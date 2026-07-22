@@ -199,6 +199,7 @@ extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_destroy(void* data);
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc);
+extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
@@ -415,6 +416,7 @@ void heap_init() {
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
     context->heap->gc->js_function_trace = js_function_gc_trace;
+    context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
@@ -442,6 +444,7 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
     context->heap->gc->js_function_trace = js_function_gc_trace;
+    context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
@@ -544,6 +547,20 @@ extern "C" void heap_no_gc_scope_end(Context* runtime) {
     if (owner && owner->heap) gc_no_gc_scope_end(owner->heap->gc);
 }
 
+extern "C" void heap_gc_defer_collection_begin(Context* runtime) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (owner && owner->heap && owner->heap->gc) {
+        gc_defer_collection_begin(owner->heap->gc);
+    }
+}
+
+extern "C" void heap_gc_defer_collection_end(Context* runtime) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (owner && owner->heap && owner->heap->gc) {
+        gc_defer_collection_end(owner->heap->gc);
+    }
+}
+
 extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
     uint64_t* slot = (uint64_t*)mem_alloc(sizeof(uint64_t), MEM_CAT_EVAL);
     if (!slot) return NULL;
@@ -623,7 +640,8 @@ extern "C" int64_t lambda_restore_number_frame_top(Context* runtime,
     if (!runtime || !top || !runtime->side_number_base ||
             !runtime->side_number_top || top < runtime->side_number_base ||
             top > runtime->side_number_top) {
-        log_error("number-frame-restore: invalid scalar watermark");
+        // This NO_GC JIT epilogue cannot enter logging because formatting may
+        // allocate before the invalid scalar-frame invariant is terminated.
         abort();
     }
 #ifndef NDEBUG

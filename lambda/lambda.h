@@ -997,6 +997,8 @@ bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
 void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
 void heap_no_gc_scope_begin(Context* runtime);
 void heap_no_gc_scope_end(Context* runtime);
+void heap_gc_defer_collection_begin(Context* runtime);
+void heap_gc_defer_collection_end(Context* runtime);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings

@@ -232,6 +232,8 @@ MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args);
 MIR_reg_t jm_array_method_direct_into(JsMirTranspiler* mt, MIR_op_t array,
         MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count);
+MIR_reg_t jm_map_method_into(JsMirTranspiler* mt, MIR_op_t object,
+        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);

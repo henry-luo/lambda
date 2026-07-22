@@ -146,6 +146,11 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
         : jm_call_2(mt, "js_new_method_function", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, method->fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, method->param_count));
+    // Class setup invokes several allocating helpers before publishing the
+    // method; the JIT register alone is not a precise GC root at those calls.
+    jm_create_gc_root_slot(mt, policy->destination);
+    jm_create_gc_root_slot(mt, policy->home_class);
+    jm_create_gc_root_slot(mt, function_item);
     if (method->name && !method->computed) {
         char function_name[256];
         if (method->is_getter) {
@@ -179,6 +184,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
         method_key = jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
     }
     if (!method_key) return false;
+    jm_create_gc_root_slot(mt, method_key);
 
     jm_emit_install_method_or_accessor(mt, policy->destination, method_key, function_item,
         method->is_getter, method->is_setter);
@@ -209,8 +215,13 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t function_item = constructor->fc->capture_count > 0
             ? jm_build_closure_for_method(mt, constructor->fc, constructor->param_count)
             : jm_create_method_function(mt, constructor->fc, constructor->param_count);
+        // The constructor function must survive home-class metadata allocation
+        // until it is attached to the class object's own property map.
+        jm_create_gc_root_slot(mt, cls_obj);
+        jm_create_gc_root_slot(mt, function_item);
         if (set_home_class) jm_emit_set_function_home_class(mt, function_item, cls_obj);
         MIR_reg_t constructor_key = jm_box_string_literal(mt, "__ctor__", 8);
+        jm_create_gc_root_slot(mt, constructor_key);
         jm_call_3(mt, "js_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, constructor_key),

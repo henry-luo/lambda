@@ -944,45 +944,52 @@ extern "C" Item js_dt_clear_data(Item format_item) {
 }
 
 static Item js_make_data_transfer_object(void) {
-    Item dt = js_new_object();
-    mark_class(dt, "DataTransfer");
-    attach_known_prototype(dt, g_data_transfer_proto);
-    js_property_set(dt, make_str("dropEffect"), make_str("none"));
-    js_property_set(dt, make_str("effectAllowed"), make_str("none"));
-    js_property_set(dt, make_str("_items"), js_array_new(0));
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> dt_root(roots, ItemNull);
+    Rooted<Item> items_root(roots, ItemNull);
+    Rooted<Item> files_root(roots, ItemNull);
+    Rooted<Item> types_root(roots, ItemNull);
+    dt_root.set(js_new_object());
+    mark_class(dt_root.get(), "DataTransfer");
+    attach_known_prototype(dt_root.get(), g_data_transfer_proto);
+    js_property_set(dt_root.get(), make_str("dropEffect"), make_str("none"));
+    js_property_set(dt_root.get(), make_str("effectAllowed"), make_str("none"));
+    js_property_set(dt_root.get(), make_str("_items"), js_array_new(0));
 
     // Stable view arrays — mutated in place by dt_recompute_views.
-    Item items = js_array_new(0);
-    Item files = js_array_new(0);
-    Item types = js_array_new(0);
+    items_root.set(js_array_new(0));
+    files_root.set(js_array_new(0));
+    types_root.set(js_array_new(0));
     // FileList is array-backed internally, but its Web IDL prototype and brand
     // must survive input.files assignment and DataTransfer view recomputation.
     if (get_type_id(g_file_list_proto) == LMD_TYPE_MAP) {
-        js_set_prototype(files, g_file_list_proto);
-        Map* props = js_array_props(files.array);
+        js_set_prototype(files_root.get(), g_file_list_proto);
+        Map* props = js_array_props(files_root.get().array);
         if (props) js_class_stamp((Item){.map = props}, JS_CLASS_FILE_LIST);
     }
-    js_property_set(items, make_str("_owner"), dt);
-    js_property_set(files, make_str("_owner"), dt);
-    js_property_set(items, make_str("add"),
+    js_property_set(items_root.get(), make_str("_owner"), dt_root.get());
+    js_property_set(files_root.get(), make_str("_owner"), dt_root.get());
+    js_property_set(items_root.get(), make_str("add"),
         js_new_function((void*)js_dt_items_add, 2));
-    js_property_set(items, make_str("item"),
+    js_property_set(items_root.get(), make_str("item"),
         js_new_function((void*)js_dt_items_item, 1));
-    js_property_set(items, make_str("remove"),
+    js_property_set(items_root.get(), make_str("remove"),
         js_new_function((void*)js_dt_items_remove, 1));
-    js_property_set(items, make_str("clear"),
+    js_property_set(items_root.get(), make_str("clear"),
         js_new_function((void*)js_dt_items_clear, 0));
-    js_property_set(dt, make_str("items"), items);
-    js_property_set(dt, make_str("files"), files);
-    js_property_set(dt, make_str("types"), types);
+    js_property_set(dt_root.get(), make_str("items"), items_root.get());
+    js_property_set(dt_root.get(), make_str("files"), files_root.get());
+    js_property_set(dt_root.get(), make_str("types"), types_root.get());
 
-    js_property_set(dt, make_str("setData"),
+    js_property_set(dt_root.get(), make_str("setData"),
         js_new_function((void*)js_dt_set_data, 2));
-    js_property_set(dt, make_str("getData"),
+    js_property_set(dt_root.get(), make_str("getData"),
         js_new_function((void*)js_dt_get_data, 1));
-    js_property_set(dt, make_str("clearData"),
+    js_property_set(dt_root.get(), make_str("clearData"),
         js_new_function((void*)js_dt_clear_data, 1));
-    return dt;
+    // The public views are published only after all native method allocation;
+    // retain each owner explicitly because native locals are not GC roots.
+    return dt_root.get();
 }
 
 extern "C" Item js_data_transfer_new(void) {

@@ -59,11 +59,24 @@ typedef struct JsObserverState {
 static JsObserverState observers[JS_OBSERVER_CAP] = {};
 static int observer_count = 0;
 static bool observer_delivery_scheduled = false;
+static uint64_t observer_roots_epoch = 0;
 extern __thread EvalContext* context;
+extern "C" uint64_t js_get_heap_epoch(void);
+extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static Item js_geometry_observer_initial_sample(void);
 
 extern Item js_make_number(double value);
+
+static void observer_register_roots(void) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (observer_roots_epoch == epoch) return;
+    for (int i = 0; i < JS_OBSERVER_CAP; i++) {
+        heap_register_gc_root(&observers[i].object.item);
+        heap_register_gc_root(&observers[i].callback.item);
+    }
+    observer_roots_epoch = epoch;
+}
 
 static Item observer_key(const char* name) {
     return js_make_string(name);
@@ -137,14 +150,19 @@ static JsObserverState* observer_create(JsObserverKind kind, Item callback) {
         log_error("dom-observer: observer capacity %d exhausted", JS_OBSERVER_CAP);
         return nullptr;
     }
+    observer_register_roots();
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> callback_root(roots, callback);
+    Rooted<Item> object_root(roots, ItemNull);
     JsObserverState* observer = &observers[observer_count++];
     memset(observer, 0, sizeof(*observer));
     observer->kind = kind;
-    observer->callback = callback;
-    observer->object = js_new_object();
+    observer->callback = callback_root.get();
+    object_root.set(js_new_object());
+    observer->object = object_root.get();
     // Native state is indexed by object identity; keeping callback and records
     // on that object makes the GC ownership match the observable lifetime.
-    js_property_set(observer->object, observer_key("__lambdaObserverCallback"), callback);
+    js_property_set(observer->object, observer_key("__lambdaObserverCallback"), callback_root.get());
     observer_replace_pending(observer);
     return observer;
 }

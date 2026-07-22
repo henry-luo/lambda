@@ -50,6 +50,8 @@ extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream);
 extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream);
 extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream);
 extern "C" void js_net_complete_transferred_connection_account(void* account);
+extern "C" uint64_t js_get_heap_epoch(void);
+extern "C" void heap_register_gc_root(uint64_t* slot);
 
 // =============================================================================
 // Helpers
@@ -3690,6 +3692,14 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 // =============================================================================
 
 static Item cp_namespace = {0};
+static uint64_t cp_namespace_roots_epoch = 0;
+
+static void js_cp_register_namespace_root(void) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (cp_namespace_roots_epoch == epoch) return;
+    heap_register_gc_root(&cp_namespace.item);
+    cp_namespace_roots_epoch = epoch;
+}
 
 static void js_cp_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -3698,25 +3708,32 @@ static void js_cp_set_method(Item ns, const char* name, void* func_ptr, int para
 }
 
 extern "C" Item js_get_child_process_namespace(void) {
+    js_cp_register_namespace_root();
     if (cp_namespace.item != 0) return cp_namespace;
 
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> namespace_root(roots, ItemNull);
     cp_namespace = js_new_object();
+    namespace_root.set(cp_namespace);
 
-    js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, -1);
-    js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 2);
-    js_cp_set_method(cp_namespace, "spawn",      (void*)js_cp_spawn, -1);
-    js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 3);
-    js_cp_set_method(cp_namespace, "execFile",   (void*)js_cp_execFile, -1);
-    js_cp_set_method(cp_namespace, "execFileSync", (void*)js_cp_execSync, 2);
-    js_cp_set_method(cp_namespace, "fork",       (void*)js_cp_fork, -1);
+    js_cp_set_method(namespace_root.get(), "exec",       (void*)js_cp_exec, -1);
+    js_cp_set_method(namespace_root.get(), "execSync",   (void*)js_cp_execSync, 2);
+    js_cp_set_method(namespace_root.get(), "spawn",      (void*)js_cp_spawn, -1);
+    js_cp_set_method(namespace_root.get(), "spawnSync",  (void*)js_cp_spawnSync, 3);
+    js_cp_set_method(namespace_root.get(), "execFile",   (void*)js_cp_execFile, -1);
+    js_cp_set_method(namespace_root.get(), "execFileSync", (void*)js_cp_execSync, 2);
+    js_cp_set_method(namespace_root.get(), "fork",       (void*)js_cp_fork, -1);
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");
-    js_property_set(cp_namespace, default_key, cp_namespace);
+    js_property_set(namespace_root.get(), default_key, namespace_root.get());
 
-    return cp_namespace;
+    // Module creation allocates before its static namespace is fully populated.
+    cp_namespace = namespace_root.get();
+    return namespace_root.get();
 }
 
 extern "C" void js_child_process_reset(void) {
     cp_namespace = (Item){0};
+    cp_namespace_roots_epoch = 0;
 }

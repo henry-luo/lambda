@@ -2143,6 +2143,13 @@ JitImport jit_runtime_imports[] = {
     {"js_set_collection_new", FPTR(js_set_collection_new)},
     {"js_set_collection_new_from", FPTR(js_set_collection_new_from)},
     {"js_map_method", FPTR(js_map_method)},
+    {"js_map_method_into", FPTR(js_map_method_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     // shims
     {"js_alert", FPTR(js_alert)},
     // typed arrays

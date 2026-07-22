@@ -92,6 +92,7 @@ typedef void (*gc_error_trace_fn)(void* data, gc_heap_t* gc);
 typedef void (*gc_error_destroy_fn)(void* data);
 typedef void (*gc_js_native_trace_fn)(void* data, gc_heap_t* gc);
 typedef int (*gc_js_function_trace_fn)(void* data, gc_heap_t* gc);
+typedef int (*gc_js_function_compact_fn)(void* data, gc_heap_t* gc);
 // Releases refcounted/native payloads embedded in otherwise zone-owned objects.
 // Implementations must clear the released field so repeated teardown is safe.
 typedef void (*gc_external_destroy_fn)(void* data, uint16_t type_tag);
@@ -251,6 +252,10 @@ typedef struct gc_heap {
     uint64_t force_random_state;
     uint32_t force_random_one_in;
 
+    // Short publication transactions may allocate a GC owner for already
+    // allocated data-zone storage. Defer collection until that owner links it.
+    int defer_collection_depth;
+
     // Opt-in rooting stress: overwrite dead object payloads before their
     // storage is recycled so missed precise roots fail deterministically.
     int poison_freed;
@@ -268,6 +273,7 @@ typedef struct gc_heap {
     gc_error_destroy_fn error_destroy; // frees LambdaError external payload fields
     gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers
     gc_js_function_trace_fn js_function_trace; // recognizes and traces GC-owned JsFunction objects
+    gc_js_function_compact_fn js_function_compact; // updates JsFunction data-zone edges
     gc_external_destroy_fn external_destroy; // frees generic external payloads at sweep/teardown
 
     // Bump-pointer block chain (for cleanup and ownership registration)
@@ -408,6 +414,8 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
 
 void gc_no_gc_scope_begin(gc_heap_t* gc);
 void gc_no_gc_scope_end(gc_heap_t* gc);
+void gc_defer_collection_begin(gc_heap_t* gc);
+void gc_defer_collection_end(gc_heap_t* gc);
 
 /** Register/unregister a non-marking Item slot. The clear callback runs after
  * the slot is zeroed, while the dead object's header is still available to GC. */

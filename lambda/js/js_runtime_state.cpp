@@ -1121,6 +1121,7 @@ extern "C" void js_runtime_set_input(void* input) {
     heap_register_gc_root(&js_current_this.item);
     heap_register_gc_root(&js_new_target.item);
     heap_register_gc_root(&js_pending_new_target.item);
+    heap_register_gc_root(&js_pending_args_callee.item);
     heap_register_gc_root(&js_exception_value.item);
 }
 
@@ -1313,66 +1314,80 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 
 extern "C" Item js_build_arguments_object() {
+    RootFrame roots((Context*)context, 10);
+    Rooted<Item> arr_root(roots, ItemNull);
+    Rooted<Item> companion_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> descriptor_root(roots, ItemNull);
+    Rooted<Item> tag_key_root(roots, ItemNull);
+    Rooted<Item> iterator_key_root(roots, ItemNull);
+    Rooted<Item> iterator_root(roots, ItemNull);
+    Rooted<Item> thrower_root(roots, ItemNull);
+    Rooted<Item> callee_key_root(roots, ItemNull);
+    Rooted<Item> callee_root(roots, js_pending_args_callee);
     int argc = js_pending_call_argc;
     Item* args = js_pending_call_args;
     int is_strict = js_pending_args_is_strict;
 
-    Item arr = js_array_new(argc);
+    arr_root.set(js_array_new(argc));
     for (int i = 0; i < argc; i++) {
         // Arguments creation defines own indexed data properties directly;
         // inherited numeric setters must not intercept parameter materialization.
-        js_array_define_dense_element_direct(arr, i, args ? args[i] : ItemNull);
+        js_array_define_dense_element_direct(arr_root.get(), i, args ? args[i] : ItemNull);
     }
     // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
-    arr.array->is_content = 1;
+    arr_root.get().array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
-    Item companion = js_new_object();
-    companion.map->map_kind = MAP_KIND_ARRAY_PROPS;
-    js_array_set_props(arr.array, companion.map);
+    companion_root.set(js_new_object());
+    companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
+    js_array_set_props(arr_root.get().array, companion_root.get().map);
 
-    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-    Item length_desc = js_new_object();
-    js_set_prototype(length_desc, ItemNull);
-    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
-    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-    js_object_define_property(companion, length_key, length_desc);
+    key_root.set((Item){.item = s2it(heap_create_name("length", 6))});
+    descriptor_root.set(js_new_object());
+    js_set_prototype(descriptor_root.get(), ItemNull);
+    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
+    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
 
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-    js_property_set(companion, tag_key,
+    tag_key_root.set((Item){.item = s2it(heap_create_name("__sym_4", 7))});
+    js_property_set(companion_root.get(), tag_key_root.get(),
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
-    js_mark_non_enumerable(companion, tag_key);
+    js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
-    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
-    Item si_fn = js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
-    js_property_set(companion, si_key, si_fn);
-    js_mark_non_enumerable(companion, si_key);
+    iterator_key_root.set((Item){.item = s2it(heap_create_name("__sym_1", 7))});
+    iterator_root.set(js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6));
+    js_property_set(companion_root.get(), iterator_key_root.get(), iterator_root.get());
+    js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
     if (is_strict) {
-        Item thrower = js_get_or_create_builtin(JS_BUILTIN_FUNC_THROW_TYPE_ERROR, "ThrowTypeError", 0);
-        Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
-        js_install_native_accessor(companion, callee_key, thrower, thrower,
+        thrower_root.set(js_get_or_create_builtin(JS_BUILTIN_FUNC_THROW_TYPE_ERROR, "ThrowTypeError", 0));
+        callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
+        js_install_native_accessor(companion_root.get(), callee_key_root.get(),
+                                   thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
-        js_property_set(companion, (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
+        js_property_set(companion_root.get(), (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
                         (Item){.item = b2it(true)});
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
-        if (js_pending_args_callee.item != 0) {
-            Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
-            Item desc = js_new_object();
-            js_set_prototype(desc, ItemNull);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, js_pending_args_callee);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-            js_object_define_property(companion, callee_key, desc);
+        if (callee_root.get().item != 0) {
+            callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
+            descriptor_root.set(js_new_object());
+            js_set_prototype(descriptor_root.get(), ItemNull);
+            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, callee_root.get());
+            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_object_define_property(companion_root.get(), callee_key_root.get(), descriptor_root.get());
         }
     }
 
-    return arr;
+    // Arguments construction allocates descriptors after creating the array;
+    // every intermediate must remain precisely rooted until publication.
+    return arr_root.get();
 }
 
 extern TypeMap EmptyMap;

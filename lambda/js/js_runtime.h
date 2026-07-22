@@ -464,6 +464,8 @@ Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
 Item js_map_method(Item obj, Item method_name, Item* args, int argc);
+Item js_map_method_into(Item obj, Item method_name, Item* args, int argc,
+        uint64_t* result_home);
 Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);

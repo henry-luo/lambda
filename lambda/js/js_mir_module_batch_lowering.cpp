@@ -6851,6 +6851,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit_exc_propagate_check(mt);
                     }
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    // Class initialization performs allocating metadata and
+                    // method setup before its lexical binding is authoritative.
+                    jm_create_gc_root_slot(mt, cls_obj);
                     jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     // Update local variable
@@ -6926,6 +6929,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     MIR_reg_t ctor_super_val = 0;
                     MIR_reg_t class_proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    jm_create_gc_root_slot(mt, class_proto_obj);
                     MIR_reg_t early_pt_key = jm_box_string_literal(mt, "prototype", 9);
                     jm_call_3(mt, "js_property_set", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),

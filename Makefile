@@ -1010,6 +1010,10 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
+	@echo "Running Lambda-to-JS Promise membrane precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/concurrency_lambda_promise.js > temp/gc_rooting_lambda_promise.txt
+	@diff -u test/js/concurrency_lambda_promise.txt temp/gc_rooting_lambda_promise.txt
 	@echo "Running LambdaJS deterministic randomized forced-GC gate..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_random.txt

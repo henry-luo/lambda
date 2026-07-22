@@ -8995,11 +8995,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // DOM nodes/resources are no longer map shells; map receivers
                 // should use the same js_map_method path as dynamic dispatch.
                 bool emitted_map_call_source = jm_emit_assert_pending_call_source(mt, call);
-                MIR_reg_t map_r = jm_call_4(mt, "js_map_method", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t map_r = jm_map_method_into(mt,
+                    MIR_new_reg_op(mt->ctx, recv),
+                    MIR_new_reg_op(mt->ctx, method_name), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_map_call_source);
                 // callback-capable map/typed-array methods can throw before normal
                 // fallthrough; read captured locals back before propagating so a
@@ -9011,11 +9010,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (recv_type == LMD_TYPE_VMAP) {
                 // Phase 6 DOM wrappers are branded VMaps; method calls must use
                 // host dispatch instead of calling the boolean method sentinel.
-                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_map_method_into(mt,
+                    MIR_new_reg_op(mt->ctx, recv),
+                    MIR_new_reg_op(mt->ctx, method_name), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_readback_closure_env(mt);
                 return r;
             }
@@ -9108,11 +9106,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_emit_label(mt, l_map);
             {
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_map_method_into(mt,
+                    MIR_new_reg_op(mt->ctx, recv),
+                    MIR_new_reg_op(mt->ctx, method_name), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
@@ -13553,6 +13550,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // Class expression: var X = class Y {} or var X = class {}
         JsClassNode* cls_expr = (JsClassNode*)expr;
         MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        // A class expression creates metadata and methods before assigning its
+        // result, so keep the transient class object in the exact root frame.
+        jm_create_gc_root_slot(mt, cls_obj);
         MIR_reg_t ctor_super_val = 0;
         // For anonymous class expressions (var X = class {}), find the class entry
         // by node pointer since cls_expr->name is NULL but the entry was named
@@ -13643,6 +13643,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 jm_emit_class_constructor_property(mt, cls_obj, ce, true);
                 // Create __instance_proto__ with all instance methods
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                jm_create_gc_root_slot(mt, proto_obj);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
@@ -13795,6 +13796,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
             } else {
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                jm_create_gc_root_slot(mt, proto_obj);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
