@@ -380,15 +380,16 @@ expected to be the next dominant Lambda-side mechanism after this plan.
 
 ### Result11 comparison provenance
 
-Result11 was run on the same Darwin arm64 host with a clean release build and
-three-run medians, but the available Node changed from Result10's Node 22.13.0
-to Node 24.7.0; QuickJS is unavailable. The checked-in Result10 JSON also
-does not contain the report's revised values (for example, its raw MIR values
-are collatz 7.47s and Splay 7.32s). Against that reproducible JSON, Result11
-improves the COW-targeted absolute MIR timings: collatz 7.47s → 1.66s, gcbench
-501ms → 381ms, array1 25.8ms → 3.81ms, primes 78.1ms → 55.3ms, and Splay 7.32s
-→ 2.22s. The published cross-engine ratio is therefore not a like-for-like
-Result10 comparison and must not be used to attribute a COW regression.
+Result11 was rebuilt and rerun on this same Darwin arm64 host with the exact
+Result10 comparison stack: Node 22.13.0, QuickJS 2025-09-13, four engines,
+three-run medians, and a 180-second timeout. The release-binary profiling
+marker check passed. On the fixed 52-row deduplicated Result10 population,
+Lambda/MIR improved from 8.60× to 4.62× Node (1.86× better); LambdaJS moved
+from 20.1× to 19.3× (1.05× better), and QuickJS from 7.74× to 7.10×
+(1.09× better). Result11's published 53-row Lambda/MIR headline is 4.73×;
+the extra row is `awfy/cd`, now output-correct and timed after the COW
+ownership rewrite. This is a like-for-like Result10 comparison and confirms
+the Stage-1 outcome target.
 
 The Radiant baseline still reports its pre-existing failures in form/CSS
 layout, `pdf_text_selection_copy`, `radiant_view_markdown_iframe`, and
