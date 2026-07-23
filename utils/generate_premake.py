@@ -34,6 +34,14 @@ class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
+        configurable_defines = self.config.get('configurable_defines', {})
+        if configurable_defines:
+            resolved_defines = self.config.setdefault('defines', [])
+            for name, default_value in configurable_defines.items():
+                if not name or not name.replace('_', '').isalnum() or name[0].isdigit():
+                    raise ValueError(f"Invalid configurable define name: {name!r}")
+                value = os.environ.get(name, str(default_value))
+                resolved_defines.append(f"{name}={value}")
         self.premake_content = []
         self.variant = variant
 

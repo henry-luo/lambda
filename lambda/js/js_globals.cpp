@@ -23,6 +23,7 @@
 #include "js_state_guards.h"
 #include "js_dom_platform.h"
 #include "js_dom_observers.h"
+#include "js_test262_fast_paths.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -47,7 +48,8 @@ extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
 extern "C" Item js_xhr_new(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
-extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
+extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
+extern "C" void js_intrinsic_note_prototype_mutation(Item object);
 extern double js_get_number(Item value);
 extern __thread EvalContext* context;
 extern "C" Item js_func_get_custom_proto(Item func);
@@ -5837,6 +5839,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     return result;
 }
 
+#if JS_TEST262_FAST_PATHS
 static int js_test262_item_to_int(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT) return (int)it2i(item);
@@ -5902,6 +5905,7 @@ extern "C" Item js_test262_build_string(Item args_item) {
     mem_free(buf);
     return result;
 }
+#endif
 
 // String.raw(template, ...substitutions) — tagged template literal
 // Called with args[0]=template_object (has .raw property), args[1..]=substitutions
@@ -7830,6 +7834,11 @@ static int js_idx_pair_cmp(const void* a, const void* b) {
 
 // Reflect.ownKeys(obj) — returns array of all own property keys (strings + symbols)
 extern "C" Item js_reflect_own_keys(Item obj) {
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> names_root(roots, ItemNull);
+    Rooted<Item> symbols_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
     // ES §28.1.13 Reflect.ownKeys: target must be an Object.
     if (!js_require_object_type(obj, "ownKeys")) return ItemNull;
     // Proxy [[OwnKeys]] trap
@@ -7838,13 +7847,16 @@ extern "C" Item js_reflect_own_keys(Item obj) {
     }
     // get string keys via getOwnPropertyNames
     Item names = js_object_get_own_property_names(obj);
+    names_root.set(names);
     // get symbol keys via getOwnPropertySymbols
     Item symbols = js_object_get_own_property_symbols(obj);
+    symbols_root.set(symbols);
     // Reorder per ES §10.1.11.1 OrdinaryOwnPropertyKeys:
     //   1) integer indices in ascending numeric order
     //   2) other string keys in insertion order
     //   3) symbols in insertion order
     Item result = js_array_new(0);
+    result_root.set(result);
     if (get_type_id(names) == LMD_TYPE_ARRAY) {
         int n = (int)js_array_length(names);
         int64_t* idx_pairs = n > 0 ? (int64_t*)mem_alloc(sizeof(int64_t) * 2 * n, MEM_CAT_JS_RUNTIME) : NULL;
@@ -7885,31 +7897,56 @@ extern "C" Item js_reflect_own_keys(Item obj) {
             js_array_push(result, sym);
         }
     }
-    return result;
+    return result_root.get();
 }
 
 static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs) {
-    Item desc = js_new_object();
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> desc_root(roots, js_new_object());
+    // Descriptor assembly allocates several shape transitions; keep both the
+    // descriptor and its caller-provided value live through the whole build.
+    js_property_set(desc_root.get(),
+        (Item){.item = s2it(heap_create_name("value", 5))}, value_root.get());
     if (include_create_attrs) {
-        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+        js_property_set(desc_root.get(),
+            (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+        js_property_set(desc_root.get(),
+            (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+        js_property_set(desc_root.get(),
+            (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
     }
-    return desc;
+    return desc_root.get();
 }
 
 static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, bool include_create_attrs) {
-    Item desc = js_make_reflect_set_value_desc(value, include_create_attrs);
-    return js_reflect_define_property(receiver, key, desc);
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> desc_root(
+        roots, js_make_reflect_set_value_desc(value_root.get(), include_create_attrs));
+    return js_reflect_define_property(
+        receiver_root.get(), key_root.get(), desc_root.get());
 }
 
 // Reflect.set(target, key, value [, receiver]) — returns boolean.
 // ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver) {
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> descriptor_root(roots, ItemNull);
+    Rooted<Item> current_root(roots, ItemNull);
+    Rooted<Item> receiver_descriptor_root(roots, ItemNull);
     if (!js_require_object_type(target, "set")) return ItemNull;
     // 3-arg call sites (old transpiler path) pass ItemNull; treat as receiver = target.
-    if (receiver.item == ItemNull.item) receiver = target;
+    if (receiver.item == ItemNull.item) {
+        receiver = target;
+        receiver_root.set(receiver);
+    }
 
     // Proxy/TypedArray fast paths BEFORE ToPropertyKey: integer index dispatch
     // in js_property_set requires the original int key, not stringified.
@@ -7940,6 +7977,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                 return (Item){.item = b2it(true)};
             }
             Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+            receiver_descriptor_root.set(recv_own);
             if (get_type_id(recv_own) == LMD_TYPE_MAP) {
                 Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
                 Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
@@ -7961,6 +7999,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
         }
     }
     key = js_to_property_key(key);
+    key_root.set(key);
     if (js_check_exception()) return ItemNull;
     if (receiver.item == target.item && get_type_id(target) == LMD_TYPE_ARRAY &&
         get_type_id(key) == LMD_TYPE_STRING) {
@@ -8000,6 +8039,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     if (receiver.item == target.item && !target_is_typed_array) {
         bool can_fast_set = true;
         Item fast_desc = js_object_get_own_property_descriptor(target, key);
+        descriptor_root.set(fast_desc);
         if (js_check_exception()) return ItemNull;
         if (get_type_id(fast_desc) == LMD_TYPE_MAP) {
             bool has_set = false, has_get = false, has_writable = false;
@@ -8028,6 +8068,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     // Walk prototype chain to find the descriptor that governs this Set.
     Item ownDesc = ItemNull;
     Item cur = target;
+    current_root.set(cur);
     int depth = 0;
     while (cur.item != ItemNull.item && depth < 100) {
         if (js_is_proxy(cur)) {
@@ -8042,8 +8083,10 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
             }
         }
         ownDesc = js_object_get_own_property_descriptor(cur, key);
+        descriptor_root.set(ownDesc);
         if (get_type_id(ownDesc) == LMD_TYPE_MAP) break;
         cur = js_get_prototype_of(cur);
+        current_root.set(cur);
         depth++;
     }
 
@@ -8091,6 +8134,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
         if (receiver.item != target.item) {
             // Existing own descriptor on receiver?
             Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+            receiver_descriptor_root.set(recv_own);
             if (get_type_id(recv_own) == LMD_TYPE_MAP) {
                 bool r_has_set = false, r_has_get = false;
                 js_map_get_fast_ext(recv_own.map,
@@ -8122,6 +8166,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                             rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
         if (!recv_is_obj) return (Item){.item = b2it(false)};
         Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+        receiver_descriptor_root.set(recv_own);
         if (get_type_id(recv_own) == LMD_TYPE_MAP) {
             bool r_has_set = false, r_has_get = false;
             js_map_get_fast_ext(recv_own.map,
@@ -8143,10 +8188,15 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
 
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> descriptor_root(roots, desc);
     // ES §28.1.3 Reflect.defineProperty: target must be an Object.
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     // step 2: Let key be ? ToPropertyKey(propertyKey).
     key = js_to_property_key(key);
+    key_root.set(key);
     if (js_check_exception()) return ItemNull;
     if (js_is_proxy(obj)) {
         extern Item js_proxy_trap_define_property(Item proxy, Item key, Item desc);
@@ -8179,10 +8229,14 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
 
 // Reflect.deleteProperty(obj, key) — returns boolean
 extern "C" Item js_reflect_delete_property(Item obj, Item key) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> key_root(roots, key);
     // ES §28.1.4 Reflect.deleteProperty: target must be an Object.
     if (!js_require_object_type(obj, "deleteProperty")) return ItemNull;
     // step 2: Let key be ? ToPropertyKey(propertyKey).
     key = js_to_property_key(key);
+    key_root.set(key);
     if (js_check_exception()) return ItemNull;
     bool saved_strict = js_strict_mode;
     js_strict_mode = false;
@@ -8236,6 +8290,7 @@ extern "C" Item js_reflect_set_prototype_of(Item obj, Item proto) {
             depth++;
         }
     }
+    js_intrinsic_note_prototype_mutation(obj);
     js_set_prototype(obj, proto);
     return (Item){.item = b2it(true)};
 }
@@ -8391,6 +8446,11 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
 }
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> descriptor_root(roots, ItemNull);
     // v20: GOPD should accept primitives (ES spec uses ToObject internally)
     // Only null/undefined throw TypeError
     TypeId type = get_type_id(obj);
@@ -8422,6 +8482,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     } else {
         name_str_item = js_to_string(name);
     }
+    name_root.set(name_str_item);
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
     // ES §7.1.19 ToPropertyKey: name is already coerced; replace `name` so all
@@ -8832,8 +8893,12 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             }
         }
 
-        Item value = js_property_get(obj, name);
-        Item desc = js_new_object();
+        value_root.set(js_property_get(obj, name));
+        Item value = value_root.get();
+        descriptor_root.set(js_new_object());
+        Item desc = descriptor_root.get();
+        // Descriptor synthesis performs four allocating property writes; the
+        // source value and descriptor must remain precise throughout.
         js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
         // ES §10.4.3.4 String exotic [[GetOwnProperty]]: length and integer-index
         // properties up to length have {writable:false, enumerable:true (indices) /
@@ -9068,7 +9133,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     if (obj.item == 0) return obj;
     name = js_to_property_key(name);
     if (js_check_exception()) return obj;
-    js_note_array_prototype_push_tamper(obj, name);
+    js_intrinsic_note_property_mutation(obj, name);
     bool ta_define_handled = false;
     bool ta_define_ok = js_ta_define_own_numeric_index(obj, name, descriptor, &ta_define_handled);
     if (js_check_exception()) return obj;
@@ -9226,6 +9291,12 @@ static void js_define_properties_cleanup(Item* desc_keys, Item* desc_objs) {
 }
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> properties_root(roots, props);
+    Rooted<Item> properties_object_root(roots, props);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> descriptor_root(roots, ItemNull);
     if (!js_require_object_type(obj, "defineProperties")) return ItemNull;
     // ES spec §19.1.2.3 step 1: Let props be ? ToObject(Properties).
     // ToObject throws TypeError on null/undefined.
@@ -9238,6 +9309,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY && pt != LMD_TYPE_FUNC &&
         pt != LMD_TYPE_ELEMENT) {
         props_obj = js_to_object(props);
+        properties_object_root.set(props_obj);
         if (js_check_exception()) return ItemNull;
         pt = get_type_id(props_obj);
     }
@@ -9246,6 +9318,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         return obj;
     }
     Item keys = js_reflect_own_keys(props_obj);
+    keys_root.set(keys);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
     int n = keys.array->length;
     if (n == 0) return obj;
@@ -9268,6 +9341,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     for (int i = 0; i < n; i++) {
         Item key = keys.array->items[i];
         Item prop_desc = js_object_get_own_property_descriptor(props_obj, key);
+        descriptor_root.set(prop_desc);
         if (js_check_exception()) {
             js_define_properties_cleanup(desc_keys, desc_objs);
             return obj;
@@ -9283,6 +9357,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         }
         if (!enumerable) continue;
         Item desc = js_property_get(props_obj, key);
+        descriptor_root.set(desc);
         if (js_check_exception()) {
             js_define_properties_cleanup(desc_keys, desc_objs);
             return obj;
@@ -10892,6 +10967,7 @@ extern "C" Item js_object_is(Item left, Item right) {
     return js_strict_equal(left, right);
 }
 
+#if JS_TEST262_FAST_PATHS
 extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     uint32_t n = 0;
     TypeId n_type = get_type_id(n_item);
@@ -11911,6 +11987,7 @@ extern "C" Item js_decimal_to_percent_hex_string(Item n_item) {
     cache[byte] = (Item){.item = s2it(heap_create_name(buf, 3))};
     return cache[byte];
 }
+#endif
 
 // =============================================================================
 // Object.assign(target, ...sources)
@@ -13954,13 +14031,7 @@ static Item js_delete_map_property(Item obj, Item key) {
     // created by the corresponding get/set/defineProperty path.
     key = js_to_property_key(key);
     if (js_check_exception()) return (Item){.item = b2it(false)};
-    js_note_array_prototype_push_tamper(obj, key);
-    // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
-    if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
-        String* _dk = it2s(key);
-        if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)
-            g_array_sym_iter_ever_set = 1;
-    }
+    js_intrinsic_note_property_mutation(obj, key);
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
@@ -17425,17 +17496,83 @@ extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) 
 // =============================================================================
 
 static Item js_constructor_cache[JS_CTOR_MAX];
-static Item js_intrinsic_proto_cache[JS_CLASS__COUNT];
-static bool js_intrinsic_proto_resolving[JS_CLASS__COUNT];
 static bool js_ctor_cache_init = false;
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
 extern "C" bool js_proto_snapshot_is_valid();
 
+static uint64_t js_intrinsic_next_mutation_version() {
+    uint64_t version = ++js_intrinsic_state.mutation_serial;
+    if (version == 0) version = ++js_intrinsic_state.mutation_serial;
+    return version;
+}
+
+static void js_intrinsic_clear_prototype_roots() {
+    for (int class_id = 0; class_id < (int)JS_CLASS__COUNT; class_id++) {
+        uint64_t* root = js_intrinsic_state.prototype_roots[class_id];
+        if (!root) continue;
+        heap_unregister_gc_root(root);
+        mem_free(root);
+        js_intrinsic_state.prototype_roots[class_id] = NULL;
+    }
+}
+
+static void js_intrinsic_state_ensure_epoch() {
+    if (js_intrinsic_state.owner_heap_epoch == js_heap_epoch) return;
+    // Heap/name-pool replacement invalidates every rooted cached Item as one owner unit.
+    js_intrinsic_clear_prototype_roots();
+    memset(js_intrinsic_state.prototype_resolving, 0,
+        sizeof(js_intrinsic_state.prototype_resolving));
+    memset(js_intrinsic_state.constructor_names, 0,
+        sizeof(js_intrinsic_state.constructor_names));
+    js_intrinsic_state.prototype_name = (Item){0};
+    js_intrinsic_state.initialization_depth = 0;
+    js_intrinsic_state.array_sym_iter_ever_set = 0;
+    js_intrinsic_state.array_proto_push_ever_set = 0;
+    js_intrinsic_state.array_writable_methods_ever_set = 0;
+    js_intrinsic_state.owner_heap_epoch = js_heap_epoch;
+    uint64_t version = js_intrinsic_next_mutation_version();
+    // Snapshot restore can reset pristine content without changing heap_epoch;
+    // publishing a fresh version for every class prevents an ABA cache match.
+    for (int class_id = 0; class_id < (int)JS_CLASS__COUNT; class_id++) {
+        js_intrinsic_state.mutation_versions[class_id] = version;
+    }
+}
+
+extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor) {
+    js_intrinsic_state_ensure_epoch();
+    for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
+        if (js_constructor_cache[ctor_id].item == constructor.item) {
+            js_intrinsic_state.initialization_depth++;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+extern "C" void js_intrinsic_initialization_end_for_constructor(int active) {
+    if (!active) return;
+    if (js_intrinsic_state.initialization_depth > 0) {
+        js_intrinsic_state.initialization_depth--;
+    }
+}
+
 static void js_intrinsic_proto_cache_reset() {
-    memset(js_intrinsic_proto_cache, 0, sizeof(js_intrinsic_proto_cache));
-    memset(js_intrinsic_proto_resolving, 0, sizeof(js_intrinsic_proto_resolving));
+    js_intrinsic_clear_prototype_roots();
+    js_intrinsic_state.owner_heap_epoch = 0;
+    js_intrinsic_state_ensure_epoch();
+}
+
+extern "C" void js_intrinsic_state_reset() {
+    js_intrinsic_proto_cache_reset();
+}
+
+extern "C" void js_intrinsic_state_teardown() {
+    // Intrinsic prototype cache slots are native precise roots, so final runtime
+    // teardown must unregister and free them before leak accounting and heap destruction.
+    js_intrinsic_clear_prototype_roots();
+    memset(&js_intrinsic_state, 0, sizeof(js_intrinsic_state));
 }
 
 void js_ctor_cache_reset() {
@@ -17802,12 +17939,14 @@ extern "C" void js_reset_constructor_prototypes() {
         if (!js_ctor_cache_init) return;
         // First call after preamble: capture snapshot. State is already correct.
         js_proto_snapshot_take_locked();
+        js_intrinsic_state_reset();
         // Still clear globalThis so it's regenerated against the snapshotted prototypes.
         js_global_this_obj = (Item){0};
         return;
     }
     // Subsequent calls: restore snapshot (preserves Map* identity).
     js_proto_snapshot_restore_locked();
+    js_intrinsic_state_reset();
     js_global_this_obj = (Item){0};
 }
 
@@ -18019,6 +18158,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (js_constructor_cache[ctor_id].item != ItemNull.item) {
         return js_constructor_cache[ctor_id];
     }
+    js_intrinsic_state_ensure_epoch();
+    js_intrinsic_state.initialization_depth++;
     // Allocate directly via pool — do NOT use js_new_function() because it
     // caches by func_ptr and all constructors share js_ctor_placeholder.
     JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
@@ -18081,21 +18222,26 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
     if (ctor_id == JS_CTOR_SYMBOL) js_populate_symbol_ctor(fn_item);
     if (ctor_id == JS_CTOR_EVENT || ctor_id == JS_CTOR_CUSTOM_EVENT) {
+        RootFrame roots((Context*)context, 1);
         // Static phase constants on Event / CustomEvent constructor + prototype.
         struct { const char* n; int v; } ph[] = {
             {"NONE", 0}, {"CAPTURING_PHASE", 1}, {"AT_TARGET", 2}, {"BUBBLING_PHASE", 3}
         };
-        Item proto = js_new_object();
+        Rooted<Item> proto_root(roots, js_new_object());
         for (int i = 0; i < 4; i++) {
             Item k = (Item){.item = s2it(heap_create_name(ph[i].n, strlen(ph[i].n)))};
             Item v = (Item){.item = i2it(ph[i].v)};
             js_func_init_property(fn_item, k, v);
-            js_property_set(proto, k, v);
+            js_property_set(proto_root.get(), k, v);
         }
         // .constructor on prototype points back to the function.
         Item ck = (Item){.item = s2it(heap_create_name("constructor", 11))};
-        js_property_set(proto, ck, fn_item);
-        ((JsCtor*)fn_item.function)->prototype = proto;
+        js_property_set(proto_root.get(), ck, fn_item);
+        JsCtor* event_ctor = (JsCtor*)fn_item.function;
+        event_ctor->prototype = proto_root.get();
+        // Constructors are pool-owned and invisible to precise GC; their
+        // lazily built Event prototype therefore needs an explicit root slot.
+        js_function_root_item_if_needed(event_ctor, &event_ctor->prototype);
     }
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
@@ -18135,6 +18281,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
             (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))},
             (Item){.item = i2it(10)});
     }
+    js_intrinsic_state.initialization_depth--;
     return fn_item;
 }
 
@@ -18210,7 +18357,12 @@ static Item js_get_constructor_intrinsic_prototype(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
     JsCtor* fn = (JsCtor*)ctor.function;
     if (fn && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
-    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    js_intrinsic_state_ensure_epoch();
+    if (js_intrinsic_state.prototype_name.item == 0) {
+        js_intrinsic_state.prototype_name =
+            (Item){.item = s2it(heap_create_name("prototype", 9))};
+    }
+    Item proto_key = js_intrinsic_state.prototype_name;
     Item proto = js_property_get(ctor, proto_key);
     if (get_type_id(proto) == LMD_TYPE_MAP) return proto;
     if (fn && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
@@ -18219,23 +18371,107 @@ static Item js_get_constructor_intrinsic_prototype(Item ctor) {
 
 extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT) return ItemNull;
+    js_intrinsic_state_ensure_epoch();
     JsClass cls = (JsClass)class_id;
     if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
-    Item cached = js_intrinsic_proto_cache[class_id];
-    if (cached.item != 0) return cached;
-    if (js_intrinsic_proto_resolving[class_id]) return ItemNull;
+    uint64_t* cached_root = js_intrinsic_state.prototype_roots[class_id];
+    if (cached_root) return (Item){.item = *cached_root};
+    if (js_intrinsic_state.prototype_resolving[class_id]) return ItemNull;
     const char* name = NULL;
     int len = 0;
     if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
-    js_intrinsic_proto_resolving[class_id] = true;
-    Item ctor_name = (Item){.item = s2it(heap_create_name(name, len))};
+    js_intrinsic_state.prototype_resolving[class_id] = true;
+    Item ctor_name = js_intrinsic_state.constructor_names[class_id];
+    if (ctor_name.item == 0) {
+        ctor_name = (Item){.item = s2it(heap_create_name(name, len))};
+        js_intrinsic_state.constructor_names[class_id] = ctor_name;
+    }
     Item ctor = js_get_constructor(ctor_name);
     Item proto = js_get_constructor_intrinsic_prototype(ctor);
     if (get_type_id(proto) == LMD_TYPE_MAP) {
-        js_intrinsic_proto_cache[class_id] = proto;
+        // Cached prototypes outlive allocating calls and may move; a raw Item
+        // here previously became a stale Map pointer during long DOM runs.
+        js_intrinsic_state.prototype_roots[class_id] =
+            heap_gc_root_slot_new(proto.item);
     }
-    js_intrinsic_proto_resolving[class_id] = false;
+    js_intrinsic_state.prototype_resolving[class_id] = false;
     return proto;
+}
+
+static bool js_intrinsic_key_equals(Item key, const char* name, int len) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* string = it2s(key);
+    return string && (int)string->len == len &&
+        memcmp(string->chars, name, (size_t)len) == 0;
+}
+
+static void js_intrinsic_invalidate_class(int class_id, Item key) {
+    if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT) return;
+    js_intrinsic_state.mutation_versions[class_id] =
+        js_intrinsic_next_mutation_version();
+    if (class_id != (int)JS_CLASS_ARRAY) return;
+
+    // Any Array prototype mutation can change the generic writable-method lookup.
+    g_array_writable_methods_ever_set = 1;
+    if (js_intrinsic_key_equals(key, "push", 4)) {
+        g_array_proto_push_ever_set = 1;
+    }
+    if (js_intrinsic_key_equals(key, "__sym_1", 7)) {
+        g_array_sym_iter_ever_set = 1;
+    }
+}
+
+extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
+    js_intrinsic_state_ensure_epoch();
+    // Lazy intrinsic construction uses ordinary property writers; treating
+    // those bootstrap stores as user tampering permanently disabled pristine paths.
+    if (js_intrinsic_state.initialization_depth > 0) return;
+    bool invalidated = false;
+    for (int class_id = (int)JS_CLASS_NONE + 1;
+         class_id < (int)JS_CLASS__COUNT; class_id++) {
+        uint64_t* proto_root = js_intrinsic_state.prototype_roots[class_id];
+        if (proto_root && *proto_root == object.item) {
+            js_intrinsic_invalidate_class(class_id, key);
+            invalidated = true;
+        }
+    }
+    if (!invalidated && get_type_id(object) == LMD_TYPE_MAP &&
+        js_class_id(object) == JS_CLASS_ARRAY) {
+        bool marker_found = false;
+        Item marker = js_map_get_fast_ext(
+            object.map, "__is_proto__", 12, &marker_found);
+        if (marker_found && js_is_truthy(marker)) {
+            js_intrinsic_invalidate_class((int)JS_CLASS_ARRAY, key);
+        }
+    }
+
+    if (!js_intrinsic_key_equals(key, "prototype", 9)) return;
+    for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
+        if (js_constructor_cache[ctor_id].item == 0 ||
+            js_constructor_cache[ctor_id].item != object.item) {
+            continue;
+        }
+        // Replacing a constructor prototype invalidates cached identity for all
+        // classes because several constructors share intrinsic ancestors.
+        js_intrinsic_clear_prototype_roots();
+        g_array_proto_push_ever_set = 1;
+        g_array_sym_iter_ever_set = 1;
+        g_array_writable_methods_ever_set = 1;
+        for (int class_id = (int)JS_CLASS_NONE + 1;
+             class_id < (int)JS_CLASS__COUNT; class_id++) {
+            js_intrinsic_invalidate_class(class_id, key);
+        }
+        break;
+    }
+}
+
+extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
+    js_intrinsic_note_property_mutation(object, ItemNull);
+}
+
+extern "C" int js_intrinsic_array_methods_pristine() {
+    js_intrinsic_state_ensure_epoch();
+    return g_array_writable_methods_ever_set == 0;
 }
 
 // =============================================================================

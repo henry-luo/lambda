@@ -271,7 +271,14 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     mt->module = MIR_new_module(ctx, "ts_script");
 
     // transpile AST to MIR
-    transpile_js_mir_ast(mt, ast);
+    if (!transpile_js_mir_ast(mt, ast)) {
+        log_error("js-mir-ast: collection/allocation failed");
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
+        return (Item){.item = ITEM_ERROR};
+    }
 
     // Canonical finalized artifact (MT2); see the JS path above.
 #ifndef NDEBUG
@@ -704,7 +711,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         MIR_set_error_func(ctx, g_batch_mir_error_handler);
     }
 
-    // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
+    // Set up the compact MIR transpiler; source-sized collection storage is allocated after parsing.
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
     if (!mt) {
         g_active_mir_ctx = NULL;
@@ -731,9 +738,23 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
 
     // Transpile AST to MIR
     phase_start = js_mir_phase_now_us();
-    transpile_js_mir_ast(mt, js_ast);
+    bool transpile_ok = transpile_js_mir_ast(mt, js_ast);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_to_mir");
+    if (!transpile_ok) {
+        log_error("js-mir: collection/allocation failed for '%s'",
+            filename ? filename : "<string>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        g_active_mir_ctx = NULL;
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
+        mem_free(owned_source);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
+        return (Item){.item = ITEM_ERROR};
+    }
 
     // Canonical finalized artifact (MT2): transpile_js_mir_ast has already run
     // MIR_finish_func/MIR_finish_module, so this is the finalized stage the

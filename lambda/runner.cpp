@@ -20,6 +20,7 @@
 #include "jube/jube_registry.h"
 #include "js/js_runtime.h"
 #include "js/js_event_loop.h"
+#include "js/js_exec_profile.h"
 #include "input/css/css_style.hpp"
 #include "template_registry.h"
 #include "../lib/file.h"
@@ -1775,6 +1776,7 @@ void runtime_reset_heap(Runtime* runtime) {
 void runtime_cleanup(Runtime* runtime) {
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
+    js_exec_profile_dump();
 
     js_canvas_cleanup();
     module_registry_cleanup();
@@ -1809,6 +1811,10 @@ void runtime_cleanup(Runtime* runtime) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
         }
+
+        // Intrinsic cache entries own native precise-root slots outside the GC
+        // pool; release them while their heap is current and before leak accounting.
+        js_intrinsic_state_teardown();
 
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.

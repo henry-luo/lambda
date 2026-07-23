@@ -116,8 +116,6 @@ static const uint64_t ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 static const uint64_t MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
-static const int JS_MIR_MAX_COLLECTED_FUNCTIONS = 32768;
-static const int JS_MIR_MAX_COLLECTED_CLASSES = 4096;
 static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
 
 typedef MirImportEntry JsMirImportEntry;
@@ -190,6 +188,7 @@ struct JsFuncCollected {
     bool uses_with;                  // own body contains a with statement
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
+    bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
@@ -277,18 +276,22 @@ struct JsClassEntry {
     JsClassNode* node;
     String* name;
     String* alias_name;                  // variable name for class expressions (var X = class Y {})
-    JsClassMethodEntry methods[128];
+    JsClassMethodEntry* methods;          // exact-sized, stable for the compile lifetime
+    int method_capacity;
     int method_count;
     JsClassMethodEntry* constructor;     // points into methods[] or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
     bool has_self_extends;               // class x extends x {} — TDZ violation
     bool is_declaration;                 // true for class declarations, false for class expressions
     int inner_module_var_index;          // immutable class-name binding inside class scope
-    JsStaticFieldEntry static_fields[16]; // static field definitions
+    JsStaticFieldEntry* static_fields;    // exact-sized, stable for the compile lifetime
+    int static_field_capacity;
     int static_field_count;
-    JsInstanceFieldEntry instance_fields[32]; // instance field definitions
+    JsInstanceFieldEntry* instance_fields; // exact-sized, stable for the compile lifetime
+    int instance_field_capacity;
     int instance_field_count;
-    JsAstNode* static_blocks[8];            // static { ... } block bodies
+    JsAstNode** static_blocks;               // exact-sized, stable for the compile lifetime
+    int static_block_capacity;
     int static_block_count;
     void** shape_cache_ptr;                 // §7: per-class shape cache slot (NULL until allocated)
     bool ctor_shape_composed;               // Tune11 P5: inherited ctor fields merged
@@ -350,14 +353,16 @@ struct JsMirTranspiler {
 
     // Collected functions (pre-pass)
     JsAstNode* root_node;
-    JsFuncCollected func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS];
+    JsFuncCollected* func_entries;      // exact-sized after the shared count pass
+    int func_capacity;
     int func_count;
-    bool func_collection_overflow_logged;
 
     // Collected classes
-    JsClassEntry class_entries[JS_MIR_MAX_COLLECTED_CLASSES];
+    JsClassEntry* class_entries;        // exact-sized after the shared count pass
+    int class_capacity;
     int class_count;
-    bool class_collection_overflow_logged;
+    bool collection_count_only;
+    bool collection_failed;
 
     // Current class being transpiled (for super resolution)
     JsClassEntry* current_class;
@@ -508,11 +513,15 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
             mt->var_scopes[i] = NULL;
         }
     }
-    for (int i = 0; i < mt->class_count && i < JS_MIR_MAX_COLLECTED_CLASSES; i++) {
-        // shape cache slots are pool-owned because generated MIR embeds their addresses.
-        mt->class_entries[i].shape_cache_ptr = NULL;
+    if (mt->class_entries) {
+        for (int i = 0; i < mt->class_count; i++) {
+            // shape cache slots are pool-owned because generated MIR embeds their addresses.
+            mt->class_entries[i].shape_cache_ptr = NULL;
+        }
     }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
+    if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
+    mt->func_entries = NULL;
+    mt->class_entries = NULL;
     if (mt->module_fc.scope_env_names) {
         mem_free(mt->module_fc.scope_env_names);
         mt->module_fc.scope_env_names = NULL;

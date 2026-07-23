@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "js_builtin_catalog.hpp"
+#include "js_test262_fast_paths.h"
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 
@@ -8,11 +9,16 @@ extern "C" Item js_eval_private_resolve(Item unscoped_key);
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
 
 static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
+#if JS_TEST262_FAST_PATHS
     if (!mt) return false;
     if (mt->preamble_entries && mt->preamble_entry_count > 0) return true;
     if (!mt->filename) return false;
     return strstr(mt->filename, "ref/test262/test/") != NULL ||
            strstr(mt->filename, "test/js262/test/") != NULL;
+#else
+    (void)mt;
+    return false;
+#endif
 }
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
@@ -647,39 +653,27 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
         }
     }
     if (metadata_count <= 0) return;
-    MIR_reg_t count_key = jm_box_string_literal(mt, "__if_count__", 12);
-    MIR_reg_t count_val = jm_box_int_const(mt, metadata_count);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, count_key),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, count_val));
+
+    const char** metadata_names = (const char**)pool_calloc(
+        mt->tp->ast_pool, (size_t)metadata_count * sizeof(const char*));
+    int* metadata_lens = (int*)pool_calloc(
+        mt->tp->ast_pool, (size_t)metadata_count * sizeof(int));
+    uint8_t* metadata_kinds = (uint8_t*)pool_calloc(
+        mt->tp->ast_pool, (size_t)metadata_count * sizeof(uint8_t));
+    if (!metadata_names || !metadata_lens || !metadata_kinds) {
+        // Generated MIR embeds these arrays, so partial metadata cannot be published safely.
+        log_error("js-mir: failed to allocate exact class instance metadata");
+        mt->collection_failed = true;
+        return;
+    }
 
     int metadata_index = 0;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
         JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
         if (inf->computed || !inf->name) continue;
-
-        char key_slot[32];
-        int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%d", metadata_index);
-        MIR_reg_t key_slot_reg = jm_box_string_literal(mt, key_slot, key_slot_len);
         String* field_name = jm_class_private_name(mt, ce, inf->name);
-        MIR_reg_t key_val = jm_box_string_literal(mt, field_name->chars, (int)field_name->len);
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_slot_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_val));
-
-        char val_slot[32];
-        int val_slot_len = snprintf(val_slot, sizeof(val_slot), "__if_val_%d", metadata_index);
-        MIR_reg_t val_slot_reg = jm_box_string_literal(mt, val_slot, val_slot_len);
-        MIR_reg_t field_val = jm_emit_undefined(mt);
-        if (inf->initializer && inf->initializer->node_type == JS_AST_NODE_LITERAL) {
-            field_val = jm_transpile_box_item(mt, inf->initializer);
-        }
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val_slot_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, field_val));
+        metadata_names[metadata_index] = field_name->chars;
+        metadata_lens[metadata_index] = (int)field_name->len;
         metadata_index++;
     }
     for (int mi = 0; mi < ce->method_count; mi++) {
@@ -696,25 +690,40 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
             }
         }
         if (seen) continue;
-
-        char key_slot[32];
-        int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%d", metadata_index);
-        MIR_reg_t key_slot_reg = jm_box_string_literal(mt, key_slot, key_slot_len);
         String* method_name = jm_class_private_name(mt, ce, me->name);
-        MIR_reg_t key_val = jm_box_string_literal(mt, method_name->chars, (int)method_name->len);
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_slot_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_val));
+        metadata_names[metadata_index] = method_name->chars;
+        metadata_lens[metadata_index] = (int)method_name->len;
+        metadata_kinds[metadata_index] = 1;
+        metadata_index++;
+    }
+    if (metadata_index != metadata_count) {
+        // Count/fill agreement protects the exact arrays embedded in generated MIR.
+        log_error("js-mir: class instance metadata count/fill mismatch %d/%d",
+            metadata_index, metadata_count);
+        mt->collection_failed = true;
+        return;
+    }
 
-        char kind_slot[32];
-        int kind_slot_len = snprintf(kind_slot, sizeof(kind_slot), "__if_kind_%d", metadata_index);
-        MIR_reg_t kind_slot_reg = jm_box_string_literal(mt, kind_slot, kind_slot_len);
-        MIR_reg_t kind_val = jm_box_int_const(mt, 1);
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, kind_slot_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, kind_val));
+    // One bulk runtime call keeps large legal classes from generating tens of
+    // thousands of MIR property stores merely to describe their instance fields.
+    jm_call_void_5(mt, "js_set_class_instance_field_metadata_bulk",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)metadata_names),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)metadata_lens),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)metadata_kinds),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, metadata_count));
+
+    metadata_index = 0;
+    for (int fi = 0; fi < ce->instance_field_count; fi++) {
+        JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
+        if (inf->computed || !inf->name) continue;
+        if (inf->initializer && inf->initializer->node_type == JS_AST_NODE_LITERAL) {
+            MIR_reg_t field_val = jm_transpile_box_item(mt, inf->initializer);
+            jm_call_void_3(mt, "js_set_class_instance_field_metadata_value",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, metadata_index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_val));
+        }
         metadata_index++;
     }
 }
@@ -1920,6 +1929,7 @@ static bool jm_uri_compare_arg_is_simple(JsAstNode* node) {
            node->node_type == JS_AST_NODE_LITERAL;
 }
 
+#if JS_TEST262_FAST_PATHS
 static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_arg) {
     if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
     JsCallNode* call = (JsCallNode*)node;
@@ -1932,6 +1942,7 @@ static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_
     *n_arg = call->arguments;
     return true;
 }
+#endif
 
 // Binary expression: native arithmetic fast path + boxed fallback
 // JS ToInt32 — replicates js_to_int32 (js_runtime_value.cpp) for compile-time folding.
@@ -2114,14 +2125,17 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
     }
     if (bin->op == JS_OP_ADD) {
+#if JS_TEST262_FAST_PATHS
         JsAstNode* n_arg = NULL;
-        if (jm_match_decimal_to_percent_hex_call(bin->right, &n_arg)) {
+        if (jm_test262_fast_paths_enabled(mt) &&
+            jm_match_decimal_to_percent_hex_call(bin->right, &n_arg)) {
             MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
             MIR_reg_t n_reg = jm_transpile_box_item(mt, n_arg);
             return jm_call_2(mt, "js_test262_concat_percent_hex", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
         }
+#endif
     }
 
     // Tune8 §2.5: retiring this caused timeouts on decodeURI/decodeURIComponent
@@ -3908,8 +3922,10 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     // that state across suspension before destructuring continues.
     bool has_yields = false;
     {
-        JsFuncCollected* fc = &mt->func_entries[mt->current_func_index];
-        if (fc->node && fc->node->is_generator) {
+        // Module destructuring uses current_func_index == -1; the former oversized
+        // collection table masked that invalid access, so use the active scope record.
+        JsFuncCollected* fc = mt->current_fc;
+        if (fc && fc->node && fc->node->is_generator) {
             JsAstNode* chk = pattern->elements;
             while (chk) {
                 if (jm_count_yields(chk) > 0) { has_yields = true; break; }
@@ -7439,6 +7455,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_transpile_math_call(mt, call, math_method);
     }
 
+#if JS_TEST262_FAST_PATHS
     // assert.sameValue(a, b [, msg]) / assert.notSameValue(a, b [, msg])
     // assert.compareArray(a, b [, msg]) / assert.deepEqual(a, b [, msg])
     // → native C++ implementation for test262 batch performance.
@@ -7599,6 +7616,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
         }
     }
+#endif
     // ClassName.staticMethod(args) → compile-time static method dispatch
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
@@ -9312,6 +9330,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_decodeURI", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+#if JS_TEST262_FAST_PATHS
             if (nl == 28 && strncmp(n, "validateNativeFunctionSource", 28) == 0 &&
                     ((mt->filename && strcmp(mt->filename, "<harness>") == 0) ||
                      (mt->preamble_entries && mt->preamble_entry_count > 0))) {
@@ -9320,6 +9339,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 return jm_emit_undefined(mt);
             }
+#endif
             // unescape(str) — legacy percent-decoding
             if (nl == 8 && strncmp(n, "unescape", 8) == 0 && !jm_find_var(mt, "_js_unescape")) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);

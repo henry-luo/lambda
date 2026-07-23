@@ -1,0 +1,12 @@
+assignment-return:91
+assignment-value:12
+assignment:1
+define:92:22
+reflect-define:93:32
+proxy-set:94:42
+delete:undefined
+iterator:77
+generic:custom
+prototype-replace-rejected:true:1
+restored:2:3,4
+sparse-push:1000000:tail

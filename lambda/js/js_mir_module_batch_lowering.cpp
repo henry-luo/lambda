@@ -3474,10 +3474,10 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
     return true;
 }
 
-void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
+bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
-        return;
+        return false;
     }
     mt->root_node = root;
 
@@ -3486,8 +3486,41 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // v20: Detect program-level "use strict" directive
     mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
-    // Phase 1: Collect all functions (post-order: innermost first)
+    // Phase 1: Use the collector itself as the count pass so class-method
+    // eligibility cannot drift from fill and invalidate published pointers.
+    mt->collection_count_only = true;
     jm_collect_functions(mt, root);
+    if (mt->collection_failed) {
+        log_error("js-mir: failed to count function/class metadata");
+        return false;
+    }
+    mt->func_capacity = mt->func_count;
+    mt->class_capacity = mt->class_count;
+    mt->func_count = 0;
+    mt->class_count = 0;
+    // Collection records retain AST/name pointers and generated code can retain
+    // metadata derived from them, so allocate them with the transpiler pools.
+    mt->func_entries = (JsFuncCollected*)pool_calloc(
+        mt->tp->ast_pool, (size_t)mt->func_capacity * sizeof(JsFuncCollected));
+    mt->class_entries = (JsClassEntry*)pool_calloc(
+        mt->tp->ast_pool, (size_t)mt->class_capacity * sizeof(JsClassEntry));
+    if ((mt->func_capacity && !mt->func_entries) ||
+        (mt->class_capacity && !mt->class_entries)) {
+        log_error("js-mir: failed to allocate exact function/class metadata");
+        mt->collection_failed = true;
+        return false;
+    }
+    mt->collection_count_only = false;
+    jm_collect_functions(mt, root);
+    if (mt->collection_failed ||
+        mt->func_count != mt->func_capacity ||
+        mt->class_count != mt->class_capacity) {
+        // A mismatch means the shared traversal was state-dependent and exact storage is unsafe.
+        log_error("js-mir: collection mismatch functions=%d/%d classes=%d/%d",
+            mt->func_count, mt->func_capacity, mt->class_count, mt->class_capacity);
+        mt->collection_failed = true;
+        return false;
+    }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
     // Phase 1.0b: Determine strict mode for each collected function.
@@ -7641,6 +7674,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Load module for linking
     MIR_load_module(mt->ctx, mt->module);
+    return true;
 }
 
 // ============================================================================
@@ -7860,7 +7894,13 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     mt->module = MIR_new_module(ctx, "js_module");
 
-    transpile_js_mir_ast(mt, js_ast);
+    if (!transpile_js_mir_ast(mt, js_ast)) {
+        log_error("js-parallel: collection/allocation failed for '%s'", node->path);
+        jm_destroy_mir_transpiler(mt);
+        js_transpiler_destroy(tp);
+        MIR_finish(ctx);
+        return false;
+    }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-parallel: NULL labels detected for '%s'", node->path);
@@ -8183,7 +8223,16 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     mt->module = MIR_new_module(ctx, "js_module");
 
-    transpile_js_mir_ast(mt, js_ast);
+    if (!transpile_js_mir_ast(mt, js_ast)) {
+        log_error("js-mir: module: collection/allocation failed for '%s'", filename);
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
+        return (Item){.item = ITEM_ERROR};
+    }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);

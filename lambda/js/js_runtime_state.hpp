@@ -6,6 +6,7 @@
 // legacy-name aliases used while the runtime is migrated away from free globals.
 
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 
 #define JS_REGEXP_MAX_PAREN 9
@@ -27,12 +28,27 @@ struct JsExceptionState {
     char msg_buf[1024] = {};
 };
 
+struct JsIntrinsicState {
+    // Prototype cache slots are precise GC roots so moving collection updates
+    // every cached Item; name Items are active-name-pool owned.
+    uint64_t* prototype_roots[JS_CLASS__COUNT] = {};
+    bool prototype_resolving[JS_CLASS__COUNT] = {};
+    Item constructor_names[JS_CLASS__COUNT] = {};
+    Item prototype_name = {0};
+    uint64_t mutation_versions[JS_CLASS__COUNT] = {};
+    uint64_t mutation_serial = 1;
+    uint64_t owner_heap_epoch = 0;
+    uint32_t initialization_depth = 0;
+    int array_sym_iter_ever_set = 0;
+    int array_proto_push_ever_set = 0;
+    int array_writable_methods_ever_set = 0;
+};
+
 struct JsRuntimeState {
     Input* input = NULL;
     bool strict_mode = false;
     bool skip_accessor_dispatch = false;
-    int array_sym_iter_ever_set = 0;
-    int array_proto_push_ever_set = 0;
+    JsIntrinsicState intrinsics = {};
 
     Item module_vars[JS_MAX_MODULE_VARS] = {};
     Item* active_module_vars = module_vars;
@@ -91,8 +107,10 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)
 #define js_skip_accessor_dispatch (js_runtime_state.skip_accessor_dispatch)
-#define g_array_sym_iter_ever_set (js_runtime_state.array_sym_iter_ever_set)
-#define g_array_proto_push_ever_set (js_runtime_state.array_proto_push_ever_set)
+#define js_intrinsic_state (js_runtime_state.intrinsics)
+#define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
+#define g_array_proto_push_ever_set (js_intrinsic_state.array_proto_push_ever_set)
+#define g_array_writable_methods_ever_set (js_intrinsic_state.array_writable_methods_ever_set)
 #define js_module_vars (js_runtime_state.module_vars)
 #define js_active_module_vars (js_active_module_vars_ref())
 #define js_module_var_count (js_runtime_state.module_var_count)

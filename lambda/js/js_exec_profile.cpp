@@ -35,7 +35,7 @@ typedef struct JsExecProfileFrame {
 } JsExecProfileFrame;
 
 typedef struct JsExecProfileMirCall {
-    const char* name;
+    char name[192];
     uint64_t sites;
 } JsExecProfileMirCall;
 
@@ -125,6 +125,7 @@ static int g_js_exec_profile_property_set_branch_count = 0;
 static int g_js_exec_profile_load_ic_site_count = 0;
 static int g_js_exec_profile_store_ic_site_count = 0;
 static int g_js_exec_profile_registered = 0;
+static bool g_js_exec_profile_dumped = false;
 
 static const char* g_js_load_ic_reason_names[JS_LOAD_IC_SITE_REASON_COUNT] = {
     "probe",
@@ -187,6 +188,7 @@ int js_exec_profile_mode(void) {
 }
 
 void js_exec_profile_reset(void) {
+    g_js_exec_profile_dumped = false;
     for (int i = 0; i < JS_EXEC_PROF_EVENT_COUNT; i++) {
         g_js_exec_profile_slots[i].calls = 0;
         g_js_exec_profile_slots[i].inclusive_ns = 0;
@@ -214,7 +216,10 @@ static void js_exec_profile_note_mir_call_name(const char* fn_name) {
         return;
     }
     int index = g_js_exec_profile_mir_call_count++;
-    g_js_exec_profile_mir_calls[index].name = fn_name;
+    // Exact transpiler collections are compile-lifetime pool allocations; the
+    // profiler outlives them until runtime cleanup and therefore owns the label.
+    snprintf(g_js_exec_profile_mir_calls[index].name,
+        sizeof(g_js_exec_profile_mir_calls[index].name), "%s", fn_name);
     g_js_exec_profile_mir_calls[index].sites = 1;
 }
 
@@ -491,7 +496,10 @@ void js_exec_profile_note_mir_call(const char* fn_name) {
 }
 
 void js_exec_profile_dump(void) {
-    if (g_js_exec_profile_mode <= 0) return;
+    if (g_js_exec_profile_mode <= 0 || g_js_exec_profile_dumped) return;
+    // MIR-call labels can be pool-owned by the transpiler; runtime cleanup must
+    // flush them before pool destruction, while atexit remains a safe fallback.
+    g_js_exec_profile_dumped = true;
     create_dir_recursive("temp");
 
     char default_path[128];

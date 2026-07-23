@@ -497,7 +497,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
-void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root);
+bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root);
 uint64_t js_path_index_hash(const void* item, uint64_t seed0, uint64_t seed1);
 int js_path_index_compare(const void* a, const void* b, void* udata);
 void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx);

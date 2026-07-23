@@ -19,6 +19,8 @@
 #include "../jube/jube_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
 #include "../input/css/dom_node.hpp"
@@ -33,6 +35,7 @@
 // js_dom.h, declared here under extern "C" to avoid header coupling).
 extern "C" Item js_get_this();
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern __thread EvalContext* context;
 extern Item js_array_new(int length);
 extern Item js_array_push(Item array, Item value);
 extern Item js_get_document_object_value();
@@ -388,12 +391,20 @@ struct NodeListenerEntry {
     void* key;
     DomDocument* owner_doc;
     DomNodeRef node_ref;
+    uint64_t* target_root;
     NodeListeners listeners;
 };
 
 static NodeListenerEntry* _entries = nullptr;
 static int _entry_count = 0;
 static int _entry_capacity = 0;
+
+struct EventTargetIndexEntry {
+    void* key;
+    int slot;
+};
+HASHMAP_DEFINE_PTRKEY(event_target_index, EventTargetIndexEntry, key)
+static struct hashmap* _entry_index = nullptr;
 
 // HTML event-handler attributes are listener-list entries even though their
 // callable value lives in the target property. Keep their stable slot order
@@ -410,6 +421,30 @@ static EventHandlerSlot* _handler_slots = nullptr;
 static int _handler_slot_count = 0;
 static int _handler_slot_capacity = 0;
 static uint64_t _event_registration_order = 0;
+
+struct EventHandlerIndexEntry {
+    void* key;
+    const char* type;
+    int slot;
+};
+
+static uint64_t event_handler_index_hash(
+        const void* item, uint64_t seed0, uint64_t seed1) {
+    const EventHandlerIndexEntry* entry = (const EventHandlerIndexEntry*)item;
+    uint64_t key_hash = hashmap_murmur(&entry->key, sizeof(entry->key), seed0, seed1);
+    uint64_t type_hash = hashmap_sip(entry->type, strlen(entry->type), seed0, seed1);
+    return key_hash ^ (type_hash * 0x9e3779b97f4a7c15ULL);
+}
+
+static int event_handler_index_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const EventHandlerIndexEntry* left = (const EventHandlerIndexEntry*)a;
+    const EventHandlerIndexEntry* right = (const EventHandlerIndexEntry*)b;
+    if (left->key != right->key) return left->key < right->key ? -1 : 1;
+    return strcmp(left->type, right->type);
+}
+
+static struct hashmap* _handler_index = nullptr;
 
 // sentinel pointers for non-element targets
 static int _window_sentinel = 0;
@@ -473,13 +508,65 @@ static void* get_event_target_key(Item target) {
     return (void*)&_window_sentinel;
 }
 
-static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
-                                              DomNodeRef node_ref) {
-    // search existing entries
-    for (int i = 0; i < _entry_count; i++) {
-        if (_entries[i].key == key) {
-            return &_entries[i].listeners;
+static bool event_target_needs_root(Item target, void* key, DomNodeRef node_ref) {
+    if (!key || node_ref.address ||
+        key == (void*)&_window_sentinel || key == (void*)&_document_sentinel) {
+        return false;
+    }
+    if (js_dom_unwrap_element(target)) return false;
+    TypeId type = get_type_id(target);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static int find_listener_entry_slot(void* key) {
+    if (!key) return -1;
+    if (_entry_index) {
+        EventTargetIndexEntry lookup = {key, -1};
+        const EventTargetIndexEntry* found =
+            (const EventTargetIndexEntry*)hashmap_get(_entry_index, &lookup);
+        if (found && found->slot >= 0 && found->slot < _entry_count) {
+            return found->slot;
         }
+        return -1;
+    }
+    for (int i = 0; i < _entry_count; i++) {
+        if (_entries[i].key == key) return i;
+    }
+    return -1;
+}
+
+static bool index_listener_entry(void* key, int slot) {
+    if (!_entry_index) {
+        _entry_index = event_target_index_new(16);
+        if (_entry_index) {
+            for (int i = 0; i < _entry_count; i++) {
+                EventTargetIndexEntry existing = {_entries[i].key, i};
+                hashmap_set(_entry_index, &existing);
+            }
+        }
+    }
+    if (!_entry_index) return false;
+    EventTargetIndexEntry entry = {key, slot};
+    hashmap_set(_entry_index, &entry);
+    if (hashmap_oom(_entry_index)) {
+        hashmap_free(_entry_index);
+        _entry_index = nullptr;
+        return false;
+    }
+    return true;
+}
+
+static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
+                                              DomNodeRef node_ref, Item target) {
+    int existing_slot = find_listener_entry_slot(key);
+    if (existing_slot >= 0) {
+        NodeListenerEntry* existing = &_entries[existing_slot];
+        if (!existing->target_root && event_target_needs_root(target, key, node_ref)) {
+            // A raw GC-container key can otherwise dangle and alias a reused allocation.
+            existing->target_root = heap_gc_root_slot_new(target.item);
+            if (!existing->target_root) return nullptr;
+        }
+        return &existing->listeners;
     }
 
     // grow if needed
@@ -494,10 +581,22 @@ static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
         _entry_capacity = new_cap;
     }
 
-    NodeListenerEntry* entry = &_entries[_entry_count++];
+    int new_slot = _entry_count++;
+    NodeListenerEntry* entry = &_entries[new_slot];
     entry->key = key;
     entry->owner_doc = owner_doc;
     entry->node_ref = node_ref;
+    entry->target_root = nullptr;
+    if (event_target_needs_root(target, key, node_ref)) {
+        // Listener indices retain plain EventTargets for the document epoch;
+        // without this root the pointer key can outlive its GC allocation.
+        entry->target_root = heap_gc_root_slot_new(target.item);
+        if (!entry->target_root) {
+            _entry_count--;
+            memset(entry, 0, sizeof(*entry));
+            return nullptr;
+        }
+    }
     if (owner_doc && node_ref.address) {
         // Listener tables live outside the DOM tree and may survive removal;
         // the event-queue pin closes that native lifetime edge until reset.
@@ -506,20 +605,27 @@ static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
     entry->listeners.items = nullptr;
     entry->listeners.count = 0;
     entry->listeners.capacity = 0;
+    // The slot, rather than the relocatable NodeListenerEntry address, is indexed.
+    (void)index_listener_entry(key, new_slot);
     return &entry->listeners;
 }
 
 static NodeListeners* find_listeners(void* key) {
-    for (int i = 0; i < _entry_count; i++) {
-        if (_entries[i].key == key) {
-            return &_entries[i].listeners;
-        }
-    }
-    return nullptr;
+    int slot = find_listener_entry_slot(key);
+    return slot >= 0 ? &_entries[slot].listeners : nullptr;
 }
 
 static EventHandlerSlot* find_handler_slot(void* key, const char* type) {
     if (!key || !type) return nullptr;
+    if (_handler_index) {
+        EventHandlerIndexEntry lookup = {key, type, -1};
+        const EventHandlerIndexEntry* found =
+            (const EventHandlerIndexEntry*)hashmap_get(_handler_index, &lookup);
+        if (found && found->slot >= 0 && found->slot < _handler_slot_count) {
+            return &_handler_slots[found->slot];
+        }
+        return nullptr;
+    }
     for (int i = 0; i < _handler_slot_count; i++) {
         EventHandlerSlot* slot = &_handler_slots[i];
         if (slot->key == key && slot->type && strcmp(slot->type, type) == 0) {
@@ -558,6 +664,29 @@ static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type)
     slot->type = type_copy;
     slot->order = 0;
     slot->active = false;
+    if (!_handler_index) {
+        _handler_index = hashmap_new(sizeof(EventHandlerIndexEntry), 16, 0, 0,
+            event_handler_index_hash, event_handler_index_compare, nullptr, nullptr);
+        if (_handler_index) {
+            for (int i = 0; i < _handler_slot_count; i++) {
+                EventHandlerIndexEntry existing = {
+                    _handler_slots[i].key, _handler_slots[i].type, i
+                };
+                hashmap_set(_handler_index, &existing);
+            }
+        }
+    }
+    if (_handler_index) {
+        EventHandlerIndexEntry index_entry = {
+            key, slot->type, _handler_slot_count - 1
+        };
+        hashmap_set(_handler_index, &index_entry);
+        if (hashmap_oom(_handler_index)) {
+            // OOM keeps the array authoritative and falls back to ordered scanning.
+            hashmap_free(_handler_index);
+            _handler_index = nullptr;
+        }
+    }
     return slot;
 }
 
@@ -606,7 +735,14 @@ extern "C" void js_dom_event_handler_property_set(Item target,
                                                     int property_name_len,
                                                     Item value) {
     if (!event_handler_target_supported(target)) return;
-    event_handler_property_set_for_key(get_event_target_key(target), property_name,
+    void* key = get_event_target_key(target);
+    DomNodeRef no_node = {nullptr, 0};
+    if (event_target_needs_root(target, key, no_node) &&
+        !get_or_create_listeners(key, nullptr, no_node, target)) {
+        log_error("js-dom-events: failed to retain handler target");
+        return;
+    }
+    event_handler_property_set_for_key(key, property_name,
                                        property_name_len, value);
 }
 
@@ -799,7 +935,12 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     }
     DomNodeRef event_ref = event_node ? dom_node_ref(event_node) : DomNodeRef{nullptr, 0};
     if (event_node && (!event_doc || !dom_node_ref_validate(event_doc, event_ref))) return;
-    NodeListeners* nl = get_or_create_listeners(key, event_doc, event_ref);
+    NodeListeners* nl = get_or_create_listeners(
+        key, event_doc, event_ref, elem_item);
+    if (!nl) {
+        log_error("js-dom-events: failed to retain listener target");
+        return;
+    }
 
     // check for duplicate (same type + callback + capture); ignore tombstones
     for (int i = 0; i < nl->count; i++) {
@@ -1148,7 +1289,12 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 // Same approach: mutable own property. Applied during dispatch.
 
 Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed) {
-    Item event = js_new_object();
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> event_root(roots, js_new_object());
+    Rooted<Item> descriptor_root(roots, ItemNull);
+    // Event construction performs many allocating property writes; keep the
+    // partially initialized receiver precise until it is returned to JS.
+    Item event = event_root.get();
 
     event_set_str(event, "type", type);
     event_set_bool(event, "bubbles", bubbles);
@@ -1207,7 +1353,8 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
         Item true_v  = (Item){.item = b2it(true)};
 
         // returnValue: get + set
-        Item rv_desc = js_new_object();
+        descriptor_root.set(js_new_object());
+        Item rv_desc = descriptor_root.get();
         js_property_set(rv_desc, get_key, js_new_function((void*)js_event_returnvalue_get, 0));
         js_property_set(rv_desc, set_key, js_new_function((void*)js_event_returnvalue_set, 1));
         js_property_set(rv_desc, conf_key, true_v);
@@ -1216,7 +1363,8 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
             (Item){.item = s2it(heap_create_name("returnValue"))}, rv_desc);
 
         // cancelBubble: get + set
-        Item cb_desc = js_new_object();
+        descriptor_root.set(js_new_object());
+        Item cb_desc = descriptor_root.get();
         js_property_set(cb_desc, get_key, js_new_function((void*)js_event_cancelbubble_get, 0));
         js_property_set(cb_desc, set_key, js_new_function((void*)js_event_cancelbubble_set, 1));
         js_property_set(cb_desc, conf_key, true_v);
@@ -1225,7 +1373,8 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
             (Item){.item = s2it(heap_create_name("cancelBubble"))}, cb_desc);
 
         // defaultPrevented: get only
-        Item dp_desc = js_new_object();
+        descriptor_root.set(js_new_object());
+        Item dp_desc = descriptor_root.get();
         js_property_set(dp_desc, get_key, js_new_function((void*)js_event_defaultprevented_get, 0));
         js_property_set(dp_desc, conf_key, true_v);
         js_property_set(dp_desc, enum_key, true_v);
@@ -1236,7 +1385,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     js_class_stamp(event, JS_CLASS_EVENT);
     event_apply_new_target_prototype(event);
 
-    return event;
+    return event_root.get();
 }
 
 Item js_create_event(const char* type, bool bubbles, bool cancelable) {
@@ -1245,25 +1394,32 @@ Item js_create_event(const char* type, bool bubbles, bool cancelable) {
 
 Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
                                bool composed, Item view, const char* data) {
-    Item event = js_create_event_init(type, bubbles, cancelable, composed);
-    event_set_item(event, "view", view.item ? view : ItemNull);
-    event_set_str(event, "data", data ? data : "");
-    event_set_int(event, "inputMethod", 0);
-    event_set_str(event, "locale", "");
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> view_root(roots, view);
+    Rooted<Item> event_root(
+        roots, js_create_event_init(type, bubbles, cancelable, composed));
+    event_set_item(event_root.get(), "view", view_root.get().item ? view_root.get() : ItemNull);
+    event_set_str(event_root.get(), "data", data ? data : "");
+    event_set_int(event_root.get(), "inputMethod", 0);
+    event_set_str(event_root.get(), "locale", "");
     Item ite_key = (Item){.item = s2it(heap_create_name("initTextEvent"))};
-    js_property_set(event, ite_key,
+    js_property_set(event_root.get(), ite_key,
         js_new_function((void*)js_event_init_text_event, 7));
-    return event;
+    return event_root.get();
 }
 
 Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,
                                  bool composed, Item detail) {
-    Item event = js_create_event_init(type, bubbles, cancelable, composed);
-    event_set_item(event, "detail", detail);
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> detail_root(roots, detail);
+    Rooted<Item> event_root(
+        roots, js_create_event_init(type, bubbles, cancelable, composed));
+    event_set_item(event_root.get(), "detail", detail_root.get());
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
-    js_property_set(event, ice_key, js_new_function((void*)js_event_init_custom_event, 4));
-    js_class_stamp(event, JS_CLASS_CUSTOM_EVENT);
-    return event;
+    js_property_set(event_root.get(), ice_key,
+        js_new_function((void*)js_event_init_custom_event, 4));
+    js_class_stamp(event_root.get(), JS_CLASS_CUSTOM_EVENT);
+    return event_root.get();
 }
 
 Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Item detail) {
@@ -2545,6 +2701,11 @@ void js_dom_events_reset(void) {
             dom_node_unpin(_entries[i].owner_doc, _entries[i].node_ref,
                            DOM_NODE_PIN_EVENT_QUEUE);
         }
+        if (_entries[i].target_root) {
+            heap_unregister_gc_root(_entries[i].target_root);
+            mem_free(_entries[i].target_root);
+            _entries[i].target_root = nullptr;
+        }
     }
     if (_entries) {
         mem_free(_entries);
@@ -2552,6 +2713,10 @@ void js_dom_events_reset(void) {
     }
     _entry_count = 0;
     _entry_capacity = 0;
+    if (_entry_index) {
+        hashmap_free(_entry_index);
+        _entry_index = nullptr;
+    }
     for (int i = 0; i < _handler_slot_count; i++) {
         if (_handler_slots[i].type) mem_free(_handler_slots[i].type);
     }
@@ -2561,6 +2726,10 @@ void js_dom_events_reset(void) {
     }
     _handler_slot_count = 0;
     _handler_slot_capacity = 0;
+    if (_handler_index) {
+        hashmap_free(_handler_index);
+        _handler_index = nullptr;
+    }
     _event_registration_order = 0;
     _stop_propagation = false;
     _stop_immediate = false;

@@ -727,7 +727,14 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     snprintf(module_name, sizeof(module_name), "js_dynfunc_%d", js_dynamic_func_counter++);
     mt->module = MIR_new_module(ctx, module_name);
 
-    transpile_js_mir_ast(mt, js_ast);
+    if (!transpile_js_mir_ast(mt, js_ast)) {
+        log_error("js-new-function: collection/allocation failed");
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        mem_free(source);
+        return ItemNull;
+    }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-new-function: NULL labels detected");
@@ -1757,7 +1764,14 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
         snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
         mt->module = MIR_new_module(eval_ctx, module_name);
 
-        transpile_js_mir_ast(mt, js_ast);
+        if (!transpile_js_mir_ast(mt, js_ast)) {
+            log_error("js-eval: collection/allocation failed");
+            jm_destroy_mir_transpiler(mt);
+            MIR_finish(eval_ctx);
+            js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
+            return ItemNull;
+        }
 
         if (!jm_validate_mir_labels(eval_ctx)) {
             log_error("js-eval: NULL labels detected in direct script");

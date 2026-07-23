@@ -5800,6 +5800,30 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     }
 }
 
+static int map_fixed_slot_prefix_count(TypeMap* map_type) {
+    if (!map_type || !map_type->slot_entries || map_type->slot_count <= 0 ||
+        map_type->byte_size < (int64_t)map_type->slot_count * (int64_t)sizeof(void*)) {
+        return 0;
+    }
+    ShapeEntry* entry = map_type->shape;
+    for (int i = 0; i < map_type->slot_count; i++) {
+        if (!entry || map_type->slot_entries[i] != entry ||
+            entry->byte_offset != (int64_t)i * (int64_t)sizeof(void*)) {
+            return 0;
+        }
+        entry = entry->next;
+    }
+    return map_type->slot_count;
+}
+
+static bool map_entry_uses_fixed_slot(TypeMap* map_type, ShapeEntry* entry) {
+    int fixed_count = map_fixed_slot_prefix_count(map_type);
+    for (int i = 0; i < fixed_count; i++) {
+        if (map_type->slot_entries[i] == entry) return true;
+    }
+    return false;
+}
+
 struct MutableCloneEntry {
     void* src;
     Item dst;
@@ -6545,17 +6569,18 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         return;
     }
 
-    // Shaped JS objects use slot_entries and fixed 8-byte slots.  Keep that
-    // layout even when a field type changes; compiled slot access uses slot*8.
-    bool preserve_slot_layout = old_map_type->slot_entries && old_map_type->slot_count > 0;
+    // Constructor fields form a fixed-width prefix; properties appended later
+    // remain packed and must not inherit the prefix's 8-byte write invariant.
+    int fixed_slot_count = map_fixed_slot_prefix_count(old_map_type);
 
     // build new shape chain with updated type for the changed field
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
     ShapeEntry* last = NULL;
-    int64_t byte_offset = 0;
 
     e = old_map_type->shape;
+    int field_index = 0;
+    int64_t byte_offset = (int64_t)fixed_slot_count * (int64_t)sizeof(void*);
     while (e) {
         TypeId ft = (e == changed_entry) ? new_value_type : e->type->type_id;
 
@@ -6572,7 +6597,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         ne->name = nv;
         ne->name_id = e->name_id ? e->name_id : typemap_name_id(nv->str, (int)nv->length);
         ne->type = type_info[ft].type;
-        ne->byte_offset = preserve_slot_layout ? e->byte_offset : byte_offset;
+        bool fixed_slot = field_index < fixed_slot_count;
+        ne->byte_offset = fixed_slot ? e->byte_offset : byte_offset;
         ne->next = NULL;
         ne->ns = e->ns;
         // Preserve property attribute flags (JSPD_IS_ACCESSOR, NW, NE, NC, etc.)
@@ -6586,16 +6612,13 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         if (prev) prev->next = ne;
         last = ne;
         prev = ne;
-        if (!preserve_slot_layout) {
+        if (!fixed_slot) {
             byte_offset += type_info[ft].byte_size;
         }
+        field_index++;
         e = e->next;
     }
-    int64_t new_byte_size = preserve_slot_layout ? old_map_type->byte_size : byte_offset;
-    if (preserve_slot_layout) {
-        int64_t slot_byte_size = (int64_t)old_map_type->slot_count * (int64_t)sizeof(void*);
-        if (new_byte_size < slot_byte_size) new_byte_size = slot_byte_size;
-    }
+    int64_t new_byte_size = byte_offset;
 
     // allocate new data buffer
     // For heap containers: calloc (consistent with map_fill, freed by free_container)
@@ -6629,6 +6652,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // copy field values from old buffer to new buffer
     ShapeEntry* old_e = old_map_type->shape;
     ShapeEntry* new_e = first;
+    field_index = 0;
     while (old_e && new_e) {
         void* old_field = (char*)old_data + old_e->byte_offset;
         void* new_field = (char*)new_data + new_e->byte_offset;
@@ -6640,10 +6664,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             map_field_store(new_field, new_value, new_value_type);
         } else {
             // unchanged field — copy bytes (ref count unchanged, same pointers)
-            int sz = preserve_slot_layout ? (int)sizeof(void*) :
+            int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
                 type_info[old_e->type->type_id].byte_size;
             memcpy(new_field, old_field, sz);
         }
+        field_index++;
         old_e = old_e->next;
         new_e = new_e->next;
     }
@@ -6688,18 +6713,18 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // Populate/grow hash table for O(1) property lookup.
         typemap_hash_build(new_mt, context->pool);
 
-        // Rebuild slot_entries if old TypeMap had them (for shaped JS objects)
-        if (old_map_type->slot_entries && old_map_type->slot_count > 0 &&
-            field_count == old_map_type->slot_count) {
+        // Preserve only the verified fixed constructor prefix. Appended packed
+        // fields are never valid targets for slot-indexed stores.
+        if (fixed_slot_count > 0) {
             ShapeEntry** entries = (ShapeEntry**)pool_calloc(context->pool,
-                field_count * sizeof(ShapeEntry*));
+                fixed_slot_count * sizeof(ShapeEntry*));
             if (entries) {
                 ShapeEntry* se = first;
-                for (int i = 0; i < field_count && se; i++, se = se->next) {
+                for (int i = 0; i < fixed_slot_count && se; i++, se = se->next) {
                     entries[i] = se;
                 }
                 new_mt->slot_entries = entries;
-                new_mt->slot_count = field_count;
+                new_mt->slot_count = fixed_slot_count;
             }
         }
 
@@ -6958,7 +6983,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
             // slot_entries for slot-indexed access.  Do not run the generic
             // Lambda map rebuild here: it packs fields by type byte size and
             // breaks the slot*8 layout used by compiled JS accessors.
-            if (map_type->slot_entries && map_type->slot_count > 0) {
+            if (map_entry_uses_fixed_slot(map_type, entry)) {
                 map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
                 if (value_type != LMD_TYPE_NULL) {

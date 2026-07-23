@@ -20,6 +20,7 @@
 #include "lambda-error.h"
 #include "concurrency.h"
 #include "runtime/side_stack.h"
+#include "js/js_test262_fast_paths.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
@@ -1098,6 +1099,10 @@ extern void js_init_module_vars_undefined_bulk(const int* indices, const Item* k
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_init_class_instance_fields(Item callee, Item object);
+extern void js_set_class_instance_field_metadata_bulk(Item class_item,
+    const char** field_names, const int* field_lens, const uint8_t* field_kinds,
+    int count);
+extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
@@ -1806,41 +1811,11 @@ JitImport jit_runtime_imports[] = {
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
     {"js_throw_const_assign", FPTR(js_throw_const_assign)},
-    // ========================================================================
-    // Tune8 §4: test262 framework fast paths.
-    //
-    // These 13 entries are emitted by the transpiler when it recognises test262
-    // harness idioms (assert.sameValue, assert.compareArray, $DONOTEVALUATE,
-    // verifyProperty, etc.). They are emitted thousands of times during a
-    // test262 sweep — `js_assert_same_value` alone is 91K emissions in a
-    // single run, `js_assert_base` 55K, `js_verify_property` 18K — so they
-    // cannot be dropped from a test262 build.
-    //
-    // The transpiler-side emission code (in js_mir_*.cpp) is NOT yet gated.
-    // A production-only build that #undef's JS_TEST262_FAST_PATHS today would
-    // still call the transpiler's emit code, which would fail at MIR link
-    // time. The full §4 gate needs matching #ifdef wrappers around the emit
-    // sites — deferred.
-    //
-    // Default: ON. Disable only when explicitly preparing a non-test262
-    // production binary.
-    // ========================================================================
-#ifndef JS_TEST262_FAST_PATHS
-#define JS_TEST262_FAST_PATHS 1
-#endif
+    // Test262-only helpers share one catalog with the configured build gate.
 #if JS_TEST262_FAST_PATHS
-    {"js_assert_same_value", FPTR(js_assert_same_value)},
-    {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
-    {"js_assert_compare_array", FPTR(js_assert_compare_array)},
-    {"js_assert_deep_equal", FPTR(js_assert_deep_equal)},
-    {"js_compare_array", FPTR(js_compare_array)},
-    {"js_verify_property", FPTR(js_verify_property)},
-    {"js_assert_throws", FPTR(js_assert_throws)},
-    {"js_assert_base", FPTR(js_assert_base)},
-    {"js_donotevaluate", FPTR(js_donotevaluate)},
-    {"js_is_constructor", FPTR(js_is_constructor)},
-    {"js_decimal_to_percent_hex_string", FPTR(js_decimal_to_percent_hex_string)},
-    {"js_test262_build_string", FPTR(js_test262_build_string)},
+#define JS_TEST262_REGISTRY_ENTRY(name) {#name, FPTR(name)},
+    JS_TEST262_FAST_PATH_CATALOG(JS_TEST262_REGISTRY_ENTRY)
+#undef JS_TEST262_REGISTRY_ENTRY
 #endif
     {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
@@ -1982,12 +1957,6 @@ JitImport jit_runtime_imports[] = {
     {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
-#if JS_TEST262_FAST_PATHS
-    // Tune8 §4: 3 more test262-specific fast paths. See block above.
-    {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
-    {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
-    {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
-#endif
     {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_array_method_direct_into", FPTR(js_array_method_direct_into),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
@@ -2236,6 +2205,8 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
+    {"js_set_class_instance_field_metadata_bulk", FPTR(js_set_class_instance_field_metadata_bulk)},
+    {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value)},
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},

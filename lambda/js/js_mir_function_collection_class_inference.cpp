@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include <limits.h>
 
 static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     if (!fn || ts_node_is_null(fn->node)) return false;
@@ -404,7 +405,7 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!node) return;
+    if (!node || mt->collection_failed) return;
 
     switch (node->node_type) {
     case JS_AST_NODE_PROGRAM: {
@@ -428,8 +429,17 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         // recurse into body (post-order)
         if (fn->body) jm_collect_functions(mt, fn->body);
         int children_end = mt->func_count;
+        if (mt->collection_count_only) {
+            if (mt->func_count == INT_MAX) {
+                log_error("js-mir: function count overflow");
+                mt->collection_failed = true;
+                break;
+            }
+            mt->func_count++;
+            break;
+        }
         // add this function
-        if (mt->func_count < JS_MIR_MAX_COLLECTED_FUNCTIONS) {
+        if (mt->func_count < mt->func_capacity) {
             int my_index = mt->func_count;
             JsFuncCollected* e = &mt->func_entries[my_index];
             memset(e, 0, sizeof(JsFuncCollected));
@@ -450,9 +460,11 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             }
             // A5: Scan for this.prop = expr patterns (constructor shape pre-alloc)
             if (fn->body) jm_scan_ctor_props(e, fn->body);
-        } else if (!mt->func_collection_overflow_logged) {
-            log_error("js-mir: function collection limit reached at %d", JS_MIR_MAX_COLLECTED_FUNCTIONS);
-            mt->func_collection_overflow_logged = true;
+        } else {
+            // The count/fill walker must agree before pointers into exact storage are published.
+            log_error("js-mir: function count/fill mismatch at %d of %d",
+                mt->func_count, mt->func_capacity);
+            mt->collection_failed = true;
         }
         break;
     }
@@ -501,7 +513,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         // e.g. var { fn = function(){} } = obj;
         if (n->id) jm_collect_functions(mt, n->id);
         // For var X = class Y { ... } or var X = class { ... }
-        if (n->init && n->init->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+        if (!mt->collection_count_only &&
+            n->init && n->init->node_type == JS_AST_NODE_CLASS_DECLARATION &&
             n->id && n->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsClassNode* cls = (JsClassNode*)n->init;
             JsIdentifierNode* var_id = (JsIdentifierNode*)n->id;
@@ -531,7 +544,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         }
         // For var X = Y where Y is a known class name — register X as alias
         // Handles esbuild pattern: var PostScriptStack = _PostScriptStack;
-        if (n->init && n->init->node_type == JS_AST_NODE_IDENTIFIER &&
+        if (!mt->collection_count_only &&
+            n->init && n->init->node_type == JS_AST_NODE_IDENTIFIER &&
             n->id && n->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* var_id = (JsIdentifierNode*)n->id;
             JsIdentifierNode* init_id = (JsIdentifierNode*)n->init;
@@ -576,7 +590,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
         jm_collect_functions(mt, n->left);
         jm_collect_functions(mt, n->right);
-        if (n->right && n->right->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+        if (!mt->collection_count_only &&
+            n->right && n->right->node_type == JS_AST_NODE_CLASS_DECLARATION &&
             n->left && n->left->node_type == JS_AST_NODE_IDENTIFIER) {
             JsClassNode* cls = (JsClassNode*)n->right;
             JsIdentifierNode* lhs_id = (JsIdentifierNode*)n->left;
@@ -691,7 +706,44 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsClassNode* cls = (JsClassNode*)node;
         if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
-            mt->class_count < JS_MIR_MAX_COLLECTED_CLASSES) {
+            mt->collection_count_only) {
+            if (mt->class_count == INT_MAX) {
+                log_error("js-mir: class count overflow");
+                mt->collection_failed = true;
+                break;
+            }
+            mt->class_count++;
+            JsBlockNode* count_body = (JsBlockNode*)cls->body;
+            for (JsAstNode* member = count_body->statements; member; member = member->next) {
+                if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+                    JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)member;
+                    if (fd->computed && fd->key) jm_collect_functions(mt, fd->key);
+                    if (fd->key && fd->value) jm_collect_functions(mt, fd->value);
+                } else if (member->node_type == JS_AST_NODE_STATIC_BLOCK) {
+                    JsStaticBlockNode* sb = (JsStaticBlockNode*)member;
+                    if (sb->body) jm_collect_functions(mt, sb->body);
+                } else if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+                    JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)member;
+                    if (md->computed && md->key) jm_collect_functions(mt, md->key);
+                    if (md->body) {
+                        JsFunctionNode* fn = (JsFunctionNode*)md;
+                        for (JsAstNode* param = fn->params; param; param = param->next) {
+                            jm_collect_functions(mt, param);
+                        }
+                        if (fn->body) jm_collect_functions(mt, fn->body);
+                        if (mt->func_count == INT_MAX) {
+                            log_error("js-mir: function count overflow");
+                            mt->collection_failed = true;
+                            break;
+                        }
+                        mt->func_count++;
+                    }
+                }
+            }
+            break;
+        }
+        if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
+            mt->class_count < mt->class_capacity) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
             memset(ce, 0, sizeof(JsClassEntry));
@@ -708,6 +760,38 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             int class_body_functions_start = mt->func_count;
 
             JsBlockNode* body = (JsBlockNode*)cls->body;
+            for (JsAstNode* member = body->statements; member; member = member->next) {
+                if (member->node_type == JS_AST_NODE_METHOD_DEFINITION &&
+                    ((JsMethodDefinitionNode*)member)->body) {
+                    ce->method_capacity++;
+                } else if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+                    JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)member;
+                    if (fd->key && fd->is_static) ce->static_field_capacity++;
+                    else if (fd->key) ce->instance_field_capacity++;
+                } else if (member->node_type == JS_AST_NODE_STATIC_BLOCK &&
+                    ((JsStaticBlockNode*)member)->body) {
+                    ce->static_block_capacity++;
+                }
+            }
+            // Class metadata retains AST pointers, so give both the same
+            // compile/runtime lifetime instead of a separate native owner.
+            ce->methods = (JsClassMethodEntry*)pool_calloc(
+                mt->tp->ast_pool, (size_t)ce->method_capacity * sizeof(JsClassMethodEntry));
+            ce->static_fields = (JsStaticFieldEntry*)pool_calloc(
+                mt->tp->ast_pool, (size_t)ce->static_field_capacity * sizeof(JsStaticFieldEntry));
+            ce->instance_fields = (JsInstanceFieldEntry*)pool_calloc(
+                mt->tp->ast_pool, (size_t)ce->instance_field_capacity * sizeof(JsInstanceFieldEntry));
+            ce->static_blocks = (JsAstNode**)pool_calloc(
+                mt->tp->ast_pool, (size_t)ce->static_block_capacity * sizeof(JsAstNode*));
+            if ((ce->method_capacity && !ce->methods) ||
+                (ce->static_field_capacity && !ce->static_fields) ||
+                (ce->instance_field_capacity && !ce->instance_fields) ||
+                (ce->static_block_capacity && !ce->static_blocks)) {
+                // Exact member storage is required because later phases retain pointers into it.
+                log_error("js-mir: failed to allocate class member metadata");
+                mt->collection_failed = true;
+                break;
+            }
             JsAstNode* m = body->statements;
             ce->static_field_count = 0;
             ce->instance_field_count = 0;
@@ -716,7 +800,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 if (m->node_type == JS_AST_NODE_FIELD_DEFINITION) {
                     JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
                     if (fd->computed && fd->key) jm_collect_functions(mt, fd->key);
-                    if (fd->is_static && fd->key && ce->static_field_count < 16) {
+                    if (fd->is_static && fd->key &&
+                        ce->static_field_count < ce->static_field_capacity) {
                         JsStaticFieldEntry* sf = &ce->static_fields[ce->static_field_count];
                         sf->computed = fd->computed;
                         sf->key_expr = fd->key;
@@ -735,7 +820,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             cls->name ? (int)cls->name->len : 5, cls->name ? cls->name->chars : "anon?",
                             fd->computed ? "[computed] " : "",
                             sf->name ? (int)sf->name->len : 0, sf->name ? sf->name->chars : "");
-                    } else if (!fd->is_static && fd->key && ce->instance_field_count < 32) {
+                    } else if (!fd->is_static && fd->key &&
+                        ce->instance_field_count < ce->instance_field_capacity) {
                         // Instance field (public or private — private already renamed to __private_)
                         JsInstanceFieldEntry* inf = &ce->instance_fields[ce->instance_field_count];
                         inf->computed = fd->computed;
@@ -757,7 +843,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 } else if (m->node_type == JS_AST_NODE_STATIC_BLOCK) {
                     // class static block: static { ... }
                     JsStaticBlockNode* sb = (JsStaticBlockNode*)m;
-                    if (sb->body && ce->static_block_count < 8) {
+                    if (sb->body && ce->static_block_count < ce->static_block_capacity) {
                         ce->static_blocks[ce->static_block_count++] = sb->body;
                         jm_collect_functions(mt, sb->body);
                         log_debug("js-mir: class '%.*s' static block #%d",
@@ -781,7 +867,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         if (fn->body) jm_collect_functions(mt, fn->body);
                         int method_children_end = mt->func_count;
                         // Add as collected function
-                        if (mt->func_count < JS_MIR_MAX_COLLECTED_FUNCTIONS) {
+                        if (mt->func_count < mt->func_capacity) {
                             int method_index = mt->func_count;
                             JsFuncCollected* fc = &mt->func_entries[mt->func_count];
                             memset(fc, 0, sizeof(JsFuncCollected));
@@ -829,8 +915,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                     mt->func_count, gs_prefix,
                                     (int)method_name->len, method_name->chars);
                             } else {
-                                // Use func_count as unique ID to avoid MIR name collisions
-                                // when class has >128 methods (ce->method_count stays at 128)
+                                // Use func_count as a unique ID for unnamed computed methods.
                                 snprintf(fc->name, sizeof(fc->name), "class_method_%d_%d",
                                     mt->class_count, mt->func_count);
                             }
@@ -850,7 +935,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             }
 
                             // Add to class entry
-                            if (ce->method_count < 128) {
+                            if (ce->method_count < ce->method_capacity) {
                                 JsClassMethodEntry* me = &ce->methods[ce->method_count];
                                 me->name = method_name;
                                 me->fc = fc;
@@ -884,9 +969,11 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 fc->is_class_static_method = me->is_static;
                                 ce->method_count++;
                             }
-                        } else if (!mt->func_collection_overflow_logged) {
-                            log_error("js-mir: function collection limit reached at %d", JS_MIR_MAX_COLLECTED_FUNCTIONS);
-                            mt->func_collection_overflow_logged = true;
+                        } else {
+                            // A mismatch would otherwise publish incomplete class/function metadata.
+                            log_error("js-mir: class method count/fill mismatch at %d of %d",
+                                mt->func_count, mt->func_capacity);
+                            mt->collection_failed = true;
                         }
                     }
                 }
@@ -916,10 +1003,11 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 ce->constructor->fc->ctor_prop_count > 0) {
                 ce->shape_cache_ptr = jm_alloc_shape_cache_slot(mt);
             }
-        } else if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
-                   !mt->class_collection_overflow_logged) {
-            log_error("js-mir: class collection limit reached at %d", JS_MIR_MAX_COLLECTED_CLASSES);
-            mt->class_collection_overflow_logged = true;
+        } else if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            // A mismatch would otherwise make owner_class and superclass pointers incomplete.
+            log_error("js-mir: class count/fill mismatch at %d of %d",
+                mt->class_count, mt->class_capacity);
+            mt->collection_failed = true;
         }
         break;
     }
@@ -1666,6 +1754,7 @@ static void jm_scan_ctor_super_call(JsFuncCollected* fc, JsCallNode* call) {
 static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* asgn) {
     if (!fc || !asgn || asgn->op != JS_OP_ASSIGN || !asgn->left ||
         asgn->left->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return;
+    if (fc->ctor_shape_overflow) return;
     JsMemberNode* mem = (JsMemberNode*)asgn->left;
     if (!mem->object || mem->object->node_type != JS_AST_NODE_IDENTIFIER ||
         mem->computed || !mem->property ||
@@ -1684,7 +1773,12 @@ static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* 
             break;
         }
     }
-    if (idx < 0 && fc->ctor_prop_count >= 16) return;
+    if (idx < 0 && fc->ctor_prop_count >= 16) {
+        // Dropping the 17th field would build a semantically incomplete optimized shape.
+        fc->ctor_prop_count = 0;
+        fc->ctor_shape_overflow = true;
+        return;
+    }
 
     bool is_new_prop = idx < 0;
     if (is_new_prop) idx = fc->ctor_prop_count;

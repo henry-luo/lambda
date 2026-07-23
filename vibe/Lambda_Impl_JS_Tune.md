@@ -1,8 +1,8 @@
 # LambdaJS Performance — Implementation Plan, Tune 6
 
-**Status:** revised draft v4
+**Status:** implemented
 
-**Revision date:** 2026-07-23
+**Revision date:** 2026-07-24
 
 **Scope:** remaining LambdaJS-specific performance work after the completed
 Stack-API/MIR tuning and the Lambda core M1/M2 numeric tuning.
@@ -432,11 +432,212 @@ array-, object-, and call-heavy workloads.
 
 ---
 
-## 7. Open design decisions for discussion
+## 7. Implementation record
 
-These are the decisions that should be settled before implementation. Routine
-census work, fixtures, and mechanical use of `lib/hashmap.h` do not need a
-separate design discussion.
+Tune 6 was implemented against base revision
+`544ae37173fd27fc4ead10ff2cc99d16b100f299`. The final candidate is that
+revision plus the Tune 6 worktree changes described below.
+
+### 7.1 Build and measurement protocol
+
+- Both the saved pre-change tree and final tree used `release_native` with LTO,
+  dead-code elimination, hidden symbols, and stripped release logging.
+- Microbenchmarks used one or two process warm-ups followed by the stated
+  sample count. Results are medians; dispersion is median absolute deviation
+  (MAD).
+- The fixed macro set used five samples per benchmark. Two independent final
+  batches were run; their median-to-median spread is the dispersion check.
+- The materiality thresholds selected for the final run were 5% for runtime
+  benchmarks and 10% for compile wall time or peak RSS.
+- Peak RSS used macOS `/usr/bin/time -l`. GC/lifetime changes were also run
+  through the forced-GC exact-root gate.
+
+### 7.2 Track A decision: stopped after A0
+
+A0 did not find enough eligible traffic to justify a loop optimizer:
+
+| Workload | Property gets | Shaped guards | Guard hits |
+|---|---:|---:|---:|
+| AWFY nbody | 3,348,400 | 1,332,075 | 30 |
+| Kostya matmul | 16,000,269 | 0 | 0 |
+| BENG mandelbrot | 262 | 0 | 0 |
+| BENG spectralnorm | 800,389 | 0 | 0 |
+
+The nbody hits occurred during setup rather than as a useful invariant dynamic
+loop stream. The other workloads had no shaped residency sites. Per the A0
+exit rule, read residency and write coalescing were not implemented.
+
+### 7.3 Track B: runtime-epoch intrinsic state
+
+The former file-static cache and Array tamper flags now live in one
+`JsIntrinsicState` owned by `JsRuntimeState`. It carries the heap owner epoch,
+monotonic mutation serial, per-class mutation versions, cached constructor/name
+Items, resolving state, and precise rooted prototype slots. Reset, snapshot
+restore, crash recovery, batch reset, heap replacement, and final teardown all
+invalidate or release the state as one owner unit.
+
+Assignment, `Object.defineProperty`/`defineProperties`, delete,
+`Object.assign`, `Reflect` set/define/delete, and Proxy set/define/delete paths
+use one invalidation hook. Array push, iterator, and generic writable-method
+checks retain the full lookup after tampering. Fresh epochs and snapshot reset
+restore the pristine fast path without reusing an old owner/version pair.
+
+On a targeted loop of 1,000 direct `Array.prototype.map` calls, the execution
+profile counted 5,261 property gets before the change and 4,261 after it:
+exactly one prototype/property probe removed per pristine call, or 19.0% of
+all property gets in that fixture. Any supported mutation path invalidates the
+state and restores the full observable lookup.
+
+The direct single-item push path also preserves the array representation
+contract: if a length-only sparse array's logical tail is beyond dense storage,
+it declines the dense helper and uses the sparse, spec-observable write path.
+
+| Release microbenchmark | Pre-change median ± MAD | Final median ± MAD | Change |
+|---|---:|---:|---:|
+| push-heavy | 193.07 ± 4.89 ms | 160.42 ± 5.89 ms | -16.9% |
+| for-of/spread | 77.28 ± 1.07 ms | 74.42 ± 1.60 ms | -3.7% |
+| Array method dispatch | 331.38 ± 3.44 ms | 334.16 ± 3.22 ms | +0.8% |
+
+The five-sample Kostya check improved on five of seven rows. The largest
+changes were base64 -14.7%, collatz -7.8%, json_gen -7.4%, and brainfuck
+-6.7%; the largest slowdown was levenshtein +3.8%, below materiality.
+
+### 7.4 Track C1: listener and handler indices
+
+The listener store now has a pointer-key HashMap to stable integer slots. The
+`on<type>` store has a separate `(target key, event type)` HashMap, also to
+integer slots. Arrays remain authoritative for ownership and ordering; no
+relocatable entry pointer is cached. Plain object/EventTarget entries receive a
+precise target root on either listener or handler registration, and reset
+releases all roots and both indices.
+
+For 2,048 targets with both a listener and handler, dispatched in reverse order
+64 times with one reusable event (one warm-up, seven samples):
+
+| Candidate | Median ± MAD | Range |
+|---|---:|---:|
+| Pre-change | 1,050.40 ± 26.39 ms | 1,024.01–1,105.81 ms |
+| Final | 905.62 ± 4.95 ms | 850.75–916.32 ms |
+
+This is a 13.8% wall-time improvement. After subtracting the small-module
+process baseline, peak RSS added by 2,048 indexed/rooted targets was about
+0.3 MiB over the old listener representation. This is the accepted
+document-lifetime retention cost; weak reclamation remains out of scope.
+
+### 7.5 Track C2 decision: profile only
+
+The profile did not justify a new dispatch table. In the editor sample,
+property get/set/access self time totalled 7.46 ms and was below 0.3% of wall
+time. In the jQuery sample, the same property machinery was about 3.0 ms while
+function-call self time was 1,053.8 ms. No C2 code was implemented.
+
+### 7.6 Track C3: exact stable transpiler storage
+
+A shared count/fill AST traversal now allocates exact, pointer-stable outer
+function and class arrays. Each class receives exact method, static-field,
+instance-field, and static-block arrays from the same count pass. Allocation
+failure, integer overflow, or count/fill mismatch aborts compilation. More than
+16 constructor-shaped fields explicitly disables that optimization and uses
+the semantic generic path.
+
+The old fixed outer arrays zeroed:
+
+- `32,768 × sizeof(JsFuncCollected=1,864)` = 61,079,552 bytes;
+- `4,096 × sizeof(JsClassEntry=6,944)` = 28,442,624 bytes;
+- total = 89,522,176 bytes (85.375 MiB) on every compile.
+
+That unconditional allocation and zeroing is gone. Release before/after
+measurements were:
+
+| Compile case | Pre-change | Final | Change |
+|---|---:|---:|---:|
+| 77-byte small module wall, 15 samples | 18.87 ± 0.52 ms | 13.90 ± 0.12 ms | -26.4% |
+| 77-byte small module peak RSS, 5 samples | 118.23 ± 0.03 MiB | 32.77 ± 0.05 MiB | -72.3% |
+| 235 KB Acorn module wall, 7 samples | 509.02 ± 21.17 ms | 495.63 ± 7.21 ms | -2.6% |
+| 235 KB Acorn module peak RSS, 5 samples | 317.48 ± 0.06 MiB | 234.20 ± 0.03 MiB | -26.2% |
+
+An exact-scaling fixture covers 130 methods, 20 static fields, 40 instance
+fields, and 10 static blocks. A legal Test262 class with roughly 8,300 private
+fields exposed the cost of emitting two metadata stores per field; metadata is
+now installed in one exact bulk runtime call, with only literal initializer
+patches emitted separately. The formerly pathological case completes in under
+two seconds. The final full Test262 run collected 40,263 runnable results in
+108.9 seconds with 1,030.5 MiB peak RSS, no retries or partial recovery, zero
+regressions, and two baseline improvements.
+
+The exact collections also shortened the lifetime of transpiler-owned call
+labels and exposed a profiling-only dangling pointer at process exit. Profile
+records now copy their labels and are flushed before compile pools are
+destroyed; the `atexit` handler remains an idempotent fallback.
+
+Exact constructor prefixes also exposed a hybrid-map invariant violation:
+properties appended after a fixed constructor prefix had been treated as
+fixed-width slots during type transitions. Rebuilds now preserve only the
+verified fixed prefix and pack later fields normally; a focused transition
+fixture covers the corruption case.
+
+### 7.7 Track C4: one production gate
+
+`JS_TEST262_FAST_PATHS` is now a configurable build define sourced from
+`build_lambda_config.json`. One shared helper catalog drives definitions, the
+sys-function registry, and MIR recognition/emission. The default build retains
+the helpers. A `JS_TEST262_FAST_PATHS=0` build compiled and linked successfully,
+and symbol/reference inspection found none of the gated helpers.
+
+### 7.8 Composite release results
+
+The comparison baseline is the checked-in July 22 release snapshot; final
+numbers are the second five-sample batch:
+
+| Workload | Baseline | Final | Change |
+|---|---:|---:|---:|
+| AWFY mandelbrot | 348.0 ms | 333.9 ms | -4.1% |
+| AWFY nbody | 286.0 ms | 258.3 ms | -9.7% |
+| AWFY richards | 1,251.6 ms | 1,150.3 ms | -8.1% |
+| AWFY deltablue | 226.1 ms | 205.3 ms | -9.2% |
+| BENG mandelbrot | 60.7 ms | 55.8 ms | -8.2% |
+| BENG nbody | 350.3 ms | 358.1 ms | +2.2% |
+| BENG spectralnorm | 276.0 ms | 272.4 ms | -1.3% |
+| Kostya matmul | 846.7 ms | 855.7 ms | +1.1% |
+| JetStream nbody | 219.6 ms | 210.1 ms | -4.3% |
+| JetStream richards | 175.8 ms | 184.3 ms | +4.8% |
+| JetStream deltablue | 339.9 ms | 333.0 ms | -2.0% |
+
+No slowdown crossed the 5% materiality threshold. Across the two final
+five-sample batches, the largest median spread was 8.9% on BENG mandelbrot;
+the other rows ranged from 0.3% to 8.2%, with no reversal into a material
+regression against baseline.
+
+### 7.9 Correctness and acceptance status
+
+- release build: passed;
+- LambdaJS suite: 406/406;
+- Test262: 40,263 runnable clean cases, zero retry/partial results, zero
+  regressions, and two baseline improvements;
+- Lambda baseline: 3,594/3,594, plus 19/19 TypeScript cases with clean
+  teardown;
+- forced-GC exact-root gate: passed, including all 21 MIR stress cases;
+- DOM integration: 63/63;
+- Stage 4C plain-DOM editor parity: 1,931/1,931 applicable assertions;
+- Node official: 3,400/3,401, with no timeout or crash. The one failing domain
+  stack assertion reproduces identically with the saved pre-change binary and
+  is therefore not a Tune 6 regression.
+
+The full Radiant umbrella gate still reports unrelated repository-baseline
+failures in form layout, two UI automation cases, and one Markdown iframe
+view case. Its baseline layout, page, DOM integration, page-load, fuzzy,
+render-visual, CSS-syntax, and DOM2 subgates pass. The editor
+`backspace-delete` view fixture also crashes in the saved pre-change binary at
+the same map-read path. These existing failures were not reclassified as Tune
+6 regressions.
+
+---
+
+## 8. Resolved design decisions
+
+These decisions were resolved before implementation. Track A and C2 stopped at
+their profile gates, so their downstream choices remain the stated boundary if
+either track is revived.
 
 ### OD1 — Track A field scope
 
@@ -516,7 +717,7 @@ hand-maintained dispatch table.
 
 ---
 
-## 8. Explicitly out of scope
+## 9. Explicitly out of scope
 
 - a separate JavaScript INT type or int-preserving arithmetic result;
 - unboxed scalar storage in maps/arrays (OI-9);

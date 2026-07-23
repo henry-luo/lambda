@@ -669,6 +669,7 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
  * Clears module vars, exception state, event loop, DOM context, and Input context.
  */
 void js_batch_reset(void);
+void js_intrinsic_state_teardown(void);
 int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
 void js_prepare_compiled_preamble_vars(int declaration_count);
@@ -822,6 +823,10 @@ void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
 void js_init_class_instance_fields(Item callee, Item object);
+void js_set_class_instance_field_metadata_bulk(Item class_item,
+    const char** field_names, const int* field_lens, const uint8_t* field_kinds,
+    int count);
+void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 void js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);

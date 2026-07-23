@@ -66,6 +66,9 @@
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION"
   ],
+  "configurable_defines": {
+    "JS_TEST262_FAST_PATHS": "1"
+  },
   "includes": [
     ".",
     "include",
