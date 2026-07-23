@@ -569,6 +569,36 @@ by wild data. [C5.3a]
 
 ## 9. Mutability: Mutable Value Semantics
 
+**State and its lifetime — at a glance.** Values never alias; **`var` is the sole
+mutability marker and the only sharing construct.** `let` is a fixed, referentially
+transparent binding; `var` is a mutable one — a state transition `x′ = f(x)` over a
+value that nothing aliased can observe (§9.6). Two facts orient everything below.
+
+*State lives exactly as long as the `var` that roots it.* Objects do not hold state
+independently — an object is a value and persists only while some `var` holds it;
+closures hold none at all (captures are immutable snapshots). So the *only* roots of
+persistent state are module-level and view-instance `var`s:
+
+| `var` root binding | State lifetime |
+|---|---|
+| module-level `var` | program / module lifetime — the only home for **global** state |
+| view-instance `var` (view `state`) | the view instance's lifetime |
+| `pn`-local `var` | the activation — **gone when the `pn` returns** |
+
+*Two cases escape "a `pn`'s state dies at return" — by design:*
+
+1. A `pn`'s **`var` parameters** (and a `pn` method's **`var` receiver**) are *not*
+   activation-scoped — they borrow the caller's `var`, so mutations through them
+   **persist after the `pn` returns**. This is the one sanctioned channel by which a
+   `pn` reaches and mutates state up to global scope (§9.1 rule 3).
+2. A `pn`-local's **value** may leave by `return` or by being stored into a
+   longer-lived home — but only as a by-value **snapshot** (an immutable copy at the
+   destination, §9.3), never as a live mutable binding. What dies at return is the
+   *binding*, not necessarily the data it produced.
+
+The full rules follow in §9.1 (borrow/covariance detail §9.2, construction-by-value
+§9.3, the mathematical reading §9.6). [C4]
+
 ### 9.1 The model
 
 **Values never alias. Mutability is a property of bindings, not values, and
@@ -618,8 +648,9 @@ it, and each fails without it:
   hole requires aliasing, and aliasing survives only in the borrow channel,
   which carries the invariance restriction.
 
-The costs are real and are recorded in §9.5, not wished away. For precedent,
-see §9.4. [C4]
+The costs are real and are recorded in §9.5, not wished away. For language
+precedent see §9.4; for how `let` and `var` correspond to mathematical binding
+and to the formal-methods model of assignment, see §9.6. [C4]
 
 ### 9.2 Covariance: where values copy — invariance: where they're borrowed
 
@@ -633,6 +664,13 @@ Representation widening (unboxed → boxed) happens lazily at COW-copy time.
 everywhere but the borrow channel, so the borrow channel carries the
 restriction (Rust's `&mut` shape). A8 thus resolves as a corollary of C4.
 [C12]
+
+Exclusivity is **writer-vs-writer only**: a *plain* parameter receiving the
+same variable as a concurrent `var` borrow observes a by-value snapshot
+(§9.3), so read access is self-protecting and needs no check — deliberately
+weaker than Swift's read-excluding Law of Exclusivity, safely. The one
+implementation obligation: value arguments capture their snapshot before any
+borrow's in-place mutation begins. [C4.2c]
 
 ### 9.3 Construction captures values
 
@@ -745,6 +783,61 @@ needs a design**; the known shapes are:
 
 Until this is designed, deep updates in hot code are a copy hazard and the
 correct alternative spelling is a verbosity tax. [C4.4]
+
+### 9.6 Relation to mathematics: `let` as binding, `var` as state transition
+
+`let` and `var` are not two dialects of one idea; they are the two notions
+mathematics already keeps apart, and naming each one's mathematical home
+explains both the `let`-finality rule and why the formal model can be small.
+
+**`let` is the variable of algebra** — a name bound to a fixed value within a
+scope, referentially transparent: inside its scope `let x = e` means `x` *is*
+`e`, substitutable everywhere it occurs (λ-calculus binding, ML/Haskell `let`,
+the `x` of a theorem or a formula). Rule 1 (§9.1 — `let` is final) *is*
+referential transparency stated operationally: the denotation never moves, so
+the name and its value are interchangeable for the life of the binding.
+
+**`var` is assignment in the sense of program logic** — specifically the
+*primed-variable / state-transition* convention of formal methods, **not** the
+free variable of algebra. In Hoare logic and the weakest-precondition calculus,
+in TLA⁺ and Z (unprimed `x` = pre-state, primed `x′` = post-state), and in
+compiler SSA form (`x₀, x₁, x₂, …`), an assignment is not a name for a value but
+a **relation between a before-value and an after-value**. Lambda's `var` is
+exactly that, and it is *well-defined* as such precisely because mutation is
+value-semantic (§9.1, §9.3), never reference-semantic: every mutation is a total
+function of the old value,
+
+```
+x = x + 1     ≡   x′ = x + 1
+push(b, 2)    ≡   b′ = b ++ [2]
+m.f = a       ≡   m′ = { *: m, f: a }
+```
+
+with no intermediate state, and nothing else able to observe the transition. A
+`var`'s history is therefore a sequence v₀, v₁, v₂, … with vₙ₊₁ = fₙ(vₙ);
+"mutation" is the imperative *spelling* of pure state transition over immutable
+values. This is the exact content of the claim that `pn` is *locally imperative
+but observably functional* (§9.1): imperative surface, state-transition
+semantics.
+
+*What licenses the reading is the absence of references.* Under reference
+semantics (Python/JS) assignment is **not** a function of the old value —
+`b.append(2)` is an effect on a shared cell observable through other names, and
+cannot be written `b′ = f(b)` without modelling the whole heap as the state. C4
+closes exactly that gap: with no reference cells (§9.1 rule 5), `x′ = f(x)` holds
+locally for every mutation, and the one construct that couples two names' state,
+the `var` inout parameter (§9.1 rule 3), is exclusivity-checked so it stays a
+single-writer pre→post relation — Hoare-logic assignment *through an lvalue*,
+never a shared reference.
+
+*Rationale.* The correspondence is not decoration. It is why a Stage-4 model
+needs a `⟨store⟩` cell **only for `var` bindings** (`let` is pure denotation and
+needs none), and why `let`-finality and COW-unobservability are *verifiable
+properties* rather than conventions: the model is small because the two
+constructs are the two mathematical notions with nothing between them. The same
+split is what lets the meta-language stay immutable while modelling a mutable
+object language (§ closure/JS discussion, [C4.2]) — `let`-denotation and
+`var`-transition are both expressible over immutable terms. [C4]
 
 ---
 

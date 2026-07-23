@@ -1,19 +1,27 @@
-# Lambda Impl Plan: Numeric Hot-Path Tuning (M1/M2/M3)
+# Lambda Impl Record: Numeric Hot-Path Tuning (M1/M2 — LANDED)
 
-> **STATUS 2026-07-22: Phase 0 + M1 + M2 LANDED, plus the NaN comparison fix
-> (6.5). M3 ON HOLD** (designer may go
-> straight to refcount COW instead of patching the eager-clone anchor).
-> Verification: `test/lambda/numeric_fastpath_edges.ls` (130 cases) **bit-identical
+> **STATUS 2026-07-23 (rev 2): this is now a LANDED-WORK RECORD.** Phase 0 +
+> M1 + M2 + the NaN comparison fix (§6.5) shipped 2026-07-22. Verification:
+> `test/lambda/numeric_fastpath_edges.ls` (130 cases) **bit-identical
 > before/after on both debug and release**; `make test-lambda-baseline`
-> **3552/3552**; benchmark correctness sweep **58 rows, 0 suspect**.
-> MT7 ratchet lifted manually for 2 probes (below). Measured results in §6.
+> **3552/3552**; benchmark correctness sweep **58 rows, 0 suspect**; MT7
+> ratchet lifted manually for 2 probes (§6.2). Measured results in §6.
+>
+> **Removed from this doc (rev 2, per designer):** the unimplemented plans.
+> **M3 (COW anchor)** is SUPERSEDED — the designer went straight to refcount
+> COW instead of patching the eager clone: design
+> `vibe/Lambda_Design_COW.md` (CW10 retires the anchor), implementation plan
+> `vibe/Lambda_Impl_Tune_COW.md` (which also absorbs M3's remedy (a) as a
+> stopgap and remedy (c) into its JIT phase). **M4 (boxed element loads /
+> `any` arithmetic)** is diagnosis only (§6.4), tracked in
+> `vibe/Lambda_Tuning_Proposal.md` under R6. The full M3 analysis text
+> (anchor sites, guards, exemptions, three sins, remedies) is preserved in
+> git history and its load-bearing findings are restated in
+> `Lambda_Design_COW.md` §2/§7.
 
-**Status: PLAN — 2026-07-22.** Implements the fixes for the three Result9→Result10
-MIR regressions root-caused on 2026-07-22 (see `test/benchmark/Overall_Result10.md`
-and the diagnosis summary at the end of this doc). M2's semantics are the
-designer's decision (2026-07-22); M3 §4 is the requested explanation of the COW
-anchor, with remedies split into approved-shape (pure perf) and
-needs-decision items.
+**Record scope.** Fixes for the three Result9→Result10 MIR regressions
+root-caused on 2026-07-22 (see `test/benchmark/Overall_Result10.md`). M2's
+semantics were the designer's decision (2026-07-22).
 
 **Governing invariant (all phases): observable behavior is bit-identical.**
 Every mechanism here is a *representation/lowering* change under P6
@@ -263,196 +271,49 @@ lift called out in the commit message. Do not widen slack globally.
 
 ---
 
-## 4. Phase 3 — M3: the COW anchor — explanation, then remedies
+## 4. Phase 3 — M3: the COW anchor — SUPERSEDED (2026-07-23)
 
-### 4.1 What the anchor is (the requested explanation)
-
-**The semantic obligation.** C4 mutable value semantics
-(`doc/Lambda_Formal_Semantics.md` §9) requires that `var x = <expr>` gives
-`x` *its own value*: after the binding, mutating `x`'s interior must not be
-visible through anything that aliases `<expr>`'s result, and vice versa. Same
-for plain assignment `x = <expr>`.
-
-**The mechanism.** The MIR transpiler implements this eagerly — the "Phase 5
-COW anchor". At two emission sites —
-
-- `var` declarations: `transpile-mir.cpp:5506-5520`
-- plain assignments: `transpile-mir.cpp:9786-9794`
-
-— if the RHS *may* be a container, the transpiler wraps the RHS in a call to
-`fn_mutable_value(rhs)` (`lambda-eval.cpp:6069`), which **deep-clones** the
-value. "Anchor" = the binding site where a value is detached from every other
-holder and becomes this binding's private, mutable copy. It is *eager* cloning
-— copy at bind time — not true COW (copy at first mutation on `ref_cnt > 1`);
-it is a stand-in until the refcount-COW of C4/§9.5.1 lands.
-
-**The guards** decide *statically* whether to anchor:
-
-- `mir_expr_may_return_container` (`:327`): if the RHS static type is a
-  definite container → yes. If it is a definite scalar AND the target is a
-  definite type → no. Otherwise (ANY involved) it falls back to **syntax**:
-  literals, identifiers, index/member reads, `call/if/match/for` expressions →
-  anchor; arithmetic/comparison expressions → no (comment: "scalar in
-  practice").
-- `mir_var_rhs_keeps_mutable_alias` (`:400`): three deliberate *exemptions*
-  where the alias is intentional and cloning would break write-back:
-  1. RHS is a call to a **`pn`** (or any fn with a `var` param) — comment:
-     "procedural helpers are the mutable layer; re-cloning their result at
-     every var binding makes graph algorithms pathological";
-  2. RHS is a bare mutable identifier;
-  3. RHS is a field/index projection rooted at a mutable identifier.
-
-**What the clone context is.** `fn_mutable_value` builds a
-`MutableCloneContext` (`lambda-eval.cpp:5816-5821`) whose one field is a
-`visited` **identity hashmap** (`hashmap_new`, 16 slots): source-container →
-its clone. During the deep clone, every container encountered is first looked
-up there. Its job is **DAG preservation**: if the same source container appears
-twice inside the value (shared substructure), both occurrences must map to the
-*same* clone — otherwise the copy changes shape (shared node duplicated into
-two independent nodes: observably different, and exponential blowup on deep
-sharing). It would also terminate cycles, though C4 values cannot contain
-cycles. The context is created before the clone starts and freed after.
-
-### 4.2 Why it is slow — three separable sins
-
-1. **The context is allocated before looking at the value.** For a scalar RHS
-   the clone is `default: return value` — a no-op — but the hashmap has
-   already been malloc'd (2 allocations + memset) and is then freed. The
-   dominant dynamic case at anchored sites *is* a scalar: e.g. collatz's
-   `n = shr(n, 1)` — a sysfunc call, statically ANY, syntactically
-   `CALL_EXPR` → anchored — executes ~40–50 M times, each a full
-   hashmap create/destroy for an int. That is the malloc/free/`hashmap_new`
-   wall in `temp/collatz_sample.txt`.
-   (Correction to the earlier diagnosis note: `var clen = collatz_len(i)` is
-   NOT anchored — `collatz_len` is a `pn`, exemption 1 applies. The anchors
-   are the sysfunc-call assignments.)
-2. **The static guard trusts syntax over types.** A `CALL_EXPR` whose static
-   type is a definite scalar (e.g. a typed builtin like `shr` returning int, if
-   its signature were propagated) still anchors whenever the *target* is
-   ANY-typed, because the definite-scalar short-circuit at `:329` requires
-   BOTH sides non-ANY.
-3. **Type demotion cascade.** After anchoring, the var's tracked type is
-   forced to ANY (`:5518`), so every later use of that variable takes boxed
-   paths (fn_add / it2i) even where the declared type was concrete.
-
-Note also what the anchor implies semantically: it is precisely the mechanism
-behind the `awfy/cd` literal-snapshot behavior (a `var lit = [b, null]`
-literal RHS anchors → the embedded array is deep-cloned), and the `pn`-call
-exemption is why `pn`-returned containers still alias. The engine's current
-aliasing behavior = "anchor sites copy, exempt sites alias". That inconsistency
-is the C4 migration state, priced in by C4.3 — **this phase must not move that
-line.** Perf fixes below are chosen so the set of anchored sites and the
-observable copies are unchanged.
-
-### 4.3 Remedies
-
-**(a) Runtime scalar early-return — approved shape, zero semantic risk.**
-In `fn_mutable_value`, before creating the context:
-
-```c
-Item fn_mutable_value(Item value) {
-    TypeId tid = get_type_id(value);
-    if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM &&
-        tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT &&
-        tid != LMD_TYPE_ELEMENT) {
-        return value;               // scalars clone to themselves; no context
-    }
-    ...existing path...
-}
-```
-
-(Reuse/extract the same type set `clone_mutable_item` dispatches on — per
-CLAUDE rule 13, share one predicate, e.g. `mir_type_needs_mutable_clone`'s
-runtime twin.) Kills the per-scalar hashmap entirely; observably identical by
-construction. This alone removes the collatz wall.
-
-**(b) Lazy context — create `visited` on first container child.** For a
-container RHS with no nested containers (flat array of scalars — the common
-small case), no `visited` entries are ever needed until a second container is
-seen. Create the hashmap inside `clone_mutable_*` on first use
-(`ctx->visited == NULL → create`). Root registration only matters for values
-reachable twice *within* the clone, which requires a nested container. Saves
-the hashmap for flat-container anchors; identical clones.
-
-**(c) Static guard: trust definite scalar types — small codegen change.**
-In `mir_expr_may_return_container`, make a definite scalar `expr_tid` decisive
-regardless of `target_tid`:
-
-```c
-if (expr_tid != LMD_TYPE_ANY) return mir_type_needs_mutable_clone(expr_tid);
-```
-
-A statically-scalar RHS can never dynamically be a container, so skipping the
-anchor is observably identical. This removes anchors (and their `var_tid`
-demotion) from typed code paths; with (a) in place its effect is mostly on
-demotion, not allocation. Requires the mir-emission budgets lift (fewer
-instructions — ratchet moves down, still a manual regen).
-
-**(d) Demotion repair — needs a decision, keep out of the first landing.**
-`:5518` forces `var_tid = ANY` because `fn_mutable_value` returns a boxed
-Item. For a var *declared* with a concrete type, the anchor could re-unbox to
-the declared type (it2i / double untag) and keep the static type. This is
-correct but touches assignment-widening interplay; propose separately after
-(a)–(c) are measured.
-
-**Explicitly out of scope for M3:** changing which sites anchor (the
-`pn` exemption, the syntax fallback list, assignment vs var-decl coverage).
-That line belongs to the C4 migration (refcount-COW per §9.5.1 eventually
-replaces eager cloning entirely; these fixes remain valid under it — a
-scalar skip is a scalar skip).
-
-### 4.4 Tests & gates
-
-- The C4-behavior probes from the cd.ls investigation double as regression
-  fixtures for "the aliasing line did not move": capture
-  `temp/REPRO_array_literal_alias.ls` + the local/param matrix
-  (`temp/matrix.ls`) into `test/lambda/` with today's outputs as goldens.
-  (They pin the *current hybrid*, deliberately — when C4 refcount-COW lands
-  later, these goldens will be updated in that project, not silently.)
-- `make test-lambda-baseline` 100%; correctness sweep re-run.
-- Micro/benchmark targets: `collatz` 7.5 s → ≈ 2 s after (a) alone
-  (remainder is M2 adds + boxed `%`), further with Phase 2 landed;
-  `splay` recovers its 2.3x; malloc traffic in a collatz profile drops from
-  ~25% of samples to noise.
+M3 never landed here. The eager-clone anchor (`fn_mutable_value` +
+`MutableCloneContext` wrapping container-possible RHS at
+`transpile-mir.cpp:5506-5520` / `:9786-9794`, with the
+`mir_var_rhs_keeps_mutable_alias` exemptions) is retired wholesale by the
+refcount-COW design: `vibe/Lambda_Design_COW.md` — its §2 restates this
+section's diagnosis as Context B, CW10 replaces the anchor with O(1)
+share-and-mark, and its §7 retires the clone context from the mutation path.
+Implementation: `vibe/Lambda_Impl_Tune_COW.md`. Of the old remedies, (a)
+runtime scalar early-return survives as that plan's stopgap Phase A0, and
+(c) trust-definite-scalar-types folds into its JIT phase; (b) lazy
+visited-map and (d) demotion repair die with the anchor itself. The full
+analysis text is preserved in git history (this file, pre-rev-2).
 
 ---
 
-## 5. Rollout order & final verification
+## 5. Rollout & verification (as executed)
 
-Order: **Phase 0 → Phase 1 (M1) → Phase 2 (M2) → Phase 3 (M3 a,b then c)** —
-independent mechanisms, but this order front-loads the biggest win (M1) and
-keeps each diff reviewable. Each phase is one commit with its budgets/goldens
-moves included.
+Executed order: **Phase 0 → Phase 1 (M1) → Phase 2 (M2)**, each one commit
+with its budgets/goldens moves included, under the identical per-phase gate:
+`make build-test` clean → `make test-lambda-baseline` 100% → Phase-0 fixture
+byte-identical → correctness sweep on all timed benchmark rows → numbers
+recorded in §6.
 
-Per-phase gate (identical): `make build-test` clean → `make
-test-lambda-baseline` 100% → Phase-0 fixture byte-identical → correctness
-sweep on all timed benchmark rows → record micro + affected-benchmark numbers
-in this doc.
+**Final verification (Result11) did NOT run here** — it is deliberately
+deferred to the exit of `vibe/Lambda_Impl_Tune_COW.md` (COW Stage 1), so the
+fresh benchmark round measures M1+M2 *and* the anchor retirement together:
+full protocol re-run (3-run median, release, 180 s), output-correctness sweep
+in the protocol (`WRONG_OUTPUT_ROWS` + sweep — a wrong-but-fast row must
+never enter the mean again), then re-rank the tuning proposal's R-queue on
+the new floor.
 
-Final verification after Phase 3:
-
-1. Full benchmark protocol re-run (3-run median, release, 180 s) → compare
-   against Result9 with `test/benchmark/compare_results.py`; the broad-regression
-   table (pnpoly 94x/fasta 78x/sum 69x/collatz 22x/matmul 19x…) should
-   collapse to ≈ R9 parity ± the recorded tag/untag residue; fib/tak keep
-   their gains (frame work, unrelated).
-2. Publish as **Result11** (fresh run, not an in-place revision), including
-   the output-correctness sweep as part of the protocol (a wrong-but-fast row
-   must never enter the mean again — `WRONG_OUTPUT_ROWS` in
-   `run_benchmarks.py` plus the sweep).
-3. Re-rank the tuning proposal's R1–R10 queue on the new floor
-   (`vibe/Lambda_Tuning_Proposal.md`).
-
-Open items deliberately NOT in this plan:
+Open items deliberately NOT covered by this record (tracked elsewhere):
 
 - Exact binary double→mpd import for float×decimal compares (rare path).
-- Compare-IC / inline type-dispatch for ANY operands in MIR emission.
+- Compare-IC / inline type-dispatch for ANY operands in MIR emission
+  (overlaps M4 → `vibe/Lambda_Tuning_Proposal.md` R6).
 - Range analysis to keep provably-in-range int arithmetic fully native
   (no tag/untag) in typed loops.
 - `fn_idiv_i`/`fn_mod_i` inlining.
-- LambdaJS (R0b) — plausibly shares M1/M3 shapes through the JS runtime;
+- LambdaJS (R0b) — plausibly shares the M1 shape through the JS runtime;
   diagnose separately before touching.
-- M3(d) demotion repair and any change to anchor-site coverage (C4 project).
 
 ---
 
@@ -520,15 +381,17 @@ Micros: ANY-float compare 736 → **31 ms** (24x); typed float compare 18.5 →
 M2 as scoped fires only when **both operands are statically `int`**. The rows
 that barely moved are dominated by costs outside M1/M2:
 
-- **collatz, and part of primes/array1** — M3's COW anchor (held by decision);
-  collatz's profile was malloc/`hashmap_new`, untouched by M1/M2.
+- **collatz, and part of primes/array1** — the COW anchor (M3): collatz's
+  profile was malloc/`hashmap_new`, untouched by M1/M2. Now owned by
+  `vibe/Lambda_Design_COW.md` / `vibe/Lambda_Impl_Tune_COW.md` (§4).
 - **matmul, triangl, array1** — `any`-typed values flowing through *array
   element loads*. Index arithmetic is now inline, but each element load still
   returns a boxed Item and the arithmetic on loaded values takes the boxed
-  `fn_add` fallback. This is a third mechanism (**M4: boxed element loads /
-  `any` arithmetic**), not previously separated out — it is the natural next
-  target after M3 and likely needs the same treatment applied to the ANY path
-  (inline type test + native fast path) or unboxed typed-array element access.
+  `fn_add` fallback. This is a fourth mechanism (**M4: boxed element loads /
+  `any` arithmetic**), not previously separated out — likely needs an inline
+  type test + native fast path on the ANY arm, or unboxed typed-array element
+  access. **Tracked in `vibe/Lambda_Tuning_Proposal.md` under R6**; not
+  planned in this record.
 - **fib/tak** keep their R10 gains (frame/rooting work, unrelated).
 
 ### 6.5 NaN comparison bug — surfaced by Phase 0, FIXED 2026-07-22
@@ -600,6 +463,6 @@ so the two paths are pinned against each other.
 
 ### 6.6 Next
 
-M3 (on hold — refcount COW may supersede), then M4 per §6.4. Re-run the full
-benchmark protocol as **Result11** once those land; the correctness sweep must
-be part of that protocol.
+The anchor (ex-M3) is retired by COW Stage 1 — `vibe/Lambda_Impl_Tune_COW.md`
+— whose exit runs the full benchmark protocol as **Result11** (correctness
+sweep in-protocol). M4 is queued in `vibe/Lambda_Tuning_Proposal.md` R6.

@@ -919,6 +919,61 @@ Two notes recorded with the ruling:
   declaration point, not the call. Helpers needing current values take parameters —
   or, once the relaxation lands, non-escaping blocks see current values directly.
 
+#### C4.2b Clarification: `let` and `var` as mathematical notions (conceptual, 2026-07-23)
+
+Designer follow-up — how do Lambda's bindings compare to *mathematics*? They map onto
+the two notions maths already separates, and recording it explains why the Stage-4
+model is small:
+
+- **`let` = the variable of algebra** — a name for a fixed value, referentially
+  transparent; rule 1 (`let` is final) *is* that property stated operationally
+  (the denotation never moves, so name and value are interchangeable).
+- **`var` = assignment in program logic** — the *primed-variable / state-transition*
+  convention (Hoare/wp, TLA⁺/Z's `x`/`x′`, SSA's `x₀,x₁,…`), **not** the free
+  variable of algebra. Because mutation is value-semantic, every mutation is a total
+  function of the old value (`x = x+1` ≡ `x′ = x+1`; `push(b,2)` ≡ `b′ = b ++ [2]`),
+  so a `var`'s life is a state sequence v₀,v₁,… — the operational content of "`pn` is
+  locally imperative but observably functional." References are what would break the
+  reading (assignment through a shared cell is not a function of the old value); the
+  no-reference-cells rule is exactly what keeps `x′ = f(x)` locally true, with the
+  `var` inout param as the single exclusivity-checked pre→post relation.
+
+Consequence: the formal model needs a `⟨store⟩` cell only for `var` bindings, and
+`let`-finality / COW-unobservability become verifiable properties. Full exposition
+recorded in `doc/Lambda_Formal_Semantics.md` §9.6.
+
+#### C4.2c Clarification: exclusivity is writer-vs-writer only (2026-07-23)
+
+Raised while designing the COW machinery (`vibe/Lambda_Design_COW.md`): C4's
+exclusivity check needs to police only **`var`-vs-`var` overlap** at each call
+site (the `pn`-method receiver counting as a `var` param). Mixing a borrow and a
+*plain* parameter of the same variable — `pn f(var a: T, b: T)` called `f(x, x)`
+— is **safe by value semantics, with no check**: the plain param receives a
+by-value snapshot (§9.3 / C4 rule 2; under COW: the value argument share-marks,
+the borrow then un-shares per CW16.4, so the reader observes the pre-call bytes
+while the borrow mutates fresh unique storage). Readers are self-protecting;
+only writer-writer overlap needs enforcement.
+
+This is **deliberately weaker than Swift's Law of Exclusivity, safely**: Swift
+must also trap *reads* overlapping an active `inout` because a Swift value read
+can observe the same COW buffer mid-mutation; Lambda's pass-by-value snapshot
+rule makes that unobservable by construction. Two consequences and one
+implementation constraint:
+
+- The call-site check enumerates only the `var` arguments pairwise — smaller
+  than Swift's static+dynamic access bookkeeping; no dynamic read-access
+  tracking will ever be needed.
+- No read-only borrow construct is needed either (plain params are snapshots,
+  not borrows), so Hylo's `let`-borrow overlap rules have no Lambda analog; the
+  parameter taxonomy stays two-kinds: value (snapshot) or `var` (exclusive
+  borrow).
+- **Ordering constraint (normative for the implementation):** the safety
+  argument requires value arguments to capture their snapshot (share-mark)
+  **before** any borrow's un-share/raw-write begins — i.e. un-share-at-borrow
+  runs after all argument values are captured. Reversing the order lets a raw
+  borrow write into storage a value param still shares — the exact bug class
+  exclusivity exists to prevent. Record as a fixture when `var` params land.
+
 #### C4.3 Costs accepted (recorded to avoid relitigation)
 
 - **Migration**: `pn` code mutating through un-annotated params or `let`/`var`

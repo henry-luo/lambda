@@ -111,6 +111,8 @@ The per-site check is still a C call: `jm_emit_pending_exception_check` emits `C
 
 The MIR-emission-test work (`Lambda_Design_MIR_Emission_Test.md`, P1/P2 green 2026-07-22) verified that MIR-Direct lacks two specializations the frozen C2MIR path has: **unboxed sys-func calls** and **native-math lowering** — and some Lambda tests still run faster under `--c2mir` than under MIR-Direct (the MT8 benchmark-tool deferral records this). With C2MIR frozen (CLAUDE.md rule 14), these are MIR-Direct debt, not optional wins. Port both specializations into `transpile-mir.cpp`; the `.mir-check` sidecars + MT7 ratchet (`test/mir/mir_budgets.json`) are the regression harness this work previously lacked.
 
+**R6b — M4: boxed element loads / `any` arithmetic** *(added 2026-07-23 from `Lambda_Impl_Tune.md` §6.4)*. With M1/M2 landed, index arithmetic is inline but each array-element load still returns a boxed Item whose arithmetic takes the boxed `fn_add` fallback — the residue behind matmul/triangl/array1's flat rows. Fix shape: inline type-test + native fast path on the ANY arm, or unboxed typed-element access. Companion to the two ports above; same harness.
+
 ### R7 — Object-churn GC: generational collection within the non-moving constraint *(evidence-gated on R0)*
 
 Re-scoped from rev 1's T4 now that transient scalars never reach the heap: the target is purely **object churn** (splay/gcbench/binarytrees-class allocate-fast-die-young workloads, literal objects, strings). Content unchanged in essence:
