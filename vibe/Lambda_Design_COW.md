@@ -31,7 +31,7 @@
   value semantics). This document may not change what a program observes
   (P6: sharing must be unobservable); every mechanism here is implementation
   freedom under that contract.
-- **Supersedes / absorbs:** `vibe/Lambda_Impl_Tune.md` §4 (M3 "the COW
+- **Supersedes / absorbs:** `vibe/Lambda_Impl_Tune3.md` §4 (M3 "the COW
   anchor" — ON HOLD precisely for this design; its site inventory and
   remedies are absorbed below). Companion surveys:
   `vibe/Lambda_Design_Memory_Model.md` §2.4 (Perceus), §5–6 (composition).
@@ -79,7 +79,7 @@ Three findings are directly this document's business:
   — an **eager deep clone** with a per-call visited-hashmap
   (`MutableCloneContext`, `:5806`). collatz executes it ~40–50 M times *on
   scalars* (hashmap create/destroy per int): part of the 7.47 s wall.
-  `Lambda_Impl_Tune.md` M3 diagnosed it and was put ON HOLD — "designer may
+  `Lambda_Impl_Tune3.md` M3 diagnosed it and was put ON HOLD — "designer may
   go straight to refcount COW instead of patching the eager-clone anchor."
   This design is that path. (M3's remedies (a)–(c) — scalar early-return,
   lazy visited map, trust-definite-scalar guard — remain valid *under* COW
@@ -858,7 +858,7 @@ operation, decided per §5.2.
 
 *Cross-refs:* C4 semantics `doc/Lambda_Formal_Semantics.md` §9 (+§9.6 math
 note); decision records `vibe/Lambda_Semantics_Formal.md` C4–C4.4; anchor
-diagnosis `vibe/Lambda_Impl_Tune.md` §4 (M3); model survey
+diagnosis `vibe/Lambda_Impl_Tune3.md` §4 (M3); model survey
 `vibe/Lambda_Design_Memory_Model.md`; benchmarks
 `test/benchmark/Overall_Result9.md` and
 `test/benchmark/Overall_Result10.md`; tuning ledger

@@ -4,7 +4,7 @@
 **Implements:** `vibe/Lambda_Design_COW.md` **Stage 1** (CW19: basic COW +
 performance, NO exclusivity enforcement) plus the C4 outstanding items that
 belong with it — foremost **proper `pn`-method support** (the C4.1 bug
-cluster). Successor of `vibe/Lambda_Impl_Tune.md` (M1/M2 landed there; the
+cluster). Successor of `vibe/Lambda_Impl_Tune3.md` (M1/M2 landed there; the
 ex-M3 anchor is retired here).
 **Semantic authority:** `doc/Lambda_Formal_Semantics.md` §9 (C4);
 decision record `vibe/Lambda_Semantics_Formal.md` C4–C4.4.
@@ -310,7 +310,7 @@ alias-preservation fixtures and LambdaJS raw-store performance probes are
 required in C/D because shared storage code is touched even though JS policy
 is not.
 
-**Exit = Result11** (absorbed from `Lambda_Impl_Tune.md` §5): full benchmark
+**Exit = Result11** (absorbed from `Lambda_Impl_Tune3.md` §5): full benchmark
 protocol (3-run median, release, 180 s), output-correctness sweep
 in-protocol, publish fresh (not in-place). The plan does not close merely
 because correctness passes: the overall Lambda/MIR result must be materially
@@ -347,7 +347,7 @@ expected to be the next dominant Lambda-side mechanism after this plan.
 ---
 
 *Cross-refs:* design `vibe/Lambda_Design_COW.md` (CW1–CW21);
-predecessor record `vibe/Lambda_Impl_Tune.md` (M1/M2, ex-M3 stub);
+predecessor record `vibe/Lambda_Impl_Tune3.md` (M1/M2, ex-M3 stub);
 semantics `doc/Lambda_Formal_Semantics.md` §9 + `vibe/Lambda_Semantics_Formal.md`
 C4.1–C4.4/C4.2a–c; tuning ledger `vibe/Lambda_Tuning_Proposal.md` (R6b = M4);
 benchmarks `test/benchmark/Overall_Result9.md` and
