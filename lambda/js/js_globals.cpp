@@ -12690,6 +12690,17 @@ extern "C" Item js_number_is_safe_integer(Item value) {
 extern "C" Item js_get_iterator(Item iterable);
 extern "C" Item js_iterator_step(Item iterator);
 extern "C" Item js_iterator_close(Item iterator);
+
+static Item js_array_from_apply_mapper(Item map_fn, Item this_arg, Item value,
+        int64_t index, uint64_t* result_home) {
+    Item index_item = (Item){.item = i2it(index)};
+    Item args[2] = {value, index_item};
+    // A mapper may return a pointer-backed scalar such as Number.MIN_VALUE.
+    // Its caller-owned home must survive until Array.from stores the value;
+    // js_call_function() would otherwise leave the Item in a dead callee frame.
+    return js_call_function_into(map_fn, this_arg, args, 2, result_home);
+}
+
 static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) {
     extern int js_check_exception(void);
     extern Item js_clear_exception(void);
@@ -12702,6 +12713,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
     Rooted<Item> result_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> saved_root(roots, ItemNull);
+    LAMBDA_SCALAR_HOME(mapped_result_home);
     // iterator callbacks can collect; retain every value needed after a step
     // or mapper invocation in side-stack roots instead of native locals.
     iterator_root.set(js_get_iterator(iterable_root.get()));
@@ -12715,9 +12727,8 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
             return js_array_new(0);
         }
         if (value_root.get().item == JS_ITER_DONE_SENTINEL) break;
-        Item idx_item = (Item){.item = i2it((int)k)};
-        Item args[2] = {value_root.get(), idx_item};
-        value_root.set(js_call_function(map_fn_root.get(), this_arg_root.get(), args, 2));
+        value_root.set(js_array_from_apply_mapper(map_fn_root.get(), this_arg_root.get(),
+            value_root.get(), k, &mapped_result_home));
         if (js_check_exception()) {
             // mapfn threw — IfAbruptCloseIterator: invoke iterator.return().
             // The original abrupt completion is preserved; any exception from
@@ -12812,6 +12823,7 @@ static void js_array_from_array_like_into(Item result, Item iterable, int64_t le
     Rooted<Item> this_arg_root(roots, this_arg);
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
+    LAMBDA_SCALAR_HOME(mapped_result_home);
     for (int64_t k = 0; k < len; k++) {
         char idx_buf[24];
         snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)k);
@@ -12819,9 +12831,8 @@ static void js_array_from_array_like_into(Item result, Item iterable, int64_t le
         value_root.set(js_property_get(iterable_root.get(), key_root.get()));
         if (js_check_exception()) return;
         if (mapping) {
-            Item idx_item = (Item){.item = i2it((int)k)};
-            Item args[2] = {value_root.get(), idx_item};
-            value_root.set(js_call_function(map_fn_root.get(), this_arg_root.get(), args, 2));
+            value_root.set(js_array_from_apply_mapper(map_fn_root.get(), this_arg_root.get(),
+                value_root.get(), k, &mapped_result_home));
             if (js_check_exception()) return;
         }
         js_array_from_define_index_or_throw(result_root.get(), k, value_root.get());
@@ -12840,6 +12851,7 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
     Rooted<Item> iterator_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> mapped_root(roots, ItemNull);
+    LAMBDA_SCALAR_HOME(mapped_result_home);
     // constructor, iterator, and destination all survive user callbacks here.
     if (mapping && get_type_id(map_fn_root.get()) != LMD_TYPE_FUNC) {
         js_throw_type_error("Array.from: mapFn is not a function");
@@ -12876,9 +12888,8 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
 
         mapped_root.set(value_root.get());
         if (mapping) {
-            Item idx_item = (Item){.item = i2it((int)k)};
-            Item args[2] = {value_root.get(), idx_item};
-            mapped_root.set(js_call_function(map_fn_root.get(), this_arg_root.get(), args, 2));
+            mapped_root.set(js_array_from_apply_mapper(map_fn_root.get(), this_arg_root.get(),
+                value_root.get(), k, &mapped_result_home));
             if (js_check_exception()) {
                 js_array_from_close_preserve_exception(iterator_root.get());
                 return ItemNull;
@@ -13008,6 +13019,7 @@ static Item js_array_from_with_mapper_impl(Item iterable, Item mapFn, Item this_
     Rooted<Item> this_arg_root(roots, this_arg);
     Rooted<Item> result_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
+    LAMBDA_SCALAR_HOME(mapped_result_home);
     // mapper callbacks may collect and mutate the source, so root both arrays
     // and re-read the source length through the rooted owner every iteration.
     if (js_has_sym_iterator(iterable_root.get())) {
@@ -13025,9 +13037,8 @@ static Item js_array_from_with_mapper_impl(Item iterable, Item mapFn, Item this_
         // iteration stops if source is shrunk by callback.
         for (int64_t i = 0; i < (int64_t)iterable_root.get().array->length; i++) {
             value_root.set(js_array_get(iterable_root.get(), (Item){.item = i2it((int)i)}));
-            Item idx_item = (Item){.item = i2it((int)i)};
-            Item args[2] = {value_root.get(), idx_item};
-            value_root.set(js_call_function(map_fn_root.get(), this_arg_root.get(), args, 2));
+            value_root.set(js_array_from_apply_mapper(map_fn_root.get(), this_arg_root.get(),
+                value_root.get(), i, &mapped_result_home));
             if (js_check_exception()) return js_array_new(0);
             js_array_push(result_root.get(), value_root.get());
         }
@@ -13039,9 +13050,8 @@ static Item js_array_from_with_mapper_impl(Item iterable, Item mapFn, Item this_
     int64_t len = js_array_length(result_root.get());
     for (int64_t i = 0; i < len; i++) {
         value_root.set(js_array_get(result_root.get(), (Item){.item = i2it(i)}));
-        Item idx_item = (Item){.item = i2it(i)};
-        Item args[2] = {value_root.get(), idx_item};
-        value_root.set(js_call_function(map_fn_root.get(), this_arg_root.get(), args, 2));
+        value_root.set(js_array_from_apply_mapper(map_fn_root.get(), this_arg_root.get(),
+            value_root.get(), i, &mapped_result_home));
         if (js_check_exception()) return js_array_new(0);
         js_array_set(result_root.get(), (Item){.item = i2it(i)}, value_root.get());
     }
