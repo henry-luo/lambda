@@ -1,4 +1,4 @@
-# Lambda Impl Record: Numeric Hot-Path Tuning (M1/M2 — LANDED)
+# Lambda Impl Tune 3: Numeric Hot-Path Tuning (M1/M2 — LANDED)
 
 > **STATUS 2026-07-23 (rev 2): this is now a LANDED-WORK RECORD.** Phase 0 +
 > M1 + M2 + the NaN comparison fix (§6.5) shipped 2026-07-22. Verification:

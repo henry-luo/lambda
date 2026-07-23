@@ -1,7 +1,14 @@
-# Lambda Tune 2: MIR Benchmark Regression
+# Lambda Impl Tune 2: MIR Benchmark Regression
 
 **Date**: June 27, 2026
 **Repo baseline inspected**: `bb40c4c81` plus the local `lambda/lambda-mem.cpp` tuning patch
+
+> **Status: DONE / SUPERSEDED.** The lazy heap-root-frame fix recorded here
+> landed historically and was later replaced by the implemented side-root and
+> side-number stack-frame architecture. Result10 was completed; useful
+> recursive-call profiling was reframed for the current ABI in
+> `Lambda_Tuning_Proposal.md` R6. The removed heap-frame mechanism and frozen
+> C2MIR path are not implementation work.
 
 This note records the diagnosis and first fix for the Lambda/MIR benchmark regression seen between `test/benchmark/Overall_Result4.md` and `test/benchmark/Overall_Result9.md`.
 
@@ -182,7 +189,13 @@ Completed checks:
 
 The first sandboxed `make test-lambda-baseline` attempt was blocked while writing Git submodule metadata under `.git/modules/test/yaml/config`. Rerunning with escalation allowed the submodule setup and the full baseline gate passed.
 
-## 9. Remaining Work
+## 9. Historical Remaining Work (closed)
+
+This was the follow-up list at the time of the original fix. It is now closed:
+Result10 was produced, the frame-elision objective was superseded by the
+side-stack implementation, and C2MIR is frozen. Only fresh profiling of
+current scalar-call overhead remains relevant, under
+`Lambda_Tuning_Proposal.md` R6.
 
 This fix recovers a significant fraction of the Result4-to-Result9 regression but does not fully restore Result4 performance.
 

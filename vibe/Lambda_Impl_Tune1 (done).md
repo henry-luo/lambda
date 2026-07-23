@@ -1,6 +1,11 @@
-# Lambda Tuning Notes
+# Lambda Impl Tune 1: Static Collection Const-Pool Tuning
 
 **Date**: June 26, 2026
+
+> **Status: DONE.** The static array/map const-pool tuning remains in the
+> current implementation. Useful follow-ups have moved to
+> `Lambda_Tuning_Proposal.md` R0/R6; this file is the historical
+> implementation and measurement record.
 
 This note records the Lambda tuning pass for slow package-heavy Lambda script tests, especially the math markup tests.
 
@@ -126,9 +131,10 @@ Verification completed:
 | full `./test/test_lambda_gtest.exe` | 381/381 passed |
 | `git diff --check` | passed |
 
-## Follow-Up Ideas
+## Historical Follow-Up Ideas
 
-Potential next steps:
+These ideas are retained here for historical context. Their useful current
+forms are tracked in `Lambda_Tuning_Proposal.md` R0/R6:
 
 - Extend static const materialization to `Element` literals once element construction semantics are audited.
 - Add a small unit/integration test that proves static containers reject mutation.
