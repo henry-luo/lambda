@@ -11,23 +11,17 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
-echo "==> Preparing Lambda release..."
-
 # Clear the release directory before copying fresh files
-echo "==> Clearing ./release/ directory..."
 rm -rf ./release
 mkdir -p ./release
-echo "    Cleared ./release/"
 
 # Runtime assets are copied to ./release/lmd/ (not ./release/lambda/) to avoid a name clash
 # between the lambda executable and a directory of the same name on macOS/Linux.
 
 # Step 1: Create release/lmd/input directory recursively
-echo "==> Creating release/lmd/input directory..."
 mkdir -p ./release/lmd/input
 
 # Step 2: Copy Lambda input files (*.ls and *.css)
-echo "==> Copying Lambda input files..."
 if ls ./lambda/input/*.ls >/dev/null 2>&1; then
     cp ./lambda/input/*.ls ./release/lmd/input/
 fi
@@ -37,10 +31,8 @@ if ls ./lambda/input/*.css >/dev/null 2>&1; then
 fi
 
 # Step 2b: Copy LaTeX CSS files
-echo "==> Creating release/lmd/input/latex/css directory..."
 mkdir -p ./release/lmd/input/latex/css
 
-echo "==> Copying LaTeX CSS files..."
 if ls ./lambda/input/latex/css/*.css >/dev/null 2>&1; then
     cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
 fi
@@ -50,18 +42,14 @@ fi
 # Fonts used by math package: KaTeX_* woff2 files (KaTeX_AMS, Caligraphic, Fraktur, Main, Math,
 #   SansSerif, Script, Size1-4, Typewriter)
 # Copy the entire fonts directory to ensure all referenced assets are present.
-echo "==> Copying LaTeX fonts (Computer Modern + KaTeX)..."
 rm -rf ./release/lmd/input/latex/fonts
 cp -r ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
 
 # Step 2d: Copy Lambda packages
-echo "==> Copying Lambda packages..."
 rm -rf ./release/lmd/package
 cp -r ./lambda/package ./release/lmd/package
 
 # Step 2c: Copy live-demo.html and referenced files
-echo "==> Copying live-demo.html and referenced files..."
-
 # Copy live-demo.html
 mkdir -p ./release/test/html
 cp ./test/html/live-demo.html ./release/test/html/
@@ -105,7 +93,6 @@ if [ -f "./test/lambda/complex_iot_report_html.ls" ]; then
 fi
 
 # Copy test/lambda/chart/ files referenced by live-demo.html
-echo "==> Copying chart demo Lambda scripts..."
 mkdir -p ./release/test/lambda/chart
 for file in chart_dashboard_demo.ls dashboard_demo.json \
             test_bar_chart.ls bar_chart.json \
@@ -123,10 +110,8 @@ for file in chart_dashboard_demo.ls dashboard_demo.json \
 done
 
 # Step 3: Copy doc files (*.md, *.pdf, *.svg, excluding paths starting with '_')
-echo "==> Creating release/doc directory..."
 mkdir -p ./release/doc
 
-echo "==> Copying documentation files (*.md, *.pdf, *.svg)..."
 while IFS= read -r -d '' file; do
     # Get path relative to ./doc
     relpath="${file#./doc/}"
@@ -149,7 +134,6 @@ fi
 # Step 5: Copy lambda.exe to release directory
 # On macOS and Linux rename to 'lambda' (no .exe) to follow POSIX convention and
 # avoid a name clash between the executable and the lmd/ asset directory.
-echo "==> Copying lambda.exe to release directory..."
 if [[ "$OSTYPE" == "darwin"* ]] || [[ "$OSTYPE" == "linux-gnu"* ]]; then
     cp ./lambda.exe ./release/lambda
 else
