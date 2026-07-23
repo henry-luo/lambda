@@ -162,6 +162,12 @@ Item pn_push(Item arr_item, Item value) {
     return arr_item;
 }
 
+Item pn_push_cow(Item owner, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    return pn_push(replacement, value);
+}
+
 Item pn_splice(Item arr_item, Item start_item, Item count_item) {
     TypeId tid = get_type_id(arr_item);
     if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM) {
@@ -211,6 +217,12 @@ Item pn_splice(Item arr_item, Item start_item, Item count_item) {
     }
     arr->length = length - count;
     return arr_item;
+}
+
+Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    return pn_splice(replacement, start_item, count_item);
 }
 
 void list_push(List* list, Item item) {

@@ -695,6 +695,11 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
         "cannot mutate through immutable binding");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ProcMethodRequiresMutableReceiver) {
+    ExpectErrorMessage("test/lambda/negative/semantic/proc_method_let_receiver.ls",
+        "mutating method 'increment' needs a `var` binding receiver");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {
     ExpectErrorMessage("test/lambda/negative/semantic/capture_mutation.ls",
         "cannot mutate captured binding");

@@ -10,6 +10,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/checked_math.hpp"
+#include "../lib/file.h"
 #include "../lib/str.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
@@ -36,6 +37,7 @@
 #include "input/html5/html5_parser.h"
 
 extern __thread EvalContext* context;
+extern "C" void cow_profile_note_mutable_value(void);
 
 Item vmap_get_by_item(VMap* vm, Item key);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -5851,6 +5853,19 @@ static void mutable_clone_register(MutableCloneContext* clone_ctx, void* src, It
 
 static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx);
 
+static bool mutable_clone_needs_container_path(Item value) {
+    switch (get_type_id(value)) {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ELEMENT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void* mutable_clone_owner_data(Item owner) {
     switch (get_type_id(owner)) {
     case LMD_TYPE_MAP: return owner.map ? owner.map->data : NULL;
@@ -6074,10 +6089,437 @@ static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
 }
 
 Item fn_mutable_value(Item value) {
+    cow_profile_note_mutable_value();
+    // Scalar var bindings never need alias isolation; avoid allocating the
+    // cycle-tracking table on this hot path.
+    if (!mutable_clone_needs_container_path(value)) return value;
     MutableCloneContext clone_ctx = mutable_clone_context_new();
     Item cloned = clone_mutable_item(value, &clone_ctx);
     mutable_clone_context_free(&clone_ctx);
     return cloned;
+}
+
+bool cow_item_is_container(Item value) {
+    switch (get_type_id(value)) {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_VMAP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static Container* cow_item_container(Item value) {
+    if (!cow_item_is_container(value)) return NULL;
+    return value.container;
+}
+
+typedef struct CowProfileTypeCounters {
+    uint64_t share_marks;
+    uint64_t unique_mutations;
+    uint64_t shared_copies;
+    uint64_t copied_bytes;
+} CowProfileTypeCounters;
+
+typedef struct CowProfileCounters {
+    CowProfileTypeCounters by_type[LMD_TYPE_COUNT];
+    uint64_t vmap_snapshots;
+    uint64_t vmap_rejections;
+    uint64_t mutable_value_calls;
+} CowProfileCounters;
+
+static CowProfileCounters g_cow_profile = {};
+static int g_cow_profile_enabled = -1;
+static bool g_cow_profile_registered = false;
+
+static bool cow_profile_truthy(const char* value) {
+    return value && value[0] && strcmp(value, "0") != 0 &&
+        strcmp(value, "false") != 0 && strcmp(value, "off") != 0 &&
+        strcmp(value, "no") != 0;
+}
+
+static bool cow_profile_enabled(void) {
+    if (g_cow_profile_enabled >= 0) return g_cow_profile_enabled != 0;
+    g_cow_profile_enabled = cow_profile_truthy(getenv("COW_EXEC_PROFILE")) ? 1 : 0;
+    if (g_cow_profile_enabled && !g_cow_profile_registered) {
+        // Register once so a release benchmark can emit its counters without
+        // putting any output or allocation into the raw mutation path.
+        atexit(cow_profile_dump);
+        g_cow_profile_registered = true;
+    }
+    return g_cow_profile_enabled != 0;
+}
+
+struct CowProfileLifetime {
+    CowProfileLifetime() {
+        // Initialize once at process startup so a no-COW workload can still
+        // prove its zero-copy hot path in the requested release profile.
+        (void)cow_profile_enabled();
+    }
+};
+
+static CowProfileLifetime g_cow_profile_lifetime;
+
+static CowProfileTypeCounters* cow_profile_for(Item value) {
+    TypeId type_id = get_type_id(value);
+    if (type_id >= LMD_TYPE_COUNT) return NULL;
+    return &g_cow_profile.by_type[type_id];
+}
+
+static uint64_t cow_one_level_copy_bytes(Item value) {
+    switch (get_type_id(value)) {
+    case LMD_TYPE_ARRAY:
+        return sizeof(Array) + (uint64_t)value.array->length * sizeof(Item);
+    case LMD_TYPE_MAP:
+        return sizeof(Map) + (uint64_t)value.map->data_cap;
+    case LMD_TYPE_OBJECT:
+        return sizeof(Object) + (uint64_t)value.object->data_cap;
+    case LMD_TYPE_ELEMENT:
+        return sizeof(Element) + (uint64_t)value.element->data_cap +
+            (uint64_t)value.element->length * sizeof(Item);
+    case LMD_TYPE_VMAP:
+        // Backend storage is opaque here; snapshot count records the exact
+        // backend event while this is the stable VMap header cost.
+        return sizeof(VMap);
+    default:
+        return 0;
+    }
+}
+
+void cow_profile_note_mutable_value(void) {
+    if (cow_profile_enabled()) g_cow_profile.mutable_value_calls++;
+}
+
+void cow_profile_note_vmap_snapshot(void) {
+    if (cow_profile_enabled()) g_cow_profile.vmap_snapshots++;
+}
+
+void cow_profile_note_vmap_rejection(void) {
+    if (cow_profile_enabled()) g_cow_profile.vmap_rejections++;
+}
+
+void cow_profile_dump(void) {
+    if (!cow_profile_enabled()) return;
+    create_dir("temp");
+    const char* output_path = getenv("COW_EXEC_PROFILE_OUT");
+    if (!output_path || !output_path[0]) output_path = "temp/cow_exec_profile.tsv";
+
+    StrBuf* output = strbuf_new();
+    if (!output) return;
+    strbuf_append_str(output, "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\n");
+    for (int i = 0; i < LMD_TYPE_COUNT; i++) {
+        CowProfileTypeCounters* counters = &g_cow_profile.by_type[i];
+        if (counters->share_marks == 0 && counters->unique_mutations == 0 &&
+                counters->shared_copies == 0 && counters->copied_bytes == 0) continue;
+        strbuf_append_str(output, get_type_name((TypeId)i));
+        strbuf_append_char(output, '\t');
+        strbuf_append_uint64(output, counters->share_marks);
+        strbuf_append_char(output, '\t');
+        strbuf_append_uint64(output, counters->unique_mutations);
+        strbuf_append_char(output, '\t');
+        strbuf_append_uint64(output, counters->shared_copies);
+        strbuf_append_char(output, '\t');
+        strbuf_append_uint64(output, counters->copied_bytes);
+        strbuf_append_char(output, '\n');
+    }
+    strbuf_append_str(output, "vmap_snapshots\t");
+    strbuf_append_uint64(output, g_cow_profile.vmap_snapshots);
+    strbuf_append_str(output, "\nvmap_rejections\t");
+    strbuf_append_uint64(output, g_cow_profile.vmap_rejections);
+    strbuf_append_str(output, "\nfn_mutable_value_calls\t");
+    strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
+    strbuf_append_char(output, '\n');
+    if (write_text_file_atomic(output_path, output->str ? output->str : "") != 0) {
+        log_error("cow profile: failed to write '%s'", output_path);
+    }
+    strbuf_free(output);
+}
+
+Item cow_mark_shared(Item value) {
+    Container* container = cow_item_container(value);
+    if (container && (container->cow_state & COW_STATE_SHARED) == 0) {
+        if (cow_profile_enabled()) {
+            CowProfileTypeCounters* counters = cow_profile_for(value);
+            if (counters) counters->share_marks++;
+        }
+        container->cow_state |= COW_STATE_SHARED;
+    }
+    return value;
+}
+
+Item cow_bind_var(Item value) {
+    // ArrayNum views keep their Stage-2 mutable-view contract; generic COW
+    // ownership starts only at the core Item-container subset.
+    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) return fn_mutable_value(value);
+    return cow_mark_shared(value);
+}
+
+static void cow_mark_shape_children(TypeMap* type, void* data) {
+    if (!type || !data) return;
+    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        if (!entry->name) {
+            Map* spread = map_shape_field_to_map(data, entry);
+            if (spread) cow_mark_shared({.map = spread});
+            continue;
+        }
+        cow_mark_shared(_map_read_field(entry, data));
+    }
+}
+
+static Item cow_clone_array_one_level(Array* source) {
+    if (!source) return ItemError;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Array*> rooted_source(roots, source);
+    Rooted<Array*> rooted_copy(roots, array_plain());
+    if (!rooted_copy.get()) return ItemError;
+    source = rooted_source.get();
+    clone_mutable_container_flags((Container*)rooted_copy.get(), (Container*)source);
+    for (int64_t index = 0; index < source->length; index++) {
+        source = rooted_source.get();
+        Item child = source->items[index];
+        cow_mark_shared(child);
+        array_push(rooted_copy.get(), child);
+    }
+    rooted_copy.get()->cow_state &= ~COW_STATE_SHARED;
+    return {.array = rooted_copy.get()};
+}
+
+static Item cow_clone_map_like_one_level(Item source_item) {
+    TypeId type_id = get_type_id(source_item);
+    Container* source = source_item.container;
+    if (!source) return ItemError;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_source(roots, source_item);
+    Rooted<Item> rooted_copy(roots, ItemNull);
+    size_t size = type_id == LMD_TYPE_MAP ? sizeof(Map) :
+        type_id == LMD_TYPE_OBJECT ? sizeof(Object) : sizeof(Element);
+    Container* copy = (Container*)heap_calloc(size, type_id);
+    if (!copy) return ItemError;
+    rooted_copy.set({.container = copy});
+    source = rooted_source.get().container;
+    clone_mutable_container_flags(copy, source);
+    copy->type_id = type_id;
+    copy->map_kind = source->map_kind;
+
+    TypeMap* type = NULL;
+    void* source_data = NULL;
+    void** copy_data = NULL;
+    int* copy_cap = NULL;
+    int source_cap = 0;
+    if (type_id == LMD_TYPE_MAP) {
+        Map* src = rooted_source.get().map;
+        Map* dst = rooted_copy.get().map;
+        dst->type = src->type;
+        type = (TypeMap*)src->type;
+        source_data = src->data;
+        copy_data = &dst->data;
+        copy_cap = &dst->data_cap;
+        source_cap = src->data_cap;
+    } else if (type_id == LMD_TYPE_OBJECT) {
+        Object* src = rooted_source.get().object;
+        Object* dst = rooted_copy.get().object;
+        dst->type = src->type;
+        type = (TypeMap*)src->type;
+        source_data = src->data;
+        copy_data = &dst->data;
+        copy_cap = &dst->data_cap;
+        source_cap = src->data_cap;
+    } else {
+        Element* src = rooted_source.get().element;
+        Element* dst = rooted_copy.get().element;
+        dst->type = src->type;
+        type = (TypeMap*)src->type;
+        source_data = src->data;
+        copy_data = &dst->data;
+        copy_cap = &dst->data_cap;
+        source_cap = src->data_cap;
+        for (int64_t index = 0; index < src->length; index++) {
+            src = rooted_source.get().element;
+            dst = rooted_copy.get().element;
+            Item child = src->items[index];
+            cow_mark_shared(child);
+            array_push((Array*)dst, child);
+        }
+    }
+    int data_cap = source_cap > 0 ? source_cap : (type ? type->byte_size : 0);
+    if (source_data && data_cap > 0) {
+        *copy_data = heap_data_calloc((size_t)data_cap);
+        if (!*copy_data) return ItemError;
+        if (type_id == LMD_TYPE_MAP) {
+            source_data = rooted_source.get().map->data;
+            copy_data = &rooted_copy.get().map->data;
+            copy_cap = &rooted_copy.get().map->data_cap;
+        } else if (type_id == LMD_TYPE_OBJECT) {
+            source_data = rooted_source.get().object->data;
+            copy_data = &rooted_copy.get().object->data;
+            copy_cap = &rooted_copy.get().object->data_cap;
+        } else {
+            source_data = rooted_source.get().element->data;
+            copy_data = &rooted_copy.get().element->data;
+            copy_cap = &rooted_copy.get().element->data_cap;
+        }
+        // Shape data stores scalar payloads by value and container references by
+        // pointer, so byte-copying preserves layout while child marks establish COW.
+        memcpy(*copy_data, source_data, (size_t)data_cap);
+        *copy_cap = data_cap;
+        cow_mark_shape_children(type, source_data);
+    }
+    rooted_copy.get().container->cow_state &= ~COW_STATE_SHARED;
+    return rooted_copy.get();
+}
+
+static Item cow_clone_one_level(Item source) {
+    switch (get_type_id(source)) {
+    case LMD_TYPE_ARRAY: return cow_clone_array_one_level(source.array);
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ELEMENT: return cow_clone_map_like_one_level(source);
+    default: return source;
+    }
+}
+
+Item cow_prepare_write(Item old) {
+    Container* container = cow_item_container(old);
+    if (!container) return old;
+    if (!container->is_static && !container->is_immortal &&
+            (container->cow_state & COW_STATE_SHARED) == 0) {
+        if (cow_profile_enabled()) {
+            CowProfileTypeCounters* counters = cow_profile_for(old);
+            if (counters) counters->unique_mutations++;
+        }
+        return old;
+    }
+
+    Item replacement = get_type_id(old) == LMD_TYPE_VMAP
+        ? vmap_clone_for_cow(old) : cow_clone_one_level(old);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    if (cow_profile_enabled()) {
+        CowProfileTypeCounters* counters = cow_profile_for(old);
+        if (counters) {
+            counters->shared_copies++;
+            counters->copied_bytes += cow_one_level_copy_bytes(old);
+        }
+    }
+
+    Container* replacement_container = cow_item_container(replacement);
+    if (replacement_container) replacement_container->cow_state &= ~COW_STATE_SHARED;
+    return replacement;
+}
+
+Item array_set_cow(Item owner, int64_t index, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    TypeId type_id = get_type_id(replacement);
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM &&
+            type_id != LMD_TYPE_ELEMENT) {
+        log_error("cow array mutation rejected non-array owner type %d", type_id);
+        return ItemError;
+    }
+    if (index < 0) {
+        // Negative procedural indices are absent writes; keep that legacy
+        // no-op while positive out-of-range writes still report their error.
+        return replacement;
+    }
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        // ArrayNum remains on its Stage-2 specialized mutation path; generic
+        // Item writes would otherwise widen compact bool and numeric storage.
+        array_num_set_item(replacement.array_num, index, value);
+        return replacement;
+    }
+    if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
+    return replacement;
+}
+
+Item map_set_cow(Item owner, Item key, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    TypeId type_id = get_type_id(replacement);
+    if (type_id != LMD_TYPE_MAP && type_id != LMD_TYPE_OBJECT &&
+            type_id != LMD_TYPE_ELEMENT && type_id != LMD_TYPE_VMAP) {
+        log_error("cow map mutation rejected non-map owner type %d", type_id);
+        return ItemError;
+    }
+    if (type_id == LMD_TYPE_VMAP) return vmap_set_cow(replacement, key, value);
+    fn_map_set(replacement, key, value);
+    return replacement;
+}
+
+Item cow_path_set_raw(Item owner, Item key, Item value) {
+    // The compiler links each copied child before descending, so this helper
+    // must remain a rooted raw write and never perform another COW decision.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    TypeId owner_type = get_type_id(rooted_owner.get());
+    int64_t index = 0;
+    if ((owner_type == LMD_TYPE_ARRAY || owner_type == LMD_TYPE_ELEMENT ||
+            owner_type == LMD_TYPE_ARRAY_NUM) &&
+            lambda_item_to_int64_exact(rooted_key.get(), &index)) {
+        if (owner_type == LMD_TYPE_ARRAY_NUM) {
+            array_num_set_item(rooted_owner.get().array_num, index, rooted_value.get());
+        } else if (fn_array_set(rooted_owner.get().array, index, rooted_value.get()).item == ItemError.item) {
+            return ItemError;
+        }
+        return rooted_owner.get();
+    }
+    if (owner_type == LMD_TYPE_MAP || owner_type == LMD_TYPE_OBJECT ||
+            owner_type == LMD_TYPE_ELEMENT || owner_type == LMD_TYPE_VMAP) {
+        fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
+        return rooted_owner.get();
+    }
+    log_error("cow path mutation rejected owner type %d", owner_type);
+    return ItemError;
+}
+
+Item cow_path_set(Item owner, Item path, Item value) {
+    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
+        log_error("cow path mutation requires a non-empty array path");
+        return ItemError;
+    }
+
+    // Every spine link may allocate while it is detached, so all live owners,
+    // keys, and the incoming value need exact roots across raw setter calls.
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_current(roots, ItemNull);
+    Rooted<Item> rooted_child(roots, ItemNull);
+    Rooted<Item> rooted_key(roots, ItemNull);
+    Rooted<Item> rooted_replacement(roots, ItemNull);
+
+    rooted_current.set(cow_prepare_write(rooted_owner.get()));
+    if (get_type_id(rooted_current.get()) == LMD_TYPE_ERROR) return ItemError;
+    // The top-level replacement survives every child detach; returning an
+    // unrooted local here used a pre-compaction address for nested writes.
+    rooted_replacement.set(rooted_current.get());
+
+    for (int64_t i = 0; i < rooted_path.get().array->length; i++) {
+        rooted_key.set(item_at(rooted_path.get(), i));
+        if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
+        if (i + 1 == rooted_path.get().array->length) {
+            if (get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(), rooted_value.get())) ==
+                    LMD_TYPE_ERROR) return ItemError;
+            return rooted_replacement.get();
+        }
+
+        rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
+        if (!cow_item_is_container(rooted_child.get()) &&
+                get_type_id(rooted_child.get()) != LMD_TYPE_ARRAY_NUM) {
+            log_error("cow path mutation encountered a non-container child");
+            return ItemError;
+        }
+        rooted_child.set(cow_prepare_write(rooted_child.get()));
+        if (get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return ItemError;
+        if (get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(), rooted_child.get())) ==
+                LMD_TYPE_ERROR) return ItemError;
+        rooted_current.set(rooted_child.get());
+    }
+    return ItemError;
 }
 
 // rebuild a map/element shape when a field's type changes

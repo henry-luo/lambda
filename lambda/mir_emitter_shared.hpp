@@ -65,6 +65,9 @@ struct VarEntry {
     MIR_reg_t hoisted_data_reg;
     MIR_reg_t hoisted_len_reg;
     bool from_hoist;
+    bool cow_marked;
+    bool cow_children_may_be_shared;
+    bool cow_owned;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };

@@ -34,9 +34,12 @@ pn splay(tree, key) {
         return 0
     }
     var dummy = create_node(0.0, null)
-    var left = dummy
-    var right = dummy
-    var current = tree.root
+    // The retained header owns the cursor sources. Extracting its fields gives
+    // the top-down loop explicit borrows rather than new COW value roots.
+    var links = {left: dummy, right: dummy, current: tree.root}
+    var left = links.left
+    var right = links.right
+    var current = links.current
     var done = false
     while (done == false) {
         if (key < current.key) {
@@ -44,7 +47,6 @@ pn splay(tree, key) {
                 done = true
             } else {
                 if (key < (current.left).key) {
-                    // rotate right
                     var tmp = current.left
                     current.left = tmp.right
                     tmp.right = current
@@ -54,7 +56,6 @@ pn splay(tree, key) {
                     }
                 }
                 if (done == false) {
-                    // link right
                     right.left = current
                     right = current
                     current = current.left
@@ -66,7 +67,6 @@ pn splay(tree, key) {
                     done = true
                 } else {
                     if (key > (current.right).key) {
-                        // rotate left
                         var tmp = current.right
                         current.right = tmp.left
                         tmp.left = current
@@ -76,7 +76,6 @@ pn splay(tree, key) {
                         }
                     }
                     if (done == false) {
-                        // link left
                         left.right = current
                         left = current
                         current = current.right
@@ -87,7 +86,6 @@ pn splay(tree, key) {
             }
         }
     }
-    // assemble
     left.right = current.left
     right.left = current.right
     current.left = dummy.right

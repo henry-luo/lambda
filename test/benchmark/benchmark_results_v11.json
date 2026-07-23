@@ -1,0 +1,2208 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-07-23T20:07:39",
+    "command": "test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v11.json --fresh",
+    "engines": [
+      "mir",
+      "lambdajs",
+      "quickjs",
+      "nodejs"
+    ],
+    "runs": 3,
+    "timeout_s": 180,
+    "results_output": "test/benchmark/benchmark_results_v11.json",
+    "fresh": true,
+    "suite_filters": [],
+    "bench_filters": [],
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 20626856,
+    "lambda_commit": "d6b1c1c5797670edd39e4afe69f191811a08644e",
+    "node_version": "v24.7.0",
+    "python_version": "Python 3.9.6",
+    "quickjs_version": null,
+    "profile_check": "passed",
+    "log_dir": "temp/benchmark_v11",
+    "finished_at": "2026-07-23T20:32:22"
+  },
+  "r7rs": {
+    "fib": {
+      "category": "recursive",
+      "mir": 5.948,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 35.299291,
+      "quickjs": null,
+      "nodejs": 1.469125
+    },
+    "fibfp": {
+      "category": "recursive",
+      "mir": 5.229,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 37.130958,
+      "quickjs": null,
+      "nodejs": 1.380667
+    },
+    "tak": {
+      "category": "recursive",
+      "mir": 0.528,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3.281709,
+      "quickjs": null,
+      "nodejs": 0.312375
+    },
+    "cpstak": {
+      "category": "closure",
+      "mir": 1.08,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 6.182709,
+      "quickjs": null,
+      "nodejs": 0.471666
+    },
+    "sum": {
+      "category": "iterative",
+      "mir": 3.659,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 12.60125,
+      "quickjs": null,
+      "nodejs": 0.89125
+    },
+    "sumfp": {
+      "category": "iterative",
+      "mir": 0.085,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1.113167,
+      "quickjs": null,
+      "nodejs": 0.827209
+    },
+    "nqueens": {
+      "category": "backtrack",
+      "mir": 1.527,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 13.827375,
+      "quickjs": null,
+      "nodejs": 1.321333
+    },
+    "fft": {
+      "category": "numeric",
+      "mir": null,
+      "_status": {
+        "mir": "exit_1",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 8.961666,
+      "quickjs": null,
+      "nodejs": 1.009042
+    },
+    "mbrot": {
+      "category": "numeric",
+      "mir": 0.754,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 8.648042,
+      "quickjs": null,
+      "nodejs": 0.847333
+    },
+    "ack": {
+      "category": "recursive",
+      "mir": 23.264,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 116.903083,
+      "quickjs": null,
+      "nodejs": 15.145459
+    }
+  },
+  "awfy": {
+    "sieve": {
+      "category": "micro",
+      "mir": 0.506,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 44.053208,
+      "quickjs": null,
+      "nodejs": 0.345125
+    },
+    "permute": {
+      "category": "micro",
+      "mir": 0.709,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 63.968541,
+      "quickjs": null,
+      "nodejs": 0.341375
+    },
+    "queens": {
+      "category": "micro",
+      "mir": 0.757,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 30.81525,
+      "quickjs": null,
+      "nodejs": 0.362917
+    },
+    "towers": {
+      "category": "micro",
+      "mir": 1.164,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 68.785083,
+      "quickjs": null,
+      "nodejs": 0.424708
+    },
+    "bounce": {
+      "category": "micro",
+      "mir": 0.845,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3.554041,
+      "quickjs": null,
+      "nodejs": 0.360166
+    },
+    "list": {
+      "category": "micro",
+      "mir": null,
+      "_status": {
+        "mir": "wrong_output",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": "list2.ls prints \"List: FAIL result=6\"; golden awfy/list2.txt is \"List: PASS\". Completes in ~0.012 ms because it does almost no work, so timing it produces a spurious best-in-class row. Already on MIR_SKIP_TESTS in test_lambda_gtest.",
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2.37475,
+      "quickjs": null,
+      "nodejs": 0.209958
+    },
+    "storage": {
+      "category": "micro",
+      "mir": 0.678,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 11.083541,
+      "quickjs": null,
+      "nodejs": 0.320958
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "mir": 34.491,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 335.501375,
+      "quickjs": null,
+      "nodejs": 22.073208
+    },
+    "nbody": {
+      "category": "compute",
+      "mir": 147.214,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 255.717667,
+      "quickjs": null,
+      "nodejs": 6.513875
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 312.402,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1142.916042,
+      "quickjs": null,
+      "nodejs": 40.344625
+    },
+    "json": {
+      "category": "macro",
+      "mir": 11.275,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 37.9345,
+      "quickjs": null,
+      "nodejs": 1.470833
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 92.271,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "wall_fallback",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "wall_fallback": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 206.825875,
+      "quickjs": null,
+      "nodejs": 7.777292
+    },
+    "havlak": {
+      "category": "macro",
+      "mir": 124.978,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "timeout",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "timeout": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": null,
+      "quickjs": null,
+      "nodejs": 79.180334
+    },
+    "cd": {
+      "category": "macro",
+      "mir": 469.177,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 85624.906625,
+      "quickjs": null,
+      "nodejs": 27.17975
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "mir": 10.349,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 36.514333,
+      "quickjs": null,
+      "nodejs": 3.900083
+    },
+    "fannkuch": {
+      "category": "permutation",
+      "mir": 0.745,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 11.921083,
+      "quickjs": null,
+      "nodejs": 2.9095
+    },
+    "fasta": {
+      "category": "generation",
+      "mir": 7.287,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 36.616333,
+      "quickjs": null,
+      "nodejs": 5.013792
+    },
+    "knucleotide": {
+      "category": "hashing",
+      "mir": 9.768,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 123.515708,
+      "quickjs": null,
+      "nodejs": 4.388625
+    },
+    "mandelbrot": {
+      "category": "numeric",
+      "mir": 127.129,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 61.846583,
+      "quickjs": null,
+      "nodejs": 11.653417
+    },
+    "nbody": {
+      "category": "numeric",
+      "mir": 163.204,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 322.6035,
+      "quickjs": null,
+      "nodejs": 6.736917
+    },
+    "pidigits": {
+      "category": "bignum",
+      "mir": null,
+      "_status": {
+        "mir": "exit_1",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 0.305834,
+      "quickjs": null,
+      "nodejs": 2.099875
+    },
+    "regexredux": {
+      "category": "regex",
+      "mir": 1.209,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 13.890583,
+      "quickjs": null,
+      "nodejs": 2.1095
+    },
+    "revcomp": {
+      "category": "string",
+      "mir": 1.031,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 43.16625,
+      "quickjs": null,
+      "nodejs": 2.953125
+    },
+    "spectralnorm": {
+      "category": "numeric",
+      "mir": 38.363,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 261.6965,
+      "quickjs": null,
+      "nodejs": 1.795625
+    }
+  },
+  "kostya": {
+    "brainfuck": {
+      "category": "interpreter",
+      "mir": 396.451,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1019.177541,
+      "quickjs": null,
+      "nodejs": 33.568709
+    },
+    "matmul": {
+      "category": "numeric",
+      "mir": 358.666,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 873.345416,
+      "quickjs": null,
+      "nodejs": 14.387166
+    },
+    "primes": {
+      "category": "numeric",
+      "mir": 55.349,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 109.272958,
+      "quickjs": null,
+      "nodejs": 4.912959
+    },
+    "base64": {
+      "category": "string",
+      "mir": 10883.1,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 727.41475,
+      "quickjs": null,
+      "nodejs": 15.455208
+    },
+    "levenshtein": {
+      "category": "string",
+      "mir": 27.633,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 89.828625,
+      "quickjs": null,
+      "nodejs": 2.699417
+    },
+    "json_gen": {
+      "category": "data",
+      "mir": 111.441,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 31.477541,
+      "quickjs": null,
+      "nodejs": 3.792958
+    },
+    "collatz": {
+      "category": "numeric",
+      "mir": 1658.88,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2073.613292,
+      "quickjs": null,
+      "nodejs": 1283.566167
+    }
+  },
+  "larceny": {
+    "triangl": {
+      "category": "search",
+      "mir": 319.921,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3643.426417,
+      "quickjs": null,
+      "nodejs": 72.008667
+    },
+    "array1": {
+      "category": "array",
+      "mir": 3.81,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 29.03625,
+      "quickjs": null,
+      "nodejs": 1.792458
+    },
+    "deriv": {
+      "category": "symbolic",
+      "mir": 30.868,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 66.239958,
+      "quickjs": null,
+      "nodejs": 2.093875
+    },
+    "diviter": {
+      "category": "iterative",
+      "mir": 17509.5,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 9867.302167,
+      "quickjs": null,
+      "nodejs": 383.854125
+    },
+    "divrec": {
+      "category": "recursive",
+      "mir": 20.507,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 49.27125,
+      "quickjs": null,
+      "nodejs": 8.357667
+    },
+    "gcbench": {
+      "category": "allocation",
+      "mir": 381.125,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 937.9575,
+      "quickjs": null,
+      "nodejs": 22.81125
+    },
+    "paraffins": {
+      "category": "combinat",
+      "mir": 2.081,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2.394833,
+      "quickjs": null,
+      "nodejs": 0.626375
+    },
+    "pnpoly": {
+      "category": "numeric",
+      "mir": 93.968,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 154.502042,
+      "quickjs": null,
+      "nodejs": 4.325875
+    },
+    "primes": {
+      "category": "iterative",
+      "mir": 53.483,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 109.703333,
+      "quickjs": null,
+      "nodejs": 4.781167
+    },
+    "puzzle": {
+      "category": "search",
+      "mir": 18.958,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 752.935375,
+      "quickjs": null,
+      "nodejs": 2.357459
+    },
+    "quicksort": {
+      "category": "sorting",
+      "mir": 13.004,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 44.23725,
+      "quickjs": null,
+      "nodejs": 1.651375
+    },
+    "ray": {
+      "category": "numeric",
+      "mir": 9.95,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 10.50275,
+      "quickjs": null,
+      "nodejs": 1.617709
+    }
+  },
+  "jetstream": {
+    "nbody": {
+      "category": "numeric",
+      "mir": 164.074,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 217.27,
+      "quickjs": null,
+      "nodejs": 4.435
+    },
+    "cube3d": {
+      "category": "3d",
+      "mir": 57.627,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 818.517,
+      "quickjs": null,
+      "nodejs": 13.021
+    },
+    "navier_stokes": {
+      "category": "numeric",
+      "mir": 1604.19,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 35613.838,
+      "quickjs": null,
+      "nodejs": 27.862
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 310.377,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 163.02,
+      "quickjs": null,
+      "nodejs": 1.791
+    },
+    "splay": {
+      "category": "data",
+      "mir": 2223.43,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 45.252,
+      "quickjs": null,
+      "nodejs": 1.48
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 16.4,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 333.761,
+      "quickjs": null,
+      "nodejs": 3.993
+    },
+    "hashmap": {
+      "category": "data",
+      "mir": 137.327,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 113589.285,
+      "quickjs": null,
+      "nodejs": 50.451
+    },
+    "crypto_sha1": {
+      "category": "crypto",
+      "mir": 176.023,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 836.208,
+      "quickjs": null,
+      "nodejs": 4.134
+    },
+    "raytrace3d": {
+      "category": "3d",
+      "mir": 339.53,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_127",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_127": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1041.073,
+      "quickjs": null,
+      "nodejs": 11.002
+    }
+  }
+}

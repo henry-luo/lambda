@@ -1,6 +1,6 @@
 # Lambda Impl Plan: COW Stage 1 + `pn`-Method Support (Tune-COW)
 
-**Status: PLAN — 2026-07-23.**
+**Status: IMPLEMENTED — 2026-07-23; Result11 provenance recorded below.**
 **Implements:** `vibe/Lambda_Design_COW.md` **Stage 1** (CW19: basic COW +
 performance, NO exclusivity enforcement) plus the C4 outstanding items that
 belong with it — foremost **proper `pn`-method support** (the C4.1 bug
@@ -343,6 +343,57 @@ expected to be the next dominant Lambda-side mechanism after this plan.
    JS reference semantics and tax its hottest stores. CW21 requires new
    wrappers and a call-site inventory; a raw mutator containing a COW check is
    a design violation.
+
+## 9. Completion record — 2026-07-23
+
+### Delivered implementation
+
+- Added the Stage-1 COW state and one-level detachment for Lambda `Array`,
+  `Map`, `Object`, `Element`, and snapshot-capable `VMap`; raw LambdaJS and
+  host setters remain raw.
+- Added replacement-returning COW wrappers, VMap snapshot/rejection handling,
+  precise-rooted nested owner-spine writeback, and release-safe COW counters.
+- Fixed `pn` method receiver handling, parameterized methods, default-instance
+  mutation, immutable capture diagnostics, and explicit `var` receiver checks.
+- Migrated DeltaBlue, Splay, and CD to ownership-correct patterns. CD now uses
+  read–modify–write for its voxel vectors and is timed by the standard runner.
+- Added COW alias, ordering, VMap, raw-JS, forced-GC, MIR structure/budget, and
+  nested Element snapshot regressions. The document gate builds 256 Element
+  nodes, retains a snapshot, performs 2,048 nested edits, and serializes HTML.
+
+### Verification
+
+- `make test-lambda-baseline`: **1,474 / 1,474 passed**.
+- Forced-GC alias, MIR emission, and MIR budget sentinels passed.
+- COW profile for the document gate preserves the snapshot (`draft`) while the
+  edited document becomes `published`; only the required shallow copies occur.
+- COW profile for release Splay shows zero share marks/copies and zero legacy
+  `fn_mutable_value` calls.
+- The 40,261-entry Test262 baseline completed against the release executable.
+- The Node baseline isolated one existing domain-runtime failure,
+  `test-domain-emit-error-handler-stack.js` (active-domain expectation); its
+  raw JavaScript array/object/map alias fixture remains green and no COW path
+  is entered by the failing test.
+- Fresh release Result11 data and report are published as
+  `test/benchmark/benchmark_results_v11.json` and
+  `test/benchmark/Overall_Result11.md`.
+
+### Result11 comparison provenance
+
+Result11 was run on the same Darwin arm64 host with a clean release build and
+three-run medians, but the available Node changed from Result10's Node 22.13.0
+to Node 24.7.0; QuickJS is unavailable. The checked-in Result10 JSON also
+does not contain the report's revised values (for example, its raw MIR values
+are collatz 7.47s and Splay 7.32s). Against that reproducible JSON, Result11
+improves the COW-targeted absolute MIR timings: collatz 7.47s → 1.66s, gcbench
+501ms → 381ms, array1 25.8ms → 3.81ms, primes 78.1ms → 55.3ms, and Splay 7.32s
+→ 2.22s. The published cross-engine ratio is therefore not a like-for-like
+Result10 comparison and must not be used to attribute a COW regression.
+
+The Radiant baseline still reports its pre-existing failures in form/CSS
+layout, `pdf_text_selection_copy`, `radiant_view_markdown_iframe`, and
+`LoadsMarkdownIntoIframeAfterLinkClickWithNoLog`; page-load and render
+baselines pass. No Radiant implementation files were changed by this work.
 
 ---
 

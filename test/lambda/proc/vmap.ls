@@ -80,4 +80,13 @@ pn main() {
     }
     print(len(m10))
     print("\n")
+
+    // Test 11: a shared Lambda VMap detaches before mutation.
+    let base = map(["value", 1])
+    var changed = base
+    changed.set("value", 99)
+    print(base.value)
+    print(" ")
+    print(changed.value)
+    print("\n")
 }

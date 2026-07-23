@@ -299,6 +299,7 @@ typedef struct AstCallNode : AstNode {
     bool propagate;
     bool can_raise;
     bool optional;
+    bool is_proc_method;
 } AstCallNode;
 
 typedef struct AstStartNode : AstNode {

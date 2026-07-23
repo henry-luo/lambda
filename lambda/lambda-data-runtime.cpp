@@ -2410,6 +2410,7 @@ void object_type_set_method(int64_t type_index, const char* method_name,
             method->compiled_fn = func_ptr;
             method->compiled_name = method_name;
             method->arity = (uint8_t)arity;
+            method->is_proc = is_proc != 0;
             log_debug("object_type_set_method: registered '%s' on '%.*s' fn=%p",
                 method_name, (int)obj_type->type_name.length, obj_type->type_name.str,
                 (void*)func_ptr);

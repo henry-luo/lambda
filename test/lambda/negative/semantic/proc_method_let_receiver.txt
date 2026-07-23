@@ -1,0 +1,1 @@
+mutating method 'increment' needs a `var` binding receiver

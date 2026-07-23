@@ -609,12 +609,12 @@ pn c_satisfy(var c: any, mark, var planner: any) {
                 var cc = vec_at(cs, i)
                 var ccid = (cc.cid)
                 if (ccid == det) {
+                    // Mutate the graph-owned constraint before retaining the
+                    // return alias, so COW does not detach a local copy.
+                    c_mark_unsatisfied(cc)
                     overridden = cc
                 }
                 i = i + 1
-            }
-            if (overridden != null) {
-                c_mark_unsatisfied(overridden)
             }
         }
         var ccid2 = (c.cid)

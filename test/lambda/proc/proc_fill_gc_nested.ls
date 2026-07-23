@@ -18,7 +18,7 @@ pn arr_get(a, idx) {
     return c2[i2]
 }
 
-pn arr_set(a, idx, val) {
+pn arr_set(var a, idx, val) {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16

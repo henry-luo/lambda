@@ -219,6 +219,17 @@
           "module_insns": 3873
         }
       }
+    },
+    {
+      "name": "lambda_cow_nested_store",
+      "script": "test/mir/lambda/cow_nested_store.ls",
+      "language": "lambda",
+      "description": "Stage-1 nested COW relinking: 149 finalized instructions on the reviewed register/root-slot path, with no heap path-array construction.",
+      "budgets": {
+        "default": {
+          "module_insns": 149
+        }
+      }
     }
   ]
 }

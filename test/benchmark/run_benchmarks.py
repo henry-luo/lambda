@@ -64,15 +64,9 @@ IS_MACOS = platform.system() == "Darwin"
 ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
 
 # Rows that RUN and exit 0 but compute the wrong answer on a given engine. They are
-# excluded per-engine, not per-row: both entries below are legitimately timed under
+# excluded per-engine, not per-row: the entry below is legitimately timed under
 # LambdaJS. Verify with test/benchmark goldens before adding or removing an entry.
 WRONG_OUTPUT_ROWS = {
-    ("awfy", "cd", "mir"):
-        'cd2.ls prints "collisions=0 / CD: FAIL"; golden awfy/cd2.txt is '
-        '"collisions=4305 / CD: PASS". The script stores an empty vector into its '
-        "voxel map and then fills it through the original binding — a reference-"
-        "semantics idiom that value semantics makes a no-op "
-        "(doc/Lambda_Formal_Semantics.md 9.3). Needs read-modify-write restructuring.",
     ("awfy", "list", "mir"):
         'list2.ls prints "List: FAIL result=6"; golden awfy/list2.txt is "List: PASS". '
         "Completes in ~0.012 ms because it does almost no work, so timing it produces "
@@ -330,6 +324,14 @@ def get_command_output(args):
 
 def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters, bench_filters):
     exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
+    quickjs_output = get_command_output([QJS_EXE, "--help"])
+    # A present QuickJS executable can still emit no version banner; metadata
+    # collection must not prevent a filtered MIR-only benchmark run.
+    quickjs_version = None
+    if quickjs_output:
+        quickjs_lines = quickjs_output.splitlines()
+        if quickjs_lines:
+            quickjs_version = quickjs_lines[0].replace("QuickJS version ", "") or None
     return {
         "schema_version": 2,
         "mode": mode,
@@ -348,7 +350,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "lambda_commit": get_command_output(["git", "rev-parse", "HEAD"]),
         "node_version": get_command_output([NODE_EXE, "--version"]),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),
-        "quickjs_version": (get_command_output([QJS_EXE, "--help"]) or "").splitlines()[0].replace("QuickJS version ", "") or None,
+        "quickjs_version": quickjs_version,
         "profile_check": os.environ.get("LAMBDA_BENCH_PROFILE_CHECK", "not_recorded"),
         "log_dir": os.environ.get("LAMBDA_BENCH_LOG_DIR"),
     }

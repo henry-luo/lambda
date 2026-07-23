@@ -672,6 +672,12 @@ enum MapKind {
 #define CONTAINER_FLAG_JS_PROPS (1u << 6)
 #define CONTAINER_FLAG_CTOR_RESERVED (1u << 7)
 
+// Lambda COW ownership state lives in the Container header padding. Raw
+// mutation APIs deliberately never inspect this byte; only *_cow wrappers do.
+enum ContainerCowState {
+    COW_STATE_SHARED = 1u << 0,
+};
+
 static inline bool map_kind_is_array_props(uint8_t map_kind) {
     return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;
 }
@@ -1928,6 +1934,8 @@ extern "C" {
     Item fn_stack(Item a, Item b);                 // stack along new leading axis
     Item pn_push(Item arr, Item value);            // append value to a growable array in place
     Item pn_splice(Item arr, Item start, Item count); // remove count elements at start, in place
+    Item pn_push_cow(Item owner, Item value);
+    Item pn_splice_cow(Item owner, Item start, Item count);
 
     // image stencil engine: slide a Kh×Kw window over the spatial dims of `in`
     // (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each position.
@@ -2131,6 +2139,19 @@ extern "C" {
     Item fn_mutable_value(Item value);
     Item fn_array_set(Array* arr, int64_t index, Item value);
     void fn_map_set(Item map, Item key, Item value);
+    bool cow_item_is_container(Item value);
+    Item cow_mark_shared(Item value);
+    Item cow_bind_var(Item value);
+    Item cow_prepare_write(Item old);
+    // Optional release-safe COW instrumentation.  It stays dormant unless
+    // COW_EXEC_PROFILE is enabled, and raw JS/host setters never call it.
+    void cow_profile_note_vmap_snapshot(void);
+    void cow_profile_note_vmap_rejection(void);
+    void cow_profile_dump(void);
+    Item array_set_cow(Item owner, int64_t index, Item value);
+    Item map_set_cow(Item owner, Item key, Item value);
+    Item cow_path_set_raw(Item owner, Item key, Item value);
+    Item cow_path_set(Item owner, Item path, Item value);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array
@@ -2142,6 +2163,8 @@ extern "C" {
     Item vmap_new();
     Item vmap_from_array(Item array_item);
     void vmap_set(Item vmap_item, Item key, Item value);
+    Item vmap_set_cow(Item owner, Item key, Item value);
+    Item vmap_clone_for_cow(Item source);
 
     // reactive UI: emit event to parent template handler
     Item pn_emit(Item event_name, Item event_data);

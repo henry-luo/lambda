@@ -44,6 +44,11 @@ static const char* kExtraJsScripts[] = {
     "test/js/concurrency_lambda_promise.js",
 };
 
+static const char* kExtraLambdaScripts[] = {
+    // COW spine detachment allocates between every retained owner write.
+    "test/lambda/proc/cow_alias.ls",
+};
+
 struct StressScript {
     std::string path;
     mir_check::Language language = mir_check::LANG_LAMBDA;
@@ -84,6 +89,14 @@ std::vector<StressScript> collect_scripts() {
         entry.path = path;
         entry.language = mir_check::LANG_JS;
         entry.name = "regression_" + mir_check::gtest_safe_name(mir_check::basename_of(path));
+        scripts.push_back(entry);
+    }
+    for (size_t i = 0; i < sizeof(kExtraLambdaScripts) / sizeof(kExtraLambdaScripts[0]); i++) {
+        StressScript entry;
+        entry.path = kExtraLambdaScripts[i];
+        entry.language = mir_check::LANG_LAMBDA;
+        entry.procedural = true;
+        entry.name = "regression_" + mir_check::gtest_safe_name(mir_check::basename_of(entry.path));
         scripts.push_back(entry);
     }
     return scripts;

@@ -793,9 +793,10 @@ pn recurse_draw(voxelMap, seenTree, vx, vy, p1x, p1y, p2x, p2y, motionIdx) {
     var existVec = rbt_get(voxelMap, vk)
     if (existVec == null) {
         existVec = vec_new()
-        rbt_put(voxelMap, vk, existVec)
     }
     vec_add(existVec, motionIdx)
+    // retain the edited value: COW may detach existVec from the stored snapshot.
+    rbt_put(voxelMap, vk, existVec)
 
     var gs = GOOD_VOXEL_SIZE
     recurse_draw(voxelMap, seenTree, vx - gs, vy, p1x, p1y, p2x, p2y, motionIdx)

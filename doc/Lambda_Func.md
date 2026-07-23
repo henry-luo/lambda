@@ -228,6 +228,33 @@ fn invalid(opt?: int, req: int) => ...  // Error
 | Missing default argument | Evaluates default expression |
 | Extra arguments (no variadic) | Warning, discarded |
 
+### Mutable `var` Parameters and Value Aliases
+
+Use a `var` parameter for explicit inout state. The caller must supply a
+mutable `var` binding with the exact declared type. Lambda treats its native
+arrays, maps, objects, elements, and VMaps as values at alias boundaries: a
+later write through one mutable binding detaches only the changed owner spine,
+leaving the retained value unchanged.
+
+```lambda
+pn publish_first(var doc: element) {
+    doc[0][0] = "published"
+}
+
+pn main() {
+    var doc = <article; <p "draft">>
+    var snapshot = doc
+    publish_first(doc)
+    print(snapshot[0][0])  // draft
+    print(doc[0][0])       // published
+}
+```
+
+This is not shared-reference mutation. If a helper needs to retain an edited
+child in a map or other container, use an explicit read–modify–write flow: read
+the value, edit the `var` binding, then store that binding back into its owner.
+This makes ownership clear and avoids depending on a reference-semantics alias.
+
 ---
 
 ## Function Calls
@@ -321,6 +348,32 @@ let result = data
 // Equivalent nested calls (harder to read)
 let result = sum(take(sort(map(filter(data, x => x > 0), x => x * 2)), 10))
 ```
+
+### Mutating Object Methods
+
+An object `pn` method receives a mutable receiver. Its receiver must be rooted
+at a `var` binding; calling it on a `let` binding or temporary is a compile-time
+error because the method writes the updated owner back on return. `fn` methods
+remain read-only.
+
+```lambda
+type Counter {
+    value: int = 0;
+    pn add(n: int) {
+        value = value + n
+    }
+    fn double() => value * 2
+}
+
+pn main() {
+    var counter = <Counter>
+    counter.add(5)
+    print(counter.double())     // 10
+}
+```
+
+Use an object with `pn` methods for encapsulated evolving state. Do not rely on
+a nested closure mutating one of its captures: captures are immutable snapshots.
 
 ---
 

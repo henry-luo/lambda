@@ -1619,6 +1619,15 @@ JitImport jit_runtime_imports[] = {
     {"fn_array_set", FPTR(fn_array_set)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
+    {"cow_mark_shared", FPTR(cow_mark_shared)},
+    {"cow_bind_var", FPTR(cow_bind_var)},
+    {"cow_prepare_write", FPTR(cow_prepare_write)},
+    {"array_set_cow", FPTR(array_set_cow)},
+    {"map_set_cow", FPTR(map_set_cow)},
+    {"cow_path_set_raw", FPTR(cow_path_set_raw)},
+    {"cow_path_set", FPTR(cow_path_set)},
+    {"pn_push_cow", FPTR(pn_push_cow)},
+    {"pn_splice_cow", FPTR(pn_splice_cow)},
 
     // ========================================================================
     // Bitwise helper
@@ -1631,6 +1640,7 @@ JitImport jit_runtime_imports[] = {
     {"vmap_new", FPTR(vmap_new)},
     {"vmap_from_array", FPTR(vmap_from_array)},
     {"vmap_set", FPTR(vmap_set)},
+    {"vmap_set_cow", FPTR(vmap_set_cow)},
 
     // ========================================================================
     // Container boxing / error conversion

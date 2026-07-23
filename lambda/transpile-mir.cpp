@@ -359,63 +359,78 @@ static AstNode* mir_unwrap_primary(AstNode* node) {
     return node;
 }
 
-static AstIdentNode* mir_compound_root_ident(AstNode* node) {
-    node = mir_unwrap_primary(node);
-    if (!node) return NULL;
-    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
-    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
-        AstFieldNode* field = (AstFieldNode*)node;
-        return mir_compound_root_ident(field->object);
-    }
-    return NULL;
-}
+static MirVarEntry* find_var(MirTranspiler* mt, const char* name);
 
-static bool mir_call_has_var_param(AstCallNode* call) {
-    if (!call) return false;
-    AstNode* fn_expr = mir_unwrap_primary(call->function);
-    if (!fn_expr || fn_expr->node_type != AST_NODE_IDENT) return false;
-    AstIdentNode* ident = (AstIdentNode*)fn_expr;
-    AstNode* fn_node_raw = ident->entry ? ident->entry->node : NULL;
-    if (!fn_node_raw || (fn_node_raw->node_type != AST_NODE_FUNC &&
-        fn_node_raw->node_type != AST_NODE_FUNC_EXPR &&
-        fn_node_raw->node_type != AST_NODE_PROC)) {
-        return false;
-    }
-    if (fn_node_raw->node_type == AST_NODE_PROC) {
-        // Procedural helpers are the mutable layer: constructors and accessors
-        // often return freshly-owned or borrowed containers. Re-cloning their
-        // result at every `var` binding makes graph algorithms pathological.
+enum { MIR_COW_PATH_MAX = 32 };
+
+typedef struct MirCowPath {
+    AstNode* root;
+    AstNode* segment[MIR_COW_PATH_MAX];
+    bool is_member[MIR_COW_PATH_MAX];
+    int count;
+} MirCowPath;
+
+static bool mir_collect_cow_path(MirCowPath* path, AstNode* node) {
+    node = mir_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_IDENT) {
+        path->root = node;
         return true;
     }
-    AstFuncNode* fn_node = (AstFuncNode*)fn_node_raw;
-    if (!fn_node->type || fn_node->type->type_id != LMD_TYPE_FUNC) return false;
-    TypeParam* param = ((TypeFunc*)fn_node->type)->param;
-    while (param) {
-        if (param->is_var_param) return true;
-        param = param->next;
-    }
-    return false;
-}
-
-static bool mir_var_rhs_keeps_mutable_alias(AstNode* rhs) {
-    AstNode* root_expr = mir_unwrap_primary(rhs);
-    if (!root_expr) {
+    if (node->node_type != AST_NODE_INDEX_EXPR && node->node_type != AST_NODE_MEMBER_EXPR) {
         return false;
     }
-    if (root_expr->node_type == AST_NODE_CALL_EXPR) {
-        // Calls that accept explicit `var` parameters are already in the
-        // borrowed-mutation channel; their result may intentionally expose a
-        // mutable subvalue, so cloning here breaks that alias contract.
-        return mir_call_has_var_param((AstCallNode*)root_expr);
+    AstFieldNode* field = (AstFieldNode*)node;
+    if (!mir_collect_cow_path(path, field->object) || !field->field ||
+            field->field->next || path->count >= MIR_COW_PATH_MAX) {
+        return false;
     }
+    path->segment[path->count] = field->field;
+    path->is_member[path->count] = node->node_type == AST_NODE_MEMBER_EXPR;
+    path->count++;
+    return true;
+}
+
+static MirVarEntry* mir_direct_root_binding(MirTranspiler* mt, AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
+    AstIdentNode* ident = (AstIdentNode*)node;
+    char name[128];
+    snprintf(name, sizeof(name), "%.*s", (int)ident->name->len, ident->name->chars);
+    return find_var(mt, name);
+}
+
+static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
+    AstNode* root_expr = mir_unwrap_primary(expr);
+    if (!root_expr) return false;
     if (root_expr->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)root_expr;
-        return ident->entry && ident->entry->is_mutable;
+        MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
+        return source && source->cow_owned;
     }
-    if (root_expr->node_type != AST_NODE_INDEX_EXPR &&
-        root_expr->node_type != AST_NODE_MEMBER_EXPR) return false;
-    AstIdentNode* root = mir_compound_root_ident(root_expr);
-    return root && root->entry && root->entry->is_mutable;
+    // Literals and calls return values into a binding. Member/index reads are
+    // borrows of an existing owner and must not turn cursor rebinding into a
+    // second COW root before their retained parent slot is available.
+    switch (root_expr->node_type) {
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_LIST:
+    case AST_NODE_OBJECT_LITERAL:
+    case AST_NODE_NEW_EXPR:
+    case AST_NODE_CALL_EXPR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr) {
+    AstNode* root_expr = mir_unwrap_primary(expr);
+    if (!root_expr || root_expr->node_type != AST_NODE_IDENT) return false;
+    MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
+    return source && source->cow_owned;
 }
 
 // Thin wrappers over the shared emitter primitives (P0.1). These delegate to
@@ -875,6 +890,38 @@ static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
         return;
     }
     store_gc_root_slot(mt, var->root_slot, var->reg);
+}
+
+static MIR_reg_t mir_prepare_cow_root(MirTranspiler* mt, MirVarEntry* root) {
+    MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
+    MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, root->reg),
+        MIR_new_reg_op(mt->ctx, replacement)));
+    root->type_id = LMD_TYPE_ANY;
+    root->mir_type = MIR_T_I64;
+    // The installed replacement is unique, but its shallow-copied children
+    // may still be shared and nested writes must keep checking that spine.
+    root->cow_marked = false;
+    root->cow_children_may_be_shared = true;
+    update_gc_root_slot(mt, root);
+    return replacement;
+}
+
+static bool mir_root_may_need_cow(MirVarEntry* root) {
+    if (!root) return false;
+    switch (root->type_id) {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_VMAP:
+    case LMD_TYPE_ANY:
+        return true;
+    default:
+        return false;
+    }
 }
 
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
@@ -2334,6 +2381,81 @@ static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_r
 // ============================================================================
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
+static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+
+static MIR_reg_t mir_emit_cow_path_key(MirTranspiler* mt, AstNode* segment,
+        bool is_member) {
+    AstNode* key_node = mir_unwrap_primary(segment);
+    if (is_member && key_node && key_node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)key_node;
+        MIR_reg_t name = emit_load_string_literal(mt, ident->name->chars);
+        MIR_reg_t symbol = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, name),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ident->name->len));
+        return emit_box_symbol(mt, symbol);
+    }
+    return transpile_box_item(mt, segment);
+}
+
+static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
+        const MirCowPath* path, AstNode* terminal, bool terminal_is_member,
+        MIR_reg_t value) {
+    // Keep the owner spine in compiler registers/root slots.  The former
+    // temporary Lambda array allocated once per nested write and made COW's
+    // cold path observable on otherwise allocation-free stores.
+    MIR_reg_t keys[MIR_COW_PATH_MAX + 1];
+    int key_roots[MIR_COW_PATH_MAX + 1];
+    int value_root = create_gc_root_slot(mt, value);
+    for (int i = 0; i <= path->count; i++) {
+        AstNode* segment = i == path->count ? terminal : path->segment[i];
+        bool is_member = i == path->count ? terminal_is_member : path->is_member[i];
+        keys[i] = mir_emit_cow_path_key(mt, segment, is_member);
+        key_roots[i] = create_gc_root_slot(mt, keys[i]);
+    }
+
+    update_gc_root_slot(mt, root);
+    MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
+    MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, replacement)));
+    root->type_id = LMD_TYPE_ANY;
+    root->mir_type = MIR_T_I64;
+    update_gc_root_slot(mt, root);
+    int current_root = root->root_slot;
+
+    for (int i = 0; i < path->count; i++) {
+        MIR_reg_t current = load_gc_root_slot(mt, current_root, "cow_parent");
+        MIR_reg_t key = load_gc_root_slot(mt, key_roots[i], "cow_key");
+        MIR_reg_t child = emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+        int child_root = create_gc_root_slot(mt, child);
+        child = load_gc_root_slot(mt, child_root, "cow_child");
+        MIR_reg_t detached = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, child));
+        store_gc_root_slot(mt, child_root, detached);
+        current = load_gc_root_slot(mt, current_root, "cow_parent");
+        key = load_gc_root_slot(mt, key_roots[i], "cow_key");
+        detached = load_gc_root_slot(mt, child_root, "cow_child");
+        emit_call_3(mt, "cow_path_set_raw", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, detached));
+        current_root = child_root;
+    }
+
+    MIR_reg_t current = load_gc_root_slot(mt, current_root, "cow_parent");
+    MIR_reg_t key = load_gc_root_slot(mt, key_roots[path->count], "cow_key");
+    MIR_reg_t terminal_value = load_gc_root_slot(mt, value_root, "cow_value");
+    emit_call_3(mt, "cow_path_set_raw", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, terminal_value));
+    root->cow_marked = false;
+    root->cow_children_may_be_shared = true;
+    return load_gc_root_slot(mt, root->root_slot, "cow_root");
+}
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
@@ -5583,22 +5705,25 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     val = ival;
                 }
 
-                bool keep_mutable_alias = let_node->node_type == AST_NODE_VAR_STAM &&
-                    mir_var_rhs_keeps_mutable_alias(asn->as);
-                if (let_node->node_type == AST_NODE_VAR_STAM &&
+                bool cow_owned = mir_expr_produces_cow_owner(mt, asn->as) &&
+                    mir_expr_may_return_container(asn->as, expr_tid, var_tid);
+                bool cow_binding = let_node->node_type == AST_NODE_VAR_STAM &&
                     mir_expr_may_return_container(asn->as, expr_tid, var_tid) &&
-                    !keep_mutable_alias) {
-                    // Phase 5 COW anchor: a var binding receives its own mutable
-                    // container so later interior writes cannot mutate a let alias.
-                    // Field/index aliases from mutable roots keep their source
-                    // identity; detaching them would break intentional write-back.
+                    mir_expr_is_owned_binding_alias(mt, asn->as);
+                MirVarEntry* cow_source = cow_binding
+                    ? mir_direct_root_binding(mt, asn->as) : NULL;
+                if (cow_binding) {
+                    // A var binding is an ownership boundary: core containers
+                    // become shared and detach at their next COW write; ArrayNum
+                    // retains its Stage-2 compatibility clone/view behavior.
                     MIR_reg_t boxed = emit_box(mt, val, var_tid);
-                    val = emit_call_1(mt, "fn_mutable_value", MIR_T_I64,
+                    val = emit_call_1(mt, "cow_bind_var", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                    // fn_mutable_value returns a boxed Item; keep the tracked
+                    // cow_bind_var returns a boxed Item; keep the tracked
                     // storage type aligned so later reads/calls use the Item ABI.
                     var_tid = LMD_TYPE_ANY;
                     expr_tid = LMD_TYPE_ANY;
+                    if (cow_source) cow_source->cow_marked = true;
                 }
 
                 MIR_type_t mtype = type_to_mir(var_tid);
@@ -5617,6 +5742,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 
                 // Store in current scope
                 set_var(mt, name_buf, copy, mtype, var_tid);
+                MirVarEntry* declared_var = find_var(mt, name_buf);
+                if (declared_var) declared_var->cow_owned = cow_owned;
+                if (cow_binding) {
+                    if (declared_var) declared_var->cow_marked = true;
+                }
                 if (var_tid == LMD_TYPE_NUM_SIZED && declared_value_type) {
                     MirVarEntry* v = find_var(mt, name_buf);
                     if (v) v->num_type = type_num_sized_kind(declared_value_type);
@@ -8000,6 +8130,18 @@ static bool mir_call_may_suspend(AstCallNode* call_node) {
 static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
     AstNode* fn_expr = call_node->function;
 
+    if (call_node->is_proc_method) {
+        AstNode* unwrapped = mir_unwrap_primary(fn_expr);
+        AstFieldNode* member = unwrapped && unwrapped->node_type == AST_NODE_MEMBER_EXPR
+            ? (AstFieldNode*)unwrapped : NULL;
+        MirVarEntry* receiver = member ? mir_direct_root_binding(mt, member->object) : NULL;
+        if (receiver && receiver->cow_marked) {
+            // The bound closure captures self by value, so replacement must be
+            // installed before fn_member creates the mutating method closure.
+            mir_prepare_cow_root(mt, receiver);
+        }
+    }
+
     AstNode* only_arg = call_node->argument;
     if (only_arg && !only_arg->next) {
         AstNode* target_expr = fn_expr;
@@ -8025,9 +8167,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         }
     }
 
-    // Check for system function calls
-    if (fn_expr->node_type == AST_NODE_SYS_FUNC) {
-        AstSysFuncNode* sys = (AstSysFuncNode*)fn_expr;
+    // Check for system function calls. Parser-built identifiers may retain a
+    // primary wrapper, which otherwise bypasses the COW-aware sysproc paths.
+    AstNode* sys_fn_expr = mir_unwrap_primary(fn_expr);
+    if (sys_fn_expr && sys_fn_expr->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys = (AstSysFuncNode*)sys_fn_expr;
         SysFuncInfo* info = sys->fn_info;
 
         // Count arguments
@@ -8106,6 +8250,28 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // ==== VMap: m.set(k, v) -> vmap_set(m, k, v) ====
         if (info->fn == SYSPROC_VMAP_SET) {
             arg = call_node->argument;
+            MirVarEntry* cow_root = mir_direct_root_binding(mt, arg);
+            if (cow_root && cow_root->cow_marked) {
+                // Snapshot value arguments before a shared VMap can detach.
+                AstNode* key_arg = arg->next;
+                AstNode* value_arg = key_arg ? key_arg->next : NULL;
+                MIR_reg_t key = transpile_box_item(mt, key_arg);
+                MIR_reg_t value = transpile_box_item(mt, value_arg);
+                MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+                MIR_reg_t replacement = emit_call_3(mt, "vmap_set_cow", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cow_root->reg),
+                    MIR_new_reg_op(mt->ctx, replacement)));
+                cow_root->type_id = LMD_TYPE_ANY;
+                cow_root->mir_type = MIR_T_I64;
+                cow_root->cow_marked = false;
+                cow_root->cow_children_may_be_shared = true;
+                update_gc_root_slot(mt, cow_root);
+                return replacement;
+            }
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
             MIR_reg_t boxed_a1 = emit_box(mt, a1, a1_tid);
@@ -8124,6 +8290,41 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
+        }
+
+        if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE) {
+            arg = call_node->argument;
+            MirVarEntry* cow_root = mir_direct_root_binding(mt, arg);
+            if (cow_root && cow_root->cow_marked) {
+                // Evaluate non-owner arguments before detaching a shared owner.
+                AstNode* first_value_arg = arg->next;
+                MIR_reg_t replacement;
+                if (info->fn == SYSPROC_PUSH) {
+                    MIR_reg_t value = transpile_box_item(mt, first_value_arg);
+                    MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+                    replacement = emit_call_2(mt, "pn_push_cow", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                } else {
+                    AstNode* count_arg = first_value_arg ? first_value_arg->next : NULL;
+                    MIR_reg_t start = transpile_box_item(mt, first_value_arg);
+                    MIR_reg_t count = transpile_box_item(mt, count_arg);
+                    MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+                    replacement = emit_call_3(mt, "pn_splice_cow", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, start),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, count));
+                }
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cow_root->reg),
+                    MIR_new_reg_op(mt->ctx, replacement)));
+                cow_root->type_id = LMD_TYPE_ANY;
+                cow_root->mir_type = MIR_T_I64;
+                cow_root->cow_marked = false;
+                cow_root->cow_children_may_be_shared = true;
+                update_gc_root_slot(mt, cow_root);
+                return replacement;
+            }
         }
 
         // ==== Native len() for typed collections/strings ====
@@ -9040,7 +9241,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 } else {
                     // Non-native param: standard boxed Item ABI
                     if (resolved_args[i]) {
-                        MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
+                        TypeParam* type_param = param_iter
+                            ? (TypeParam*)((AstNode*)param_iter)->type : NULL;
+                        MirVarEntry* borrow_root = type_param && type_param->is_var_param
+                            ? mir_direct_root_binding(mt, resolved_args[i]) : NULL;
+                        // An explicit var parameter borrows the caller's writable root.
+                        // Detach before passing it because the callee's raw stores cannot
+                        // write a replacement back into the caller after the call begins.
+                        MIR_reg_t val = borrow_root && borrow_root->cow_marked &&
+                                mir_root_may_need_cow(borrow_root)
+                            ? mir_prepare_cow_root(mt, borrow_root)
+                            : transpile_box_item(mt, resolved_args[i]);
                         arg_root_slots[i] = create_gc_root_slot(mt, val);
                         arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
                     } else {
@@ -9865,18 +10076,25 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     if (var) {
         TypeId var_tid = var->type_id;
 
-        bool keep_mutable_alias = mir_var_rhs_keeps_mutable_alias(assign->value);
-        if (mir_expr_may_return_container(assign->value, val_tid, var_tid) && !keep_mutable_alias) {
-            // Phase 5 COW anchor for reassignment: storing a container into a
-            // var slot must detach it before later interior writes. Direct
-            // aliases from mutable roots and borrowed-var calls keep identity.
+        bool cow_owned = mir_expr_produces_cow_owner(mt, assign->value) &&
+            mir_expr_may_return_container(assign->value, val_tid, var_tid);
+        bool cow_binding = mir_expr_may_return_container(assign->value, val_tid, var_tid) &&
+            mir_expr_is_owned_binding_alias(mt, assign->value);
+        MirVarEntry* cow_source = cow_binding
+            ? mir_direct_root_binding(mt, assign->value) : NULL;
+        if (cow_binding) {
+            // Reassignment crosses the same ownership boundary as var
+            // declaration; both roots must observe a later COW detachment.
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
-            val = emit_call_1(mt, "fn_mutable_value", MIR_T_I64,
+            val = emit_call_1(mt, "cow_bind_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-            // fn_mutable_value returns a boxed Item; assignment widening and
+            // cow_bind_var returns a boxed Item; assignment widening and
             // follow-up boxing must see the actual register representation.
             val_tid = LMD_TYPE_ANY;
+            if (cow_source) cow_source->cow_marked = true;
         }
+        var->cow_marked = cow_binding;
+        var->cow_owned = cow_owned;
 
         // Check if the new value type matches the variable's tracked type.
         // INT and INT64 are both raw int64 in MIR registers (MIR_T_I64) —
@@ -10668,6 +10886,43 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return result;
         }
 
+        MirCowPath cow_path = {};
+        bool has_cow_path = mir_collect_cow_path(&cow_path, ca->object);
+        MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
+        if (cow_root && cow_path.count > 0 && mir_root_may_need_cow(cow_root) &&
+                (cow_root->cow_marked || cow_root->cow_children_may_be_shared)) {
+            // Snapshot the RHS before rebuilding the owner spine; the nested
+            // path is re-resolved only after that evaluation completes. A
+            // unique root can still contain shared children after an earlier
+            // shallow detach, so every nested owner spine must test its links.
+            MIR_reg_t value = transpile_box_item(mt, ca->value);
+            return mir_emit_cow_path_set(mt, cow_root, &cow_path, ca->key, false, value);
+        }
+        if (cow_root && cow_root->cow_marked && cow_root->type_id != LMD_TYPE_ARRAY_NUM) {
+            // Evaluate the value before borrowing the root: a RHS call may
+            // observe the pre-write owner, and COW replacement must not move it first.
+            MIR_reg_t value = transpile_box_item(mt, ca->value);
+            MIR_reg_t index = transpile_expr(mt, ca->key);
+            TypeId index_type = get_effective_type(mt, ca->key);
+            if (!is_integer_type_id(index_type)) {
+                index = emit_unbox(mt, index, LMD_TYPE_INT);
+            }
+            MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+            MIR_reg_t replacement = emit_call_3(mt, "array_set_cow", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, cow_root->reg),
+                MIR_new_reg_op(mt->ctx, replacement)));
+            cow_root->type_id = LMD_TYPE_ANY;
+            cow_root->mir_type = MIR_T_I64;
+            cow_root->cow_marked = false;
+            cow_root->cow_children_may_be_shared = true;
+            update_gc_root_slot(mt, cow_root);
+            return replacement;
+        }
+
         MIR_reg_t obj = transpile_expr(mt, ca->object);
         TypeId obj_tid = get_effective_type(mt, ca->object);
         // Object must be a pointer (Array*), unbox if boxed
@@ -11026,6 +11281,46 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             log_debug("mir: edit bridge member assign via %s for '%.*s'",
                       bridge_fn, (int)ident->name->len, ident->name->chars);
             return result;
+        }
+
+        MirCowPath cow_path = {};
+        bool has_cow_path = mir_collect_cow_path(&cow_path, ca->object);
+        MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
+        if (cow_root && cow_path.count > 0 && mir_root_may_need_cow(cow_root) &&
+                (cow_root->cow_marked || cow_root->cow_children_may_be_shared)) {
+            // The path helper rebuilds every copied parent, avoiding a raw
+            // write through a child shared by an earlier shallow detach.
+            MIR_reg_t value = transpile_box_item(mt, ca->value);
+            return mir_emit_cow_path_set(mt, cow_root, &cow_path, ca->key, true, value);
+        }
+        if (cow_root && cow_root->cow_marked) {
+            // Keep the RHS-before-borrow ordering when a shared map detaches.
+            MIR_reg_t value = transpile_box_item(mt, ca->value);
+            MIR_reg_t key;
+            if (ca->key->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ident = (AstIdentNode*)ca->key;
+                MIR_reg_t name_ptr = emit_load_string_literal(mt, ident->name->chars);
+                MIR_reg_t symbol = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ident->name->len));
+                key = emit_box_symbol(mt, symbol);
+            } else {
+                key = transpile_box_item(mt, ca->key);
+            }
+            MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
+            MIR_reg_t replacement = emit_call_3(mt, "map_set_cow", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, cow_root->reg),
+                MIR_new_reg_op(mt->ctx, replacement)));
+            cow_root->type_id = LMD_TYPE_ANY;
+            cow_root->mir_type = MIR_T_I64;
+            cow_root->cow_marked = false;
+            cow_root->cow_children_may_be_shared = true;
+            update_gc_root_slot(mt, cow_root);
+            return replacement;
         }
 
         // ==================================================================
@@ -12991,6 +13286,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             }
 
             set_var(mt, pname, final_reg, type_to_mir(var_type), var_type);
+            TypeParam* declared_param = (TypeParam*)param->type;
+            MirVarEntry* param_var = find_var(mt, pname);
+            if (param_var && declared_param && declared_param->is_var_param) {
+                // A caller can detach the root before this var borrow while
+                // leaving shallow children shared, so callee writes recheck paths.
+                param_var->cow_children_may_be_shared = true;
+            }
             if (var_type == LMD_TYPE_NUM_SIZED) {
                 MirVarEntry* v = find_var(mt, pname);
                 if (v) v->num_type = type_num_sized_kind(param_decl_type);

@@ -2220,6 +2220,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     // For method calls, first build the object to get its type for validation
     AstNode* method_object = NULL;
     TypeId obj_type_id = LMD_TYPE_ANY;
+    bool user_method_is_proc = false;
 
     // Check if this is a module call (e.g., io.copy() or hostobj_demo.answer()).
     // Modules are identified by name or alias and don't require building the object.
@@ -2380,13 +2381,17 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             // Also check object method table
             if (!has_user_member && tid == LMD_TYPE_OBJECT) {
                 TypeObject* obj_type = (TypeObject*)method_object->type;
-                for (TypeMethod* m = obj_type->methods; m; m = m->next) {
-                    if (m->name && m->name->length == method_name.length &&
-                        strncmp(m->name->str, method_name.str, method_name.length) == 0) {
-                        has_user_member = true;
-                        log_debug("method_call: user-defined method '%.*s' takes precedence over sys func",
-                            (int)method_name.length, method_name.str);
-                        break;
+                for (TypeObject* owner = obj_type; owner && !has_user_member;
+                        owner = owner->base) {
+                    for (TypeMethod* m = owner->methods; m; m = m->next) {
+                        if (m->name && m->name->length == method_name.length &&
+                            strncmp(m->name->str, method_name.str, method_name.length) == 0) {
+                            has_user_member = true;
+                            user_method_is_proc = m->is_proc;
+                            log_debug("method_call: user-defined method '%.*s' takes precedence over sys func",
+                                (int)method_name.length, method_name.str);
+                            break;
+                        }
                     }
                 }
             }
@@ -2501,6 +2506,27 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         else {
             ast_node->type = &TYPE_ANY;
         }
+    }
+
+    if (is_method_call && user_method_is_proc) {
+        if (!tp->current_scope || !tp->current_scope->is_proc) {
+            record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                "procedure method '%.*s' cannot be called in a function",
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+        AstIdentNode* receiver_root = compound_root_ident(method_object);
+        if (!receiver_root || !receiver_root->entry || !receiver_root->entry->is_mutable) {
+            // A pn method writes its implicit self parameter back on return, so a
+            // let-rooted receiver would otherwise appear to succeed and lose the write.
+            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                "mutating method '%.*s' needs a `var` binding receiver",
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+        ast_node->is_proc_method = true;
     }
 
     // build arguments

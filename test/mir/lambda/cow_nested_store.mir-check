@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Nested COW stores detach and relink through rooted registers. The old heap path-array lowering is forbidden so the cold path cannot allocate a Lambda path object.",
+  "checks": [
+    {
+      "in_func": "*",
+      "expect": [
+        "import\tcow_prepare_write",
+        "import\tcow_path_set_raw"
+      ],
+      "forbid": [
+        "import\tarray_push"
+      ]
+    }
+  ]
+}
