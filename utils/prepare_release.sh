@@ -30,12 +30,10 @@ mkdir -p ./release/lmd/input
 echo "==> Copying Lambda input files..."
 if ls ./lambda/input/*.ls >/dev/null 2>&1; then
     cp ./lambda/input/*.ls ./release/lmd/input/
-    echo "    Copied *.ls files"
 fi
 
 if ls ./lambda/input/*.css >/dev/null 2>&1; then
     cp ./lambda/input/*.css ./release/lmd/input/
-    echo "    Copied *.css files"
 fi
 
 # Step 2b: Copy LaTeX CSS files
@@ -45,7 +43,6 @@ mkdir -p ./release/lmd/input/latex/css
 echo "==> Copying LaTeX CSS files..."
 if ls ./lambda/input/latex/css/*.css >/dev/null 2>&1; then
     cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
-    echo "    Copied LaTeX CSS files"
 fi
 
 # Step 2b2: Copy LaTeX fonts (Computer Modern + KaTeX)
@@ -56,13 +53,11 @@ fi
 echo "==> Copying LaTeX fonts (Computer Modern + KaTeX)..."
 rm -rf ./release/lmd/input/latex/fonts
 cp -r ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
-echo "    Copied lambda/input/latex/fonts/ (KaTeX woff2 + CMU woff subdirectories)"
 
 # Step 2d: Copy Lambda packages
 echo "==> Copying Lambda packages..."
 rm -rf ./release/lmd/package
 cp -r ./lambda/package ./release/lmd/package
-echo "    Copied lambda/package/ (chart, latex, math)"
 
 # Step 2c: Copy live-demo.html and referenced files
 echo "==> Copying live-demo.html and referenced files..."
@@ -70,17 +65,14 @@ echo "==> Copying live-demo.html and referenced files..."
 # Copy live-demo.html
 mkdir -p ./release/test/html
 cp ./test/html/live-demo.html ./release/test/html/
-echo "    Copied test/html/live-demo.html"
 
 # Copy demo.html as index.html
 cp ./test/html/demo.html ./release/test/html/index.html
-echo "    Copied test/html/demo.html as index.html"
 
 # Copy HTML files from test/html/ referenced by live-demo.html
 for file in flex.html grid.html table.html table_simple.html box.html position.html; do
     if [ -f "./test/html/$file" ]; then
         cp "./test/html/$file" ./release/test/html/
-        echo "    Copied test/html/$file"
     fi
 done
 
@@ -88,7 +80,6 @@ done
 mkdir -p ./release/test/layout/data/page
 if [ -f "./test/layout/data/page/combo_003_complete_article.html" ]; then
     cp "./test/layout/data/page/combo_003_complete_article.html" ./release/test/layout/data/page/
-    echo "    Copied test/layout/data/page/combo_003_complete_article.html"
 fi
 
 # Copy test/layout/data/res/ files (images/SVGs)
@@ -96,7 +87,6 @@ mkdir -p ./release/test/layout/data/res
 for file in tiger.svg sample1.png; do
     if [ -f "./test/layout/data/res/$file" ]; then
         cp "./test/layout/data/res/$file" ./release/test/layout/data/res/
-        echo "    Copied test/layout/data/res/$file"
     fi
 done
 
@@ -105,7 +95,6 @@ mkdir -p ./release/test/input
 for file in comprehensive_test.md latex-showcase.tex test.xml test-xml.css raw_commands_test.pdf more_test.yaml; do
     if [ -f "./test/input/$file" ]; then
         cp "./test/input/$file" ./release/test/input/
-        echo "    Copied test/input/$file"
     fi
 done
 
@@ -113,7 +102,6 @@ done
 mkdir -p ./release/test/lambda
 if [ -f "./test/lambda/complex_iot_report_html.ls" ]; then
     cp "./test/lambda/complex_iot_report_html.ls" ./release/test/lambda/
-    echo "    Copied test/lambda/complex_iot_report_html.ls"
 fi
 
 # Copy test/lambda/chart/ files referenced by live-demo.html
@@ -131,7 +119,6 @@ for file in chart_dashboard_demo.ls dashboard_demo.json \
             test_layered_chart.ls layered_chart.json; do
     if [ -f "./test/lambda/chart/$file" ]; then
         cp "./test/lambda/chart/$file" ./release/test/lambda/chart/
-        echo "    Copied test/lambda/chart/$file"
     fi
 done
 
@@ -150,7 +137,6 @@ while IFS= read -r -d '' file; do
     destdir="./release/doc/$(dirname "$relpath")"
     mkdir -p "$destdir"
     cp "$file" "$destdir/"
-    echo "    Copied doc/$relpath"
 done < <(find ./doc -type f \( -name "*.md" -o -name "*.pdf" -o -name "*.svg" \) -print0)
 
 # Step 4: Require a release binary built by make build-release
@@ -166,10 +152,8 @@ fi
 echo "==> Copying lambda.exe to release directory..."
 if [[ "$OSTYPE" == "darwin"* ]] || [[ "$OSTYPE" == "linux-gnu"* ]]; then
     cp ./lambda.exe ./release/lambda
-    echo "    Copied lambda.exe as release/lambda"
 else
     cp ./lambda.exe ./release/lambda.exe
-    echo "    Copied lambda.exe to release/"
 fi
 
 echo "==> Release preparation complete!"
