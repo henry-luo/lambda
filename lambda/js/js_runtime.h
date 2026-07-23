@@ -594,6 +594,8 @@ void js_require_object_coercible(Item value);
  * Returns 1 if pending, 0 otherwise.
  */
 int js_check_exception(void);
+void js_debug_assert_exception_clear(void);
+void js_debug_assert_exception_set(void);
 
 /**
  * Clear the pending exception and return the thrown value.

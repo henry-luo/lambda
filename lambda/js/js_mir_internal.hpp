@@ -132,6 +132,7 @@ MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
+void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsExcTrack state);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     bool item_return, MirScalarReturnMode scalar_return_mode,
     MIR_reg_t runtime_reg);
@@ -166,8 +167,13 @@ void jm_emit_resume_env_restore(JsMirTranspiler* mt);
 void jm_emit_try_state_reset(JsMirTranspiler* mt);
 void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
-void jm_emit_pending_exception_check(JsMirTranspiler* mt, JsMirCompletionKind kind);
-void jm_optimize_exception_polls(JsMirTranspiler* mt);
+JsExcTrack jm_exc_state(JsMirTranspiler* mt);
+JsExcTrack jm_exc_merge(JsExcTrack a, JsExcTrack b);
+void jm_exc_set_state(JsMirTranspiler* mt, JsExcTrack state);
+void jm_exc_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
+MIR_reg_t jm_emit_exception_test(JsMirTranspiler* mt);
+void jm_emit_exception_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
+void jm_emit_exception_guard(JsMirTranspiler* mt, MIR_label_t target);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);

@@ -22,7 +22,7 @@
             {
               "name": "_twice_#",
               "occurrence": 0,
-              "roots": 2,
+              "roots": 0,
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
@@ -60,7 +60,7 @@
             {
               "name": "_accumulate_#",
               "occurrence": 0,
-              "roots": 5,
+              "roots": 3,
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
@@ -111,10 +111,10 @@
       "description": "JS call-result binding: watches js_main's root-store traffic.",
       "budgets": {
         "default": {
-          "module_insns": 155,
+          "module_insns": 158,
           "functions": {
             "js_main": {
-              "insns": 95
+              "insns": 98
             }
           },
           "frames": [
@@ -137,10 +137,10 @@
       "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat.",
       "budgets": {
         "default": {
-          "module_insns": 298,
+          "module_insns": 300,
           "functions": {
             "js_main": {
-              "insns": 67
+              "insns": 69
             }
           },
           "frames": [
@@ -194,7 +194,7 @@
       "description": "Picked corpus script (array/callback-heavy), whole-module total only.",
       "budgets": {
         "default": {
-          "module_insns": 2834
+          "module_insns": 2823
         }
       }
     },
@@ -205,7 +205,7 @@
       "description": "Picked corpus script (generator/resume-heavy), whole-module total only.",
       "budgets": {
         "default": {
-          "module_insns": 4062
+          "module_insns": 4006
         }
       }
     },
@@ -216,7 +216,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting.",
       "budgets": {
         "default": {
-          "module_insns": 3873
+          "module_insns": 3920
         }
       }
     },

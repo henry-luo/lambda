@@ -87,6 +87,7 @@ typedef enum JitExceptionEffect {
     JIT_EXCEPTION_MAY_SET = 0,
     JIT_EXCEPTION_PRESERVES,
     JIT_EXCEPTION_CLEARS,
+    JIT_EXCEPTION_SETS,
 } JitExceptionEffect;
 typedef enum JitNumberStackEffect {
     JIT_NUMBER_STACK_MAY_ALLOCATE = 0,

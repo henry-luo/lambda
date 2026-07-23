@@ -414,6 +414,26 @@ extern "C" int js_check_exception(void) {
     return js_exception_pending ? 1 : 0;
 }
 
+extern "C" void js_debug_assert_exception_clear(void) {
+#ifndef NDEBUG
+    AutoAssertNoGC no_gc((Context*)context);
+    if (js_exception_pending) {
+        log_error("js-exc assert-clear: pending flag unexpectedly set");
+        abort();
+    }
+#endif
+}
+
+extern "C" void js_debug_assert_exception_set(void) {
+#ifndef NDEBUG
+    AutoAssertNoGC no_gc((Context*)context);
+    if (!js_exception_pending) {
+        log_error("js-exc assert-set: pending flag unexpectedly clear");
+        abort();
+    }
+#endif
+}
+
 extern "C" Item js_clear_exception(void) {
     js_exception_pending = false;
     // Re-materialize before clearing: a nested throw may overwrite this slot

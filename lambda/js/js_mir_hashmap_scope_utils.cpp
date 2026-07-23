@@ -58,6 +58,12 @@ static void js_call_root_value(void* owner, MIR_reg_t reg) {
     if (mt && mt->em.frame.active && reg) jm_create_gc_root_slot(mt, reg);
 }
 
+static void jm_note_call_exception(void* owner, JitExceptionEffect effect) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    if (!mt) return;
+    jm_exc_note_call(mt, effect);
+}
+
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
@@ -75,6 +81,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.note_mir_call = js_exec_profile_note_mir_call;
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
+    mt->em.note_call_exception = jm_note_call_exception;
     mt->em.convert_rep = jm_convert_rep;
     mt->em.lookup_import_metadata = jm_lookup_import_metadata;
     mt->is_module = is_module;
@@ -353,10 +360,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
         bool item_return, MirScalarReturnMode scalar_return_mode,
         MIR_reg_t runtime_reg) {
     if (!mt) return;
-    // Poll dedup is local to one MIR function; retaining another function's
-    // tail pointer would suppress a required first exception observation.
-    mt->last_exception_poll_branch = NULL;
-    mt->last_exception_poll_target = 0;
+    // Function entry must start unknown because callers may arrive with a
+    // pending exception already set, matching the legacy dirty-entry proof.
+    mt->exc_track = JS_EXC_UNKNOWN;
     mt->arg_stack_scope = NULL;
     em_frame_dispose(&mt->em);
     mt->em.frame.return_type = return_type;
@@ -450,7 +456,6 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     }
     jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1,
         MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
-    jm_optimize_exception_polls(mt);
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->em);
     // Scratch coloring fixes the physical frame size only after the complete
@@ -481,10 +486,15 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
             MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), insn->ops[0]));
         jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
+        jm_exc_set_state(mt, JS_EXC_UNREACHABLE);
         _MIR_free_insn(mt->ctx, insn);
         return;
     }
     jm_emit_raw(mt, insn);
+    if (!insn) return;
+    if (insn->code == MIR_JMP || insn->code == MIR_RET) {
+        jm_exc_set_state(mt, JS_EXC_UNREACHABLE);
+    }
 }
 
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
@@ -492,6 +502,18 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
+    // Unowned labels may be joins from exception and non-exception paths; the
+    // tracker must forget any stronger local proof before control merges here.
+    jm_exc_set_state(mt, JS_EXC_UNKNOWN);
+    em_emit_label(&mt->em, label);
+}
+
+void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsExcTrack state) {
+    if (!label) {
+        log_error("js-mir: attempt to emit NULL structured label — skipping");
+        return;
+    }
+    jm_exc_set_state(mt, state == JS_EXC_UNREACHABLE ? JS_EXC_UNKNOWN : state);
     em_emit_label(&mt->em, label);
 }
 

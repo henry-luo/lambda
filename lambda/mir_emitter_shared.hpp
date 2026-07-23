@@ -216,7 +216,6 @@ struct MirGcCallSite {
     MIR_insn_t insn;
     JitGcEffect effect;
     JitExceptionEffect exception_effect;
-    bool is_exception_poll;
 };
 
 struct MirRootWriteBackResult {
@@ -403,6 +402,7 @@ struct MirEmitter {
     void (*before_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg);
     void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
+    void (*note_call_exception)(void* owner, JitExceptionEffect effect);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
     // Hosted compilers provide their build-coupled catalog lookup. Core
     // transpilers leave this NULL and retain the existing registry path.
@@ -551,8 +551,7 @@ static inline bool em_root_candidate_info(const MirRootCandidate* candidates,
 
 static inline bool em_root_note_call_site(MirGcCallSite** call_sites,
         int* call_site_count, int* call_site_capacity, MIR_insn_t insn,
-        JitGcEffect effect, JitExceptionEffect exception_effect,
-        bool is_exception_poll) {
+        JitGcEffect effect, JitExceptionEffect exception_effect) {
     if (!call_sites || !call_site_count || !call_site_capacity || !insn) {
         return false;
     }
@@ -569,7 +568,6 @@ static inline bool em_root_note_call_site(MirGcCallSite** call_sites,
     site->insn = insn;
     site->effect = effect;
     site->exception_effect = exception_effect;
-    site->is_exception_poll = is_exception_poll;
     return true;
 }
 
@@ -2614,10 +2612,14 @@ static inline void em_after_resolved_call(MirEmitter* em,
     if (!em_root_note_call_site(
             &em->frame.gc_call_sites, &em->frame.gc_call_site_count,
             &em->frame.gc_call_site_capacity, call, metadata->effects.gc,
-            metadata->effects.exception,
-            call_name && strcmp(call_name, "js_check_exception") == 0)) {
+            metadata->effects.exception)) {
         log_error("mir-call: unable to record call site for %s", call_name);
         abort();
+    }
+    if (em->note_call_exception) {
+        // The tracker must see the emitted helper effect before any result-only
+        // fast path returns, otherwise void and non-void calls diverge.
+        em->note_call_exception(em->call_owner, metadata->effects.exception);
     }
     if (!result) return;
     if (em->after_call_result) {
@@ -2681,9 +2683,12 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
     if (!em_root_note_call_site(
             &em->frame.gc_call_sites, &em->frame.gc_call_site_count,
             &em->frame.gc_call_site_capacity, insn, JIT_EFFECT_MAY_GC,
-            JIT_EXCEPTION_MAY_SET, false)) {
+            JIT_EXCEPTION_MAY_SET)) {
         log_error("mir-call: unable to record unresolved call site");
         abort();
+    }
+    if (em->note_call_exception) {
+        em->note_call_exception(em->call_owner, JIT_EXCEPTION_MAY_SET);
     }
     for (size_t i = 0; i < count; i++) {
         int output = 0;

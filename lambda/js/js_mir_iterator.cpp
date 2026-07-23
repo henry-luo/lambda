@@ -40,7 +40,7 @@ void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator) {
 }
 
 void jm_emit_iterator_close_on_exception(JsMirTranspiler* mt, MIR_reg_t iterator, MIR_label_t target) {
-    MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_reg_t exc = jm_emit_exception_test(mt);
     MIR_label_t no_exc = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
         MIR_new_label_op(mt->ctx, no_exc),
@@ -60,7 +60,7 @@ void jm_emit_iterator_close_on_exception(JsMirTranspiler* mt, MIR_reg_t iterator
 void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target)
 {
-    MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_reg_t exc = jm_emit_exception_test(mt);
     MIR_label_t no_exc = jm_new_label(mt);
     MIR_label_t rethrow_only = jm_new_label(mt);
     MIR_label_t after_close = jm_new_label(mt);

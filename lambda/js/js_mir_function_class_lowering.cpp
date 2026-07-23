@@ -731,6 +731,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         bool saved_tail_pos = mt->in_tail_position;
         // Save exception label — must not leak from outer function into native version
         MIR_label_t saved_except_label = mt->func_except_label;
+        JsExcTrack saved_exc_track = mt->exc_track;
 
         if (jm_has_use_strict_directive(fn)) {
             fc->is_strict = true;
@@ -750,6 +751,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_tail_position = false;
         mt->tco_jumped = false;
         mt->func_except_label = 0;    // reset — native func needs its own exception label
+        mt->exc_track = JS_EXC_UNKNOWN;
 
         jm_begin_function_frame(mt, native_ret_type, false,
             MIR_SCALAR_RETURN_NONE, 0);
@@ -1009,6 +1011,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_tail_position = saved_tail_pos;
         mt->tco_jumped = false;
         mt->func_except_label = saved_except_label;  // restore outer function's exception label
+        mt->exc_track = saved_exc_track;
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
@@ -1358,10 +1361,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                     jm_call_void_1(mt, "js_require_object_coercible",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
                     MIR_label_t skip_param_destr = jm_new_label(mt);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_param_destr),
-                        MIR_new_reg_op(mt->ctx, param_exc)));
+                    jm_emit_exception_guard(mt, skip_param_destr);
                     jm_emit_object_destructure(mt, destr_pat, preg);
                     jm_emit_label(mt, skip_param_destr);
                 }
@@ -1382,10 +1383,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // to execute param destructuring, and the generator starts at state 1.
         {
             // Check for pending exception from param destructuring
-            MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, mt->gen_done_label),
-                MIR_new_reg_op(mt->ctx, param_exc)));
+            jm_emit_exception_guard(mt, mt->gen_done_label);
 
             jm_emit_suspend_env_save(mt);
 
@@ -1747,6 +1745,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             bool saved_in_generator = mt->in_generator;
             bool saved_in_async = mt->in_async;
             MIR_label_t saved_except_label_sm = mt->func_except_label;
+            JsExcTrack saved_exc_track_sm = mt->exc_track;
 
             if (jm_has_use_strict_directive(fn)) {
                 fc->is_strict = true;
@@ -1766,6 +1765,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_slot_count = 0;
             mt->current_func_index = (int)(fc - mt->func_entries);
             mt->func_except_label = 0;
+            mt->exc_track = JS_EXC_UNKNOWN;
 
             // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
             mt->in_generator = true;
@@ -1866,10 +1866,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                         jm_call_void_1(mt, "js_require_object_coercible",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                        MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
                         MIR_label_t skip_param_destr = jm_new_label(mt);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_param_destr),
-                            MIR_new_reg_op(mt->ctx, param_exc)));
+                        jm_emit_exception_guard(mt, skip_param_destr);
                         jm_emit_object_destructure(mt, destr_pat, preg);
                         jm_emit_label(mt, skip_param_destr);
                     }
@@ -2153,10 +2151,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 while (s) {
                     jm_transpile_statement(mt, s);
                     // Check for exception after each statement
-                    MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                        MIR_new_label_op(mt->ctx, async_sm_catch_label),
-                        MIR_new_reg_op(mt->ctx, exc_check)));
+                    jm_emit_exception_route(mt, JS_MIR_COMPLETION_THROW);
                     s = s->next;
                 }
             } else if (fn->body) {
@@ -2216,6 +2211,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_slot_count = saved_scope_env_slot_sm;
             mt->current_func_index = saved_func_index_sm;
             mt->func_except_label = saved_except_label_sm;
+            mt->exc_track = saved_exc_track_sm;
             mt->in_generator = saved_in_generator;
             mt->in_async = saved_in_async;
 
@@ -3103,10 +3099,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     // Throw TypeError if arg is null/undefined (RequireObjectCoercible)
                     jm_call_void_1(mt, "js_require_object_coercible",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
                     MIR_label_t skip_param_destr = jm_new_label(mt);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_param_destr),
-                        MIR_new_reg_op(mt->ctx, param_exc)));
+                    jm_emit_exception_guard(mt, skip_param_destr);
 
                     JsObjectPatternNode* op = (JsObjectPatternNode*)destr_pat;
                     log_debug("js-mir: destructuring object param %d in %s", i, fc->name);
@@ -3677,10 +3671,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         jm_transpile_statement(mt, s);
                         // Phase 5: After each statement in async body, check for exception
                         if (async_catch_label) {
-                            MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                                MIR_new_label_op(mt->ctx, async_catch_label),
-                                MIR_new_reg_op(mt->ctx, exc_check)));
+                            jm_emit_exception_route(mt, JS_MIR_COMPLETION_THROW);
                         }
                         s = s->next;
                     }
@@ -3698,7 +3689,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // Without this, the BT→func_except_label branch targets an
                 // uninserted label, causing a NULL label crash during MIR inlining.
                 if (mt->func_except_label != 0) {
-                    jm_emit_label(mt, mt->func_except_label);
+                    jm_emit_label_with_state(mt, mt->func_except_label, JS_EXC_SET);
                     MIR_reg_t exc_ret;
                     if (fn->is_async) {
                         MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);

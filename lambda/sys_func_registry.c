@@ -1810,7 +1810,9 @@ JitImport jit_runtime_imports[] = {
     {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
-    {"js_throw_const_assign", FPTR(js_throw_const_assign)},
+    {"js_throw_const_assign", FPTR(js_throw_const_assign),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_NON_GC_SCALAR, 0,
+      0, JIT_EXCEPTION_SETS, 0}},
     // Test262-only helpers share one catalog with the configured build gate.
 #if JS_TEST262_FAST_PATHS
 #define JS_TEST262_REGISTRY_ENTRY(name) {#name, FPTR(name)},
@@ -1840,7 +1842,9 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
     {"js_args_restore", FPTR(js_args_restore),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_call_function", FPTR(js_call_function),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -1939,16 +1943,37 @@ JitImport jit_runtime_imports[] = {
     {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
-    {"js_throw_value", FPTR(js_throw_value)},
+    {"js_throw_value", FPTR(js_throw_value),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_NON_GC_SCALAR, 0,
+      0, JIT_EXCEPTION_SETS, 0}},
     // Exception polling is a thread-local flag read with no allocation.
     {"js_check_exception", FPTR(js_check_exception),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
-    {"js_clear_exception", FPTR(js_clear_exception)},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
+    {"js_debug_assert_exception_clear", FPTR(js_debug_assert_exception_clear),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
+    {"js_debug_assert_exception_set", FPTR(js_debug_assert_exception_set),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
+    {"js_clear_exception", FPTR(js_clear_exception),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      // The returned Item comes from the exception slots, so catch bindings
+      // must treat wide scalars like Number.MIN_VALUE as already stable.
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_CLEARS, 0}},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
     // Tune8 §2.3: js_throw_syntax_error / _reference_error replaced by
     // js_throw_named_error(kind, msg). C wrappers in js_runtime.cpp preserve
     // direct-call semantics for js_globals.cpp.
-    {"js_throw_named_error", FPTR(js_throw_named_error)},
+    {"js_throw_named_error", FPTR(js_throw_named_error),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      0, JIT_EXCEPTION_SETS, 0}},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
@@ -3075,7 +3100,11 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_async_frame_get_word", "lambda_async_frame_set_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
-        "js_check_exception", "js_set_this", "js_get_new_target",
+        // Exception-flag helpers stay NO_GC by design, so the allowlist must
+        // advance with metadata changes or debug JIT startup aborts.
+        "js_check_exception", "js_debug_assert_exception_clear",
+        "js_debug_assert_exception_set", "js_clear_exception",
+        "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
         "js_mark_strict_func", "js_finalize_function", "js_set_module_var",
         "js_get_module_var",

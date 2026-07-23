@@ -125,6 +125,13 @@ struct JsLocalFuncEntry {
     MIR_item_t func_item;
 };
 
+typedef enum JsExcTrack {
+    JS_EXC_UNKNOWN = 0,
+    JS_EXC_CLEAN,
+    JS_EXC_SET,
+    JS_EXC_UNREACHABLE,
+} JsExcTrack;
+
 // Loop label pair for break/continue
 struct JsLoopLabels {
     MIR_label_t continue_label;
@@ -447,8 +454,7 @@ struct JsMirTranspiler {
     // Exception propagation: label to jump to when an exception is detected outside a try block.
     // Lazily created when first needed within a function body. Jumps to this label → return null.
     MIR_label_t func_except_label;   // 0 if not yet created for current function
-    MIR_insn_t last_exception_poll_branch; // last emitted poll branch, for adjacent-poll dedup
-    MIR_label_t last_exception_poll_target;
+    JsExcTrack exc_track;
 
     JsMirArgStackScope* arg_stack_scope; // active call/new argument extent, if any
 

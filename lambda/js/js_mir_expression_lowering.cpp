@@ -854,16 +854,11 @@ static MIR_reg_t jm_emit_super_bind_this_with_public_fields(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
     if (mt && mt->current_class && mt->current_class->node && mt->current_class->node->superclass) {
-        MIR_reg_t has_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-        MIR_label_t done = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-            MIR_new_label_op(mt->ctx, done),
-            MIR_new_reg_op(mt->ctx, has_exc)));
+        jm_emit_exc_propagate_check(mt);
         jm_emit_update_lexical_this_binding(mt, bound_this);
         if (jm_class_has_public_instance_fields(mt->current_class)) {
             jm_emit_public_instance_fields_for_super(mt, bound_this, mt->current_class);
         }
-        jm_emit_label(mt, done);
     }
     return bound_this;
 }
@@ -2446,6 +2441,7 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             cond = jm_emit_is_truthy(mt, left_val, bin->left);
         }
 
+        JsExcTrack branch_exc = jm_exc_state(mt);
         if (bin->op == JS_OP_OR) {
             // ||: if left is truthy, return left; else evaluate right
             // BF l_right: if truthy is FALSE (not truthy), jump to right
@@ -2470,16 +2466,19 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, left_val)));
+        JsExcTrack short_circuit_exit = jm_exc_state(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
         // Evaluate right side
-        jm_emit_label(mt, l_right);
+        jm_emit_label_with_state(mt, l_right, branch_exc);
         MIR_reg_t right_val = jm_transpile_box_item(mt, bin->right);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, right_val)));
+        JsExcTrack right_exit = jm_exc_state(mt);
 
-        jm_emit_label(mt, l_end);
+        jm_emit_label_with_state(mt, l_end,
+            jm_exc_merge(short_circuit_exit, right_exit));
         return result;
     }
 
@@ -3583,12 +3582,9 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, js_name_len));
-            MIR_reg_t has_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_label_t l_skip_set = jm_new_label(mt);
             MIR_label_t l_done = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_skip_set),
-                MIR_new_reg_op(mt->ctx, has_exc)));
+            jm_emit_exception_guard(mt, l_skip_set);
             jm_call_void_2(mt, "js_set_module_var",
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_var->int_val),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -3609,12 +3605,9 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         if (strict_assign) {
             jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
-            MIR_reg_t has_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_label_t l_skip_set = jm_new_label(mt);
             MIR_label_t l_done = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_skip_set),
-                MIR_new_reg_op(mt->ctx, has_exc)));
+            jm_emit_exception_guard(mt, l_skip_set);
             jm_call_void_3(mt, "js_set_global_property",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
@@ -3677,9 +3670,9 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, js_name_len));
-            MIR_reg_t has_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_label_t l_write = jm_new_label(mt);
             MIR_label_t l_done = jm_new_label(mt);
+            MIR_reg_t has_exc = jm_emit_exception_test(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                 MIR_new_label_op(mt->ctx, l_write),
                 MIR_new_reg_op(mt->ctx, has_exc)));
@@ -3709,9 +3702,9 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, old_env_val),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, js_name_len));
-            MIR_reg_t has_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_label_t l_no_tdz = jm_new_label(mt);
             MIR_label_t l_done = jm_new_label(mt);
+            MIR_reg_t has_exc = jm_emit_exception_test(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                 MIR_new_label_op(mt->ctx, l_no_tdz),
                 MIR_new_reg_op(mt->ctx, has_exc)));
@@ -3937,10 +3930,8 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     // Get iterator from iterable (ES spec: GetIterator)
     MIR_reg_t iterator = jm_emit_get_iterator_lazy(mt, src);
     // If js_get_iterator threw (non-iterable), skip destructuring
-    MIR_reg_t iter_exc_chk = jm_call_0(mt, "js_check_exception", MIR_T_I64);
     MIR_label_t skip_arr_destr = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
-        MIR_new_reg_op(mt->ctx, iter_exc_chk)));
+    jm_emit_exception_guard(mt, skip_arr_destr);
 
     // Track whether iterator is exhausted
     MIR_reg_t iter_done = jm_new_reg(mt, "itrdone", MIR_T_I64);
@@ -4014,9 +4005,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, rest_skip),
                     MIR_new_reg_op(mt->ctx, iter_done)));
                 MIR_reg_t rest = jm_emit_iterator_collect_rest(mt, iterator);
-                MIR_reg_t rest_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
-                    MIR_new_reg_op(mt->ctx, rest_exc)));
+                jm_emit_exception_guard(mt, skip_arr_destr);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, iter_done),
                     MIR_new_int_op(mt->ctx, 1)));
                 int rest_target_iterator_spill = -1;
@@ -4065,9 +4054,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, elision_end),
                 MIR_new_reg_op(mt->ctx, iter_done)));
             MIR_reg_t step_val = jm_emit_iterator_step(mt, iterator);
-            MIR_reg_t elision_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
-                MIR_new_reg_op(mt->ctx, elision_exc)));
+            jm_emit_exception_guard(mt, skip_arr_destr);
             // check if done
             MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_val, "eldone");
             // if done, mark iter_done
@@ -4124,9 +4111,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
 
             // call js_iterator_step
             MIR_reg_t step_val = jm_emit_iterator_step(mt, iterator);
-            MIR_reg_t step_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
-                MIR_new_reg_op(mt->ctx, step_exc)));
+            jm_emit_exception_guard(mt, skip_arr_destr);
 
             // check if done
             MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_val, "stdone");
@@ -4217,7 +4202,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, arr_destr_after)));
     if (pushed_arr_destr_try) mt->try_ctx_depth--;
-    jm_emit_label(mt, arr_destr_exc);
+    jm_emit_label_with_state(mt, arr_destr_exc, JS_EXC_SET);
     jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
     jm_emit_label(mt, arr_destr_after);
 
@@ -4264,10 +4249,8 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
     jm_call_void_1(mt, "js_require_object_coercible",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
     // If exception pending, skip destructuring (caller or try/catch will handle it)
-    MIR_reg_t exc_chk = jm_call_0(mt, "js_check_exception", MIR_T_I64);
     MIR_label_t skip_destr = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_destr),
-        MIR_new_reg_op(mt->ctx, exc_chk)));
+    jm_emit_exception_guard(mt, skip_destr);
 
     JsAstNode* prop = pattern->properties;
     while (prop) {
@@ -11941,6 +11924,7 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
         MIR_new_reg_op(mt->ctx, truthy)));
+    JsExcTrack branch_exc = jm_exc_state(mt);
 
     JsMirBranchState branch_state;
     jm_save_branch_state(mt, &branch_state);
@@ -11950,9 +11934,10 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
+    JsExcTrack cons_exit = jm_exc_state(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-    jm_emit_label(mt, l_false);
+    jm_emit_label_with_state(mt, l_false, branch_exc);
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
@@ -11960,8 +11945,9 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));
+    JsExcTrack alt_exit = jm_exc_state(mt);
 
-    jm_emit_label(mt, l_end);
+    jm_emit_label_with_state(mt, l_end, jm_exc_merge(cons_exit, alt_exit));
     return result;
 }
 
@@ -11977,6 +11963,7 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
         MIR_new_reg_op(mt->ctx, truthy)));
+    JsExcTrack branch_exc = jm_exc_state(mt);
 
     JsMirBranchState branch_state;
     jm_save_branch_state(mt, &branch_state);
@@ -11987,9 +11974,10 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
+    JsExcTrack cons_exit = jm_exc_state(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-    jm_emit_label(mt, l_false);
+    jm_emit_label_with_state(mt, l_false, branch_exc);
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     TypeId alt_type = jm_get_effective_type(mt, cond->alternate);
@@ -11998,8 +11986,9 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));
+    JsExcTrack alt_exit = jm_exc_state(mt);
 
-    jm_emit_label(mt, l_end);
+    jm_emit_label_with_state(mt, l_end, jm_exc_merge(cons_exit, alt_exit));
     return result;
 }
 
@@ -13451,7 +13440,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, null_iter)));
                     jm_emit_iterator_close(mt, active_iter);
-                    MIR_reg_t close_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                    MIR_reg_t close_exc = jm_emit_exception_test(mt);
                     MIR_label_t close_ok = jm_new_label(mt);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                         MIR_new_label_op(mt->ctx, close_ok),
@@ -13497,7 +13486,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_reg_t must_suspend = jm_call_1(mt, "js_async_must_suspend", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
 
-            jm_emit_pending_exception_check(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
+            jm_emit_exception_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
 
             // If pending, jump to suspend path
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -13538,9 +13527,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // suspend time; scope_env holds the canonical, post-callback
             // value for any local also captured by a closure.
             jm_emit_async_resume_refresh(mt);
-            jm_emit_pending_exception_check(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
+            jm_emit_exception_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
 
-            jm_emit_label(mt, after_await_label);
+            jm_emit_label_with_state(mt, after_await_label, JS_EXC_CLEAN);
             return await_result;
         }
 
