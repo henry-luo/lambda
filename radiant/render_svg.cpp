@@ -12,7 +12,7 @@
 #include "../lib/utf.h"
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/base64.h"

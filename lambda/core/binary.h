@@ -1,8 +1,8 @@
 #ifndef LAMBDA_BINARY_H
 #define LAMBDA_BINARY_H
 
-#include "lambda.h"
-#include "../lib/byte_storage.h"
+#include "../lambda.h"
+#include "../../lib/byte_storage.h"
 
 #ifdef __cplusplus
 extern "C" {

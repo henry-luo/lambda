@@ -1,13 +1,13 @@
 // render_map.cpp — Implementation of observer-based source→result mapping
 // Phase 3 of Reactive UI: tracks which template invocations produced which
 // result nodes, enabling targeted re-transformation when state/model changes.
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "render_map.h"
 #include "template_registry.h"
 #include "transpiler.hpp"
-#include "../lib/log.h"
-#include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../../lib/log.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include <string.h>
 #include <stdio.h>
 

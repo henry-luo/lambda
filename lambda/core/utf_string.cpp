@@ -1,10 +1,10 @@
 #include "utf_string.h"
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include <utf8proc.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 
 void init_utf8proc_support(void) {
     // utf8proc is initialized automatically, no setup needed

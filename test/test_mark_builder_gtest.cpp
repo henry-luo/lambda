@@ -4,8 +4,8 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/mark_builder.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"

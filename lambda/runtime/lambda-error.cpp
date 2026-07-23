@@ -34,16 +34,16 @@ extern "C" {
 #endif
 
 #include "lambda-error.h"
-#include "lambda.h"
-#include "runtime/gc/gc_heap.h"
-#include "../lib/log.h"
-#include "../lib/stringbuf.h"
-#include "../lib/arraylist.h"
-#include "../lib/binsearch.h"
+#include "../lambda.h"
+#include "gc/gc_heap.h"
+#include "../../lib/log.h"
+#include "../../lib/stringbuf.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/binsearch.h"
 #include <tree_sitter/api.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/memtrack.h"
+#include "../../lib/memtrack.h"
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>

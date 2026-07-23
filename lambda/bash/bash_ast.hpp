@@ -5,7 +5,7 @@ extern "C" {
 #endif
 
 #include <tree_sitter/api.h>
-#include "../ast.hpp"
+#include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
 
 #ifdef __cplusplus

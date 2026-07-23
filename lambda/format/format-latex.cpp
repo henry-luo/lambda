@@ -3,7 +3,7 @@
 #include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include <string.h>
 
 // Forward declarations

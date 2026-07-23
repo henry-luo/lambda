@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-#include "../lib/mempool.h"
-#include "../lib/str.h"
+#include "../../lib/mempool.h"
+#include "../../lib/str.h"
 
 static atomic_int64 binary_payload_copies = {0};
 

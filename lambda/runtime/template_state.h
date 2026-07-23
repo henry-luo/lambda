@@ -4,7 +4,7 @@
 // state map lives on DocState; in headless mode, a standalone map is used.
 #pragma once
 
-#include "lambda.h"
+#include "../lambda.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus

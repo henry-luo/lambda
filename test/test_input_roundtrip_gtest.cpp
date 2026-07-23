@@ -41,7 +41,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"

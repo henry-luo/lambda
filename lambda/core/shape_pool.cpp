@@ -1,10 +1,10 @@
 #include "shape_pool.hpp"
-#include "lambda-data.hpp"
-#include "../lib/log.h"
-#include "../lib/lambda_alloca.h"
-#include "../lib/string.h"
-#include "../lib/hashmap_helpers.h"
-#include "../lib/ref_counted_pool.hpp"
+#include "../lambda-data.hpp"
+#include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
+#include "../../lib/string.h"
+#include "../../lib/hashmap_helpers.h"
+#include "../../lib/ref_counted_pool.hpp"
 #include <string.h>
 
 // Hook to release a memory-context node when a registered shape pool is freed

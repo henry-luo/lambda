@@ -7,11 +7,11 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_event_loop.h"
-#include "../binary.h"
+#include "../core/binary.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include <cstring>

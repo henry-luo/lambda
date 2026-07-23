@@ -9,8 +9,8 @@
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lambda/template_state.h"
-#include "../lambda/render_map.h"
+#include "../lambda/runtime/template_state.h"
+#include "../lambda/runtime/render_map.h"
 #endif
 
 #include <cstdint>

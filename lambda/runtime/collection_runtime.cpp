@@ -1,5 +1,5 @@
 #include "../lambda-data.hpp"
-#include "../lambda-number-runtime.hpp"
+#include "lambda-number-runtime.hpp"
 #include "../core/collection_storage.h"
 #include "../io/input-allocation-context.h"
 #include "heap_api.h"

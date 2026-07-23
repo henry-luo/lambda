@@ -1,9 +1,9 @@
 #pragma once
 
 #ifdef __cplusplus
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #else
-#include "lambda.h"
+#include "../lambda.h"
 #endif
 
 #ifdef __cplusplus

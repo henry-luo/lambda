@@ -1,11 +1,11 @@
 
 #include "transpiler.hpp"
-#include "lambda-decimal.hpp"
-#include "runtime/lambda-number-runtime.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/str.h"
-#include "js/js_typed_array.h"
+#include "../core/lambda-decimal.hpp"
+#include "lambda-number-runtime.hpp"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/str.h"
+#include "../js/js_typed_array.h"
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function

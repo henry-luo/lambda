@@ -21,8 +21,8 @@
 
 #include "input.hpp"
 #include "input-parsers.h"
-#include "../mark_builder.hpp"
-#include "../mark_reader.hpp"
+#include "../io/mark_builder.hpp"
+#include "../core/mark_reader.hpp"
 #include "lib/log.h"
 #include "lib/mem.h"
 #include "lib/base64.h"

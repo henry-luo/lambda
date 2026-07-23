@@ -1,14 +1,14 @@
 #include "concurrency.h"
 
-#include "lambda.hpp"
-#include "lambda-data.hpp"
+#include "../lambda.hpp"
+#include "../lambda-data.hpp"
 #include "lambda-error.h"
 #include "transpiler.hpp"
-#include "runtime/gc/gc_heap.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/strbuf.h"
-#include "../lib/uv_loop.h"
+#include "gc/gc_heap.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/uv_loop.h"
 
 #include <assert.h>
 #include <fcntl.h>

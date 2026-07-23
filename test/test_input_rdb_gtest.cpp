@@ -27,8 +27,8 @@
 #endif
 
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/lambda-decimal.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/lambda-decimal.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lib/arena.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"

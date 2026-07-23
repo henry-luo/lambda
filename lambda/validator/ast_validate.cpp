@@ -6,8 +6,8 @@
  */
 
 #include "validator.hpp"
-#include "../transpiler.hpp"
-#include "../ast.hpp"
+#include "../runtime/transpiler.hpp"
+#include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/mem_factory.h"
 #include "../input/input.hpp"

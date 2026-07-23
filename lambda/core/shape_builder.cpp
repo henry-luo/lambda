@@ -1,6 +1,6 @@
 #include "shape_builder.hpp"
-#include "lambda-data.hpp"  // For full ShapeEntry definition
-#include "../lib/log.h"
+#include "../lambda-data.hpp"  // For full ShapeEntry definition
+#include "../../lib/log.h"
 #include <string.h>
 #include <assert.h>
 

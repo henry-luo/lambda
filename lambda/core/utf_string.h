@@ -1,7 +1,7 @@
 #ifndef LAMBDA_UTF_STRING_H
 #define LAMBDA_UTF_STRING_H
 
-#include "lambda.h"
+#include "../lambda.h"
 
 #ifdef __cplusplus
 extern "C" {

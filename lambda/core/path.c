@@ -8,12 +8,12 @@
  *   Path("hosts") -> Path("etc") -> Path("file") -> ROOT_SENTINEL
  */
 
-#include "../lib/strbuf.h"
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#include "lambda.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/log.h"
+#include "../../lib/mempool.h"
+#include "../lambda.h"
 #include "lambda-path.h"
-#include "sysinfo.h"
+#include "../runtime/sysinfo.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -622,11 +622,11 @@ extern Pool* path_get_pool(void);
 
 #ifndef PATH_NO_ITERATION
 
-#include "../lib/file.h"
-#include "../lib/file_utils.h"
-#include "../lib/arraylist.h"
-#include "../lib/url.h"
-#include "../lib/mem.h"
+#include "../../lib/file.h"
+#include "../../lib/file_utils.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/url.h"
+#include "../../lib/mem.h"
 
 // Extern declaration for datetime_from_unix (defined in datetime.c)
 // In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*

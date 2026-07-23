@@ -2,7 +2,7 @@
 #define LAMBDA_NUMBER_TYPES_HPP
 
 #include "lambda-number.hpp"
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 
 static inline LambdaNumericKind lambda_numeric_kind_from_type(const Type* type) {
     if (!type) return LAMBDA_NUM_INVALID;

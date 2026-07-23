@@ -9,8 +9,8 @@ extern "C" {
 
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/mark_builder.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 
 // build_dom_tree_from_element is now exported from dom_element.cpp
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);

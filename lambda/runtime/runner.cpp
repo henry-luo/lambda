@@ -8,27 +8,27 @@
 #include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
-#include "../lib/hashmap_helpers.h"
-#include "../lib/thread_pool.h"
-#include "mark_builder.hpp"
-#include "lambda-decimal.hpp"
+#include "../../lib/hashmap_helpers.h"
+#include "../../lib/thread_pool.h"
+#include "../io/mark_builder.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
-#include "runtime/lambda-stack.h"
-#include "runtime/side_stack.h"
+#include "lambda-stack.h"
+#include "side_stack.h"
 #include "concurrency.h"
 #include "module_registry.h"
-#include "jube/jube_registry.h"
-#include "js/js_runtime.h"
-#include "js/js_event_loop.h"
-#include "js/js_exec_profile.h"
-#include "input/css/css_style.hpp"
+#include "../jube/jube_registry.h"
+#include "../js/js_runtime.h"
+#include "../js/js_event_loop.h"
+#include "../js/js_exec_profile.h"
+#include "../input/css/css_style.hpp"
 #include "template_registry.h"
-#include "../lib/file.h"
-#include "../lib/mem_factory.h"
-#include "../lib/memtrack.h"
-#include "../lib/file_utils.h"
-#include "../lib/shell.h"
-#include "../lib/uv_loop.h"
+#include "../../lib/file.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/file_utils.h"
+#include "../../lib/shell.h"
+#include "../../lib/uv_loop.h"
 
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
@@ -1398,9 +1398,9 @@ void runner_init(Runtime *runtime, Runner* runner) {
     runner->runtime = runtime;
 }
 
-#include "../lib/url.h"
-#include "validator/validator.hpp"
-#include "runtime/lambda-stack.h"
+#include "../../lib/url.h"
+#include "../validator/validator.hpp"
+#include "lambda-stack.h"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");

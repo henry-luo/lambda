@@ -11,15 +11,15 @@
  */
 
 #include "sysinfo.h"
-#include "lambda-data.hpp"
-#include "input/input.hpp"
-#include "mark_builder.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/strbuf.h"
-#include "../lib/str.h"
-#include "../lib/file.h"
-#include "../lib/shell.h"
+#include "../lambda-data.hpp"
+#include "../input/input.hpp"
+#include "../io/mark_builder.hpp"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/str.h"
+#include "../../lib/file.h"
+#include "../../lib/shell.h"
 
 #include <cstdlib>
 #include <cstring>

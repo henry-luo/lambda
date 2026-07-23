@@ -1,7 +1,7 @@
 // Test file for MarkEditor - CRUD operations on Lambda documents
 #include <gtest/gtest.h>
-#include "../lambda/mark_editor.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/io/mark_editor.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
 #include "../lib/mempool.h"

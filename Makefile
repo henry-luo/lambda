@@ -137,7 +137,7 @@ GRAMMAR_JS = lambda/tree-sitter-lambda/grammar.js
 PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
-TS_ENUM_H = lambda/ts-enum.h
+TS_ENUM_H = lambda/runtime/ts-enum.h
 UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
 
 # Auto-generate parser and ts-enum.h when grammar.js changes
@@ -2218,7 +2218,7 @@ analyze-single:
 	@rm -f /tmp/test_analyzer.c
 	@echo ""
 	@echo "Analyzing Lambda source files..."
-	@for file in lambda/print.cpp lambda/pack.cpp lib/strbuf.c lib/arraylist.c; do \
+	@for file in lambda/core/print.cpp lambda/runtime/pack.cpp lib/strbuf.c lib/arraylist.c; do \
 		if [ -f "$$file" ]; then \
 			echo "Analyzing $$file..."; \
 			clang --analyze -Xanalyzer -analyzer-output=text \
@@ -2253,7 +2253,7 @@ analyze-direct:
 	@mkdir -p analysis-results-direct
 	@echo "Analyzing files that can compile independently..."
 	@# Analyze files that don't have complex dependencies
-	@for file in lambda/print.cpp lambda/pack.cpp lambda/utf_string.cpp \
+	@for file in lambda/core/print.cpp lambda/runtime/pack.cpp lambda/core/utf_string.cpp \
 	             lambda/format/format-*.cpp lambda/input/input-common.cpp \
 	             lib/mime-*.c lambda/validator/error_reporting.c; do \
 		if [ -f "$$file" ]; then \
@@ -2377,7 +2377,7 @@ tidy-printf:
 		echo ""; \
 		echo "Examples:"; \
 		echo "  make tidy-printf FILE='include/mir-bitmap.h' DRY_RUN=1"; \
-		echo "  make tidy-printf FILE='lambda/lambda-eval.cpp' BACKUP=1"; \
+		echo "  make tidy-printf FILE='lambda/runtime/lambda-eval.cpp' BACKUP=1"; \
 		echo "  make tidy-printf FILE='lambda/*.cpp' DRY_RUN=1"; \
 		echo "  make tidy-printf FILE='lib/*.c' BACKUP=1"; \
 		echo "  make tidy-printf FILE='lambda/input/input*.cpp' BACKUP=1"; \

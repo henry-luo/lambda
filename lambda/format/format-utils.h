@@ -4,7 +4,7 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/escape.h"
 #include "../lambda-data.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 
 // text escaping configuration
 typedef struct {

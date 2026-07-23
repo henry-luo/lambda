@@ -4,13 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "sys_func_registry.h"
 #include "mir_dump.h"
-#include "../lib/arraylist.h"
-#include "../lib/hashmap.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 
 struct JsClassEntry;
 

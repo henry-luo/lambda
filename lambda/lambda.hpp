@@ -1,7 +1,7 @@
 
 #pragma once
 #include "lambda.h"
-#include "lambda-path.h"
+#include "core/lambda-path.h"
 #include "io/target.h"
 #include "../lib/byte_storage.h"
 #include "runtime/side_stack.h"

@@ -2,11 +2,11 @@
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
 #include "transpiler.hpp"
-#include "runtime/lambda-number-runtime.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/sort.h"
-#include "../lib/image.h"
+#include "lambda-number-runtime.hpp"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/sort.h"
+#include "../../lib/image.h"
 #include <cmath>
 #include <cstring>
 #include <cstdlib>

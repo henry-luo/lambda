@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <cstring>
-#include "../../lambda/lambda-number.hpp"
+#include "../../lambda/runtime/lambda-number.hpp"
 
 extern "C" {
 #include "../../lib/num_stack.h"

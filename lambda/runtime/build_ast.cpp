@@ -1,21 +1,21 @@
 #include "transpiler.hpp"
-#include "lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-error.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
-#include "jube/jube_language.h"
-#include "jube/jube_registry.h"
+#include "../jube/jube_language.h"
+#include "../jube/jube_registry.h"
 #endif
-#include "../lib/hashmap.h"
-#include "../lib/datetime.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/str.h"
-#include "../lib/strview.h"
-#include "../lib/arraylist.h"
-#include "../lib/file.h"
-#include "../lib/recursion_guard.hpp"
+#include "../../lib/hashmap.h"
+#include "../../lib/datetime.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/str.h"
+#include "../../lib/strview.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/file.h"
+#include "../../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <stdlib.h>
 

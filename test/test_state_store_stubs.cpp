@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/template_registry.h"
+#include "../lambda/runtime/template_registry.h"
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/view.hpp"

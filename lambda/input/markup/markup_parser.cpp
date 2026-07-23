@@ -17,7 +17,7 @@
 #include "../../../lib/memtrack.h"
 #include "../input-utils.h"
 #include "../markup-format.h"
-#include "../../utf_string.h"
+#include "../../core/utf_string.h"
 #include "lib/log.h"
 #include <cstring>
 #include <new>

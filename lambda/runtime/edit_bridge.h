@@ -4,7 +4,7 @@
 // functions instead of direct in-place mutations.
 #pragma once
 
-#include "lambda.h"
+#include "../lambda.h"
 #include <stdbool.h>
 #include <stdint.h>
 

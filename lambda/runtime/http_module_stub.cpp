@@ -2,9 +2,9 @@
 // Used when libuv/server is not available in the build.
 // All functions return an error indicating HTTP is not supported.
 
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "lambda-error.h"
-#include "../lib/log.h"
+#include "../../lib/log.h"
 
 #define HTTP_UNAVAIL_MSG "io.http module is not available in this build"
 

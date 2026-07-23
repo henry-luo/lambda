@@ -3,7 +3,7 @@
 // This is the single source of truth for all JIT-importable function registrations.
 #pragma once
 
-#include "lambda.h"  // for Type*, TypeId, SysFunc, fn_ptr
+#include "../lambda.h"  // for Type*, TypeId, SysFunc, fn_ptr
 #include "value_rep.h"
 #include <stdbool.h>
 

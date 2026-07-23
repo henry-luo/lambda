@@ -1,8 +1,8 @@
 // Test file for EditSession bridge API
 #include <gtest/gtest.h>
-#include "../lambda/edit_bridge.h"
-#include "../lambda/mark_builder.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/runtime/edit_bridge.h"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"

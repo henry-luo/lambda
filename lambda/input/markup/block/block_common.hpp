@@ -19,7 +19,7 @@
 #include "../markup_parser.hpp"
 #include "../format_adapter.hpp"
 #include "../../input-context.hpp"
-#include "../../../mark_builder.hpp"
+#include "../../../io/mark_builder.hpp"
 #include "lib/strbuf.h"
 #include "lib/log.h"
 #include <cstring>

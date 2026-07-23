@@ -1,7 +1,7 @@
 #pragma once
 
 #include "shape_pool.hpp"
-#include "lambda.h"
+#include "../lambda.h"
 
 #define SHAPE_BUILDER_MAX_FIELDS 64  // Safety limit for field count
 

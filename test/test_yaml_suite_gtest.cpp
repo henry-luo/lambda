@@ -24,7 +24,7 @@
 #include <setjmp.h>
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lib/url.h"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"

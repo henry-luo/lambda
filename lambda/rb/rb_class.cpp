@@ -6,7 +6,7 @@
 #include "rb_runtime.h"
 #include "rb_transpiler.hpp"
 #include "../lambda-data.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/strbuf.h"

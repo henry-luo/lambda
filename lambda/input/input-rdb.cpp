@@ -13,8 +13,8 @@
 
 #include "input.hpp"
 #include "input-parsers.h"
-#include "../mark_builder.hpp"
-#include "../lambda-decimal.hpp"
+#include "../io/mark_builder.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/rdb.h"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"

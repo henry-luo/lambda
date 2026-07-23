@@ -4,7 +4,7 @@
  */
 
 
-#include "../lambda/transpiler.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 #include <stdlib.h>
 #include <string.h>
 

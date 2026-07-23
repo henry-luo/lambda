@@ -1,12 +1,12 @@
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "lambda-decimal.hpp"
-#include "core/lambda_typed.hpp"
-#include "../lib/log.h"
-#include "../lib/str.h"
+#include "lambda_typed.hpp"
+#include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
 #ifndef LAMBDA_PRINT_VALUE_ONLY
-#include "ast.hpp"
+#include "../runtime/ast.hpp"
 #endif
 
 #define MAX_DEPTH 2000

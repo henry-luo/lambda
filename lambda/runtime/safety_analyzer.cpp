@@ -11,8 +11,8 @@
 
 #include "safety_analyzer.hpp"
 #include "ast.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include <new>
 
 // Global safety analyzer instance

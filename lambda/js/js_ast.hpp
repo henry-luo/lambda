@@ -5,7 +5,7 @@ extern "C" {
 #endif
 
 #include <tree_sitter/api.h>
-#include "../ast.hpp"
+#include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
 
 // forward declaration so JsFunctionNode and JsVariableDeclaratorNode can reference it

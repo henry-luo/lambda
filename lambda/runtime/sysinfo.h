@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#include "lambda.h"
+#include "../lambda.h"
 
 // Forward declarations
 typedef struct Path Path;

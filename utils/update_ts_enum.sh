@@ -2,7 +2,7 @@
 
 # Define file paths
 PARSER_C="lambda/tree-sitter-lambda/src/parser.c"
-TS_ENUM_H="lambda/ts-enum.h"
+TS_ENUM_H="lambda/runtime/ts-enum.h"
 TEMP_TS_ENUM_H=$(mktemp)
 TEMP_ENUM_FILE=$(mktemp) # Temporary file for extracted enum content
 

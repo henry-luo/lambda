@@ -1,5 +1,5 @@
 #include "js_runtime_internal.hpp"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 
 extern __thread EvalContext* context;
 

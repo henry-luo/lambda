@@ -3,7 +3,7 @@
 // Updated to use MarkReader API and YamlContext (Nov 2025)
 #include "format.h"
 #include "format-utils.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/datetime.h"

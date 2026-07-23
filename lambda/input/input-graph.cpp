@@ -1,5 +1,5 @@
 #include "input-graph.h"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include <string.h>
 #include "lib/log.h"
 

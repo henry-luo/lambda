@@ -1,9 +1,9 @@
 #include "format.h"
-#include "../windows_compat.h"  // For Windows compatibility functions like strndup
+#include "../../lib/windows_compat.h"  // For Windows compatibility functions like strndup
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
 #include "format-utils.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "../../lib/log.h"
 #include "html-defs.h"  // html_is_raw_text_element
 

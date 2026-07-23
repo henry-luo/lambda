@@ -5,8 +5,8 @@
  * STUBBED OUT: API migration in progress. Functions return error stubs.
  */
 
-#include "lambda.hpp"
-#include "../lib/log.h"
+#include "../lambda.hpp"
+#include "../../lib/log.h"
 
 // ============================================================================
 // Stubbed io.http functions (API migration pending)

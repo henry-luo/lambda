@@ -1,17 +1,17 @@
 // module_registry.cpp — Unified cross-language module registry implementation
-#include "lambda-data.hpp"  // must be first — wraps lambda.h in extern "C" block
+#include "../lambda-data.hpp"  // must be first — wraps lambda.h in extern "C" block
 #include "module_registry.h"
 #include "ast.hpp"
 #include "transpiler.hpp"
-#include "shape_pool.hpp"
+#include "../core/shape_pool.hpp"
 #include "concurrency_js.h"
-#include "runtime/lambda-root-frame.hpp"
-#include "../lib/hashmap.h"
-#include "../lib/mem_factory.h"
-#include "../lib/hashmap_helpers.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/strbuf.h"
+#include "lambda-root-frame.hpp"
+#include "../../lib/hashmap.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/hashmap_helpers.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
 
 #include <string.h>
 #include <stdlib.h>

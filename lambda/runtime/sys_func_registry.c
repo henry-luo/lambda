@@ -19,8 +19,8 @@
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
 #include "concurrency.h"
-#include "runtime/side_stack.h"
-#include "js/js_test262_fast_paths.h"
+#include "side_stack.h"
+#include "../js/js_test262_fast_paths.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
@@ -30,8 +30,8 @@ extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYP
 // Runtime-only declarations (not needed for dylib / AST metadata builds)
 // ============================================================================
 #ifndef LAMBDA_IO_STATIC_VALUES
-#include "../lib/stringbuf.h"
-#include "lambda-path.h"
+#include "../../lib/stringbuf.h"
+#include "../core/lambda-path.h"
 
 // aliased function declarations (actual names differ from JIT import names)
 extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
@@ -173,26 +173,26 @@ extern RetItem pn_io_http_stop(Item server);
 extern bool target_equal(Target* a, Target* b);
 
 // JS runtime functions
-#include "js/js_runtime.h"
-#include "ts/ts_runtime.h"
+#include "../js/js_runtime.h"
+#include "../ts/ts_runtime.h"
 #ifdef LAMBDA_BASH
-#include "bash/bash_runtime.h"
-#include "bash/bash_expand.h"
-#include "bash/bash_errors.h"
-#include "bash/bash_arith.h"
-#include "bash/bash_redir.h"
-#include "bash/bash_exec.h"
-#include "bash/bash_builtins_ext.h"
-#include "bash/bash_cond.h"
-#include "bash/bash_heredoc.h"
+#include "../bash/bash_runtime.h"
+#include "../bash/bash_expand.h"
+#include "../bash/bash_errors.h"
+#include "../bash/bash_arith.h"
+#include "../bash/bash_redir.h"
+#include "../bash/bash_exec.h"
+#include "../bash/bash_builtins_ext.h"
+#include "../bash/bash_cond.h"
+#include "../bash/bash_heredoc.h"
 #endif
 #ifdef LAMBDA_RUBY
-#include "rb/rb_runtime.h"
+#include "../rb/rb_runtime.h"
 #endif
-#include "js/js_dom.h"
-#include "js/js_typed_array.h"
-#include "js/js_event_loop.h"
-#include "js/js_xhr.h"
+#include "../js/js_dom.h"
+#include "../js/js_typed_array.h"
+#include "../js/js_event_loop.h"
+#include "../js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
 // Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
 // arr.indexOf(int) flows through the generic array method dispatcher now.

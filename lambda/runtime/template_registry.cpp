@@ -1,11 +1,11 @@
 // template_registry.cpp — Implementation of view/edit template registry and apply() dispatch
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "template_registry.h"
 #include "render_map.h"
 #include "edit_bridge.h"
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#include "../lib/memtrack.h"
+#include "../../lib/log.h"
+#include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 #include <stdlib.h>
 #include <string.h>
 

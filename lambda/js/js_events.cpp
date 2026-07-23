@@ -11,7 +11,7 @@
 #include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 

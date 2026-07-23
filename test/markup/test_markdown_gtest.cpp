@@ -28,7 +28,7 @@
 #include <map>
 #include "../../lambda/lambda.h"
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/mark_reader.hpp"
+#include "../../lambda/core/mark_reader.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
 #include "../../lib/log.h"

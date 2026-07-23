@@ -1,7 +1,7 @@
 #ifndef LAMBDA_NUMBER_HPP
 #define LAMBDA_NUMBER_HPP
 
-#include "lambda.h"
+#include "../lambda.h"
 
 // Numeric promotion is a language rule, not a TypeId ordering rule.  Keep this
 // descriptor independent of Item storage so the evaluator and both transpilers

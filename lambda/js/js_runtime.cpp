@@ -12,7 +12,7 @@
 #include "js_permission.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
-#include "../lambda-error.h"
+#include "../runtime/lambda-error.h"
 #include "../core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"

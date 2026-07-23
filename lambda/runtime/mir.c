@@ -1,18 +1,18 @@
  #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/memtrack.h"
+#include "../../lib/memtrack.h"
 #include <string.h>
 #include <stdarg.h>  // for va_list
 #include <math.h>
-#include "../lib/log.h"
-#include "../lib/hashmap.h"    // for O(1) import resolution
-#include "../lib/hashmap_helpers.h"
+#include "../../lib/log.h"
+#include "../../lib/hashmap.h"    // for O(1) import resolution
+#include "../../lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
 #ifdef LAMBDA_C2MIR
 #include "c2mir.h"
 #endif
-#include "lambda.h"
+#include "../lambda.h"
 #include "lambda-error.h"
 #include "sys_func_registry.h"
 

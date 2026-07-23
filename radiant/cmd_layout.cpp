@@ -74,7 +74,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
-#include "../lambda/transpiler.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_event_loop.h"
@@ -82,7 +82,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/network/network_downloader.h"
 #include "network_integration.h"
 #include "../lambda/network/network_resource_manager.h"
-#include "../lambda/mark_builder.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../radiant/view.hpp"
 #include "render.hpp"
 #include "../radiant/layout.hpp"
@@ -91,8 +91,8 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "event.hpp"
 #include "../radiant/radiant.hpp"
 #include "../lib/tagged.hpp"
-#include "../lambda/render_map.h"
-#include "../lambda/template_state.h"
+#include "../lambda/runtime/render_map.h"
+#include "../lambda/runtime/template_state.h"
 
 // JS runtime batch reset functions (from lambda/js/)
 extern "C" void js_batch_reset(void);

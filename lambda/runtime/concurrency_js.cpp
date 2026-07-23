@@ -1,12 +1,12 @@
 #include "concurrency_js.h"
 
 #include "concurrency.h"
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "lambda-error.h"
-#include "runtime/lambda-root-frame.hpp"
-#include "js/js_runtime.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "lambda-root-frame.hpp"
+#include "../js/js_runtime.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 
 #include <string.h>
 

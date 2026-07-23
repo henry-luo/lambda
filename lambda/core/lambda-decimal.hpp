@@ -19,7 +19,7 @@ typedef struct mpd_t mpd_t;
 
 #include <cstdint>
 #include <cstddef>
-#include "../lib/strbuf.h"
+#include "../../lib/strbuf.h"
 
 // Forward declarations
 struct Decimal;

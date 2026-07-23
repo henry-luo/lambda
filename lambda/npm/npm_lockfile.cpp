@@ -8,7 +8,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/stringbuf.h"
 #include "../lambda-data.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues
 class Input;
 Item parse_json_to_item(Input* input, const char* json_string);

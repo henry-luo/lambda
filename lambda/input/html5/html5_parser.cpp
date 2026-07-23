@@ -1,8 +1,8 @@
 #include "html5_parser.h"
 #include "../../../lib/log.h"
-#include "../../mark_builder.hpp"
-#include "../../mark_reader.hpp"
-#include "../../mark_editor.hpp"
+#include "../../io/mark_builder.hpp"
+#include "../../core/mark_reader.hpp"
+#include "../../io/mark_editor.hpp"
 #include <string.h>
 #include <assert.h>
 

@@ -1,7 +1,7 @@
 #include "format-markup.h"
 #include "format-utils.h"
 #include "format-utils.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
 #include "../../lib/mem_factory.h"

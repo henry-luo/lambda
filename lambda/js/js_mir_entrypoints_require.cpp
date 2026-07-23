@@ -1,6 +1,6 @@
 #include "js_mir_internal.hpp"
-#include "../lambda-error.h"
-#include "../mir_dump.h"
+#include "../runtime/lambda-error.h"
+#include "../runtime/mir_dump.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
 #include <cstdio>

@@ -16,8 +16,8 @@
 #include <cstring>
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_reader.hpp"
-#include "../lambda/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lib/html_entities.h"
 #include "../lambda/input/input-utils.h"
 #include "../lib/log.h"

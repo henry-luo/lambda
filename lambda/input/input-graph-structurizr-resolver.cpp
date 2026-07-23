@@ -3,8 +3,8 @@
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/memtrack.h"
-#include "../mark_builder.hpp"
-#include "../mark_reader.hpp"
+#include "../io/mark_builder.hpp"
+#include "../core/mark_reader.hpp"
 #include <string.h>
 
 using namespace lambda;

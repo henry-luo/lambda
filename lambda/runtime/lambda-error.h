@@ -275,6 +275,6 @@ SourceLocation src_loc_span(const char* file, uint32_t line, uint32_t col,
 
 // Parse error diagnostics (C++ only — requires tree-sitter TSNode)
 #include <tree_sitter/api.h>
-#include "../lib/arraylist.h"
+#include "../../lib/arraylist.h"
 void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors);
 #endif

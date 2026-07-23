@@ -4,10 +4,10 @@
 #pragma once
 
 #ifdef __cplusplus
-#include "lambda.hpp"
+#include "../lambda.hpp"
 #include "ast-core.hpp"
 #else
-#include "lambda.h"
+#include "../lambda.h"
 typedef struct LangProfile LangProfile;
 #endif
 

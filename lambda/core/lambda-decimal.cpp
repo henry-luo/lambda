@@ -4,11 +4,11 @@
 // All other files should use the API declared in lambda-decimal.hpp
 
 #include "lambda-decimal.hpp"
-#include "lambda-data.hpp"
-#include "runtime/heap_api.h"
-#include "../lib/log.h"
-#include "../lib/mem.h"
-#include "../lib/strbuf.h"
+#include "../lambda-data.hpp"
+#include "../runtime/heap_api.h"
+#include "../../lib/log.h"
+#include "../../lib/mem.h"
+#include "../../lib/strbuf.h"
 #include <mpdecimal.h>  // only included here
 #include <math.h>
 #include <stdio.h>
@@ -309,7 +309,7 @@ void decimal_free_string(char* str) {
 }
 
 // Deep copy a decimal Item (for arena allocation in MarkBuilder)
-#include "../lib/arena.h"
+#include "../../lib/arena.h"
 extern mpd_context_t* InputManager_decimal_context();  // forward declare
 
 Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {

@@ -20,7 +20,7 @@
 #include "js_function.hpp"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"

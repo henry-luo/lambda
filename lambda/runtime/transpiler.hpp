@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../lib/log.h"
-#include "io/input-allocation-context.h"
+#include "../../lib/log.h"
+#include "../io/input-allocation-context.h"
 
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 
 #include "ast.hpp"
 
@@ -38,9 +38,9 @@ extern "C" {
 #include <mir-gen.h>
 #include <c2mir.h>
 #else
-#include "../wasm-deps/include/mir.h"
-#include "../wasm-deps/include/mir-gen.h"
-#include "../wasm-deps/include/c2mir.h"
+#include "../../wasm-deps/include/mir.h"
+#include "../../wasm-deps/include/mir-gen.h"
+#include "../../wasm-deps/include/c2mir.h"
 #endif
 }
 
@@ -99,7 +99,7 @@ void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
                               bool reusing_context);
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
-#include "runtime/runtime-state.h"
+#include "runtime-state.h"
 
 // Lambda home: directory containing runtime assets (package/, input/).
 // Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.

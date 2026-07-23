@@ -1,11 +1,11 @@
 // template_state.cpp — Implementation of central template state store
 // Provides reactive state keyed by (model_item, template_ref, state_name).
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "template_state.h"
 #include "render_map.h"
-#include "../lib/log.h"
-#include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../../lib/log.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include <string.h>
 #include <stdio.h>
 

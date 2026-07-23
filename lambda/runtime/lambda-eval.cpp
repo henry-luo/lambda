@@ -1,18 +1,18 @@
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
-#include "runtime/lambda-number-runtime.hpp"
-#include "runtime/heap_api.h"
-#include "lambda-decimal.hpp"
+#include "lambda-number-runtime.hpp"
+#include "heap_api.h"
+#include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "concurrency.h"
 #include <limits.h>
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/url.h"
-#include "../lib/checked_math.hpp"
-#include "../lib/file.h"
-#include "../lib/str.h"
-#include "utf_string.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/url.h"
+#include "../../lib/checked_math.hpp"
+#include "../../lib/file.h"
+#include "../../lib/str.h"
+#include "../core/utf_string.h"
 #include "re2_wrapper.hpp"
 #include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
@@ -32,9 +32,9 @@
 #else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
-#include "validator/validator.hpp"
-#include "input/input.hpp"
-#include "input/html5/html5_parser.h"
+#include "../validator/validator.hpp"
+#include "../input/input.hpp"
+#include "../input/html5/html5_parser.h"
 
 extern __thread EvalContext* context;
 extern "C" void cow_profile_note_mutable_value(void);

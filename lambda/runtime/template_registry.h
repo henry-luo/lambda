@@ -3,7 +3,7 @@
 // provides apply() dispatch: matches a model item to the best template.
 #pragma once
 
-#include "lambda.h"
+#include "../lambda.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus

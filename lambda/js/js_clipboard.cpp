@@ -28,7 +28,7 @@
 #include "js_class.h"
 #include "js_dom_events.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../radiant/event.hpp"

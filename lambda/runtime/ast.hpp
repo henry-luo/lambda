@@ -8,7 +8,7 @@ extern "C" {
 #include <sys/types.h>
 #include <time.h>
 #include "ts-enum.h"
-#include "../lib/mempool.h"
+#include "../../lib/mempool.h"
 
 #define SYM_NULL sym_null
 #define SYM_NAMED_VALUE sym_named_value
@@ -200,8 +200,8 @@ extern "C" {
 }
 #endif
 
-#include "lambda-data.hpp"
-#include "core/print.h"
+#include "../lambda-data.hpp"
+#include "../core/print.h"
 #include "sys_func_registry.h"
 
 typedef struct JubeModuleImport {

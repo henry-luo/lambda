@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <tree_sitter/api.h>
-#include "lambda.h"
+#include "../lambda.h"
 #include "value_rep.h"
 
 typedef struct NamePool NamePool;

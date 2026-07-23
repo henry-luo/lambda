@@ -1,5 +1,5 @@
 #include "js_runtime_internal.hpp"
-#include "../lambda-error.h"
+#include "../runtime/lambda-error.h"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
 

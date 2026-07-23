@@ -13,12 +13,12 @@
  * Variables are stored as Items in a module variable table (like Python).
  */
 #include "bash_transpiler.hpp"
-#include "../mir_dump.h"
+#include "../runtime/mir_dump.h"
 #include "bash_runtime.h"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
-#include "../mir_emitter_shared.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/mir_emitter_shared.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/mem_factory.h"

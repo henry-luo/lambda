@@ -1,9 +1,9 @@
 #pragma once
 
-#include "lambda.h"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/hashmap.h"
+#include "../lambda.h"
+#include "../../lib/mempool.h"
+#include "../../lib/arena.h"
+#include "../../lib/hashmap.h"
 
 // Forward declarations
 struct ShapeEntry;

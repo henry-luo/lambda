@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-REGISTRY = ROOT / "lambda" / "sys_func_registry.c"
+REGISTRY = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
 SOURCE_ROOTS = (ROOT / "lambda", ROOT / "lib")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 SKIP_SOURCE_PARTS = {

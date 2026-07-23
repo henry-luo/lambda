@@ -7,7 +7,7 @@
  */
 
 #include "transpiler.hpp"
-#include "../lib/log.h"
+#include "../../lib/log.h"
 #include <string.h>
 
 extern Type TYPE_ANY, TYPE_INT;

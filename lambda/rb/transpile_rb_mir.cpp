@@ -5,11 +5,11 @@
 // (rb_add, rb_subtract, etc.) take and return Items.
 
 #include "rb_transpiler.hpp"
-#include "../mir_dump.h"
+#include "../runtime/mir_dump.h"
 #include "rb_runtime.h"
 #include "../lambda-data.hpp"
-#include "../mir_emitter_shared.hpp"
-#include "../module_registry.h"
+#include "../runtime/mir_emitter_shared.hpp"
+#include "../runtime/module_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/mem_factory.h"
@@ -17,9 +17,9 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../runtime/heap_api.h"
-#include "../name_pool.hpp"
+#include "../core/name_pool.hpp"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>

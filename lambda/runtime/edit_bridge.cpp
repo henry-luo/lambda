@@ -1,12 +1,12 @@
 // edit_bridge.cpp — Implementation of C-linkage bridge to MarkEditor
 // Wraps MarkEditor's C++ methods as flat C functions for JIT-compiled
 // edit handlers. Manages a global MarkEditor instance per edit session.
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "edit_bridge.h"
-#include "mark_editor.hpp"
-#include "mark_reader.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "../io/mark_editor.hpp"
+#include "../core/mark_reader.hpp"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include <string.h>
 
 // forward declaration: runtime context (defined in mir.c)

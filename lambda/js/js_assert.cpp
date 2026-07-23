@@ -13,7 +13,7 @@
 #include "js_error_codes.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 

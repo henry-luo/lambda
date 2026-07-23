@@ -5,7 +5,7 @@
 //   Phase 2: Top-down re-transform of dirty entries only
 #pragma once
 
-#include "lambda.h"
+#include "../lambda.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus

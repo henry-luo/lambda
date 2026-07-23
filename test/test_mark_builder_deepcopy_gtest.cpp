@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_builder.hpp"
-#include "../lambda/mark_reader.hpp"  // for ArrayReader
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"  // for ArrayReader
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"

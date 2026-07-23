@@ -8,12 +8,12 @@
 #include "re2_wrapper.hpp"
 #include "ast.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
-#include "lambda.hpp"
-#include "runtime/heap_api.h"
+#include "../lambda.hpp"
+#include "heap_api.h"
 #endif
-#include "../lib/re2_glue.hpp"
-#include "../lib/log.h"
-#include "../lib/mempool.h"
+#include "../../lib/re2_glue.hpp"
+#include "../../lib/log.h"
+#include "../../lib/mempool.h"
 
 #include <re2/re2.h>
 #include <stdint.h>

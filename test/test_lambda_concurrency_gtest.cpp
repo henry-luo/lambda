@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include "../lambda/concurrency.h"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/lambda.hpp"
-#include "../lambda/lambda-error.h"
-#include "../lambda/transpiler.hpp"
+#include "../lambda/runtime/lambda-error.h"
+#include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/uv_loop.h"
 

@@ -5,7 +5,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
 #include "format-markup.h"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 

@@ -3,9 +3,9 @@
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/str.h"
-#include "../../mark_builder.hpp"
-#include "../../mark_reader.hpp"
-#include "../../mark_editor.hpp"
+#include "../../io/mark_builder.hpp"
+#include "../../core/mark_reader.hpp"
+#include "../../io/mark_editor.hpp"
 #include <string.h>
 
 // JSON parser for embedded JSON-LD in <script type="application/ld+json">

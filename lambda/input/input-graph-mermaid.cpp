@@ -1,6 +1,6 @@
 #include "input-graph.h"
-#include "../mark_builder.hpp"
-#include "../mark_reader.hpp"
+#include "../io/mark_builder.hpp"
+#include "../core/mark_reader.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"

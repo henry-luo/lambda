@@ -26,7 +26,7 @@
 #include "../test_baseline_mode.hpp"
 
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/mark_reader.hpp"
+#include "../../lambda/core/mark_reader.hpp"
 
 extern "C" {
 #include "../../lib/log.h"

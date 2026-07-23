@@ -32,15 +32,15 @@ ignores:
   - "lambda/repl/**"
   - "lambda/main.cpp"
   - "lambda/main-repl.cpp"
-  - "lambda/lambda-error.cpp"
+  - "lambda/runtime/lambda-error.cpp"
   - "lambda/lambda-help.cpp"
-  - "lambda/print.cpp"
+  - "lambda/core/print.cpp"
   # CLI subcommand handlers (sibling of lambda/main.cpp) added per
   # vibe/Lambda_Lint_Fix.md §3.1 — these legitimately produce stdout.
   - "lambda/validator/ast_validate.cpp"   # `lambda validate` subcommand
   - "lambda/headless_stubs.cpp"           # CLI-only build stubs
   - "lambda/npm/**"                       # npm-compat CLI
-  - "lambda/runner.cpp"                   # CLI runner
+  - "lambda/runtime/runner.cpp"                   # CLI runner
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   - "radiant/event_sim.cpp"               # event-simulation test driver
   - "radiant/render_img.cpp"              # image-rendering dump path

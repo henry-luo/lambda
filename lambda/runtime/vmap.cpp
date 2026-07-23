@@ -2,16 +2,16 @@
 // Provides a dynamic hash-map type for Lambda with arbitrary key types.
 // Uses lib/hashmap.h (Robin Hood open-addressed hash table) as the backing store.
 
-#include "lambda.hpp"
-#include "lambda-decimal.hpp"
-#include "../lib/memtrack.h"
-#include "lambda-data.hpp"
-#include "../lib/hashmap.h"
-#include "../lib/arraylist.h"
-#include "runtime/gc/gc_heap.h"
-#include "../lib/log.h"
-#include "jube/jube_registry.h"
-#include "jube/jube_interface.h"
+#include "../lambda.hpp"
+#include "../core/lambda-decimal.hpp"
+#include "../../lib/memtrack.h"
+#include "../lambda-data.hpp"
+#include "../../lib/hashmap.h"
+#include "../../lib/arraylist.h"
+#include "gc/gc_heap.h"
+#include "../../lib/log.h"
+#include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 #include "concurrency.h"
 #include <cstdlib>
 #include <cstring>

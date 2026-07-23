@@ -7,8 +7,8 @@
 
 #pragma once
 
-#include "lambda-data.hpp"
-#include "../lib/strbuf.h"
+#include "../lambda-data.hpp"
+#include "../../lib/strbuf.h"
 
 // Forward declarations
 struct AstNode;

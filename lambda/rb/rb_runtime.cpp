@@ -15,7 +15,7 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 #include "../../lib/mem.h"
 #include <cmath>
 #include <re2/re2.h>
-#include "../re2_wrapper.hpp"
+#include "../runtime/re2_wrapper.hpp"
 
 // push_d boxes a double into an Item via the shared number-stack API (C linkage)
 extern "C" Item push_d(double dval);

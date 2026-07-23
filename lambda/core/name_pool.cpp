@@ -1,8 +1,8 @@
-#include "../lib/log.h"
-#include "../lib/string.h"
-#include "../lib/hashmap_helpers.h"
-#include "../lib/ref_counted_pool.hpp"
-#include "lambda-data.hpp"
+#include "../../lib/log.h"
+#include "../../lib/string.h"
+#include "../../lib/hashmap_helpers.h"
+#include "../../lib/ref_counted_pool.hpp"
+#include "../lambda-data.hpp"
 
 // Entry structure for the hashmap
 typedef struct NamePoolEntry {

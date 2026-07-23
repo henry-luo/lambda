@@ -1,8 +1,8 @@
 #include "input.hpp"
-#include "../mark_builder.hpp"
+#include "../io/mark_builder.hpp"
 #include "../lambda.h"  // For it2s() function
 #include <tree_sitter/api.h>
-#include "../ts-enum.h"
+#include "../runtime/ts-enum.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/strbuf.h"
