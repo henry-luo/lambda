@@ -30,7 +30,8 @@ Direct answer to "what else is outstanding from C4":
 | Item | Source | Disposition |
 |---|---|---|
 | COW at mutation points (refcount/uniqueness-triggered) | C4.4 #1 | **Phases C–E** (bit 0 of `cow_state`, CW3) for Array/Map/Object/Element/VMap |
-| VMap COW | COW rev 5 / CW9 | **IN — C2/C3.** Backend-level snapshot/detach hook; HashMap backend supported, task handles immutable, mutable host backends must opt in |
+| Raw-vs-COW mutation API boundary | COW rev 6 / CW21 | **IN — C0/C3.** Existing in-place APIs remain unchanged; new Lambda-only `_cow` wrappers return the possibly replaced owner and delegate to raw mutation |
+| VMap COW | COW rev 6 / CW9 | **IN — C2/C3.** `vmap_set()` remains raw/host-compatible; `vmap_set_cow()` uses the backend snapshot/detach hook; task handles and non-snapshot host backends reject `_cow` mutation |
 | ArrayNum COW, views, representation-invariant equality | COW §9/CW15–CW16 | **OUT — Stage 2.** Keep the native specialized path; no generic COW branch/walk |
 | JS↔Lambda COW/buffer ownership | COW §9.3/CW17 | **OUT — Stage 2.** test262/Node remain regression gates only |
 | `var`-param grammar | C4.4 #1 | **already parses** (`var_param_marker`, grammar.js:494/:554; `is_var_param` built at build_ast.cpp:7951, consumed at :2575, transpile-mir.cpp:394) — semantics audited in B4/C4, no grammar work expected |
@@ -69,7 +70,9 @@ declaring C4 fully done once this plan completes.
   bytes copied; VMap backend and host-rejection counts; plus
   `fn_mutable_value` call rate while it still exists.
   These counters are the CW4 (saturating-count) decision data; they ship
-  first so before/after spans the whole migration.
+  first so before/after spans the whole migration. COW mutation counters live
+  in `_cow` wrappers/cold helpers only; raw JS/in-place stores neither pay for
+  nor contaminate them.
 - **A2 — capture the C4.1 probe matrix as fixtures with CURRENT goldens**:
   `let g`/`var h`, var–var alias, object alias, default-instance no-op,
   second-mutation loss, frozen-receiver no-op, capture-assign behavior
@@ -149,6 +152,27 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
   registers/stack state and propagate copied children into copied parents;
   do not allocate a heap path descriptor. Direct MIR stores may temporarily
   route through the audited slow path during bring-up.
+- **C0a — freeze the raw/COW API boundary (CW21).** Inventory all existing
+  update-in-place entry points and their Lambda, JS, Radiant, and host callers.
+  `array_set()`, `fn_array_set()`, `fn_map_set()`, `vmap_set()`,
+  `js_array_set()`, `js_property_set()`, `js_set_shaped_slot()`, and the raw
+  push/splice/pop family keep their signatures and behavior. They never test
+  or mark `cow_state`. Add replacement-returning Lambda-only entry points:
+
+  ```c
+  Item array_set_cow(Item owner, int64_t index, Item value);
+  Item map_set_cow(Item owner, Item key, Item value);
+  Item vmap_set_cow(Item owner, Item key, Item value);
+  ```
+
+  Add matching `_cow` wrappers for push/splice/pop and editor mutations.
+  Store-only wrappers return the updated owner. Operations with a semantic
+  result return the owner and write the result through an out parameter.
+  Wrappers share `cow_prepare_write()` and delegate to raw implementations;
+  no mutation algorithm is copied. Delegate at the highest existing raw layer
+  that already owns bounds checks, representation conversion, errors, and
+  storage details (`fn_array_set` before `array_set` when those semantics are
+  required).
 - **C0b — precise-rooting contract (DECIDED).** A copy allocates. Root source,
   replacement, incoming value, and every live owner-chain Item with
   `RootFrame` / `Rooted`; reload pointers after any possible compaction.
@@ -163,30 +187,30 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
 - **C2 — one-level copy primitives.**
   - Array copies its Item slots and marks container children shared.
   - Map/Object copy value storage while sharing `TypeMap`/`ShapeEntry`
-    (DECIDED). Audit all in-place `ShapeEntry::type` updates: a write must
-    detach/transition shape metadata before changing it.
+    (DECIDED). `map_set_cow()` detaches/transitions Lambda-shared metadata
+    before delegating to `fn_map_set()`; do not change JS raw shape paths.
   - Element copies both list and map facets under the same rule.
-  - VMap gains the decided vtable snapshot/detach hook. It runs only after the
-    common shared-state test, so unique mutation calls the existing `set`
-    without an extra virtual dispatch. The HashMap backend clones table and
-    insertion-order storage in one pass, preserving capacity/hash metadata
-    where safe, and marks container keys **and** values shared. Task handles
-    remain immutable. A host backend participates only if its visible backing
-    is snapshot-stable and the hook creates independent writable value
-    storage; a missing hook means immutable and Lambda mutation is rejected.
-    Audit `vmap_host_set_by_item`: generic Lambda map mutation must not route
-    into an external host setter. Capability side effects move through an
-    explicit host method/API.
+  - VMap gains the decided vtable snapshot/detach hook. Only
+    `vmap_set_cow()` consults it. Existing `vmap_set()` and
+    `vmap_host_set_by_item()` keep their JS/host in-place behavior. The
+    HashMap backend clones table and insertion-order storage in one pass,
+    preserving capacity/hash metadata where safe, and marks container keys
+    **and** values shared. A unique, COW-capable VMap delegates directly to
+    `vmap_set()`. Task handles and host backends without snapshot-stable value
+    storage reject `_cow` mutation before raw delegation.
     Fixtures/counters prove: unique HashMap VMap mutation takes zero
     snapshots; the first shared mutation takes exactly one snapshot and
     preserves the old value; immutable/host-capability mutation invokes no
     external setter and reports rejection.
-- **C3 — mutation choke points.** Route index/field assignment,
-  `push`/`splice`/`pop`, method-receiver mutation, VMap set, and
-  MarkEditor/edit-bridge mutation through the replacement-returning ABI.
-  Wire Lambda share events: binding/assignment (emission flip remains E),
-  construction/insertion, return/capture, and retained Lambda `Item`
-  ownership. Do not add JS-boundary marking. There is no special
+- **C3 — implement wrappers, then migrate Lambda callers only.**
+  `array_set_cow()` / `map_set_cow()` / `vmap_set_cow()` and the collection
+  operation wrappers perform prepare-write, Lambda capture marking, raw
+  delegation, and replacement return. Refactor Lambda MIR/runtime index/field
+  assignment, push/splice/pop, method receivers, and MarkEditor/edit-bridge
+  paths to install the returned owner. Do not migrate JS transpiler/runtime
+  call sites. Wire Lambda share events: binding/assignment (emission flip
+  remains E), construction/insertion, return/capture, and retained Lambda
+  `Item` ownership. Do not add JS-boundary marking. There is no special
   `PersistentFieldRef` rule; current uses are raw characters, not Items.
 - **C4 — un-share-at-borrow for in-scope containers.** At `var`-param call
   sites and method-receiver binding, install a unique replacement before the
@@ -203,16 +227,21 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
 
 All C work remains behind `LAMBDA_COW=1`; both flag states retain current
 observable semantics. Gate: Lambda and Radiant baselines, focused VMap and
-nested-spine fixtures, ASan, and forced-GC stress. The `let g`/`var h`
-probe remains the false-unique canary but does not flip yet.
+nested-spine fixtures, ASan, and forced-GC stress. Add JS alias-preservation
+fixtures for arrays, ordinary objects, shaped objects, globals, and host
+VMaps: mutating through one JS alias must remain visible through the other,
+and profiling must show no `_cow` call/branch in the JS store path. The
+`let g`/`var h` probe remains the false-unique canary but does not flip yet.
 
 ## 4. Phase D — final hot path and performance gate
 
 - Unique mutation: inline one byte load/test/branch on `cow_state`; no helper
   call, allocation, child scan, or path-object allocation. The cold arm calls
-  the copy helper and installs its returned Item.
+  the copy helper, delegates the update to the raw mutator, and installs the
+  returned Item.
 - Restore every direct MIR array/field store with the inline guard and cold
-  branch; no permanent helper-only store path.
+  branch; no permanent helper-only store path. This is Lambda `_cow`
+  lowering only—JS direct/raw stores are not changed.
 - CW2 static elision: provably-fresh containers skip the test. A
   definite-scalar RHS emits no share helper; a known container emits an
   inline OR; only dynamically typed values may call a helper.
@@ -220,6 +249,9 @@ probe remains the false-unique canary but does not flip yet.
   matched release A/B. **Phase E is blocked until the unique-mutation path
   has the intended instruction/allocation shape and every affected-row
   regression is explained.**
+- Verify the JS MIR/runtime store inventory still resolves exclusively to raw
+  setters. LambdaJS array/property mutation microbenchmarks must show no new
+  COW instruction, helper, allocation, or aliasing change.
 
 Expected release targets remain: collatz ≤ ~700 ms; splay recovers its 2.3×;
 gcbench/binarytrees improve without over-promising literal/GC work; the
@@ -273,7 +305,10 @@ touched suites → correctness sweep on all timed benchmark rows → counters +
 affected-benchmark numbers recorded in this doc's completion record.
 C/E add Radiant baseline and forced-GC stress with the `let g`/`var h`
 canary. test262, Node, and JS gtests run as shared-runtime regression gates;
-no JS boundary semantic change is accepted in Stage 1.
+no JS boundary semantic change is accepted in Stage 1. The focused JS
+alias-preservation fixtures and LambdaJS raw-store performance probes are
+required in C/D because shared storage code is touched even though JS policy
+is not.
 
 **Exit = Result11** (absorbed from `Lambda_Impl_Tune.md` §5): full benchmark
 protocol (3-run median, release, 180 s), output-correctness sweep
@@ -303,10 +338,15 @@ expected to be the next dominant Lambda-side mechanism after this plan.
 6. **Deferred performance-critical surfaces** — ArrayNum and JS↔Lambda
    ownership are intentionally unchanged. Any accidental generic COW branch
    in ArrayNum or observable buffer-boundary change is a Stage-1 regression.
+7. **Raw-path contamination** — adding COW logic to `array_set()`,
+   `fn_array_set()`, `fn_map_set()`, `vmap_set()`, or JS setters would change
+   JS reference semantics and tax its hottest stores. CW21 requires new
+   wrappers and a call-site inventory; a raw mutator containing a COW check is
+   a design violation.
 
 ---
 
-*Cross-refs:* design `vibe/Lambda_Design_COW.md` (CW1–CW20);
+*Cross-refs:* design `vibe/Lambda_Design_COW.md` (CW1–CW21);
 predecessor record `vibe/Lambda_Impl_Tune.md` (M1/M2, ex-M3 stub);
 semantics `doc/Lambda_Formal_Semantics.md` §9 + `vibe/Lambda_Semantics_Formal.md`
 C4.1–C4.4/C4.2a–c; tuning ledger `vibe/Lambda_Tuning_Proposal.md` (R6b = M4);

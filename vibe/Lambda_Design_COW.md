@@ -1,6 +1,6 @@
 # Lambda Design: Copy-on-Write for Mutable Value Semantics
 
-- **Status:** PROPOSED — rev 5, 2026-07-23. **Layer-2 v1 mechanism decided by
+- **Status:** PROPOSED — rev 6, 2026-07-23. **Layer-2 v1 mechanism decided by
   designer: the 1-bit shared flag (CW3), simplicity first.** The
   saturating-count upgrade is explicitly deferred behind future deep
   benchmarking on live/production Lambda scripts (CW4). **Rev 2 adds §9
@@ -19,6 +19,10 @@
   and copied spines use precise rooting. Performance has no arbitrary
   per-benchmark percentage cutoff: Result11 must be materially better than
   Result10 overall and target Result9-class or better Lambda/MIR performance.**
+  **Rev 6 (CW21, designer 2026-07-23) isolates language policy in new
+  Lambda-only `_cow` mutation wrappers. Existing in-place mutation APIs remain
+  unchanged for LambdaJS/host code; each COW wrapper prepares/replaces the
+  Lambda owner and then delegates the actual update to the existing raw API.**
   Everything else is proposed for review.
 - **Owns:** the engineering realization of C4's copy discipline — uniqueness
   tracking, the copy path, retirement of the eager clone anchor, and the
@@ -174,7 +178,9 @@ Two asymmetries frame the choice:
   shared-bit sets, mutations on unique (in-place), mutations on shared
   (copies taken), bytes copied. `js_exec_profile`-style, release-safe. These
   counters *are* the future benchmarking's data; without them CW4's decision
-  can never be made.
+  can never be made. Mutation counters are entered only through Lambda
+  `_cow` wrappers/cold helpers; raw JS/in-place stores incur no counter branch
+  and do not pollute Lambda COW measurements.
 
 ### 5.3 Bit placement and the flag's exact semantics
 
@@ -234,6 +240,62 @@ installed into the binding or copied parent slot before mutation. The JIT
 inlines the state test + branch on hot paths (Layer 1 elides it where
 uniqueness is proven); the cold copy helper returns the replacement.
 
+### 5.4 CW21 — raw mutation stays raw; Lambda COW is a wrapper layer
+
+**DECIDED (designer, 2026-07-23): existing in-place APIs keep their current
+semantics and signatures.** `array_set()`, `fn_array_set()`, `fn_map_set()`,
+`vmap_set()`, JS array/property/shape setters, and equivalent raw
+push/splice/pop helpers do not inspect or update `cow_state`, do not copy,
+and do not acquire Lambda ownership policy. LambdaJS depends on these
+operations having reference semantics; their names do not make them
+Lambda-only.
+
+Stage 1 adds a parallel Lambda-only family:
+
+```c
+Item array_set_cow(Item owner, int64_t index, Item value);
+Item map_set_cow(Item owner, Item key, Item value);
+Item vmap_set_cow(Item owner, Item key, Item value);
+```
+
+`map_set_cow()` covers Map/Object/Element through the existing shared raw
+map-update implementation. Other mutating operations follow the same suffix
+and ownership convention (`array_push_cow`, `array_splice_cow`,
+`array_pop_cow`, editor mutation wrappers, and so on) rather than duplicating
+their update algorithms.
+
+| Lambda COW entry | Raw delegate after prepare-write | Unchanged JS/host route |
+|---|---|---|
+| `array_set_cow` | `fn_array_set` / `array_set` at the existing validation/storage layer | `js_array_set` → raw array storage |
+| `map_set_cow` | `fn_map_set` | `js_property_set`, shaped-slot setters → existing raw map/shape paths |
+| `vmap_set_cow` | `vmap_set` after COW-capability validation | `vmap_set` retains current host dispatch |
+| `array_*_cow` | corresponding existing push/splice/pop implementation | JS array builtins retain current raw implementations |
+
+The wrapper delegates at the highest existing raw layer that already owns
+bounds checks, representation conversion, error behavior, and storage
+details; it does not repeat those checks merely to reach `array_set()`.
+
+Each `_cow` API has one contract:
+
+1. precisely root `owner`, `value`, and any live parent chain;
+2. call `cow_prepare_write(owner)` and receive the original unique owner or a
+   one-level replacement;
+3. mark a stored container value shared when the operation creates another
+   Lambda owner, unless the JIT proves a true move/last use;
+4. delegate the actual mutation to the existing in-place API;
+5. return the possibly replaced owner for mandatory installation into its
+   binding or parent slot.
+
+APIs that also return a semantic result, such as `pop`, return the updated
+owner and place the operation result in an out parameter; they never hide
+owner replacement in a local pointer. Errors use the existing runtime error
+channel and must not make the caller lose the current owner.
+
+The JIT may inline the unique test and raw store, but that lowering is an
+optimization of the `_cow` contract. Lambda source mutation is refactored to
+call/inline `_cow`; JS lowering never emits `_cow`. No language-mode test is
+added to `array_set()` or another raw hot path.
+
 ## 6. Layer 3 — the copy path: one shallow level + mark children shared
 
 **CW9 — a COW copy is one level deep: copy the container's own storage
@@ -263,25 +325,28 @@ node representation: the existing containers become the persistent structure.
   generic COW test, Item walk, or visited map is added to its native path.
 - **VMap is a backend contract, not a header copy (DECIDED, designer,
   2026-07-23).** `VMapVtable` gains a one-level snapshot/detach operation.
-  The hook is called only on the shared cold path; unique VMap mutation keeps
-  the existing direct vtable `set` after the common state test. The ordinary
-  HashMap backend clones its table and insertion-order storage in one pass,
-  preserving capacity/hash metadata where safe rather than rebuilding by
-  repeated insertion, and marks container keys and values shared. Task
-  handles stay immutable. A host-backed VMap can participate only when its
-  visible backing is snapshot-stable and the hook produces independent
-  writable value storage. A missing hook means immutable and mutation is
-  rejected. Generic Lambda map mutation must not fall through to an external
-  host setter; capability side effects use an explicit host method/API rather
-  than leaking reference semantics into a Lambda value. Counters/fixtures
-  require zero snapshots for unique HashMap mutation, exactly one snapshot at
-  first shared mutation, preservation of the old value, and no external
-  setter call on a rejected capability mutation.
+  Only `vmap_set_cow()` consults it; existing `vmap_set()` retains its current
+  in-place/host-set behavior for JS and host callers. On the Lambda shared
+  cold path, the ordinary HashMap backend clones its table and
+  insertion-order storage in one pass, preserving capacity/hash metadata
+  where safe rather than rebuilding by repeated insertion, and marks
+  container keys and values shared. On the unique Lambda path,
+  `vmap_set_cow()` delegates directly to `vmap_set()`.
+
+  Task handles stay immutable. A host-backed VMap can enter Lambda COW only
+  when its visible backing is snapshot-stable and the hook produces
+  independent writable value storage. Otherwise `vmap_set_cow()` rejects the
+  mutation without calling the host setter; JS/host callers may continue to
+  use raw `vmap_set()` reference semantics. Counters/fixtures require zero
+  snapshots for unique HashMap mutation, exactly one snapshot at first shared
+  mutation, preservation of the old value, and no external setter call from a
+  rejected `_cow` operation.
 - **Map/Object shape metadata is shared, not copied per value.** `TypeMap` /
-  `ShapeEntry` must be immutable once shared by COW values. Existing
-  type-changing field writes must take their existing shape-transition or
-  detach path before changing metadata; an audit of the current in-place
-  `ShapeEntry::type` writes is a Stage-1 gate.
+  `ShapeEntry` must be immutable once shared by Lambda COW values.
+  `map_set_cow()` detaches/transitions Lambda shape metadata before delegating
+  to a raw update that may change `ShapeEntry::type`. Existing JS raw shape
+  mutation and its JS-specific detach rules remain unchanged; COW policy is
+  not inserted into `fn_map_set()` or `js_set_shaped_slot()`.
 - **Undo/history falls out** (§9.5.1): a retained old root is a full snapshot
   at O(spine) cost — the editor gets persistence as a side effect.
 - **§9.5.2 interplay:** explicit owner writeback makes the *naive*
@@ -471,9 +536,9 @@ borrows the target's root (`a[i] = g(var a)`) must resolve the store address
 | Phase | Content | Gate |
 |---|---|---|
 | P0 | CW5 counters on the *current* anchor (`fn_mutable_value` call rate, clone bytes, per-type) + fixtures: C4.1 probe goldens, editor/document benchmark (C4.3 gate), gcbench/splay/collatz A/B harness | counters visible in release |
-| P0b | Settle the mutation-owner/writeback ABI, precise-rooting rules, shared-shape invariant, and `VMapVtable` snapshot contract before changing semantics | focused nested-write, forced-GC, VMap backend fixtures |
+| P0b | Freeze CW21's raw-versus-`_cow` API boundary, mutation-owner/writeback ABI, precise-rooting rules, shared-shape invariant, and `VMapVtable` snapshot contract before changing semantics | API call-site inventory; focused nested-write, forced-GC, VMap backend fixtures |
 | P1 | `COW_STATE_SHARED` helpers + one-level copy for the five Stage-1 kinds; `MarkBuilder` static marking (CW8), all behind `LAMBDA_COW=1`; no anchor retirement yet | baseline 100% flag-off and flag-on; current observable semantics unchanged; ASan/forced-GC clean |
-| P2 | Route every in-scope mutation choke point through replacement-returning prepare-write and prove nested owner writeback; ordinary VMap snapshot, immutable-task rejection, host-backend capability rule | Lambda + Radiant baselines; focused map/object/element/VMap and nested-spine fixtures |
+| P2 | Implement thin `_cow` wrappers over unchanged raw mutators; refactor every Lambda mutation choke point to the wrappers and prove nested owner writeback; ordinary VMap snapshot, immutable-task rejection, host-backend capability rule | Lambda + Radiant baselines; JS raw-mutator alias fixtures; focused map/object/element/VMap and nested-spine fixtures |
 | P3 | JIT inline unique test/cold-copy branch; Layer-1 scalar/fresh-value elision (CW2); direct MIR stores regain the guarded fast path | MIR budgets; release A/B shows no unexplained regression on unique mutation and identifies every new branch/allocation on affected paths |
 | P4 | Only after P3 passes: CW10 anchor → share-and-mark for Stage-1 kinds; remove applicable exemptions; retain a narrow ArrayNum compatibility path; split genuine boundary deep copy | C4 core-container probe goldens flip; Lambda + Radiant baselines; test262/Node as shared-runtime regression gates only |
 | P5 | MarkEditor/Radiant retained-`Item` audit and production benchmark/counter record | Radiant baseline 100%, editor/document benchmark, release Result11 record |
@@ -485,6 +550,8 @@ allocation. Known scalar RHS emits nothing; known container sharing emits an
 inline OR; only dynamically typed values may call a helper. Direct MIR stores
 may be temporarily routed through the audited path during bring-up, but the
 guarded inline path must exist before P4 changes observable semantics.
+This applies only to Lambda `_cow` lowering. Existing raw C/JS mutators gain
+no COW branch, helper call, share mark, or change of aliasing behavior.
 
 **Stage-1 performance outcome (DECIDED, designer, 2026-07-23):** do not use
 an arbitrary uniform percentage cutoff. Measure Result11 with the same clean
@@ -629,28 +696,30 @@ Stage 2 also owns the implementation of §9:
 
 These are accepted decisions, not open design questions:
 
-1. **Mutation ownership/writeback ABI (DECIDED).** A copied container returned
+1. **Raw/COW API separation (DECIDED).** Existing in-place mutators remain
+   policy-free and unchanged for JS/host callers. Lambda mutation is moved to
+   new replacement-returning `_cow` wrappers, which reuse the raw operations
+   after preparing a unique owner. JS lowering never calls `_cow`.
+2. **Mutation ownership/writeback ABI (DECIDED).** A copied container returned
    only to a local variable is lost, so every mutation lowering owns an
    assignable root/parent slot. `cow_prepare_write(Item)` returns the
    replacement; nested writes propagate and install replacements along the
    owner chain. The chain stays in MIR registers/stack state, never a heap
    descriptor. P0b fixtures must prove root and deep-spine writeback.
-2. **VMap snapshot/detach contract (DECIDED).** `VMapVtable` gains the hook.
-   Mutable backends implement it; immutable capability VMaps reject mutation.
-   A backend whose `set` means an external side effect is not a C4 value and
-   cannot silently use Lambda map mutation. Snapshot-stable backends call the
-   hook only on the shared cold path; external capability effects use an
-   explicit non-map-mutation API.
-3. **Performance outcome (DECIDED).** There is no blanket 3% cutoff. Every
+3. **VMap snapshot/detach contract (DECIDED).** `VMapVtable` gains the hook,
+   used only by `vmap_set_cow()` on its shared cold path. Existing
+   `vmap_set()` retains JS/host in-place and host-set behavior. `_cow`
+   rejects non-snapshot-capable host/capability VMaps before raw delegation.
+4. **Performance outcome (DECIDED).** There is no blanket 3% cutoff. Every
    design choice remains performance-accounted, and Result11 uses the
    Result9/10 release protocol. Lambda/MIR must be materially better than
    Result10 overall and target Result9-class or better performance; focused
    hot-path results and counters must agree with the overall result.
-4. **Shape metadata invariant (DECIDED).** Map/Object values share shapes for
-   efficiency. Every `ShapeEntry::type` mutation first detaches/transitions
-   the shape; otherwise a value-level copy could mutate another value's
-   interpretation.
-5. **GC rooting of a copied spine (DECIDED).** Source, replacement, incoming
+5. **Shape metadata invariant (DECIDED).** Lambda Map/Object values share
+   shapes for efficiency. `map_set_cow()` detaches/transitions a shared shape
+   before calling the raw updater. JS raw shape mutation remains governed by
+   its existing JS-specific shape rules.
+6. **GC rooting of a copied spine (DECIDED).** Source, replacement, incoming
    value, and intermediate parents are precisely rooted across allocations
    and reloaded after possible compaction. Forced-GC coverage is mandatory.
 
