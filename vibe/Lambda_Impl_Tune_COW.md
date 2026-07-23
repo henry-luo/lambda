@@ -12,12 +12,14 @@ decision record `vibe/Lambda_Semantics_Formal.md` C4–C4.4.
 against symbol names.
 
 **Governing invariant — different from Impl_Tune's.** Impl_Tune was
-bit-identical by contract. This plan **deliberately moves the aliasing line
-to full C4** (Phase C3): `let`-finality becomes real, exempt-site aliasing
-ends, the C4.1 probes flip from bug-pinning goldens to correct-behavior
-goldens. Every observable change must be *enumerated in the phase that makes
-it* and land as an explicit golden update — never as silent churn. Everything
-else (representation, sharing, bit placement) stays invisible per P6.
+bit-identical by contract. This plan deliberately moves the aliasing line to
+the **C4 core-container subset**: Lambda-native `Array`, `Map`, `Object`,
+`Element`, and `VMap`. ArrayNum COW/views and JS↔Lambda interop remain on
+their current behavior until Stage 2. For the in-scope kinds, `let`-finality
+becomes real, exempt-site aliasing ends, and the C4.1 probes flip from
+bug-pinning goldens to correct-behavior goldens. Every observable change
+must be enumerated in the phase that makes it and land as an explicit golden
+update. Everything else stays invisible per P6.
 
 ---
 
@@ -27,7 +29,10 @@ Direct answer to "what else is outstanding from C4":
 
 | Item | Source | Disposition |
 |---|---|---|
-| COW at mutation points (refcount/uniqueness-triggered) | C4.4 #1 | **Phase C** (as 1-bit `is_shared`, CW3) |
+| COW at mutation points (refcount/uniqueness-triggered) | C4.4 #1 | **Phases C–E** (bit 0 of `cow_state`, CW3) for Array/Map/Object/Element/VMap |
+| VMap COW | COW rev 5 / CW9 | **IN — C2/C3.** Backend-level snapshot/detach hook; HashMap backend supported, task handles immutable, mutable host backends must opt in |
+| ArrayNum COW, views, representation-invariant equality | COW §9/CW15–CW16 | **OUT — Stage 2.** Keep the native specialized path; no generic COW branch/walk |
+| JS↔Lambda COW/buffer ownership | COW §9.3/CW17 | **OUT — Stage 2.** test262/Node remain regression gates only |
 | `var`-param grammar | C4.4 #1 | **already parses** (`var_param_marker`, grammar.js:494/:554; `is_var_param` built at build_ast.cpp:7951, consumed at :2575, transpile-mir.cpp:394) — semantics audited in B4/C4, no grammar work expected |
 | Compile check: `var` receiver for `pn` methods | C4.4 #1 | **Phase B4 — pulled forward from Stage 2.** Justification: it is a *binding-kind* check (is the receiver rooted at a `var` binding?), not an overlap analysis; and without it `frozen.increment()` stays a silent no-op — the C4.1 worst-case failure mode. Exclusivity proper stays out |
 | Compile checks: var-args-only, exclusivity (all faces) | C4.4 #1 | **OUT — Stage 2**, `Lambda_Design_COW.md` §11 |
@@ -36,11 +41,11 @@ Direct answer to "what else is outstanding from C4":
 | Migration audit (stdlib/fixture aliasing reliance, benchmark `var` signatures, editor/Radiant element paths) | C4.4 #3 | **Phase F** |
 | Docs: delete/rewrite `Lambda_Func.md` "Mutable Captures"; aliasing/mutability section; state idioms; construction-captures teaching | C4.4 #4 / #7 | **Phase F** (non-gating, listed) |
 | Formal model: store only for `var` bindings | C4.4 #5 | OUT — semantics-DSL project |
-| Nested-mutation ergonomics (path borrows, `_modify`) | C4.4 #6 / §9.5.2 | OUT — needs its own design; Phase C makes the naive spelling *safe* (worst case O(spine)), which removes the urgency |
+| Nested-mutation correctness vs ergonomics | C4.4 #6 / §9.5.2 | **Correct owner/spine writeback IN — C0/C3.** New path-borrow / `_modify` syntax remains OUT |
 | Non-escaping nested-`pn` relaxation | C4.2a | OUT — deferred by record; interim idiom is the object form, which **Phase B unblocks** |
 | Ordering fixtures: value-args-before-borrow; store-target re-resolution | C4.2c / CW19 | **Phase C5** |
 | Snapshot iteration ruling | COW §11.6 | OUT — Stage 2 (candidate C4.2d) |
-| `let g`/`var h` aliasing probes (canonical violation) | C4.1 | goldens **flip at Phase C3** |
+| `let g`/`var h` aliasing probes (canonical violation) | C4.1 | in-scope goldens **flip at Phase E** |
 
 The OUT rows above are consolidated — with pick-up triggers and grouping
 (Stage 2 / needs-design / different project) — as
@@ -56,12 +61,13 @@ declaring C4 fully done once this plan completes.
   scalars return unchanged, no hashmap. Extract the container-set predicate
   shared with `clone_mutable_item`'s dispatch (`lambda-eval.cpp:6065`) per
   CLAUDE rule 13. Expected: collatz 6 358 → ≈ 2 s class immediately
-  (profile wall was malloc/`hashmap_new`). **This code is deleted again in
-  C3** — it exists so every intermediate measurement isn't dominated by a
-  known-dead cost. Gate: baseline 100 %, bit-identical (pure representation).
+  (profile wall was malloc/`hashmap_new`). Its generic-container role is
+  removed in Phase E; a narrow ArrayNum-specialized guard/path may remain
+  until Stage 2. Gate: baseline 100 %, bit-identical (pure representation).
 - **A1 — CW5 counters, release-safe** (`js_exec_profile`-style): per TypeId —
   share-marks, mutations-on-unique (in-place), mutations-on-shared (copies),
-  bytes copied; plus `fn_mutable_value` call rate while it still exists.
+  bytes copied; VMap backend and host-rejection counts; plus
+  `fn_mutable_value` call rate while it still exists.
   These counters are the CW4 (saturating-count) decision data; they ship
   first so before/after spans the whole migration.
 - **A2 — capture the C4.1 probe matrix as fixtures with CURRENT goldens**:
@@ -69,10 +75,17 @@ declaring C4 fully done once this plan completes.
   second-mutation loss, frozen-receiver no-op, capture-assign behavior
   (`temp/REPRO_array_literal_alias.ls` + `temp/matrix.ls` promoted into
   `test/lambda/` with `.txt` goldens per rule 8). They pin the hybrid now and
-  flip deliberately in B/C.
+  flip deliberately in B/E.
 - **A3 — benchmark harness points**: record collatz/splay/gcbench/primes/
   array1 + the C4.3 **editor/document benchmark** (create if absent: element
   tree build → repeated small edits → serialize; this is the §9.5.1 gate).
+- **A4 — performance acceptance protocol (DECIDED, designer, 2026-07-23):**
+  release builds only, matched binaries/configuration, three-run medians, and
+  output correctness checked before a timing enters an aggregate. Do not use
+  a blanket per-benchmark percentage cutoff. Record branch/helper/allocation
+  deltas for COW paths and explain every affected-row regression. Result11
+  must be materially better than Result10 overall and target Result9-class or
+  better Lambda/MIR performance (§4 and §7).
 
 ## 2. Phase B — `pn`-method support (the C4.1 cluster)
 
@@ -104,7 +117,7 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
 - **B3 — lost second mutation under aliasing.** Reproduce the C4.1 probe
   (alias exists → second `c.increment()` lost); root-cause (likely the same
   materialization/copy seam as B2 interacting with the anchor exemptions).
-  If the honest fix is the C3 aliasing-line move, record that and let C3
+  If the honest fix is the Phase-E aliasing-line move, record that and let E
   close it — do not band-aid.
 - **B4 — receiver is a `var` borrow.** Desugar `pn` method receiver to an
   implicit leading `var self` param (`is_var_param`); implement the
@@ -127,92 +140,119 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
   chain method. `.txt` goldens per rule 8. Gate: baseline 100 % with only
   the enumerated golden flips (B2/B3 rows).
 
-## 3. Phase C — COW core (Design §10 P1+P2)
+## 3. Phase C — correctness substrate, still behind the flag
 
-- **C1 — the bit + helper.** `is_shared:1` in `Container.flags` spare bit
-  (`lambda.h:678`; `padding[4]` confirms zero layout pressure). Runtime
-  helper `fn_mark_shared(Item)` (containers only — the five-kind set; scalars
-  untouched). `MarkBuilder` sets `is_shared` on static/arena containers at
-  construction (CW8; generalizes `is_data_migrated` materialize-on-write).
-  Set points wired: binding/assignment share (replacing anchor semantics —
-  emission change is C3), construction-capture stores, JS ingress/egress
-  (CW7), Radiant pin (`PersistentFieldRef`) sites.
-- **C2 — mutation choke points consult the bit.** Every interior-mutation
-  entry (index/field assign, `push`/`splice`/`pop`, method-receiver mutation,
-  MarkEditor edits): `if (is_shared) cow_copy_level()` then mutate.
-  `cow_copy_level` = one-level shallow copy + set `is_shared` on every
-  *container* child (CW9); per kind: List/Array item array, ArrayNum
-  `memcpy`, Map/Object data buffer + field walk, Element both natures.
-  Introduced behind **`LAMBDA_COW=1`**; flag-off = today's behavior,
-  bit maintained but not consulted. Gate: baseline 100 % both flag states;
-  ASan; forced-GC stress (`LAMBDA_GC_FORCE_*`) flag-on — the `let g`/`var h`
-  probe is the canary for a false-unique.
-- **C3 — anchor retirement + the aliasing-line move (the big flip).**
-  Transpiler emission at `transpile-mir.cpp:5506–5520` / `:9786–9794`:
-  replace the `fn_mutable_value` wrap with share-marking; **delete** the
-  deep-clone body, `MutableCloneContext`, and A0's stopgap; **remove the
-  exemptions** (`mir_var_rhs_keeps_mutable_alias`) — `pn`-result, mutable
-  identifier, and projection RHS now share-and-mark like everything else,
-  closing the C4.1 aliasing bugs uniformly. The ANY-demotion at `:5518` goes
-  with the wrapper (ex-M3(d) resolves by deletion — share-marking returns
-  the same Item, no boxing, no type loss). Retire the `LAMBDA_COW` flag in
-  this same phase — no two-regime limbo (the Go lesson, §9.4).
-  **Enumerated observable changes:** A2 probe goldens flip to C4 semantics;
-  `awfy/cd` gets its C4.3 restructuring (and `awfy/list` re-audited — both
-  currently `wrong_output`-excluded); stale pre-C4 `push`/`splice` sharing
-  comments corrected. Gate: baseline 100 % with the enumerated flips only;
-  test262 + JS gtests (CW7 ingress marking touches the boundary); Radiant
-  baseline; correctness sweep all timed rows.
-- **C4 — un-share-at-borrow.** At `var`-param call sites, method-receiver
-  binding (B4), and mutable-view creation (`lambda-vector.cpp:3082`/`:3180`,
-  `lambda-data-runtime.cpp:647`): if the borrow root `is_shared`, COW-copy it
-  first (CW16.4); after that the borrow writes raw (CW1 — no per-write cost).
+- **C0 — mutation owner/writeback ABI first (DECIDED).** Define
+  `cow_prepare_write(Item old) -> Item replacement`. Every mutation lowering
+  must own an assignable root or parent slot and install the replacement
+  before writing. For `t.nodes[i].value`, preserve the owner chain in MIR
+  registers/stack state and propagate copied children into copied parents;
+  do not allocate a heap path descriptor. Direct MIR stores may temporarily
+  route through the audited slow path during bring-up.
+- **C0b — precise-rooting contract (DECIDED).** A copy allocates. Root source,
+  replacement, incoming value, and every live owner-chain Item with
+  `RootFrame` / `Rooted`; reload pointers after any possible compaction.
+  Add forced-GC fixtures for root mutation and a three-level nested write.
+- **C1 — state + helpers.** Define `COW_STATE_SHARED = 1u << 0` in the
+  prepared `Container.cow_state` byte (offset 4; public header remains eight
+  bytes). New runtime objects start unique; mark is monotonic/idempotent;
+  a copied destination clears the shared bit; source stays shared; static
+  and arena containers are treated as shared. Helpers operate only on
+  `Array`, `Map`, `Object`, `Element`, and `VMap`; definite scalars and
+  ArrayNum do not enter them.
+- **C2 — one-level copy primitives.**
+  - Array copies its Item slots and marks container children shared.
+  - Map/Object copy value storage while sharing `TypeMap`/`ShapeEntry`
+    (DECIDED). Audit all in-place `ShapeEntry::type` updates: a write must
+    detach/transition shape metadata before changing it.
+  - Element copies both list and map facets under the same rule.
+  - VMap gains the decided vtable snapshot/detach hook. It runs only after the
+    common shared-state test, so unique mutation calls the existing `set`
+    without an extra virtual dispatch. The HashMap backend clones table and
+    insertion-order storage in one pass, preserving capacity/hash metadata
+    where safe, and marks container keys **and** values shared. Task handles
+    remain immutable. A host backend participates only if its visible backing
+    is snapshot-stable and the hook creates independent writable value
+    storage; a missing hook means immutable and Lambda mutation is rejected.
+    Audit `vmap_host_set_by_item`: generic Lambda map mutation must not route
+    into an external host setter. Capability side effects move through an
+    explicit host method/API.
+    Fixtures/counters prove: unique HashMap VMap mutation takes zero
+    snapshots; the first shared mutation takes exactly one snapshot and
+    preserves the old value; immutable/host-capability mutation invokes no
+    external setter and reports rejection.
+- **C3 — mutation choke points.** Route index/field assignment,
+  `push`/`splice`/`pop`, method-receiver mutation, VMap set, and
+  MarkEditor/edit-bridge mutation through the replacement-returning ABI.
+  Wire Lambda share events: binding/assignment (emission flip remains E),
+  construction/insertion, return/capture, and retained Lambda `Item`
+  ownership. Do not add JS-boundary marking. There is no special
+  `PersistentFieldRef` rule; current uses are raw characters, not Items.
+- **C4 — un-share-at-borrow for in-scope containers.** At `var`-param call
+  sites and method-receiver binding, install a unique replacement before the
+  callee receives its raw borrow. ArrayNum mutable-view behavior is unchanged
+  until Stage 2.
 - **C5 — ordering fixtures** (CW19 obligations): value args snapshot before
   any borrow's un-share/raw-write (C4.2c); store-target address resolved
-  after RHS evaluation for `a[i] = g(var a)` shapes. Both as `.ls` fixtures
-  with goldens.
-- **C6 — boundary deep-copy utility.** The genuine deep-copy residue
-  (isolate messages / heap-exit materialization) split into its own helper,
-  *keeping* a visited map (eager deep copy of a DAG still needs dedup).
-  During migration it also guards legacy aliased data; simplify to plain
-  recursion only after the A2-flipped fixtures are green.
+  after RHS evaluation for `a[i] = g(var a)` shapes.
+- **C6 — deep-copy and ArrayNum compatibility residue.** Split genuine
+  boundary deep-copy (isolate messages / heap-exit materialization) into its
+  own utility with a visited map. Preserve a narrow ArrayNum-specific
+  `fn_mutable_value`/clone path until Stage 2; do not delete or replace it
+  with the generic Item-container copier.
 
-**Phase-C measurement targets** (release, rule 10): collatz ≤ ~700 ms
-(R9 355 + M2-landed adds; remainder = M4, tracked at R6b); `splay` recovers
-its 2.3×; gcbench/binarytrees improve (literal churn still allocs — R3/R7
-territory, don't over-promise); **editor/document benchmark within noise of
-pre-C4** (the C4.3 acceptance); counters show copies-taken ≪ share-marks.
+All C work remains behind `LAMBDA_COW=1`; both flag states retain current
+observable semantics. Gate: Lambda and Radiant baselines, focused VMap and
+nested-spine fixtures, ASan, and forced-GC stress. The `let g`/`var h`
+probe remains the false-unique canary but does not flip yet.
 
-## 4. Phase D — JIT fast path + static elision (Design §10 P3)
+## 4. Phase D — final hot path and performance gate
 
-- Inline the `is_shared` test at hot mutation sites (load flags byte, `BT`)
-  instead of the C-helper round trip; cold arm calls `cow_copy_level`.
-- CW2 static elision: provably-fresh containers (literal not yet
-  stored/passed; result of a copy the transpiler just emitted) skip the test
-  entirely. Fold in ex-M3 remedy (c): a definite-scalar static type is
-  decisive in `mir_expr_may_return_container` (`:327`) regardless of target
-  type — no share-marking emission for provably-scalar RHS.
-- MIR-emission budgets: regen `test/mir/mir_budgets.json` (manual lift with
-  rationale, per MT7 discipline).
+- Unique mutation: inline one byte load/test/branch on `cow_state`; no helper
+  call, allocation, child scan, or path-object allocation. The cold arm calls
+  the copy helper and installs its returned Item.
+- Restore every direct MIR array/field store with the inline guard and cold
+  branch; no permanent helper-only store path.
+- CW2 static elision: provably-fresh containers skip the test. A
+  definite-scalar RHS emits no share helper; a known container emits an
+  inline OR; only dynamically typed values may call a helper.
+- Regenerate `test/mir/mir_budgets.json` with rationale, then run the A4
+  matched release A/B. **Phase E is blocked until the unique-mutation path
+  has the intended instruction/allocation shape and every affected-row
+  regression is explained.**
 
-## 5. Phase E — views & boundaries, Stage-1 slice (Design §10 P4/P4b)
+Expected release targets remain: collatz ≤ ~700 ms; splay recovers its 2.3×;
+gcbench/binarytrees improve without over-promising literal/GC work; the
+editor/document benchmark stays within noise of pre-C4; counters show
+copies-taken ≪ share-marks. These focused targets prevent aggregate gains
+from hiding a COW-specific regression.
 
-- MarkEditor / `edit_bridge` mutation entries honor the bit (may already be
-  covered by C2's choke points — audit, don't duplicate).
-- **CW17 detach-at-wrap**: Lambda→JS writable TypedArray egress copies once
-  at wrapper creation when `is_shared`; JS-owned buffers never consult the
-  bit (hot stores stay branch-free). Ingress marking landed in C1.
-- **CW16.1 ArrayNum `==` representation-invariance fix**: value-equal
-  Array vs ArrayNum (and ArrayNum vs ArrayNum across elem kinds) must
-  compare equal — the Typed-Array-4 representation-sensitivity is a bug by
-  the §9 ruling; folds into the OI-1 equality surface. Fixture: same values
-  through both representations, `==` and `!=` both directions.
-- Radiant pin audit (CW7): every `PersistentFieldRef` acquisition marks;
-  Radiant baseline 100 %.
+**Overall Result11 target:** use the exact Result9/10 clean-release,
+three-run-median, output-correctness-checked protocol. Result10 Lambda/MIR is
+8.42× Node across its 52-row like-for-like population; Result9 is 4.80× on
+those rows, with a 4.31× published all-timed deduplicated headline. Result11
+must be materially better than Result10 overall and should be close to or
+better than the corresponding Result9 result. This is an outcome target, not
+a license to hide a hot-path regression in the geometric mean.
+
+## 5. Phase E — semantic flip for Stage-1 kinds only
+
+- Replace the generic-container `fn_mutable_value` anchor with share-marking
+  at the binding/assignment emission sites; remove applicable
+  `mir_var_rhs_keeps_mutable_alias` exemptions. The ANY-demotion goes with
+  the generic wrapper. Retain the narrow ArrayNum compatibility path from C6.
+- Retire `LAMBDA_COW` only after D passes, so there is no shipped slow regime.
+- **Enumerated observable changes:** in-scope A2 probe goldens flip to C4
+  semantics; `awfy/cd` receives its C4.3 restructuring; stale pre-C4
+  `push`/`splice` sharing comments are corrected. ArrayNum/view and JS
+  boundary behavior do not change in this phase.
+- Gate: Lambda and Radiant baselines, ASan, forced-GC, correctness sweep over
+  all timed rows, and release A/B. test262, Node, and JS gtests are
+  shared-runtime regression gates only; they do not expand Stage-1 scope.
 
 ## 6. Phase F — migration audit + docs (C4.4 #3/#4/#7; non-gating docs)
 
-- Sweep stdlib/fixtures for aliasing reliance (the C3 flip surfaces them as
+- Sweep stdlib/fixtures for aliasing reliance (the Phase-E flip surfaces them as
   golden diffs — each gets a deliberate fix-or-annotate decision).
 - Benchmark sources gain honest `var` annotations where they relied on the
   `pn` exemption (graph benchmarks: havlak/splay-class).
@@ -223,37 +263,46 @@ pre-C4** (the C4.3 acceptance); counters show copies-taken ≪ share-marks.
 ## 7. Rollout, gates, exit
 
 **Order: A → B → C → D → E → F.** B before C so COW-on-objects lands on a
-working object substrate; A0 keeps interim numbers honest; C is one
-regime-flip commit (C3) inside an otherwise incremental sequence.
+working object substrate; A0 keeps interim numbers honest; C establishes
+correctness behind the flag, D proves the final hot path, and only E flips
+observable semantics.
 
 Per-phase gate (constant): `make build-test` clean → `make
 test-lambda-baseline` 100 % (golden flips only where enumerated) → ASan on
 touched suites → correctness sweep on all timed benchmark rows → counters +
 affected-benchmark numbers recorded in this doc's completion record.
-C-phases add: test262 + JS gtest suites, Radiant baseline, forced-GC stress
-with the `let g`/`var h` canary.
+C/E add Radiant baseline and forced-GC stress with the `let g`/`var h`
+canary. test262, Node, and JS gtests run as shared-runtime regression gates;
+no JS boundary semantic change is accepted in Stage 1.
 
 **Exit = Result11** (absorbed from `Lambda_Impl_Tune.md` §5): full benchmark
 protocol (3-run median, release, 180 s), output-correctness sweep
-in-protocol, publish fresh (not in-place), then re-rank
+in-protocol, publish fresh (not in-place). The plan does not close merely
+because correctness passes: the overall Lambda/MIR result must be materially
+better than Result10 and target Result9-class or better, with focused COW
+hot paths free of unexplained regressions. Then re-rank
 `vibe/Lambda_Tuning_Proposal.md`'s R-queue on the new floor — R6b (M4) is
 expected to be the next dominant Lambda-side mechanism after this plan.
 
 ## 8. Risks
 
-1. **Golden churn discipline** — the C3 flip touches many fixtures; the
+1. **Golden churn discipline** — the Phase-E flip touches many fixtures; the
    enumerated-changes rule is the guard; any *unenumerated* diff is a bug.
 2. **Editor/element perf** — one-level copies on huge-fan-out element nodes
-   are O(width); the editor benchmark gates C3, and the §9.5.1 chunked-node
+   are O(width); the editor benchmark gates D/E, and the §9.5.1 chunked-node
    question stays open if it fails.
-3. **JS-boundary conservatism** (CW7 marks unconditionally) — counters
-   decide whether a finer contract is ever worth designing.
+3. **VMap backend opacity** — a header-only copy is incorrect. The vtable
+   snapshot hook and explicit rejection of mutable non-snapshot backends are
+   required before VMap can be declared supported.
 4. **B2/B3 hypotheses may be wrong** — they are stated as hypotheses;
    root-cause before fixing (rule 1), and if the object bugs turn out to
-   live in the C3 seam, B records that and C closes them.
+   live in the COW/anchor seam, B records that and C/E close them.
 5. **Un-checked borrow overlap (Stage 1 by design)** — `f(x, x)` still
    aliases until Stage 2; the C4.1 fixtures that cover writer-writer overlap
    stay pinned at current behavior with a `// stage-2` marker, not flipped.
+6. **Deferred performance-critical surfaces** — ArrayNum and JS↔Lambda
+   ownership are intentionally unchanged. Any accidental generic COW branch
+   in ArrayNum or observable buffer-boundary change is a Stage-1 regression.
 
 ---
 
@@ -261,4 +310,5 @@ expected to be the next dominant Lambda-side mechanism after this plan.
 predecessor record `vibe/Lambda_Impl_Tune.md` (M1/M2, ex-M3 stub);
 semantics `doc/Lambda_Formal_Semantics.md` §9 + `vibe/Lambda_Semantics_Formal.md`
 C4.1–C4.4/C4.2a–c; tuning ledger `vibe/Lambda_Tuning_Proposal.md` (R6b = M4);
-benchmarks `test/benchmark/Overall_Result10.md`.
+benchmarks `test/benchmark/Overall_Result9.md` and
+`test/benchmark/Overall_Result10.md`.

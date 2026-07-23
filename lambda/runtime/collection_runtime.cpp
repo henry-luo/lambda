@@ -55,7 +55,7 @@ void expand_list(List* list, Arena* arena) {
 }
 
 bool js_array_has_props(const Array* arr) {
-    return arr && (arr->flags & CONTAINER_FLAG_JS_PROPS) != 0;
+    return arr && arr->has_js_props;
 }
 
 Map* js_array_props(const Array* arr) {
@@ -112,7 +112,7 @@ void js_array_set_props(Array* arr, Map* props) {
     }
     arr->items[arr->capacity - 1] = {.map = props};
     arr->extra++;
-    arr->flags |= CONTAINER_FLAG_JS_PROPS;
+    arr->has_js_props = 1;
     // Sparse arrays can have a spec length beyond their physical dense prefix.
     // Promotion may allocate fresh slots after the last sparse-hole stamp;
     // mark those slots as holes so iteration never exposes zeroed words as null.

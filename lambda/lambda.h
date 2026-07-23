@@ -667,6 +667,8 @@ enum MapKind {
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
+// raw masks remain part of the container ABI for code that snapshots `flags`
+// without a Container pointer (notably the moving GC).
 #define CONTAINER_FLAG_JS_PROPS (1u << 6)
 #define CONTAINER_FLAG_CTOR_RESERVED (1u << 7)
 
@@ -687,6 +689,8 @@ struct Container {
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
             uint8_t is_static:1;         // read-only const-pool/static data container
             uint8_t is_immortal:1;       // storage outlives every execution frame (input arena/const pool)
+            uint8_t has_js_props:1;      // array/list owns a reserved-tail JS property companion
+            uint8_t has_ctor_reserved:1; // map has constructor slots awaiting initialization
         };
     };
     union {
@@ -699,12 +703,37 @@ struct Container {
         };
     };    
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
-    uint8_t padding[4];  // padding to align to 8 bytes
+    // these named state bytes occupy the former padding without changing the
+    // public eight-byte header or any derived-container field offset.
+    uint8_t cow_state;
+    uint8_t ctor_reserved_mask_lo;
+    uint8_t ctor_reserved_mask_hi;
+    uint8_t reserved_state;
 };
 
 #if !defined(LAMBDA_C2MIR_RUNTIME)
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
                      "Container TypeId must remain at byte zero");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, flags) == 1,
+                     "Container flags ABI offset changed");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, array_flags) == 2,
+                     "Container array flags ABI offset changed");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, map_kind) == 3,
+                     "Container map kind ABI offset changed");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, cow_state) == 4,
+                     "Container COW state must reuse padding byte zero");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, ctor_reserved_mask_lo) == 5,
+                     "Container constructor mask low-byte ABI offset changed");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, ctor_reserved_mask_hi) == 6,
+                     "Container constructor mask high-byte ABI offset changed");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, reserved_state) == 7,
+                     "Container reserved-state ABI offset changed");
+LAMBDA_STATIC_ASSERT(sizeof(Container) == 8,
+                     "Container header must remain eight bytes");
+LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_JS_PROPS == (1u << 6),
+                     "Container JS-properties mask must match its bitfield");
+LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_CTOR_RESERVED == (1u << 7),
+                     "Container constructor-reserved mask must match its bitfield");
 #endif
 
 // List/Array flags (stored in List.flags / Array.flags field)

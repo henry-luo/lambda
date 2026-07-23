@@ -75,6 +75,47 @@ TEST(ItemRepresentation, SharedMasksKeepSentinelsOutOfDoubleSpace) {
     EXPECT_EQ((uint8_t)(ITEM_FLOAT_N0 >> 56), LMD_TYPE_FLOAT);
 }
 
+TEST(ItemRepresentation, ContainerHeaderNamedStatePreservesRawAbi) {
+    Container container = {};
+
+    EXPECT_EQ(sizeof(Container), 8u);
+    EXPECT_EQ(__builtin_offsetof(Container, cow_state), 4u);
+    EXPECT_EQ(__builtin_offsetof(Container, ctor_reserved_mask_lo), 5u);
+    EXPECT_EQ(__builtin_offsetof(Container, ctor_reserved_mask_hi), 6u);
+    EXPECT_EQ(__builtin_offsetof(Container, reserved_state), 7u);
+
+    // named access and detached raw-mask access must describe the same ABI byte.
+    container.has_js_props = 1;
+    EXPECT_EQ(container.flags, CONTAINER_FLAG_JS_PROPS);
+    container.has_ctor_reserved = 1;
+    EXPECT_EQ(container.flags,
+              CONTAINER_FLAG_JS_PROPS | CONTAINER_FLAG_CTOR_RESERVED);
+    container.has_js_props = 0;
+    EXPECT_EQ(container.flags, CONTAINER_FLAG_CTOR_RESERVED);
+    container.flags = CONTAINER_FLAG_JS_PROPS;
+    EXPECT_TRUE(container.has_js_props);
+    EXPECT_FALSE(container.has_ctor_reserved);
+
+    container.cow_state = 0xa5;
+    container.ctor_reserved_mask_lo = 0xcd;
+    container.ctor_reserved_mask_hi = 0xab;
+    container.reserved_state = 0x5a;
+    EXPECT_EQ(container.cow_state, 0xa5);
+    EXPECT_EQ(container.ctor_reserved_mask_lo, 0xcd);
+    EXPECT_EQ(container.ctor_reserved_mask_hi, 0xab);
+    EXPECT_EQ(container.reserved_state, 0x5a);
+
+    Map map = {};
+    map_ctor_set_reserved_mask(&map, UINT16_C(0xabcd));
+    EXPECT_TRUE(map.has_ctor_reserved);
+    EXPECT_EQ(map.flags & CONTAINER_FLAG_CTOR_RESERVED,
+              CONTAINER_FLAG_CTOR_RESERVED);
+    EXPECT_EQ(map_ctor_reserved_mask(&map), UINT16_C(0xabcd));
+    map_ctor_set_reserved_mask(&map, 0);
+    EXPECT_FALSE(map.has_ctor_reserved);
+    EXPECT_EQ(map_ctor_reserved_mask(&map), 0);
+}
+
 TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedPayload) {
     const int64_t values[] = {
         INT64_MIN + 1, INT56_MIN, -1, 0, 1, INT56_MAX, INT64_MAX,

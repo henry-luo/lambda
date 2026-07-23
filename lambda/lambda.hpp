@@ -444,27 +444,26 @@ struct Map : Container {
 };
 
 // Constructor shapes reserve at most 16 fixed-width slots before executing the
-// body. The mask lives in otherwise-unused Container padding, preserving the
-// public Map layout and keeping the state per instance rather than on TypeMap.
+// body. The named mask bytes preserve the public Map layout and keep the state
+// per instance rather than on TypeMap.
 static inline uint16_t map_ctor_reserved_mask(const Map* map) {
-    if (!map || !(map->flags & CONTAINER_FLAG_CTOR_RESERVED)) return 0;
-    return (uint16_t)map->padding[1] |
-        (uint16_t)((uint16_t)map->padding[2] << 8);
+    if (!map || !map->has_ctor_reserved) return 0;
+    return (uint16_t)map->ctor_reserved_mask_lo |
+        (uint16_t)((uint16_t)map->ctor_reserved_mask_hi << 8);
 }
 
 static inline void map_ctor_set_reserved_mask(Map* map, uint16_t mask) {
     if (!map) return;
-    map->padding[1] = (uint8_t)(mask & 0xffu);
-    map->padding[2] = (uint8_t)(mask >> 8);
-    if (mask) map->flags |= CONTAINER_FLAG_CTOR_RESERVED;
-    else map->flags &= (uint8_t)~CONTAINER_FLAG_CTOR_RESERVED;
+    map->ctor_reserved_mask_lo = (uint8_t)(mask & 0xffu);
+    map->ctor_reserved_mask_hi = (uint8_t)(mask >> 8);
+    map->has_ctor_reserved = mask != 0;
 }
 
 static inline bool map_ctor_offset_is_reserved(const Map* map,
                                                 int64_t byte_offset) {
     // Ordinary maps dominate property traffic, so reject them before doing
     // offset arithmetic for the constructor-only reservation mechanism.
-    if (!map || !(map->flags & CONTAINER_FLAG_CTOR_RESERVED) || byte_offset < 0 ||
+    if (!map || !map->has_ctor_reserved || byte_offset < 0 ||
             (byte_offset % (int64_t)sizeof(void*)) != 0) return false;
     int64_t slot = byte_offset / (int64_t)sizeof(void*);
     return slot < 16 && (map_ctor_reserved_mask(map) & (uint16_t)(1u << slot));

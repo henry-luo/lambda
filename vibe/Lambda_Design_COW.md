@@ -1,6 +1,6 @@
 # Lambda Design: Copy-on-Write for Mutable Value Semantics
 
-- **Status:** PROPOSED — rev 3, 2026-07-23. **Layer-2 v1 mechanism decided by
+- **Status:** PROPOSED — rev 5, 2026-07-23. **Layer-2 v1 mechanism decided by
   designer: the 1-bit shared flag (CW3), simplicity first.** The
   saturating-count upgrade is explicitly deferred behind future deep
   benchmarking on live/production Lambda scripts (CW4). **Rev 2 adds §9
@@ -9,8 +9,17 @@
   semantics, maximal shared implementation. **Rev 3 (CW19, designer
   2026-07-23): two-stage delivery — Stage 1 (§10) is basic COW with NO
   exclusivity enforcement, performance first; Stage 2 (§11) records the full
-  exclusivity/borrow-discipline design now, implemented later.** Everything
-  else is proposed for review.
+  exclusivity/borrow-discipline design now, implemented later.** **Rev 4
+  narrows Stage 1 to Lambda-native `Array`, `Map`, `Object`, `Element`, and
+  `VMap`; ArrayNum COW and JS↔Lambda interop are Stage 2 because both require
+  representation-specific, performance-sensitive designs.** **Rev 5 accepts
+  the remaining Stage-1 decisions: VMap uses a mandatory backend
+  snapshot/detach hook; nested mutation uses replacement-returning owner
+  writeback; Map/Object shapes are shared only under detach-before-mutate;
+  and copied spines use precise rooting. Performance has no arbitrary
+  per-benchmark percentage cutoff: Result11 must be materially better than
+  Result10 overall and target Result9-class or better Lambda/MIR performance.**
+  Everything else is proposed for review.
 - **Owns:** the engineering realization of C4's copy discipline — uniqueness
   tracking, the copy path, retirement of the eager clone anchor, and the
   related value-sharing/interning rules.
@@ -44,8 +53,10 @@ What the semantics *obligates* the engineering to deliver:
    direction: structural sharing (spine copy, subtree reuse), Clojure/immer
    precedent.
 3. **The naive deep-update spelling must not silently copy subtrees** —
-   §9.5.2 (nested-mutation ergonomics, undesigned; this doc's Layer 2 makes
-   its "uniqueness get-modify-put" option implementable).
+   §9.5.2. Stage 1 must define how each copied child is written back into its
+   copied parent; a local `c = cow_copy_level(c)` alone is insufficient.
+   New surface ergonomics remain separate, but correct O(depth) spine
+   propagation for existing nested assignment is a Stage-1 prerequisite.
 
 Current implementation state is the C4.1 bug catalog: uniform reference
 aliasing wherever the eager anchor (§2) doesn't fire. COW is therefore not an
@@ -130,7 +141,7 @@ first, deliberately modest slice:
 |---|---|---|---|---|---|
 | **(a) Full refcount** | a count word (header growth) | inc/dec on every share/drop | exact; reverts to unique when count falls to 1 | RC itself can reclaim; no cycle collector needed under C4 | The classic answer. Non-atomic here (isolates). Biggest cost is the *decrement discipline*: every scope exit, container overwrite, and frame teardown must dec — a pervasive, bug-prone protocol the tracing GC currently spares us |
 | **(b) Small saturating count (2–4 bits)** | spare header bits | inc on share; dec optional (can skip — saturate instead) | exact below the cap; degrades to "shared forever" past it | GC reclaims (count is advisory only) | The midpoint: exact uniqueness for the dominant low-sharing case, near-1-bit cost. No decrement protocol needed if paired with GC refresh (d) |
-| **(c) 1-bit shared flag** | one spare bit — **free** (see §5.3) | one OR on share; **no decrements, ever** | over-approximates: monotonic — once shared, never reverts (until (d)) | GC reclaims | Simplest possible: cannot leak, cannot underflow, no protocol. Cost: copies that full RC would have avoided after sharing ends |
+| **(c) 1-bit shared flag** | bit 0 of the prepared `cow_state` byte (no header growth; see §5.3) | one OR on share; **no decrements, ever** | over-approximates: monotonic — once shared, never reverts (until (d)) | GC reclaims | Simplest possible: cannot leak, cannot underflow, no protocol. Cost: copies that full RC would have avoided after sharing ends |
 | **(d) GC-refreshed signal** (add-on to b/c) | none beyond b/c | none | restores reversion: the tracing GC — which already visits every live object — recomputes "single referrer?" during marking and resets the bit/count | unchanged | Recovers most of full RC's precision without any mutator decrement traffic; marking must distinguish in-degree 1 vs ≥2 instead of a plain mark bit |
 | (e) No signal — always copy on mutation | — | — | — | — | **Rejected**: O(size) per mutation; explicitly ruled out by §9.5.1 |
 | (f) Pure persistent structures, no in-place | — | — | — | — | **Rejected**: pays spine-copy even when unique; fails obligation 1 (the push/splice hot path) |
@@ -167,21 +178,28 @@ Two asymmetries frame the choice:
 
 ### 5.3 Bit placement and the flag's exact semantics
 
-**CW6 — the bit lives in the `Container.flags` byte, not the GC header.**
-`struct Container` (`lambda.h:678`) has a lifecycle-flags byte with two spare
-bits (six used: `is_content`, `is_spreadable`, `is_heap`,
-`is_data_migrated`, `is_static`, `is_immortal`); claim one spare bit as
-`is_shared:1`. Every COW-relevant kind (ARRAY, ARRAY_NUM, MAP, OBJECT,
-ELEMENT — exactly `clone_mutable_item`'s dispatch set,
-`lambda-eval.cpp:6065`) extends `Container`, the bit rides the cache line the
-mutation is already touching (the GC header at ptr−16 would not), and —
-decisive — **it exists uniformly for arena-owned containers, which have no
-GC header.** Capacity is a non-issue (designer note 2026-07-23): `Container`
-ends with `uint8_t padding[4]` — four unused bytes — so CW4's future
-saturating count (even a full count byte) fits with zero struct growth.
+**CW6 — bit 0 of `Container.cow_state`, not `Container.flags` and not the GC
+header.** Header housekeeping has reserved byte 4 for COW without changing
+the public eight-byte `Container` size or any derived-container offset:
+`flags` remains byte 1, `array_flags` byte 2, `map_kind` byte 3,
+`cow_state` byte 4, constructor-reserved mask bytes 5–6, and
+`reserved_state` byte 7. The formerly macro-only JS-property and
+constructor-reserved flags are now proper `has_js_props` /
+`has_ctor_reserved` bitfields occupying bits 6/7 of `flags`; they are not
+available to COW.
 
-**Flag semantics:** `is_shared == 1` means *may be reachable by more than one
-owner*. Over-approximation is legal; under-approximation is a bug.
+`COW_STATE_SHARED = 1u << 0`. The remaining `cow_state` bits reserve the
+zero-layout-growth path for CW4's future small count or GC-refreshed state.
+The byte exists uniformly for heap and arena-owned containers; the GC header
+does not.
+
+**State semantics:** `cow_state & COW_STATE_SHARED` means *may be reachable
+by more than one owner*. New runtime containers start at zero. A share mark
+is monotonic and idempotent. A one-level copy starts unique (its shared bit
+is cleared); the source remains shared. Static/arena-owned containers are
+treated as shared. Copy helpers must initialize the destination state
+explicitly rather than blindly copying `cow_state`. Over-approximation is
+legal; under-approximation is a bug.
 
 **Set points (share events)** — all are existing centralized entry points:
 
@@ -191,10 +209,14 @@ owner*. Over-approximation is legal; under-approximation is a bug.
 2. Storing a container into a container (§9.3 construction capture) when the
    copy is deferred: literal build, field/index write, `push`/`splice`
    argument.
-3. Crossing to LambdaJS (`input()` results retained by JS, DOM bridging):
-   JS has reference semantics and may retain arbitrarily — **mark shared,
-   unconditionally** (CW7).
-4. Radiant retained pins (`PersistentFieldRef`): pin ⇒ mark shared (CW7).
+3. Returning/capturing a Lambda value or otherwise installing a second
+   Lambda-visible owner.
+
+JS↔Lambda boundary ownership is deliberately absent from this Stage-1 set
+and is specified for Stage 2 in §9.3. Radiant is not treated as a special
+pin class: any actual retained `Item` must go through the same owner-install
+rule as other Lambda storage. The current `PersistentFieldRef` uses are raw
+character references, not `Item` owners.
 
 **Statically-owned data is born shared (CW8).** `is_static` / `is_immortal`
 / `!is_heap` containers (parser-built Mark data in the Input arena, const
@@ -202,43 +224,69 @@ pools) are never mutated in place *today* via the `is_data_migrated`
 migration path; under COW the rule becomes uniform: treat them as
 permanently shared — first mutation copies into the runtime heap
 (materialization), exactly the existing migration pattern made lazy and
-universal. `MarkBuilder` sets `is_shared = 1` at construction; no ownership
+universal. `MarkBuilder` sets `COW_STATE_SHARED` at construction; no ownership
 range-test is ever needed.
 
 **Test points:** every interior-mutation entry (index/field assign,
 `push`/`splice`/`pop`, `pn`-method receiver mutation, MarkEditor edits):
-`if (c->is_shared) c = cow_copy_level(c); mutate(c);` — with the JIT
-inlining the bit-test + branch on hot paths (Layer 1 elides it entirely
-where uniqueness is proven).
+`owner = cow_prepare_write(owner); mutate(owner);`. The replacement must be
+installed into the binding or copied parent slot before mutation. The JIT
+inlines the state test + branch on hot paths (Layer 1 elides it where
+uniqueness is proven); the cold copy helper returns the replacement.
 
 ## 6. Layer 3 — the copy path: one shallow level + mark children shared
 
 **CW9 — a COW copy is one level deep: copy the container's own storage
-(header + slot/field array), then set `is_shared = 1` on every *container*
+(header + slot/field array), then set `COW_STATE_SHARED` on every *container*
 child, sharing them by pointer.** Scalars copy by value (or are immutable
 pointers — §8). Cost O(width of one level), never O(subtree).
 
 This single rule *is* §9.5.1's structural sharing, without inventing a new
 node representation: the existing containers become the persistent structure.
 
-- **Spine copying emerges dynamically.** Mutating `t.nodes[i].value` on a
+- **Spine copying requires explicit writeback.** Mutating
+  `t.nodes[i].value` on a
   fully-shared `t` copies `t` (marking `nodes` shared), then `nodes` (marking
   its elements shared), then `nodes[i]` — the spine, O(depth) levels of
-  O(width) — and every untouched subtree remains shared. Later mutations on
-  the now-unique spine are in-place.
+  O(width) — and installs each new child into the new parent. Every untouched
+  subtree remains shared. Later mutations on the now-unique spine are
+  in-place. The owner chain is lowered as MIR registers/stack state; Stage 1
+  must not allocate a heap path descriptor on the hot path.
 - **DAG shape is preserved for free.** The eager clone needed its visited
   hashmap to keep shared substructure shared (else exponential blowup on
   deep DAGs). Lazy COW never deep-copies, so shared substructure simply
   *stays* shared; divergence happens per-written-path only. (Observably
   identical either way — values have no identity; the difference was only
   ever cost.)
-- **ArrayNum** copies are a `memcpy` of raw scalars — no children to mark;
-  cheap by construction. The `is_view`/`is_mutable_view` interaction is an
-  open item (§10).
+- **Stage-1 kinds:** `Array`, `Map`, `Object`, `Element`, and `VMap`.
+  ArrayNum remains on its current specialized behavior until Stage 2; no
+  generic COW test, Item walk, or visited map is added to its native path.
+- **VMap is a backend contract, not a header copy (DECIDED, designer,
+  2026-07-23).** `VMapVtable` gains a one-level snapshot/detach operation.
+  The hook is called only on the shared cold path; unique VMap mutation keeps
+  the existing direct vtable `set` after the common state test. The ordinary
+  HashMap backend clones its table and insertion-order storage in one pass,
+  preserving capacity/hash metadata where safe rather than rebuilding by
+  repeated insertion, and marks container keys and values shared. Task
+  handles stay immutable. A host-backed VMap can participate only when its
+  visible backing is snapshot-stable and the hook produces independent
+  writable value storage. A missing hook means immutable and mutation is
+  rejected. Generic Lambda map mutation must not fall through to an external
+  host setter; capability side effects use an explicit host method/API rather
+  than leaking reference semantics into a Lambda value. Counters/fixtures
+  require zero snapshots for unique HashMap mutation, exactly one snapshot at
+  first shared mutation, preservation of the old value, and no external
+  setter call on a rejected capability mutation.
+- **Map/Object shape metadata is shared, not copied per value.** `TypeMap` /
+  `ShapeEntry` must be immutable once shared by COW values. Existing
+  type-changing field writes must take their existing shape-transition or
+  detach path before changing metadata; an audit of the current in-place
+  `ShapeEntry::type` writes is a Stage-1 gate.
 - **Undo/history falls out** (§9.5.1): a retained old root is a full snapshot
   at O(spine) cost — the editor gets persistence as a side effect.
-- **§9.5.2 interplay:** this layer makes the *naive* get-modify-put spelling
-  safe (never O(size), worst case O(spine)); the *guaranteed* in-place
+- **§9.5.2 interplay:** explicit owner writeback makes the *naive*
+  get-modify-put spelling safe (never O(size), worst case O(spine)); the
+  *guaranteed* in-place
   designs there (path-shaped `var` borrows, `_modify`-style accessors)
   remain the ergonomics work and compose with — do not replace — this.
 
@@ -247,13 +295,16 @@ node representation: the existing containers become the persistent structure.
 Today: `fn_mutable_value` + `MutableCloneContext` (identity hashmap for DAG
 preservation) eagerly deep-clone at anchor sites (§2).
 
-**CW10 — under COW the anchor becomes: set `is_shared` on the RHS value and
-bind the pointer. No clone, no context, no hashmap — O(1).** First
+**CW10 — for Stage-1 kinds, the anchor becomes: set `COW_STATE_SHARED` on the
+RHS value and bind the pointer. No clone, no context, no hashmap — O(1).**
+First
 subsequent mutation (of either holder) pays one Layer-3 level. Consequences:
 
-- `fn_mutable_value`'s deep-clone body and `MutableCloneContext` are deleted
-  from the binding/assignment path entirely. collatz-class anchor traffic
-  (a scalar or a bind) drops to a bit-OR.
+- `fn_mutable_value`'s generic-container deep-clone body and
+  `MutableCloneContext` are deleted from the binding/assignment path.
+  ArrayNum retains a narrow representation-specific compatibility path until
+  Stage 2; Stage 1 must not route it through the generic COW implementation.
+  collatz-class anchor traffic (a scalar or a bind) drops to a bit-OR.
 - The **anchor exemptions can then be removed** (`pn`-result, mutable
   identifier, projection — `mir_var_rhs_keeps_mutable_alias`), closing the
   C4.1 aliasing bugs uniformly: the exemptions existed only because eager
@@ -274,7 +325,7 @@ subsequent mutation (of either holder) pays one Layer-3 level. Consequences:
 ## 8. Co-design: value sharing and interning (strings first)
 
 The complement of COW: **immutable values never need it.** COW machinery
-applies *only* to the five mutable container kinds; everything else shares
+applies only to the Stage-1 mutable kinds listed in §6; everything else shares
 unconditionally because sharing an immutable value is unobservable:
 
 - **CW11 — strings, symbols, binary, decimal, datetime share by pointer on
@@ -295,17 +346,19 @@ unconditionally because sharing an immutable value is unobservable:
   Each is a few lines and measurable; none lands without a counter showing
   the allocation actually recurs.
 - **CW14 — const-literal hoisting composes with CW8:** an all-constant
-  container literal can be built once (arena/const pool, born `is_shared`)
+  container literal can be built once (arena/const pool, born shared)
   and share-and-marked per evaluation instead of rebuilt — the same
   mechanism as static Mark data. Candidate follow-up once v1 lands.
 
-## 9. ArrayNum and mutable views: one storage layer, two language policies
+## 9. Stage-2 design: ArrayNum, mutable views, and JS↔Lambda interop
 
 Designer ruling (2026-07-23): ArrayNum views serve **two languages**. Under
 Lambda they follow C4 — *"ArrayNum should behave exactly the same as Array
 from the user's perspective."* Under JS they follow JS semantics (TypedArray
 views alias their ArrayBuffer by spec). Design and implementation cater for
-both and share as much as possible.
+both and share as much as possible. **CW15–CW18 are design requirements, not
+Stage-1 implementation scope.** ArrayNum is performance-critical native
+storage; a naive generic COW treatment would defeat its purpose.
 
 ### 9.1 CW15 — the layering (DECIDED, designer, 2026-07-23)
 
@@ -319,14 +372,14 @@ buffer identity/detach/resize.
 | Layer | Contents | Owner |
 |---|---|---|
 | **Storage (shared)** | elem-kind enum + load/store dispatch, `ArrayNumShape` stride/shape math, slicing, view descriptor (`is_view`/`is_mutable_view`, base + `extra` shape), SIMD kernels, memcpy copy, bounds checks, growth | one implementation, language-free |
-| **Lambda policy** | the `is_shared` bit + COW test at mutation entries (§5.3); view/borrow rules of CW16 | Lambda runtime + MIR transpiler |
+| **Lambda policy** | the shared bit in `cow_state` + COW test at mutation entries (§5.3); view/borrow rules of CW16 | Lambda runtime + MIR transpiler |
 | **JS policy** | `JsArrayBuffer` identity, multi-wrapper aliasing, detach, resize/length-tracking, species — per ECMA spec | `js_typed_array.cpp` |
 
 ### 9.2 CW16 — Lambda policy: representation invariance + borrow-only write-through
 
 1. **Representation invariance.** ArrayNum is an optimization of
    representation, not a semantic type: it participates in COW identically to
-   Array (`is_shared` bit; copy = one `memcpy`, no children to mark) and must
+   Array (shared-state test; copy = one `memcpy`, no children to mark) and must
    be observably indistinguishable from Array — equality, `type()`/`is`,
    iteration, mutation semantics. **Consequence:** the known ArrayNum `==`
    representation-sensitivity (Typed-Array-4 note: value-equal arrays
@@ -335,7 +388,7 @@ buffer identity/detach/resize.
 2. **Read views stay first-class values — COW makes them correct for free.**
    A read view (`is_view && !is_mutable_view`; write-rejected today at the
    guards, `lambda-data-runtime.cpp:574` et al.) is a zero-copy slice: create
-   it, mark base and view `is_shared`. Snapshot semantics then falls out of
+   it, mark base and view shared. Snapshot semantics then falls out of
    Layer 2: whichever holder mutates first COW-copies its storage and the
    other keeps the old bytes — observably a copy at creation (P6), costing
    nothing until divergence.
@@ -347,7 +400,7 @@ buffer identity/detach/resize.
    returnable, or storable). Same `is_mutable_view` machinery underneath;
    confinement is static.
 4. **Borrow requires unique storage (un-share at borrow).** Creating a
-   mutable borrow over `is_shared == 1` storage first COW-copies the base at
+   mutable borrow over shared storage first COW-copies the base at
    the borrow root — otherwise write-through would mutate bytes value-holders
    snapshotted. Swift's inout-uniqueness is the precedent. After the one-time
    un-share, the borrow writes raw (CW1: no per-write cost).
@@ -362,22 +415,26 @@ buffer identity/detach/resize.
 
 Within JS, TypedArray/ArrayBuffer aliasing is untouched: many wrappers over
 one buffer, `subarray`, `DataView`, resize/detach all behave per spec, and
-**JS-owned buffers never consult `is_shared`** — JS hot stores stay
+**JS-owned buffers never consult Lambda `cow_state`** — JS hot stores stay
 branch-free. The two languages meet only at the boundary:
 
-- **Ingress (JS → Lambda):** mark shared (CW7). First Lambda mutation copies;
-  JS aliases keep their buffer.
+- **Ingress (JS → Lambda):** a shared mark alone is insufficient if the
+  Lambda wrapper still points at bytes JS can mutate. Ordinary
+  `ArrayBuffer`/TypedArray ingress must either transfer/detach ownership or
+  copy into Lambda-owned storage. `SharedArrayBuffer` ingress always copies.
+  A future explicit read-only foreign-buffer contract may share storage, but
+  cannot be inferred from ordinary JS values.
 - **Egress (Lambda → JS), writable view requested:** crossing is a share
-  event. **Detach-at-wrap:** if the ArrayNum is `is_shared`, copy once into a
+  event. **Detach-at-wrap:** if the ArrayNum is shared, copy once into a
   JS-owned buffer at wrapper creation. Lambda holders keep their snapshot;
   every JS alias derives from the one buffer made at that crossing, so JS
   aliasing among themselves is intact; and the copy is boundary-grained (one
   memcpy per crossing), never store-grained. Two separate crossings of the
   same Lambda value yield two buffers with no cross-aliasing — which is
   exactly value-handoff semantics.
-- Read-only egress (formatter/inspection paths) may share storage without
-  copying; a future read-only-wrapper optimization is possible but not
-  designed here.
+- Read-only egress (formatter/inspection paths) may share storage only under
+  an explicit non-retaining/non-writing contract; a future read-only-wrapper
+  optimization is possible but is not implicit in ordinary JS objects.
 
 ### 9.4 CW18 — the sharing discipline (what must not fork)
 
@@ -387,18 +444,23 @@ Standing guard (CLAUDE rule 13): any near-duplicate arising between
 `js_typed_array.cpp` and `lambda-vector.cpp`/`lambda-data-runtime.cpp` gets
 hoisted into the storage layer, never copied.
 
-## 10. Implementation plan — Stage 1: basic COW, no exclusivity enforcement
+## 10. Implementation plan — Stage 1: efficient Lambda core-container COW
 
 **CW19 (DECIDED, designer, 2026-07-23): two-stage delivery.** Stage 1 is this
-plan — get basic COW and its performance right, with **no exclusivity
-enforcement**: no call-site overlap checks, no borrow confinement, no
-global-borrow rule. Overlapping writers behave as they do today (unchecked
-aliasing through the borrow channel); the C4.1 fixtures keep pinning that
-line and Stage 1 must not move it. What Stage 1 *does* guarantee:
-**value-holders are protected** — un-share-at-borrow (CW16.4) and the C4.2c
-snapshot-ordering rule land here, so the unchecked residue is
-writer-vs-writer overlap only, never value corruption. Stage 2 (§11) is the
-full borrow-discipline design, recorded now, addressed later.
+plan — get Lambda-native COW and its performance right for `Array`, `Map`,
+`Object`, `Element`, and `VMap`, with **no exclusivity enforcement**: no
+call-site overlap checks, no borrow confinement, no global-borrow rule.
+ArrayNum COW/views and JS↔Lambda interop are Stage 2 (§9 and §11.8).
+Stage 1 is therefore the **C4 core-container subset**, not a declaration
+that every representation and cross-language boundary has completed C4.
+
+Overlapping writers behave as they do today (unchecked aliasing through the
+borrow channel); the C4.1 fixtures keep pinning that line and Stage 1 must
+not move it. For in-scope Lambda containers, Stage 1 protects value-holders:
+un-share-at-borrow and the C4.2c snapshot-ordering rule land here, so the
+unchecked residue is writer-vs-writer overlap. ArrayNum retains its current
+specialized path until Stage 2 rather than receiving a naive generic COW
+implementation.
 
 Stage-1 ordering obligations (mechanism correctness, not checks — fixtures
 required): (a) value arguments capture their snapshot **before** any
@@ -409,16 +471,37 @@ borrows the target's root (`a[i] = g(var a)`) must resolve the store address
 | Phase | Content | Gate |
 |---|---|---|
 | P0 | CW5 counters on the *current* anchor (`fn_mutable_value` call rate, clone bytes, per-type) + fixtures: C4.1 probe goldens, editor/document benchmark (C4.3 gate), gcbench/splay/collatz A/B harness | counters visible in release |
-| P1 | `is_shared` bit + set/test at the §5.3 choke points, `MarkBuilder` static marking (CW8), behind `LAMBDA_COW=1` | baseline 100% flag-off; flag-on: C4.1 probes flip to C4 semantics (new goldens), ASan clean |
-| P2 | CW10: anchor → share-and-mark; delete eager clone from the path; remove exemptions; boundary deep-copy utility split out | baseline + test262 + Radiant baseline; A/B vs Result10-revised (collatz, splay, gcbench targets) |
-| P3 | JIT: inline bit-test fast path; Layer-1 elision (CW2); M3 remedy (c) guard folded in | mir-budgets ratchet regen; benchmark A/B |
-| P4 | Editor/Radiant sweep: MarkEditor mutation entries honor the bit; pin/JS-boundary marking (CW7) audited | Radiant baseline 100%, editor benchmark |
-| P4b | §9 view policy, Stage-1 slice: un-share-at-borrow for mutable views (CW16.4), JS detach-at-wrap (CW17), ArrayNum `==` representation-invariance fix (CW16.1). CW16.3 borrow *confinement* is Stage 2 — mutable views stay first-class bindables until then | `proc_view_mutable` + image-toolkit + typed-array suites; JS typed-array gtests |
-| P5 | Evaluate (d) GC-refresh and (b) saturating count against CW5 production-corpus data | designer decision per CW4 |
+| P0b | Settle the mutation-owner/writeback ABI, precise-rooting rules, shared-shape invariant, and `VMapVtable` snapshot contract before changing semantics | focused nested-write, forced-GC, VMap backend fixtures |
+| P1 | `COW_STATE_SHARED` helpers + one-level copy for the five Stage-1 kinds; `MarkBuilder` static marking (CW8), all behind `LAMBDA_COW=1`; no anchor retirement yet | baseline 100% flag-off and flag-on; current observable semantics unchanged; ASan/forced-GC clean |
+| P2 | Route every in-scope mutation choke point through replacement-returning prepare-write and prove nested owner writeback; ordinary VMap snapshot, immutable-task rejection, host-backend capability rule | Lambda + Radiant baselines; focused map/object/element/VMap and nested-spine fixtures |
+| P3 | JIT inline unique test/cold-copy branch; Layer-1 scalar/fresh-value elision (CW2); direct MIR stores regain the guarded fast path | MIR budgets; release A/B shows no unexplained regression on unique mutation and identifies every new branch/allocation on affected paths |
+| P4 | Only after P3 passes: CW10 anchor → share-and-mark for Stage-1 kinds; remove applicable exemptions; retain a narrow ArrayNum compatibility path; split genuine boundary deep copy | C4 core-container probe goldens flip; Lambda + Radiant baselines; test262/Node as shared-runtime regression gates only |
+| P5 | MarkEditor/Radiant retained-`Item` audit and production benchmark/counter record | Radiant baseline 100%, editor/document benchmark, release Result11 record |
+| P6 | Evaluate (d) GC-refresh and (b) saturating count against CW5 production-corpus data | designer decision per CW4 |
 
-Risk gates throughout: forced-GC stress (`LAMBDA_GC_FORCE_*`) with the bit
-on — a false-unique under GC pressure is the C4.1 bug class resurfacing;
-the `let g`/`var h` probe is the canary.
+The final unique-mutation fast path is non-negotiable: one byte
+load/test/branch, no helper call, allocation, child scan, or path-object
+allocation. Known scalar RHS emits nothing; known container sharing emits an
+inline OR; only dynamically typed values may call a helper. Direct MIR stores
+may be temporarily routed through the audited path during bring-up, but the
+guarded inline path must exist before P4 changes observable semantics.
+
+**Stage-1 performance outcome (DECIDED, designer, 2026-07-23):** do not use
+an arbitrary uniform percentage cutoff. Measure Result11 with the same clean
+release, three-run median, output-correctness-checked protocol as Result9/10.
+For Lambda/MIR, Result10's like-for-like overall ratio is 8.42× Node on 52
+common rows; Result9 is 4.80× on that same population (4.31× in its published
+all-timed deduplicated headline). Result11 must be **materially better than
+Result10 overall** and target the **Result9 class or better**. Unique
+container mutation, scalar-heavy rows, allocation-heavy rows, and the
+editor/document workload are inspected separately so a headline geometric
+mean cannot hide a COW hot-path regression. Missing or wrong-output rows do
+not improve the score.
+
+All allocating copy paths use precise `RootFrame` / `Rooted` ownership for
+the source, replacement, incoming value, and owner chain, and reload moved
+pointers after a possible GC. Forced-GC stress (`LAMBDA_GC_FORCE_*`) is a
+gate throughout; the `let g`/`var h` probe is the false-unique canary.
 
 ## 11. Stage 2 — exclusivity & borrow discipline (design recorded, deferred)
 
@@ -432,7 +515,7 @@ The `var` borrow is the one deliberate hole C4 punches in "values never
 alias": for the duration of a call, two names refer to one storage.
 Exclusivity keeps that hole single-writer. It is the precondition for four
 things: the callee's local reasoning (its params are independent values);
-**CW1's zero-cost raw borrows** (no `is_shared` consult — sound only if no
+**CW1's zero-cost raw borrows** (no shared-state consult — sound only if no
 other observer exists during the borrow); the JIT's no-alias optimization
 freedom (every `var` param is `restrict` by construction — the Fortran
 argument-rule advantage); and the §9.6 formal reading (each `var` an
@@ -524,23 +607,63 @@ confinement (mutable views become non-escaping, `var`-position-only) + the
 disjoint-tiles rejection under the conservative rule (documents the
 intentional false positive), snapshot-iteration goldens.
 
-## 12. Open questions / risks
+### 11.8 ArrayNum and JS↔Lambda boundary work
+
+Stage 2 also owns the implementation of §9:
+
+- ArrayNum COW must preserve native packed storage, SIMD/vector kernels, view
+  math, and branch-free proven-unique stores. Its design includes
+  representation-invariant equality and the read-view/mutable-borrow split;
+  it is not an instantiation of the generic Item-container copier.
+- JS↔Lambda interop must implement the ingress/egress ownership matrix in
+  §9.3. Ordinary JS mutable buffers cannot become Lambda snapshots by merely
+  setting a bit; `SharedArrayBuffer` always copies; writable Lambda→JS
+  crossings receive JS-owned storage; only explicit read-only contracts may
+  share bytes.
+- Stage-1 test262/Node runs are regression gates for shared runtime changes,
+  not evidence that these Stage-2 boundary semantics have landed.
+
+## 12. Settled Stage-1 decisions and residual risks
+
+### 12.1 Settled Stage-1 implementation contract
+
+These are accepted decisions, not open design questions:
+
+1. **Mutation ownership/writeback ABI (DECIDED).** A copied container returned
+   only to a local variable is lost, so every mutation lowering owns an
+   assignable root/parent slot. `cow_prepare_write(Item)` returns the
+   replacement; nested writes propagate and install replacements along the
+   owner chain. The chain stays in MIR registers/stack state, never a heap
+   descriptor. P0b fixtures must prove root and deep-spine writeback.
+2. **VMap snapshot/detach contract (DECIDED).** `VMapVtable` gains the hook.
+   Mutable backends implement it; immutable capability VMaps reject mutation.
+   A backend whose `set` means an external side effect is not a C4 value and
+   cannot silently use Lambda map mutation. Snapshot-stable backends call the
+   hook only on the shared cold path; external capability effects use an
+   explicit non-map-mutation API.
+3. **Performance outcome (DECIDED).** There is no blanket 3% cutoff. Every
+   design choice remains performance-accounted, and Result11 uses the
+   Result9/10 release protocol. Lambda/MIR must be materially better than
+   Result10 overall and target Result9-class or better performance; focused
+   hot-path results and counters must agree with the overall result.
+4. **Shape metadata invariant (DECIDED).** Map/Object values share shapes for
+   efficiency. Every `ShapeEntry::type` mutation first detaches/transitions
+   the shape; otherwise a value-level copy could mutate another value's
+   interpretation.
+5. **GC rooting of a copied spine (DECIDED).** Source, replacement, incoming
+   value, and intermediate parents are precisely rooted across allocations
+   and reloaded after possible compaction. Forced-GC coverage is mandatory.
+
+### 12.2 Deferred questions and residual risks
 
 1. **Stage-2 granularity endpoint** (design ladder recorded in §11.3): does
    the image toolkit need more than splitters — i.e., do dynamic
    `(base, range)` checks ever pay their way? Decide on real toolkit code
    when Stage 2 starts.
-2. **Flag-byte pressure — RESOLVED (designer, 2026-07-23):** void.
-   `Container` has `uint8_t padding[4]` unused; the CW4 saturating count (or
-   a full count byte) fits without struct growth. `gc_flags` fallback no
-   longer needed.
-3. **JS-boundary conservatism** (CW7 marks shared unconditionally): may
-   over-copy for data JS only reads. Counters (CW5) will show whether a
-   finer contract (JS-side read-only wrapper) is worth designing.
-4. **Migration hazards:** stale pre-C4 comments claim `push`/`splice`
+2. **Migration hazards:** stale pre-C4 comments claim `push`/`splice`
    sharing semantics that the exemption removal changes; scripts relying on
-   aliasing (cd.ls) need their C4.3 restructuring in the same window as P2.
-5. **`Element`/document depth:** Layer-3 spine cost is O(depth×width); deep
+   aliasing (cd.ls) need their C4.3 restructuring in the same window as P4.
+3. **`Element`/document depth:** Layer-3 spine cost is O(depth×width); deep
    narrow documents are fine, shallow enormous fan-out nodes (10⁵-child
    element) pay O(width) per copy of that node — the §9.5.1 node-
    representation question (chunked children) stays open for exactly this
@@ -633,9 +756,11 @@ bounds-check elimination as a new item not yet in any ledger.
 
 | Item | Source | Pick-up trigger |
 |---|---|---|
+| **ArrayNum COW and view policy** — native packed-copy strategy, representation-invariant equality, read-view snapshots, mutable-view borrows | §9.1–§9.2; §11.8 | Stage 2; preserve the current specialized ArrayNum path throughout Stage 1 |
+| **JS↔Lambda ownership boundaries** — mutable-buffer ingress/egress, `SharedArrayBuffer`, explicit read-only sharing | §9.3; §11.8 | Stage 2; Stage-1 JS suites are regression-only |
 | Exclusivity checks — all four call-site faces (`var`-vs-`var` args, receiver-vs-args overlap, path-prefix, view-region) + the `var`-args-only check | C4.4 #1; §11.3 | Stage-2 start; fixtures `f(x,x)`, `x.merge(x)` stay pinned at *current* (aliasing) behavior with a stage-2 marker until then |
 | Module-level / view-state `var` passed as `var` arg (the non-local overlap) | §11.4 | Stage-2 start; recommended opening rule = forbid, with teaching error |
-| View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Stage-2; until then mutable views remain first-class bindables (P4b note) |
+| View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Stage 2; until then mutable views retain current behavior |
 | Snapshot iteration over a mutated `var` container | §11.6 | Stage-2; record as C4.2d when implemented |
 | Exclusivity granularity endpoint (splitters vs static ranges vs dynamic checks) | §11.3 ladder; §12.1 | decide on real image-toolkit code during Stage 2 |
 
@@ -644,7 +769,7 @@ bounds-check elimination as a new item not yet in any ledger.
 | Item | Source | Notes |
 |---|---|---|
 | **Nested-mutation ergonomics** — path-shaped `var` borrows (`f(var t.nodes[i])`), `_modify`-style in-place accessors, guaranteed get-modify-put | C4.4 #6; `doc/Lambda_Formal_Semantics.md` §9.5.2 | Stage 1 *reduces the urgency* (the naive spelling becomes safe — worst case O(spine), never O(size)) but the guaranteed-in-place forms and their syntax are undesigned. Natural sequencing: after Stage 2 (path borrows reuse the exclusivity machinery) |
-| **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.5 | gate on the editor/document benchmark from Tune-COW Phase A3; only if it fails on real documents |
+| **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.2 | gate on the editor/document benchmark from Tune-COW Phase A3; only if it fails on real documents |
 | **Non-escaping nested-`pn` relaxation** (direct up-level `var` access for call-position-only nested `pn`s — the closure-style parser case) | C4.2a spec sketch | backward-compatible addition; interim idiom (object with `pn` methods) is unblocked by Tune-COW Phase B, which lowers the pressure to do this soon |
 
 ### B.3 Different project
@@ -666,6 +791,7 @@ operation, decided per §5.2.
 note); decision records `vibe/Lambda_Semantics_Formal.md` C4–C4.4; anchor
 diagnosis `vibe/Lambda_Impl_Tune.md` §4 (M3); model survey
 `vibe/Lambda_Design_Memory_Model.md`; benchmarks
+`test/benchmark/Overall_Result9.md` and
 `test/benchmark/Overall_Result10.md`; tuning ledger
 `vibe/Lambda_Tuning_Proposal.md` (R-items); implementation
 `vibe/Lambda_Impl_Tune_COW.md` (Stage 1) with §0 ledger mirroring this

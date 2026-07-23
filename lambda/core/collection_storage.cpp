@@ -31,9 +31,9 @@ void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
     // so a sparse spec length cannot observe stale payloads or zeroed nulls.
     int64_t new_tail_start = new_capacity - list->extra;
     int64_t old_tail_start = old_capacity - list->extra;
-    Item vacant = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
+    Item vacant = list->has_js_props ?
         Item{.item = ITEM_JS_DELETED_SENTINEL} : ItemNull;
-    int64_t vacant_end = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
+    int64_t vacant_end = list->has_js_props ?
         new_tail_start : old_capacity;
     if (vacant_end > new_tail_start) vacant_end = new_tail_start;
     for (int64_t i = old_tail_start; i < vacant_end; i++) {
