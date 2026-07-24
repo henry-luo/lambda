@@ -230,6 +230,109 @@
           "module_insns": 149
         }
       }
+    },
+    {
+      "name": "lambda_tune4_typed_array_guard",
+      "script": "test/mir/lambda/typed_array_guard.ls",
+      "language": "lambda",
+      "description": "Tune4 M1 numeric-array load/store guards and their generic fallback emission cost.",
+      "budgets": {
+        "default": {
+          "module_insns": 500,
+          "functions": {
+            "_guarded_load_#": {
+              "insns": 95
+            },
+            "_guarded_store_#": {
+              "insns": 152
+            }
+          },
+          "frames": [
+            {
+              "name": "_guarded_load_#",
+              "roots": 3,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 4
+            },
+            {
+              "name": "_guarded_store_#",
+              "roots": 6,
+              "root_stores": 0,
+              "scalar_homes": 2,
+              "number_scratch": 0,
+              "safepoints": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "lambda_tune4_callsite_inference",
+      "script": "test/mir/lambda/callsite_inference.ls",
+      "language": "lambda",
+      "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail.",
+      "budgets": {
+        "default": {
+          "module_insns": 492,
+          "functions": {
+            "_closed_gap_#": {
+              "insns": 114
+            },
+            "_open_gap_#": {
+              "insns": 31
+            }
+          },
+          "frames": [
+            {
+              "name": "_closed_gap_#",
+              "roots": 0,
+              "root_stores": 0,
+              "scalar_homes": 2,
+              "number_scratch": 0,
+              "safepoints": 3
+            },
+            {
+              "name": "_open_gap_#",
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "js_tune6_exact_collection",
+      "script": "test/mir/js/tune6_exact_collection.js",
+      "language": "js",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication.",
+      "budgets": {
+        "default": {
+          "module_insns": 7389,
+          "functions": {
+            "js_main": {
+              "insns": 3519
+            },
+            "Tune6ExactCollection_m128_128": {
+              "insns": 17
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 7,
+              "root_stores": 841,
+              "scalar_homes": 6,
+              "number_scratch": 0,
+              "safepoints": 1603
+            }
+          ]
+        }
+      }
     }
   ]
 }

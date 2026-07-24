@@ -1989,3 +1989,129 @@ retain conservative production fallbacks and can be measured independently:
 None of these optional refinements permits exposing an internal ABI, omitting
 an error lane, retaining activation storage across an ownership boundary, or
 weakening the rooting invariants.
+
+## 17. JS runtime stack merges
+
+**Status:** decided 2026-07-24; implementation plan for all three merges in
+`Lambda_Impl_Merge_Stack.md`.
+
+Three merges are decided, one per kind of duplication:
+
+- **Merge A (lifetime):** the transient call-argument stack (`js_args_stack`)
+  moves onto the side-root region — detailed below (§17.1).
+- **Merge B (mechanism):** the six-plus hand-rolled semantic context stacks
+  (Appendix A.2) share one `JsContextStack` helper with **non-optional**
+  epoch-guarded GC root registration, pop-time slot nulling, and a single
+  batch-reset registry. Each stack keeps its own storage and semantics; only
+  the boilerplate unifies. Motivated directly by the Appendix A audit: the
+  confirmed `js_with_stack` use-after-free existed because every stack
+  hand-rolls its own rooting and one forgot.
+- **Merge C (data):** the eval cluster — `js_eval_source_*`'s five parallel
+  arrays plus the six binding-journal frame-index stacks — collapses into one
+  `JsEvalFrame` stack (source info + journal watermarks) with a single
+  push/pop, replacing ~25 duplicated early-return cleanup sites in the eval
+  lowering. Binding *entry* arrays keep their watermark pattern unchanged.
+  Builds on Merge B for its `Item` members.
+
+Explicitly rejected: any cross-semantic *data* merge of the context stacks
+(one tagged stack for with/domain/cjs/super) — different bracket lifetimes,
+non-LIFO capture/replay, and content-filtered walks make a shared array
+strictly worse — and any merge involving the number region, which stays on
+the non-scanned side of the GC boundary.
+
+### 17.1 Merge A: call-argument stack → side-root region
+
+LambdaJS lowers each call/new expression's evaluated arguments into a
+transient `Item[]` frame on a private bump stack
+(`js_args_stack` in `lambda/js/js_runtime_function.cpp`), bracketed by
+`js_args_save`/`js_args_restore` on both the normal and exceptional edges.
+That stack is a hand-rolled duplicate of the per-Context **side-root region**
+with strictly worse properties:
+
+- a fixed 2 MB `mem_calloc` buffer, resident for the process lifetime, versus
+  the side-root's demand-paged reservation with post-GC decommit;
+- the **entire capacity** registered as a permanent GC root range, forcing a
+  `[len, cap)` zeroed invariant and restore-time re-zeroing, versus the
+  side-root rule that the collector scans exactly `[base, top)` and never
+  looks above the watermark;
+- its own reset/cleanup lifecycle (`js_args_stack_reset`,
+  `js_args_stack_cleanup`) outside the `LambdaRecoveryCheckpoint`
+  snapshot/restore protocol that already governs both side regions;
+- a separate overflow fallback (`js_alloc_env`) instead of the uniform
+  side-stack overflow error.
+
+**Decision:** argument frames move onto the side-root stack. A new primitive
+`lambda_side_root_alloc_n()` (the root-side twin of
+`lambda_side_number_alloc()`) reserves and zeroes `n` contiguous slots above
+`side_root_top`. The `js_args_*` entry points are reimplemented over it; the
+save/restore marks become saved `side_root_top` values, which the JIT may
+later inline as direct `Context` field loads/stores. Argument frames nest
+strictly LIFO between generated-frame root watermarks
+(`caller roots → call args → callee roots → …`), so the existing prologue and
+epilogue watermark discipline of section 8 is unchanged, and an enclosing
+generated epilogue's watermark restore now also truncates any argument frame
+an unwind path failed to pop explicitly.
+
+The zero-fill obligation moves from pop-time to push-time: slots are zeroed
+before the new top is published, for the same reason
+`lambda_root_frame_begin` zeroes — a collection during argument evaluation
+must never interpret stale words below the top as live roots.
+
+**Boundary of Merge A:** it covers only the transient call-argument stack —
+the one structure whose contents are anonymous rooted `Item` slots with
+call-expression lifetime. The semantic context stacks (`js_with_stack` and
+the rest of Appendix A.2) are read by content and keep their own storage;
+they are addressed by Merges B and C above, not by relocation onto the
+side-root region. The number region remains non-scanned raw payload words
+and is untouched by all three merges. Appendix A inventories every
+stack-like structure in the JS runtime and records why each is or is not a
+side-stack merge candidate.
+
+## Appendix A: JS runtime stack inventory
+
+Survey date 2026-07-24. Three families: the two per-Context side regions
+(lifetime/rooting infrastructure), semantic context stacks (fixed-size
+globals read by content), and diagnostics stacks (non-`Item`, GC-irrelevant).
+Only `js_args_stack` qualifies for a side-region merge (§17); every other
+entry fails at least one of: order-insensitive anonymous slots, strict LIFO
+nesting with generated frames, or `Item`-only payload.
+
+### A.1 Side regions (per-Context, watermark discipline)
+
+| Stack | Location | Purpose | GC contract |
+|---|---|---|---|
+| **side_root** | `Context.side_root_*`; `lambda/runtime/side_stack.c` | Canonical `Item` root slots: generated-frame reservations (§8), native `RootFrame`/`Rooted` frames, and — after §17 — transient JS call-argument frames | Collector scans exactly `[base, top)`; demand-paged 16 MB reservation, post-GC decommit; LIFO watermarks enforced by `lambda_root_frame_end` |
+| **side_number** | `Context.side_number_*`; same file | Raw one-word scalar homes for transient `INT64`/`UINT64`/out-of-band `FLOAT` payloads (§8.7, §15) | **Never scanned** — cells are raw words, not `Item`s; per-frame watermark + caller-home adoption; debug pop poisons `0xA5` |
+
+The two regions are duals across the scan boundary and must never be merged
+with each other or absorb structures from the wrong side.
+
+### A.2 Semantic context stacks (fixed-size globals, read by content)
+
+| Stack | Location | Depth | Purpose | GC rooting |
+|---|---|---|---|---|
+| `js_args_stack` | `js_runtime_function.cpp` | 256 K Items | Transient call/new argument frames | Full-capacity root-range registration — **merging into side_root per §17** |
+| `js_with_stack` | `js_globals.cpp` | 16 | `with`-statement scope chain: top-down name-resolution walk + last-binding cache | **FIXED 2026-07-24**: was unregistered — confirmed use-after-free (`with ({…}) { … }` under `LAMBDA_GC_FORCE_EVERY=1` collected the scope object mid-body). Now epoch-guarded lazy root-range registration (`js_with_register_roots`, same pattern as `js_eval_source_register_roots`) covering the 16-slot array plus the two last-binding cache slots; pop/restore-depth/set-stack null unwound slots; batch reset clears the cache Items. Regression gate: `test/js/regression_with_stack_gc.js` in `test-gc-rooting-core` + baseline. (Separate finding while testing: `with (primitive)` still fails under forced GC because String-wrapper objects don't trace their wrapped value — pre-existing wrapper bug, not a with-stack issue; spawned as task_ce716fbc) |
+| `js_eval_source_*` | `js_runtime_state.cpp` | 16 | Nested `eval()` source context (filename, source, line/col offsets, compact flag) for `Error.stack` synthesis | Two `Item` arrays root-range registered lazily per heap epoch |
+| eval-env binding journals | `js_globals.cpp` (`js_eval_env_*` et al.) | 6 paired journals, 32–512 entries | Bindings introduced by direct eval into enclosing scopes (env with old-value restore, global-lexical, local, lexical, immutable, private), popped per eval frame | No dedicated registration. Forced-GC probe of the local-binding read path passed 2026-07-24 (value apparently duplicated in a rooted structure); the `old_value` restore path remains unverified |
+| `js_domain_stack` | `js_runtime.cpp` | 64 | Node `domain` module: active domain chain, mirrored to `process.domain`, capture/replay for async continuations | Whole array root-range registered once |
+| `js_cjs_module_stack` | `js_mir_entrypoints_require.cpp` | `JS_CJS_STACK_MAX` | Current `module` object chain for nested CommonJS `require()` | Root-range registered; cleared on batch reset |
+| `super_this_*` stacks | `js_runtime_state.hpp` (128-pair `bool`/`Item`) | 128 | Derived-constructor `this` binding across `super()` (TDZ tracking) | Not separately registered, but protected in practice: super lowering immediately writes `bound_this` into the rooted lexical-`this` env binding (`jm_emit_super_bind_this_with_public_fields`), so the stack entry is a duplicate reference; forced-GC probe passed 2026-07-24 |
+
+None of these merge into side_root: they are read by content (scope walks,
+capture/replay, old-value restore), several have non-`Item` companion data
+(offsets, flags, keys), and `domain.enter()`/captured-stack replay is
+legitimately non-LIFO with respect to generated frames. They are tiny and
+bounded; their scan cost is negligible.
+
+### A.3 Diagnostics stacks (non-`Item`; no GC interaction)
+
+| Stack | Location | Purpose |
+|---|---|---|
+| `js_call_name_stack` (+ lengths) | `js_call_function_impl`, `js_runtime.cpp` (thread-local, 64) | Callee-name breadcrumb for stack-overflow/trace messages |
+| `g_js_exec_profile_stack` | `js_exec_profile.cpp` (4096) | Exec-profile timing frames (event, start, child time) |
+| assert partial-pair stack | `js_assert.cpp` (per-comparison, 4096 pairs) | Cycle detection inside `deepEqual` |
+
+Not in scope as stacks: `js_promise_unhandled_queue` and the job/event-loop
+structures are queues, and single-slot save/restore pairs (async-hooks
+current resource, pending new-target, etc.) are not stacks.

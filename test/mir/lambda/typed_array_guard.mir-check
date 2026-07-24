@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "description": "Tune4 M1: numeric-array load/store fast paths guard container kind, shaped/view flags, and element representation, retaining generic fallbacks for widened aliases.",
+  "checks": [
+    {
+      "in_func": "_guarded_load_#",
+      "expect_seq": [
+        { "pattern": "mov\tidx_type_" },
+        { "pattern": "eq\tidx_type_ok_" },
+        { "pattern": "mov\tidx_flags_" },
+        { "pattern": "and\tidx_shaped_" },
+        { "pattern": "mov\tidx_elem_" },
+        { "pattern": "eq\tidx_elem_ok_" },
+        { "pattern": "call\titem_at_p, item_at" }
+      ],
+      "count": {
+        "call\titem_at_p, item_at": 1
+      }
+    },
+    {
+      "in_func": "_guarded_store_#",
+      "expect_seq": [
+        { "pattern": "mov\tgtid_" },
+        { "pattern": "eq\tgtidok_" },
+        { "pattern": "mov\tglay_" },
+        { "pattern": "and\tgshp_" },
+        { "pattern": "mov\tgelm_" },
+        { "pattern": "eq\tgelmok_" },
+        { "pattern": "and\tfvw_" },
+        { "pattern": "call\tfn_array_set_p, fn_array_set" }
+      ],
+      "count": {
+        "call\tfn_array_set_p, fn_array_set": 1
+      }
+    }
+  ]
+}

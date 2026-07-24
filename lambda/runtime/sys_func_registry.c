@@ -1122,6 +1122,7 @@ extern void js_evalscript_check_global_lex_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_global_lexical_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
+extern void js_eval_env_bridge_journal_vars(void);
 extern void js_eval_global_lexical_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
 extern int64_t js_eval_env_is_active(void);
@@ -2245,6 +2246,7 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
     {"js_eval_global_lexical_push_frame", FPTR(js_eval_global_lexical_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
+    {"js_eval_env_bridge_journal_vars", FPTR(js_eval_env_bridge_journal_vars)},
     {"js_eval_global_lexical_bind", FPTR(js_eval_global_lexical_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},
     {"js_eval_env_is_active", FPTR(js_eval_env_is_active)},

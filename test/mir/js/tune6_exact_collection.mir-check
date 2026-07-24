@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Tune6 C3: exact count/fill storage accepts classes beyond every former fixed member cap, and instance metadata is published by one bulk call rather than per-field property stores.",
+  "checks": [
+    {
+      "in_func": "*",
+      "expect": [
+        "import\tjs_set_class_instance_field_metadata_bulk"
+      ],
+      "count": {
+        "call\tjs_set_class_instance_field_metadata_bulk_p": 1
+      }
+    },
+    {
+      "in_func": "js_main",
+      "expect": [
+        "Tune6ExactCollection_m128_128"
+      ]
+    }
+  ]
+}
