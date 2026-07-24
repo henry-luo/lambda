@@ -854,6 +854,7 @@ int64_t js_capture_with_binding(Item key);
 int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 void js_eval_env_bind(Item key, Item value);
+void js_eval_env_bridge_journal_vars(void);
 void js_eval_global_lexical_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_env_is_active(void);

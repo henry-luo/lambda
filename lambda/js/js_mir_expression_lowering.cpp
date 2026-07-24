@@ -6670,6 +6670,11 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
         }
     }
+    // Bridge journal vars from a prior direct eval AFTER the static binds:
+    // caller identifier reads resolve journal-first, so when an eval'd `var`
+    // re-declared a static local the journal value must win in the nested
+    // eval's global lookup as well.
+    jm_call_void_0(mt, "js_eval_env_bridge_journal_vars");
     return bridged;
 }
 

@@ -1005,9 +1005,15 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // per-test boundary, and running them here pollutes hot-reload batches.
     if (!g_jm_preamble_compile_only && !js_batch_execution_mode) {
         int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
+        // An exception already pending here is the SCRIPT's uncaught exception;
+        // it must survive to the CLI so it is reported and sets exit code 1.
+        // Only an exception newly raised BY a beforeExit listener may be
+        // cleared below — without this distinction the clearing swallowed
+        // every uncaught script exception (silent exit 0 under --no-log).
+        bool script_exception_pending = js_check_exception();
         js_async_hooks_drain_destroy_queue();
         js_process_emit_before_exit(exit_code);
-        bool before_exit_threw = js_check_exception();
+        bool before_exit_threw = !script_exception_pending && js_check_exception();
         if (js_event_loop_has_refed_handles()) {
             js_event_loop_drain();
         } else {

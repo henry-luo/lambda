@@ -1,0 +1,10 @@
+before
+mid object
+999
+direct 999
+ident true
+stmt 999
+typeof object
+prop-write 5
+rebind 77
+after-g undefined

@@ -16290,6 +16290,22 @@ static int js_with_stack_depth = 0;
 static Item js_last_with_binding_scope = {.item = ITEM_NULL};
 static Item js_last_with_binding_key = {.item = ITEM_NULL};
 static bool js_last_with_binding_valid = false;
+static uint64_t js_with_roots_epoch = 0;
+
+// GC root registration for the with-scope stack. The stack (and the memoized
+// binding cache) can hold the ONLY reference to a with-scope object — e.g.
+// `with ({...})` where the operand's JIT register dies after js_with_push, or
+// the js_to_object wrapper created for a primitive operand. Without rooting,
+// any allocation inside the with body can collect the scope object and
+// subsequent unqualified-name lookups read freed memory. Epoch-guarded lazy
+// registration because the GC heap is torn down/recreated across batch tests.
+static void js_with_register_roots(void) {
+    if (js_with_roots_epoch == js_heap_epoch) return;
+    heap_register_gc_root_range((uint64_t*)js_with_stack, JS_WITH_STACK_MAX);
+    heap_register_gc_root_range((uint64_t*)&js_last_with_binding_scope.item, 1);
+    heap_register_gc_root_range((uint64_t*)&js_last_with_binding_key.item, 1);
+    js_with_roots_epoch = js_heap_epoch;
+}
 
 static void js_throw_binding_reference_error(Item key);
 
@@ -16312,9 +16328,14 @@ extern "C" void js_with_batch_reset(void) {
     js_with_stack_depth = 0;
     js_last_with_binding_valid = false;
     memset(js_with_stack, 0, sizeof(js_with_stack));
+    // the binding cache slots are registered GC roots — stale Items from the
+    // prior script must not survive into the next heap's root scan
+    js_last_with_binding_scope = ItemNull;
+    js_last_with_binding_key = ItemNull;
 }
 
 extern "C" void js_with_push(Item obj) {
+    js_with_register_roots();
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
         js_throw_type_error("Cannot convert undefined or null to object");
@@ -16334,6 +16355,9 @@ extern "C" void js_with_pop() {
     if (js_with_stack_depth > 0) {
         js_last_with_binding_valid = false;
         js_with_stack_depth--;
+        // the whole array is a registered root range — clear the popped slot so
+        // the always-scanned region holds no stale root keeping garbage alive
+        js_with_stack[js_with_stack_depth] = ItemNull;
     }
 }
 
@@ -16342,6 +16366,12 @@ extern "C" int js_with_save_depth() {
 }
 
 extern "C" void js_with_restore_depth(int depth) {
+    if (depth < 0) depth = 0;
+    // clear unwound slots — the array is a registered root range (see
+    // js_with_register_roots) and must not retain popped scope objects
+    for (int i = depth; i < js_with_stack_depth && i < JS_WITH_STACK_MAX; i++) {
+        js_with_stack[i] = ItemNull;
+    }
     js_with_stack_depth = depth;
     js_last_with_binding_valid = false;
 }
@@ -16358,10 +16388,16 @@ extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
 }
 
 extern "C" void js_with_set_stack(Item* stack, int depth) {
+    js_with_register_roots();
     if (depth < 0) depth = 0;
     if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
     for (int i = 0; i < depth; i++) {
         js_with_stack[i] = stack ? stack[i] : ItemNull;
+    }
+    // clear any deeper entries from a previously restored stack — the array is
+    // a registered root range and must not retain scopes past their depth
+    for (int i = depth; i < js_with_stack_depth && i < JS_WITH_STACK_MAX; i++) {
+        js_with_stack[i] = ItemNull;
     }
     js_with_stack_depth = depth;
     js_last_with_binding_valid = false;
@@ -17120,6 +17156,10 @@ typedef struct JsEvalEnvBinding {
     Item key;
     Item old_value;
     bool had_own;
+    // binding bridged from the eval-local journal (a var introduced by a prior
+    // direct eval in this function scope) rather than from a static local;
+    // its post-eval value must be written back to the journal on frame pop.
+    bool from_journal;
 } JsEvalEnvBinding;
 
 static JsEvalEnvBinding js_eval_env_bindings[JS_EVAL_ENV_BIND_MAX];
@@ -17173,6 +17213,35 @@ extern "C" void js_eval_env_push_frame(void) {
         return;
     }
     js_eval_env_frame_stack[js_eval_env_frame_depth++] = js_eval_env_binding_count;
+}
+
+// Bridge vars introduced by a PRIOR direct eval in this function scope
+// (they live only in the eval-local journal, not in any static local slot).
+// Nested direct eval compiles as separate code that resolves free names
+// through global lookup, so without this bridge `eval("var x = 1")`
+// followed by `eval("x")` throws ReferenceError. The values are exposed as
+// temporary globals exactly like bridged static locals; frame pop restores
+// the old globals and writes mutations back to the journal. Called AFTER the
+// static-local binds: an eval'd `var x` re-declaring a static local puts the
+// current value in the journal, and identifier reads in the caller resolve
+// journal-first, so the journal value must win over the static bind here too.
+extern "C" void js_eval_env_bridge_journal_vars(void) {
+    if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
+    Item global = js_get_global_this();
+    int frame_start = js_eval_local_frame_stack[js_eval_local_frame_depth - 1];
+    for (int i = frame_start; i < js_eval_local_binding_count; i++) {
+        if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
+            log_error("js-eval-env: binding stack overflow bridging journal vars");
+            break;
+        }
+        JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
+        binding->key = js_eval_local_bindings[i].key;
+        binding->from_journal = true;
+        binding->had_own = it2b(js_has_own_property(global, binding->key));
+        binding->old_value = binding->had_own ?
+            js_property_get(global, binding->key) : make_js_undefined();
+        js_property_set(global, binding->key, js_eval_local_bindings[i].value);
+    }
 }
 
 extern "C" void js_eval_global_lexical_push_frame(void) {
@@ -17328,6 +17397,7 @@ extern "C" void js_eval_env_bind(Item key, Item value) {
     Item global = js_get_global_this();
     JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
     binding->key = key;
+    binding->from_journal = false;
     binding->had_own = it2b(js_has_own_property(global, key));
     binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
     js_property_set(global, key, value);
@@ -17373,6 +17443,7 @@ extern "C" void js_eval_env_track_global_binding(Item key) {
     Item global = js_get_global_this();
     JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
     binding->key = key;
+    binding->from_journal = false;
     binding->had_own = it2b(js_has_own_property(global, key));
     binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
 }
@@ -17401,6 +17472,16 @@ extern "C" void js_eval_env_pop_frame(void) {
     Item global = js_get_global_this();
     while (js_eval_env_binding_count > frame_start) {
         JsEvalEnvBinding* binding = &js_eval_env_bindings[--js_eval_env_binding_count];
+        if (binding->from_journal) {
+            // journal-origin vars have no static slot the caller could write
+            // back to; assignments made by the eval'd code landed in the
+            // bridged temporary global and must flow back into the journal
+            // before the old global value is restored.
+            int idx = js_eval_local_find_binding(binding->key);
+            if (idx >= 0) {
+                js_eval_local_bindings[idx].value = js_property_get(global, binding->key);
+            }
+        }
         js_eval_restore_global_binding(global, binding);
     }
 }

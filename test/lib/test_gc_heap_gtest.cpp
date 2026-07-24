@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <cstdint>
+#include <stdlib.h>
 
 extern "C" {
 #include "../../lambda/lambda.h"
@@ -210,7 +211,7 @@ TEST_F(GCHeapTest, CallocZeroed) {
 }
 
 TEST_F(GCHeapTest, AllocMultiple) {
-    void* a = gc_heap_alloc(gc, 16, LMD_TYPE_INT64);
+    void* a = gc_heap_alloc(gc, 16, LMD_TYPE_STRING);
     void* b = gc_heap_alloc(gc, 48, LMD_TYPE_STRING);
     void* c = gc_heap_alloc(gc, 128, LMD_TYPE_ARRAY);
     ASSERT_NE(a, nullptr);
@@ -241,6 +242,135 @@ TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
 
     EXPECT_TRUE(gc_is_managed(gc, ptr));
     EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)ptr + 8));
+}
+
+TEST_F(GCHeapTest, LargeObjectSetSurvivesGrowthAndBackwardShiftDeletion) {
+    const int object_count = 512;
+    void** objects = (void**)calloc((size_t)object_count, sizeof(void*));
+    uint64_t* roots = (uint64_t*)calloc((size_t)object_count, sizeof(uint64_t));
+    ASSERT_NE(objects, nullptr);
+    ASSERT_NE(roots, nullptr);
+
+    for (int i = 0; i < object_count; i++) {
+        objects[i] = gc_heap_alloc(gc, GC_LARGE_OBJECT_THRESHOLD + 64,
+            LMD_TYPE_STRING);
+        ASSERT_NE(objects[i], nullptr);
+        roots[i] = string_item(objects[i]);
+    }
+
+    gc_tune_stats_t grown = gc_heap_get_tune_stats(gc);
+    EXPECT_EQ(gc->large_objects.count, (size_t)object_count);
+    EXPECT_EQ(grown.large_add_calls, (uint64_t)object_count);
+    EXPECT_EQ(grown.large_peak_count, (size_t)object_count);
+    EXPECT_GT(grown.large_rehashes, 1u);
+    EXPECT_EQ(gc->large_objects.capacity &
+        (gc->large_objects.capacity - 1), 0u);
+
+    // Marking every exact pointer proves all entries remain discoverable after
+    // rehashing; an interior address must never match the exact-pointer set.
+    for (int i = 0; i < object_count; i++) {
+        gc_header_t* header = gc_get_header(objects[i]);
+        gc_mark_item(gc, roots[i]);
+        EXPECT_EQ(header->marked, 1) << "large object " << i;
+        header->marked = 0;
+
+        uint64_t interior = string_item((uint8_t*)objects[i] + 8);
+        gc_mark_item(gc, interior);
+        EXPECT_EQ(header->marked, 0) << "interior pointer " << i;
+    }
+
+    // Deleting alternating entries creates holes throughout probe clusters.
+    // Backward-shift deletion must preserve lookup for every surviving entry.
+    for (int i = 0; i < object_count; i += 2) {
+        gc_heap_pool_free(gc, objects[i]);
+        roots[i] = 0;
+    }
+    gc_register_root_range(gc, roots, object_count);
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_EQ(gc->large_objects.count, (size_t)object_count / 2);
+    EXPECT_EQ(gc->object_count, (size_t)object_count / 2);
+    gc_tune_stats_t compacted = gc_heap_get_tune_stats(gc);
+    EXPECT_EQ(compacted.large_remove_calls, (uint64_t)object_count / 2);
+    EXPECT_GT(compacted.large_find_calls, grown.large_find_calls);
+
+    for (int i = 1; i < object_count; i += 2) {
+        gc_header_t* header = gc_get_header(objects[i]);
+        gc_mark_item(gc, roots[i]);
+        EXPECT_EQ(header->marked, 1) << "survivor " << i;
+        header->marked = 0;
+    }
+
+    gc_unregister_root_range(gc, roots);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->large_objects.count, 0u);
+    EXPECT_EQ(gc->object_count, 0u);
+
+    free(roots);
+    free(objects);
+}
+
+TEST_F(GCHeapTest, ParallelSlabOwnersStayAlignedAcrossRangeGrowth) {
+    static_assert(sizeof(gc_slab_range_t) == 2 * sizeof(void*),
+        "slab-range search entries must stay cache-dense");
+
+    const int allocation_count = 2048;
+    void** objects = (void**)calloc((size_t)allocation_count, sizeof(void*));
+    ASSERT_NE(objects, nullptr);
+
+    // The 256-byte class has 32 slots per slab. This crosses the initial
+    // 64-range capacity and exercises paired growth/insertion of both arrays.
+    for (int i = 0; i < allocation_count; i++) {
+        objects[i] = gc_heap_alloc(gc, GC_LARGE_OBJECT_THRESHOLD,
+            LMD_TYPE_STRING);
+        ASSERT_NE(objects[i], nullptr);
+    }
+
+    gc_object_zone_t* zone = gc->object_zone;
+    ASSERT_NE(zone, nullptr);
+    EXPECT_GT(zone->range_count, (size_t)GC_INITIAL_RANGE_CAPACITY);
+    ASSERT_NE(zone->slab_ranges, nullptr);
+    ASSERT_NE(zone->range_slabs, nullptr);
+
+    size_t non_slab_ranges = 0;
+    for (size_t i = 0; i < zone->range_count; i++) {
+        const gc_slab_range_t* range = &zone->slab_ranges[i];
+        if (i > 0) EXPECT_LE(zone->slab_ranges[i - 1].base, range->base);
+        EXPECT_LT(range->base, range->end);
+
+        gc_object_slab_t* slab = zone->range_slabs[i];
+        if (!slab) {
+            non_slab_ranges++;
+            EXPECT_FALSE(gc_object_zone_owns(zone,
+                range->base + sizeof(gc_header_t)));
+            continue;
+        }
+        EXPECT_EQ(slab->base, range->base);
+        EXPECT_EQ(slab->base + slab->slot_size * slab->slot_count,
+            range->end);
+        if (slab->next_fresh > 0) {
+            uint8_t* first_user = slab->base + sizeof(gc_header_t);
+            EXPECT_TRUE(gc_object_zone_owns(zone, first_user));
+            EXPECT_FALSE(gc_object_zone_owns(zone, first_user + 1));
+            EXPECT_FALSE(gc_object_zone_owns(zone, slab->base));
+            if (slab->next_fresh < slab->slot_count) {
+                uint8_t* first_unallocated =
+                    slab->base + slab->next_fresh * slab->slot_size +
+                    sizeof(gc_header_t);
+                EXPECT_FALSE(gc_object_zone_owns(zone, first_unallocated));
+            }
+        }
+    }
+    // The initial bump block is registered in the same sorted range index but
+    // deliberately carries no slab owner.
+    EXPECT_GE(non_slab_ranges, 1u);
+
+    for (int i = 0; i < allocation_count; i++) {
+        EXPECT_TRUE(gc_object_zone_owns(zone, objects[i]))
+            << "allocated slot " << i;
+    }
+
+    free(objects);
 }
 
 TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {
@@ -455,32 +585,18 @@ TEST_F(GCHeapTest, MarkInlineValueIgnored) {
     EXPECT_EQ(gc->mark_top, 0);
 }
 
-TEST_F(GCHeapTest, RootedWideIntegerFallbackCellsSurviveCollection) {
-    int64_t* signed_cell = (int64_t*)gc_heap_alloc(gc, sizeof(int64_t), LMD_TYPE_INT64);
-    uint64_t* unsigned_cell = (uint64_t*)gc_heap_alloc(gc, sizeof(uint64_t), LMD_TYPE_UINT64);
-    ASSERT_NE(signed_cell, nullptr);
-    ASSERT_NE(unsigned_cell, nullptr);
-    *signed_cell = INT64_MAX;
-    *unsigned_cell = UINT64_MAX;
-
-    uint64_t signed_root = l2it(signed_cell);
-    uint64_t unsigned_root = u2it(unsigned_cell);
-    gc_register_root(gc, &signed_root);
-    gc_register_root(gc, &unsigned_root);
-    gc_set_poison_freed(gc, 1);
-
-    gc_collect(gc, NULL, 0);
-
-    // Ownerless wide scalars use leaf GC cells; both signedness tags must keep
-    // the payload alive without tracing its arbitrary bits as child Items.
-    EXPECT_EQ(gc->object_count, 2u);
-    EXPECT_EQ(*signed_cell, INT64_MAX);
-    EXPECT_EQ(*unsigned_cell, UINT64_MAX);
-    EXPECT_EQ(gc_get_header(signed_cell)->type_tag, LMD_TYPE_INT64);
-    EXPECT_EQ(gc_get_header(unsigned_cell)->type_tag, LMD_TYPE_UINT64);
-
-    gc_unregister_root(gc, &signed_root);
-    gc_unregister_root(gc, &unsigned_root);
+TEST_F(GCHeapTest, ScalarObjectTagsAreRejectedBeforePublication) {
+    const uint16_t scalar_tags[] = {
+        LMD_TYPE_INT64, LMD_TYPE_UINT64, LMD_TYPE_FLOAT, LMD_TYPE_FLOAT64,
+    };
+    for (size_t i = 0; i < sizeof(scalar_tags) / sizeof(scalar_tags[0]); i++) {
+        // Wide scalars require caller/container-owned homes; admitting any tag
+        // here would make the marker treat an ownerless GC cell as a leaf.
+        EXPECT_DEATH({
+            (void)gc_heap_alloc(gc, sizeof(uint64_t), scalar_tags[i]);
+        }, "gc-scalar-invariant");
+    }
+    EXPECT_EQ(gc->object_count, 0u);
 }
 
 TEST_F(GCHeapTest, MarkListTracesChildren) {
