@@ -1,6 +1,27 @@
 # Lambda Impl Plan: Tune 4 — Result11 Tail Elimination (GC cliffs + typed elements + scalar inference)
 
-**Status: IMPLEMENTED — 2026-07-24 (G0/G1/G2/M1/M2 all landed; S1 not needed).**
+**Status: IMPLEMENTED + RESULT12 MEASURED — 2026-07-24 (G0/G1/G2/M1/M2 landed; S1 not needed).**
+
+## Result12 exit measurement (2026-07-24)
+
+Four-engine matrix, 3-run medians, 180s timeout (Result11 protocol), fresh
+release build with Tune4+Tune5. Raw: `test/benchmark/benchmark_results_v12.json`;
+report: `test/benchmark/Overall_Result12.md`. QuickJS/Node geo held 7.10x→7.00x,
+confirming host consistency (QuickJS unchanged).
+
+| Metric | Result11 | Result12 | Tune4 target | Verdict |
+|---|---|---|---|---|
+| MIR/Node geo (dedup) | 4.73x | **3.01x** | ≤3.0x | ~met (0.3% over) |
+| Worst MIR row | 617x (base64) | 66x (richards) | ≤25x | **not met** |
+
+Targeted MIR rows all landed their wins: base64 617x→16.8x (G1), matmul 27x→2.8x
+(M1), diviter MIR ~41x→7x (M2). The residual worst-MIR rows are all **untyped
+map field access** (richards 66x, splay 43x, crypto_sha1 31x, navier 26x) — the
+R6 follow-on §9 explicitly scoped out; base64 is no longer anywhere near the top.
+So the geo target is met and the worst-row target is missed only on rows this
+plan deferred by design. Re-rank evidence for `Lambda_Tuning_Proposal.md`: the
+MIR tail is now R6 (untyped-map shape scans + `math.sqrt` native lowering), not
+GC or typed-element access.
 
 ## Implementation record (2026-07-24)
 

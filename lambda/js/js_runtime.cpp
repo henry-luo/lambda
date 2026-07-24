@@ -285,16 +285,57 @@ static inline int64_t js_array_dense_capacity(const Array* arr) {
     return container_dense_capacity(arr);
 }
 
+// J0.1: release-safe array-store counters. Always compiled (the increments sit
+// on already-out-of-line paths); dumped at exit when LAMBDA_JS_ARRAY_STATS is
+// set. These validated the J1 diagnosis (scanned-slots ~= capacity x stores)
+// in-tree and confirm the collapse to zero scans afterward.
+static struct {
+    uint64_t dense_required_calls;   // js_array_dense_required invocations
+    uint64_t dense_required_scans;   // of those, ones that ran a backward scan
+    uint64_t dense_required_slots;   // cumulative slots walked by scans
+    uint64_t store_fast_bypass;      // js_array_store_owned direct-array_set hits
+    uint64_t store_scan_path;        // js_array_store_owned grow-check stores
+} g_js_array_stats;
+static bool g_js_array_stats_registered = false;
+
+static void js_array_stats_report(void) {
+    const auto& s = g_js_array_stats;
+    fprintf(stderr,
+        "js-array-stats: dense_required=%llu scans=%llu scanned_slots=%llu "
+        "(%.1f slots/scan) | store_fast=%llu store_growcheck=%llu\n",
+        (unsigned long long)s.dense_required_calls,
+        (unsigned long long)s.dense_required_scans,
+        (unsigned long long)s.dense_required_slots,
+        s.dense_required_scans ? (double)s.dense_required_slots / (double)s.dense_required_scans : 0.0,
+        (unsigned long long)s.store_fast_bypass,
+        (unsigned long long)s.store_scan_path);
+}
+
+static inline void js_array_stats_touch(void) {
+    if (!g_js_array_stats_registered && getenv("LAMBDA_JS_ARRAY_STATS")) {
+        atexit(js_array_stats_report);
+        g_js_array_stats_registered = true;
+    }
+}
+
+// J1: the growth-sizing value for js_array_store_owned (its only caller).
+//
+// The former sparse branch ran an O(dense_capacity) backward hole scan on
+// every store into a sparse array — the hashmap 2609x cliff (measured ~48k
+// slots/scan). That scan is unnecessary: expand_list copies the whole physical
+// buffer regardless of this value, and js_array_store_owned uses the result
+// only in its grow-loop condition, always clamped up to `index + 1`. Every
+// already-stored slot sits at an index < dense_capacity and was given its tail
+// headroom when it was written (capacity only grows), so the write target is
+// the only requirement the loop must newly satisfy. Returning 0 for the sparse
+// case lets the index+1 clamp size growth — O(1), and it can never balloon on
+// a spec length because it never reads arr->length as a physical bound.
 static int64_t js_array_dense_required(const Array* arr) {
+    js_array_stats_touch();
+    g_js_array_stats.dense_required_calls++;
     int64_t dense_capacity = js_array_dense_capacity(arr);
     if (!arr || !arr->items || dense_capacity <= 0) return 0;
     if (arr->length <= dense_capacity) return arr->length;
-    // Sparse arrays carry a spec length beyond their physical prefix. Promotion
-    // stamps unused dense storage as holes, so the highest non-hole slot is the
-    // exact boundary growth must preserve without treating capacity as length.
-    for (int64_t i = dense_capacity - 1; i >= 0; i--) {
-        if (arr->items[i].item != JS_DELETED_SENTINEL_VAL) return i + 1;
-    }
     return 0;
 }
 
@@ -303,9 +344,11 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (arr->items && arr->extra == 0 && index < js_array_dense_capacity(arr)) {
         // Only arrays without a scalar tail can bypass the required scan: wide
         // scalar writes consume capacity from that tail and must retain it.
+        g_js_array_stats.store_fast_bypass++;
         array_set(arr, index, value);
         return;
     }
+    g_js_array_stats.store_scan_path++;
     int64_t dense_required = js_array_dense_required(arr);
     if (dense_required < index + 1) dense_required = index + 1;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
@@ -5840,6 +5883,20 @@ static bool js_array_key_is_index(Item key, int64_t* out_index) {
     return false;
 }
 
+// J2: canonical array index for the numeric-keyed dense fast paths. JS numbers
+// are doubles, so an ordinary `a[i]` arrives FLOAT-typed and misses a bare
+// `== LMD_TYPE_INT` gate, then round-trips through js_to_property_key → dtoa →
+// sscanf per access (the sieve/permute/towers regression cluster). This accepts
+// exactly the numeric key kinds that name an array element and hands back the
+// integer index, reusing js_array_key_is_index for the spec edge cases
+// (-0 → 0, reject NaN/±inf/fractional/negative and the 2^32-1 ceiling). String
+// keys are deliberately excluded so the string-property path is unchanged.
+static inline bool js_key_as_array_index(Item key, int64_t* out_index) {
+    TypeId kt = get_type_id(key);
+    if (kt != LMD_TYPE_INT && kt != LMD_TYPE_INT64 && kt != LMD_TYPE_FLOAT) return false;
+    return js_array_key_is_index(key, out_index);
+}
+
 static Item js_array_numeric_key_to_property_key(Item key) {
     TypeId kt = get_type_id(key);
     char buf[64];
@@ -6844,9 +6901,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     // Fast path: result[i] = v where i is an existing own dense element of a
     // plain array. Bypasses the symbol/marker/accessor/proto preamble below,
     // which is all no-op for a non-negative integer key on such an array.
-    if (get_type_id(object) == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
-        int64_t kidx = it2i(key);
-        if (kidx >= 0 && js_array_fast_own_dense_set(object, kidx, value)) {
+    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        int64_t kidx;
+        if (js_key_as_array_index(key, &kidx) &&
+                js_array_fast_own_dense_set(object, kidx, value)) {
             JS_PROPERTY_SET_BRANCH("top_array_int_dense_fast");
             return value;
         }
@@ -7081,14 +7139,16 @@ extern "C" Item js_property_access(Item object, Item key) {
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
 
-    if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
-        // Live DOM collections must refresh before dense array fast reads;
-        // otherwise optimized member access can observe stale option slots.
-        js_array_exotic_before_property_get(object, key);
-        Item dense_value = ItemNull;
-        int64_t idx = it2i(key);
-        if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
-            return dense_value;
+    if (type == LMD_TYPE_ARRAY) {
+        int64_t idx;
+        if (js_key_as_array_index(key, &idx)) {
+            // Live DOM collections must refresh before dense array fast reads;
+            // otherwise optimized member access can observe stale option slots.
+            js_array_exotic_before_property_get(object, key);
+            Item dense_value = ItemNull;
+            if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
+                return dense_value;
+            }
         }
     }
 

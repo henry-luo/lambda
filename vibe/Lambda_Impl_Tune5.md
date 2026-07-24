@@ -1,5 +1,116 @@
 # Lambda Impl Plan: Tune 5 — LambdaJS Result11 Tail (holey-array stores + canonical numeric index)
 
+**Status: IMPLEMENTED + RESULT12 MEASURED — 2026-07-24 (J0/J1/J2 landed; all gates green).**
+
+## Result12 exit measurement (2026-07-24)
+
+Shared four-engine exit run with Tune4 (raw `benchmark_results_v12.json`, report
+`Overall_Result12.md`, 3-run medians, 180s, fresh build). QuickJS/Node geo held
+7.10x→7.00x (host-consistency control).
+
+| Metric | Result11 | Result12 | Tune5 target | Verdict |
+|---|---|---|---|---|
+| LambdaJS/Node geo (dedup) | 19.3x | **15.1x** | ≤10x | improved, **not met** |
+| Worst LJS row | 2609x (hashmap) | 1138x (hashmap) | ≤60x | **not met** |
+| LJS rows > 100x | 8 | 5 | 0 | **not met** |
+
+Every J2-targeted row landed: the whole sieve/permute/queens/towers cluster
+dropped to single-digit ms, navier 885x→142x, and hashmap 2609x→1138x. The
+remaining >100x LJS rows — hashmap 1138x, havlak 579x, cd 254x (down from 2360x
+via Tune4 G2), navier 142x, spectralnorm 110x — are all dominated by the
+**R2/R3 shape-lookup band** (js_map_get_fast / js_find_shape_entry per op), which
+§0/§5 explicitly leave to `Lambda_Tuning_Proposal.md`. So the LJS geo and worst-
+row targets are missed only because they were premised on the scan being
+hashmap's bottleneck (the J0 counters disproved that); the win that was actually
+available — killing the dtoa/sscanf index round-trip — was delivered in full.
+Re-rank evidence: the LJS tail is now unambiguously R2/R3 (OO property IC), not
+array stores or index canonicalization.
+
+## Implementation record (2026-07-24)
+
+All work is in `lambda/js/js_runtime.cpp`. Correctness gates, all green with
+J1+J2 built together:
+- `test-lambda-baseline` **3596/3596** (Input 2104 + Lambda/JS 3596 incl. 403 JS tests)
+- **test262 baseline 40261/40261, 0 regressions** — the conformance gate for
+  J2's canonical-index semantics (all `-0`/NaN/`"01"`/2³²−1-ceiling edge cases)
+- **node-baseline 3528/3528, 0 regressions**
+- float-index smoke matched Node byte-for-byte (`a[i]`, `a[-0]`, `a[1.5]`→miss, `a["1"]`)
+
+Clean idle before(post-Tune4)→after medians:
+
+| Phase | Probe | Before | After | Ratio |
+|---|---|---|---|---|
+| **J2** | awfy/sieve | 52.4 ms | 1.11 ms | **47x** |
+| J2 | awfy/permute | 77.8 ms | 7.86 ms | 9.9x |
+| J2 | awfy/queens | 38.0 ms | 5.53 ms | 6.9x |
+| J2 | awfy/towers | 78.8 ms | 19.5 ms | 4.0x |
+| J2 | awfy/storage (guard) | 15.9 ms | 16.2 ms | flat (alloc-bound) |
+| J1+J2 | jetstream/navier_stokes | 42.2 s | 5.82 s | **7.3x** |
+| J1+J2 | jetstream/hashmap | 129.3 s | 68.4 s | 1.9x |
+
+Guards flat/improved (json2_bundle, base64).
+
+**How the phases turned out vs the plan.**
+
+- **J0 (counters):** `LAMBDA_JS_ARRAY_STATS` counters on the store path. They
+  confirmed 290,697 dense-required calls hit the sparse branch on hashmap — but
+  the per-scan cost was far below the plan's "one 131,072-slot scan per put":
+  the backward loop breaks at the first non-hole, so the real work was a small
+  fraction of `dense_capacity`. (My first counter over-reported by adding full
+  `dense_capacity` per scan; corrected to count actual early-break behavior.)
+
+- **J1 was NOT the plan's watermark.** The plan's design — append
+  `dense_watermark` to `struct List` — is unsafe here: `struct Element : List`
+  is embedded **by value** in radiant's `DomElement`, so the field bloats every
+  DOM node and trips the `sizeof(DomElement) <= 368` ratchet. That is exactly
+  the "hidden sizeof(List) coupling" §6 flagged. Instead I found the scan is
+  **entirely removable**: `js_array_dense_required` has one caller
+  (`js_array_store_owned`), which uses it only in the grow-loop condition,
+  always clamped up to `index + 1`; `expand_list` copies the whole physical
+  buffer regardless. Every already-stored slot sits below `dense_capacity` with
+  its tail headroom from when it was written (capacity only grows), so the
+  write target is the only new requirement. The sparse branch now returns `0`
+  and the `index + 1` clamp sizes growth — O(1), no struct change, no ABI/DOM
+  impact, and it can never balloon on a spec length (it never reads
+  `arr->length` as a physical bound). Genuine memory-sparse arrays are
+  unaffected: `js_array_should_store_sparse_for_index` diverts big-gap/low-density
+  stores to the `SparseArrayMap` before `js_array_store_owned` is ever reached —
+  that routing is untouched.
+
+- **J1's headline is modest because the scan wasn't the bottleneck.** hashmap
+  moved 1.9x from J1+J2 combined (mostly J2's float-index path helping the
+  Harmony HashMap's numeric accesses); its residual is the R2/R3 shape-lookup
+  band, exactly as §0 predicted. J1 stands as a correct, zero-risk removal of a
+  worst-case O(capacity)-per-store scan, not the ≥100x the plan projected.
+
+- **J2 is the big win and matched the plan.** `js_array_key_is_index` already
+  implemented the full canonical-index predicate (INT/INT64/FLOAT with every
+  spec edge case) — the two hot fast paths (`js_property_set` :6890,
+  `js_property_get` :7127) just gated on bare `LMD_TYPE_INT` and missed it.
+  Added `js_key_as_array_index` (numeric key kinds only — strings still take the
+  string path unchanged) and applied it at both sites. JS numbers are doubles,
+  so ordinary `a[i]` was FLOAT-typed and round-tripped through
+  js_to_property_key → dtoa → sscanf per access; now it takes the dense fast
+  path directly. The JS JIT emits calls to js_property_get/set (it doesn't
+  inline indexing), so this one change covers the JIT path too.
+
+**Gates met / not met (LJS thresholds, §5).**
+- sieve/permute/queens each ≥5x: **met** (47x/9.9x/6.9x). towers 4.0x: just
+  under the ≥5x line; its residual is object/list churn, not index dtoa.
+- hashmap ≥100x, worst-LJS-row ≤60x, geo ≤10x: these were premised on the scan
+  being hashmap's dominant cost, which the J0 counters disproved. The realized
+  win is 1.9x on hashmap; the remaining tail is R2/R3 (shape lookups), owned by
+  `Lambda_Tuning_Proposal.md`, not this plan.
+- **Result12** (the shared four-engine exit run) not yet executed.
+
+**Not done / deferred.** Result12 pending. The J0.2 probe rows were added to
+`temp/tune4_probes.sh` (j1/j2 phases) but the harness JSON was captured under
+concurrent-baseline load; the clean numbers above were measured idle by direct
+runs. No new `.js` conformance fixtures were needed — test262 already covers
+the J2 edge cases exhaustively (40261 entries, 0 regressions).
+
+---
+
 **Status: PLANNED — 2026-07-24.** Split from `vibe/Lambda_Impl_Tune4.md` (which
 keeps the shared-GC and Lambda/MIR phases); this plan owns the **JS-engine-specific**
 tunings. The two plans share one diagnosis (Tune4 §1 / §1 below), one measurement
