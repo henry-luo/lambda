@@ -17,8 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON_DIR = ROOT / "lambda" / "py"
 MAIN = ROOT / "lambda" / "main.cpp"
 CORE_JIT_CATALOG = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
-CORE_IMPORTER = ROOT / "lambda" / "build_ast.cpp"
-CORE_TRANSPILE_HEADER = ROOT / "lambda" / "transpiler.hpp"
+# Core sources moved under runtime; keep the architecture gate anchored to the
+# live files so a source regrouping cannot silently disable boundary checks.
+CORE_IMPORTER = ROOT / "lambda" / "runtime" / "build_ast.cpp"
+CORE_TRANSPILE_HEADER = ROOT / "lambda" / "runtime" / "transpiler.hpp"
 CORE_AST = ROOT / "lambda" / "runtime" / "ast-core.hpp"
 BUILD_CONFIG = ROOT / "build_lambda_config.json"
 PYTHON_JUBE_ADAPTER = PYTHON_DIR / "python_jube_module.cpp"
