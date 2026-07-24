@@ -127,6 +127,16 @@ is not marked complete merely because its happy-path implementation exists.
   closure/generator checks, isolated dispatch, loader-negative matrix, and
   architecture gates pass on that matching pair. Calls, comparisons, memory
   operations, and shared frame/root finalization remain H7C work.
+- The `h7e17` pair adds semantic integer compare-and-branch forms to the same
+  generic instruction descriptor. Python's optimized numeric type guard and
+  oversized-left-shift fallback now retain only their lowering decision while
+  the host builds `BNE`/`BGE` MIR. A stale generated Python parser caused an
+  ABI-15/ABI-14 Tree-sitter compile mismatch during the rebuild; it was
+  repaired only through `make generate-tree-sitter-python-parser`. The matching
+  release pair passes the focused integer-overflow script, the full 43-test
+  Python corpus, dispatch, loader-negative, and architecture self-checker
+  gates. Arithmetic/comparison instruction construction, calls, memory
+  operations, and frame/root finalization remain H7C work.
 - The current `make test-lambda-baseline` run passes all 2,104 input-baseline
   cases and all 1,492 Lambda-runner cases with zero failures. This is current
   shared-host evidence; Test262, platform, and performance acceptance remain
