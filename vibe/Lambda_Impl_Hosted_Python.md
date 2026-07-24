@@ -1,8 +1,11 @@
 # Hosted Python — Detailed Implementation Plan
 
-> **Status:** draft implementation plan
+> **Status:** active implementation; product split landed, compiler boundary and
+> release acceptance incomplete
 >
 > **Date:** 2026-07-20
+>
+> **Last verified against the live tree:** 2026-07-24
 >
 > **First hosted-language adopter:** Python (`lang-python`)
 >
@@ -12,10 +15,69 @@
 > `vibe/Lambda_Desing_Native_Module.md`, and
 > `doc/Lambda_Jube_Runtime.md`
 
-## Implementation progress snapshot — 2026-07-21
+## Implementation progress snapshot — 2026-07-24
 
-This is an implementation checkpoint, not a completion claim. The runnable
-product path is now a unified host plus an external Python module:
+**Overall verdict: not complete.** The runnable product topology and the main
+runtime membranes are implemented, but the proposal's final public compiler
+boundary, negative/conformance coverage, platform matrix, and release evidence
+are not. In particular, a passing architecture check currently means that
+already-retired dependencies did not return; it does not mean that Python
+depends only on public Jube headers and entry points.
+
+### Stage status
+
+| Stage | Live status | Main evidence or remaining gate |
+|---|---|---|
+| H0 | Partial | Deterministic coupling inventory and split Python GC target exist. ADR closure, dated evidence archive, and release baselines/performance evidence are missing. |
+| H1 | Substantially implemented | Architecture checker, strict script/golden inventory, configurable host, `requires_lang_python`, and absent-module package smoke exist. Checker self-tests and a fresh full baseline are missing. |
+| H2 | Partial | Size/version/capability/build-ID negotiation and partitioned service tables exist. The legacy JS-backed value table remains, and the requested ABI negative/conformance suite is not present. |
+| H3 | Operational final path; checkpoint coverage incomplete | Generic alias, `run --lang`, and extension dispatch exist; `main.cpp` has no Python branch. The temporary static Python checkpoint is already gone, but its full parity/registry test matrix is not archived. |
+| H4 | Functional path implemented; acceptance incomplete | The 161 `py_*` runtime imports are module-owned and registered through `JubeRuntimeCatalogAPI`; core ownership is removed. Collision/signature/effect/caching conformance tests remain. |
+| H5 | Functional boundary mostly implemented | Python has no `js_*` source or dynamic import and uses neutral data/root services. The complete per-operation ownership contract and the full cross-boundary stress matrix remain. |
+| H6 | Functional core mostly implemented | Host activation/recovery/JIT lifecycle and common module-graph services are in use. The language session is still only a marker, the Python-owned session-state design is incomplete, and the full failure/repetition matrix is missing. |
+| H7 | **Incomplete — primary architecture blocker** | H7D lifecycle finalization is implemented. H7A/H7B/H7C are not: Python still includes host AST/transpiler/data/MIR headers and constructs raw MIR operations. |
+| H8 | Partial | External `lang-python` target, manifest discovery, build-ID/integrity checks, rollback, and POSIX/macOS loading exist. The module still imports internal host/library symbols, and Linux/Windows, static/dynamic parity, and negative-loader matrices are incomplete. |
+| H9 | Substantially implemented | One host target, compatibility symlink, standard/full package split, identical-host check, and absent/full smoke targets exist. Legacy `requires_jube_exe` metadata remains for Ruby/Bash, and current release performance evidence is missing. |
+| H10 | Incomplete | Static Python registration is removed and runtime docs were started. Final allowlist reduction, ADR/design status, audit, platform matrix, sanitizer/stress archive, and performance closeout remain. |
+
+The task checkboxes below intentionally remain acceptance checkboxes. A stage
+is not marked complete merely because its happy-path implementation exists.
+
+### Live verification notes
+
+- The current corpus contains **42** `test_py_*.py` scripts and 42 matching
+  goldens, not the 41 pairs used by the original plan. The GTest runner
+  therefore contains 43 tests including the inventory check.
+- `make check-hosted-python-architecture` initially failed because the checker
+  still referenced pre-regrouping paths such as `lambda/build_ast.cpp`. The
+  checker was repaired to follow `lambda/runtime/...` and now passes, including
+  `--require-module-binary`.
+- The regenerated coupling inventory reports 3,330 remaining entries:
+  80 external includes, 107 host-layout references, 2,979 raw MIR references,
+  161 runtime imports, and 3 generated-build dependencies. These are review
+  records rather than 3,330 unique defects, but they make H7's incompleteness
+  unambiguous.
+- A clean current debug host and external macOS module build succeeds.
+  `lambda-jube.exe` is a symlink to `lambda.exe`; the host has no linked Python
+  library and no exported `py_*`, `transpile_py_*`, or `load_py_module`
+  symbols.
+- Current debug execution is **not green**: the rebuilt ASan host did not reach
+  `--help` within 15 seconds, the 43-test Python runner did not begin reporting
+  its parameterized cases, and a standalone `test_py_basic.py` run timed out
+  after 60 seconds with no output. The older staged release host still reaches
+  `--help`, but its full-bundle directory currently has no module library, so
+  it cannot substitute for a current source/module verification. This blocks
+  a fresh H1/H3 functional acceptance claim until triaged.
+- The module-boundary checker rejects the specifically retired host and
+  JavaScript imports, but `nm -u` still shows non-Jube internal dependencies
+  such as Lambda `Item` globals, heap/name helpers, arrays, arithmetic
+  builtins, filesystem helpers, MIR, arenas, and name pools. Therefore H8.8
+  and the H7 exit gate are not satisfied.
+- The 2026-07-21 Lambda/Test262/package results below remain historical
+  checkpoint evidence. They were not rerun as current release acceptance in
+  this status audit.
+
+The runnable product path is now a unified host plus an external Python module:
 
 - `lambda.exe` discovers and loads `modules/lang-python/lang-python.dylib`;
   there is no separately compiled `lambda-jube.exe` runtime. The compatibility
@@ -25,13 +87,13 @@ product path is now a unified host plus an external Python module:
   negotiated Jube services. Python no longer imports the retired raw host
   lifecycle, root-frame, `_lambda_rt`, function-construction, forward-declare,
   or register-name lookup symbols.
-- The standard and full-Jube packages contain bit-identical hosts. The latest
-  `make verify-jube-package` run reported SHA-256
+- The standard and full-Jube packages contain bit-identical hosts. The
+  2026-07-21 `make verify-jube-package` run reported SHA-256
   `b55452fc076f94fafe6460fb1997137a4e16c5f9a26810f79057f7d0564b731e`
   for both `release-standard/lambda` and `release-jube/lambda` and completed
   the standard-absent/full-Python smoke checks.
-- Current focused evidence is green: the 42-test Python suite, closure and
-  generator forced-GC gates, and
+- The 2026-07-21 focused evidence was green: the then-42-test Python suite,
+  closure and generator forced-GC gates, and
   `utils/check_hosted_python_architecture.py --require-module-binary`. The
   rebuilt `make test-jube-module-integrity` tamper gate also completed
   successfully.
