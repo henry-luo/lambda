@@ -45,6 +45,17 @@ function rootedLocal() {
     return value.answer;
 }
 
+function argumentRootValue(value) {
+    const payload = {value: value};
+    gc();
+    return payload;
+}
+
+function sumRootedArguments(first, second, third) {
+    gc();
+    return first.value + second.value + third.value;
+}
+
 function makeTinyCell() {
     let value = Number.MIN_VALUE;
     return {
@@ -92,6 +103,10 @@ console.log(retUndefined() === undefined && retNull() === null &&
 console.log(retNaN() !== retNaN() && retPositiveInfinity() === Infinity &&
     retNegativeInfinity() === -Infinity && retNegativeTiny() === -Number.MIN_VALUE);
 console.log(rootedLocal() === 42);
+// The first two results are live only in the caller's argument-root range
+// while later argument evaluation and the callee itself force collections.
+console.log(sumRootedArguments(argumentRootValue(10), argumentRootValue(20),
+    argumentRootValue(12)) === 42);
 gc();
 console.log(cell.read() === Number.MIN_VALUE);
 console.log(cell.write(-Number.MIN_VALUE) === -Number.MIN_VALUE);

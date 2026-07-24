@@ -28,6 +28,129 @@ struct JsExceptionState {
     char msg_buf[1024] = {};
 };
 
+typedef void (*JsRootRangeResetFn)(void* owner);
+
+// A fixed Item range whose address outlives every heap epoch.  Registration is
+// deliberately owned by the range so clients cannot publish a live Item before
+// the collector knows where that Item resides.
+struct JsRootRange {
+    Item* slots = NULL;
+    int slot_count = 0;
+    uint64_t roots_epoch = 0;
+    const char* name = NULL;
+    void* reset_owner = NULL;
+    JsRootRangeResetFn reset = NULL;
+    bool reset_registered = false;
+};
+
+// Use this only for actual single-Item LIFO storage.  Clients with replacement,
+// replay, or multi-field records retain those semantic operations themselves.
+struct JsItemStack {
+    JsRootRange roots = {};
+    int depth = 0;
+};
+
+bool js_root_range_ensure_registered(JsRootRange* range);
+void js_root_range_clear(JsRootRange* range);
+bool js_root_range_register_reset(JsRootRange* range, void* owner,
+                                  JsRootRangeResetFn reset);
+void js_root_range_reset_all(void);
+bool js_item_stack_push(JsItemStack* stack, Item value);
+Item js_item_stack_top(const JsItemStack* stack);
+void js_item_stack_pop(JsItemStack* stack);
+void js_item_stack_clear(JsItemStack* stack);
+void js_item_stack_shrink(JsItemStack* stack, int depth);
+
+#define JS_EVAL_SOURCE_STACK_MAX 16
+
+// Source records span a runtime eval or a VM-originated function call. Their
+// Item fields are separate exact ranges; POD metadata is never scanned as an
+// Item merely because it is adjacent to source roots.
+struct JsEvalSourceState {
+    Item filename_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+    Item code_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+    int64_t line_offset_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+    int64_t column_offset_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+    bool compact_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+    int depth = 0;
+    JsRootRange filename_roots = {};
+    JsRootRange code_roots = {};
+};
+
+#define JS_EVAL_ENV_BIND_MAX 512
+#define JS_EVAL_ENV_FRAME_MAX 32
+#define JS_EVAL_LOCAL_BIND_MAX 512
+#define JS_EVAL_LOCAL_FRAME_MAX 64
+#define JS_EVAL_LEXICAL_BIND_MAX 512
+#define JS_EVAL_IMMUTABLE_BIND_MAX 512
+#define JS_EVAL_PRIVATE_BIND_MAX 256
+
+// A direct-eval bridge exists for one generated eval call.  Item columns are
+// structure-of-arrays so each exact GC range excludes the bool metadata.
+struct JsEvalBridgeState {
+    Item env_keys[JS_EVAL_ENV_BIND_MAX] = {};
+    Item env_old_values[JS_EVAL_ENV_BIND_MAX] = {};
+    bool env_had_own[JS_EVAL_ENV_BIND_MAX] = {};
+    bool env_from_journal[JS_EVAL_ENV_BIND_MAX] = {};
+    int env_count = 0;
+    int env_frame_marks[JS_EVAL_ENV_FRAME_MAX] = {};
+    int env_frame_depth = 0;
+
+    Item global_lexical_keys[JS_EVAL_ENV_BIND_MAX] = {};
+    Item global_lexical_old_values[JS_EVAL_ENV_BIND_MAX] = {};
+    bool global_lexical_had_own[JS_EVAL_ENV_BIND_MAX] = {};
+    int global_lexical_count = 0;
+    int global_lexical_frame_marks[JS_EVAL_ENV_FRAME_MAX] = {};
+    int global_lexical_frame_depth = 0;
+
+    Item private_unscoped_keys[JS_EVAL_PRIVATE_BIND_MAX] = {};
+    Item private_scoped_keys[JS_EVAL_PRIVATE_BIND_MAX] = {};
+    int private_count = 0;
+    int private_frame_marks[JS_EVAL_LOCAL_FRAME_MAX] = {};
+    int private_frame_depth = 0;
+
+    JsRootRange env_key_roots = {};
+    JsRootRange env_old_value_roots = {};
+    JsRootRange global_lexical_key_roots = {};
+    JsRootRange global_lexical_old_value_roots = {};
+    JsRootRange private_unscoped_key_roots = {};
+    JsRootRange private_scoped_key_roots = {};
+};
+
+typedef struct JsEvalLocalFrameMarks {
+    int local_mark;
+    int lexical_mark;
+    int immutable_mark;
+} JsEvalLocalFrameMarks;
+
+// Caller-local records survive multiple direct eval calls in one generated
+// function. They deliberately do not share bridge or source depths.
+struct JsEvalLocalState {
+    Item keys[JS_EVAL_LOCAL_BIND_MAX] = {};
+    Item values[JS_EVAL_LOCAL_BIND_MAX] = {};
+    int count = 0;
+    JsEvalLocalFrameMarks frame_marks[JS_EVAL_LOCAL_FRAME_MAX] = {};
+    int frame_depth = 0;
+    Item lexical_keys[JS_EVAL_LEXICAL_BIND_MAX] = {};
+    int lexical_count = 0;
+    Item immutable_keys[JS_EVAL_IMMUTABLE_BIND_MAX] = {};
+    int immutable_count = 0;
+
+    JsRootRange key_roots = {};
+    JsRootRange value_roots = {};
+    JsRootRange lexical_key_roots = {};
+    JsRootRange immutable_key_roots = {};
+};
+
+struct JsEvalState {
+    JsEvalSourceState source = {};
+    JsEvalBridgeState bridge = {};
+    JsEvalLocalState local = {};
+};
+
+void js_eval_state_reset(JsEvalState* state);
+void js_eval_state_assert_clear(const JsEvalState* state, const char* reset_name);
+
 struct JsIntrinsicState {
     // Prototype cache slots are precise GC roots so moving collection updates
     // every cached Item; name Items are active-name-pool owned.
@@ -49,6 +172,7 @@ struct JsRuntimeState {
     bool strict_mode = false;
     bool skip_accessor_dispatch = false;
     JsIntrinsicState intrinsics = {};
+    JsEvalState eval = {};
 
     Item module_vars[JS_MAX_MODULE_VARS] = {};
     Item* active_module_vars = module_vars;
@@ -63,8 +187,8 @@ struct JsRuntimeState {
     Item pending_new_target = {0};
     bool has_pending_new_target = false;
     bool super_this_bound_stack[128] = {};
-    Item super_this_value_stack[128] = {};
-    int super_this_bound_depth = 0;
+    Item super_this_value_slots[128] = {};
+    JsItemStack super_this_values = {};
     Item* pending_call_args = NULL;
     int pending_call_argc = 0;
     const char* pending_call_source = NULL;
@@ -122,8 +246,8 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_pending_new_target (js_runtime_state.pending_new_target)
 #define js_has_pending_new_target (js_runtime_state.has_pending_new_target)
 #define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
-#define js_super_this_value_stack (js_runtime_state.super_this_value_stack)
-#define js_super_this_bound_depth (js_runtime_state.super_this_bound_depth)
+#define js_super_this_value_stack (js_runtime_state.super_this_values.roots.slots)
+#define js_super_this_bound_depth (js_runtime_state.super_this_values.depth)
 #define js_pending_call_args (js_runtime_state.pending_call_args)
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
 #define js_pending_call_source (js_runtime_state.pending_call_source)

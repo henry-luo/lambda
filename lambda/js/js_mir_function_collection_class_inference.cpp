@@ -3144,14 +3144,9 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
-    // Args live on the transient call-argument stack (js_args_push), which is
-    // registered with the GC once and popped after the call returns. The
-    // enclosing call/new scope emits its mark lazily at the first push, so
-    // direct and zero-argument calls carry no argument-stack protocol. This
-    // avoids the per-call permanent GC root range
-    // that made js_alloc_env-based calls O(n^2) in call-heavy loops. We use a
-    // runtime stack (not MIR_ALLOCA) to avoid the MIR inlining ALLOCA bug on
-    // ARM64 where top-alloca consolidation assigns wrong offsets.
+    // Args occupy canonical side-root slots and are popped by the enclosing
+    // call/new watermark. This avoids permanent root-range registration while
+    // keeping partially evaluated nested arguments visible to precise GC.
     if (!mt->arg_stack_scope) {
         // Every transient buffer must be bounded by its owning call/new
         // expression; an unscoped push would leak stack roots across calls.
@@ -3163,6 +3158,17 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
     }
     MIR_reg_t args_ptr = jm_call_1(mt, "js_args_push", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    MIR_label_t args_ready = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, args_ready),
+        MIR_new_reg_op(mt->ctx, args_ptr)));
+    // js_args_push has already recorded the native allocation failure. Raise
+    // a JS RangeError and route it before any store can dereference NULL.
+    jm_call_1(mt, "js_throw_range_error", MIR_T_I64,
+        MIR_T_P, MIR_new_int_op(mt->ctx,
+            (int64_t)(uintptr_t)"Maximum call argument stack size exceeded"));
+    jm_emit_exc_propagate_check(mt);
+    jm_emit_label(mt, args_ready);
 
     // Evaluate and store each argument
     JsAstNode* arg = first_arg;

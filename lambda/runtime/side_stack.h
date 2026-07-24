@@ -48,6 +48,9 @@ void lambda_side_stack_restore(Context* context, LambdaSideStackSnapshot snapsho
 LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(Context* context);
 void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint);
 void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint);
+// Reserve canonical Item roots above the current watermark. The caller owns
+// restoration through a saved side-stack snapshot or an enclosing frame.
+uint64_t* lambda_side_root_alloc_n(Context* context, size_t slot_count);
 uint64_t* lambda_side_number_alloc(Context* context);
 void lambda_side_stack_decommit_unused(Context* context);
 

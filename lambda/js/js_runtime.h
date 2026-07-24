@@ -228,12 +228,10 @@ void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
 void js_env_rehome_scalars(Item* env);
-// transient JIT call-argument stack (see js_runtime_function.cpp)
+// transient JIT call-argument roots (see js_runtime_function.cpp)
 Item* js_args_push(int count);
 int64_t js_args_save(void);
 void js_args_restore(int64_t mark);
-void js_args_stack_reset(void);
-void js_args_stack_cleanup(void);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 enum {
@@ -834,7 +832,7 @@ void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_
 Item js_get_global_builtin_fn(Item name, Item param_count);
 void js_eval_env_push_frame(void);
 void js_eval_global_lexical_push_frame(void);
-void js_eval_local_push_frame(void);
+int64_t js_eval_local_push_frame(void);
 void js_eval_local_pop_frame(void);
 void js_eval_private_push_frame(void);
 void js_eval_private_pop_frame(void);

@@ -1808,7 +1808,16 @@ void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt) {
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, done_label)));
     jm_emit_label(mt, push_label);
-    jm_call_void_0(mt, "js_eval_local_push_frame");
+    MIR_reg_t pushed = jm_call_0(mt, "js_eval_local_push_frame", MIR_T_I64);
+    MIR_label_t pushed_label = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, pushed_label), MIR_new_reg_op(mt->ctx, pushed)));
+    // A failed local-frame push must not set the active flag: a later epilogue
+    // pop would otherwise discard an enclosing direct-eval caller's journal.
+    jm_call_1(mt, "js_throw_range_error", MIR_T_I64, MIR_T_P,
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"Maximum eval local frame depth exceeded"));
+    jm_emit_exc_propagate_check(mt);
+    jm_emit_label(mt, pushed_label);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
         MIR_new_int_op(mt->ctx, 1)));

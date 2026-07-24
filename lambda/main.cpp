@@ -437,7 +437,6 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     g_lambda_main_pre_memtrack_cleanup_done = true;
     // JS helper globals outlive Runtime teardown, so release them before
     // emitting live-allocation telemetry or entering memtrack shutdown.
-    js_args_stack_cleanup();
     js_array_runtime_items_cleanup_all();
     // Tagged-template cache entries are tracked allocations; freeing them from
     // a late atexit hook runs after memtrack shutdown and becomes a raw bad free.

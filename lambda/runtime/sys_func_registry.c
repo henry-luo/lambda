@@ -1129,7 +1129,7 @@ extern int64_t js_eval_env_is_active(void);
 extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
 extern void js_eval_global_lexical_pop_frame(void);
-extern void js_eval_local_push_frame(void);
+extern int64_t js_eval_local_push_frame(void);
 extern void js_eval_local_pop_frame(void);
 extern void js_eval_private_push_frame(void);
 extern void js_eval_private_pop_frame(void);
@@ -1837,8 +1837,9 @@ JitImport jit_runtime_imports[] = {
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
     {"js_args_push", FPTR(js_args_push)},
-    // Argument-watermark operations only read/write the registered argument
-    // range and call libc memset while popping; they cannot enter the GC.
+    {"js_throw_range_error", FPTR(js_throw_range_error)},
+    // Argument-watermark operations only move the precise side-root top and
+    // cannot enter the collector.
     {"js_args_save", FPTR(js_args_save),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
     {"js_args_restore", FPTR(js_args_restore),
@@ -1953,15 +1954,19 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
     {"js_debug_assert_exception_clear", FPTR(js_debug_assert_exception_clear),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+     // Debug failures log before aborting; logging is not a NO_GC operation.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
     {"js_debug_assert_exception_set", FPTR(js_debug_assert_exception_set),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+     // Keep the debug assertion on the conservative path for the same reason.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
     {"js_clear_exception", FPTR(js_clear_exception),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+     // Re-materializing a wide scalar can grow the side-number stack, so this
+     // import must publish a JIT safepoint before the returned Item is used.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       // The returned Item comes from the exception slots, so catch bindings
       // must treat wide scalars like Number.MIN_VALUE as already stable.
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
@@ -2804,7 +2809,9 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_async_frame_set_word", FPTR(lambda_async_frame_set_word),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     // Its debug ownership assertion can log before aborting, so generated
+     // code must publish roots before calling it in every build mode.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
@@ -3099,13 +3106,12 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
         "owned_item_slot_store",
-        "lambda_async_frame_get_word", "lambda_async_frame_set_word",
+        "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
-        // Exception-flag helpers stay NO_GC by design, so the allowlist must
-        // advance with metadata changes or debug JIT startup aborts.
-        "js_check_exception", "js_debug_assert_exception_clear",
-        "js_debug_assert_exception_set", "js_clear_exception",
+        // Only the flag read is an audited NO_GC helper. Debug assertions can
+        // log on failure and exception extraction can allocate a number home.
+        "js_check_exception",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
         "js_mark_strict_func", "js_finalize_function", "js_set_module_var",

@@ -171,6 +171,8 @@ After this, generated code contains only names, indices, and values. This refact
 
 *The end-state already recommended by `Lambda_Desing_Native_Module.md` §7.4; precedents: V8 code cache, tree-sitter's `~/.tree-sitter` compiled-grammar cache.*
 
+> **Detailed design (2026-07-24):** `vibe/Lambda_Design_MIR_Cache_L3.md` — decides de-pointer vs image-patching (opt 1 wins, L3-1), the regenerate-front-end load model (no const/type sidecar in v1, L3-2), the relocation-journal kinds/hooks, the differential write verifier, and cache key/location (resolves OQ3/OQ5). The sketch below is superseded at the detail level.
+
 **Shape:** after `MIR_gen`, serialize the module's generated machine code plus a **relocation journal**; loading = `mmap` + apply fixups + W^X flip + register with the runtime. No toolchain, no linker formats, microsecond-scale loads.
 
 **The relocation journal.** `MIR_gen` produces no relocation records, so we create them at the points where process-specific addresses enter the code:

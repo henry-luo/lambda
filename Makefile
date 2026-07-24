@@ -1039,6 +1039,13 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_with_stack_gc.js > temp/gc_rooting_js_with.txt
 	@diff -u test/js/regression_with_stack_gc.txt temp/gc_rooting_js_with.txt
+	@echo "Running LambdaJS eval state forced-GC gates..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/eval_basic.js > temp/gc_rooting_js_eval_basic.txt
+	@diff -u test/js/eval_basic.txt temp/gc_rooting_js_eval_basic.txt
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/eval_local_var_nested.js > temp/gc_rooting_js_eval_local.txt
+	@diff -u test/js/eval_local_var_nested.txt temp/gc_rooting_js_eval_local.txt
 	@echo "Running LambdaJS deterministic randomized forced-GC gate..."
 	@LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_random.txt

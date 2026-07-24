@@ -388,10 +388,10 @@ static const int JS_BOUND_TARGET_KEY_LEN = 16;
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
-extern "C" void js_eval_source_push(Item filename, Item source,
-                                    int64_t line_offset, int64_t column_offset);
-extern "C" void js_eval_source_push_compact(Item filename, Item source,
-                                            int64_t line_offset, int64_t column_offset);
+extern "C" int64_t js_eval_source_push(Item filename, Item source,
+                                        int64_t line_offset, int64_t column_offset);
+extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
+                                                int64_t line_offset, int64_t column_offset);
 extern "C" void js_eval_source_pop(void);
 
 static inline Item js_native_function_source_item() {
@@ -402,12 +402,12 @@ static bool js_function_has_vm_stack_source(JsFunction* fn) {
     return fn && fn->vm_stack_filename && fn->vm_stack_source;
 }
 
-static void js_function_push_vm_stack_source(JsFunction* fn) {
-    if (!js_function_has_vm_stack_source(fn)) return;
-    js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
-                                (Item){.item = s2it(fn->vm_stack_source)},
-                                fn->vm_stack_line_offset,
-                                fn->vm_stack_column_offset);
+static bool js_function_push_vm_stack_source(JsFunction* fn) {
+    if (!js_function_has_vm_stack_source(fn)) return false;
+    return js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
+                                       (Item){.item = s2it(fn->vm_stack_source)},
+                                       fn->vm_stack_line_offset,
+                                       fn->vm_stack_column_offset) != 0;
 }
 
 struct JsGlobalVarModuleBinding {
@@ -12907,9 +12907,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
 static void js_super_this_binding_push(Item initial_this) {
     if (js_super_this_bound_depth >= 128) return;
+    if (!js_item_stack_push(&js_runtime_state.super_this_values, initial_this)) {
+        log_error("js-super-this: failed to publish constructor binding root");
+        return;
+    }
     js_super_this_bound_stack[js_super_this_bound_depth] = false;
-    js_super_this_value_stack[js_super_this_bound_depth] = initial_this;
-    js_super_this_bound_depth++;
 }
 
 static Item js_throw_super_called_twice(void) {
@@ -12926,8 +12928,7 @@ static Item js_super_this_binding_finish(Item result) {
     bool initialized = js_super_this_bound_stack[idx];
     Item bound_this = js_super_this_value_stack[idx];
     js_super_this_bound_stack[idx] = false;
-    js_super_this_value_stack[idx] = (Item){0};
-    js_super_this_bound_depth--;
+    js_item_stack_pop(&js_runtime_state.super_this_values);
 
     if (js_check_exception()) return result;
     if (js_is_object_constructor_result(result)) return result;
@@ -13697,8 +13698,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
             js_current_private_home_class = method_home_class;
             js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
-        bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
-        if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
+        bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc, invoke_result_home);
         if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
@@ -13778,8 +13778,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
-    bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
-    if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
+    bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
@@ -15721,7 +15720,11 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
     rd->unicode = ce.has_unicode;
     rd->has_indices = ce.has_indices;
-    Item regex_obj = js_new_object();
+    RootFrame roots((Context*)context, 2);
+    // Creating each property can allocate; keep the half-built RegExp rooted
+    // until its own property map becomes the durable owner of the values.
+    Rooted<Item> regex_obj_root(roots, js_new_object());
+    Item regex_obj = regex_obj_root.get();
     heap_create_name(JS_REGEX_DATA_KEY);
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
     js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
@@ -15765,12 +15768,13 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     js_mark_non_configurable(regex_obj, li_key);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
-    Item regexp_proto = js_get_regexp_prototype();
+    Rooted<Item> regexp_proto_root(roots, js_get_regexp_prototype());
+    Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
         heap_create_name("__proto__", 9);
         js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
     }
-    return regex_obj;
+    return regex_obj_root.get();
 }
 
 static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
@@ -17177,7 +17181,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern_len = literal_len;
     }
     // create a Map object and set properties
-    Item regex_obj = js_new_object();
+    RootFrame regex_roots((Context*)context, 2);
+    // Every following property setup can allocate. Keep the object and its
+    // eventual prototype alive until the map owns the completed graph.
+    Rooted<Item> regex_obj_root(regex_roots, js_new_object());
+    Item regex_obj = regex_obj_root.get();
     // store regex data pointer as int in hidden property
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
@@ -17246,7 +17254,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     js_mark_non_configurable(regex_obj, li_key);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides work
-    Item regexp_proto = js_get_regexp_prototype();
+    Rooted<Item> regexp_proto_root(regex_roots, js_get_regexp_prototype());
+    Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(regex_obj, proto_key, regexp_proto);
@@ -17269,7 +17278,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                                              (int)strlen(flg_buf), dot_all, compile_info.has_indices,
                                              has_unicode, compile_info.unicode_sets};
     }
-    return regex_obj;
+    return regex_obj_root.get();
 }
 
 // Create a RegExp from a source literal string like "/pattern/flags".
@@ -30477,8 +30486,11 @@ static int js_promise_unhandled_queue_count = 0;
 static bool js_promise_unhandled_strict = false;
 static Item js_domain_current = {0};
 static Item js_domain_namespace = {0};
-static Item js_domain_stack[64];
-static int js_domain_stack_count = 0;
+static Item js_domain_stack_slots[64];
+static JsItemStack js_domain_stack_state = {{js_domain_stack_slots, 64, 0,
+                                              "domain stack"}, 0};
+#define js_domain_stack (js_domain_stack_state.roots.slots)
+#define js_domain_stack_count (js_domain_stack_state.depth)
 
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_async_hooks_get_current_resource(void);
@@ -30527,18 +30539,19 @@ extern "C" Item js_domain_capture_async_stack(void) {
 }
 
 static void js_domain_apply_stack(Item stack) {
-    js_domain_stack_count = 0;
+    if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return;
+    js_item_stack_clear(&js_domain_stack_state);
     if (get_type_id(stack) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stack);
         if (len > 64) len = 64;
         for (int64_t i = 0; i < len; i++) {
             Item domain = js_array_get_int(stack, i);
             if (js_domain_is_domain_item(domain)) {
-                js_domain_stack[js_domain_stack_count++] = domain;
+                if (!js_item_stack_push(&js_domain_stack_state, domain)) break;
             }
         }
     } else if (js_domain_is_domain_item(stack)) {
-        js_domain_stack[js_domain_stack_count++] = stack;
+        js_item_stack_push(&js_domain_stack_state, stack);
     }
     js_domain_sync_visible_state();
 }
@@ -30555,7 +30568,7 @@ extern "C" void js_domain_restore_stack(Item previous) {
 
 static void js_domain_push(Item domain) {
     if (!js_domain_is_domain_item(domain)) return;
-    if (js_domain_stack_count < 64) js_domain_stack[js_domain_stack_count++] = domain;
+    if (js_domain_stack_count < 64) js_item_stack_push(&js_domain_stack_state, domain);
     js_domain_sync_visible_state();
 }
 
@@ -30569,10 +30582,11 @@ extern "C" Item js_domain_set_current(Item domain) {
     TypeId domain_type = get_type_id(domain);
     if (domain.item == 0 || domain_type == LMD_TYPE_UNDEFINED ||
         domain_type == LMD_TYPE_NULL || domain.item == ItemNull.item) {
-        js_domain_stack_count = 0;
+        js_item_stack_clear(&js_domain_stack_state);
     } else {
-        js_domain_stack_count = 1;
-        js_domain_stack[0] = domain;
+        if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return previous;
+        js_item_stack_clear(&js_domain_stack_state);
+        js_item_stack_push(&js_domain_stack_state, domain);
     }
     js_domain_sync_visible_state();
     return previous;
@@ -30596,7 +30610,7 @@ static bool js_domain_emit_error_at(Item domain, Item error, int parent_count) {
 
     if (parent_count < 0) parent_count = 0;
     if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
-    js_domain_stack_count = parent_count;
+    js_item_stack_shrink(&js_domain_stack_state, parent_count);
     // An empty domain stack exposes process.domain as undefined; overriding it
     // with null here broke root error handlers and their inherited async context.
     js_domain_sync_visible_state();
@@ -30656,7 +30670,7 @@ static void js_promise_register_roots_once() {
     }
     heap_register_gc_root(&js_domain_current.item);
     heap_register_gc_root(&js_domain_namespace.item);
-    heap_register_gc_root_range((uint64_t*)js_domain_stack, 64);
+    js_root_range_ensure_registered(&js_domain_stack_state.roots);
     // Batch heap replacement discards the old registry while these static
     // addresses survive, so registration is once per heap epoch, not process.
     roots_epoch = epoch;
@@ -35606,8 +35620,9 @@ static Item js_domain_run(Item fn) {
         Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
         if (js_check_exception()) {
             Item error = js_clear_exception();
-            js_domain_stack_count = parent_count + 1;
-            if (js_domain_stack_count > 64) js_domain_stack_count = 64;
+            int restore_depth = parent_count + 1;
+            if (restore_depth > 64) restore_depth = 64;
+            js_item_stack_shrink(&js_domain_stack_state, restore_depth);
             js_domain_sync_visible_state();
             bool handled = js_domain_emit_error_at(self, error, parent_count);
             if (!handled && !js_check_exception()) {
@@ -35634,7 +35649,7 @@ static Item js_domain_enter(void) {
 }
 
 static Item js_domain_exit(void) {
-    if (js_domain_stack_count > 0) js_domain_stack_count--;
+    if (js_domain_stack_count > 0) js_item_stack_pop(&js_domain_stack_state);
     js_domain_sync_visible_state();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -40440,8 +40455,7 @@ void js_deep_batch_reset() {
     js_promise_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
-    memset(js_domain_stack, 0, sizeof(js_domain_stack));
-    js_domain_stack_count = 0;
+    js_item_stack_clear(&js_domain_stack_state);
     memset(js_async_contexts, 0, sizeof(js_async_contexts));
     js_async_context_count = 0;
     memset(js_als_instances, 0, sizeof(js_als_instances));
