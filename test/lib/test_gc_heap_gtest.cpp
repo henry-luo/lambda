@@ -181,6 +181,38 @@ TEST(SideStackRootFrameTest, OversizedFrameFailsWithoutAdvancingWatermark) {
     lambda_side_stack_reset(&runtime);
 }
 
+TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    LambdaSideStackSnapshot checkpoint = lambda_side_stack_snapshot(&runtime);
+    uint64_t* roots = lambda_side_root_alloc_n(&runtime, 3);
+    ASSERT_NE(roots, nullptr);
+    EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 3);
+    EXPECT_EQ(roots[0], 0u);
+    EXPECT_EQ(roots[1], 0u);
+    EXPECT_EQ(roots[2], 0u);
+
+    void* object = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_NE(object, nullptr);
+    roots[0] = string_item(object);
+
+    LambdaRootFrame nested{};
+    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &nested, 2));
+    EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 5);
+    gc_collect_with_root_region(gc, NULL, 0, runtime.side_root_base,
+        (int64_t)(runtime.side_root_top - runtime.side_root_base));
+    EXPECT_TRUE(gc_is_managed(gc, object));
+    EXPECT_EQ(gc->object_count, 1u);
+
+    lambda_root_frame_end(&nested);
+    EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 3);
+    lambda_side_stack_restore(&runtime, checkpoint);
+    gc_collect_with_root_region(gc, NULL, 0, runtime.side_root_base,
+        (int64_t)(runtime.side_root_top - runtime.side_root_base));
+    EXPECT_EQ(gc->object_count, 0u);
+    lambda_side_stack_reset(&runtime);
+}
+
 // ============================================================================
 // 1. Object Allocation and Tracking
 // ============================================================================

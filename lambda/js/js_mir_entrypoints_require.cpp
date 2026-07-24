@@ -1,4 +1,6 @@
 #include "js_mir_internal.hpp"
+#include "js_runtime_state.hpp"
+#undef js_input
 #include "../runtime/lambda-error.h"
 #include "../runtime/mir_dump.h"
 #include "../../lib/mem_factory.h"
@@ -1625,27 +1627,30 @@ static Item js_cjs_key(const char* name) {
 
 #define JS_CJS_STACK_MAX 128
 #define JS_CJS_MODULE_MAX 256
-static Item js_cjs_module_stack[JS_CJS_STACK_MAX];
-static int js_cjs_module_stack_count = 0;
+static Item js_cjs_module_stack_slots[JS_CJS_STACK_MAX];
+static JsItemStack js_cjs_module_stack_state = {{js_cjs_module_stack_slots,
+                                                  JS_CJS_STACK_MAX, 0,
+                                                  "CommonJS module stack"}, 0};
+#define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
+#define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
 static Item js_cjs_module_names[JS_CJS_MODULE_MAX];
 static Item js_cjs_module_objects[JS_CJS_MODULE_MAX];
 static int js_cjs_module_count = 0;
 static struct gc_heap* js_cjs_roots_gc = NULL;
 
-static void js_cjs_register_roots(void) {
-    if (!context || !context->heap || !context->heap->gc) return;
-    if (js_cjs_roots_gc == context->heap->gc) return;
-    heap_register_gc_root_range((uint64_t*)js_cjs_module_stack, JS_CJS_STACK_MAX);
+static bool js_cjs_register_roots(void) {
+    if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) return false;
+    if (js_cjs_roots_gc == context->heap->gc) return true;
     heap_register_gc_root_range((uint64_t*)js_cjs_module_names, JS_CJS_MODULE_MAX);
     heap_register_gc_root_range((uint64_t*)js_cjs_module_objects, JS_CJS_MODULE_MAX);
     js_cjs_roots_gc = context->heap->gc;
+    return true;
 }
 
 extern "C" void js_cjs_metadata_reset(void) {
-    memset(js_cjs_module_stack, 0, sizeof(js_cjs_module_stack));
+    js_item_stack_clear(&js_cjs_module_stack_state);
     memset(js_cjs_module_names, 0, sizeof(js_cjs_module_names));
     memset(js_cjs_module_objects, 0, sizeof(js_cjs_module_objects));
-    js_cjs_module_stack_count = 0;
     js_cjs_module_count = 0;
 }
 
@@ -1713,7 +1718,7 @@ static void js_cjs_update_cached_default(Item filename, Item module) {
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
-    js_cjs_register_roots();
+    if (!js_cjs_register_roots()) return (Item){.item = ITEM_JS_UNDEFINED};
     if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -1729,7 +1734,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
         js_cjs_update_cached_default(filename, module);
     }
     if (js_cjs_module_stack_count < JS_CJS_STACK_MAX) {
-        js_cjs_module_stack[js_cjs_module_stack_count++] = module;
+        js_item_stack_push(&js_cjs_module_stack_state, module);
     } else {
         log_error("cjs-metadata: module stack overflow (%d)", JS_CJS_STACK_MAX);
     }
@@ -1746,14 +1751,15 @@ extern "C" Item js_cjs_complete(Item module) {
 extern "C" Item js_cjs_leave(Item module) {
     if (js_cjs_module_stack_count > 0) {
         if (js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
-            js_cjs_module_stack_count--;
+            js_item_stack_pop(&js_cjs_module_stack_state);
         } else {
             for (int i = js_cjs_module_stack_count - 1; i >= 0; i--) {
                 if (js_cjs_module_stack[i].item != module.item) continue;
                 for (int j = i + 1; j < js_cjs_module_stack_count; j++) {
                     js_cjs_module_stack[j - 1] = js_cjs_module_stack[j];
                 }
-                js_cjs_module_stack_count--;
+                js_item_stack_shrink(&js_cjs_module_stack_state,
+                                     js_cjs_module_stack_count - 1);
                 break;
             }
         }

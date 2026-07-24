@@ -5,44 +5,244 @@
 
 JsRuntimeState js_runtime_state;
 extern __thread EvalContext* context;
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 
-#define JS_EVAL_SOURCE_STACK_MAX 16
-static Item js_eval_source_filename_stack[JS_EVAL_SOURCE_STACK_MAX];
-static Item js_eval_source_code_stack[JS_EVAL_SOURCE_STACK_MAX];
-static int64_t js_eval_source_line_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
-static int64_t js_eval_source_column_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
-static bool js_eval_source_compact_stack[JS_EVAL_SOURCE_STACK_MAX];
-static int js_eval_source_stack_depth = 0;
-static uint64_t js_eval_source_roots_epoch = 0;
+#define JS_ROOT_RANGE_REGISTRY_MAX 64
+static JsRootRange* js_root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX];
+static int js_root_range_registry_count = 0;
 
-static void js_eval_source_register_roots(void) {
-    if (js_eval_source_roots_epoch == js_heap_epoch) return;
-    heap_register_gc_root_range((uint64_t*)js_eval_source_filename_stack, JS_EVAL_SOURCE_STACK_MAX);
-    heap_register_gc_root_range((uint64_t*)js_eval_source_code_stack, JS_EVAL_SOURCE_STACK_MAX);
-    js_eval_source_roots_epoch = js_heap_epoch;
+static void js_root_range_set_storage(JsRootRange* range, Item* slots, int slot_count,
+                                      const char* name) {
+    range->slots = slots;
+    range->slot_count = slot_count;
+    range->name = name;
 }
 
-static void js_eval_source_push_mode(Item filename, Item source,
+// The state capsule has self-referential range descriptors. Initialize those
+// pointers after the final global object exists; copying a default-initialized
+// subobject would otherwise leave a descriptor pointing at a temporary.
+static void js_runtime_state_prepare_root_ranges(void) {
+    JsEvalState* eval = &js_runtime_state.eval;
+    JsEvalSourceState* source = &eval->source;
+    js_root_range_set_storage(&source->filename_roots, source->filename_slots,
+        JS_EVAL_SOURCE_STACK_MAX, "eval source filenames");
+    js_root_range_set_storage(&source->code_roots, source->code_slots,
+        JS_EVAL_SOURCE_STACK_MAX, "eval source code");
+
+    JsEvalBridgeState* bridge = &eval->bridge;
+    js_root_range_set_storage(&bridge->env_key_roots, bridge->env_keys,
+        JS_EVAL_ENV_BIND_MAX, "eval env keys");
+    js_root_range_set_storage(&bridge->env_old_value_roots, bridge->env_old_values,
+        JS_EVAL_ENV_BIND_MAX, "eval env old values");
+    js_root_range_set_storage(&bridge->global_lexical_key_roots, bridge->global_lexical_keys,
+        JS_EVAL_ENV_BIND_MAX, "eval global lexical keys");
+    js_root_range_set_storage(&bridge->global_lexical_old_value_roots,
+        bridge->global_lexical_old_values, JS_EVAL_ENV_BIND_MAX, "eval global lexical old values");
+    js_root_range_set_storage(&bridge->private_unscoped_key_roots, bridge->private_unscoped_keys,
+        JS_EVAL_PRIVATE_BIND_MAX, "eval private unscoped keys");
+    js_root_range_set_storage(&bridge->private_scoped_key_roots, bridge->private_scoped_keys,
+        JS_EVAL_PRIVATE_BIND_MAX, "eval private scoped keys");
+
+    JsEvalLocalState* local = &eval->local;
+    js_root_range_set_storage(&local->key_roots, local->keys,
+        JS_EVAL_LOCAL_BIND_MAX, "eval local keys");
+    js_root_range_set_storage(&local->value_roots, local->values,
+        JS_EVAL_LOCAL_BIND_MAX, "eval local values");
+    js_root_range_set_storage(&local->lexical_key_roots, local->lexical_keys,
+        JS_EVAL_LEXICAL_BIND_MAX, "eval lexical keys");
+    js_root_range_set_storage(&local->immutable_key_roots, local->immutable_keys,
+        JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys");
+
+    js_root_range_set_storage(&js_runtime_state.super_this_values.roots,
+        js_runtime_state.super_this_value_slots, 128, "super-this values");
+}
+
+bool js_root_range_register_reset(JsRootRange* range, void* owner,
+                                  JsRootRangeResetFn reset) {
+    if (!range || !range->slots || range->slot_count <= 0) return false;
+    if (range->reset_registered) {
+        // A direct ensure may register the range before its stack client first
+        // publishes a value. Preserve that descriptor but install the later
+        // semantic reset callback instead of silently losing its depth reset.
+        if (reset && !range->reset) {
+            range->reset_owner = owner;
+            range->reset = reset;
+        }
+        return true;
+    }
+    if (js_root_range_registry_count >= JS_ROOT_RANGE_REGISTRY_MAX) {
+        log_error("js-root-range: reset registry overflow for %s",
+            range->name ? range->name : "unnamed range");
+        return false;
+    }
+    range->reset_owner = owner;
+    range->reset = reset;
+    js_root_range_registry[js_root_range_registry_count++] = range;
+    range->reset_registered = true;
+    return true;
+}
+
+bool js_root_range_ensure_registered(JsRootRange* range) {
+    js_runtime_state_prepare_root_ranges();
+    if (!range || !range->slots || range->slot_count <= 0) return false;
+    if (!js_root_range_register_reset(range, NULL, NULL)) return false;
+    if (!context || !context->heap || !context->heap->gc) return false;
+    if (range->roots_epoch == js_heap_epoch) return true;
+    heap_register_gc_root_range((uint64_t*)range->slots, range->slot_count);
+    range->roots_epoch = js_heap_epoch;
+    return true;
+}
+
+void js_root_range_clear(JsRootRange* range) {
+    if (!range || !range->slots || range->slot_count <= 0) return;
+    memset(range->slots, 0, (size_t)range->slot_count * sizeof(Item));
+}
+
+void js_root_range_reset_all(void) {
+    for (int i = 0; i < js_root_range_registry_count; i++) {
+        JsRootRange* range = js_root_range_registry[i];
+        if (!range) continue;
+        js_root_range_clear(range);
+        if (range->reset) range->reset(range->reset_owner);
+    }
+}
+
+static void js_item_stack_reset_callback(void* owner) {
+    js_item_stack_clear((JsItemStack*)owner);
+}
+
+bool js_item_stack_push(JsItemStack* stack, Item value) {
+    if (!stack || stack->depth < 0) return false;
+    if (!js_root_range_ensure_registered(&stack->roots)) return false;
+    // ensure prepares self-referential runtime-state descriptors before the
+    // slot-count check, so the super-this stack has no hidden init ordering.
+    if (!stack->roots.slots || stack->depth >= stack->roots.slot_count) return false;
+    if (!js_root_range_register_reset(&stack->roots, stack,
+                                      js_item_stack_reset_callback)) return false;
+    stack->roots.slots[stack->depth++] = value;
+    return true;
+}
+
+Item js_item_stack_top(const JsItemStack* stack) {
+    if (!stack || !stack->roots.slots || stack->depth <= 0) return ItemNull;
+    return stack->roots.slots[stack->depth - 1];
+}
+
+void js_item_stack_pop(JsItemStack* stack) {
+    if (!stack || !stack->roots.slots || stack->depth <= 0) return;
+    // The registered fixed range is scanned in full, so vacated slots must not
+    // retain old heap Items across a later collection or heap replacement.
+    stack->roots.slots[--stack->depth] = ItemNull;
+}
+
+void js_item_stack_clear(JsItemStack* stack) {
+    if (!stack || !stack->roots.slots) return;
+    for (int i = 0; i < stack->depth; i++) stack->roots.slots[i] = ItemNull;
+    stack->depth = 0;
+}
+
+void js_item_stack_shrink(JsItemStack* stack, int depth) {
+    if (!stack || !stack->roots.slots) return;
+    if (depth < 0) depth = 0;
+    if (depth >= stack->depth) return;
+    for (int i = depth; i < stack->depth; i++) stack->roots.slots[i] = ItemNull;
+    stack->depth = depth;
+}
+
+#define js_eval_source_filename_stack (js_runtime_state.eval.source.filename_slots)
+#define js_eval_source_code_stack (js_runtime_state.eval.source.code_slots)
+#define js_eval_source_line_offset_stack (js_runtime_state.eval.source.line_offset_slots)
+#define js_eval_source_column_offset_stack (js_runtime_state.eval.source.column_offset_slots)
+#define js_eval_source_compact_stack (js_runtime_state.eval.source.compact_slots)
+#define js_eval_source_stack_depth (js_runtime_state.eval.source.depth)
+
+void js_eval_state_reset(JsEvalState* state) {
+    if (!state) return;
+    js_runtime_state_prepare_root_ranges();
+    js_root_range_clear(&state->source.filename_roots);
+    js_root_range_clear(&state->source.code_roots);
+    memset(state->source.line_offset_slots, 0, sizeof(state->source.line_offset_slots));
+    memset(state->source.column_offset_slots, 0, sizeof(state->source.column_offset_slots));
+    memset(state->source.compact_slots, 0, sizeof(state->source.compact_slots));
+    state->source.depth = 0;
+
+    JsEvalBridgeState* bridge = &state->bridge;
+    js_root_range_clear(&bridge->env_key_roots);
+    js_root_range_clear(&bridge->env_old_value_roots);
+    js_root_range_clear(&bridge->global_lexical_key_roots);
+    js_root_range_clear(&bridge->global_lexical_old_value_roots);
+    js_root_range_clear(&bridge->private_unscoped_key_roots);
+    js_root_range_clear(&bridge->private_scoped_key_roots);
+    memset(bridge->env_had_own, 0, sizeof(bridge->env_had_own));
+    memset(bridge->env_from_journal, 0, sizeof(bridge->env_from_journal));
+    memset(bridge->env_frame_marks, 0, sizeof(bridge->env_frame_marks));
+    memset(bridge->global_lexical_had_own, 0, sizeof(bridge->global_lexical_had_own));
+    memset(bridge->global_lexical_frame_marks, 0, sizeof(bridge->global_lexical_frame_marks));
+    memset(bridge->private_frame_marks, 0, sizeof(bridge->private_frame_marks));
+    bridge->env_count = 0;
+    bridge->env_frame_depth = 0;
+    bridge->global_lexical_count = 0;
+    bridge->global_lexical_frame_depth = 0;
+    bridge->private_count = 0;
+    bridge->private_frame_depth = 0;
+
+    JsEvalLocalState* local = &state->local;
+    js_root_range_clear(&local->key_roots);
+    js_root_range_clear(&local->value_roots);
+    js_root_range_clear(&local->lexical_key_roots);
+    js_root_range_clear(&local->immutable_key_roots);
+    memset(local->frame_marks, 0, sizeof(local->frame_marks));
+    local->count = 0;
+    local->frame_depth = 0;
+    local->lexical_count = 0;
+    local->immutable_count = 0;
+}
+
+void js_eval_state_assert_clear(const JsEvalState* state, const char* reset_name) {
+    if (!state) return;
+    const char* name = reset_name ? reset_name : "reset";
+    if (state->source.depth != 0) {
+        log_error("js-eval-state: %s left source depth=%d", name, state->source.depth);
+    }
+    if (state->bridge.env_frame_depth != 0 || state->bridge.global_lexical_frame_depth != 0 ||
+        state->bridge.private_frame_depth != 0) {
+        log_error("js-eval-state: %s left bridge depths env=%d lexical=%d private=%d", name,
+            state->bridge.env_frame_depth, state->bridge.global_lexical_frame_depth,
+            state->bridge.private_frame_depth);
+    }
+    if (state->local.frame_depth != 0) {
+        log_error("js-eval-state: %s left local frame depth=%d", name, state->local.frame_depth);
+    }
+}
+
+static bool js_eval_source_register_roots(void) {
+    JsEvalSourceState* source = &js_runtime_state.eval.source;
+    return js_root_range_ensure_registered(&source->filename_roots) &&
+        js_root_range_ensure_registered(&source->code_roots);
+}
+
+static bool js_eval_source_push_mode(Item filename, Item source,
                                      int64_t line_offset, int64_t column_offset,
                                      bool compact_stack) {
-    js_eval_source_register_roots();
-    if (js_eval_source_stack_depth >= JS_EVAL_SOURCE_STACK_MAX) return;
+    if (!js_eval_source_register_roots()) return false;
+    if (js_eval_source_stack_depth >= JS_EVAL_SOURCE_STACK_MAX) return false;
     int idx = js_eval_source_stack_depth++;
     js_eval_source_filename_stack[idx] = filename;
     js_eval_source_code_stack[idx] = source;
     js_eval_source_line_offset_stack[idx] = line_offset;
     js_eval_source_column_offset_stack[idx] = column_offset;
     js_eval_source_compact_stack[idx] = compact_stack;
+    return true;
 }
 
-extern "C" void js_eval_source_push(Item filename, Item source,
-                                    int64_t line_offset, int64_t column_offset) {
-    js_eval_source_push_mode(filename, source, line_offset, column_offset, false);
+extern "C" int64_t js_eval_source_push(Item filename, Item source,
+                                         int64_t line_offset, int64_t column_offset) {
+    return js_eval_source_push_mode(filename, source, line_offset, column_offset, false) ? 1 : 0;
 }
 
-extern "C" void js_eval_source_push_compact(Item filename, Item source,
-                                            int64_t line_offset, int64_t column_offset) {
-    js_eval_source_push_mode(filename, source, line_offset, column_offset, true);
+extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
+                                                 int64_t line_offset, int64_t column_offset) {
+    return js_eval_source_push_mode(filename, source, line_offset, column_offset, true) ? 1 : 0;
 }
 
 extern "C" void js_eval_source_pop(void) {
@@ -499,6 +699,8 @@ extern "C" void js_batch_reset() {
     js_exception_pending = false;
     js_exception_value = (Item){0};
     js_exception_slots[1] = (Item){0};
+    // Report unbalanced eval scopes before cleanup erases the evidence.
+    js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset pre-cleanup");
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
@@ -601,6 +803,7 @@ extern "C" void js_batch_reset() {
     js_eval_preamble_cache_reset();
     js_dynfunc_cache_reset();
     js_array_runtime_items_cleanup_all();
+    js_root_range_reset_all();
     js_assert_batch_runtime_state_clear("js_batch_reset", true);
 }
 
@@ -649,6 +852,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_exception_pending = false;
     js_exception_value = (Item){0};
     js_exception_slots[1] = (Item){0};
+    // Keep partial batch resets equally strict about eval frame ownership.
+    js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset_to pre-cleanup");
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
@@ -734,6 +939,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     extern void js_node_test_reset(void);
     js_node_test_reset();
     js_dynfunc_cache_reset();
+    js_root_range_reset_all();
     js_assert_batch_runtime_state_clear("js_batch_reset_to", true);
 }
 
@@ -1217,9 +1423,8 @@ void js_reset_transient_call_state() {
     js_new_target = (Item){0};
     js_pending_new_target = (Item){0};
     js_has_pending_new_target = false;
-    js_super_this_bound_depth = 0;
     memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
-    memset(js_super_this_value_stack, 0, sizeof(js_runtime_state.super_this_value_stack));
+    js_item_stack_clear(&js_runtime_state.super_this_values);
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
     js_pending_call_source = NULL;
@@ -1227,9 +1432,7 @@ void js_reset_transient_call_state() {
     js_pending_args_is_strict = 0;
     js_pending_args_callee = (Item){0};
     js_array_method_real_this = (Item){0};
-    // drop transient call-arg stack frames and its GC registration (heap may be
-    // recreated across batch tests; re-registered lazily on next push)
-    js_args_stack_reset();
+    js_eval_state_reset(&js_runtime_state.eval);
 }
 
 void js_reset_heap_bound_runtime_state() {
@@ -1280,6 +1483,7 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left super this binding depth=%d", name, js_super_this_bound_depth);
     }
+    js_eval_state_assert_clear(&js_runtime_state.eval, name);
     if (js_pending_call_args || js_pending_call_argc != 0) {
         leak_count++;
         log_error("js-batch-state: %s left pending call args ptr=%p argc=%d",

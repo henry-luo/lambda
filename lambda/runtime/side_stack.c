@@ -172,6 +172,20 @@ void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint) {
     if (checkpoint) checkpoint->active = false;
 }
 
+uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) {
+    if (!runtime_context ||
+            !lambda_side_stack_ensure(runtime_context, slot_count, 0)) {
+        return NULL;
+    }
+
+    uint64_t* slots = runtime_context->side_root_top;
+    // Zero before publishing the new watermark so a forced collection can
+    // never interpret stale words from a previous activation as live roots.
+    for (size_t i = 0; i < slot_count; i++) slots[i] = 0;
+    runtime_context->side_root_top += slot_count;
+    return slots;
+}
+
 uint64_t* lambda_side_number_alloc(Context* runtime_context) {
     if (!runtime_context || !lambda_side_stack_ensure(runtime_context, 0, 1)) {
         return NULL;
@@ -218,18 +232,14 @@ bool lambda_root_frame_begin(Context* runtime_context, LambdaRootFrame* frame,
     frame->slot_count = 0;
     frame->next_slot = 0;
     frame->active = false;
-    if (!runtime_context ||
-            !lambda_side_stack_ensure(runtime_context, slot_count, 0)) {
+    uint64_t* slots = lambda_side_root_alloc_n(runtime_context, slot_count);
+    if (!slots) {
         return false;
     }
 
-    frame->watermark = runtime_context->side_root_top;
-    frame->slots = frame->watermark;
+    frame->watermark = slots;
+    frame->slots = slots;
     frame->slot_count = slot_count;
-    // Zero before publishing the new watermark so a forced collection can
-    // never interpret stale words from a previous activation as live roots.
-    for (size_t i = 0; i < slot_count; i++) frame->slots[i] = 0;
-    runtime_context->side_root_top += slot_count;
     frame->active = true;
     return true;
 }

@@ -16285,26 +16285,28 @@ extern "C" Item js_get_global_object() {
 // With-scope stack for 'with' statement support
 // ============================================================================
 #define JS_WITH_STACK_MAX 16
-static Item js_with_stack[JS_WITH_STACK_MAX];
-static int js_with_stack_depth = 0;
-static Item js_last_with_binding_scope = {.item = ITEM_NULL};
-static Item js_last_with_binding_key = {.item = ITEM_NULL};
+static Item js_with_stack_slots[JS_WITH_STACK_MAX];
+static JsItemStack js_with_stack_state = {{js_with_stack_slots, JS_WITH_STACK_MAX, 0,
+                                           "with-scope stack"}, 0};
+static Item js_last_with_binding_slots[2];
+static JsRootRange js_last_with_binding_roots = {js_last_with_binding_slots, 2, 0,
+                                                  "with binding cache"};
+#define js_with_stack (js_with_stack_state.roots.slots)
+#define js_with_stack_depth (js_with_stack_state.depth)
+#define js_last_with_binding_scope (js_last_with_binding_slots[0])
+#define js_last_with_binding_key (js_last_with_binding_slots[1])
 static bool js_last_with_binding_valid = false;
-static uint64_t js_with_roots_epoch = 0;
 
 // GC root registration for the with-scope stack. The stack (and the memoized
 // binding cache) can hold the ONLY reference to a with-scope object — e.g.
 // `with ({...})` where the operand's JIT register dies after js_with_push, or
 // the js_to_object wrapper created for a primitive operand. Without rooting,
 // any allocation inside the with body can collect the scope object and
-// subsequent unqualified-name lookups read freed memory. Epoch-guarded lazy
-// registration because the GC heap is torn down/recreated across batch tests.
-static void js_with_register_roots(void) {
-    if (js_with_roots_epoch == js_heap_epoch) return;
-    heap_register_gc_root_range((uint64_t*)js_with_stack, JS_WITH_STACK_MAX);
-    heap_register_gc_root_range((uint64_t*)&js_last_with_binding_scope.item, 1);
-    heap_register_gc_root_range((uint64_t*)&js_last_with_binding_key.item, 1);
-    js_with_roots_epoch = js_heap_epoch;
+// subsequent unqualified-name lookups read freed memory. Keep both exact
+// ranges registered before publishing either a scope or a cache entry.
+static bool js_with_ensure_roots(void) {
+    return js_root_range_ensure_registered(&js_with_stack_state.roots) &&
+        js_root_range_ensure_registered(&js_last_with_binding_roots);
 }
 
 static void js_throw_binding_reference_error(Item key);
@@ -16325,17 +16327,15 @@ static bool js_with_scope_is_object(Item value) {
 }
 
 extern "C" void js_with_batch_reset(void) {
-    js_with_stack_depth = 0;
+    js_item_stack_clear(&js_with_stack_state);
     js_last_with_binding_valid = false;
-    memset(js_with_stack, 0, sizeof(js_with_stack));
     // the binding cache slots are registered GC roots — stale Items from the
     // prior script must not survive into the next heap's root scan
-    js_last_with_binding_scope = ItemNull;
-    js_last_with_binding_key = ItemNull;
+    js_root_range_clear(&js_last_with_binding_roots);
 }
 
 extern "C" void js_with_push(Item obj) {
-    js_with_register_roots();
+    if (!js_with_ensure_roots()) return;
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
         js_throw_type_error("Cannot convert undefined or null to object");
@@ -16347,17 +16347,14 @@ extern "C" void js_with_push(Item obj) {
     }
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {
         js_last_with_binding_valid = false;
-        js_with_stack[js_with_stack_depth++] = obj;
+        js_item_stack_push(&js_with_stack_state, obj);
     }
 }
 
 extern "C" void js_with_pop() {
     if (js_with_stack_depth > 0) {
         js_last_with_binding_valid = false;
-        js_with_stack_depth--;
-        // the whole array is a registered root range — clear the popped slot so
-        // the always-scanned region holds no stale root keeping garbage alive
-        js_with_stack[js_with_stack_depth] = ItemNull;
+        js_item_stack_pop(&js_with_stack_state);
     }
 }
 
@@ -16367,12 +16364,7 @@ extern "C" int js_with_save_depth() {
 
 extern "C" void js_with_restore_depth(int depth) {
     if (depth < 0) depth = 0;
-    // clear unwound slots — the array is a registered root range (see
-    // js_with_register_roots) and must not retain popped scope objects
-    for (int i = depth; i < js_with_stack_depth && i < JS_WITH_STACK_MAX; i++) {
-        js_with_stack[i] = ItemNull;
-    }
-    js_with_stack_depth = depth;
+    js_item_stack_shrink(&js_with_stack_state, depth);
     js_last_with_binding_valid = false;
 }
 
@@ -16388,18 +16380,13 @@ extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
 }
 
 extern "C" void js_with_set_stack(Item* stack, int depth) {
-    js_with_register_roots();
+    if (!js_with_ensure_roots()) return;
     if (depth < 0) depth = 0;
     if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
+    js_item_stack_clear(&js_with_stack_state);
     for (int i = 0; i < depth; i++) {
-        js_with_stack[i] = stack ? stack[i] : ItemNull;
+        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) break;
     }
-    // clear any deeper entries from a previously restored stack — the array is
-    // a registered root range and must not retain scopes past their depth
-    for (int i = depth; i < js_with_stack_depth && i < JS_WITH_STACK_MAX; i++) {
-        js_with_stack[i] = ItemNull;
-    }
-    js_with_stack_depth = depth;
     js_last_with_binding_valid = false;
 }
 
@@ -16476,9 +16463,11 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
                 if (js_check_exception()) {
                     return ItemNull;
                 }
-                js_last_with_binding_scope = scope_obj;
-                js_last_with_binding_key = key;
-                js_last_with_binding_valid = true;
+                if (js_with_ensure_roots()) {
+                    js_last_with_binding_scope = scope_obj;
+                    js_last_with_binding_key = key;
+                    js_last_with_binding_valid = true;
+                }
                 return value;
             }
             if (js_check_exception()) {
@@ -16547,6 +16536,7 @@ extern "C" int64_t js_capture_with_binding(Item key) {
                 if (js_check_exception()) return 1;
                 if (js_is_truthy(blocked)) continue;
             }
+            if (!js_with_ensure_roots()) return 0;
             js_last_with_binding_scope = scope_obj;
             js_last_with_binding_key = key;
             js_last_with_binding_valid = true;
@@ -17150,62 +17140,21 @@ extern "C" void js_evalscript_check_global_lex_decl(Item key) {
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,
 // so temporarily expose caller var/parameter bindings through global lookup.
-#define JS_EVAL_ENV_BIND_MAX 512
-#define JS_EVAL_ENV_FRAME_MAX 32
-typedef struct JsEvalEnvBinding {
-    Item key;
-    Item old_value;
-    bool had_own;
-    // binding bridged from the eval-local journal (a var introduced by a prior
-    // direct eval in this function scope) rather than from a static local;
-    // its post-eval value must be written back to the journal on frame pop.
-    bool from_journal;
-} JsEvalEnvBinding;
-
-static JsEvalEnvBinding js_eval_env_bindings[JS_EVAL_ENV_BIND_MAX];
-static int js_eval_env_binding_count = 0;
-static int js_eval_env_frame_stack[JS_EVAL_ENV_FRAME_MAX];
-static int js_eval_env_frame_depth = 0;
-
-static JsEvalEnvBinding js_eval_global_lexical_bindings[JS_EVAL_ENV_BIND_MAX];
-static int js_eval_global_lexical_binding_count = 0;
-static int js_eval_global_lexical_frame_stack[JS_EVAL_ENV_FRAME_MAX];
-static int js_eval_global_lexical_frame_depth = 0;
-
-#define JS_EVAL_LOCAL_BIND_MAX 512
-#define JS_EVAL_LOCAL_FRAME_MAX 64
-typedef struct JsEvalLocalBinding {
-    Item key;
-    Item value;
-} JsEvalLocalBinding;
-
-static JsEvalLocalBinding js_eval_local_bindings[JS_EVAL_LOCAL_BIND_MAX];
-static int js_eval_local_binding_count = 0;
-static int js_eval_local_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
-static int js_eval_local_frame_depth = 0;
-
-#define JS_EVAL_LEXICAL_BIND_MAX 512
-static Item js_eval_lexical_bindings[JS_EVAL_LEXICAL_BIND_MAX];
-static int js_eval_lexical_binding_count = 0;
-static int js_eval_lexical_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
-static int js_eval_lexical_frame_depth = 0;
-
-#define JS_EVAL_IMMUTABLE_BIND_MAX 512
-static Item js_eval_immutable_bindings[JS_EVAL_IMMUTABLE_BIND_MAX];
-static int js_eval_immutable_binding_count = 0;
-static int js_eval_immutable_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
-static int js_eval_immutable_frame_depth = 0;
-
-#define JS_EVAL_PRIVATE_BIND_MAX 256
-typedef struct JsEvalPrivateBinding {
-    Item unscoped_key;
-    Item scoped_key;
-} JsEvalPrivateBinding;
-
-static JsEvalPrivateBinding js_eval_private_bindings[JS_EVAL_PRIVATE_BIND_MAX];
-static int js_eval_private_binding_count = 0;
-static int js_eval_private_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
-static int js_eval_private_frame_depth = 0;
+#define js_eval_bridge (js_runtime_state.eval.bridge)
+#define js_eval_local (js_runtime_state.eval.local)
+#define js_eval_env_binding_count (js_eval_bridge.env_count)
+#define js_eval_env_frame_stack (js_eval_bridge.env_frame_marks)
+#define js_eval_env_frame_depth (js_eval_bridge.env_frame_depth)
+#define js_eval_global_lexical_binding_count (js_eval_bridge.global_lexical_count)
+#define js_eval_global_lexical_frame_stack (js_eval_bridge.global_lexical_frame_marks)
+#define js_eval_global_lexical_frame_depth (js_eval_bridge.global_lexical_frame_depth)
+#define js_eval_private_binding_count (js_eval_bridge.private_count)
+#define js_eval_private_frame_stack (js_eval_bridge.private_frame_marks)
+#define js_eval_private_frame_depth (js_eval_bridge.private_frame_depth)
+#define js_eval_local_binding_count (js_eval_local.count)
+#define js_eval_local_frame_depth (js_eval_local.frame_depth)
+#define js_eval_lexical_binding_count (js_eval_local.lexical_count)
+#define js_eval_immutable_binding_count (js_eval_local.immutable_count)
 
 extern "C" void js_eval_env_push_frame(void) {
     if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
@@ -17227,20 +17176,23 @@ extern "C" void js_eval_env_push_frame(void) {
 // journal-first, so the journal value must win over the static bind here too.
 extern "C" void js_eval_env_bridge_journal_vars(void) {
     if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
+    if (!js_root_range_ensure_registered(&js_eval_bridge.env_key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_bridge.env_old_value_roots)) return;
     Item global = js_get_global_this();
-    int frame_start = js_eval_local_frame_stack[js_eval_local_frame_depth - 1];
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].local_mark;
     for (int i = frame_start; i < js_eval_local_binding_count; i++) {
         if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
             log_error("js-eval-env: binding stack overflow bridging journal vars");
             break;
         }
-        JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
-        binding->key = js_eval_local_bindings[i].key;
-        binding->from_journal = true;
-        binding->had_own = it2b(js_has_own_property(global, binding->key));
-        binding->old_value = binding->had_own ?
-            js_property_get(global, binding->key) : make_js_undefined();
-        js_property_set(global, binding->key, js_eval_local_bindings[i].value);
+        int binding_idx = js_eval_env_binding_count++;
+        js_eval_bridge.env_keys[binding_idx] = js_eval_local.keys[i];
+        js_eval_bridge.env_from_journal[binding_idx] = true;
+        js_eval_bridge.env_had_own[binding_idx] =
+            it2b(js_has_own_property(global, js_eval_bridge.env_keys[binding_idx]));
+        js_eval_bridge.env_old_values[binding_idx] = js_eval_bridge.env_had_own[binding_idx] ?
+            js_property_get(global, js_eval_bridge.env_keys[binding_idx]) : make_js_undefined();
+        js_property_set(global, js_eval_bridge.env_keys[binding_idx], js_eval_local.values[i]);
     }
 }
 
@@ -17253,28 +17205,24 @@ extern "C" void js_eval_global_lexical_push_frame(void) {
         js_eval_global_lexical_binding_count;
 }
 
-extern "C" void js_eval_local_push_frame(void) {
+extern "C" int64_t js_eval_local_push_frame(void) {
     if (js_eval_local_frame_depth >= JS_EVAL_LOCAL_FRAME_MAX) {
         log_error("js-eval-local: frame stack overflow");
-        return;
+        return 0;
     }
-    js_eval_local_frame_stack[js_eval_local_frame_depth++] = js_eval_local_binding_count;
-    js_eval_lexical_frame_stack[js_eval_lexical_frame_depth++] = js_eval_lexical_binding_count;
-    js_eval_immutable_frame_stack[js_eval_immutable_frame_depth++] = js_eval_immutable_binding_count;
+    JsEvalLocalFrameMarks* marks = &js_eval_local.frame_marks[js_eval_local_frame_depth++];
+    marks->local_mark = js_eval_local_binding_count;
+    marks->lexical_mark = js_eval_lexical_binding_count;
+    marks->immutable_mark = js_eval_immutable_binding_count;
+    return 1;
 }
 
 extern "C" void js_eval_local_pop_frame(void) {
     if (js_eval_local_frame_depth <= 0) return;
-    int frame_start = js_eval_local_frame_stack[--js_eval_local_frame_depth];
-    js_eval_local_binding_count = frame_start;
-    if (js_eval_lexical_frame_depth > 0) {
-        int lexical_frame_start = js_eval_lexical_frame_stack[--js_eval_lexical_frame_depth];
-        js_eval_lexical_binding_count = lexical_frame_start;
-    }
-    if (js_eval_immutable_frame_depth > 0) {
-        int immutable_frame_start = js_eval_immutable_frame_stack[--js_eval_immutable_frame_depth];
-        js_eval_immutable_binding_count = immutable_frame_start;
-    }
+    JsEvalLocalFrameMarks marks = js_eval_local.frame_marks[--js_eval_local_frame_depth];
+    js_eval_local_binding_count = marks.local_mark;
+    js_eval_lexical_binding_count = marks.lexical_mark;
+    js_eval_immutable_binding_count = marks.immutable_mark;
 }
 
 extern "C" void js_eval_private_push_frame(void) {
@@ -17298,17 +17246,22 @@ extern "C" void js_eval_private_bind(Item unscoped_key, Item scoped_key) {
         log_error("js-eval-private: binding stack overflow");
         return;
     }
-    JsEvalPrivateBinding* binding = &js_eval_private_bindings[js_eval_private_binding_count++];
-    binding->unscoped_key = unscoped_key;
-    binding->scoped_key = scoped_key;
+    int binding_idx = js_eval_private_binding_count++;
+    if (!js_root_range_ensure_registered(&js_eval_bridge.private_unscoped_key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_bridge.private_scoped_key_roots)) {
+        js_eval_private_binding_count--;
+        return;
+    }
+    js_eval_bridge.private_unscoped_keys[binding_idx] = unscoped_key;
+    js_eval_bridge.private_scoped_keys[binding_idx] = scoped_key;
 }
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key) {
     if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
     int frame_start = js_eval_private_frame_stack[js_eval_private_frame_depth - 1];
     for (int i = js_eval_private_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_private_bindings[i].unscoped_key, unscoped_key)) {
-            return js_eval_private_bindings[i].scoped_key;
+        if (js_with_binding_key_same(js_eval_bridge.private_unscoped_keys[i], unscoped_key)) {
+            return js_eval_bridge.private_scoped_keys[i];
         }
     }
     return ItemNull;
@@ -17316,74 +17269,78 @@ extern "C" Item js_eval_private_resolve(Item unscoped_key) {
 
 static int js_eval_local_find_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return -1;
-    int frame_start = js_eval_local_frame_stack[js_eval_local_frame_depth - 1];
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].local_mark;
     for (int i = js_eval_local_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_local_bindings[i].key, key)) return i;
+        if (js_with_binding_key_same(js_eval_local.keys[i], key)) return i;
     }
     return -1;
 }
 
 extern "C" Item js_eval_local_get_binding_or_fallback(Item key, Item fallback) {
     int idx = js_eval_local_find_binding(key);
-    return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
+    return idx >= 0 ? js_eval_local.values[idx] : fallback;
 }
 
 extern "C" void js_eval_local_export_var(Item key, Item value) {
     if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
     int idx = js_eval_local_find_binding(key);
     if (idx >= 0) {
-        js_eval_local_bindings[idx].value = value;
+        js_eval_local.values[idx] = value;
         return;
     }
     if (js_eval_local_binding_count >= JS_EVAL_LOCAL_BIND_MAX) {
         log_error("js-eval-local: binding stack overflow");
         return;
     }
-    JsEvalLocalBinding* binding = &js_eval_local_bindings[js_eval_local_binding_count++];
-    binding->key = key;
-    binding->value = value;
+    if (!js_root_range_ensure_registered(&js_eval_local.key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_local.value_roots)) return;
+    int binding_idx = js_eval_local_binding_count++;
+    js_eval_local.keys[binding_idx] = key;
+    js_eval_local.values[binding_idx] = value;
 }
 
 extern "C" void js_eval_local_note_lexical_binding(Item key) {
-    if (js_eval_lexical_frame_depth <= 0) return;
-    int frame_start = js_eval_lexical_frame_stack[js_eval_lexical_frame_depth - 1];
+    if (js_eval_local_frame_depth <= 0) return;
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark;
     for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_lexical_bindings[i], key)) return;
+        if (js_with_binding_key_same(js_eval_local.lexical_keys[i], key)) return;
     }
     if (js_eval_lexical_binding_count >= JS_EVAL_LEXICAL_BIND_MAX) {
         log_error("js-eval-lexical: binding stack overflow");
         return;
     }
-    js_eval_lexical_bindings[js_eval_lexical_binding_count++] = key;
+    if (!js_root_range_ensure_registered(&js_eval_local.lexical_key_roots)) return;
+    js_eval_local.lexical_keys[js_eval_lexical_binding_count++] = key;
 }
 
 extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
-    if (js_eval_lexical_frame_depth <= 0) return 0;
-    int frame_start = js_eval_lexical_frame_stack[js_eval_lexical_frame_depth - 1];
+    if (js_eval_local_frame_depth <= 0) return 0;
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark;
     for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_lexical_bindings[i], key)) return 1;
+        if (js_with_binding_key_same(js_eval_local.lexical_keys[i], key)) return 1;
     }
     return 0;
 }
 
 extern "C" void js_eval_local_note_immutable_binding(Item key) {
-    if (js_eval_immutable_frame_depth <= 0) return;
-    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    if (js_eval_local_frame_depth <= 0) return;
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark;
     for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return;
+        if (js_with_binding_key_same(js_eval_local.immutable_keys[i], key)) return;
     }
     if (js_eval_immutable_binding_count >= JS_EVAL_IMMUTABLE_BIND_MAX) {
         log_error("js-eval-immutable: binding stack overflow");
         return;
     }
-    js_eval_immutable_bindings[js_eval_immutable_binding_count++] = key;
+    if (!js_root_range_ensure_registered(&js_eval_local.immutable_key_roots)) return;
+    js_eval_local.immutable_keys[js_eval_immutable_binding_count++] = key;
 }
 
 extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
-    if (js_eval_immutable_frame_depth <= 0) return 0;
-    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    if (js_eval_local_frame_depth <= 0) return 0;
+    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark;
     for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return 1;
+        if (js_with_binding_key_same(js_eval_local.immutable_keys[i], key)) return 1;
     }
     return 0;
 }
@@ -17394,12 +17351,15 @@ extern "C" void js_eval_env_bind(Item key, Item value) {
         log_error("js-eval-env: binding stack overflow");
         return;
     }
+    if (!js_root_range_ensure_registered(&js_eval_bridge.env_key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_bridge.env_old_value_roots)) return;
     Item global = js_get_global_this();
-    JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
-    binding->key = key;
-    binding->from_journal = false;
-    binding->had_own = it2b(js_has_own_property(global, key));
-    binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
+    int binding_idx = js_eval_env_binding_count++;
+    js_eval_bridge.env_keys[binding_idx] = key;
+    js_eval_bridge.env_from_journal[binding_idx] = false;
+    js_eval_bridge.env_had_own[binding_idx] = it2b(js_has_own_property(global, key));
+    js_eval_bridge.env_old_values[binding_idx] = js_eval_bridge.env_had_own[binding_idx] ?
+        js_property_get(global, key) : make_js_undefined();
     js_property_set(global, key, value);
 }
 
@@ -17409,11 +17369,14 @@ extern "C" void js_eval_global_lexical_bind(Item key, Item value) {
         log_error("js-eval-global-lexical: binding stack overflow");
         return;
     }
+    if (!js_root_range_ensure_registered(&js_eval_bridge.global_lexical_key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_bridge.global_lexical_old_value_roots)) return;
     Item global = js_get_global_this();
-    JsEvalEnvBinding* binding = &js_eval_global_lexical_bindings[js_eval_global_lexical_binding_count++];
-    binding->key = key;
-    binding->had_own = it2b(js_has_own_property(global, key));
-    binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
+    int binding_idx = js_eval_global_lexical_binding_count++;
+    js_eval_bridge.global_lexical_keys[binding_idx] = key;
+    js_eval_bridge.global_lexical_had_own[binding_idx] = it2b(js_has_own_property(global, key));
+    js_eval_bridge.global_lexical_old_values[binding_idx] =
+        js_eval_bridge.global_lexical_had_own[binding_idx] ? js_property_get(global, key) : make_js_undefined();
     js_property_set(global, key, value);
 }
 
@@ -17421,7 +17384,7 @@ extern "C" int64_t js_eval_env_has_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return 0;
     int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
     for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_env_bindings[i].key, key)) return 1;
+        if (js_with_binding_key_same(js_eval_bridge.env_keys[i], key)) return 1;
     }
     return 0;
 }
@@ -17434,36 +17397,39 @@ extern "C" void js_eval_env_track_global_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return;
     int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
     for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_env_bindings[i].key, key)) return;
+        if (js_with_binding_key_same(js_eval_bridge.env_keys[i], key)) return;
     }
     if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
         log_error("js-eval-env: binding stack overflow");
         return;
     }
+    if (!js_root_range_ensure_registered(&js_eval_bridge.env_key_roots) ||
+        !js_root_range_ensure_registered(&js_eval_bridge.env_old_value_roots)) return;
     Item global = js_get_global_this();
-    JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
-    binding->key = key;
-    binding->from_journal = false;
-    binding->had_own = it2b(js_has_own_property(global, key));
-    binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
+    int binding_idx = js_eval_env_binding_count++;
+    js_eval_bridge.env_keys[binding_idx] = key;
+    js_eval_bridge.env_from_journal[binding_idx] = false;
+    js_eval_bridge.env_had_own[binding_idx] = it2b(js_has_own_property(global, key));
+    js_eval_bridge.env_old_values[binding_idx] = js_eval_bridge.env_had_own[binding_idx] ?
+        js_property_get(global, key) : make_js_undefined();
 }
 
-static void js_eval_restore_global_binding(Item global, JsEvalEnvBinding* binding) {
-    if (binding->had_own) {
-        js_property_set(global, binding->key, binding->old_value);
+static void js_eval_restore_global_binding(Item global, Item key, Item old_value, bool had_own) {
+    if (had_own) {
+        js_property_set(global, key, old_value);
         return;
     }
-    if (get_type_id(binding->key) == LMD_TYPE_STRING) {
-        String* key = it2s(binding->key);
-        if (key && key->len > 0 && key->len < 200) {
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* key_string = it2s(key);
+        if (key_string && key_string->len > 0 && key_string->len < 200) {
             // Pending eval SyntaxErrors make ordinary delete short-circuit;
             // tombstone bridge-created globals directly while preserving the throw.
-            js_shape_mark_deleted_own(global, key->chars, (int)key->len,
+            js_shape_mark_deleted_own(global, key_string->chars, (int)key_string->len,
                                       /*create_if_missing=*/false);
             return;
         }
     }
-    js_delete_property(global, binding->key);
+    js_delete_property(global, key);
 }
 
 extern "C" void js_eval_env_pop_frame(void) {
@@ -17471,18 +17437,20 @@ extern "C" void js_eval_env_pop_frame(void) {
     int frame_start = js_eval_env_frame_stack[--js_eval_env_frame_depth];
     Item global = js_get_global_this();
     while (js_eval_env_binding_count > frame_start) {
-        JsEvalEnvBinding* binding = &js_eval_env_bindings[--js_eval_env_binding_count];
-        if (binding->from_journal) {
+        int binding_idx = --js_eval_env_binding_count;
+        Item key = js_eval_bridge.env_keys[binding_idx];
+        if (js_eval_bridge.env_from_journal[binding_idx]) {
             // journal-origin vars have no static slot the caller could write
             // back to; assignments made by the eval'd code landed in the
             // bridged temporary global and must flow back into the journal
             // before the old global value is restored.
-            int idx = js_eval_local_find_binding(binding->key);
+            int idx = js_eval_local_find_binding(key);
             if (idx >= 0) {
-                js_eval_local_bindings[idx].value = js_property_get(global, binding->key);
+                js_eval_local.values[idx] = js_property_get(global, key);
             }
         }
-        js_eval_restore_global_binding(global, binding);
+        js_eval_restore_global_binding(global, key,
+            js_eval_bridge.env_old_values[binding_idx], js_eval_bridge.env_had_own[binding_idx]);
     }
 }
 
@@ -17491,9 +17459,10 @@ extern "C" void js_eval_global_lexical_pop_frame(void) {
     int frame_start = js_eval_global_lexical_frame_stack[--js_eval_global_lexical_frame_depth];
     Item global = js_get_global_this();
     while (js_eval_global_lexical_binding_count > frame_start) {
-        JsEvalEnvBinding* binding =
-            &js_eval_global_lexical_bindings[--js_eval_global_lexical_binding_count];
-        js_eval_restore_global_binding(global, binding);
+        int binding_idx = --js_eval_global_lexical_binding_count;
+        js_eval_restore_global_binding(global, js_eval_bridge.global_lexical_keys[binding_idx],
+            js_eval_bridge.global_lexical_old_values[binding_idx],
+            js_eval_bridge.global_lexical_had_own[binding_idx]);
     }
 }
 

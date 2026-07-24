@@ -1992,32 +1992,40 @@ weakening the rooting invariants.
 
 ## 17. JS runtime stack merges
 
-**Status:** decided 2026-07-24; implementation plan for all three merges in
-`Lambda_Impl_Merge_Stack.md`.
+**Status:** implemented 2026-07-24. The execution record and verification
+gates are in `Lambda_Impl_Merge_Stack.md`.
 
 Three merges are decided, one per kind of duplication:
 
 - **Merge A (lifetime):** the transient call-argument stack (`js_args_stack`)
   moves onto the side-root region — detailed below (§17.1).
-- **Merge B (mechanism):** the six-plus hand-rolled semantic context stacks
-  (Appendix A.2) share one `JsContextStack` helper with **non-optional**
-  epoch-guarded GC root registration, pop-time slot nulling, and a single
-  batch-reset registry. Each stack keeps its own storage and semantics; only
-  the boilerplate unifies. Motivated directly by the Appendix A audit: the
-  confirmed `js_with_stack` use-after-free existed because every stack
-  hand-rolls its own rooting and one forgot.
-- **Merge C (data):** the eval cluster — `js_eval_source_*`'s five parallel
-  arrays plus the six binding-journal frame-index stacks — collapses into one
-  `JsEvalFrame` stack (source info + journal watermarks) with a single
-  push/pop, replacing ~25 duplicated early-return cleanup sites in the eval
-  lowering. Binding *entry* arrays keep their watermark pattern unchanged.
-  Builds on Merge B for its `Item` members.
+- **Merge B (mechanism):** fixed global `Item` storage in Appendix A.2 shares
+  a `JsRootRange` base with **non-optional** epoch-guarded registration and
+  batch clearing. True single-Item stacks may layer `JsItemStack` depth /
+  push / pop / shrink operations over it; caches, whole-stack replay, middle
+  removal, POD companions, and multi-field journals retain their client-owned
+  semantics. Motivated directly by the Appendix A audit: the confirmed
+  `js_with_stack` use-after-free existed because every range hand-rolled its
+  own rooting and one forgot.
+- **Merge C (state ownership + lifetime-preserving data):** one
+  `JsEvalState`, embedded in `JsRuntimeState`, owns the source-context,
+  per-call bridge, and caller-local journal substates and centralizes their
+  reset/diagnostics. Those substates do **not** share one activation, depth, or
+  whole-state push/pop and must not collapse into one `JsEvalFrame`.
+  Consolidation stays within each lifetime: one source-context ownership
+  wrapper for `js_builtin_eval_with_options`, one
+  local/lexical/immutable watermark record, and an optional separate
+  env/global/private bridge token only if its conditional/writeback ordering
+  remains exact. Binding entry arrays retain their watermark pattern and
+  receive precise rooting through Merge B's `JsRootRange`; the mixed
+  `JsEvalState` bytes are never registered as one Item range.
 
 Explicitly rejected: any cross-semantic *data* merge of the context stacks
 (one tagged stack for with/domain/cjs/super) — different bracket lifetimes,
 non-LIFO capture/replay, and content-filtered walks make a shared array
-strictly worse — and any merge involving the number region, which stays on
-the non-scanned side of the GC boundary.
+strictly worse; one combined eval source/journal frame, because those
+structures bracket different owners and lifetimes; and any merge involving
+the number region, which stays on the non-scanned side of the GC boundary.
 
 ### 17.1 Merge A: call-argument stack → side-root region
 
@@ -2025,8 +2033,8 @@ LambdaJS lowers each call/new expression's evaluated arguments into a
 transient `Item[]` frame on a private bump stack
 (`js_args_stack` in `lambda/js/js_runtime_function.cpp`), bracketed by
 `js_args_save`/`js_args_restore` on both the normal and exceptional edges.
-That stack is a hand-rolled duplicate of the per-Context **side-root region**
-with strictly worse properties:
+That stack is a hand-rolled duplicate of the thread-local **side-root region**
+surfaced through the active `Context`, with strictly worse properties:
 
 - a fixed 2 MB `mem_calloc` buffer, resident for the process lifetime, versus
   the side-root's demand-paged reservation with post-GC decommit;
@@ -2037,16 +2045,21 @@ with strictly worse properties:
 - its own reset/cleanup lifecycle (`js_args_stack_reset`,
   `js_args_stack_cleanup`) outside the `LambdaRecoveryCheckpoint`
   snapshot/restore protocol that already governs both side regions;
-- a separate overflow fallback (`js_alloc_env`) instead of the uniform
-  side-stack overflow error.
+- an ownerless overflow fallback (`js_alloc_env`). The allocation is
+  traceable if marked but has no closure/function owner while later arguments
+  allocate, so it is not a valid precise root.
 
 **Decision:** argument frames move onto the side-root stack. A new primitive
 `lambda_side_root_alloc_n()` (the root-side twin of
 `lambda_side_number_alloc()`) reserves and zeroes `n` contiguous slots above
 `side_root_top`. The `js_args_*` entry points are reimplemented over it; the
-save/restore marks become saved `side_root_top` values, which the JIT may
-later inline as direct `Context` field loads/stores. Argument frames nest
-strictly LIFO between generated-frame root watermarks
+save/restore marks become saved `side_root_top` values. Allocation failure
+sets the uniform stack-overflow error and the emitter branches before its
+first slot write; it never falls back to an unowned heap environment. The JIT
+may later inline save/restore only if release MIR preserves the restore
+validity/order guard—a plain unconditional store can resurrect roots after an
+older exceptional restore. Argument frames nest strictly LIFO between
+generated-frame root watermarks
 (`caller roots → call args → callee roots → …`), so the existing prologue and
 epilogue watermark discipline of section 8 is unchanged, and an enclosing
 generated epilogue's watermark restore now also truncates any argument frame
@@ -2069,18 +2082,19 @@ side-stack merge candidate.
 
 ## Appendix A: JS runtime stack inventory
 
-Survey date 2026-07-24. Three families: the two per-Context side regions
-(lifetime/rooting infrastructure), semantic context stacks (fixed-size
-globals read by content), and diagnostics stacks (non-`Item`, GC-irrelevant).
+Survey date 2026-07-24. Three families: the two thread-local side regions
+surfaced through active-`Context` watermarks (lifetime/rooting infrastructure),
+semantic context stacks (fixed-size globals read by content), and diagnostics
+stacks (non-`Item`, GC-irrelevant).
 Only `js_args_stack` qualifies for a side-region merge (§17); every other
 entry fails at least one of: order-insensitive anonymous slots, strict LIFO
 nesting with generated frames, or `Item`-only payload.
 
-### A.1 Side regions (per-Context, watermark discipline)
+### A.1 Side regions (thread-local reservation, active-Context watermarks)
 
 | Stack | Location | Purpose | GC contract |
 |---|---|---|---|
-| **side_root** | `Context.side_root_*`; `lambda/runtime/side_stack.c` | Canonical `Item` root slots: generated-frame reservations (§8), native `RootFrame`/`Rooted` frames, and — after §17 — transient JS call-argument frames | Collector scans exactly `[base, top)`; demand-paged 16 MB reservation, post-GC decommit; LIFO watermarks enforced by `lambda_root_frame_end` |
+| **side_root** | thread-local region surfaced through `Context.side_root_*`; `lambda/runtime/side_stack.c` | Canonical `Item` root slots: generated-frame reservations (§8), native `RootFrame`/`Rooted` frames, and — after §17 — transient JS call-argument frames | Collector scans exactly `[base, top)`; demand-paged 16 MB reservation, post-GC decommit; LIFO watermarks enforced by `lambda_root_frame_end` |
 | **side_number** | `Context.side_number_*`; same file | Raw one-word scalar homes for transient `INT64`/`UINT64`/out-of-band `FLOAT` payloads (§8.7, §15) | **Never scanned** — cells are raw words, not `Item`s; per-frame watermark + caller-home adoption; debug pop poisons `0xA5` |
 
 The two regions are duals across the scan boundary and must never be merged
@@ -2090,13 +2104,13 @@ with each other or absorb structures from the wrong side.
 
 | Stack | Location | Depth | Purpose | GC rooting |
 |---|---|---|---|---|
-| `js_args_stack` | `js_runtime_function.cpp` | 256 K Items | Transient call/new argument frames | Full-capacity root-range registration — **merging into side_root per §17** |
-| `js_with_stack` | `js_globals.cpp` | 16 | `with`-statement scope chain: top-down name-resolution walk + last-binding cache | **FIXED 2026-07-24**: was unregistered — confirmed use-after-free (`with ({…}) { … }` under `LAMBDA_GC_FORCE_EVERY=1` collected the scope object mid-body). Now epoch-guarded lazy root-range registration (`js_with_register_roots`, same pattern as `js_eval_source_register_roots`) covering the 16-slot array plus the two last-binding cache slots; pop/restore-depth/set-stack null unwound slots; batch reset clears the cache Items. Regression gate: `test/js/regression_with_stack_gc.js` in `test-gc-rooting-core` + baseline. (Separate finding while testing: `with (primitive)` still fails under forced GC because String-wrapper objects don't trace their wrapped value — pre-existing wrapper bug, not a with-stack issue; spawned as task_ce716fbc) |
-| `js_eval_source_*` | `js_runtime_state.cpp` | 16 | Nested `eval()` source context (filename, source, line/col offsets, compact flag) for `Error.stack` synthesis | Two `Item` arrays root-range registered lazily per heap epoch |
-| eval-env binding journals | `js_globals.cpp` (`js_eval_env_*` et al.) | 6 paired journals, 32–512 entries | Bindings introduced by direct eval into enclosing scopes (env with old-value restore, global-lexical, local, lexical, immutable, private), popped per eval frame | No dedicated registration. Forced-GC probe of the local-binding read path passed 2026-07-24 (value apparently duplicated in a rooted structure); the `old_value` restore path remains unverified |
-| `js_domain_stack` | `js_runtime.cpp` | 64 | Node `domain` module: active domain chain, mirrored to `process.domain`, capture/replay for async continuations | Whole array root-range registered once |
-| `js_cjs_module_stack` | `js_mir_entrypoints_require.cpp` | `JS_CJS_STACK_MAX` | Current `module` object chain for nested CommonJS `require()` | Root-range registered; cleared on batch reset |
-| `super_this_*` stacks | `js_runtime_state.hpp` (128-pair `bool`/`Item`) | 128 | Derived-constructor `this` binding across `super()` (TDZ tracking) | Not separately registered, but protected in practice: super lowering immediately writes `bound_this` into the rooted lexical-`this` env binding (`jm_emit_super_bind_this_with_public_fields`), so the stack entry is a duplicate reference; forced-GC probe passed 2026-07-24 |
+| `js_args_stack` | removed | — | Transient call/new argument frames | Replaced by exact live slots in the active `Context` side-root region; no private capacity or lifecycle remains |
+| `js_with_stack` | `js_globals.cpp` | 16 | `with`-statement scope chain: top-down name-resolution walk + last-binding cache | **FIXED 2026-07-24**: was unregistered — confirmed use-after-free (`with ({…}) { … }` under `LAMBDA_GC_FORCE_EVERY=1` collected the scope object mid-body). Now epoch-guarded lazy root-range registration (`js_with_register_roots`, same pattern as `js_eval_source_register_roots`) covering the 16-slot array plus the two last-binding cache slots; pop/restore-depth/set-stack null unwound slots; batch reset clears the cache Items. Regression gate: `test/js/regression_with_stack_gc.js` in `test-gc-rooting-core` + baseline. **Two further use-after-frees in the same machinery were found and fixed 2026-07-24 while extending the test:** (a) the primitive-wrapper builders `js_new_string/number/boolean_wrapper` and the Symbol/BigInt cases of `js_to_object` (`js_runtime.cpp`) built the wrapper across many allocating calls (class stamp clones the typemap, `heap_create_name`, `js_to_string`, `js_property_set`) while `obj` sat in an unrooted local → a mid-construction GC freed the half-built map (this was the reported "String-wrapper" bug, ex task_ce716fbc); now `RootFrame`/`Rooted` around every builder. (b) the **call-boundary saved with-scope** (`js_call_function_impl` ×2 + the `vm` eval path, `js_runtime.cpp`): a `with` scope must not leak into a callee, so the caller's active scope is copied into a native-stack `Item saved_with_stack[16]` and the callee's own with-env installed; that native copy was the only live reference while the callee ran, so a GC inside the callee freed the caller's still-live scope object and the restore wrote a dangling pointer back. Fixed with a `JsSavedWithScopeRoots` RAII guard that registers the saved array as a GC root range for the callee span (only when depth>0) and unregisters before the native frame returns. This one hit plain call-result operands too (`with (mk()) { churn(); … }`), not just wrappers. |
+| `js_eval_source_*` | `JsRuntimeState.eval.source` in `js_runtime_state.cpp` | 16 | Source context (filename, source, line/col offsets, compact flag) for `Error.stack` synthesis in nested eval and VM-provided compact function sources | Two exact `JsRootRange`s; source depth remains independent of bridge/local state |
+| eval binding journals | `JsRuntimeState.eval.bridge/local` with operations in `js_globals.cpp` | 6 paired journals, 32–512 entries | Bindings introduced by direct eval into enclosing scopes: env/global/private bridges are per call, while local/lexical/immutable state persists until the generated caller exits | Each `Item` column has a precise `JsRootRange`; bridge and local marks remain distinct lifetime APIs |
+| `js_domain_stack` | `js_runtime.cpp` | 64 | Node `domain` module: active domain chain, mirrored to `process.domain`, capture/replay for async continuations | `JsItemStack`; replay/filtering remains client-owned |
+| `js_cjs_module_stack` | `js_mir_entrypoints_require.cpp` | `JS_CJS_STACK_MAX` | Current `module` object chain for nested CommonJS `require()` | `JsItemStack`; separate module-name/object table roots remain client-owned |
+| `super_this_*` stacks | `js_runtime_state.hpp` (128-pair `bool`/`Item`) | 128 | Derived-constructor `this` binding across `super()` (TDZ tracking) | `JsItemStack` for exact Item roots; parallel bound-state booleans remain client-owned |
 
 None of these merge into side_root: they are read by content (scope walks,
 capture/replay, old-value restore), several have non-`Item` companion data

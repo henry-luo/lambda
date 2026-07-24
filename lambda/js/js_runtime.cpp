@@ -388,10 +388,10 @@ static const int JS_BOUND_TARGET_KEY_LEN = 16;
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
-extern "C" void js_eval_source_push(Item filename, Item source,
-                                    int64_t line_offset, int64_t column_offset);
-extern "C" void js_eval_source_push_compact(Item filename, Item source,
-                                            int64_t line_offset, int64_t column_offset);
+extern "C" int64_t js_eval_source_push(Item filename, Item source,
+                                        int64_t line_offset, int64_t column_offset);
+extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
+                                                int64_t line_offset, int64_t column_offset);
 extern "C" void js_eval_source_pop(void);
 
 static inline Item js_native_function_source_item() {
@@ -402,12 +402,12 @@ static bool js_function_has_vm_stack_source(JsFunction* fn) {
     return fn && fn->vm_stack_filename && fn->vm_stack_source;
 }
 
-static void js_function_push_vm_stack_source(JsFunction* fn) {
-    if (!js_function_has_vm_stack_source(fn)) return;
-    js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
-                                (Item){.item = s2it(fn->vm_stack_source)},
-                                fn->vm_stack_line_offset,
-                                fn->vm_stack_column_offset);
+static bool js_function_push_vm_stack_source(JsFunction* fn) {
+    if (!js_function_has_vm_stack_source(fn)) return false;
+    return js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
+                                       (Item){.item = s2it(fn->vm_stack_source)},
+                                       fn->vm_stack_line_offset,
+                                       fn->vm_stack_column_offset) != 0;
 }
 
 struct JsGlobalVarModuleBinding {
@@ -12907,9 +12907,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
 static void js_super_this_binding_push(Item initial_this) {
     if (js_super_this_bound_depth >= 128) return;
+    if (!js_item_stack_push(&js_runtime_state.super_this_values, initial_this)) {
+        log_error("js-super-this: failed to publish constructor binding root");
+        return;
+    }
     js_super_this_bound_stack[js_super_this_bound_depth] = false;
-    js_super_this_value_stack[js_super_this_bound_depth] = initial_this;
-    js_super_this_bound_depth++;
 }
 
 static Item js_throw_super_called_twice(void) {
@@ -12926,8 +12928,7 @@ static Item js_super_this_binding_finish(Item result) {
     bool initialized = js_super_this_bound_stack[idx];
     Item bound_this = js_super_this_value_stack[idx];
     js_super_this_bound_stack[idx] = false;
-    js_super_this_value_stack[idx] = (Item){0};
-    js_super_this_bound_depth--;
+    js_item_stack_pop(&js_runtime_state.super_this_values);
 
     if (js_check_exception()) return result;
     if (js_is_object_constructor_result(result)) return result;
@@ -13118,6 +13119,34 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
 
 static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home);
+
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
+extern "C" void heap_unregister_gc_root_range(uint64_t* base);
+
+// A `with` scope must not leak into a called function, so the call boundary
+// copies the caller's active with-scope objects into a native-stack array and
+// installs the callee's own (usually empty) with-env into the global stack.
+// That native copy is then the ONLY live reference to those scope objects while
+// the callee runs, so a GC during the callee would free them and the post-call
+// restore would write dangling pointers back. This RAII guard registers the
+// saved array as an exact GC root range for exactly that span and unregisters
+// before the native frame returns (by which point the values are back in the
+// GC-rooted global with-stack). Only pays a cost when a with-scope is actually
+// active across the call (depth > 0).
+struct JsSavedWithScopeRoots {
+    uint64_t* base;
+    JsSavedWithScopeRoots(Item* stack, int depth) : base(nullptr) {
+        if (depth > 0) {
+            base = (uint64_t*)stack;
+            heap_register_gc_root_range(base, depth);
+        }
+    }
+    ~JsSavedWithScopeRoots() {
+        if (base) heap_unregister_gc_root_range(base);
+    }
+    JsSavedWithScopeRoots(const JsSavedWithScopeRoots&) = delete;
+    JsSavedWithScopeRoots& operator=(const JsSavedWithScopeRoots&) = delete;
+};
 
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
@@ -13646,6 +13675,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         // Enter the callee's lexical with-environment, then restore caller state.
         Item saved_with_stack[16];
         int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+        JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
         if (fn->func_ptr || fn->with_env_depth > 0) {
             js_with_set_stack(fn->with_env, fn->with_env_depth);
         }
@@ -13668,8 +13698,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
             js_current_private_home_class = method_home_class;
             js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
-        bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
-        if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
+        bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc, invoke_result_home);
         if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
@@ -13725,6 +13754,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     // Enter the callee's lexical with-environment, then restore caller state.
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
     if (fn->func_ptr || fn->with_env_depth > 0) {
         js_with_set_stack(fn->with_env, fn->with_env_depth);
     }
@@ -13748,8 +13778,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
-    bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
-    if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
+    bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
@@ -15691,7 +15720,11 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
     rd->unicode = ce.has_unicode;
     rd->has_indices = ce.has_indices;
-    Item regex_obj = js_new_object();
+    RootFrame roots((Context*)context, 2);
+    // Creating each property can allocate; keep the half-built RegExp rooted
+    // until its own property map becomes the durable owner of the values.
+    Rooted<Item> regex_obj_root(roots, js_new_object());
+    Item regex_obj = regex_obj_root.get();
     heap_create_name(JS_REGEX_DATA_KEY);
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
     js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
@@ -15735,12 +15768,13 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     js_mark_non_configurable(regex_obj, li_key);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
-    Item regexp_proto = js_get_regexp_prototype();
+    Rooted<Item> regexp_proto_root(roots, js_get_regexp_prototype());
+    Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
         heap_create_name("__proto__", 9);
         js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
     }
-    return regex_obj;
+    return regex_obj_root.get();
 }
 
 static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
@@ -17147,7 +17181,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern_len = literal_len;
     }
     // create a Map object and set properties
-    Item regex_obj = js_new_object();
+    RootFrame regex_roots((Context*)context, 2);
+    // Every following property setup can allocate. Keep the object and its
+    // eventual prototype alive until the map owns the completed graph.
+    Rooted<Item> regex_obj_root(regex_roots, js_new_object());
+    Item regex_obj = regex_obj_root.get();
     // store regex data pointer as int in hidden property
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
@@ -17216,7 +17254,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     js_mark_non_configurable(regex_obj, li_key);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides work
-    Item regexp_proto = js_get_regexp_prototype();
+    Rooted<Item> regexp_proto_root(regex_roots, js_get_regexp_prototype());
+    Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(regex_obj, proto_key, regexp_proto);
@@ -17239,7 +17278,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                                              (int)strlen(flg_buf), dot_all, compile_info.has_indices,
                                              has_unicode, compile_info.unicode_sets};
     }
-    return regex_obj;
+    return regex_obj_root.get();
 }
 
 // Create a RegExp from a source literal string like "/pattern/flags".
@@ -28116,12 +28155,18 @@ static void js_wrapper_set_proto(Item obj, const char* ctor_name, int ctor_len) 
 
 // Create a Number wrapper object with [[NumberData]] in __primitiveValue__.
 extern "C" Item js_new_number_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_NUMBER);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    js_property_set(obj, pv_key, js_to_number(arg));
-    js_wrapper_set_proto(obj, "Number", 6);
-    return obj;
+    // Every step here allocates (class stamp clones the typemap, heap_create_name,
+    // js_to_number, js_property_set can grow the map, wrapper_set_proto reads the
+    // constructor). The half-built wrapper is referenced only by this local, so
+    // it must stay exact-rooted or a collection mid-construction frees it.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    js_class_stamp(obj_root.get(), JS_CLASS_NUMBER);
+    js_property_set(obj_root.get(), pv_key_root.get(), js_to_number(arg_root.get()));
+    js_wrapper_set_proto(obj_root.get(), "Number", 6);
+    return obj_root.get();
 }
 
 // ES spec: new Number(arg) — checks symbol before creating wrapper
@@ -28139,32 +28184,43 @@ extern "C" Item js_new_number_checked(Item arg) {
 
 // Create a Boolean wrapper object
 extern "C" Item js_new_boolean_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_BOOLEAN);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    js_property_set(obj, pv_key, js_to_boolean(arg));
-    js_wrapper_set_proto(obj, "Boolean", 7);
-    return obj;
+    // See js_new_number_wrapper: keep the unfinished wrapper exact-rooted across
+    // every allocating construction step.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    js_class_stamp(obj_root.get(), JS_CLASS_BOOLEAN);
+    js_property_set(obj_root.get(), pv_key_root.get(), js_to_boolean(arg_root.get()));
+    js_wrapper_set_proto(obj_root.get(), "Boolean", 7);
+    return obj_root.get();
 }
 
 // Create a String wrapper object
 extern "C" Item js_new_string_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_STRING);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    Item str_val = js_to_string(arg);
-    js_property_set(obj, pv_key, str_val);
+    // See js_new_number_wrapper: the wrapper is built across many allocating
+    // calls (class stamp, two heap_create_name keys, js_to_string, two
+    // js_property_set, wrapper_set_proto, three attr marks) while referenced only
+    // by these locals — all must stay exact-rooted so a mid-construction
+    // collection cannot free the half-built map or the wrapped string.
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    Rooted<Item> str_val_root(roots, js_to_string(arg_root.get()));
+    js_class_stamp(obj_root.get(), JS_CLASS_STRING);
+    js_property_set(obj_root.get(), pv_key_root.get(), str_val_root.get());
     // Also set length property
-    String* s = it2s(str_val);
+    String* s = it2s(str_val_root.get());
     int len = s ? (int)js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Rooted<Item> len_key_root(roots, (Item){.item = s2it(heap_create_name("length", 6))});
     Item len_val = (Item){.item = i2it(len)};
-    js_property_set(obj, len_key, len_val);
-    js_wrapper_set_proto(obj, "String", 6);
-    js_mark_non_writable(obj, len_key);
-    js_mark_non_enumerable(obj, len_key);
-    js_mark_non_configurable(obj, len_key);
-    return obj;
+    js_property_set(obj_root.get(), len_key_root.get(), len_val);
+    js_wrapper_set_proto(obj_root.get(), "String", 6);
+    js_mark_non_writable(obj_root.get(), len_key_root.get());
+    js_mark_non_enumerable(obj_root.get(), len_key_root.get());
+    js_mark_non_configurable(obj_root.get(), len_key_root.get());
+    return obj_root.get();
 }
 
 // ToObject conversion: wraps primitives into their corresponding wrapper objects
@@ -28175,26 +28231,33 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
     // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-        Item obj = js_new_object();
-        js_class_stamp(obj, JS_CLASS_SYMBOL);
-        Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-        js_property_set(obj, pv_key, value);
-        js_wrapper_set_proto(obj, "Symbol", 6);
-        return obj;
+        // exact-root the half-built wrapper across the allocating steps (see
+        // js_new_number_wrapper) — an unrooted obj is freed by a mid-build GC.
+        RootFrame roots((Context*)context, 3);
+        Rooted<Item> value_root(roots, value);
+        Rooted<Item> obj_root(roots, js_new_object());
+        Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+        js_class_stamp(obj_root.get(), JS_CLASS_SYMBOL);
+        js_property_set(obj_root.get(), pv_key_root.get(), value_root.get());
+        js_wrapper_set_proto(obj_root.get(), "Symbol", 6);
+        return obj_root.get();
     }
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
     if (js_is_bigint_egress(value)) {
-        // BigInt wrapper object with __primitiveValue__
-        Item obj = js_new_object();
-        js_class_stamp(obj, JS_CLASS_BIGINT);
-        Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+        // BigInt wrapper object with __primitiveValue__; exact-root as above.
+        RootFrame roots((Context*)context, 4);
+        Rooted<Item> value_root(roots, value);
+        Rooted<Item> obj_root(roots, js_new_object());
+        Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+        js_class_stamp(obj_root.get(), JS_CLASS_BIGINT);
         // native int64/uint64 egress as BigInt, but wrapper methods require the
         // canonical mpdec-unlimited representation in [[BigIntData]].
-        Item pv = js_is_native_bigint_egress(value) ? js_native_bigint_to_bigint(value) : value;
-        js_property_set(obj, pv_key, pv);
-        js_wrapper_set_proto(obj, "BigInt", 6);
-        return obj;
+        Rooted<Item> pv_root(roots, js_is_native_bigint_egress(value_root.get())
+            ? js_native_bigint_to_bigint(value_root.get()) : value_root.get());
+        js_property_set(obj_root.get(), pv_key_root.get(), pv_root.get());
+        js_wrapper_set_proto(obj_root.get(), "BigInt", 6);
+        return obj_root.get();
     }
     // null and undefined throw TypeError in spec, but return empty object here for safety
     return js_new_object();
@@ -30423,8 +30486,11 @@ static int js_promise_unhandled_queue_count = 0;
 static bool js_promise_unhandled_strict = false;
 static Item js_domain_current = {0};
 static Item js_domain_namespace = {0};
-static Item js_domain_stack[64];
-static int js_domain_stack_count = 0;
+static Item js_domain_stack_slots[64];
+static JsItemStack js_domain_stack_state = {{js_domain_stack_slots, 64, 0,
+                                              "domain stack"}, 0};
+#define js_domain_stack (js_domain_stack_state.roots.slots)
+#define js_domain_stack_count (js_domain_stack_state.depth)
 
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_async_hooks_get_current_resource(void);
@@ -30473,18 +30539,19 @@ extern "C" Item js_domain_capture_async_stack(void) {
 }
 
 static void js_domain_apply_stack(Item stack) {
-    js_domain_stack_count = 0;
+    if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return;
+    js_item_stack_clear(&js_domain_stack_state);
     if (get_type_id(stack) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stack);
         if (len > 64) len = 64;
         for (int64_t i = 0; i < len; i++) {
             Item domain = js_array_get_int(stack, i);
             if (js_domain_is_domain_item(domain)) {
-                js_domain_stack[js_domain_stack_count++] = domain;
+                if (!js_item_stack_push(&js_domain_stack_state, domain)) break;
             }
         }
     } else if (js_domain_is_domain_item(stack)) {
-        js_domain_stack[js_domain_stack_count++] = stack;
+        js_item_stack_push(&js_domain_stack_state, stack);
     }
     js_domain_sync_visible_state();
 }
@@ -30501,7 +30568,7 @@ extern "C" void js_domain_restore_stack(Item previous) {
 
 static void js_domain_push(Item domain) {
     if (!js_domain_is_domain_item(domain)) return;
-    if (js_domain_stack_count < 64) js_domain_stack[js_domain_stack_count++] = domain;
+    if (js_domain_stack_count < 64) js_item_stack_push(&js_domain_stack_state, domain);
     js_domain_sync_visible_state();
 }
 
@@ -30515,10 +30582,11 @@ extern "C" Item js_domain_set_current(Item domain) {
     TypeId domain_type = get_type_id(domain);
     if (domain.item == 0 || domain_type == LMD_TYPE_UNDEFINED ||
         domain_type == LMD_TYPE_NULL || domain.item == ItemNull.item) {
-        js_domain_stack_count = 0;
+        js_item_stack_clear(&js_domain_stack_state);
     } else {
-        js_domain_stack_count = 1;
-        js_domain_stack[0] = domain;
+        if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return previous;
+        js_item_stack_clear(&js_domain_stack_state);
+        js_item_stack_push(&js_domain_stack_state, domain);
     }
     js_domain_sync_visible_state();
     return previous;
@@ -30542,7 +30610,7 @@ static bool js_domain_emit_error_at(Item domain, Item error, int parent_count) {
 
     if (parent_count < 0) parent_count = 0;
     if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
-    js_domain_stack_count = parent_count;
+    js_item_stack_shrink(&js_domain_stack_state, parent_count);
     // An empty domain stack exposes process.domain as undefined; overriding it
     // with null here broke root error handlers and their inherited async context.
     js_domain_sync_visible_state();
@@ -30602,7 +30670,7 @@ static void js_promise_register_roots_once() {
     }
     heap_register_gc_root(&js_domain_current.item);
     heap_register_gc_root(&js_domain_namespace.item);
-    heap_register_gc_root_range((uint64_t*)js_domain_stack, 64);
+    js_root_range_ensure_registered(&js_domain_stack_state.roots);
     // Batch heap replacement discards the old registry while these static
     // addresses survive, so registration is once per heap epoch, not process.
     roots_epoch = epoch;
@@ -34213,6 +34281,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     Item prev_global = js_vm_swap_global_this(sandbox);
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
     js_with_push(sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
@@ -35551,8 +35620,9 @@ static Item js_domain_run(Item fn) {
         Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
         if (js_check_exception()) {
             Item error = js_clear_exception();
-            js_domain_stack_count = parent_count + 1;
-            if (js_domain_stack_count > 64) js_domain_stack_count = 64;
+            int restore_depth = parent_count + 1;
+            if (restore_depth > 64) restore_depth = 64;
+            js_item_stack_shrink(&js_domain_stack_state, restore_depth);
             js_domain_sync_visible_state();
             bool handled = js_domain_emit_error_at(self, error, parent_count);
             if (!handled && !js_check_exception()) {
@@ -35579,7 +35649,7 @@ static Item js_domain_enter(void) {
 }
 
 static Item js_domain_exit(void) {
-    if (js_domain_stack_count > 0) js_domain_stack_count--;
+    if (js_domain_stack_count > 0) js_item_stack_pop(&js_domain_stack_state);
     js_domain_sync_visible_state();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -39785,12 +39855,15 @@ extern "C" Item js_module_namespace_create(Item exports_map) {
 // =============================================================================
 
 extern "C" Item js_text_encoder_new(void) {
-    Item obj = js_new_object();
-    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
-    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
-    js_property_set(obj, k, v);
-    js_class_stamp(obj, JS_CLASS_TEXT_ENCODER);
-    return obj;
+    // exact-root the object across the allocating property-set and class-stamp
+    // (typemap clone) — an unrooted obj is freed by a mid-construction GC.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> k_root(roots, (Item){.item = s2it(heap_create_name("encoding"))});
+    Rooted<Item> v_root(roots, (Item){.item = s2it(heap_create_name("utf-8"))});
+    js_property_set(obj_root.get(), k_root.get(), v_root.get());
+    js_class_stamp(obj_root.get(), JS_CLASS_TEXT_ENCODER);
+    return obj_root.get();
 }
 
 static int js_text_encoder_utf8_len(const char* chars, int byte_len) {
@@ -40165,12 +40238,17 @@ extern "C" Item js_weakref_new(Item target) {
     if (!js_can_be_held_weakly(target)) {
         return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
     }
-    Item obj = js_new_object();
-    js_collection_link_prototype(obj, "WeakRef", 7);
-    js_class_stamp(obj, JS_CLASS_WEAK_REF);
-    Item target_key = (Item){.item = s2it(heap_create_name("__weakref_target__", 18))};
-    js_property_set(obj, target_key, target);
-    return obj;
+    // exact-root obj (and the borrowed target) across prototype link, class
+    // stamp, key alloc, and property set — an unrooted obj is freed by a
+    // mid-construction GC.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> obj_root(roots, js_new_object());
+    js_collection_link_prototype(obj_root.get(), "WeakRef", 7);
+    js_class_stamp(obj_root.get(), JS_CLASS_WEAK_REF);
+    Rooted<Item> target_key_root(roots, (Item){.item = s2it(heap_create_name("__weakref_target__", 18))});
+    js_property_set(obj_root.get(), target_key_root.get(), target_root.get());
+    return obj_root.get();
 }
 
 extern "C" Item js_weakref_deref(Item this_val) {
@@ -40189,14 +40267,20 @@ extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
     if (get_type_id(cleanup_callback) != LMD_TYPE_FUNC) {
         return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
     }
-    Item obj = js_new_object();
-    js_collection_link_prototype(obj, "FinalizationRegistry", 20);
-    js_class_stamp(obj, JS_CLASS_FINALIZATION_REGISTRY);
-    Item cb_key = (Item){.item = s2it(heap_create_name("__fr_cleanup__", 14))};
-    js_property_set(obj, cb_key, cleanup_callback);
-    Item cells_key = (Item){.item = s2it(heap_create_name("__fr_cells__", 12))};
-    js_property_set(obj, cells_key, js_array_new(0));
-    return obj;
+    // exact-root obj (and the borrowed callback) across prototype link, class
+    // stamp, two key allocs, the cells array alloc, and two property sets — an
+    // unrooted obj is freed by a mid-construction GC (register() would then be
+    // missing from the collected object).
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> cleanup_root(roots, cleanup_callback);
+    Rooted<Item> obj_root(roots, js_new_object());
+    js_collection_link_prototype(obj_root.get(), "FinalizationRegistry", 20);
+    js_class_stamp(obj_root.get(), JS_CLASS_FINALIZATION_REGISTRY);
+    Rooted<Item> cb_key_root(roots, (Item){.item = s2it(heap_create_name("__fr_cleanup__", 14))});
+    js_property_set(obj_root.get(), cb_key_root.get(), cleanup_root.get());
+    Rooted<Item> cells_key_root(roots, (Item){.item = s2it(heap_create_name("__fr_cells__", 12))});
+    js_property_set(obj_root.get(), cells_key_root.get(), js_array_new(0));
+    return obj_root.get();
 }
 
 static Item js_finalization_registry_cells(Item registry) {
@@ -40371,8 +40455,7 @@ void js_deep_batch_reset() {
     js_promise_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
-    memset(js_domain_stack, 0, sizeof(js_domain_stack));
-    js_domain_stack_count = 0;
+    js_item_stack_clear(&js_domain_stack_state);
     memset(js_async_contexts, 0, sizeof(js_async_contexts));
     js_async_context_count = 0;
     memset(js_als_instances, 0, sizeof(js_als_instances));
