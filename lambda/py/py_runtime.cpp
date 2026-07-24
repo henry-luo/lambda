@@ -1462,13 +1462,10 @@ extern "C" Item py_delattr(Item object, Item name) {
 
 extern "C" Item py_list_new(int length) {
     Array* arr = array();
-    if (length > 0) {
-        arr->capacity = length + 4;
-        arr->items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_PY_RUNTIME);
-        arr->length = length;
-        for (int i = 0; i < length; i++) {
-            arr->items[i] = ItemNull;
-        }
+    for (int i = 0; i < length; i++) {
+        // Array payloads must come from the runtime data zone so GC teardown
+        // releases them; a tracked side allocation leaks when the list dies.
+        array_push(arr, ItemNull);
     }
     return (Item){.array = arr};
 }

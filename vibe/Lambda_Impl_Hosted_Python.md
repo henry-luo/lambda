@@ -29,14 +29,14 @@ depends only on public Jube headers and entry points.
 | Stage | Live status | Main evidence or remaining gate |
 |---|---|---|
 | H0 | Partial | Deterministic coupling inventory and split Python GC target exist. ADR closure, dated evidence archive, and release baselines/performance evidence are missing. |
-| H1 | Substantially implemented | Architecture checker, strict script/golden inventory, configurable host, `requires_lang_python`, and absent-module package smoke exist. Checker self-tests and a fresh full baseline are missing. |
+| H1 | Substantially implemented | Architecture checker with synthetic regression self-tests, strict script/golden inventory, configurable host, `requires_lang_python`, absent-module package smoke, and a fresh Lambda baseline exist. Cross-platform and release-performance evidence is still missing. |
 | H2 | Partial | Size/version/capability/build-ID negotiation and partitioned service tables exist. The legacy JS-backed value table remains, and the requested ABI negative/conformance suite is not present. |
-| H3 | Operational final path; checkpoint coverage incomplete | Generic alias, `run --lang`, and extension dispatch exist; `main.cpp` has no Python branch. The temporary static Python checkpoint is already gone, but its full parity/registry test matrix is not archived. |
+| H3 | Operational final path; checkpoint coverage incomplete | Generic alias, `run --lang`, and extension dispatch exist; `main.cpp` has no Python branch. The isolated dispatch matrix covers aliases, normalized aliases/extensions, help, `run --lang`, and deterministic duplicate-bundle selection; the full parity/registry lifecycle matrix is not archived. |
 | H4 | Functional path implemented; acceptance incomplete | The 161 `py_*` runtime imports are module-owned and registered through `JubeRuntimeCatalogAPI`; core ownership is removed. Collision/signature/effect/caching conformance tests remain. |
 | H5 | Functional boundary mostly implemented | Python has no `js_*` source or dynamic import and uses neutral data/root services. The complete per-operation ownership contract and the full cross-boundary stress matrix remain. |
 | H6 | Functional core mostly implemented | Host activation/recovery/JIT lifecycle and common module-graph services are in use. The language session is still only a marker, the Python-owned session-state design is incomplete, and the full failure/repetition matrix is missing. |
-| H7 | **Incomplete — primary architecture blocker** | H7D lifecycle finalization is implemented. H7A/H7B/H7C are not: Python still includes host AST/transpiler/data/MIR headers and constructs raw MIR operations. |
-| H8 | Partial | External `lang-python` target, manifest discovery, build-ID/integrity checks, rollback, and POSIX/macOS loading exist. The module still imports internal host/library symbols, and Linux/Windows, static/dynamic parity, and negative-loader matrices are incomplete. |
+| H7 | **Incomplete — primary architecture blocker** | H7D lifecycle finalization is implemented and H7C now has host-owned runtime-load, identity-allocation, and validated semantic move services. H7A/H7B/H7C remain open: Python still includes host AST/transpiler/data/MIR headers and constructs most raw MIR operations. |
+| H8 | Partial | External `lang-python` target, manifest discovery, build-ID/integrity checks, rollback, POSIX/macOS loading, and the macOS negative-loader matrix exist. The module still imports internal host/library symbols, and Linux/Windows and static/dynamic parity remain incomplete. |
 | H9 | Substantially implemented | One host target, compatibility symlink, standard/full package split, identical-host check, and absent/full smoke targets exist. Legacy `requires_jube_exe` metadata remains for Ruby/Bash, and current release performance evidence is missing. |
 | H10 | Incomplete | Static Python registration is removed and runtime docs were started. Final allowlist reduction, ADR/design status, audit, platform matrix, sanitizer/stress archive, and performance closeout remain. |
 
@@ -61,13 +61,86 @@ is not marked complete merely because its happy-path implementation exists.
   `lambda-jube.exe` is a symlink to `lambda.exe`; the host has no linked Python
   library and no exported `py_*`, `transpile_py_*`, or `load_py_module`
   symbols.
-- Current debug execution is **not green**: the rebuilt ASan host did not reach
-  `--help` within 15 seconds, the 43-test Python runner did not begin reporting
-  its parameterized cases, and a standalone `test_py_basic.py` run timed out
-  after 60 seconds with no output. The older staged release host still reaches
-  `--help`, but its full-bundle directory currently has no module library, so
-  it cannot substitute for a current source/module verification. This blocks
-  a fresh H1/H3 functional acceptance claim until triaged.
+- Current direct-host execution is green: `./lambda.exe --help` exits normally,
+  the 43-test Python suite passes, and the forced-GC closure and generator
+  gates match their goldens. Earlier timeout reports came from macOS `gtimeout`
+  returning status 124 after emitting the host's full help output; it is not
+  used for acceptance checks.
+- The 2026-07-24 regression repair made resolved local Python calls use the
+  shared borrowed-call classification, preserving caller-owned scalar return
+  homes. `py_list_new` now builds its backing storage through `array_push`, so
+  it is released with the runtime data zone instead of leaking a tracked
+  Python-runtime allocation at GC teardown. The match golden and forced-GC
+  checks cover these paths.
+- `make test-jube-module-loader-negative` now runs isolated copied-bundle
+  cases for a missing library, corrupt/incomplete manifests, wrong base/hosted
+  ABI, wrong host build ID, missing checksum, checksum mismatch, and a missing
+  entry symbol. `make test-jube-module-integrity` separately verifies that a
+  tampered library is rejected before the module initializer can run. Missing
+  capability/dependency and genuine initializer-failure coverage remain.
+- `make build-test` now refreshes the manifest after its debug `all` build
+  rewrites `lang-python`; otherwise the correctly enforced digest check would
+  leave the development bundle unloadable after a test-only rebuild.
+- `make test-hosted-python-architecture-checker` proves the architecture gate
+  rejects synthetic reintroductions of a Python main branch, JavaScript call,
+  raw frame-runtime memory load, direct register/label allocation, and stale
+  manifest build ID; the live checker still passes afterwards.
+- `make test-jube-language-dispatch` now copies an isolated host/module bundle
+  and checks `py`, case-normalized `PY`, `run --lang python`, `.py`,
+  case-normalized `.PY`, hosted help, and duplicate-bundle selection. Manifest
+  discovery now normalizes aliases/extensions before descriptor registration
+  and chooses the lexicographically first matching child manifest, so dispatch
+  never depends on filesystem enumeration order.
+- The `h7e13` host/module pair passes the full 43-test Python corpus, forced-GC
+  closure/generator gates, isolated dispatch and loader-negative matrices, and
+  `utils/check_hosted_python_architecture.py --require-module-binary`. It moves
+  activation runtime loads plus repeated register/label identity allocation
+  behind execution services; it does not close H7C's remaining raw builder
+  surface.
+- The `h7e14` host/module pair adds a single generic semantic-instruction
+  descriptor rather than a per-opcode ABI: host-validated integer/float
+  immediate moves and integer register moves are appended only through the
+  opaque function service. Python integer/float literal lowering and the
+  public scalar-return handoff now use that service. The full 43-test corpus,
+  forced-GC closure/generator gates, isolated dispatch and loader-negative
+  matrices, and the hosted-Python architecture checker pass against the
+  release artifacts.
+  This is an incremental H7C migration, not completion: control flow, calls,
+  memory operations, and shared frame/root finalization still construct raw
+  MIR through the shared emitter.
+- The `h7e15` pair extends that same descriptor with destination-less jumps
+  and true/false branches; it does not add a per-opcode service. Python's
+  integer boxing range split, `not`, boolean short-circuiting, and conditional
+  lowering now use the opaque control-flow forms. The host validates operands
+  by descriptor opcode because branch forms intentionally have no destination
+  register. Two consecutive full 43-test Python corpus runs, forced-GC
+  closure/generator checks, dispatch, loader-negative, and architecture
+  self-checker gates passed against the rebuilt release host/module pair.
+  Calls, comparisons, memory operations, labels, and shared frame/root
+  finalization still keep H7C incomplete.
+- The `h7e16` pair moves placement of the already-opaque label identities into
+  a tail-appended host service. Python no longer calls the shared label emitter;
+  it can only ask the host to place a host-created label in its current opaque
+  function. The architecture self-checker now rejects a raw label append.
+  The release host was force-relinked after the ABI bump to ensure its embedded
+  build ID matched the rebuilt module. The 43-test corpus, forced-GC
+  closure/generator checks, isolated dispatch, loader-negative matrix, and
+  architecture gates pass on that matching pair. Calls, comparisons, memory
+  operations, and shared frame/root finalization remain H7C work.
+- The `h7e17` pair adds semantic integer compare-and-branch forms to the same
+  generic instruction descriptor. Python's optimized numeric type guard and
+  oversized-left-shift fallback now retain only their lowering decision while
+  the host builds `BNE`/`BGE` MIR. A stale generated Python parser caused an
+  ABI-15/ABI-14 Tree-sitter compile mismatch during the rebuild; it was
+  repaired only through `make generate-tree-sitter-python-parser`. The matching
+  release pair passes the focused integer-overflow script, the full 43-test
+  Python corpus, dispatch, loader-negative, and architecture self-checker
+  gates. Arithmetic/comparison instruction construction, calls, memory
+  operations, and frame/root finalization remain H7C work.
+- The current `make test-lambda-baseline` run passes all 2,104 input-baseline
+  cases and all 1,492 Lambda-runner cases with zero failures. This is current
+  shared-host evidence; Test262, platform, and performance acceptance remain
+  separately outstanding.
 - The module-boundary checker rejects the specifically retired host and
   JavaScript imports, but `nm -u` still shows non-Jube internal dependencies
   such as Lambda `Item` globals, heap/name helpers, arrays, arithmetic
@@ -1053,6 +1126,32 @@ Lambda and JavaScript lowering retain their existing lookup path; the added
 state is compiler-local and is never read on their execution paths. The
 dynamic-module architecture gate rejects `_MIR_reg`, while Python golden and
 forced-GC closure/generator tests protect the parameter-root invariant.
+
+**Implementation update (2026-07-24, h7e11).** The activation-scoped runtime
+token load that precedes Python frame setup is now emitted by the host through
+a tail-appended, size-gated execution service. The host requires an active
+guest activation, the host-issued frame-runtime slot, and the matching active
+function relationship before it creates the address and memory-load MIR
+operations; Python receives only the numeric runtime-register identity. The
+architecture verifier rejects a raw frame-runtime memory load in Python.
+This removes one host-memory access operation from lowering, while the broader
+opaque builder/module/function/block/value/import service and the remaining
+raw MIR operations still keep H7C open. The rebuilt host/module pair passes
+the 43-test corpus, forced-GC closure/generator checks, isolated dispatch,
+loader-negative checks, and the binary-aware architecture check.
+
+**Implementation update (2026-07-24, h7e13).** Python's repeated compiler
+identity allocation now crosses two tail-appended execution services: the host
+allocates registers from a public I64/F64/pointer value-kind projection and
+allocates opaque labels. Python continues to own its monotonic naming counter,
+preserving generated-name ordering while the host retains MIR type coercion and
+identity representation. Labels cross as opaque pointers because MIR labels
+are pointer-backed; the initial numeric form would have truncated them on
+64-bit builds and was corrected before acceptance. The architecture verifier
+rejects Python calls to `em_new_reg` and `em_new_label`. The rebuilt h7e13 pair
+passes the full Python corpus, forced-GC closure/generator checks, dispatch,
+loader-negative, and binary-aware architecture gates. Raw operand/instruction
+construction and shared emitter internals remain H7C work.
 
 - [ ] Expose opaque MIR builder/module/function/block/value/import handles.
 - [ ] Wrap the existing `MirEmitter` operations needed by Python: function

@@ -194,7 +194,7 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->session_memory->session_alloc ||
         !host->hosted_language->session_memory->session_free ||
         host->hosted_language->execution->api_version != JUBE_HOST_SERVICE_API_VERSION ||
-        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE ||
+        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE ||
         !host->hosted_language->execution->execution_create ||
         !host->hosted_language->execution->execution_destroy ||
         !host->hosted_language->execution->execution_link_module ||
@@ -213,6 +213,11 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->execution->mir_function_forward_create ||
         !host->hosted_language->execution->mir_item_function_proto_create ||
         !host->hosted_language->execution->mir_function_register_lookup ||
+        !host->hosted_language->execution->mir_function_frame_runtime_load ||
+        !host->hosted_language->execution->mir_function_register_create ||
+        !host->hosted_language->execution->mir_label_create ||
+        !host->hosted_language->execution->mir_instruction_emit ||
+        !host->hosted_language->execution->mir_label_emit ||
         host->hosted_language->roots->api_version != JUBE_HOST_SERVICE_API_VERSION ||
         host->hosted_language->roots->struct_size < JUBE_HOST_ROOT_API_H5_PERSISTENT_SIZE ||
         !host->hosted_language->roots->root_frame_begin ||
