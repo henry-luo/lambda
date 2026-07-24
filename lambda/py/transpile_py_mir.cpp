@@ -1,18 +1,15 @@
 // transpile_py_mir.cpp - Direct MIR generation for Python
 //
 // Mirrors the JavaScript MIR transpiler architecture (transpile_js_mir.cpp).
-// All Python values are boxed Items (MIR_T_I64). Runtime functions
+// All Python values are boxed Items (PM_COMPILER_VALUE_I64). Runtime functions
 // (py_add, py_subtract, etc.) take and return Items.
 
 #include "py_transpiler.hpp"
-#include "../runtime/mir_dump.h"
 #include "py_runtime.h"
 #include "py_bigint.h"
 #include "py_async.h"
 #include "py_stdlib.h"
 #include "../lambda-data.hpp"
-#define MIR_EMITTER_NO_DIRECT_REGISTER_LOOKUP 1
-#include "../runtime/mir_emitter_shared.hpp"
 #include "../jube/jube_language.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
@@ -20,10 +17,6 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
-#include "../runtime/transpiler.hpp"
-#include "../runtime/heap_api.h"
-#include <mir.h>
-#include <mir-gen.h>
 #include <cstring>
 #include <cstdio>
 #include "../../lib/mem.h"
@@ -56,6 +49,18 @@ static const int PM_MAX_TRY_HANDLERS = 16;
 static const int PM_MAX_GENERATOR_SLOTS = 32;
 static const int PM_MAX_MIR_PARAMS = 16;
 
+// These are guest-side identities only. Their representation is selected by
+// the host cursor services and must never expose a MIR layout to Python.
+typedef uint32_t PmCompilerRegister;
+typedef void* PmCompilerLabel;
+typedef void* PmCompilerFunctionItem;
+typedef void* PmCompilerFunction;
+typedef uint8_t PmCompilerValueKind;
+
+#define PM_COMPILER_VALUE_I64 JUBE_COMPILER_VALUE_I64
+#define PM_COMPILER_VALUE_F64 JUBE_COMPILER_VALUE_F64
+#define PM_COMPILER_VALUE_POINTER JUBE_COMPILER_VALUE_POINTER
+
 // directory of the entry-point script, used for absolute import resolution
 // in sub-modules (prevents path doubling for package-internal imports)
 static char py_entry_script_dir[512] = "";
@@ -63,7 +68,6 @@ static const JubeModuleGraphAPI* py_hosted_module_graph_api = NULL;
 static const JubeSourceAPI* py_hosted_source_api = NULL;
 static const JubeGuestExecutionAPI* py_hosted_execution_api = NULL;
 static const JubeRuntimeCatalogAPI* py_hosted_runtime_catalog_api = NULL;
-static thread_local MirEmitter* py_mir_argument_emitter = NULL;
 
 void py_set_hosted_module_graph_api(const JubeModuleGraphAPI* module_graph) {
     py_hosted_module_graph_api = module_graph;
@@ -79,24 +83,6 @@ void py_set_hosted_execution_api(const JubeGuestExecutionAPI* execution_api) {
 
 void py_set_hosted_runtime_catalog_api(const JubeRuntimeCatalogAPI* runtime_catalog) {
     py_hosted_runtime_catalog_api = runtime_catalog;
-}
-
-static bool pm_lookup_hosted_import_metadata(const char* name,
-        JitImportMetadata* out_metadata) {
-    if (!name || !out_metadata || !py_hosted_runtime_catalog_api ||
-        !py_hosted_runtime_catalog_api->lookup_import_metadata) return false;
-    JubeRuntimeImportMetadata hosted = {};
-    if (py_hosted_runtime_catalog_api->lookup_import_metadata(name, &hosted) != 0) {
-        return false;
-    }
-    out_metadata->gc_effect = (JitGcEffect)hosted.gc_effect;
-    out_metadata->reentry_effect = (JitReentryEffect)hosted.reentry_effect;
-    out_metadata->ret_class = (JitValueClass)hosted.result_class;
-    out_metadata->arg_classes = hosted.argument_classes;
-    out_metadata->flags = hosted.flags;
-    out_metadata->exception_effect = (JitExceptionEffect)hosted.exception_effect;
-    out_metadata->arg_effects = hosted.argument_effects;
-    return true;
 }
 
 // Import lowering can allocate while it traverses a Python namespace. The
@@ -117,106 +103,27 @@ public:
     }
 };
 
-static bool pm_link_hosted_module(void* host_execution, MIR_context_t mir_context) {
+static bool pm_link_hosted_module(void* host_execution, void* compiler_context) {
     return py_hosted_execution_api &&
         py_hosted_execution_api->api_version == JUBE_HOST_SERVICE_API_VERSION &&
         py_hosted_execution_api->struct_size >= JUBE_GUEST_EXECUTION_API_V1_SIZE &&
         py_hosted_execution_api->execution_link_module &&
-        py_hosted_execution_api->execution_link_module(host_execution, mir_context) == 0;
+        py_hosted_execution_api->execution_link_module(host_execution, compiler_context) == 0;
 }
 
-static MIR_context_t pm_create_hosted_mir_context(void) {
+static void* pm_create_hosted_mir_context(void) {
     if (!py_hosted_execution_api || !py_hosted_execution_api->mir_context_create) return NULL;
-    return (MIR_context_t)py_hosted_execution_api->mir_context_create(2);
+    return py_hosted_execution_api->mir_context_create(2);
 }
 
-static void pm_destroy_hosted_mir_context(MIR_context_t mir_context) {
-    if (!mir_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_context_destroy) return;
-    py_hosted_execution_api->mir_context_destroy(mir_context);
+static void pm_destroy_hosted_mir_context(void* compiler_context) {
+    if (!compiler_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_context_destroy) return;
+    py_hosted_execution_api->mir_context_destroy(compiler_context);
 }
 
-static MIR_module_t pm_create_hosted_mir_module(MIR_context_t mir_context, const char* module_name) {
-    if (!mir_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_module_create) return NULL;
-    return (MIR_module_t)py_hosted_execution_api->mir_module_create(mir_context, module_name);
-}
-
-static bool pm_finalize_and_load_hosted_mir_module(MIR_context_t mir_context, MIR_module_t mir_module) {
-    return mir_context && mir_module && py_hosted_execution_api &&
-        py_hosted_execution_api->mir_module_finalize_and_load &&
-        py_hosted_execution_api->mir_module_finalize_and_load(mir_context, mir_module) == 0;
-}
-
-static void* pm_find_hosted_mir_function(MIR_context_t mir_context, const char* function_name) {
-    if (!mir_context || !function_name || !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_function_lookup) return NULL;
-    return py_hosted_execution_api->mir_function_lookup(mir_context, function_name);
-}
-
-static void pm_finish_hosted_mir_function(MIR_context_t mir_context) {
-    if (!mir_context || !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_function_finish) return;
-    py_hosted_execution_api->mir_function_finish(mir_context);
-}
-
-static bool pm_create_hosted_item_function_typed(MIR_context_t mir_context,
-        const char* function_name, int parameter_count,
-        const char* const* parameter_names, const uint8_t* parameter_kinds,
-        MIR_item_t* out_function_item, MIR_func_t* out_function) {
-    if (!mir_context || !function_name || parameter_count < 0 || !out_function_item ||
-            !out_function || !parameter_kinds || !py_hosted_execution_api ||
-            py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_TYPED_FUNCTION_CREATE_SIZE ||
-            !py_hosted_execution_api->mir_item_function_create_typed) return false;
-    void* function_item = NULL;
-    void* function = NULL;
-    if (py_hosted_execution_api->mir_item_function_create_typed(mir_context,
-            function_name, (uint32_t)parameter_count, parameter_names,
-            parameter_kinds, &function_item, &function) != 0) return false;
-    *out_function_item = (MIR_item_t)function_item;
-    *out_function = (MIR_func_t)function;
-    return true;
-}
-
-static bool pm_create_hosted_function_forward(MIR_context_t mir_context,
-        const char* function_name, MIR_item_t* out_function_item) {
-    if (!mir_context || !function_name || !out_function_item ||
-        !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_function_forward_create) return false;
-    void* function_item = NULL;
-    if (py_hosted_execution_api->mir_function_forward_create(mir_context, function_name,
-            &function_item) != 0) return false;
-    *out_function_item = (MIR_item_t)function_item;
-    return true;
-}
-
-static bool pm_create_hosted_item_function_proto_typed(MIR_context_t mir_context,
-        const char* prototype_name, int parameter_count,
-        const uint8_t* parameter_kinds, MIR_item_t* out_prototype_item) {
-    if (!mir_context || !prototype_name || parameter_count < 0 ||
-            !parameter_kinds || !out_prototype_item || !py_hosted_execution_api ||
-            py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_TYPED_PROTO_CREATE_SIZE ||
-            !py_hosted_execution_api->mir_item_function_proto_create_typed) return false;
-    void* prototype_item = NULL;
-    if (py_hosted_execution_api->mir_item_function_proto_create_typed(mir_context,
-            prototype_name, (uint32_t)parameter_count, parameter_kinds,
-            &prototype_item) != 0) return false;
-    *out_prototype_item = (MIR_item_t)prototype_item;
-    return true;
-}
-
-static MIR_reg_t pm_lookup_hosted_function_register(MIR_context_t mir_context,
-        MIR_func_t function, const char* register_name) {
-    if (!mir_context || !function || !register_name || !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_function_register_lookup) return 0;
-    uint32_t register_id = 0;
-    if (py_hosted_execution_api->mir_function_register_lookup(mir_context, function,
-            register_name, &register_id) != 0) return 0;
-    MIR_reg_t reg = (MIR_reg_t)register_id;
-    // Parameter binding is the only point where the hosted lowerer receives
-    // this identity; retain it for entry-root liveness without a raw lookup.
-    em_function_argument_register(py_mir_argument_emitter, reg);
-    return reg;
+static void* pm_create_hosted_mir_module(void* compiler_context, const char* module_name) {
+    if (!compiler_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_module_create) return NULL;
+    return py_hosted_execution_api->mir_module_create(compiler_context, module_name);
 }
 
 static bool pm_activate_hosted_guest_execution(void* host_execution, void** out_input) {
@@ -284,14 +191,41 @@ static Item pm_load_lambda_module(void* host_execution, const char* source_path)
 // Transpiler structs
 // ============================================================================
 
-// Python uses the shared lowering scope entry.  `type_id` carries its optional
-// native-number evidence while the existing env fields preserve closure access.
-typedef VarEntry PyMirVarEntry;
-typedef VarScopeEntry PyVarScopeEntry;
+// Python scope records carry language-level bindings only. They intentionally
+// do not inherit the host emitter's private frame/root/layout fields.
+struct PyMirVarEntry {
+    PmCompilerRegister reg;
+    PmCompilerValueKind mir_type;
+    TypeId type_id;
+    bool from_env;
+    int env_slot;
+    PmCompilerRegister env_reg;
+};
+
+struct PyVarScopeEntry {
+    char name[128];
+    PyMirVarEntry var;
+};
+
+static int pm_var_scope_cmp(const void* left, const void* right, void* user_data) {
+    (void)user_data;
+    return strcmp(((const PyVarScopeEntry*)left)->name,
+        ((const PyVarScopeEntry*)right)->name);
+}
+
+static uint64_t pm_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const PyVarScopeEntry* entry = (const PyVarScopeEntry*)item;
+    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
+}
+
+static struct hashmap* pm_var_scope_new(int capacity) {
+    return hashmap_new(sizeof(PyVarScopeEntry), capacity, 0, 0,
+        pm_var_scope_hash, pm_var_scope_cmp, NULL, NULL);
+}
 
 struct PyLoopLabels {
-    MIR_label_t continue_label;
-    MIR_label_t break_label;
+    PmCompilerLabel continue_label;
+    PmCompilerLabel break_label;
 };
 
 struct PyFuncCollected {
@@ -299,7 +233,7 @@ struct PyFuncCollected {
     FnAnalysis* analysis;
     PyFnExt* ext;
     char name[128];
-    MIR_item_t func_item;
+    PmCompilerFunctionItem func_item;
     int param_count;
     int required_count;  // params without defaults
     int default_count;   // params with defaults
@@ -337,7 +271,7 @@ struct PyLambdaCollected {
     FnAnalysis* analysis;
     PyFnExt* ext;
     char name[64];
-    MIR_item_t func_item;
+    PmCompilerFunctionItem func_item;
     int param_count;
     char captures[32][128];
     int capture_count;
@@ -348,8 +282,9 @@ struct PyLambdaCollected {
 struct PyMirTranspiler {
     PyTranspiler* tp;
 
-    MirEmitter em;
-    MIR_module_t module;
+    // Opaque host cursor; Python never allocates or observes MirEmitter state.
+    void* compiler_cursor;
+    void* module;
     // Local function items
     struct hashmap* local_funcs;
 
@@ -381,13 +316,13 @@ struct PyMirTranspiler {
     PyLambdaCollected lambda_entries[PM_MAX_LAMBDAS];
 
     // Scope env for closures
-    MIR_reg_t scope_env_reg;
+    PmCompilerRegister scope_env_reg;
     int scope_env_slot_count;
     int current_func_index;
 
     // Try/except stack
     int try_depth;
-    MIR_label_t try_handler_labels[PM_MAX_TRY_HANDLERS];
+    PmCompilerLabel try_handler_labels[PM_MAX_TRY_HANDLERS];
 
     // Source filename for relative import resolution
     const char* filename;
@@ -401,48 +336,214 @@ struct PyMirTranspiler {
 
     // ---- TCO (Tail Call Optimization) state ----
     PyFuncCollected* tco_func;      // current function being TCO'd (NULL if not TCO)
-    MIR_label_t tco_label;          // jump target at top of function body
-    MIR_reg_t tco_count_reg;        // iteration counter for overflow guard
+    PmCompilerLabel tco_label;          // jump target at top of function body
+    PmCompilerRegister tco_count_reg;        // iteration counter for overflow guard
     bool in_tail_position;          // true when current expression is in tail position
     bool block_returned;            // set when TCO jump replaces a return
 
     // ---- Generator compilation state (valid during pm_compile_generator) ----
     bool in_generator;              // true while compiling a generator resume function
     bool in_async;                  // true while compiling an async def (Phase D)
-    MIR_reg_t gen_frame_reg;        // MIR reg holding the _gen_frame pointer parameter
-    MIR_reg_t gen_sent_reg;         // MIR reg holding the _gen_sent parameter
+    PmCompilerRegister gen_frame_reg;        // MIR reg holding the _gen_frame pointer parameter
+    PmCompilerRegister gen_sent_reg;         // MIR reg holding the _gen_sent parameter
     int gen_yield_count;            // yield points emitted so far (0-based)
-    MIR_label_t gen_yield_labels[PM_MAX_GENERATOR_SLOTS]; // pre-created labels: gen_yield_labels[i] = L_resume_(i+1)
+    PmCompilerLabel gen_yield_labels[PM_MAX_GENERATOR_SLOTS]; // pre-created labels: gen_yield_labels[i] = L_resume_(i+1)
     char gen_local_names[PM_MAX_GENERATOR_SLOTS][128];  // local var names tracked in frame (with _py_ prefix)
     int  gen_local_frame_slots[PM_MAX_GENERATOR_SLOTS]; // frame slot index for each gen_local_names[i]
     int  gen_local_count;           // number of entries
     int  gen_iter_count;            // counter for auto-named iterator vars (_py__git_N)
 
-    // Shared-emitter call-path telemetry, populated while lowering this module.
-    int mir_call_count;
-    int mir_may_gc_call_count;
-    int mir_item_result_count;
     bool has_compile_error;
 };
 
-static thread_local PyMirTranspiler* py_mir_telemetry_owner = NULL;
-
-static void pm_select_hosted_function(PyMirTranspiler* mt, MIR_item_t function_item,
-        MIR_func_t function) {
-    if (!mt) return;
-    mt->em.func_item = function_item;
-    mt->em.func = function;
-    py_mir_argument_emitter = &mt->em;
-    em_function_arguments_clear(&mt->em);
+static bool pm_create_hosted_compiler_cursor(PyMirTranspiler* mt,
+        void* compiler_context) {
+    if (!mt || !compiler_context || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_COMPILER_CURSOR_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_compiler_cursor_create) return false;
+    return py_hosted_execution_api->mir_compiler_cursor_create(compiler_context,
+        &mt->compiler_cursor) == 0 && mt->compiler_cursor;
 }
 
-static void pm_restore_hosted_function(PyMirTranspiler* mt, MIR_item_t function_item,
-        MIR_func_t function, MirFunctionArgumentState arguments) {
-    if (!mt) return;
-    mt->em.func_item = function_item;
-    mt->em.func = function;
-    py_mir_argument_emitter = &mt->em;
-    em_function_arguments_restore(&mt->em, arguments);
+static void pm_destroy_hosted_compiler_cursor(PyMirTranspiler* mt) {
+    if (!mt || !mt->compiler_cursor || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_COMPILER_CURSOR_DESTROY_SIZE ||
+            !py_hosted_execution_api->mir_compiler_cursor_destroy) return;
+    py_hosted_execution_api->mir_compiler_cursor_destroy(mt->compiler_cursor);
+    mt->compiler_cursor = NULL;
+}
+
+static bool pm_hosted_import_cache_init(PyMirTranspiler* mt) {
+    return mt && py_hosted_execution_api && py_hosted_execution_api->struct_size >=
+        JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CACHE_INIT_SIZE &&
+        py_hosted_execution_api->mir_compiler_import_cache_init &&
+        py_hosted_execution_api->mir_compiler_import_cache_init(mt->compiler_cursor, 64) == 0;
+}
+
+static void pm_hosted_import_cache_destroy(PyMirTranspiler* mt) {
+    if (!mt || !py_hosted_execution_api || py_hosted_execution_api->struct_size <
+            JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CACHE_DESTROY_SIZE ||
+            !py_hosted_execution_api->mir_compiler_import_cache_destroy) return;
+    py_hosted_execution_api->mir_compiler_import_cache_destroy(mt->compiler_cursor);
+}
+
+static bool pm_get_hosted_local_direct_call_prototype(PyMirTranspiler* mt,
+        const char* cache_key, const char* prototype_name, int parameter_count,
+        const uint8_t* parameter_kinds, PmCompilerFunctionItem* out_prototype_item) {
+    if (!mt || !cache_key || !prototype_name || parameter_count < 0 ||
+            !parameter_kinds || !out_prototype_item || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_LOCAL_PROTO_CACHE_SIZE ||
+            !py_hosted_execution_api->mir_local_direct_call_prototype_get_or_create) {
+        return false;
+    }
+    void* prototype_item = NULL;
+    if (py_hosted_execution_api->mir_local_direct_call_prototype_get_or_create(mt->compiler_cursor,
+            cache_key, prototype_name, (uint32_t)parameter_count, parameter_kinds,
+            &prototype_item) != 0 || !prototype_item) return false;
+    *out_prototype_item = (PmCompilerFunctionItem)prototype_item;
+    return true;
+}
+
+static void pm_finish_hosted_mir_function_current(PyMirTranspiler* mt) {
+    if (!mt || !py_hosted_execution_api || py_hosted_execution_api->struct_size <
+            JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FUNCTION_FINISH_SIZE ||
+            !py_hosted_execution_api->mir_function_finish_current) {
+        log_error("py-mir: hosted current-function finalization unavailable");
+        abort();
+    }
+    py_hosted_execution_api->mir_function_finish_current(mt->compiler_cursor);
+}
+
+static bool pm_create_hosted_item_function_typed(PyMirTranspiler* mt,
+        const char* function_name, int parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        PmCompilerFunctionItem* out_function_item, PmCompilerFunction* out_function) {
+    if (!mt || !function_name || parameter_count < 0 || !out_function_item ||
+            !out_function || !parameter_kinds || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_TYPED_FUNCTION_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_item_function_create_typed_current) return false;
+    void* function_item = NULL;
+    void* function = NULL;
+    if (py_hosted_execution_api->mir_item_function_create_typed_current(mt->compiler_cursor,
+            function_name, (uint32_t)parameter_count, parameter_names,
+            parameter_kinds, &function_item, &function) != 0) return false;
+    *out_function_item = (PmCompilerFunctionItem)function_item;
+    *out_function = (PmCompilerFunction)function;
+    return true;
+}
+
+static bool pm_create_hosted_function_forward(PyMirTranspiler* mt,
+        const char* function_name, PmCompilerFunctionItem* out_function_item) {
+    if (!mt || !function_name || !out_function_item || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FORWARD_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_function_forward_create_current) return false;
+    void* function_item = NULL;
+    if (py_hosted_execution_api->mir_function_forward_create_current(mt->compiler_cursor,
+            function_name, &function_item) != 0) return false;
+    *out_function_item = (PmCompilerFunctionItem)function_item;
+    return true;
+}
+
+static bool pm_finalize_and_load_hosted_mir_module_current(PyMirTranspiler* mt,
+        void* mir_module) {
+    return mt && mir_module && py_hosted_execution_api &&
+        py_hosted_execution_api->struct_size >=
+            JUBE_GUEST_EXECUTION_API_H7C_CURRENT_MODULE_FINALIZE_SIZE &&
+        py_hosted_execution_api->mir_module_finalize_and_load_current &&
+        py_hosted_execution_api->mir_module_finalize_and_load_current(mt->compiler_cursor,
+            mir_module) == 0;
+}
+
+static void* pm_find_hosted_mir_function_current(PyMirTranspiler* mt,
+        const char* function_name) {
+    return mt && function_name && py_hosted_execution_api &&
+        py_hosted_execution_api->struct_size >=
+            JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FUNCTION_LOOKUP_SIZE &&
+        py_hosted_execution_api->mir_function_lookup_current
+        ? py_hosted_execution_api->mir_function_lookup_current(mt->compiler_cursor, function_name) : NULL;
+}
+
+static PmCompilerRegister pm_create_hosted_scalar_home(PyMirTranspiler* mt, int* out_home_id) {
+    if (!mt || !out_home_id || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_SCALAR_HOME_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_scalar_home_create_current) return 0;
+    int32_t home_id = 0;
+    uint32_t address = 0;
+    if (py_hosted_execution_api->mir_scalar_home_create_current(mt->compiler_cursor,
+            &home_id, &address) != 0 || home_id <= 0 || !address) return 0;
+    *out_home_id = home_id;
+    return (PmCompilerRegister)address;
+}
+
+static void pm_bind_hosted_scalar_home(PyMirTranspiler* mt, int home_id,
+        PmCompilerRegister value) {
+    if (!mt || home_id <= 0 || !value || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_SCALAR_HOME_BIND_SIZE ||
+            !py_hosted_execution_api->mir_scalar_home_bind_current ||
+            py_hosted_execution_api->mir_scalar_home_bind_current(mt->compiler_cursor,
+                home_id, (uint32_t)value) != 0) {
+        log_error("py-mir: hosted scalar result home unavailable");
+        abort();
+    }
+}
+
+static void* pm_suspend_hosted_function_state(PyMirTranspiler* mt) {
+    if (!mt || !py_hosted_execution_api || py_hosted_execution_api->struct_size <
+            JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_STATE_SUSPEND_SIZE ||
+            !py_hosted_execution_api->mir_function_state_suspend) {
+        log_error("py-mir: hosted function-state suspension unavailable");
+        abort();
+    }
+    void* state = NULL;
+    if (py_hosted_execution_api->mir_function_state_suspend(mt->compiler_cursor, &state) != 0 ||
+            !state) {
+        log_error("py-mir: host rejected function-state suspension");
+        abort();
+    }
+    return state;
+}
+
+static PmCompilerRegister pm_lookup_hosted_function_register(PyMirTranspiler* mt,
+        const char* register_name) {
+    if (!mt || !register_name || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_REGISTER_LOOKUP_SIZE ||
+            !py_hosted_execution_api->mir_function_register_lookup_current) return 0;
+    uint32_t register_id = 0;
+    if (py_hosted_execution_api->mir_function_register_lookup_current(mt->compiler_cursor,
+            register_name, &register_id) != 0) return 0;
+    return (PmCompilerRegister)register_id;
+}
+
+static void pm_select_hosted_function(PyMirTranspiler* mt, PmCompilerFunctionItem function_item,
+        PmCompilerFunction function) {
+    if (!mt || !function_item || !function || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_SELECT_SIZE ||
+            !py_hosted_execution_api->mir_function_select ||
+            py_hosted_execution_api->mir_function_select(mt->compiler_cursor, function_item,
+                function) != 0) {
+        log_error("py-mir: host rejected function selection");
+        abort();
+    }
+}
+
+static void pm_restore_hosted_function(PyMirTranspiler* mt, void* state) {
+    if (!mt || !state || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_STATE_RESTORE_SIZE ||
+            !py_hosted_execution_api->mir_function_state_restore ||
+            py_hosted_execution_api->mir_function_state_restore(mt->compiler_cursor, state) != 0) {
+        log_error("py-mir: host rejected function-state restoration");
+        abort();
+    }
 }
 
 static bool pm_require_capacity(PyMirTranspiler* mt, int used, int capacity,
@@ -465,7 +566,7 @@ static bool pm_require_count(PyMirTranspiler* mt, int count, int maximum,
 
 struct PyLocalFuncEntry {
     char name[128];
-    MIR_item_t func_item;
+    PmCompilerFunctionItem func_item;
 };
 HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
 
@@ -473,73 +574,71 @@ HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
 // Forward declarations
 // ============================================================================
 
-static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
+static PmCompilerRegister pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
 static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt);
-static MIR_reg_t pm_call_0(PyMirTranspiler* mt, const char* fn_name,
-                           MIR_type_t ret_type);
-static void pm_call_void_1(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1);
+static PmCompilerRegister pm_call_semantic_0(PyMirTranspiler* mt, const char* fn_name,
+                                    PmCompilerValueKind result_type);
 
 // ============================================================================
 // Basic MIR helpers
 // ============================================================================
 
-static uint8_t pm_hosted_value_kind(MIR_type_t type) {
-    if (type == MIR_T_I64) return JUBE_COMPILER_VALUE_I64;
-    if (type == MIR_T_D) return JUBE_COMPILER_VALUE_F64;
-    if (type == MIR_T_P) return JUBE_COMPILER_VALUE_POINTER;
+static uint8_t pm_hosted_value_kind(PmCompilerValueKind type) {
+    if (type == PM_COMPILER_VALUE_I64) return JUBE_COMPILER_VALUE_I64;
+    if (type == PM_COMPILER_VALUE_F64) return JUBE_COMPILER_VALUE_F64;
+    if (type == PM_COMPILER_VALUE_POINTER) return JUBE_COMPILER_VALUE_POINTER;
     log_error("py-mir: unsupported hosted compiler value type %d", (int)type);
     abort();
 }
 
-static MIR_reg_t pm_new_reg(PyMirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    if (!mt || !mt->em.func || !prefix || !*prefix || !py_hosted_execution_api ||
+static PmCompilerRegister pm_new_reg(PyMirTranspiler* mt, const char* prefix, PmCompilerValueKind type) {
+    if (!mt || !prefix || !*prefix || !py_hosted_execution_api ||
             py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_REGISTER_CREATE_SIZE ||
-            !py_hosted_execution_api->mir_function_register_create) {
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_REGISTER_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_function_register_create_current) {
         log_error("py-mir: hosted compiler cannot allocate a register");
         abort();
     }
     uint32_t register_id = 0;
-    if (py_hosted_execution_api->mir_function_register_create(mt->em.ctx, mt->em.func,
-            &mt->em.reg_counter, prefix, pm_hosted_value_kind(type), &register_id) != 0 ||
+    if (py_hosted_execution_api->mir_function_register_create_current(mt->compiler_cursor,
+            prefix, pm_hosted_value_kind(type), &register_id) != 0 ||
             register_id == 0) {
         log_error("py-mir: host rejected register allocation");
         abort();
     }
-    return (MIR_reg_t)register_id;
+    return (PmCompilerRegister)register_id;
 }
 
-static MIR_label_t pm_new_label(PyMirTranspiler* mt) {
+static PmCompilerLabel pm_new_label(PyMirTranspiler* mt) {
     if (!mt || !py_hosted_execution_api ||
             py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_LABEL_CREATE_SIZE ||
-            !py_hosted_execution_api->mir_label_create) {
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_LABEL_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_label_create_current) {
         log_error("py-mir: hosted compiler cannot allocate a label");
         abort();
     }
     void* label = NULL;
-    if (py_hosted_execution_api->mir_label_create(mt->em.ctx, &label) != 0 || !label) {
+    if (py_hosted_execution_api->mir_label_create_current(mt->compiler_cursor, &label) != 0 || !label) {
         log_error("py-mir: host rejected label allocation");
         abort();
     }
-    return (MIR_label_t)label;
+    return (PmCompilerLabel)label;
 }
 
 static void pm_emit_hosted_instruction(PyMirTranspiler* mt,
         const JubeCompilerInstruction* instruction) {
-    if (!mt || !mt->em.func_item || !instruction || !py_hosted_execution_api ||
+    if (!mt || !instruction || !py_hosted_execution_api ||
             py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_INSTRUCTION_EMIT_SIZE ||
-            !py_hosted_execution_api->mir_instruction_emit ||
-            py_hosted_execution_api->mir_instruction_emit(mt->em.ctx,
-                mt->em.func_item, instruction) != 0) {
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_INSTRUCTION_EMIT_SIZE ||
+            !py_hosted_execution_api->mir_instruction_emit_current ||
+            py_hosted_execution_api->mir_instruction_emit_current(mt->compiler_cursor,
+                instruction) != 0) {
         log_error("py-mir: host rejected compiler instruction");
         abort();
     }
 }
 
-static void pm_emit_i64_immediate(PyMirTranspiler* mt, MIR_reg_t destination,
+static void pm_emit_i64_immediate(PyMirTranspiler* mt, PmCompilerRegister destination,
         int64_t value) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_MOVE_I64_IMMEDIATE;
@@ -548,7 +647,7 @@ static void pm_emit_i64_immediate(PyMirTranspiler* mt, MIR_reg_t destination,
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_f64_immediate(PyMirTranspiler* mt, MIR_reg_t destination,
+static void pm_emit_f64_immediate(PyMirTranspiler* mt, PmCompilerRegister destination,
         double value) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_MOVE_F64_IMMEDIATE;
@@ -557,8 +656,8 @@ static void pm_emit_f64_immediate(PyMirTranspiler* mt, MIR_reg_t destination,
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_i64_register_move(PyMirTranspiler* mt, MIR_reg_t destination,
-        MIR_reg_t source) {
+static void pm_emit_i64_register_move(PyMirTranspiler* mt, PmCompilerRegister destination,
+        PmCompilerRegister source) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_MOVE_I64_REGISTER;
     instruction.destination_register = (uint32_t)destination;
@@ -566,15 +665,35 @@ static void pm_emit_i64_register_move(PyMirTranspiler* mt, MIR_reg_t destination
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_jump(PyMirTranspiler* mt, MIR_label_t target) {
+static void pm_emit_i64_reference_move(PyMirTranspiler* mt, PmCompilerRegister destination,
+        void* source) {
+    JubeCompilerInstruction instruction = {};
+    instruction.opcode = JUBE_COMPILER_INSN_MOVE_I64_REFERENCE;
+    instruction.destination_register = (uint32_t)destination;
+    instruction.source_reference = source;
+    pm_emit_hosted_instruction(mt, &instruction);
+}
+
+static void pm_emit_f64_operation(PyMirTranspiler* mt, uint32_t operation,
+        PmCompilerRegister destination, PmCompilerRegister left, PmCompilerRegister right) {
+    JubeCompilerInstruction instruction = {};
+    instruction.opcode = JUBE_COMPILER_INSN_F64_OPERATION;
+    instruction.operation = operation;
+    instruction.destination_register = (uint32_t)destination;
+    instruction.source_register = (uint32_t)left;
+    instruction.right_register = (uint32_t)right;
+    pm_emit_hosted_instruction(mt, &instruction);
+}
+
+static void pm_emit_jump(PyMirTranspiler* mt, PmCompilerLabel target) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_JUMP;
     instruction.target_label = (void*)target;
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_branch_true(PyMirTranspiler* mt, MIR_reg_t condition,
-        MIR_label_t target) {
+static void pm_emit_branch_true(PyMirTranspiler* mt, PmCompilerRegister condition,
+        PmCompilerLabel target) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_BRANCH_TRUE;
     instruction.source_register = (uint32_t)condition;
@@ -582,8 +701,8 @@ static void pm_emit_branch_true(PyMirTranspiler* mt, MIR_reg_t condition,
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_branch_false(PyMirTranspiler* mt, MIR_reg_t condition,
-        MIR_label_t target) {
+static void pm_emit_branch_false(PyMirTranspiler* mt, PmCompilerRegister condition,
+        PmCompilerLabel target) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_BRANCH_FALSE;
     instruction.source_register = (uint32_t)condition;
@@ -592,7 +711,7 @@ static void pm_emit_branch_false(PyMirTranspiler* mt, MIR_reg_t condition,
 }
 
 static void pm_emit_branch_not_equal_i64_immediate(PyMirTranspiler* mt,
-        MIR_reg_t condition, int64_t value, MIR_label_t target) {
+        PmCompilerRegister condition, int64_t value, PmCompilerLabel target) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_BRANCH_NOT_EQUAL_I64_IMMEDIATE;
     instruction.source_register = (uint32_t)condition;
@@ -602,7 +721,7 @@ static void pm_emit_branch_not_equal_i64_immediate(PyMirTranspiler* mt,
 }
 
 static void pm_emit_branch_greater_equal_i64_immediate(PyMirTranspiler* mt,
-        MIR_reg_t condition, int64_t value, MIR_label_t target) {
+        PmCompilerRegister condition, int64_t value, PmCompilerLabel target) {
     JubeCompilerInstruction instruction = {};
     instruction.opcode = JUBE_COMPILER_INSN_BRANCH_GREATER_EQUAL_I64_IMMEDIATE;
     instruction.source_register = (uint32_t)condition;
@@ -611,277 +730,268 @@ static void pm_emit_branch_greater_equal_i64_immediate(PyMirTranspiler* mt,
     pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit_raw(PyMirTranspiler* mt, MIR_insn_t insn) {
-    em_emit_insn(&mt->em, insn);
+static void pm_emit_i64_operation(PyMirTranspiler* mt, uint32_t operation,
+        PmCompilerRegister destination, PmCompilerRegister left, PmCompilerRegister right, int64_t immediate) {
+    JubeCompilerInstruction instruction = {};
+    instruction.opcode = JUBE_COMPILER_INSN_I64_OPERATION;
+    instruction.operation = operation;
+    instruction.destination_register = (uint32_t)destination;
+    instruction.source_register = (uint32_t)left;
+    instruction.right_register = (uint32_t)right;
+    instruction.immediate_i64 = immediate;
+    pm_emit_hosted_instruction(mt, &instruction);
 }
 
-static void pm_emit(PyMirTranspiler* mt, MIR_insn_t insn) {
-    if (mt->em.frame.active && insn->code == MIR_RET) {
-        if (insn->nops != 1) {
-            log_error("py-mir-frame: expected one return operand, got %u", insn->nops);
-            pm_emit_raw(mt, insn);
-            return;
-        }
-        pm_emit_raw(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, mt->em.frame.return_reg), insn->ops[0]));
-        pm_emit_raw(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-            MIR_new_label_op(mt->em.ctx, mt->em.frame.return_label)));
-        _MIR_free_insn(mt->em.ctx, insn);
-        return;
+static void pm_emit_item_return_operand(PyMirTranspiler* mt,
+        const JubeCompilerCallOperand* operand) {
+    if (!mt || !operand || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_ITEM_RETURN_EMIT_SIZE ||
+            !py_hosted_execution_api->mir_item_return_emit ||
+            py_hosted_execution_api->mir_item_return_emit(mt->compiler_cursor, operand) != 0) {
+        log_error("py-mir: host rejected Item return");
+        abort();
     }
-    em_emit_insn(&mt->em, insn);
+}
+
+static void pm_emit_item_return_register(PyMirTranspiler* mt, PmCompilerRegister value) {
+    JubeCompilerCallOperand operand = {};
+    operand.value_kind = JUBE_COMPILER_VALUE_I64;
+    operand.operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+    operand.register_id = (uint32_t)value;
+    pm_emit_item_return_operand(mt, &operand);
+}
+
+static void pm_emit_item_return_i64_immediate(PyMirTranspiler* mt, int64_t value) {
+    JubeCompilerCallOperand operand = {};
+    operand.value_kind = JUBE_COMPILER_VALUE_I64;
+    operand.operand_kind = JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE;
+    operand.immediate_i64 = value;
+    pm_emit_item_return_operand(mt, &operand);
 }
 
 static void pm_emit_local_direct_call(PyMirTranspiler* mt, const char* function_name,
-                                      int operand_count, MIR_op_t* operands) {
-    // A resolved local function borrows its argument frame for this synchronous
-    // call; treating it as unknown would reject valid caller-owned scalar homes.
-    em_emit_borrowed_call(&mt->em, function_name,
-        MIR_new_insn_arr(mt->em.ctx, MIR_CALL, operand_count, operands));
+        PmCompilerFunctionItem prototype, PmCompilerFunctionItem target, PmCompilerRegister result,
+        int operand_count, const JubeCompilerCallOperand* operands) {
+    if (!mt || !function_name || !prototype || !target || !result || operand_count < 0 ||
+            !py_hosted_execution_api || py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_LOCAL_DIRECT_CALL_EMIT_SIZE ||
+            !py_hosted_execution_api->mir_local_direct_call_emit ||
+            py_hosted_execution_api->mir_local_direct_call_emit(mt->compiler_cursor, function_name,
+                prototype, target, (uint32_t)result, (uint32_t)operand_count,
+                operands) != 0) {
+        log_error("py-mir: host rejected local direct call %s", function_name ? function_name : "<null>");
+        abort();
+    }
 }
 
-static void pm_emit_label(PyMirTranspiler* mt, MIR_label_t label) {
-    if (!mt || !mt->em.func_item || !label || !py_hosted_execution_api ||
+static void pm_emit_label(PyMirTranspiler* mt, PmCompilerLabel label) {
+    if (!mt || !label || !py_hosted_execution_api ||
             py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE ||
-            !py_hosted_execution_api->mir_label_emit ||
-            py_hosted_execution_api->mir_label_emit(mt->em.ctx,
-                mt->em.func_item, (void*)label) != 0) {
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_LABEL_EMIT_SIZE ||
+            !py_hosted_execution_api->mir_label_emit_current ||
+            py_hosted_execution_api->mir_label_emit_current(mt->compiler_cursor,
+                (void*)label) != 0) {
         log_error("py-mir: host rejected label emission");
         abort();
     }
 }
 
-static MIR_reg_t pm_load_side_stack_runtime(PyMirTranspiler* mt) {
-    if (!mt || !mt->frame_runtime_slot || !mt->em.func_item || !mt->em.func ||
+static PmCompilerRegister pm_load_side_stack_runtime(PyMirTranspiler* mt) {
+    if (!mt || !mt->frame_runtime_slot ||
             !py_hosted_execution_api ||
             py_hosted_execution_api->struct_size <
-                JUBE_GUEST_EXECUTION_API_H7C_FRAME_RUNTIME_LOAD_SIZE ||
-            !py_hosted_execution_api->mir_function_frame_runtime_load) {
+                JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FRAME_RUNTIME_LOAD_SIZE ||
+            !py_hosted_execution_api->mir_function_frame_runtime_load_current) {
         log_error("py-mir: hosted compiler cannot load the active frame runtime");
         abort();
     }
     uint32_t runtime_register = 0;
-    if (py_hosted_execution_api->mir_function_frame_runtime_load(mt->em.ctx,
-            mt->em.func_item, mt->em.func, mt->frame_runtime_slot,
+    if (py_hosted_execution_api->mir_function_frame_runtime_load_current(mt->compiler_cursor,
+            mt->frame_runtime_slot,
             &runtime_register) != 0 || runtime_register == 0) {
         log_error("py-mir: host rejected the active frame runtime load");
         abort();
     }
-    return (MIR_reg_t)runtime_register;
+    return (PmCompilerRegister)runtime_register;
 }
-
-static void pm_emit_side_stack_overflow(PyMirTranspiler* mt) {
-    if (!mt) return;
-    // The shared import cache owns the module-global prototype; hand-written
-    // prototypes here would redeclare the same ABI contract per Python frame.
-    pm_call_void_1(mt, "lambda_stack_overflow_error", MIR_T_P,
-        MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)"py-side-stack"));
-}
-
-static void pm_root_call_value(void* owner, MIR_reg_t reg) {
-    PyMirTranspiler* mt = (PyMirTranspiler*)owner;
-    if (!mt || !mt->em.frame.active || !reg) return;
-    if (!em_root_note_candidate(&mt->em.frame.gc_candidates,
-            &mt->em.frame.gc_candidate_count, &mt->em.frame.gc_candidate_capacity,
-            &mt->em.frame.gc_candidate_by_reg,
-            &mt->em.frame.gc_candidate_by_reg_capacity, reg,
-            JIT_VALUE_UNKNOWN, 0)) {
-        log_error("py-mir-frame: unable to record root candidate reg=%u",
-            (unsigned)reg);
-        abort();
-    }
-}
-
-static void pm_note_mir_call(const char* name) {
-    (void)name;
-    if (py_mir_telemetry_owner) py_mir_telemetry_owner->mir_call_count++;
-}
-
-static void pm_before_may_gc_call(void* owner) {
-    PyMirTranspiler* mt = (PyMirTranspiler*)owner;
-    if (mt) mt->mir_may_gc_call_count++;
-}
-
-static void pm_after_call_result(void* owner, MIR_reg_t reg, MIR_type_t type) {
-    PyMirTranspiler* mt = (PyMirTranspiler*)owner;
-    if (mt && reg && type == MIR_T_I64) mt->mir_item_result_count++;
-}
-
-static MIR_reg_t pm_call_1(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1);
 
 // Python Item values have no static type proof at lowering time, so the shared
 // liveness pass owns their exact root slots instead of trusting local hints.
-static void pm_begin_function_frame(PyMirTranspiler* mt, MIR_reg_t runtime) {
-    if (!mt) return;
-    em_frame_dispose(&mt->em);
-    mt->em.frame.return_type = MIR_T_I64;
-    mt->em.frame.item_return = true;
-    mt->em.frame.scalar_return_mode = MIR_SCALAR_RETURN_DYNAMIC;
-    mt->em.frame.runtime = runtime;
-    mt->em.frame.root_base = pm_new_reg(mt, "py_root_frame", MIR_T_I64);
-    mt->em.frame.number_base = pm_new_reg(mt, "py_number_frame", MIR_T_I64);
-    mt->em.frame.anchor = pm_new_label(mt);
-    mt->em.frame.return_label = pm_new_label(mt);
-    mt->em.frame.return_reg = pm_new_reg(mt, "py_return_value", MIR_T_I64);
-    mt->em.frame.plan.entry_kind = FN_ENTRY_PUBLIC_WRAPPER;
-    mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
-    mt->em.frame.active = true;
-    pm_emit_label(mt, mt->em.frame.anchor);
+static void pm_begin_function_frame(PyMirTranspiler* mt, PmCompilerRegister runtime) {
+    if (!mt || !runtime || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_FRAME_BEGIN_SIZE ||
+            !py_hosted_execution_api->mir_function_frame_begin ||
+            py_hosted_execution_api->mir_function_frame_begin(mt->compiler_cursor,
+                (uint32_t)runtime) != 0) {
+        log_error("py-mir: host rejected function frame initialization");
+        abort();
+    }
 }
 
 static void pm_enable_scalar_return_home(PyMirTranspiler* mt,
         const char* home_name) {
     if (!mt || !home_name) return;
-    MIR_reg_t home = pm_lookup_hosted_function_register(mt->em.ctx,
-        mt->em.func, home_name);
+    PmCompilerRegister home = pm_lookup_hosted_function_register(mt, home_name);
     if (!home) {
         log_error("py-mir: missing required scalar return home '%s'", home_name);
         abort();
     }
-    // Public Python frames must hand scalar payloads to their caller before
-    // popping the number stack; a fallback GC scalar cell is forbidden.
-    mt->em.frame.incoming_scalar_home = home;
-    mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
-    mt->em.frame.plan.accepts_caller_scalar_home = true;
+    if (!py_hosted_execution_api || py_hosted_execution_api->struct_size <
+            JUBE_GUEST_EXECUTION_API_H7C_FRAME_SCALAR_HOME_SIZE ||
+            !py_hosted_execution_api->mir_function_frame_scalar_return_home_set ||
+            py_hosted_execution_api->mir_function_frame_scalar_return_home_set(mt->compiler_cursor,
+                (uint32_t)home) != 0) {
+        log_error("py-mir: host rejected scalar return home '%s'", home_name);
+        abort();
+    }
 }
 
 static void pm_finish_function_frame(PyMirTranspiler* mt, const char* name) {
-    if (!mt || !mt->em.frame.active) return;
-    mt->em.frame.plan.debug_name = name;
-    pm_emit_label(mt, mt->em.frame.return_label);
-
-    MirRootWriteBackResult roots = {};
-    em_finalize_semantic_root_write_back(&mt->em, mt->em.frame.root_base,
-        mt->em.frame.anchor, false, 0, &mt->em.frame.gc_candidates,
-        &mt->em.frame.gc_candidate_count, &mt->em.frame.gc_candidate_capacity,
-        &mt->em.frame.gc_candidate_by_reg,
-        &mt->em.frame.gc_candidate_by_reg_capacity, mt->em.frame.gc_call_sites,
-        mt->em.frame.gc_call_site_count, &roots, name);
-    mt->em.frame.root_slot_count = roots.stable_slots + roots.scratch_slots;
-    mt->em.frame.root_store_count = roots.inserted_stores;
-    em_finalize_scalar_homes(&mt->em);
-
-    if (mt->em.frame.item_return) {
-        MIR_reg_t returned = mt->em.frame.return_reg;
-        if (!mt->em.frame.incoming_scalar_home) {
-            log_error("py-mir: public Item return has no scalar home");
-            abort();
-        }
-        returned = em_adopt_scalar_item(&mt->em,
-            mt->em.frame.scalar_return_mode, returned,
-            mt->em.frame.runtime, offsetof(Context, side_number_top),
-            mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
-        if (returned != mt->em.frame.return_reg) {
-            pm_emit_i64_register_move(mt, mt->em.frame.return_reg, returned);
-        }
-    } else {
-        em_store_frame_top(&mt->em, mt->em.frame.runtime,
-            offsetof(Context, side_number_top), mt->em.frame.number_base);
+    if (!mt || !name || !*name ||
+            !py_hosted_execution_api || py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_FRAME_FINALIZE_SIZE ||
+            !py_hosted_execution_api->mir_function_frame_finalize ||
+            py_hosted_execution_api->mir_function_frame_finalize(mt->compiler_cursor, name) != 0) {
+        log_error("py-mir: host rejected function frame finalization");
+        abort();
     }
-    if (mt->em.frame.root_slot_count > 0) {
-        em_store_frame_top(&mt->em, mt->em.frame.runtime,
-            offsetof(Context, side_root_top), mt->em.frame.root_base);
-    }
-    pm_emit_raw(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-        MIR_new_reg_op(mt->em.ctx, mt->em.frame.return_reg)));
-
-    em_finalize_frame_prologue(&mt->em, mt->em.frame.plan.entry_mode,
-        offsetof(Context, side_root_top), offsetof(Context, side_root_limit),
-        offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
-        offsetof(Context, side_root_commit_limit));
-    mt->em.frame.active = false;
-    pm_emit_side_stack_overflow(mt);
-    pm_emit_raw(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-        MIR_new_uint_op(mt->em.ctx, PY_ITEM_NULL_VAL)));
-    em_finalize_function_metadata(&mt->em);
-    em_frame_dispose(&mt->em);
 }
 
 // ============================================================================
 // Call helpers
 // ============================================================================
 
-static MIR_reg_t pm_call_0(PyMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
-    return em_call_0(&mt->em, fn_name, ret_type, true);
+static JubeCompilerCallOperand pm_call_operand_register(PmCompilerValueKind type,
+        PmCompilerRegister register_id) {
+    JubeCompilerCallOperand operand = {};
+    operand.value_kind = pm_hosted_value_kind(type);
+    operand.operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+    operand.register_id = (uint32_t)register_id;
+    return operand;
 }
 
-static MIR_reg_t pm_call_1(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
-    return em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
+static JubeCompilerCallOperand pm_call_operand_i64_immediate(int64_t value) {
+    JubeCompilerCallOperand operand = {};
+    operand.value_kind = JUBE_COMPILER_VALUE_I64;
+    operand.operand_kind = JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE;
+    operand.immediate_i64 = value;
+    return operand;
 }
 
-static MIR_reg_t pm_call_2(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2) {
-    return em_call_2(&mt->em, fn_name, ret_type, a1t, a1, a2t, a2, true);
+static PmCompilerRegister pm_emit_hosted_runtime_call_operands(PyMirTranspiler* mt,
+        const char* fn_name, PmCompilerValueKind result_type, int operand_count,
+        const JubeCompilerCallOperand* operands, bool discard_result) {
+    if (!mt || !fn_name || operand_count < 0 || operand_count > PM_MAX_MIR_PARAMS ||
+            (operand_count > 0 && !operands) || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size < JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CALL_EMIT_SIZE ||
+            !py_hosted_execution_api->mir_runtime_import_call_emit) {
+        log_error("py-mir: hosted compiler cannot emit semantic runtime import call");
+        abort();
+    }
+    uint32_t result_register = 0;
+    if (py_hosted_execution_api->mir_runtime_import_call_emit(mt->compiler_cursor, fn_name,
+            pm_hosted_value_kind(result_type), (uint32_t)operand_count, operands,
+            discard_result, &result_register) != 0 ||
+            (!discard_result && !result_register)) {
+        log_error("py-mir: host rejected runtime import %s", fn_name);
+        abort();
+    }
+    return (PmCompilerRegister)result_register;
 }
 
-static MIR_reg_t pm_call_3(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3) {
-    return em_call_3(&mt->em, fn_name, ret_type, a1t, a1, a2t, a2, a3t, a3, true);
+static PmCompilerRegister pm_call_semantic_1(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type, JubeCompilerCallOperand operand) {
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 1,
+        &operand, false);
 }
 
-static MIR_reg_t pm_call_4(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4) {
-    return em_call_4(&mt->em, fn_name, ret_type,
-        a1t, a1, a2t, a2, a3t, a3, a4t, a4, true);
+static PmCompilerRegister pm_call_semantic_2(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type, JubeCompilerCallOperand first,
+        JubeCompilerCallOperand second) {
+    JubeCompilerCallOperand operands[] = {first, second};
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 2,
+        operands, false);
 }
 
-static MIR_reg_t pm_call_5(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
-    return em_call_5(&mt->em, fn_name, ret_type,
-        a1t, a1, a2t, a2, a3t, a3, a4t, a4, a5t, a5, true);
+static PmCompilerRegister pm_call_semantic_3(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type, JubeCompilerCallOperand first,
+        JubeCompilerCallOperand second, JubeCompilerCallOperand third) {
+    JubeCompilerCallOperand operands[] = {first, second, third};
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 3,
+        operands, false);
 }
 
-static void pm_call_void_1(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1) {
-    em_call_void_1(&mt->em, fn_name, a1t, a1, true);
+static PmCompilerRegister pm_call_semantic_4(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type, JubeCompilerCallOperand first,
+        JubeCompilerCallOperand second, JubeCompilerCallOperand third,
+        JubeCompilerCallOperand fourth) {
+    JubeCompilerCallOperand operands[] = {first, second, third, fourth};
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 4,
+        operands, false);
 }
 
-static void pm_call_void_2(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
-    em_call_void_2(&mt->em, fn_name, a1t, a1, a2t, a2, true);
+static PmCompilerRegister pm_call_semantic_5(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type, JubeCompilerCallOperand first,
+        JubeCompilerCallOperand second, JubeCompilerCallOperand third,
+        JubeCompilerCallOperand fourth, JubeCompilerCallOperand fifth) {
+    JubeCompilerCallOperand operands[] = {first, second, third, fourth, fifth};
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 5,
+        operands, false);
 }
 
-static void pm_call_void_3(PyMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3) {
-    MIR_type_t types[] = {a1t, a2t, a3t};
-    MIR_op_t ops[] = {a1, a2, a3};
-    em_call_void_with_args(&mt->em, fn_name, 3, types, ops, true);
+static void pm_call_semantic_void_1(PyMirTranspiler* mt, const char* fn_name,
+        JubeCompilerCallOperand operand) {
+    pm_emit_hosted_runtime_call_operands(mt, fn_name, PM_COMPILER_VALUE_I64, 1,
+        &operand, true);
+}
+
+static void pm_call_semantic_void_2(PyMirTranspiler* mt, const char* fn_name,
+        JubeCompilerCallOperand first, JubeCompilerCallOperand second) {
+    JubeCompilerCallOperand operands[] = {first, second};
+    pm_emit_hosted_runtime_call_operands(mt, fn_name, PM_COMPILER_VALUE_I64, 2,
+        operands, true);
+}
+
+static void pm_call_semantic_void_3(PyMirTranspiler* mt, const char* fn_name,
+        JubeCompilerCallOperand first, JubeCompilerCallOperand second,
+        JubeCompilerCallOperand third) {
+    JubeCompilerCallOperand operands[] = {first, second, third};
+    pm_emit_hosted_runtime_call_operands(mt, fn_name, PM_COMPILER_VALUE_I64, 3,
+        operands, true);
+}
+
+static PmCompilerRegister pm_call_semantic_0(PyMirTranspiler* mt, const char* fn_name,
+        PmCompilerValueKind result_type) {
+    return pm_emit_hosted_runtime_call_operands(mt, fn_name, result_type, 0,
+        NULL, false);
 }
 
 struct PmArgScope {
-    MIR_reg_t mark;
-    MIR_reg_t args;
+    PmCompilerRegister mark;
+    PmCompilerRegister args;
 };
 
 static PmArgScope pm_begin_arg_scope(PyMirTranspiler* mt, int count) {
     PmArgScope scope = {};
-    scope.mark = pm_call_0(mt, "py_args_save", MIR_T_I64);
-    scope.args = pm_call_1(mt, "py_args_push", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, count));
+    scope.mark = pm_call_semantic_0(mt, "py_args_save", PM_COMPILER_VALUE_I64);
+    scope.args = pm_call_semantic_1(mt, "py_args_push", PM_COMPILER_VALUE_I64,
+        pm_call_operand_i64_immediate(count));
     return scope;
 }
 
 static void pm_arg_scope_store(PyMirTranspiler* mt, PmArgScope scope,
-        int index, MIR_reg_t value) {
-    pm_call_void_3(mt, "py_args_store",
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, scope.args),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, index),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, value));
+        int index, PmCompilerRegister value) {
+    pm_call_semantic_void_3(mt, "py_args_store",
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, scope.args),
+        pm_call_operand_i64_immediate(index),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, value));
 }
 
 static void pm_end_arg_scope(PyMirTranspiler* mt, PmArgScope scope) {
-    pm_call_void_1(mt, "py_args_restore", MIR_T_I64,
-        MIR_new_reg_op(mt->em.ctx, scope.mark));
+    pm_call_semantic_void_1(mt, "py_args_restore",
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, scope.mark));
 }
 
 // ============================================================================
@@ -892,7 +1002,7 @@ static void pm_push_scope(PyMirTranspiler* mt) {
     if (!pm_require_capacity(mt, mt->scope_depth + 1, PM_MAX_VAR_SCOPES,
             "nested variable scopes")) return;
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = em_var_scope_new(16);
+    mt->var_scopes[mt->scope_depth] = pm_var_scope_new(16);
 }
 
 static void pm_pop_scope(PyMirTranspiler* mt) {
@@ -902,47 +1012,47 @@ static void pm_pop_scope(PyMirTranspiler* mt) {
     mt->scope_depth--;
 }
 
-static void pm_set_var(PyMirTranspiler* mt, const char* name, MIR_reg_t reg) {
+static void pm_set_var(PyMirTranspiler* mt, const char* name, PmCompilerRegister reg) {
     PyVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
-    entry.var.mir_type = MIR_T_I64;
+    entry.var.mir_type = PM_COMPILER_VALUE_I64;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
-static void pm_set_var_with_type(PyMirTranspiler* mt, const char* name, MIR_reg_t reg, TypeId type_hint) {
+static void pm_set_var_with_type(PyMirTranspiler* mt, const char* name, PmCompilerRegister reg, TypeId type_hint) {
     PyVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
-    entry.var.mir_type = MIR_T_I64;
+    entry.var.mir_type = PM_COMPILER_VALUE_I64;
     entry.var.type_id = type_hint;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
-static void pm_set_env_var(PyMirTranspiler* mt, const char* name, MIR_reg_t env_reg, int slot) {
+static void pm_set_env_var(PyMirTranspiler* mt, const char* name, PmCompilerRegister env_reg, int slot) {
     PyVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.from_env = true;
     entry.var.env_reg = env_reg;
     entry.var.env_slot = slot;
-    entry.var.mir_type = MIR_T_I64;
+    entry.var.mir_type = PM_COMPILER_VALUE_I64;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
-static MIR_reg_t pm_load_env_slot(PyMirTranspiler* mt, MIR_reg_t env_reg, int slot) {
-    return pm_call_2(mt, "py_env_load", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, env_reg),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, slot));
+static PmCompilerRegister pm_load_env_slot(PyMirTranspiler* mt, PmCompilerRegister env_reg, int slot) {
+    return pm_call_semantic_2(mt, "py_env_load", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, env_reg),
+        pm_call_operand_i64_immediate(slot));
 }
 
-static void pm_store_env_slot(PyMirTranspiler* mt, MIR_reg_t env_reg, int slot, MIR_reg_t val_reg) {
-    pm_call_void_3(mt, "py_env_store",
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, env_reg),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, slot),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_reg));
+static void pm_store_env_slot(PyMirTranspiler* mt, PmCompilerRegister env_reg, int slot, PmCompilerRegister val_reg) {
+    pm_call_semantic_void_3(mt, "py_env_store",
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, env_reg),
+        pm_call_operand_i64_immediate(slot),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, val_reg));
 }
 
 static PyMirVarEntry* pm_find_var(PyMirTranspiler* mt, const char* name) {
@@ -961,34 +1071,44 @@ static PyMirVarEntry* pm_find_var(PyMirTranspiler* mt, const char* name) {
 // Boxing helpers
 // ============================================================================
 
-static MIR_reg_t pm_emit_null(PyMirTranspiler* mt) {
-    MIR_reg_t r = pm_new_reg(mt, "null", MIR_T_I64);
+static PmCompilerRegister pm_emit_null(PyMirTranspiler* mt) {
+    PmCompilerRegister r = pm_new_reg(mt, "null", PM_COMPILER_VALUE_I64);
     pm_emit_i64_immediate(mt, r, (int64_t)PY_ITEM_NULL_VAL);
     return r;
 }
 
-static MIR_reg_t pm_box_int_const(PyMirTranspiler* mt, int64_t value) {
-    MIR_reg_t r = pm_new_reg(mt, "boxi", MIR_T_I64);
+static PmCompilerRegister pm_box_int_const(PyMirTranspiler* mt, int64_t value) {
+    PmCompilerRegister r = pm_new_reg(mt, "boxi", PM_COMPILER_VALUE_I64);
     uint64_t tagged = PY_ITEM_INT_TAG | ((uint64_t)value & PY_MASK56);
     pm_emit_i64_immediate(mt, r, (int64_t)tagged);
     return r;
 }
 
-static MIR_reg_t pm_box_float(PyMirTranspiler* mt, MIR_reg_t d_reg) {
-    return pm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->em.ctx, d_reg));
+static PmCompilerRegister pm_box_float(PyMirTranspiler* mt, PmCompilerRegister d_reg) {
+    return pm_call_semantic_1(mt, "push_d", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_F64, d_reg));
 }
 
-static MIR_reg_t pm_box_string_literal(PyMirTranspiler* mt, const char* str, int len) {
+static Item pm_hosted_name_from_utf8_n(const char* text, size_t length) {
+    Item name = py_data_name_from_utf8_n(text, length);
+    if (name.item == ItemNull.item) {
+        log_error("py-mir: host could not intern a source name");
+        abort();
+    }
+    return name;
+}
+
+static PmCompilerRegister pm_box_string_literal(PyMirTranspiler* mt, const char* str, int len) {
     // Module JIT code outlives the parser pool, so embedding AST-owned chars
     // leaves imported functions with dangling literal pointers after cleanup.
-    String* literal = heap_create_name(str, (size_t)len);
-    MIR_reg_t result = pm_new_reg(mt, "str_literal", MIR_T_I64);
-    pm_emit_i64_immediate(mt, result, (int64_t)s2it(literal));
+    Item literal = pm_hosted_name_from_utf8_n(str, (size_t)len);
+    PmCompilerRegister result = pm_new_reg(mt, "str_literal", PM_COMPILER_VALUE_I64);
+    pm_emit_i64_immediate(mt, result, (int64_t)literal.item);
     return result;
 }
 
-static MIR_reg_t pm_emit_bool(PyMirTranspiler* mt, bool value) {
-    MIR_reg_t r = pm_new_reg(mt, "bool", MIR_T_I64);
+static PmCompilerRegister pm_emit_bool(PyMirTranspiler* mt, bool value) {
+    PmCompilerRegister r = pm_new_reg(mt, "bool", PM_COMPILER_VALUE_I64);
     uint64_t bval = value ? PY_ITEM_TRUE_VAL : PY_ITEM_FALSE_VAL;
     pm_emit_i64_immediate(mt, r, (int64_t)bval);
     return r;
@@ -999,7 +1119,7 @@ static MIR_reg_t pm_emit_bool(PyMirTranspiler* mt, bool value) {
 // ============================================================================
 
 // forward declaration
-static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
+static PmCompilerRegister pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
 
 // infer the effective type of an AST expression without emitting code
 static TypeId pm_get_effective_type(PyMirTranspiler* mt, PyAstNode* expr) {
@@ -1058,77 +1178,69 @@ static TypeId pm_get_effective_type(PyMirTranspiler* mt, PyAstNode* expr) {
 }
 
 // emit MIR code to produce an unboxed int64 from a boxed Item register
-static MIR_reg_t pm_emit_unbox_int(PyMirTranspiler* mt, MIR_reg_t item) {
-    MIR_reg_t result = pm_new_reg(mt, "ubi", MIR_T_I64);
+static PmCompilerRegister pm_emit_unbox_int(PyMirTranspiler* mt, PmCompilerRegister item) {
+    PmCompilerRegister result = pm_new_reg(mt, "ubi", PM_COMPILER_VALUE_I64);
     // shift left 8 to discard tag, arithmetic shift right 8 for sign extension
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LSH, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, item), MIR_new_int_op(mt->em.ctx, 8)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, result), MIR_new_int_op(mt->em.ctx, 8)));
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LSH, result, item, 0, 8);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, result, result, 0, 8);
     return result;
 }
 
 // box an unboxed int64 register back to a tagged Item, with INT56 range check
-static MIR_reg_t pm_box_int_reg(PyMirTranspiler* mt, MIR_reg_t val) {
+static PmCompilerRegister pm_box_int_reg(PyMirTranspiler* mt, PmCompilerRegister val) {
     int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
     int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
 
-    MIR_reg_t result = pm_new_reg(mt, "bxi", MIR_T_I64);
-    MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
-    MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
-    MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
-    MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
-    MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+    PmCompilerRegister result = pm_new_reg(mt, "bxi", PM_COMPILER_VALUE_I64);
+    PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
+    PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
+    PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
+    PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
+    PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
 
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LE, MIR_new_reg_op(mt->em.ctx, le_max),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT56_MAX_VAL)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, ge_min),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT56_MIN_VAL)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, in_range),
-        MIR_new_reg_op(mt->em.ctx, le_max), MIR_new_reg_op(mt->em.ctx, ge_min)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, masked),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, (int64_t)PY_MASK56)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_OR, MIR_new_reg_op(mt->em.ctx, tagged),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->em.ctx, masked)));
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, val, 0, INT56_MAX_VAL);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, val, 0, INT56_MIN_VAL);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range, le_max, ge_min, 0);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked, val, 0,
+        (int64_t)PY_MASK56);
+    // OR permits an immediate left operand in MIR, so keep its source as the
+    // value operand and let the descriptor carry the tag immediate on right.
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged, masked, 0,
+        (int64_t)PY_ITEM_INT_TAG);
 
-    MIR_label_t l_ok = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerLabel l_ok = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
     pm_emit_branch_true(mt, in_range, l_ok);
     // Native arithmetic reaches here only after producing a valid int64; it
     // must become a Python bigint instead of discarding the computed value.
-    MIR_reg_t promoted = pm_call_1(mt, "py_bigint_from_int64", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, promoted)));
+    PmCompilerRegister promoted = pm_call_semantic_1(mt, "py_bigint_from_int64", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
+    pm_emit_i64_register_move(mt, result, promoted);
     pm_emit_jump(mt, l_end);
     pm_emit_label(mt, l_ok);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, tagged)));
+    pm_emit_i64_register_move(mt, result, tagged);
     pm_emit_label(mt, l_end);
     return result;
 }
 
 // emit code to produce an unboxed int64 from an expression (literal → direct, var → unbox)
-static MIR_reg_t pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr) {
+static PmCompilerRegister pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr) {
     if (!expr) {
-        MIR_reg_t z = pm_new_reg(mt, "zero", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, z),
-            MIR_new_int_op(mt->em.ctx, 0)));
+        PmCompilerRegister z = pm_new_reg(mt, "zero", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_immediate(mt, z, 0);
         return z;
     }
     // integer literal → emit constant directly
     if (expr->node_type == PY_AST_NODE_LITERAL) {
         PyLiteralNode* lit = (PyLiteralNode*)expr;
         if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
-            MIR_reg_t r = pm_new_reg(mt, "ilit", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, r),
-                MIR_new_int_op(mt->em.ctx, lit->value.int_value)));
+            PmCompilerRegister r = pm_new_reg(mt, "ilit", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, r, lit->value.int_value);
             return r;
         }
         if (lit->literal_type == PY_LITERAL_BOOLEAN) {
-            MIR_reg_t r = pm_new_reg(mt, "blit", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, r),
-                MIR_new_int_op(mt->em.ctx, lit->value.boolean_value ? 1 : 0)));
+            PmCompilerRegister r = pm_new_reg(mt, "blit", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, r, lit->value.boolean_value ? 1 : 0);
             return r;
         }
     }
@@ -1148,27 +1260,24 @@ static MIR_reg_t pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr
         TypeId lt = pm_get_effective_type(mt, bin->left);
         TypeId rt = pm_get_effective_type(mt, bin->right);
         if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
-            MIR_reg_t l = pm_transpile_as_native_int(mt, bin->left);
-            MIR_reg_t r = pm_transpile_as_native_int(mt, bin->right);
-            MIR_insn_code_t op;
+            PmCompilerRegister l = pm_transpile_as_native_int(mt, bin->left);
+            PmCompilerRegister r = pm_transpile_as_native_int(mt, bin->right);
+            uint32_t operation;
             switch (bin->op) {
-            case PY_OP_ADD: op = MIR_ADD; break;
-            case PY_OP_SUB: op = MIR_SUB; break;
-            case PY_OP_MUL: op = MIR_MUL; break;
-            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
-            case PY_OP_MOD: op = MIR_MOD; break;
-            case PY_OP_LSHIFT: op = MIR_LSH; break;
-            case PY_OP_RSHIFT: op = MIR_RSH; break;
-            case PY_OP_BIT_AND: op = MIR_AND; break;
-            case PY_OP_BIT_OR: op = MIR_OR; break;
-            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            case PY_OP_ADD: operation = JUBE_COMPILER_I64_ADD; break;
+            case PY_OP_SUB: operation = JUBE_COMPILER_I64_SUB; break;
+            case PY_OP_MUL: operation = JUBE_COMPILER_I64_MUL; break;
+            case PY_OP_FLOOR_DIV: operation = JUBE_COMPILER_I64_DIV; break;
+            case PY_OP_MOD: operation = JUBE_COMPILER_I64_MOD; break;
+            case PY_OP_LSHIFT: operation = JUBE_COMPILER_I64_LSH; break;
+            case PY_OP_RSHIFT: operation = JUBE_COMPILER_I64_RSH; break;
+            case PY_OP_BIT_AND: operation = JUBE_COMPILER_I64_AND; break;
+            case PY_OP_BIT_OR: operation = JUBE_COMPILER_I64_OR; break;
+            case PY_OP_BIT_XOR: operation = JUBE_COMPILER_I64_XOR; break;
             default: goto fallback;
             }
-            MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, op,
-                MIR_new_reg_op(mt->em.ctx, res),
-                MIR_new_reg_op(mt->em.ctx, l),
-                MIR_new_reg_op(mt->em.ctx, r)));
+            PmCompilerRegister res = pm_new_reg(mt, "ni", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, operation, res, l, r, 0);
             return res;
         }
     }
@@ -1177,24 +1286,22 @@ static MIR_reg_t pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr
         PyUnaryNode* un = (PyUnaryNode*)expr;
         TypeId ot = pm_get_effective_type(mt, un->operand);
         if (ot == LMD_TYPE_INT && un->op == PY_OP_NEGATE) {
-            MIR_reg_t inner = pm_transpile_as_native_int(mt, un->operand);
-            MIR_reg_t res = pm_new_reg(mt, "neg", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_NEG,
-                MIR_new_reg_op(mt->em.ctx, res),
-                MIR_new_reg_op(mt->em.ctx, inner)));
+            PmCompilerRegister inner = pm_transpile_as_native_int(mt, un->operand);
+            PmCompilerRegister res = pm_new_reg(mt, "neg", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_NEG, res, inner, 0, 0);
             return res;
         }
     }
 fallback:;
     // fallback: transpile as boxed then unbox
-    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
+    PmCompilerRegister boxed = pm_transpile_expression(mt, expr);
     return pm_emit_unbox_int(mt, boxed);
 }
 
 // emit code to produce an unboxed double from an expression
-static MIR_reg_t pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* expr) {
+static PmCompilerRegister pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* expr) {
     if (!expr) {
-        MIR_reg_t z = pm_new_reg(mt, "fzero", MIR_T_D);
+        PmCompilerRegister z = pm_new_reg(mt, "fzero", PM_COMPILER_VALUE_F64);
         pm_emit_f64_immediate(mt, z, 0.0);
         return z;
     }
@@ -1202,18 +1309,16 @@ static MIR_reg_t pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* ex
     if (expr->node_type == PY_AST_NODE_LITERAL) {
         PyLiteralNode* lit = (PyLiteralNode*)expr;
         if (lit->literal_type == PY_LITERAL_FLOAT) {
-            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
+            PmCompilerRegister r = pm_new_reg(mt, "dlit", PM_COMPILER_VALUE_F64);
             pm_emit_f64_immediate(mt, r, lit->value.float_value);
             return r;
         }
         // int literal → convert to double
         if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
-            MIR_reg_t i = pm_new_reg(mt, "i2f", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, i),
-                MIR_new_int_op(mt->em.ctx, lit->value.int_value)));
-            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_I2D, MIR_new_reg_op(mt->em.ctx, r),
-                MIR_new_reg_op(mt->em.ctx, i)));
+            PmCompilerRegister i = pm_new_reg(mt, "i2f", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, i, lit->value.int_value);
+            PmCompilerRegister r = pm_new_reg(mt, "dlit", PM_COMPILER_VALUE_F64);
+            pm_emit_f64_operation(mt, JUBE_COMPILER_F64_FROM_I64, r, i, 0);
             return r;
         }
     }
@@ -1224,22 +1329,21 @@ static MIR_reg_t pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* ex
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
         PyMirVarEntry* var = pm_find_var(mt, vname);
         if (var && var->type_id == LMD_TYPE_FLOAT) {
-            return pm_call_1(mt, "it2d", MIR_T_D,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, var->reg));
+            return pm_call_semantic_1(mt, "it2d", PM_COMPILER_VALUE_F64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, var->reg));
         }
         // int var used in float context → unbox int then convert
         if (var && var->type_id == LMD_TYPE_INT) {
-            MIR_reg_t i = pm_emit_unbox_int(mt, var->reg);
-            MIR_reg_t d = pm_new_reg(mt, "i2d", MIR_T_D);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_I2D, MIR_new_reg_op(mt->em.ctx, d),
-                MIR_new_reg_op(mt->em.ctx, i)));
+            PmCompilerRegister i = pm_emit_unbox_int(mt, var->reg);
+            PmCompilerRegister d = pm_new_reg(mt, "i2d", PM_COMPILER_VALUE_F64);
+            pm_emit_f64_operation(mt, JUBE_COMPILER_F64_FROM_I64, d, i, 0);
             return d;
         }
     }
     // fallback: transpile as boxed then call it2d
-    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
-    return pm_call_1(mt, "it2d", MIR_T_D,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, boxed));
+    PmCompilerRegister boxed = pm_transpile_expression(mt, expr);
+    return pm_call_semantic_1(mt, "it2d", PM_COMPILER_VALUE_F64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, boxed));
 }
 
 // ============================================================================
@@ -1255,22 +1359,21 @@ static void pm_transpile_for_gen(PyMirTranspiler* mt, PyForNode* forn);
 static bool pm_is_global_in_current_func(PyMirTranspiler* mt, const char* vname);
 static int pm_get_global_var_index(PyMirTranspiler* mt, const char* vname);
 
-static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
+static PmCompilerRegister pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     switch (lit->literal_type) {
     case PY_LITERAL_INT:
         if (lit->is_bigint_literal && lit->bigint_literal_str) {
             // large integer literal: call py_bigint_from_cstr at runtime
             String* interned = name_pool_create_len(mt->tp->name_pool,
                 lit->bigint_literal_str, (int)strlen(lit->bigint_literal_str));
-            MIR_reg_t ptr = pm_new_reg(mt, "biglit", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ptr),
-                MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)interned->chars)));
-            return pm_call_1(mt, "py_bigint_from_cstr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, ptr));
+            PmCompilerRegister ptr = pm_new_reg(mt, "biglit", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, ptr, (int64_t)(uintptr_t)interned->chars);
+            return pm_call_semantic_1(mt, "py_bigint_from_cstr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, ptr));
         }
         return pm_box_int_const(mt, lit->value.int_value);
     case PY_LITERAL_FLOAT: {
-        MIR_reg_t d = pm_new_reg(mt, "dbl", MIR_T_D);
+        PmCompilerRegister d = pm_new_reg(mt, "dbl", PM_COMPILER_VALUE_F64);
         pm_emit_f64_immediate(mt, d, lit->value.float_value);
         return pm_box_float(mt, d);
     }
@@ -1290,7 +1393,7 @@ static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     return pm_emit_null(mt);
 }
 
-static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* id) {
+static PmCompilerRegister pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* id) {
     // Python builtins as names
     if (id->name->len == 4 && strncmp(id->name->chars, "None", 4) == 0) {
         return pm_emit_null(mt);
@@ -1309,8 +1412,8 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
     if (pm_is_global_in_current_func(mt, vname)) {
         int idx = pm_get_global_var_index(mt, vname);
         if (idx >= 0) {
-            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, idx));
+            return pm_call_semantic_1(mt, "py_get_module_var", PM_COMPILER_VALUE_I64,
+                pm_call_operand_i64_immediate(idx));
         }
     }
 
@@ -1324,8 +1427,8 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
     {
         int midx = pm_get_global_var_index(mt, vname);
         if (midx >= 0) {
-            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx));
+            return pm_call_semantic_1(mt, "py_get_module_var", PM_COMPILER_VALUE_I64,
+                pm_call_operand_i64_immediate(midx));
         }
     }
 
@@ -1340,19 +1443,17 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
                 char fname[128];
                 snprintf(fname, sizeof(fname), "_py_%s", mt->func_entries[i].name);
                 if (strcmp(fname, vname) == 0) {
-                    MIR_reg_t fptr = pm_new_reg(mt, "fptr", MIR_T_I64);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, fptr),
-                        MIR_new_ref_op(mt->em.ctx, found->func_item)));
-                    MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                        MIR_T_I64, MIR_new_int_op(mt->em.ctx, mt->func_entries[i].param_count));
+                    PmCompilerRegister fptr = pm_new_reg(mt, "fptr", PM_COMPILER_VALUE_I64);
+                    pm_emit_i64_reference_move(mt, fptr, found->func_item);
+                    PmCompilerRegister fn_item_reg = pm_call_semantic_2(mt, "py_new_function", PM_COMPILER_VALUE_I64,
+                        pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                        pm_call_operand_i64_immediate(mt->func_entries[i].param_count));
                     if (mt->func_entries[i].has_kwargs) {
-                        pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+                        pm_call_semantic_1(mt, "py_set_kwargs_flag", PM_COMPILER_VALUE_I64,
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
                     }
-                    fn_item_reg = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+                    fn_item_reg = pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                        pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
                     return fn_item_reg;
                 }
             }
@@ -1362,9 +1463,9 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
     log_debug("py-mir: undefined variable '%.*s' — trying builtin class lookup",
         (int)id->name->len, id->name->chars);
     // fallback: look up as a builtin class (ValueError, RuntimeError, etc.)
-    MIR_reg_t name_item = pm_box_string_literal(mt, id->name->chars, id->name->len);
-    return pm_call_1(mt, "py_resolve_name_item", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, name_item));
+    PmCompilerRegister name_item = pm_box_string_literal(mt, id->name->chars, id->name->len);
+    return pm_call_semantic_1(mt, "py_resolve_name_item", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, name_item));
 }
 
 static const char* pm_binary_op_func(PyOperator op) {
@@ -1401,112 +1502,101 @@ static const char* pm_compare_op_func(PyOperator op) {
     }
 }
 
-static MIR_reg_t pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode* bin) {
+static PmCompilerRegister pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode* bin) {
     // Phase 1: native integer arithmetic when both operands are provably INT
     TypeId lt = pm_get_effective_type(mt, bin->left);
     TypeId rt = pm_get_effective_type(mt, bin->right);
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op != PY_OP_DIV && bin->op != PY_OP_POW) {
-        MIR_insn_code_t op;
+        uint32_t operation;
         bool can_overflow = false;
         switch (bin->op) {
-        case PY_OP_ADD: op = MIR_ADD; can_overflow = true; break;
-        case PY_OP_SUB: op = MIR_SUB; can_overflow = true; break;
-        case PY_OP_MUL: op = MIR_MUL; can_overflow = true; break;
-        case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
-        case PY_OP_MOD: op = MIR_MOD; break;
-        case PY_OP_LSHIFT: op = MIR_LSH; can_overflow = true; break;
-        case PY_OP_RSHIFT: op = MIR_RSH; break;
-        case PY_OP_BIT_AND: op = MIR_AND; break;
-        case PY_OP_BIT_OR: op = MIR_OR; break;
-        case PY_OP_BIT_XOR: op = MIR_XOR; break;
+        case PY_OP_ADD: operation = JUBE_COMPILER_I64_ADD; can_overflow = true; break;
+        case PY_OP_SUB: operation = JUBE_COMPILER_I64_SUB; can_overflow = true; break;
+        case PY_OP_MUL: operation = JUBE_COMPILER_I64_MUL; can_overflow = true; break;
+        case PY_OP_FLOOR_DIV: operation = JUBE_COMPILER_I64_DIV; break;
+        case PY_OP_MOD: operation = JUBE_COMPILER_I64_MOD; break;
+        case PY_OP_LSHIFT: operation = JUBE_COMPILER_I64_LSH; can_overflow = true; break;
+        case PY_OP_RSHIFT: operation = JUBE_COMPILER_I64_RSH; break;
+        case PY_OP_BIT_AND: operation = JUBE_COMPILER_I64_AND; break;
+        case PY_OP_BIT_OR: operation = JUBE_COMPILER_I64_OR; break;
+        case PY_OP_BIT_XOR: operation = JUBE_COMPILER_I64_XOR; break;
         default: goto boxed_path;
         }
         const char* fn = pm_binary_op_func(bin->op);
 
         // transpile both as boxed Items first (needed for runtime fallback)
-        MIR_reg_t lhs_boxed = pm_transpile_expression(mt, bin->left);
-        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, bin->right);
+        PmCompilerRegister lhs_boxed = pm_transpile_expression(mt, bin->left);
+        PmCompilerRegister rhs_boxed = pm_transpile_expression(mt, bin->right);
 
-        MIR_reg_t final_result = pm_new_reg(mt, "bxr", MIR_T_I64);
-        MIR_label_t l_boxed_call = pm_new_label(mt);
-        MIR_label_t l_end = pm_new_label(mt);
+        PmCompilerRegister final_result = pm_new_reg(mt, "bxr", PM_COMPILER_VALUE_I64);
+        PmCompilerLabel l_boxed_call = pm_new_label(mt);
+        PmCompilerLabel l_end = pm_new_label(mt);
 
         // runtime type guard: verify both operands are actually INT at runtime
-        MIR_reg_t l_tag = pm_new_reg(mt, "lt", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, l_tag),
-            MIR_new_reg_op(mt->em.ctx, lhs_boxed), MIR_new_int_op(mt->em.ctx, 56)));
+        PmCompilerRegister l_tag = pm_new_reg(mt, "lt", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, l_tag, lhs_boxed, 0, 56);
         pm_emit_branch_not_equal_i64_immediate(mt, l_tag, (int64_t)LMD_TYPE_INT,
             l_boxed_call);
-        MIR_reg_t r_tag = pm_new_reg(mt, "rt", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, r_tag),
-            MIR_new_reg_op(mt->em.ctx, rhs_boxed), MIR_new_int_op(mt->em.ctx, 56)));
+        PmCompilerRegister r_tag = pm_new_reg(mt, "rt", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, r_tag, rhs_boxed, 0, 56);
         pm_emit_branch_not_equal_i64_immediate(mt, r_tag, (int64_t)LMD_TYPE_INT,
             l_boxed_call);
 
         // native path: unbox and compute
-        MIR_reg_t l = pm_emit_unbox_int(mt, lhs_boxed);
-        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
+        PmCompilerRegister l = pm_emit_unbox_int(mt, lhs_boxed);
+        PmCompilerRegister r = pm_emit_unbox_int(mt, rhs_boxed);
 
         // for LSHIFT: CPU masks shift to 6 bits, so shift >= 64 gives wrong results
         if (bin->op == PY_OP_LSHIFT) {
             pm_emit_branch_greater_equal_i64_immediate(mt, r, 63, l_boxed_call);
         }
 
-        MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, op,
-            MIR_new_reg_op(mt->em.ctx, res),
-            MIR_new_reg_op(mt->em.ctx, l),
-            MIR_new_reg_op(mt->em.ctx, r)));
+        PmCompilerRegister res = pm_new_reg(mt, "ni", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, operation, res, l, r, 0);
 
         if (can_overflow) {
             // range check: if result outside INT56, fall back to boxed runtime call
             int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
             int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
-            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
-            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
-            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LE, MIR_new_reg_op(mt->em.ctx, le_max),
-                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, INT56_MAX_VAL)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, ge_min),
-                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, INT56_MIN_VAL)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, in_range),
-                MIR_new_reg_op(mt->em.ctx, le_max), MIR_new_reg_op(mt->em.ctx, ge_min)));
-            MIR_label_t l_ok = pm_new_label(mt);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_ok),
-                MIR_new_reg_op(mt->em.ctx, in_range)));
+            PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, res, 0, INT56_MAX_VAL);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, res, 0, INT56_MIN_VAL);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range, le_max, ge_min, 0);
+            PmCompilerLabel l_ok = pm_new_label(mt);
+            pm_emit_branch_true(mt, in_range, l_ok);
             // overflow → runtime call with boxed operands (handles bigint promotion)
-            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, lhs_boxed),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rhs_boxed));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, final_result),
-                MIR_new_reg_op(mt->em.ctx, ov_result)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister ov_result = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, lhs_boxed),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, rhs_boxed));
+            pm_emit_i64_register_move(mt, final_result, ov_result);
+            pm_emit_jump(mt, l_end);
             // fast path: inline box the native result
             pm_emit_label(mt, l_ok);
-            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
-            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, masked),
-                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, (int64_t)PY_MASK56)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_OR, MIR_new_reg_op(mt->em.ctx, tagged),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->em.ctx, masked)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, final_result),
-                MIR_new_reg_op(mt->em.ctx, tagged)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked, res, 0,
+                (int64_t)PY_MASK56);
+            // The descriptor has one immediate position; OR is commutative, so
+            // retain the tagged representation without exposing raw MIR operands.
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged, masked, 0,
+                (int64_t)PY_ITEM_INT_TAG);
+            pm_emit_i64_register_move(mt, final_result, tagged);
+            pm_emit_jump(mt, l_end);
         } else {
-            MIR_reg_t boxed = pm_box_int_reg(mt, res);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, final_result),
-                MIR_new_reg_op(mt->em.ctx, boxed)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister boxed = pm_box_int_reg(mt, res);
+            pm_emit_i64_register_move(mt, final_result, boxed);
+            pm_emit_jump(mt, l_end);
         }
 
         // boxed fallback: runtime call (wrong type at runtime or overflow)
         pm_emit_label(mt, l_boxed_call);
-        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, lhs_boxed),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rhs_boxed));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, final_result),
-            MIR_new_reg_op(mt->em.ctx, boxed_res)));
+        PmCompilerRegister boxed_res = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, lhs_boxed),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, rhs_boxed));
+        pm_emit_i64_register_move(mt, final_result, boxed_res);
         pm_emit_label(mt, l_end);
         return final_result;
     }
@@ -1515,48 +1605,42 @@ static MIR_reg_t pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode* bin) {
     if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
         (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
-        MIR_insn_code_t op;
+        uint32_t operation;
         switch (bin->op) {
-        case PY_OP_ADD: op = MIR_DADD; break;
-        case PY_OP_SUB: op = MIR_DSUB; break;
-        case PY_OP_MUL: op = MIR_DMUL; break;
-        case PY_OP_DIV: op = MIR_DDIV; break;
+        case PY_OP_ADD: operation = JUBE_COMPILER_F64_ADD; break;
+        case PY_OP_SUB: operation = JUBE_COMPILER_F64_SUB; break;
+        case PY_OP_MUL: operation = JUBE_COMPILER_F64_MUL; break;
+        case PY_OP_DIV: operation = JUBE_COMPILER_F64_DIV; break;
         default: goto boxed_path;
         }
-        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
-        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
-        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, op,
-            MIR_new_reg_op(mt->em.ctx, res),
-            MIR_new_reg_op(mt->em.ctx, l),
-            MIR_new_reg_op(mt->em.ctx, r)));
+        PmCompilerRegister l = pm_transpile_as_native_float(mt, bin->left);
+        PmCompilerRegister r = pm_transpile_as_native_float(mt, bin->right);
+        PmCompilerRegister res = pm_new_reg(mt, "nf", PM_COMPILER_VALUE_F64);
+        pm_emit_f64_operation(mt, operation, res, l, r);
         return pm_box_float(mt, res);
     }
 
     // true division on int/int yields float
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op == PY_OP_DIV) {
-        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
-        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
-        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_DDIV,
-            MIR_new_reg_op(mt->em.ctx, res),
-            MIR_new_reg_op(mt->em.ctx, l),
-            MIR_new_reg_op(mt->em.ctx, r)));
+        PmCompilerRegister l = pm_transpile_as_native_float(mt, bin->left);
+        PmCompilerRegister r = pm_transpile_as_native_float(mt, bin->right);
+        PmCompilerRegister res = pm_new_reg(mt, "nf", PM_COMPILER_VALUE_F64);
+        pm_emit_f64_operation(mt, JUBE_COMPILER_F64_DIV, res, l, r);
         return pm_box_float(mt, res);
     }
 
 boxed_path:;
     // fallback: boxed runtime call
-    MIR_reg_t left = pm_transpile_expression(mt, bin->left);
-    MIR_reg_t right = pm_transpile_expression(mt, bin->right);
+    PmCompilerRegister left = pm_transpile_expression(mt, bin->left);
+    PmCompilerRegister right = pm_transpile_expression(mt, bin->right);
     const char* fn = pm_binary_op_func(bin->op);
-    return pm_call_2(mt, fn, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, right));
+    return pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, left),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, right));
 }
 
-static MIR_reg_t pm_transpile_unary(PyMirTranspiler* mt, PyUnaryNode* un) {
-    MIR_reg_t operand = pm_transpile_expression(mt, un->operand);
+static PmCompilerRegister pm_transpile_unary(PyMirTranspiler* mt, PyUnaryNode* un) {
+    PmCompilerRegister operand = pm_transpile_expression(mt, un->operand);
     const char* fn;
     switch (un->op) {
     case PY_OP_NEGATE:  fn = "py_negate"; break;
@@ -1564,41 +1648,39 @@ static MIR_reg_t pm_transpile_unary(PyMirTranspiler* mt, PyUnaryNode* un) {
     case PY_OP_BIT_NOT: fn = "py_bit_not"; break;
     default:            fn = "py_negate"; break;
     }
-    return pm_call_1(mt, fn, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, operand));
+    return pm_call_semantic_1(mt, fn, PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, operand));
 }
 
-static MIR_reg_t pm_transpile_not(PyMirTranspiler* mt, PyUnaryNode* un) {
-    MIR_reg_t operand = pm_transpile_expression(mt, un->operand);
+static PmCompilerRegister pm_transpile_not(PyMirTranspiler* mt, PyUnaryNode* un) {
+    PmCompilerRegister operand = pm_transpile_expression(mt, un->operand);
     // call py_is_truthy, negate result, box as bool
-    MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, operand));
+    PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, operand));
     // negate: result = truthy ? False : True
-    MIR_reg_t result = pm_new_reg(mt, "not", MIR_T_I64);
-    MIR_label_t l_true = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerRegister result = pm_new_reg(mt, "not", PM_COMPILER_VALUE_I64);
+    PmCompilerLabel l_true = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
     pm_emit_branch_true(mt, truthy, l_true);
     // truthy was false → return True
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_TRUE_VAL)));
+    pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_TRUE_VAL);
     pm_emit_jump(mt, l_end);
     pm_emit_label(mt, l_true);
     // truthy was true → return False
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+    pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_FALSE_VAL);
     pm_emit_label(mt, l_end);
     return result;
 }
 
-static MIR_reg_t pm_transpile_boolean(PyMirTranspiler* mt, PyBooleanNode* bop) {
+static PmCompilerRegister pm_transpile_boolean(PyMirTranspiler* mt, PyBooleanNode* bop) {
     // short-circuit: and/or
-    MIR_reg_t left = pm_transpile_expression(mt, bop->left);
-    MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left));
+    PmCompilerRegister left = pm_transpile_expression(mt, bop->left);
+    PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, left));
 
-    MIR_reg_t result = pm_new_reg(mt, "bop", MIR_T_I64);
-    MIR_label_t l_short = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerRegister result = pm_new_reg(mt, "bop", PM_COMPILER_VALUE_I64);
+    PmCompilerLabel l_short = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
     if (bop->op == PY_OP_AND) {
         // and: if left is falsy, return left
@@ -1609,14 +1691,12 @@ static MIR_reg_t pm_transpile_boolean(PyMirTranspiler* mt, PyBooleanNode* bop) {
     }
 
     // evaluate right
-    MIR_reg_t right = pm_transpile_expression(mt, bop->right);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, right)));
+    PmCompilerRegister right = pm_transpile_expression(mt, bop->right);
+    pm_emit_i64_register_move(mt, result, right);
     pm_emit_jump(mt, l_end);
 
     pm_emit_label(mt, l_short);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, left)));
+    pm_emit_i64_register_move(mt, result, left);
     pm_emit_label(mt, l_end);
     return result;
 }
@@ -1627,35 +1707,35 @@ static bool pm_is_native_int_compare_op(PyOperator op) {
            op == PY_OP_EQ || op == PY_OP_NE;
 }
 
-static MIR_insn_code_t pm_native_int_compare_insn(PyOperator op) {
+static uint32_t pm_native_int_compare_operation(PyOperator op) {
     switch (op) {
-    case PY_OP_LT: return MIR_LT;
-    case PY_OP_LE: return MIR_LE;
-    case PY_OP_GT: return MIR_GT;
-    case PY_OP_GE: return MIR_GE;
-    case PY_OP_EQ: return MIR_EQ;
-    case PY_OP_NE: return MIR_NE;
-    default: return MIR_EQ;
+    case PY_OP_LT: return JUBE_COMPILER_I64_LT;
+    case PY_OP_LE: return JUBE_COMPILER_I64_LE;
+    case PY_OP_GT: return JUBE_COMPILER_I64_GT;
+    case PY_OP_GE: return JUBE_COMPILER_I64_GE;
+    case PY_OP_EQ: return JUBE_COMPILER_I64_EQ;
+    case PY_OP_NE: return JUBE_COMPILER_I64_NE;
+    default: return JUBE_COMPILER_I64_EQ;
     }
 }
 
-static MIR_insn_code_t pm_native_float_compare_insn(PyOperator op) {
+static uint32_t pm_native_float_compare_operation(PyOperator op) {
     switch (op) {
-    case PY_OP_LT: return MIR_DLT;
-    case PY_OP_LE: return MIR_DLE;
-    case PY_OP_GT: return MIR_DGT;
-    case PY_OP_GE: return MIR_DGE;
-    case PY_OP_EQ: return MIR_DEQ;
-    case PY_OP_NE: return MIR_DNE;
-    default: return MIR_DEQ;
+    case PY_OP_LT: return JUBE_COMPILER_F64_LT;
+    case PY_OP_LE: return JUBE_COMPILER_F64_LE;
+    case PY_OP_GT: return JUBE_COMPILER_F64_GT;
+    case PY_OP_GE: return JUBE_COMPILER_F64_GE;
+    case PY_OP_EQ: return JUBE_COMPILER_F64_EQ;
+    case PY_OP_NE: return JUBE_COMPILER_F64_NE;
+    default: return JUBE_COMPILER_F64_EQ;
     }
 }
 
-static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
+static PmCompilerRegister pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
     // chained comparisons: a < b < c → (a < b) and (b < c)
-    MIR_reg_t result = pm_new_reg(mt, "cmp", MIR_T_I64);
-    MIR_label_t l_false = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerRegister result = pm_new_reg(mt, "cmp", PM_COMPILER_VALUE_I64);
+    PmCompilerLabel l_false = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
     // Phase 2: for simple (non-chained) int comparisons, use native path with runtime type guard
     if (cmp->op_count == 1 && pm_is_native_int_compare_op(cmp->ops[0])) {
@@ -1664,50 +1744,42 @@ static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
 
         if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
             // transpile both as boxed first (for fallback)
-            MIR_reg_t lhs_boxed = pm_transpile_expression(mt, cmp->left);
-            MIR_reg_t rhs_boxed = pm_transpile_expression(mt, cmp->comparators[0]);
+            PmCompilerRegister lhs_boxed = pm_transpile_expression(mt, cmp->left);
+            PmCompilerRegister rhs_boxed = pm_transpile_expression(mt, cmp->comparators[0]);
 
-            MIR_label_t l_boxed_cmp = pm_new_label(mt);
+            PmCompilerLabel l_boxed_cmp = pm_new_label(mt);
 
             // runtime type guard: verify both are actually INT
-            MIR_reg_t l_tag = pm_new_reg(mt, "clt", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, l_tag),
-                MIR_new_reg_op(mt->em.ctx, lhs_boxed), MIR_new_int_op(mt->em.ctx, 56)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, l_boxed_cmp),
-                MIR_new_reg_op(mt->em.ctx, l_tag), MIR_new_int_op(mt->em.ctx, (int64_t)LMD_TYPE_INT)));
-            MIR_reg_t r_tag = pm_new_reg(mt, "crt", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, r_tag),
-                MIR_new_reg_op(mt->em.ctx, rhs_boxed), MIR_new_int_op(mt->em.ctx, 56)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, l_boxed_cmp),
-                MIR_new_reg_op(mt->em.ctx, r_tag), MIR_new_int_op(mt->em.ctx, (int64_t)LMD_TYPE_INT)));
+            PmCompilerRegister l_tag = pm_new_reg(mt, "clt", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, l_tag, lhs_boxed, 0, 56);
+            pm_emit_branch_not_equal_i64_immediate(mt, l_tag, (int64_t)LMD_TYPE_INT,
+                l_boxed_cmp);
+            PmCompilerRegister r_tag = pm_new_reg(mt, "crt", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, r_tag, rhs_boxed, 0, 56);
+            pm_emit_branch_not_equal_i64_immediate(mt, r_tag, (int64_t)LMD_TYPE_INT,
+                l_boxed_cmp);
 
             // native int compare
-            MIR_reg_t l_val = pm_emit_unbox_int(mt, lhs_boxed);
-            MIR_reg_t r_val = pm_emit_unbox_int(mt, rhs_boxed);
-            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmp", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, pm_native_int_compare_insn(cmp->ops[0]),
-                MIR_new_reg_op(mt->em.ctx, cmp_res),
-                MIR_new_reg_op(mt->em.ctx, l_val),
-                MIR_new_reg_op(mt->em.ctx, r_val)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_false),
-                MIR_new_reg_op(mt->em.ctx, cmp_res)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_TRUE_VAL)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister l_val = pm_emit_unbox_int(mt, lhs_boxed);
+            PmCompilerRegister r_val = pm_emit_unbox_int(mt, rhs_boxed);
+            PmCompilerRegister cmp_res = pm_new_reg(mt, "ncmp", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, pm_native_int_compare_operation(cmp->ops[0]),
+                cmp_res, l_val, r_val, 0);
+            pm_emit_branch_false(mt, cmp_res, l_false);
+            pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_TRUE_VAL);
+            pm_emit_jump(mt, l_end);
 
             // boxed fallback: call runtime compare
             pm_emit_label(mt, l_boxed_cmp);
             const char* fn = pm_compare_op_func(cmp->ops[0]);
-            MIR_reg_t boxed_cmp = pm_call_2(mt, fn, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, lhs_boxed),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rhs_boxed));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-                MIR_new_reg_op(mt->em.ctx, boxed_cmp)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister boxed_cmp = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, lhs_boxed),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, rhs_boxed));
+            pm_emit_i64_register_move(mt, result, boxed_cmp);
+            pm_emit_jump(mt, l_end);
 
             pm_emit_label(mt, l_false);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_FALSE_VAL);
             pm_emit_label(mt, l_end);
             return result;
         }
@@ -1716,83 +1788,72 @@ static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
         if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
             (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
             (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
-            MIR_reg_t l = pm_transpile_as_native_float(mt, cmp->left);
-            MIR_reg_t r = pm_transpile_as_native_float(mt, cmp->comparators[0]);
-            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmpf", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, pm_native_float_compare_insn(cmp->ops[0]),
-                MIR_new_reg_op(mt->em.ctx, cmp_res),
-                MIR_new_reg_op(mt->em.ctx, l),
-                MIR_new_reg_op(mt->em.ctx, r)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_false),
-                MIR_new_reg_op(mt->em.ctx, cmp_res)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_TRUE_VAL)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            PmCompilerRegister l = pm_transpile_as_native_float(mt, cmp->left);
+            PmCompilerRegister r = pm_transpile_as_native_float(mt, cmp->comparators[0]);
+            PmCompilerRegister cmp_res = pm_new_reg(mt, "ncmpf", PM_COMPILER_VALUE_I64);
+            pm_emit_f64_operation(mt, pm_native_float_compare_operation(cmp->ops[0]),
+                cmp_res, l, r);
+            pm_emit_branch_false(mt, cmp_res, l_false);
+            pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_TRUE_VAL);
+            pm_emit_jump(mt, l_end);
             pm_emit_label(mt, l_false);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_FALSE_VAL);
             pm_emit_label(mt, l_end);
             return result;
         }
     }
 
     // general path: boxed comparisons with chaining support
-    MIR_reg_t left = pm_transpile_expression(mt, cmp->left);
+    PmCompilerRegister left = pm_transpile_expression(mt, cmp->left);
 
     for (int i = 0; i < cmp->op_count; i++) {
-        MIR_reg_t right = pm_transpile_expression(mt, cmp->comparators[i]);
+        PmCompilerRegister right = pm_transpile_expression(mt, cmp->comparators[i]);
 
         const char* fn = pm_compare_op_func(cmp->ops[i]);
-        MIR_reg_t cmp_result;
+        PmCompilerRegister cmp_result;
 
         if (cmp->ops[i] == PY_OP_NOT_IN) {
             // not in → negate contains
-            cmp_result = pm_call_2(mt, "py_contains", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, right),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left));
+            cmp_result = pm_call_semantic_2(mt, "py_contains", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, right),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, left));
             // negate
-            MIR_reg_t neg = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cmp_result));
-            MIR_label_t l_was_true = pm_new_label(mt);
-            MIR_label_t l_neg_end = pm_new_label(mt);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_was_true),
-                MIR_new_reg_op(mt->em.ctx, neg)));
-            cmp_result = pm_new_reg(mt, "neg", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, cmp_result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_TRUE_VAL)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_neg_end)));
+            PmCompilerRegister neg = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cmp_result));
+            PmCompilerLabel l_was_true = pm_new_label(mt);
+            PmCompilerLabel l_neg_end = pm_new_label(mt);
+            pm_emit_branch_true(mt, neg, l_was_true);
+            cmp_result = pm_new_reg(mt, "neg", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, cmp_result, (int64_t)PY_ITEM_TRUE_VAL);
+            pm_emit_jump(mt, l_neg_end);
             pm_emit_label(mt, l_was_true);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, cmp_result),
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_i64_immediate(mt, cmp_result, (int64_t)PY_ITEM_FALSE_VAL);
             pm_emit_label(mt, l_neg_end);
         } else if (cmp->ops[i] == PY_OP_IN) {
             // in → py_contains(container, value)
-            cmp_result = pm_call_2(mt, "py_contains", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, right),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left));
+            cmp_result = pm_call_semantic_2(mt, "py_contains", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, right),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, left));
         } else {
-            cmp_result = pm_call_2(mt, fn, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, right));
+            cmp_result = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, left),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, right));
         }
 
         // check if comparison is false → short-circuit
-        MIR_reg_t is_true = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cmp_result));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_false),
-            MIR_new_reg_op(mt->em.ctx, is_true)));
+        PmCompilerRegister is_true = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, cmp_result));
+        pm_emit_branch_false(mt, is_true, l_false);
 
         left = right;
     }
 
     // all comparisons passed
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_TRUE_VAL)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+    pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_TRUE_VAL);
+    pm_emit_jump(mt, l_end);
 
     pm_emit_label(mt, l_false);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+    pm_emit_i64_immediate(mt, result, (int64_t)PY_ITEM_FALSE_VAL);
 
     pm_emit_label(mt, l_end);
     return result;
@@ -1855,7 +1916,7 @@ static bool pm_should_use_tco(PyFuncCollected* fc) {
     return pm_has_py_tail_call(fc->node->body, fc);
 }
 
-static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
+static PmCompilerRegister pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
     // check for builtin calls
     if (call->function && call->function->node_type == PY_AST_NODE_IDENTIFIER) {
         PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
@@ -1872,7 +1933,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 // load the class variable — look up scope then module vars
                 char cls_var[132];
                 snprintf(cls_var, sizeof(cls_var), "_py_%s", cls_name);
-                MIR_reg_t cls_reg;
+                PmCompilerRegister cls_reg;
                 {
                     // try scope first
                     PyMirVarEntry* cv = pm_find_var(mt, cls_var);
@@ -1882,15 +1943,15 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                         // try module var
                         int midx = pm_get_global_var_index(mt, cls_var);
                         if (midx >= 0) {
-                            cls_reg = pm_call_1(mt, "py_get_module_var", MIR_T_I64,
-                                MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx));
+                            cls_reg = pm_call_semantic_1(mt, "py_get_module_var", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_i64_immediate(midx));
                         } else {
                             cls_reg = pm_emit_null(mt);
                         }
                     }
                 }
                 // load self — first param of the method
-                MIR_reg_t self_reg;
+                PmCompilerRegister self_reg;
                 PyAstNode* first_param = mt->func_entries[cur].node->params;
                 if (first_param) {
                     String* pn = ((PyParamNode*)first_param)->name;
@@ -1901,9 +1962,9 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 } else {
                     self_reg = pm_emit_null(mt);
                 }
-                return pm_call_2(mt, "py_super", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cls_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, self_reg));
+                return pm_call_semantic_2(mt, "py_super", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, cls_reg),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, self_reg));
             }
             return pm_emit_null(mt);
         }
@@ -1911,8 +1972,8 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         // print()
         if (name_len == 5 && strncmp(name, "print", 5) == 0) {
             // check for sep= and end= keyword arguments
-            MIR_reg_t sep_reg = pm_emit_null(mt);
-            MIR_reg_t end_reg = pm_emit_null(mt);
+            PmCompilerRegister sep_reg = pm_emit_null(mt);
+            PmCompilerRegister end_reg = pm_emit_null(mt);
             bool has_kwargs = false;
             {
                 PyAstNode* ka = call->arguments;
@@ -1934,7 +1995,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             // collect positional args on stack
             int argc = 0;
             PyAstNode* arg = call->arguments;
-            MIR_reg_t arg_regs[64];
+            PmCompilerRegister arg_regs[64];
             while (arg) {
                 if (arg->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
                     arg = arg->next; continue;
@@ -1951,73 +2012,73 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             for (int i = 0; i < argc; i++) pm_arg_scope_store(mt, args, i, arg_regs[i]);
 
             if (has_kwargs) {
-                MIR_reg_t result = pm_call_4(mt, "py_print_ex", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, sep_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, end_reg));
+                PmCompilerRegister result = pm_call_semantic_4(mt, "py_print_ex", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                    pm_call_operand_i64_immediate(argc),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, sep_reg),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, end_reg));
                 pm_end_arg_scope(mt, args);
                 return result;
             }
-            MIR_reg_t result = pm_call_2(mt, "py_print", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+            PmCompilerRegister result = pm_call_semantic_2(mt, "py_print", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                pm_call_operand_i64_immediate(argc));
             pm_end_arg_scope(mt, args);
             return result;
         }
 
         // len()
         if (name_len == 3 && strncmp(name, "len", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_len", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_len", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // type()
         if (name_len == 4 && strncmp(name, "type", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_type", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_type", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // int(), float(), str(), bool()
         if (name_len == 3 && strncmp(name, "int", 3) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) : pm_box_int_const(mt, 0);
-            return pm_call_1(mt, "py_builtin_int", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_int", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 5 && strncmp(name, "float", 5) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) : pm_box_int_const(mt, 0);
-            return pm_call_1(mt, "py_builtin_float", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_float", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 3 && strncmp(name, "str", 3) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) : pm_box_string_literal(mt, "", 0);
-            return pm_call_1(mt, "py_builtin_str", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_str", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 4 && strncmp(name, "bool", 4) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) : pm_emit_bool(mt, false);
-            return pm_call_1(mt, "py_builtin_bool", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_bool", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // abs()
         if (name_len == 3 && strncmp(name, "abs", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_abs", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_abs", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // range()
         if (name_len == 5 && strncmp(name, "range", 5) == 0) {
             int argc = 0;
             PyAstNode* arg = call->arguments;
-            MIR_reg_t arg_regs[3];
+            PmCompilerRegister arg_regs[3];
             while (arg) {
                 if (argc >= 3) {
                     log_error("py-mir: range accepts at most 3 arguments");
@@ -2028,9 +2089,9 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
             PmArgScope args = pm_begin_arg_scope(mt, argc);
             for (int i = 0; i < argc; i++) pm_arg_scope_store(mt, args, i, arg_regs[i]);
-            MIR_reg_t result = pm_call_2(mt, "py_builtin_range", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+            PmCompilerRegister result = pm_call_semantic_2(mt, "py_builtin_range", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                pm_call_operand_i64_immediate(argc));
             pm_end_arg_scope(mt, args);
             return result;
         }
@@ -2041,7 +2102,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             const char* fn_name = (name[1] == 'i') ? "py_builtin_min" : "py_builtin_max";
             int argc = 0;
             PyAstNode* arg = call->arguments;
-            MIR_reg_t arg_regs[64];
+            PmCompilerRegister arg_regs[64];
             while (arg) {
                 if (argc >= 64) {
                     log_error("py-mir: min/max argument count exceeds Python argument stack limit");
@@ -2052,25 +2113,25 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
             PmArgScope args = pm_begin_arg_scope(mt, argc);
             for (int i = 0; i < argc; i++) pm_arg_scope_store(mt, args, i, arg_regs[i]);
-            MIR_reg_t result = pm_call_2(mt, fn_name, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+            PmCompilerRegister result = pm_call_semantic_2(mt, fn_name, PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                pm_call_operand_i64_immediate(argc));
             pm_end_arg_scope(mt, args);
             return result;
         }
 
         if (name_len == 3 && strncmp(name, "sum", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_sum", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_sum", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // sorted(), reversed()
         if (name_len == 6 && strncmp(name, "sorted", 6) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
             // check for key= and reverse= kwargs
-            MIR_reg_t key_reg = pm_emit_null(mt);
-            MIR_reg_t rev_reg = pm_emit_null(mt);
+            PmCompilerRegister key_reg = pm_emit_null(mt);
+            PmCompilerRegister rev_reg = pm_emit_null(mt);
             bool has_kwargs = false;
             {
                 PyAstNode* ka = call->arguments;
@@ -2089,248 +2150,248 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 }
             }
             if (has_kwargs) {
-                return pm_call_3(mt, "py_builtin_sorted_ex", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rev_reg));
+                return pm_call_semantic_3(mt, "py_builtin_sorted_ex", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, arg),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, key_reg),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, rev_reg));
             }
-            return pm_call_1(mt, "py_builtin_sorted", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_sorted", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 8 && strncmp(name, "reversed", 8) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_reversed", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_reversed", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // enumerate()
         if (name_len == 9 && strncmp(name, "enumerate", 9) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_enumerate", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_enumerate", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // ord(), chr()
         if (name_len == 3 && strncmp(name, "ord", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_ord", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_ord", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 3 && strncmp(name, "chr", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_chr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_chr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // input()
         if (name_len == 5 && strncmp(name, "input", 5) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) :
                 pm_box_string_literal(mt, "", 0);
-            return pm_call_1(mt, "py_builtin_input", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_input", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // repr()
         if (name_len == 4 && strncmp(name, "repr", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_repr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_repr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // map(func, iterable)
         if (name_len == 3 && strncmp(name, "map", 3) == 0 && call->arg_count >= 2) {
-            MIR_reg_t func_arg = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t iter_arg = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_builtin_map", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func_arg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iter_arg));
+            PmCompilerRegister func_arg = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister iter_arg = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_builtin_map", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, func_arg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, iter_arg));
         }
 
         // filter(func, iterable)
         if (name_len == 6 && strncmp(name, "filter", 6) == 0 && call->arg_count >= 2) {
-            MIR_reg_t func_arg = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t iter_arg = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_builtin_filter", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func_arg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iter_arg));
+            PmCompilerRegister func_arg = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister iter_arg = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_builtin_filter", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, func_arg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, iter_arg));
         }
 
         // list()
         if (name_len == 4 && strncmp(name, "list", 4) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) :
-                pm_call_1(mt, "py_list_new", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+                pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_i64_immediate(0));
             if (!call->arguments) return arg;
-            return pm_call_1(mt, "py_builtin_list", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_list", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // round()
         if (name_len == 5 && strncmp(name, "round", 5) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t ndigits = call->arguments->next ?
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister ndigits = call->arguments->next ?
                 pm_transpile_expression(mt, call->arguments->next) : pm_emit_null(mt);
-            return pm_call_2(mt, "py_builtin_round", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, ndigits));
+            return pm_call_semantic_2(mt, "py_builtin_round", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, ndigits));
         }
 
         // all()
         if (name_len == 3 && strncmp(name, "all", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_all", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_all", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // any()
         if (name_len == 3 && strncmp(name, "any", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_any", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_any", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // bin(), oct(), hex()
         if (name_len == 3 && strncmp(name, "bin", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_bin", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_bin", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 3 && strncmp(name, "oct", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_oct", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_oct", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 3 && strncmp(name, "hex", 3) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_hex", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_hex", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // divmod()
         if (name_len == 6 && strncmp(name, "divmod", 6) == 0 && call->arg_count >= 2) {
-            MIR_reg_t a = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t b = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_builtin_divmod", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, a),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, b));
+            PmCompilerRegister a = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister b = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_builtin_divmod", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, a),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, b));
         }
 
         // pow()
         if (name_len == 3 && strncmp(name, "pow", 3) == 0 && call->arg_count >= 2) {
-            MIR_reg_t base = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t exp = pm_transpile_expression(mt, call->arguments->next);
-            MIR_reg_t mod = (call->arguments->next->next) ?
+            PmCompilerRegister base = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister exp = pm_transpile_expression(mt, call->arguments->next);
+            PmCompilerRegister mod = (call->arguments->next->next) ?
                 pm_transpile_expression(mt, call->arguments->next->next) : pm_emit_null(mt);
-            return pm_call_3(mt, "py_builtin_pow", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, base),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exp),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mod));
+            return pm_call_semantic_3(mt, "py_builtin_pow", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, base),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exp),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, mod));
         }
 
         // callable()
         if (name_len == 8 && strncmp(name, "callable", 8) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_callable", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_callable", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // getattr(obj, name) / getattr(obj, name, default)
         if (name_len == 7 && strncmp(name, "getattr", 7) == 0 && call->arg_count >= 2) {
-            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_getattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
+            PmCompilerRegister obj_r = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
         }
 
         // setattr(obj, name, value)
         if (name_len == 7 && strncmp(name, "setattr", 7) == 0 && call->arg_count >= 3) {
-            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
-            MIR_reg_t val_r = pm_transpile_expression(mt, call->arguments->next->next);
-            return pm_call_3(mt, "py_setattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_r));
+            PmCompilerRegister obj_r = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister key_r = pm_transpile_expression(mt, call->arguments->next);
+            PmCompilerRegister val_r = pm_transpile_expression(mt, call->arguments->next->next);
+            return pm_call_semantic_3(mt, "py_setattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, val_r));
         }
 
         // hasattr(obj, name)
         if (name_len == 7 && strncmp(name, "hasattr", 7) == 0 && call->arg_count >= 2) {
-            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_hasattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
+            PmCompilerRegister obj_r = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_hasattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
         }
 
         // delattr(obj, name)
         if (name_len == 7 && strncmp(name, "delattr", 7) == 0 && call->arg_count >= 2) {
-            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_delattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
+            PmCompilerRegister obj_r = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_delattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
         }
 
         // property(fget) — creates a property descriptor {__is_property__: True, __get__: fget}
         if (name_len == 8 && strncmp(name, "property", 8) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_property", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_property", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // isinstance()
         if (name_len == 10 && strncmp(name, "isinstance", 10) == 0 && call->arg_count >= 2) {
-            MIR_reg_t obj = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t cls = pm_transpile_expression(mt, call->arguments->next);
-            return pm_call_2(mt, "py_builtin_isinstance", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cls));
+            PmCompilerRegister obj = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister cls = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_semantic_2(mt, "py_builtin_isinstance", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cls));
         }
 
         // hash(), id()
         if (name_len == 4 && strncmp(name, "hash", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_hash", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_hash", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 2 && strncmp(name, "id", 2) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_builtin_id", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_builtin_id", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // set(), tuple(), dict()
         if (name_len == 3 && strncmp(name, "set", 3) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) :
-                pm_call_1(mt, "py_list_new", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+                pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_i64_immediate(0));
             if (!call->arguments) return arg;
-            return pm_call_1(mt, "py_builtin_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_set", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 5 && strncmp(name, "tuple", 5) == 0) {
-            MIR_reg_t arg = call->arguments ?
+            PmCompilerRegister arg = call->arguments ?
                 pm_transpile_expression(mt, call->arguments) :
-                pm_call_1(mt, "py_list_new", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+                pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_i64_immediate(0));
             if (!call->arguments) return arg;
-            return pm_call_1(mt, "py_builtin_tuple", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            return pm_call_semantic_1(mt, "py_builtin_tuple", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
         if (name_len == 4 && strncmp(name, "dict", 4) == 0) {
             // dict() with no args → empty dict
-            return pm_call_0(mt, "py_dict_new", MIR_T_I64);
+            return pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
         }
 
         // zip()
         if (name_len == 3 && strncmp(name, "zip", 3) == 0) {
             int argc = 0;
             PyAstNode* arg = call->arguments;
-            MIR_reg_t arg_regs[64];
+            PmCompilerRegister arg_regs[64];
             while (arg) {
                 if (argc >= 64) {
                     log_error("py-mir: zip argument count exceeds Python argument stack limit");
@@ -2341,59 +2402,59 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
             PmArgScope args = pm_begin_arg_scope(mt, argc);
             for (int i = 0; i < argc; i++) pm_arg_scope_store(mt, args, i, arg_regs[i]);
-            MIR_reg_t result = pm_call_2(mt, "py_builtin_zip", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+            PmCompilerRegister result = pm_call_semantic_2(mt, "py_builtin_zip", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                pm_call_operand_i64_immediate(argc));
             pm_end_arg_scope(mt, args);
             return result;
         }
 
         // iter()
         if (name_len == 4 && strncmp(name, "iter", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_get_iterator", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_get_iterator", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // next()
         if (name_len == 4 && strncmp(name, "next", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
-            return pm_call_1(mt, "py_iterator_next", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, arg));
+            PmCompilerRegister arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_1(mt, "py_iterator_next", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, arg));
         }
 
         // open()
         if (name_len == 4 && strncmp(name, "open", 4) == 0 && call->arg_count >= 1) {
-            MIR_reg_t path_arg = pm_transpile_expression(mt, call->arguments);
-            MIR_reg_t mode_arg = (call->arguments->next) ?
+            PmCompilerRegister path_arg = pm_transpile_expression(mt, call->arguments);
+            PmCompilerRegister mode_arg = (call->arguments->next) ?
                 pm_transpile_expression(mt, call->arguments->next) :
                 pm_box_string_literal(mt, "r", 1);
-            return pm_call_2(mt, "py_builtin_open", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, path_arg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mode_arg));
+            return pm_call_semantic_2(mt, "py_builtin_open", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, path_arg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, mode_arg));
         }
     }
 
     // method call: obj.method(args)
     if (call->function && call->function->node_type == PY_AST_NODE_ATTRIBUTE) {
         PyAttributeNode* attr = (PyAttributeNode*)call->function;
-        MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
+        PmCompilerRegister obj = pm_transpile_expression(mt, attr->object);
 
         // gen.send(value) — generator send shortcut
         if (attr->attribute->len == 4 && strncmp(attr->attribute->chars, "send", 4) == 0
             && call->arg_count == 1) {
-            MIR_reg_t val = pm_transpile_expression(mt, call->arguments);
-            return pm_call_2(mt, "py_gen_send", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+            PmCompilerRegister val = pm_transpile_expression(mt, call->arguments);
+            return pm_call_semantic_2(mt, "py_gen_send", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         }
 
-        MIR_reg_t method_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+        PmCompilerRegister method_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
 
         // collect args
         int argc = 0;
         PyAstNode* arg = call->arguments;
-        MIR_reg_t arg_regs[64];
+        PmCompilerRegister arg_regs[64];
         while (arg) {
             if (arg->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
                 arg = arg->next; continue;
@@ -2411,71 +2472,61 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
 
         // dispatch: try string, then list, then dict method
         // simpler approach: call py_string_method first, if returns null try list, then dict
-        MIR_reg_t str_result = pm_call_4(mt, "py_string_method", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, method_name),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+        PmCompilerRegister str_result = pm_call_semantic_4(mt, "py_string_method", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, method_name),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+            pm_call_operand_i64_immediate(argc));
 
         // check if string method returned non-null
-        MIR_reg_t result = pm_new_reg(mt, "mcall", MIR_T_I64);
-        MIR_label_t l_try_list = pm_new_label(mt);
-        MIR_label_t l_try_dict = pm_new_label(mt);
-        MIR_label_t l_end = pm_new_label(mt);
+        PmCompilerRegister result = pm_new_reg(mt, "mcall", PM_COMPILER_VALUE_I64);
+        PmCompilerLabel l_try_list = pm_new_label(mt);
+        PmCompilerLabel l_try_dict = pm_new_label(mt);
+        PmCompilerLabel l_end = pm_new_label(mt);
 
         // if str_result != NULL_VAL, use it
-        MIR_reg_t is_null = pm_new_reg(mt, "isnull", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_EQ, MIR_new_reg_op(mt->em.ctx, is_null),
-            MIR_new_reg_op(mt->em.ctx, str_result),
-            MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_try_list),
-            MIR_new_reg_op(mt->em.ctx, is_null)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_new_reg_op(mt->em.ctx, str_result)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+        PmCompilerRegister is_null = pm_new_reg(mt, "isnull", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_EQ, is_null, str_result, 0,
+            (int64_t)PY_ITEM_NULL_VAL);
+        pm_emit_branch_true(mt, is_null, l_try_list);
+        pm_emit_i64_register_move(mt, result, str_result);
+        pm_emit_jump(mt, l_end);
 
         pm_emit_label(mt, l_try_list);
-        MIR_reg_t list_result = pm_call_4(mt, "py_list_method", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, method_name),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_EQ, MIR_new_reg_op(mt->em.ctx, is_null),
-            MIR_new_reg_op(mt->em.ctx, list_result),
-            MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_try_dict),
-            MIR_new_reg_op(mt->em.ctx, is_null)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_new_reg_op(mt->em.ctx, list_result)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+        PmCompilerRegister list_result = pm_call_semantic_4(mt, "py_list_method", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, method_name),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+            pm_call_operand_i64_immediate(argc));
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_EQ, is_null, list_result, 0,
+            (int64_t)PY_ITEM_NULL_VAL);
+        pm_emit_branch_true(mt, is_null, l_try_dict);
+        pm_emit_i64_register_move(mt, result, list_result);
+        pm_emit_jump(mt, l_end);
 
         pm_emit_label(mt, l_try_dict);
-        MIR_reg_t dict_result = pm_call_4(mt, "py_dict_method", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, method_name),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_EQ, MIR_new_reg_op(mt->em.ctx, is_null),
-            MIR_new_reg_op(mt->em.ctx, dict_result),
-            MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
-        MIR_label_t l_try_instance = pm_new_label(mt);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_try_instance),
-            MIR_new_reg_op(mt->em.ctx, is_null)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_new_reg_op(mt->em.ctx, dict_result)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+        PmCompilerRegister dict_result = pm_call_semantic_4(mt, "py_dict_method", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, method_name),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+            pm_call_operand_i64_immediate(argc));
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_EQ, is_null, dict_result, 0,
+            (int64_t)PY_ITEM_NULL_VAL);
+        PmCompilerLabel l_try_instance = pm_new_label(mt);
+        pm_emit_branch_true(mt, is_null, l_try_instance);
+        pm_emit_i64_register_move(mt, result, dict_result);
+        pm_emit_jump(mt, l_end);
 
         // fallback: user-defined class method — get bound method via py_getattr + call it
         pm_emit_label(mt, l_try_instance);
-        MIR_reg_t bound_method = pm_call_2(mt, "py_getattr", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, method_name));
-        MIR_reg_t instance_result = pm_call_3(mt, "py_call_function", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, bound_method),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_new_reg_op(mt->em.ctx, instance_result)));
+        PmCompilerRegister bound_method = pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, method_name));
+        PmCompilerRegister instance_result = pm_call_semantic_3(mt, "py_call_function", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, bound_method),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+            pm_call_operand_i64_immediate(argc));
+        pm_emit_i64_register_move(mt, result, instance_result);
 
         pm_emit_label(mt, l_end);
         pm_end_arg_scope(mt, args);
@@ -2524,7 +2575,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 int total_params = target_fc->param_count;
 
                 // Phase 1: evaluate all arguments into temporaries
-                MIR_reg_t temps[16];
+                PmCompilerRegister temps[16];
                 int arg_idx = 0;
                 PyAstNode* a = call->arguments;
                 // positional args
@@ -2566,9 +2617,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                         snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
                         PyMirVarEntry* pvar = pm_find_var(mt, pname);
                         if (pvar) {
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, pvar->reg),
-                                MIR_new_reg_op(mt->em.ctx, temps[i])));
+                            pm_emit_i64_register_move(mt, pvar->reg, temps[i]);
                         }
                     }
                 }
@@ -2576,21 +2625,18 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 mt->in_tail_position = saved_tail;
 
                 // jump back to function start
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                    MIR_new_label_op(mt->em.ctx, mt->tco_label)));
+                pm_emit_jump(mt, mt->tco_label);
                 mt->block_returned = true;
 
                 // return dummy register (unreachable but MIR needs a value)
-                MIR_reg_t dummy = pm_new_reg(mt, "tco_dummy", MIR_T_I64);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, dummy),
-                    MIR_new_int_op(mt->em.ctx, 0)));
+                PmCompilerRegister dummy = pm_new_reg(mt, "tco_dummy", PM_COMPILER_VALUE_I64);
+                pm_emit_i64_immediate(mt, dummy, 0);
                 return dummy;
             }
 
             int total_params = target_fc->param_count;
             // build ordered argument array: init all slots to null
-            MIR_reg_t ordered_args[16];
+            PmCompilerRegister ordered_args[16];
             bool arg_filled[16];
             for (int i = 0; i < total_params && i < 16; i++) {
                 ordered_args[i] = pm_emit_null(mt);
@@ -2652,38 +2698,24 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             uint8_t direct_param_kinds[21] = {};
             direct_param_kinds[mir_total] = 1;
 
-            // check import cache for proto (avoid duplicate proto names)
+            // The host owns the shared import/prototype cache so Python cannot
+            // observe its hashmap layout or retain stale MIR items across frames.
             char proto_key[148];
             snprintf(proto_key, sizeof(proto_key), "%s_local", fn_name);
-            MirImportCacheEntry key;
-            memset(&key, 0, sizeof(key));
-            snprintf(key.name, sizeof(key.name), "%s", proto_key);
-            MirImportCacheEntry* cached =
-                (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
-            MIR_item_t proto;
-            if (cached) {
-                proto = cached->entry.proto;
-            } else {
-                char proto_name[160];
-                snprintf(proto_name, sizeof(proto_name), "%s_lp", fn_name);
-                if (!pm_create_hosted_item_function_proto_typed(mt->em.ctx,
-                        proto_name, direct_mir_total, direct_param_kinds, &proto)) {
-                    log_error("py-mir: host could not create direct-call prototype '%s'", proto_name);
-                    mt->has_compile_error = true;
-                    return pm_emit_null(mt);
-                }
-                MirImportCacheEntry new_entry;
-                memset(&new_entry, 0, sizeof(new_entry));
-                snprintf(new_entry.name, sizeof(new_entry.name), "%s", proto_key);
-                new_entry.entry.proto = proto;
-                new_entry.entry.import = NULL;
-                hashmap_set(mt->em.import_cache, &new_entry);
+            PmCompilerFunctionItem proto;
+            char proto_name[160];
+            snprintf(proto_name, sizeof(proto_name), "%s_lp", fn_name);
+            if (!pm_get_hosted_local_direct_call_prototype(mt, proto_key, proto_name,
+                    direct_mir_total, direct_param_kinds, &proto)) {
+                log_error("py-mir: host could not create direct-call prototype '%s'", proto_name);
+                mt->has_compile_error = true;
+                return pm_emit_null(mt);
             }
 
             // build kwargs map for **kwargs-accepting functions
-            MIR_reg_t kwargs_map_reg = 0;
+            PmCompilerRegister kwargs_map_reg = 0;
             if (target_fc->has_kwargs) {
-                kwargs_map_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+                kwargs_map_reg = pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
                 // third pass: collect leftover keyword args + **splat into kwargs map
                 PyAstNode* ka = call->arguments;
                 while (ka) {
@@ -2691,10 +2723,10 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                         PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
                         if (!kw->key) {
                             // **expr splat — merge into kwargs map
-                            MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
-                            pm_call_2(mt, "py_dict_merge", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kwargs_map_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, splat_val));
+                            PmCompilerRegister splat_val = pm_transpile_expression(mt, kw->value);
+                            pm_call_semantic_2(mt, "py_dict_merge", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, kwargs_map_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, splat_val));
                         } else {
                             // named kwarg — add to map if it doesn't match any named param
                             bool kw_matched = false;
@@ -2718,12 +2750,12 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                                 }
                             }
                             if (!kw_matched) {
-                                MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
-                                MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
-                                pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kwargs_map_reg),
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kname_reg),
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kval_reg));
+                                PmCompilerRegister kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                                PmCompilerRegister kval_reg = pm_transpile_expression(mt, kw->value);
+                                pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, kwargs_map_reg),
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, kname_reg),
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, kval_reg));
                             }
                         }
                     }
@@ -2731,10 +2763,9 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 }
             }
 
-            MIR_reg_t res = pm_new_reg(mt, "dcall", MIR_T_I64);
-            int result_home_id = em_scalar_home_new(&mt->em);
-            MIR_reg_t result_home = em_materialize_frame_ref(&mt->em,
-                em_scalar_home_ref(&mt->em, result_home_id));
+            PmCompilerRegister res = pm_new_reg(mt, "dcall", PM_COMPILER_VALUE_I64);
+            int result_home_id = 0;
+            PmCompilerRegister result_home = pm_create_hosted_scalar_home(mt, &result_home_id);
             if (!result_home) {
                 log_error("py-mir: direct call has no caller-owned scalar result home");
                 abort();
@@ -2743,7 +2774,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             if (target_fc->has_star_args) {
                 // collect all positional args beyond regular params as excess
                 int excess_count = 0;
-                MIR_reg_t excess_regs[64];
+                PmCompilerRegister excess_regs[64];
                 int positional = 0;
                 PyAstNode* pa = call->arguments;
                 while (pa) {
@@ -2765,48 +2796,50 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                     pm_arg_scope_store(mt, varargs, i, excess_regs[i]);
                 }
 
-                int nops = 3 + direct_mir_total;
-                MIR_op_t ops[24];
-                ops[0] = MIR_new_ref_op(mt->em.ctx, proto);
-                ops[1] = MIR_new_ref_op(mt->em.ctx, target_fc->func_item);
-                ops[2] = MIR_new_reg_op(mt->em.ctx, res);
+                JubeCompilerCallOperand operands[21] = {};
                 for (int i = 0; i < total_params && i < 16; i++) {
-                    ops[3 + i] = MIR_new_reg_op(mt->em.ctx, ordered_args[i]);
+                    operands[i].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                    operands[i].register_id = (uint32_t)ordered_args[i];
                 }
-                ops[3 + total_params] = MIR_new_reg_op(mt->em.ctx, varargs.args);
-                ops[3 + total_params + 1] = MIR_new_int_op(mt->em.ctx, excess_count);
+                operands[total_params].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                operands[total_params].register_id = (uint32_t)varargs.args;
+                operands[total_params + 1].operand_kind = JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE;
+                operands[total_params + 1].immediate_i64 = excess_count;
                 if (target_fc->has_kwargs) {
-                    ops[3 + total_params + 2] = MIR_new_reg_op(mt->em.ctx, kwargs_map_reg);
+                    operands[total_params + 2].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                    operands[total_params + 2].register_id = (uint32_t)kwargs_map_reg;
                 }
-                ops[3 + mir_total] = MIR_new_reg_op(mt->em.ctx, result_home);
-                pm_emit_local_direct_call(mt, fn_name, nops, ops);
+                operands[mir_total].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                operands[mir_total].register_id = (uint32_t)result_home;
+                pm_emit_local_direct_call(mt, fn_name, proto, target_fc->func_item, res,
+                    direct_mir_total, operands);
                 pm_end_arg_scope(mt, varargs);
             } else {
-                int nops = 3 + direct_mir_total;
-                MIR_op_t ops[20]; // proto + func_ref + result + up to 16 args + optional kwargs map
-                ops[0] = MIR_new_ref_op(mt->em.ctx, proto);
-                ops[1] = MIR_new_ref_op(mt->em.ctx, target_fc->func_item);
-                ops[2] = MIR_new_reg_op(mt->em.ctx, res);
+                JubeCompilerCallOperand operands[21] = {};
                 for (int i = 0; i < total_params && i < 16; i++) {
-                    ops[3 + i] = MIR_new_reg_op(mt->em.ctx, ordered_args[i]);
+                    operands[i].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                    operands[i].register_id = (uint32_t)ordered_args[i];
                 }
                 if (target_fc->has_kwargs) {
-                    ops[3 + total_params] = MIR_new_reg_op(mt->em.ctx, kwargs_map_reg);
+                    operands[total_params].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                    operands[total_params].register_id = (uint32_t)kwargs_map_reg;
                 }
-                ops[3 + mir_total] = MIR_new_reg_op(mt->em.ctx, result_home);
-                pm_emit_local_direct_call(mt, fn_name, nops, ops);
+                operands[mir_total].operand_kind = JUBE_COMPILER_CALL_OPERAND_REGISTER;
+                operands[mir_total].register_id = (uint32_t)result_home;
+                pm_emit_local_direct_call(mt, fn_name, proto, target_fc->func_item, res,
+                    direct_mir_total, operands);
             }
-            em_scalar_home_bind(&mt->em, result_home_id, res);
+            pm_bind_hosted_scalar_home(mt, result_home_id, res);
             return res;
         }
     }
 
     // generic function call: evaluate function, collect args, call py_call_function
-    MIR_reg_t func = pm_transpile_expression(mt, call->function);
+    PmCompilerRegister func = pm_transpile_expression(mt, call->function);
 
     int argc = 0;
     PyAstNode* arg = call->arguments;
-    MIR_reg_t arg_regs[64];
+    PmCompilerRegister arg_regs[64];
     while (arg) {
         if (arg->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
             arg = arg->next; continue;
@@ -2832,197 +2865,193 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         }
         if (has_any_kwarg) {
             // build kwargs map from all named kwargs and **splat
-            MIR_reg_t kw_map = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+            PmCompilerRegister kw_map = pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
             ka = call->arguments;
             while (ka) {
                 if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
                     PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
                     if (!kw->key) {
                         // **expr splat — merge into kwargs map
-                        MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
-                        pm_call_2(mt, "py_dict_merge", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kw_map),
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, splat_val));
+                        PmCompilerRegister splat_val = pm_transpile_expression(mt, kw->value);
+                        pm_call_semantic_2(mt, "py_dict_merge", PM_COMPILER_VALUE_I64,
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, kw_map),
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, splat_val));
                     } else {
                         // named kwarg — add to map
-                        MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
-                        MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
-                        pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kw_map),
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kname_reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kval_reg));
+                        PmCompilerRegister kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                        PmCompilerRegister kval_reg = pm_transpile_expression(mt, kw->value);
+                        pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, kw_map),
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, kname_reg),
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, kval_reg));
                     }
                 }
                 ka = ka->next;
             }
-            int keyword_home_id = em_scalar_home_new(&mt->em);
-            MIR_reg_t keyword_home = em_materialize_frame_ref(&mt->em,
-                em_scalar_home_ref(&mt->em, keyword_home_id));
+            int keyword_home_id = 0;
+            PmCompilerRegister keyword_home = pm_create_hosted_scalar_home(mt, &keyword_home_id);
             if (!keyword_home) {
                 log_error("py-mir: keyword call has no caller-owned scalar result home");
                 abort();
             }
-            MIR_reg_t result = pm_call_5(mt, "py_call_function_kw_into", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kw_map),
-                MIR_T_P, MIR_new_reg_op(mt->em.ctx, keyword_home));
-            em_scalar_home_bind(&mt->em, keyword_home_id, result);
+            PmCompilerRegister result = pm_call_semantic_5(mt, "py_call_function_kw_into", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, func),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+                pm_call_operand_i64_immediate(argc),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, kw_map),
+                pm_call_operand_register(PM_COMPILER_VALUE_POINTER, keyword_home));
+            pm_bind_hosted_scalar_home(mt, keyword_home_id, result);
             pm_end_arg_scope(mt, args);
             return result;
         }
     }
 
-    int dynamic_home_id = em_scalar_home_new(&mt->em);
-    MIR_reg_t dynamic_home = em_materialize_frame_ref(&mt->em,
-        em_scalar_home_ref(&mt->em, dynamic_home_id));
+    int dynamic_home_id = 0;
+    PmCompilerRegister dynamic_home = pm_create_hosted_scalar_home(mt, &dynamic_home_id);
     if (!dynamic_home) {
         log_error("py-mir: dynamic call has no caller-owned scalar result home");
         abort();
     }
-    MIR_reg_t result = pm_call_4(mt, "py_call_function_into", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc),
-        MIR_T_P, MIR_new_reg_op(mt->em.ctx, dynamic_home));
-    em_scalar_home_bind(&mt->em, dynamic_home_id, result);
+    PmCompilerRegister result = pm_call_semantic_4(mt, "py_call_function_into", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, func),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+        pm_call_operand_i64_immediate(argc),
+        pm_call_operand_register(PM_COMPILER_VALUE_POINTER, dynamic_home));
+    pm_bind_hosted_scalar_home(mt, dynamic_home_id, result);
     pm_end_arg_scope(mt, args);
     return result;
 }
 
-static MIR_reg_t pm_transpile_attribute(PyMirTranspiler* mt, PyAttributeNode* attr) {
-    MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
-    MIR_reg_t name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
-    return pm_call_2(mt, "py_getattr", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, name));
+static PmCompilerRegister pm_transpile_attribute(PyMirTranspiler* mt, PyAttributeNode* attr) {
+    PmCompilerRegister obj = pm_transpile_expression(mt, attr->object);
+    PmCompilerRegister name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+    return pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, name));
 }
 
-static MIR_reg_t pm_transpile_subscript(PyMirTranspiler* mt, PySubscriptNode* sub) {
-    MIR_reg_t obj = pm_transpile_expression(mt, sub->object);
+static PmCompilerRegister pm_transpile_subscript(PyMirTranspiler* mt, PySubscriptNode* sub) {
+    PmCompilerRegister obj = pm_transpile_expression(mt, sub->object);
 
     // check if index is a slice node
     if (sub->index && sub->index->node_type == PY_AST_NODE_SLICE) {
         PySliceNode* slice = (PySliceNode*)sub->index;
-        MIR_reg_t start = slice->start ? pm_transpile_expression(mt, slice->start) : pm_emit_null(mt);
-        MIR_reg_t stop = slice->stop ? pm_transpile_expression(mt, slice->stop) : pm_emit_null(mt);
-        MIR_reg_t step = slice->step ? pm_transpile_expression(mt, slice->step) : pm_emit_null(mt);
-        return pm_call_4(mt, "py_slice_get", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, start),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, stop),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, step));
+        PmCompilerRegister start = slice->start ? pm_transpile_expression(mt, slice->start) : pm_emit_null(mt);
+        PmCompilerRegister stop = slice->stop ? pm_transpile_expression(mt, slice->stop) : pm_emit_null(mt);
+        PmCompilerRegister step = slice->step ? pm_transpile_expression(mt, slice->step) : pm_emit_null(mt);
+        return pm_call_semantic_4(mt, "py_slice_get", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, start),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, stop),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, step));
     }
 
-    MIR_reg_t key = pm_transpile_expression(mt, sub->index);
-    return pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key));
+    PmCompilerRegister key = pm_transpile_expression(mt, sub->index);
+    return pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, key));
 }
 
-static MIR_reg_t pm_transpile_list(PyMirTranspiler* mt, PySequenceNode* seq) {
-    MIR_reg_t list = pm_call_1(mt, "py_list_new", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+static PmCompilerRegister pm_transpile_list(PyMirTranspiler* mt, PySequenceNode* seq) {
+    PmCompilerRegister list = pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+        pm_call_operand_i64_immediate(0));
 
     PyAstNode* elem = seq->elements;
     while (elem) {
-        MIR_reg_t val = pm_transpile_expression(mt, elem);
-        pm_call_2(mt, "py_list_append", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, list),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+        PmCompilerRegister val = pm_transpile_expression(mt, elem);
+        pm_call_semantic_2(mt, "py_list_append", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, list),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         elem = elem->next;
     }
     return list;
 }
 
-static MIR_reg_t pm_transpile_tuple(PyMirTranspiler* mt, PySequenceNode* seq) {
+static PmCompilerRegister pm_transpile_tuple(PyMirTranspiler* mt, PySequenceNode* seq) {
     int length = seq->length;
-    MIR_reg_t tuple = pm_call_1(mt, "py_tuple_new", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, length));
+    PmCompilerRegister tuple = pm_call_semantic_1(mt, "py_tuple_new", PM_COMPILER_VALUE_I64,
+        pm_call_operand_i64_immediate(length));
 
     PyAstNode* elem = seq->elements;
     int i = 0;
     while (elem) {
-        MIR_reg_t val = pm_transpile_expression(mt, elem);
-        pm_call_3(mt, "py_tuple_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, tuple),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, i),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+        PmCompilerRegister val = pm_transpile_expression(mt, elem);
+        pm_call_semantic_3(mt, "py_tuple_set", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, tuple),
+            pm_call_operand_i64_immediate(i),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         elem = elem->next;
         i++;
     }
     return tuple;
 }
 
-static MIR_reg_t pm_transpile_dict(PyMirTranspiler* mt, PyDictNode* dict) {
-    MIR_reg_t d = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+static PmCompilerRegister pm_transpile_dict(PyMirTranspiler* mt, PyDictNode* dict) {
+    PmCompilerRegister d = pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
 
     PyAstNode* pair_node = dict->pairs;
     while (pair_node) {
         if (pair_node->node_type == PY_AST_NODE_PAIR) {
             PyPairNode* pair = (PyPairNode*)pair_node;
-            MIR_reg_t key = pm_transpile_expression(mt, pair->key);
-            MIR_reg_t val = pm_transpile_expression(mt, pair->value);
-            pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, d),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+            PmCompilerRegister key = pm_transpile_expression(mt, pair->key);
+            PmCompilerRegister val = pm_transpile_expression(mt, pair->value);
+            pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, d),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         }
         pair_node = pair_node->next;
     }
     return d;
 }
 
-static MIR_reg_t pm_transpile_conditional(PyMirTranspiler* mt, PyConditionalNode* cond) {
-    MIR_reg_t test = pm_transpile_expression(mt, cond->test);
-    MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, test));
+static PmCompilerRegister pm_transpile_conditional(PyMirTranspiler* mt, PyConditionalNode* cond) {
+    PmCompilerRegister test = pm_transpile_expression(mt, cond->test);
+    PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, test));
 
-    MIR_reg_t result = pm_new_reg(mt, "cond", MIR_T_I64);
-    MIR_label_t l_else = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerRegister result = pm_new_reg(mt, "cond", PM_COMPILER_VALUE_I64);
+    PmCompilerLabel l_else = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
     pm_emit_branch_false(mt, truthy, l_else);
 
-    MIR_reg_t then_val = pm_transpile_expression(mt, cond->then);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, then_val)));
+    PmCompilerRegister then_val = pm_transpile_expression(mt, cond->then);
+    pm_emit_i64_register_move(mt, result, then_val);
     pm_emit_jump(mt, l_end);
 
     pm_emit_label(mt, l_else);
-    MIR_reg_t else_val = pm_transpile_expression(mt, cond->otherwise);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, else_val)));
+    PmCompilerRegister else_val = pm_transpile_expression(mt, cond->otherwise);
+    pm_emit_i64_register_move(mt, result, else_val);
 
     pm_emit_label(mt, l_end);
     return result;
 }
 
-static MIR_reg_t pm_transpile_fstring(PyMirTranspiler* mt, PyFStringNode* fstr) {
+static PmCompilerRegister pm_transpile_fstring(PyMirTranspiler* mt, PyFStringNode* fstr) {
     // f-string: concatenate parts via py_to_str + py_add
-    MIR_reg_t result = pm_box_string_literal(mt, "", 0);
+    PmCompilerRegister result = pm_box_string_literal(mt, "", 0);
     PyAstNode* part = fstr->parts;
     while (part) {
-        MIR_reg_t val;
+        PmCompilerRegister val;
         if (part->node_type == PY_AST_NODE_LITERAL) {
             val = pm_transpile_literal(mt, (PyLiteralNode*)part);
         } else if (part->node_type == PY_AST_NODE_FSTRING_EXPR) {
             // f-string expression with format spec: f"{expr:spec}"
             PyFStringExprNode* fse = (PyFStringExprNode*)part;
-            MIR_reg_t expr_val = pm_transpile_expression(mt, fse->expression);
-            MIR_reg_t spec_val = pm_box_string_literal(mt, fse->format_spec->chars, fse->format_spec->len);
-            val = pm_call_2(mt, "py_format_value", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, expr_val),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, spec_val));
+            PmCompilerRegister expr_val = pm_transpile_expression(mt, fse->expression);
+            PmCompilerRegister spec_val = pm_box_string_literal(mt, fse->format_spec->chars, fse->format_spec->len);
+            val = pm_call_semantic_2(mt, "py_format_value", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, expr_val),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, spec_val));
         } else {
-            MIR_reg_t expr = pm_transpile_expression(mt, part);
-            val = pm_call_1(mt, "py_to_str", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, expr));
+            PmCompilerRegister expr = pm_transpile_expression(mt, part);
+            val = pm_call_semantic_1(mt, "py_to_str", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, expr));
         }
-        result = pm_call_2(mt, "py_add", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+        result = pm_call_semantic_2(mt, "py_add", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, result),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         part = part->next;
     }
     return result;
@@ -3033,21 +3062,17 @@ static MIR_reg_t pm_transpile_fstring(PyMirTranspiler* mt, PyFStringNode* fstr) 
 // ============================================================================
 
 // helper: assign a loop element to the target variable(s) in comprehension
-static void pm_assign_comp_target(PyMirTranspiler* mt, PyAstNode* target, MIR_reg_t item) {
+static void pm_assign_comp_target(PyMirTranspiler* mt, PyAstNode* target, PmCompilerRegister item) {
     if (target->node_type == PY_AST_NODE_IDENTIFIER) {
         PyIdentifierNode* id = (PyIdentifierNode*)target;
         char vname[128];
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
         PyMirVarEntry* var = pm_find_var(mt, vname);
         if (var) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, var->reg),
-                MIR_new_reg_op(mt->em.ctx, item)));
+            pm_emit_i64_register_move(mt, var->reg, item);
         } else {
-            MIR_reg_t reg = pm_new_reg(mt, vname, MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, reg),
-                MIR_new_reg_op(mt->em.ctx, item)));
+            PmCompilerRegister reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+            pm_emit_i64_register_move(mt, reg, item);
             pm_set_var(mt, vname, reg);
         }
     } else if (target->node_type == PY_AST_NODE_TUPLE ||
@@ -3056,9 +3081,10 @@ static void pm_assign_comp_target(PyMirTranspiler* mt, PyAstNode* target, MIR_re
         PyAstNode* elem = tup->elements;
         int i = 0;
         while (elem) {
-            MIR_reg_t sub_item = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, item),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pm_box_int_const(mt, i)));
+            PmCompilerRegister index = pm_box_int_const(mt, i);
+            PmCompilerRegister sub_item = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, item),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, index));
             pm_assign_comp_target(mt, elem, sub_item);
             elem = elem->next;
             i++;
@@ -3066,123 +3092,115 @@ static void pm_assign_comp_target(PyMirTranspiler* mt, PyAstNode* target, MIR_re
     }
 }
 
-static MIR_reg_t pm_transpile_list_comprehension(PyMirTranspiler* mt, PyComprehensionNode* comp) {
+static PmCompilerRegister pm_transpile_list_comprehension(PyMirTranspiler* mt, PyComprehensionNode* comp) {
     // create result list
-    MIR_reg_t result = pm_call_1(mt, "py_list_new", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+    PmCompilerRegister result = pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+        pm_call_operand_i64_immediate(0));
 
     // evaluate iterable
-    MIR_reg_t iterable = pm_transpile_expression(mt, comp->iter);
-    MIR_reg_t length = pm_call_1(mt, "py_builtin_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable));
+    PmCompilerRegister iterable = pm_transpile_expression(mt, comp->iter);
+    PmCompilerRegister length = pm_call_semantic_1(mt, "py_builtin_len", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable));
 
     // loop index
-    MIR_reg_t idx = pm_new_reg(mt, "comp_idx", MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_new_int_op(mt->em.ctx, (int64_t)(PY_ITEM_INT_TAG | 0))));
+    PmCompilerRegister idx = pm_new_reg(mt, "comp_idx", PM_COMPILER_VALUE_I64);
+    pm_emit_i64_immediate(mt, idx, (int64_t)(PY_ITEM_INT_TAG | 0));
 
-    MIR_label_t l_start = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
-    MIR_label_t l_continue = pm_new_label(mt);
+    PmCompilerLabel l_start = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
+    PmCompilerLabel l_continue = pm_new_label(mt);
 
     pm_emit_label(mt, l_start);
 
     // check idx < length
-    MIR_reg_t cmp = pm_call_2(mt, "py_lt", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, length));
-    MIR_reg_t cmp_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cmp));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_end),
-        MIR_new_reg_op(mt->em.ctx, cmp_truthy)));
+    PmCompilerRegister cmp = pm_call_semantic_2(mt, "py_lt", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, length));
+    PmCompilerRegister cmp_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, cmp));
+    pm_emit_branch_false(mt, cmp_truthy, l_end);
 
     // get current item and assign to target
-    MIR_reg_t item = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx));
+    PmCompilerRegister item = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx));
     pm_assign_comp_target(mt, comp->target, item);
 
     // evaluate conditions (if any)
-    MIR_label_t l_skip = NULL;
+    PmCompilerLabel l_skip = NULL;
     if (comp->conditions) {
         l_skip = pm_new_label(mt);
         PyAstNode* cond = comp->conditions;
         while (cond) {
-            MIR_reg_t cond_val = pm_transpile_expression(mt, cond);
-            MIR_reg_t cond_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cond_val));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_skip),
-                MIR_new_reg_op(mt->em.ctx, cond_truthy)));
+            PmCompilerRegister cond_val = pm_transpile_expression(mt, cond);
+            PmCompilerRegister cond_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cond_val));
+            pm_emit_branch_false(mt, cond_truthy, l_skip);
             cond = cond->next;
         }
     }
 
     // evaluate element expression and append to result
-    MIR_reg_t elem = pm_transpile_expression(mt, comp->element);
-    pm_call_2(mt, "py_list_append", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, elem));
+    PmCompilerRegister elem = pm_transpile_expression(mt, comp->element);
+    pm_call_semantic_2(mt, "py_list_append", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, result),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, elem));
 
     if (l_skip) pm_emit_label(mt, l_skip);
     pm_emit_label(mt, l_continue);
 
     // increment idx
-    MIR_reg_t one = pm_box_int_const(mt, 1);
-    MIR_reg_t new_idx = pm_call_2(mt, "py_add", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, one));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_new_reg_op(mt->em.ctx, new_idx)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_start)));
+    PmCompilerRegister one = pm_box_int_const(mt, 1);
+    PmCompilerRegister new_idx = pm_call_semantic_2(mt, "py_add", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, one));
+    pm_emit_i64_register_move(mt, idx, new_idx);
+    pm_emit_jump(mt, l_start);
 
     pm_emit_label(mt, l_end);
     return result;
 }
 
-static MIR_reg_t pm_transpile_dict_comprehension(PyMirTranspiler* mt, PyComprehensionNode* comp) {
+static PmCompilerRegister pm_transpile_dict_comprehension(PyMirTranspiler* mt, PyComprehensionNode* comp) {
     // create result dict
-    MIR_reg_t result = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+    PmCompilerRegister result = pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
 
     // evaluate iterable
-    MIR_reg_t iterable = pm_transpile_expression(mt, comp->iter);
-    MIR_reg_t length = pm_call_1(mt, "py_builtin_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable));
+    PmCompilerRegister iterable = pm_transpile_expression(mt, comp->iter);
+    PmCompilerRegister length = pm_call_semantic_1(mt, "py_builtin_len", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable));
 
-    MIR_reg_t idx = pm_new_reg(mt, "comp_idx", MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_new_int_op(mt->em.ctx, (int64_t)(PY_ITEM_INT_TAG | 0))));
+    PmCompilerRegister idx = pm_new_reg(mt, "comp_idx", PM_COMPILER_VALUE_I64);
+    pm_emit_i64_immediate(mt, idx, (int64_t)(PY_ITEM_INT_TAG | 0));
 
-    MIR_label_t l_start = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
-    MIR_label_t l_continue = pm_new_label(mt);
+    PmCompilerLabel l_start = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
+    PmCompilerLabel l_continue = pm_new_label(mt);
 
     pm_emit_label(mt, l_start);
 
-    MIR_reg_t cmp = pm_call_2(mt, "py_lt", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, length));
-    MIR_reg_t cmp_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cmp));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_end),
-        MIR_new_reg_op(mt->em.ctx, cmp_truthy)));
+    PmCompilerRegister cmp = pm_call_semantic_2(mt, "py_lt", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, length));
+    PmCompilerRegister cmp_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, cmp));
+    pm_emit_branch_false(mt, cmp_truthy, l_end);
 
-    MIR_reg_t item = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx));
+    PmCompilerRegister item = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx));
     pm_assign_comp_target(mt, comp->target, item);
 
     // evaluate conditions
-    MIR_label_t l_skip = NULL;
+    PmCompilerLabel l_skip = NULL;
     if (comp->conditions) {
         l_skip = pm_new_label(mt);
         PyAstNode* cond = comp->conditions;
         while (cond) {
-            MIR_reg_t cond_val = pm_transpile_expression(mt, cond);
-            MIR_reg_t cond_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cond_val));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_skip),
-                MIR_new_reg_op(mt->em.ctx, cond_truthy)));
+            PmCompilerRegister cond_val = pm_transpile_expression(mt, cond);
+            PmCompilerRegister cond_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cond_val));
+            pm_emit_branch_false(mt, cond_truthy, l_skip);
             cond = cond->next;
         }
     }
@@ -3190,25 +3208,23 @@ static MIR_reg_t pm_transpile_dict_comprehension(PyMirTranspiler* mt, PyComprehe
     // for dict comprehension, element is a pair node with key and value
     if (comp->element && comp->element->node_type == PY_AST_NODE_PAIR) {
         PyPairNode* pair = (PyPairNode*)comp->element;
-        MIR_reg_t key_val = pm_transpile_expression(mt, pair->key);
-        MIR_reg_t val_val = pm_transpile_expression(mt, pair->value);
-        pm_call_3(mt, "py_dict_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, result),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_val),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_val));
+        PmCompilerRegister key_val = pm_transpile_expression(mt, pair->key);
+        PmCompilerRegister val_val = pm_transpile_expression(mt, pair->value);
+        pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, result),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, key_val),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val_val));
     }
 
     if (l_skip) pm_emit_label(mt, l_skip);
     pm_emit_label(mt, l_continue);
 
-    MIR_reg_t one = pm_box_int_const(mt, 1);
-    MIR_reg_t new_idx = pm_call_2(mt, "py_add", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, one));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, idx),
-        MIR_new_reg_op(mt->em.ctx, new_idx)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_start)));
+    PmCompilerRegister one = pm_box_int_const(mt, 1);
+    PmCompilerRegister new_idx = pm_call_semantic_2(mt, "py_add", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, idx),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, one));
+    pm_emit_i64_register_move(mt, idx, new_idx);
+    pm_emit_jump(mt, l_start);
 
     pm_emit_label(mt, l_end);
     return result;
@@ -3218,38 +3234,36 @@ static MIR_reg_t pm_transpile_dict_comprehension(PyMirTranspiler* mt, PyComprehe
 // Lambda expressions
 // ============================================================================
 
-static MIR_reg_t pm_transpile_lambda(PyMirTranspiler* mt, PyLambdaNode* lam) {
+static PmCompilerRegister pm_transpile_lambda(PyMirTranspiler* mt, PyLambdaNode* lam) {
     // find the pre-compiled lambda entry by matching node pointer
     for (int i = 0; i < mt->lambda_count; i++) {
         if (mt->lambda_entries[i].node == lam) {
             PyLambdaCollected* lc = &mt->lambda_entries[i];
-            MIR_reg_t fptr = pm_new_reg(mt, "lam_ptr", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_new_ref_op(mt->em.ctx, lc->func_item)));
+            PmCompilerRegister fptr = pm_new_reg(mt, "lam_ptr", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_reference_move(mt, fptr, lc->func_item);
 
             if (lc->is_closure) {
-                MIR_reg_t closure = pm_call_3(mt, "py_new_closure", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, lc->param_count),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, lc->capture_count));
-                MIR_reg_t env = pm_call_1(mt, "py_closure_get_env", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
+                PmCompilerRegister closure = pm_call_semantic_3(mt, "py_new_closure", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                    pm_call_operand_i64_immediate(lc->param_count),
+                    pm_call_operand_i64_immediate(lc->capture_count));
+                PmCompilerRegister env = pm_call_semantic_1(mt, "py_closure_get_env", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, closure));
                 for (int ci = 0; ci < lc->capture_count; ci++) {
                     PyMirVarEntry* cvar = pm_find_var(mt, lc->captures[ci]);
                     if (cvar) {
                         pm_store_env_slot(mt, env, ci, cvar->reg);
                     }
                 }
-                return pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
+                return pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, closure));
             }
 
-            MIR_reg_t function = pm_call_2(mt, "py_new_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, lc->param_count));
-            return pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, function));
+            PmCompilerRegister function = pm_call_semantic_2(mt, "py_new_function", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                pm_call_operand_i64_immediate(lc->param_count));
+            return pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, function));
         }
     }
     log_error("py-mir: lambda not found in pre-compiled entries");
@@ -3260,7 +3274,7 @@ static MIR_reg_t pm_transpile_lambda(PyMirTranspiler* mt, PyLambdaNode* lam) {
 // Expression dispatcher
 // ============================================================================
 
-static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
+static PmCompilerRegister pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
     if (!expr) return pm_emit_null(mt);
 
     switch (expr->node_type) {
@@ -3315,61 +3329,55 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
             char iter_vname[128];
             snprintf(iter_vname, sizeof(iter_vname), "_py__git_%d", mt->gen_iter_count++);
             // evaluate sub-iterable and create iterator
-            MIR_reg_t sub_expr = yn->value ? pm_transpile_expression(mt, yn->value) : pm_emit_null(mt);
-            MIR_reg_t sub_iter = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, sub_expr));
+            PmCompilerRegister sub_expr = yn->value ? pm_transpile_expression(mt, yn->value) : pm_emit_null(mt);
+            PmCompilerRegister sub_iter = pm_call_semantic_1(mt, "py_get_iterator", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, sub_expr));
             // store in pre-registered gen_local
             PyMirVarEntry* sub_iter_var = pm_find_var(mt, iter_vname);
             if (sub_iter_var && !sub_iter_var->from_env) {
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, sub_iter_var->reg),
-                    MIR_new_reg_op(mt->em.ctx, sub_iter)));
+                pm_emit_i64_register_move(mt, sub_iter_var->reg, sub_iter);
             }
             // save all locals and enter the yield-from loop state
             pm_gen_emit_save(mt);
             int yf_state = mt->gen_yield_count + 1;
             pm_gen_store_state(mt, yf_state);
             // jump to the loop label (also used as the dispatch target on resume)
-            MIR_label_t l_yf_loop = mt->gen_yield_labels[mt->gen_yield_count];
-            MIR_label_t l_yf_done = pm_new_label(mt);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_yf_loop)));
+            PmCompilerLabel l_yf_loop = mt->gen_yield_labels[mt->gen_yield_count];
+            PmCompilerLabel l_yf_done = pm_new_label(mt);
+            pm_emit_jump(mt, l_yf_loop);
             // === the loop label (both initial entry and resume landing pad) ===
             pm_emit_label(mt, l_yf_loop);
             mt->gen_yield_count++;
             // restore locals (including sub_iter_var)
             pm_gen_emit_restore(mt);
-            MIR_reg_t cur_iter = (sub_iter_var && !sub_iter_var->from_env) ? sub_iter_var->reg : sub_iter;
-            MIR_reg_t sub_item = pm_call_1(mt, "py_iterator_next", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cur_iter));
-            MIR_reg_t is_stop = pm_call_1(mt, "py_is_stop_iteration", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, sub_item));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                MIR_new_label_op(mt->em.ctx, l_yf_done),
-                MIR_new_reg_op(mt->em.ctx, is_stop)));
+            PmCompilerRegister cur_iter = (sub_iter_var && !sub_iter_var->from_env) ? sub_iter_var->reg : sub_iter;
+            PmCompilerRegister sub_item = pm_call_semantic_1(mt, "py_iterator_next", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cur_iter));
+            PmCompilerRegister is_stop = pm_call_semantic_1(mt, "py_is_stop_iteration", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, sub_item));
+            pm_emit_branch_true(mt, is_stop, l_yf_done);
             // yield sub_item to caller, loop back (same state)
             pm_gen_emit_save(mt);
             pm_gen_store_state(mt, yf_state);
-            pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, sub_item)));
+            pm_emit_item_return_register(mt, sub_item);
             pm_emit_label(mt, l_yf_done);
             // yield from complete — result is ItemNull (sub-generator return value not tracked)
             return pm_emit_null(mt);
         }
         // regular yield: evaluate value, save locals, set next state, return value
-        MIR_reg_t yield_val = yn->value ? pm_transpile_expression(mt, yn->value) : pm_emit_null(mt);
+        PmCompilerRegister yield_val = yn->value ? pm_transpile_expression(mt, yn->value) : pm_emit_null(mt);
         pm_gen_emit_save(mt);
         int next_state = mt->gen_yield_count + 1;
         pm_gen_store_state(mt, next_state);
-        pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, yield_val)));
+        pm_emit_item_return_register(mt, yield_val);
         // resume label: execution continues here on next next()/send() call
         pm_emit_label(mt, mt->gen_yield_labels[mt->gen_yield_count]);
         mt->gen_yield_count++;
         // restore locals from frame
         pm_gen_emit_restore(mt);
         // return the sent value (for use as expression result in: value = yield expr)
-        MIR_reg_t sent_result = pm_new_reg(mt, "gen_sent_r", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, sent_result),
-            MIR_new_reg_op(mt->em.ctx, mt->gen_sent_reg)));
+        PmCompilerRegister sent_result = pm_new_reg(mt, "gen_sent_r", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, sent_result, mt->gen_sent_reg);
         return sent_result;
     }
     case PY_AST_NODE_AWAIT: {
@@ -3377,46 +3385,42 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
         PyAwaitNode* aw = (PyAwaitNode*)expr;
         if (!mt->in_generator) {
             // await outside async context: drive the coroutine directly
-            MIR_reg_t coro = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
-            return pm_call_1(mt, "py_coro_drive", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, coro));
+            PmCompilerRegister coro = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
+            return pm_call_semantic_1(mt, "py_coro_drive", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, coro));
         }
         // inside async def: same as yield from but result = py_coro_get_return()
         char iter_vname[128];
         snprintf(iter_vname, sizeof(iter_vname), "_py__git_%d", mt->gen_iter_count++);
-        MIR_reg_t sub_expr = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
-        MIR_reg_t sub_iter = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, sub_expr));
+        PmCompilerRegister sub_expr = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
+        PmCompilerRegister sub_iter = pm_call_semantic_1(mt, "py_get_iterator", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, sub_expr));
         PyMirVarEntry* sub_iter_var = pm_find_var(mt, iter_vname);
         if (sub_iter_var && !sub_iter_var->from_env) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, sub_iter_var->reg),
-                MIR_new_reg_op(mt->em.ctx, sub_iter)));
+            pm_emit_i64_register_move(mt, sub_iter_var->reg, sub_iter);
         }
         pm_gen_emit_save(mt);
         int yf_state = mt->gen_yield_count + 1;
         pm_gen_store_state(mt, yf_state);
-        MIR_label_t l_yf_loop = mt->gen_yield_labels[mt->gen_yield_count];
-        MIR_label_t l_yf_done = pm_new_label(mt);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_yf_loop)));
+        PmCompilerLabel l_yf_loop = mt->gen_yield_labels[mt->gen_yield_count];
+        PmCompilerLabel l_yf_done = pm_new_label(mt);
+        pm_emit_jump(mt, l_yf_loop);
         // === loop label: both initial entry and resume landing ===
         pm_emit_label(mt, l_yf_loop);
         mt->gen_yield_count++;
         pm_gen_emit_restore(mt);
-        MIR_reg_t cur_iter = (sub_iter_var && !sub_iter_var->from_env) ? sub_iter_var->reg : sub_iter;
-        MIR_reg_t sub_item = pm_call_1(mt, "py_iterator_next", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cur_iter));
-        MIR_reg_t is_stop = pm_call_1(mt, "py_is_stop_iteration", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, sub_item));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-            MIR_new_label_op(mt->em.ctx, l_yf_done),
-            MIR_new_reg_op(mt->em.ctx, is_stop)));
+        PmCompilerRegister cur_iter = (sub_iter_var && !sub_iter_var->from_env) ? sub_iter_var->reg : sub_iter;
+        PmCompilerRegister sub_item = pm_call_semantic_1(mt, "py_iterator_next", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, cur_iter));
+        PmCompilerRegister is_stop = pm_call_semantic_1(mt, "py_is_stop_iteration", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, sub_item));
+        pm_emit_branch_true(mt, is_stop, l_yf_done);
         pm_gen_emit_save(mt);
         pm_gen_store_state(mt, yf_state);
-        pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, sub_item)));
+        pm_emit_item_return_register(mt, sub_item);
         pm_emit_label(mt, l_yf_done);
         // retrieve the return value stored by the sub-coroutine
-        return pm_call_0(mt, "py_coro_get_return", MIR_T_I64);
+        return pm_call_semantic_0(mt, "py_coro_get_return", PM_COMPILER_VALUE_I64);
     }
     default:
         log_error("py-mir: unsupported expression type %d", expr->node_type);
@@ -3431,7 +3435,7 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
 static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assign) {
     // infer type of RHS for type propagation
     TypeId rhs_type = pm_get_effective_type(mt, assign->right);
-    MIR_reg_t val = pm_transpile_expression(mt, assign->right);
+    PmCompilerRegister val = pm_transpile_expression(mt, assign->right);
 
     // walk targets
     PyAstNode* target = assign->left;
@@ -3445,9 +3449,9 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
             if (pm_is_global_in_current_func(mt, vname)) {
                 int idx = pm_get_global_var_index(mt, vname);
                 if (idx >= 0) {
-                    pm_call_void_2(mt, "py_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->em.ctx, idx),
-                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+                    pm_call_semantic_void_2(mt, "py_set_module_var",
+                        pm_call_operand_i64_immediate(idx),
+                        pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
                     target = target->next;
                     continue;
                 }
@@ -3458,9 +3462,7 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                 if (var->from_env) {
                     pm_store_env_slot(mt, var->env_reg, var->env_slot, val);
                 } else {
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, var->reg),
-                        MIR_new_reg_op(mt->em.ctx, val)));
+                    pm_emit_i64_register_move(mt, var->reg, val);
                     // update type hint
                     if (rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT)
                         var->type_id = rhs_type;
@@ -3469,51 +3471,50 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                 }
             } else {
                 // new variable
-                MIR_reg_t reg = pm_new_reg(mt, vname, MIR_T_I64);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, reg),
-                    MIR_new_reg_op(mt->em.ctx, val)));
+                PmCompilerRegister reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+                pm_emit_i64_register_move(mt, reg, val);
                 pm_set_var_with_type(mt, vname, reg, rhs_type);
             }
         } else if (target->node_type == PY_AST_NODE_SUBSCRIPT) {
             PySubscriptNode* sub = (PySubscriptNode*)target;
-            MIR_reg_t obj = pm_transpile_expression(mt, sub->object);
+            PmCompilerRegister obj = pm_transpile_expression(mt, sub->object);
             if (sub->index && sub->index->node_type == PY_AST_NODE_SLICE) {
                 // slice assignment: obj[start:stop:step] = val
                 PySliceNode* slice = (PySliceNode*)sub->index;
-                MIR_reg_t start = slice->start ? pm_transpile_expression(mt, slice->start) : pm_emit_null(mt);
-                MIR_reg_t stop  = slice->stop  ? pm_transpile_expression(mt, slice->stop)  : pm_emit_null(mt);
-                MIR_reg_t step  = slice->step  ? pm_transpile_expression(mt, slice->step)  : pm_emit_null(mt);
-                pm_call_5(mt, "py_slice_set", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, start),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, stop),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, step),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+                PmCompilerRegister start = slice->start ? pm_transpile_expression(mt, slice->start) : pm_emit_null(mt);
+                PmCompilerRegister stop  = slice->stop  ? pm_transpile_expression(mt, slice->stop)  : pm_emit_null(mt);
+                PmCompilerRegister step  = slice->step  ? pm_transpile_expression(mt, slice->step)  : pm_emit_null(mt);
+                pm_call_semantic_5(mt, "py_slice_set", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, start),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, stop),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, step),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
             } else {
-                MIR_reg_t key = pm_transpile_expression(mt, sub->index);
-                pm_call_3(mt, "py_subscript_set", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+                PmCompilerRegister key = pm_transpile_expression(mt, sub->index);
+                pm_call_semantic_3(mt, "py_subscript_set", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, key),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
             }
         } else if (target->node_type == PY_AST_NODE_ATTRIBUTE) {
             PyAttributeNode* attr = (PyAttributeNode*)target;
-            MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
-            MIR_reg_t name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
-            pm_call_3(mt, "py_setattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, name),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+            PmCompilerRegister obj = pm_transpile_expression(mt, attr->object);
+            PmCompilerRegister name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+            pm_call_semantic_3(mt, "py_setattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, name),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
         } else if (target->node_type == PY_AST_NODE_TUPLE_UNPACK || target->node_type == PY_AST_NODE_TUPLE) {
             // tuple unpacking: a, b = expr
             PySequenceNode* tup = (PySequenceNode*)target;
             PyAstNode* elem = tup->elements;
             int idx = 0;
             while (elem) {
-                MIR_reg_t item_val = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pm_box_int_const(mt, idx)));
+                PmCompilerRegister index = pm_box_int_const(mt, idx);
+                PmCompilerRegister item_val = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, val),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, index));
 
                 if (elem->node_type == PY_AST_NODE_IDENTIFIER) {
                     PyIdentifierNode* eid = (PyIdentifierNode*)elem;
@@ -3521,14 +3522,10 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                     snprintf(evname, sizeof(evname), "_py_%.*s", (int)eid->name->len, eid->name->chars);
                     PyMirVarEntry* evar = pm_find_var(mt, evname);
                     if (evar) {
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->em.ctx, evar->reg),
-                            MIR_new_reg_op(mt->em.ctx, item_val)));
+                        pm_emit_i64_register_move(mt, evar->reg, item_val);
                     } else {
-                        MIR_reg_t reg = pm_new_reg(mt, evname, MIR_T_I64);
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->em.ctx, reg),
-                            MIR_new_reg_op(mt->em.ctx, item_val)));
+                        PmCompilerRegister reg = pm_new_reg(mt, evname, PM_COMPILER_VALUE_I64);
+                        pm_emit_i64_register_move(mt, reg, item_val);
                         pm_set_var(mt, evname, reg);
                     }
                 }
@@ -3564,19 +3561,19 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
         TypeId lt = pm_get_effective_type(mt, aug->left);
         TypeId rt = pm_get_effective_type(mt, aug->right);
         if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
-            MIR_insn_code_t op;
+            uint32_t operation;
             bool native_ok = true;
             switch (bin_op) {
-            case PY_OP_ADD: op = MIR_ADD; break;
-            case PY_OP_SUB: op = MIR_SUB; break;
-            case PY_OP_MUL: op = MIR_MUL; break;
-            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
-            case PY_OP_MOD: op = MIR_MOD; break;
-            case PY_OP_LSHIFT: op = MIR_LSH; break;
-            case PY_OP_RSHIFT: op = MIR_RSH; break;
-            case PY_OP_BIT_AND: op = MIR_AND; break;
-            case PY_OP_BIT_OR: op = MIR_OR; break;
-            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            case PY_OP_ADD: operation = JUBE_COMPILER_I64_ADD; break;
+            case PY_OP_SUB: operation = JUBE_COMPILER_I64_SUB; break;
+            case PY_OP_MUL: operation = JUBE_COMPILER_I64_MUL; break;
+            case PY_OP_FLOOR_DIV: operation = JUBE_COMPILER_I64_DIV; break;
+            case PY_OP_MOD: operation = JUBE_COMPILER_I64_MOD; break;
+            case PY_OP_LSHIFT: operation = JUBE_COMPILER_I64_LSH; break;
+            case PY_OP_RSHIFT: operation = JUBE_COMPILER_I64_RSH; break;
+            case PY_OP_BIT_AND: operation = JUBE_COMPILER_I64_AND; break;
+            case PY_OP_BIT_OR: operation = JUBE_COMPILER_I64_OR; break;
+            case PY_OP_BIT_XOR: operation = JUBE_COMPILER_I64_XOR; break;
             default: native_ok = false; break;
             }
             if (native_ok) {
@@ -3592,84 +3589,72 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
                                              bin_op == PY_OP_MUL || bin_op == PY_OP_LSHIFT);
 
                         // transpile RHS as boxed Item first (needed for fallback)
-                        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, aug->right);
+                        PmCompilerRegister rhs_boxed = pm_transpile_expression(mt, aug->right);
 
-                        MIR_label_t l_boxed_path = pm_new_label(mt);
-                        MIR_label_t l_end = pm_new_label(mt);
+                        PmCompilerLabel l_boxed_path = pm_new_label(mt);
+                        PmCompilerLabel l_end = pm_new_label(mt);
 
                         // runtime type guard: verify variable is actually INT
-                        MIR_reg_t var_tag = pm_new_reg(mt, "vt", MIR_T_I64);
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, var_tag),
-                            MIR_new_reg_op(mt->em.ctx, var->reg), MIR_new_int_op(mt->em.ctx, 56)));
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, l_boxed_path),
-                            MIR_new_reg_op(mt->em.ctx, var_tag), MIR_new_int_op(mt->em.ctx, (int64_t)LMD_TYPE_INT)));
+                        PmCompilerRegister var_tag = pm_new_reg(mt, "vt", PM_COMPILER_VALUE_I64);
+                        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, var_tag,
+                            var->reg, 0, 56);
+                        pm_emit_branch_not_equal_i64_immediate(mt, var_tag,
+                            (int64_t)LMD_TYPE_INT, l_boxed_path);
                         // runtime type guard: verify RHS is actually INT
-                        MIR_reg_t rhs_tag = pm_new_reg(mt, "rhst", MIR_T_I64);
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_RSH, MIR_new_reg_op(mt->em.ctx, rhs_tag),
-                            MIR_new_reg_op(mt->em.ctx, rhs_boxed), MIR_new_int_op(mt->em.ctx, 56)));
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, l_boxed_path),
-                            MIR_new_reg_op(mt->em.ctx, rhs_tag), MIR_new_int_op(mt->em.ctx, (int64_t)LMD_TYPE_INT)));
+                        PmCompilerRegister rhs_tag = pm_new_reg(mt, "rhst", PM_COMPILER_VALUE_I64);
+                        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_RSH, rhs_tag,
+                            rhs_boxed, 0, 56);
+                        pm_emit_branch_not_equal_i64_immediate(mt, rhs_tag,
+                            (int64_t)LMD_TYPE_INT, l_boxed_path);
 
                         // native path: unbox and compute
-                        MIR_reg_t l = pm_emit_unbox_int(mt, var->reg);
-                        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
-                        MIR_reg_t res = pm_new_reg(mt, "naug", MIR_T_I64);
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, op,
-                            MIR_new_reg_op(mt->em.ctx, res),
-                            MIR_new_reg_op(mt->em.ctx, l),
-                            MIR_new_reg_op(mt->em.ctx, r)));
+                        PmCompilerRegister l = pm_emit_unbox_int(mt, var->reg);
+                        PmCompilerRegister r = pm_emit_unbox_int(mt, rhs_boxed);
+                        PmCompilerRegister res = pm_new_reg(mt, "naug", PM_COMPILER_VALUE_I64);
+                        pm_emit_i64_operation(mt, operation, res, l, r, 0);
 
                         if (can_overflow) {
                             int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
                             int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
-                            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
-                            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
-                            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LE, MIR_new_reg_op(mt->em.ctx, le_max),
-                                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, INT56_MAX_VAL)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, ge_min),
-                                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, INT56_MIN_VAL)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, in_range),
-                                MIR_new_reg_op(mt->em.ctx, le_max), MIR_new_reg_op(mt->em.ctx, ge_min)));
-                            MIR_label_t l_ok = pm_new_label(mt);
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_ok),
-                                MIR_new_reg_op(mt->em.ctx, in_range)));
+                            PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
+                            PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
+                            PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
+                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max,
+                                res, 0, INT56_MAX_VAL);
+                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min,
+                                res, 0, INT56_MIN_VAL);
+                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range,
+                                le_max, ge_min, 0);
+                            PmCompilerLabel l_ok = pm_new_label(mt);
+                            pm_emit_branch_true(mt, in_range, l_ok);
                             // overflow → runtime call with boxed operands
-                            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, var->reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rhs_boxed));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, var->reg),
-                                MIR_new_reg_op(mt->em.ctx, ov_result)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+                            PmCompilerRegister ov_result = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, var->reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, rhs_boxed));
+                            pm_emit_i64_register_move(mt, var->reg, ov_result);
+                            pm_emit_jump(mt, l_end);
                             // fast path: inline box
                             pm_emit_label(mt, l_ok);
-                            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
-                            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, masked),
-                                MIR_new_reg_op(mt->em.ctx, res), MIR_new_int_op(mt->em.ctx, (int64_t)PY_MASK56)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_OR, MIR_new_reg_op(mt->em.ctx, tagged),
-                                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->em.ctx, masked)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, var->reg),
-                                MIR_new_reg_op(mt->em.ctx, tagged)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+                            PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
+                            PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
+                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked,
+                                res, 0, (int64_t)PY_MASK56);
+                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged,
+                                masked, 0, (int64_t)PY_ITEM_INT_TAG);
+                            pm_emit_i64_register_move(mt, var->reg, tagged);
+                            pm_emit_jump(mt, l_end);
                         } else {
-                            MIR_reg_t boxed = pm_box_int_reg(mt, res);
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, var->reg),
-                                MIR_new_reg_op(mt->em.ctx, boxed)));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+                            PmCompilerRegister boxed = pm_box_int_reg(mt, res);
+                            pm_emit_i64_register_move(mt, var->reg, boxed);
+                            pm_emit_jump(mt, l_end);
                         }
 
                         // boxed fallback: runtime call (wrong type or overflow)
                         pm_emit_label(mt, l_boxed_path);
-                        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, var->reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rhs_boxed));
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->em.ctx, var->reg),
-                            MIR_new_reg_op(mt->em.ctx, boxed_res)));
+                        PmCompilerRegister boxed_res = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, var->reg),
+                            pm_call_operand_register(PM_COMPILER_VALUE_I64, rhs_boxed));
+                        pm_emit_i64_register_move(mt, var->reg, boxed_res);
                         pm_emit_label(mt, l_end);
                         return;
                     }
@@ -3678,12 +3663,12 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
         }
     }
 
-    MIR_reg_t left = pm_transpile_expression(mt, aug->left);
-    MIR_reg_t right = pm_transpile_expression(mt, aug->right);
+    PmCompilerRegister left = pm_transpile_expression(mt, aug->left);
+    PmCompilerRegister right = pm_transpile_expression(mt, aug->right);
     const char* fn = pm_binary_op_func(bin_op);
-    MIR_reg_t val = pm_call_2(mt, fn, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, left),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, right));
+    PmCompilerRegister val = pm_call_semantic_2(mt, fn, PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, left),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, right));
 
     // assign back
     if (aug->left->node_type == PY_AST_NODE_IDENTIFIER) {
@@ -3695,9 +3680,9 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
         if (pm_is_global_in_current_func(mt, vname)) {
             int idx = pm_get_global_var_index(mt, vname);
             if (idx >= 0) {
-                pm_call_void_2(mt, "py_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, idx),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+                pm_call_semantic_void_2(mt, "py_set_module_var",
+                    pm_call_operand_i64_immediate(idx),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
                 return;
             }
         }
@@ -3707,41 +3692,38 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
             if (var->from_env) {
                 pm_store_env_slot(mt, var->env_reg, var->env_slot, val);
             } else {
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, var->reg),
-                    MIR_new_reg_op(mt->em.ctx, val)));
+                pm_emit_i64_register_move(mt, var->reg, val);
             }
         }
     } else if (aug->left->node_type == PY_AST_NODE_SUBSCRIPT) {
         PySubscriptNode* sub = (PySubscriptNode*)aug->left;
-        MIR_reg_t obj = pm_transpile_expression(mt, sub->object);
-        MIR_reg_t key = pm_transpile_expression(mt, sub->index);
-        pm_call_3(mt, "py_subscript_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+        PmCompilerRegister obj = pm_transpile_expression(mt, sub->object);
+        PmCompilerRegister key = pm_transpile_expression(mt, sub->index);
+        pm_call_semantic_3(mt, "py_subscript_set", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, key),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
     } else if (aug->left->node_type == PY_AST_NODE_ATTRIBUTE) {
         // self.x += val → py_setattr(self, "x", val)
         PyAttributeNode* attr = (PyAttributeNode*)aug->left;
-        MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
-        MIR_reg_t attr_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
-        pm_call_3(mt, "py_setattr", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, attr_name),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
+        PmCompilerRegister obj = pm_transpile_expression(mt, attr->object);
+        PmCompilerRegister attr_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+        pm_call_semantic_3(mt, "py_setattr", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, attr_name),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
     }
 }
 
 static void pm_transpile_if(PyMirTranspiler* mt, PyIfNode* ifn) {
-    MIR_reg_t test = pm_transpile_expression(mt, ifn->test);
-    MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, test));
+    PmCompilerRegister test = pm_transpile_expression(mt, ifn->test);
+    PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, test));
 
-    MIR_label_t l_else = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerLabel l_else = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_else),
-        MIR_new_reg_op(mt->em.ctx, truthy)));
+    pm_emit_branch_false(mt, truthy, l_else);
 
     // then body
     if (ifn->body) {
@@ -3753,7 +3735,7 @@ static void pm_transpile_if(PyMirTranspiler* mt, PyIfNode* ifn) {
         }
         while (s) { pm_transpile_statement(mt, s); s = s->next; }
     }
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+    pm_emit_jump(mt, l_end);
 
     pm_emit_label(mt, l_else);
 
@@ -3762,12 +3744,11 @@ static void pm_transpile_if(PyMirTranspiler* mt, PyIfNode* ifn) {
     while (elif) {
         if (elif->node_type == PY_AST_NODE_ELIF) {
             PyIfNode* elif_node = (PyIfNode*)elif;
-            MIR_reg_t elif_test = pm_transpile_expression(mt, elif_node->test);
-            MIR_reg_t elif_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, elif_test));
-            MIR_label_t l_next = pm_new_label(mt);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_next),
-                MIR_new_reg_op(mt->em.ctx, elif_truthy)));
+            PmCompilerRegister elif_test = pm_transpile_expression(mt, elif_node->test);
+            PmCompilerRegister elif_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, elif_test));
+            PmCompilerLabel l_next = pm_new_label(mt);
+            pm_emit_branch_false(mt, elif_truthy, l_next);
 
             if (elif_node->body) {
                 PyAstNode* s;
@@ -3778,7 +3759,7 @@ static void pm_transpile_if(PyMirTranspiler* mt, PyIfNode* ifn) {
                 }
                 while (s) { pm_transpile_statement(mt, s); s = s->next; }
             }
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
+            pm_emit_jump(mt, l_end);
             pm_emit_label(mt, l_next);
         }
         elif = elif->next;
@@ -3799,8 +3780,8 @@ static void pm_transpile_if(PyMirTranspiler* mt, PyIfNode* ifn) {
 }
 
 static void pm_transpile_while(PyMirTranspiler* mt, PyWhileNode* wh) {
-    MIR_label_t l_start = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerLabel l_start = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
     if (!pm_require_capacity(mt, mt->loop_depth, PM_MAX_LOOPS, "nested loops")) return;
     mt->loop_stack[mt->loop_depth].continue_label = l_start;
@@ -3809,11 +3790,10 @@ static void pm_transpile_while(PyMirTranspiler* mt, PyWhileNode* wh) {
 
     pm_emit_label(mt, l_start);
 
-    MIR_reg_t test = pm_transpile_expression(mt, wh->test);
-    MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, test));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF, MIR_new_label_op(mt->em.ctx, l_end),
-        MIR_new_reg_op(mt->em.ctx, truthy)));
+    PmCompilerRegister test = pm_transpile_expression(mt, wh->test);
+    PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, test));
+    pm_emit_branch_false(mt, truthy, l_end);
 
     if (wh->body) {
         PyAstNode* s;
@@ -3825,7 +3805,7 @@ static void pm_transpile_while(PyMirTranspiler* mt, PyWhileNode* wh) {
         while (s) { pm_transpile_statement(mt, s); s = s->next; }
     }
 
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_start)));
+    pm_emit_jump(mt, l_start);
     pm_emit_label(mt, l_end);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -3858,23 +3838,20 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         PyAstNode* arg2 = arg1 ? arg1->next : NULL;
         PyAstNode* arg3 = arg2 ? arg2->next : NULL;
 
-        MIR_reg_t start_reg, stop_reg, step_reg;
+        PmCompilerRegister start_reg, stop_reg, step_reg;
         if (call->arg_count == 1) {
             // range(stop): start=0, step=1
-            start_reg = pm_new_reg(mt, "rstart", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, start_reg),
-                MIR_new_int_op(mt->em.ctx, 0)));
+            start_reg = pm_new_reg(mt, "rstart", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, start_reg, 0);
             stop_reg = pm_transpile_as_native_int(mt, arg1);
-            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, step_reg),
-                MIR_new_int_op(mt->em.ctx, 1)));
+            step_reg = pm_new_reg(mt, "rstep", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, step_reg, 1);
         } else if (call->arg_count == 2) {
             // range(start, stop): step=1
             start_reg = pm_transpile_as_native_int(mt, arg1);
             stop_reg = pm_transpile_as_native_int(mt, arg2);
-            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, step_reg),
-                MIR_new_int_op(mt->em.ctx, 1)));
+            step_reg = pm_new_reg(mt, "rstep", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_immediate(mt, step_reg, 1);
         } else {
             // range(start, stop, step)
             start_reg = pm_transpile_as_native_int(mt, arg1);
@@ -3883,26 +3860,25 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         }
 
         // counter register
-        MIR_reg_t counter = pm_new_reg(mt, "rcnt", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, counter),
-            MIR_new_reg_op(mt->em.ctx, start_reg)));
+        PmCompilerRegister counter = pm_new_reg(mt, "rcnt", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, counter, start_reg);
 
         // set loop var with INT type hint to enable native arithmetic inside the body
         char vname[128];
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)target_id->name->len, target_id->name->chars);
 
         // create or find the loop variable register
-        MIR_reg_t var_reg;
+        PmCompilerRegister var_reg;
         PyMirVarEntry* existing_var = pm_find_var(mt, vname);
         if (existing_var) {
             var_reg = existing_var->reg;
         } else {
-            var_reg = pm_new_reg(mt, vname, MIR_T_I64);
+            var_reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
         }
 
-        MIR_label_t l_test = pm_new_label(mt);
-        MIR_label_t l_continue = pm_new_label(mt);
-        MIR_label_t l_end = pm_new_label(mt);
+        PmCompilerLabel l_test = pm_new_label(mt);
+        PmCompilerLabel l_continue = pm_new_label(mt);
+        PmCompilerLabel l_end = pm_new_label(mt);
 
         if (!pm_require_capacity(mt, mt->loop_depth, PM_MAX_LOOPS, "nested loops")) return;
         mt->loop_stack[mt->loop_depth].continue_label = l_continue;
@@ -3915,45 +3891,35 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         // for simplicity and common case (step=1), use counter >= stop → exit
         // for general case with variable step, check (counter - stop) * sign(step) >= 0
         // but for benchmarks, step is almost always 1, so check counter >= stop
-        MIR_reg_t cmp_exit = pm_new_reg(mt, "rcmp", MIR_T_I64);
+        PmCompilerRegister cmp_exit = pm_new_reg(mt, "rcmp", PM_COMPILER_VALUE_I64);
         if (call->arg_count <= 2) {
             // step is always 1: simple counter >= stop check
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, cmp_exit),
-                MIR_new_reg_op(mt->em.ctx, counter), MIR_new_reg_op(mt->em.ctx, stop_reg)));
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, cmp_exit, counter, stop_reg, 0);
         } else {
             // general step: check if (counter - stop) has same sign as step
             // use: step > 0 ? counter >= stop : counter <= stop
-            MIR_reg_t step_pos = pm_new_reg(mt, "spos", MIR_T_I64);
-            MIR_reg_t cmp_fwd = pm_new_reg(mt, "cfwd", MIR_T_I64);
-            MIR_reg_t cmp_bwd = pm_new_reg(mt, "cbwd", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GT, MIR_new_reg_op(mt->em.ctx, step_pos),
-                MIR_new_reg_op(mt->em.ctx, step_reg), MIR_new_int_op(mt->em.ctx, 0)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, cmp_fwd),
-                MIR_new_reg_op(mt->em.ctx, counter), MIR_new_reg_op(mt->em.ctx, stop_reg)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LE, MIR_new_reg_op(mt->em.ctx, cmp_bwd),
-                MIR_new_reg_op(mt->em.ctx, counter), MIR_new_reg_op(mt->em.ctx, stop_reg)));
+            PmCompilerRegister step_pos = pm_new_reg(mt, "spos", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister cmp_fwd = pm_new_reg(mt, "cfwd", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister cmp_bwd = pm_new_reg(mt, "cbwd", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GT, step_pos, step_reg, 0, 0);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, cmp_fwd, counter, stop_reg, 0);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, cmp_bwd, counter, stop_reg, 0);
             // cmp_exit = step > 0 ? cmp_fwd : cmp_bwd
-            MIR_label_t l_use_fwd = pm_new_label(mt);
-            MIR_label_t l_cmp_done = pm_new_label(mt);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_use_fwd),
-                MIR_new_reg_op(mt->em.ctx, step_pos)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, cmp_exit),
-                MIR_new_reg_op(mt->em.ctx, cmp_bwd)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_cmp_done)));
+            PmCompilerLabel l_use_fwd = pm_new_label(mt);
+            PmCompilerLabel l_cmp_done = pm_new_label(mt);
+            pm_emit_branch_true(mt, step_pos, l_use_fwd);
+            pm_emit_i64_register_move(mt, cmp_exit, cmp_bwd);
+            pm_emit_jump(mt, l_cmp_done);
             pm_emit_label(mt, l_use_fwd);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, cmp_exit),
-                MIR_new_reg_op(mt->em.ctx, cmp_fwd)));
+            pm_emit_i64_register_move(mt, cmp_exit, cmp_fwd);
             pm_emit_label(mt, l_cmp_done);
         }
 
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_end),
-            MIR_new_reg_op(mt->em.ctx, cmp_exit)));
+        pm_emit_branch_true(mt, cmp_exit, l_end);
 
         // box counter and assign to loop variable (with INT type hint)
-        MIR_reg_t boxed_cnt = pm_box_int_reg(mt, counter);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, var_reg),
-            MIR_new_reg_op(mt->em.ctx, boxed_cnt)));
+        PmCompilerRegister boxed_cnt = pm_box_int_reg(mt, counter);
+        pm_emit_i64_register_move(mt, var_reg, boxed_cnt);
         pm_set_var_with_type(mt, vname, var_reg, LMD_TYPE_INT);
 
         // body
@@ -3970,11 +3936,8 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         pm_emit_label(mt, l_continue);
 
         // increment counter natively: counter += step
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_ADD,
-            MIR_new_reg_op(mt->em.ctx, counter),
-            MIR_new_reg_op(mt->em.ctx, counter),
-            MIR_new_reg_op(mt->em.ctx, step_reg)));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_test)));
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_ADD, counter, counter, step_reg, 0);
+        pm_emit_jump(mt, l_test);
         pm_emit_label(mt, l_end);
 
         if (mt->loop_depth > 0) mt->loop_depth--;
@@ -3982,13 +3945,13 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
     }
 
     // general for loop path: evaluate iterable and get an iterator object
-    MIR_reg_t iterable = pm_transpile_expression(mt, forn->right);
-    MIR_reg_t iter_obj = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable));
+    PmCompilerRegister iterable = pm_transpile_expression(mt, forn->right);
+    PmCompilerRegister iter_obj = pm_call_semantic_1(mt, "py_get_iterator", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable));
 
-    MIR_label_t l_start = pm_new_label(mt);
-    MIR_label_t l_continue = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
+    PmCompilerLabel l_start = pm_new_label(mt);
+    PmCompilerLabel l_continue = pm_new_label(mt);
+    PmCompilerLabel l_end = pm_new_label(mt);
 
     if (!pm_require_capacity(mt, mt->loop_depth, PM_MAX_LOOPS, "nested loops")) return;
     mt->loop_stack[mt->loop_depth].continue_label = l_continue;
@@ -3998,13 +3961,11 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
     pm_emit_label(mt, l_start);
 
     // get next item; end loop on StopIteration
-    MIR_reg_t item = pm_call_1(mt, "py_iterator_next", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iter_obj));
-    MIR_reg_t is_stop = pm_call_1(mt, "py_is_stop_iteration", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, item));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-        MIR_new_label_op(mt->em.ctx, l_end),
-        MIR_new_reg_op(mt->em.ctx, is_stop)));
+    PmCompilerRegister item = pm_call_semantic_1(mt, "py_iterator_next", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iter_obj));
+    PmCompilerRegister is_stop = pm_call_semantic_1(mt, "py_is_stop_iteration", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, item));
+    pm_emit_branch_true(mt, is_stop, l_end);
 
     // assign to loop variable
     if (forn->left->node_type == PY_AST_NODE_IDENTIFIER) {
@@ -4013,14 +3974,10 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
         PyMirVarEntry* var = pm_find_var(mt, vname);
         if (var) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, var->reg),
-                MIR_new_reg_op(mt->em.ctx, item)));
+            pm_emit_i64_register_move(mt, var->reg, item);
         } else {
-            MIR_reg_t reg = pm_new_reg(mt, vname, MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, reg),
-                MIR_new_reg_op(mt->em.ctx, item)));
+            PmCompilerRegister reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+            pm_emit_i64_register_move(mt, reg, item);
             pm_set_var(mt, vname, reg);
         }
     } else if (forn->left->node_type == PY_AST_NODE_TUPLE ||
@@ -4030,23 +3987,20 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         PyAstNode* elem = tup->elements;
         int i = 0;
         while (elem) {
-            MIR_reg_t sub_item = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, item),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pm_box_int_const(mt, i)));
+            PmCompilerRegister index = pm_box_int_const(mt, i);
+            PmCompilerRegister sub_item = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, item),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, index));
             if (elem->node_type == PY_AST_NODE_IDENTIFIER) {
                 PyIdentifierNode* eid = (PyIdentifierNode*)elem;
                 char evname[128];
                 snprintf(evname, sizeof(evname), "_py_%.*s", (int)eid->name->len, eid->name->chars);
                 PyMirVarEntry* evar = pm_find_var(mt, evname);
                 if (evar) {
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, evar->reg),
-                        MIR_new_reg_op(mt->em.ctx, sub_item)));
+                    pm_emit_i64_register_move(mt, evar->reg, sub_item);
                 } else {
-                    MIR_reg_t reg = pm_new_reg(mt, evname, MIR_T_I64);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, reg),
-                        MIR_new_reg_op(mt->em.ctx, sub_item)));
+                    PmCompilerRegister reg = pm_new_reg(mt, evname, PM_COMPILER_VALUE_I64);
+                    pm_emit_i64_register_move(mt, reg, sub_item);
                     pm_set_var(mt, evname, reg);
                 }
             }
@@ -4067,7 +4021,7 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
     }
 
     pm_emit_label(mt, l_continue);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_start)));
+    pm_emit_jump(mt, l_start);
     pm_emit_label(mt, l_end);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -4078,13 +4032,13 @@ static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
         // return inside a generator/coroutine: mark exhausted and return stop_iteration
         if (mt->in_async && ret->value) {
             // async def return X: store return value via side-channel before exhaustion
-            MIR_reg_t rval = pm_transpile_expression(mt, ret->value);
-            pm_call_1(mt, "py_coro_set_return", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rval));
+            PmCompilerRegister rval = pm_transpile_expression(mt, ret->value);
+            pm_call_semantic_1(mt, "py_coro_set_return", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, rval));
         }
         pm_gen_store_state(mt, -1);
-        MIR_reg_t si = pm_call_0(mt, "py_stop_iteration", MIR_T_I64);
-        pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, si)));
+        PmCompilerRegister si = pm_call_semantic_0(mt, "py_stop_iteration", PM_COMPILER_VALUE_I64);
+        pm_emit_item_return_register(mt, si);
         return;
     }
     // TCO: return value is in tail position
@@ -4093,7 +4047,7 @@ static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
     if (mt->tco_func) {
         mt->in_tail_position = true;
     }
-    MIR_reg_t val;
+    PmCompilerRegister val;
     if (ret->value) {
         val = pm_transpile_expression(mt, ret->value);
     } else {
@@ -4102,7 +4056,7 @@ static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
     mt->in_tail_position = saved_tail;
     // if TCO converted the call to a jump, block_returned is set — skip the ret
     if (mt->block_returned) return;
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, val)));
+    pm_emit_item_return_register(mt, val);
 }
 
 static void pm_transpile_block(PyMirTranspiler* mt, PyAstNode* body) {
@@ -4123,7 +4077,7 @@ static void pm_transpile_block(PyMirTranspiler* mt, PyAstNode* body) {
 // Apply a decorator list (bottom-to-top) to a value and return the final result.
 // Decorators are linked via ->next in source order; bottom-to-top means the last
 // decorator in the list wraps first (inner-most) and the first wraps last (outer).
-static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAstNode* decorators) {
+static PmCompilerRegister pm_apply_decorators(PyMirTranspiler* mt, PmCompilerRegister value, PyAstNode* decorators) {
     if (!decorators) return value;
 
     // collect into small fixed array so we can iterate in reverse
@@ -4145,21 +4099,21 @@ static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAst
         if (dn->expression && dn->expression->node_type == PY_AST_NODE_IDENTIFIER) {
             PyIdentifierNode* id = (PyIdentifierNode*)dn->expression;
             if (id->name->len == 8 && strncmp(id->name->chars, "property", 8) == 0) {
-                value = pm_call_1(mt, "py_builtin_property", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, value));
+                value = pm_call_semantic_1(mt, "py_builtin_property", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, value));
                 continue;
             }
         }
 
-        MIR_reg_t dec_val = pm_transpile_expression(mt, dn->expression);
+        PmCompilerRegister dec_val = pm_transpile_expression(mt, dn->expression);
 
         // decorator values can allocate, so their positional argument must stay rooted.
         PmArgScope args = pm_begin_arg_scope(mt, 1);
         pm_arg_scope_store(mt, args, 0, value);
-        value = pm_call_3(mt, "py_call_function", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, dec_val),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, 1));
+        value = pm_call_semantic_3(mt, "py_call_function", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, dec_val),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, args.args),
+            pm_call_operand_i64_immediate(1));
         pm_end_arg_scope(mt, args);
     }
     return value;
@@ -4170,12 +4124,12 @@ static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAst
 // ============================================================================
 
 // Forward declaration
-static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
-                                PyPatternNode* pat, MIR_label_t l_fail);
+static void pm_compile_pattern(PyMirTranspiler* mt, PmCompilerRegister subj,
+                                PyPatternNode* pat, PmCompilerLabel l_fail);
 
 // Emit code to resolve a dotted value name (e.g., "Status.OK") and return its reg.
 // Split on '.' and chain py_getattr calls.
-static MIR_reg_t pm_resolve_dotted_name(PyMirTranspiler* mt, const char* dotted, int len) {
+static PmCompilerRegister pm_resolve_dotted_name(PyMirTranspiler* mt, const char* dotted, int len) {
     // find first dot
     int dot = -1;
     for (int i = 0; i < len; i++) {
@@ -4191,20 +4145,21 @@ static MIR_reg_t pm_resolve_dotted_name(PyMirTranspiler* mt, const char* dotted,
         // check module-level vars (includes classes scanned in pm_scan_module_vars)
         int midx = pm_get_global_var_index(mt, vname);
         if (midx >= 0) {
-            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx));
+            return pm_call_semantic_1(mt, "py_get_module_var", PM_COMPILER_VALUE_I64,
+                pm_call_operand_i64_immediate(midx));
         }
         // fallback: builtin class lookup by name
-        return pm_call_1(mt, "py_resolve_name_item", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pm_box_string_literal(mt, dotted, len)));
+        PmCompilerRegister name = pm_box_string_literal(mt, dotted, len);
+        return pm_call_semantic_1(mt, "py_resolve_name_item", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, name));
     }
-    MIR_reg_t obj = pm_resolve_dotted_name(mt, dotted, dot);
+    PmCompilerRegister obj = pm_resolve_dotted_name(mt, dotted, dot);
     const char* rest = dotted + dot + 1;
     int rlen = len - dot - 1;
-    MIR_reg_t attr_r = pm_box_string_literal(mt, rest, rlen);
-    return pm_call_2(mt, "py_getattr", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj),
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, attr_r));
+    PmCompilerRegister attr_r = pm_box_string_literal(mt, rest, rlen);
+    return pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, obj),
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, attr_r));
 }
 
 // Count elements in a linked list
@@ -4215,28 +4170,24 @@ static int pm_count_nodes(PyAstNode* head) {
 }
 
 // Bind a capture variable in the current scope
-static void pm_bind_capture(PyMirTranspiler* mt, String* name, MIR_reg_t val_reg) {
+static void pm_bind_capture(PyMirTranspiler* mt, String* name, PmCompilerRegister val_reg) {
     char vname[130];
     snprintf(vname, sizeof(vname), "_py_%.*s", (int)name->len, name->chars);
-    MIR_reg_t r = pm_new_reg(mt, vname, MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, r),
-        MIR_new_reg_op(mt->em.ctx, val_reg)));
+    PmCompilerRegister r = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+    pm_emit_i64_register_move(mt, r, val_reg);
     pm_set_var(mt, vname, r);
 }
 
 // Emit code to match subject against a sequence pattern.
 // l_fail: jumped to on mismatch.
-static void pm_compile_sequence_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
-                                         PyPatternNode* pat, MIR_label_t l_fail) {
+static void pm_compile_sequence_pattern(PyMirTranspiler* mt, PmCompilerRegister subj,
+                                         PyPatternNode* pat, PmCompilerLabel l_fail) {
     // 1. Check it's a list/tuple (not string)
-    MIR_reg_t seq_ok = pm_call_1(mt, "py_match_is_sequence", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj));
-    MIR_reg_t seq_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, seq_ok));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-        MIR_new_label_op(mt->em.ctx, l_fail),
-        MIR_new_reg_op(mt->em.ctx, seq_t)));
+    PmCompilerRegister seq_ok = pm_call_semantic_1(mt, "py_match_is_sequence", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, subj));
+    PmCompilerRegister seq_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, seq_ok));
+    pm_emit_branch_false(mt, seq_t, l_fail);
 
     // Count elements
     int n_elem = pm_count_nodes(pat->elements);
@@ -4247,66 +4198,62 @@ static void pm_compile_sequence_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
     int n_after  = (star_pos >= 0) ? (n_elem - n_before) : 0;
 
     // 2. Get length
-    MIR_reg_t len_reg = pm_call_1(mt, "py_builtin_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj));
+    PmCompilerRegister len_reg = pm_call_semantic_1(mt, "py_builtin_len", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, subj));
 
     if (!has_star) {
         // exact length check
-        MIR_reg_t exp_len = pm_box_int_const(mt, n_elem);
-        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, len_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exp_len));
-        MIR_reg_t eq_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, eq_r));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, eq_t)));
+        PmCompilerRegister exp_len = pm_box_int_const(mt, n_elem);
+        PmCompilerRegister eq_r = pm_call_semantic_2(mt, "py_eq", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, len_reg),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, exp_len));
+        PmCompilerRegister eq_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, eq_r));
+        pm_emit_branch_false(mt, eq_t, l_fail);
     } else {
         // len >= n_before + n_after
-        MIR_reg_t min_len = pm_box_int_const(mt, n_before + n_after);
-        MIR_reg_t ge_r = pm_call_2(mt, "py_ge", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, len_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, min_len));
-        MIR_reg_t ge_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, ge_r));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, ge_t)));
+        PmCompilerRegister min_len = pm_box_int_const(mt, n_before + n_after);
+        PmCompilerRegister ge_r = pm_call_semantic_2(mt, "py_ge", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, len_reg),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, min_len));
+        PmCompilerRegister ge_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, ge_r));
+        pm_emit_branch_false(mt, ge_t, l_fail);
     }
 
     // 3. Match each element
     int i = 0;
     for (PyAstNode* e = pat->elements; e; e = e->next, i++) {
-        MIR_reg_t idx_r;
+        PmCompilerRegister idx_r;
         if (star_pos >= 0 && i >= n_before) {
             // after star: index from end
             int offset = n_after - (i - n_before);
-            MIR_reg_t off_r = pm_box_int_const(mt, offset);
-            idx_r = pm_call_2(mt, "py_subtract", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, len_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, off_r));
+            PmCompilerRegister off_r = pm_box_int_const(mt, offset);
+            idx_r = pm_call_semantic_2(mt, "py_subtract", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, len_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, off_r));
         } else {
             idx_r = pm_box_int_const(mt, i);
         }
-        MIR_reg_t elem_r = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, idx_r));
+        PmCompilerRegister elem_r = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, idx_r));
         pm_compile_pattern(mt, elem_r, (PyPatternNode*)e, l_fail);
     }
 
     // 4. Bind *rest if named
     if (has_star && pat->rest_name) {
-        MIR_reg_t start_r = pm_box_int_const(mt, n_before);
-        MIR_reg_t off_r   = pm_box_int_const(mt, n_after);
-        MIR_reg_t end_r   = pm_call_2(mt, "py_subtract", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, len_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, off_r));
-        MIR_reg_t none_r  = pm_emit_null(mt);
-        MIR_reg_t rest_r  = pm_call_4(mt, "py_slice_get", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, start_r),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, end_r),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, none_r));
+        PmCompilerRegister start_r = pm_box_int_const(mt, n_before);
+        PmCompilerRegister off_r   = pm_box_int_const(mt, n_after);
+        PmCompilerRegister end_r   = pm_call_semantic_2(mt, "py_subtract", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, len_reg),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, off_r));
+        PmCompilerRegister none_r  = pm_emit_null(mt);
+        PmCompilerRegister rest_r  = pm_call_semantic_4(mt, "py_slice_get", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, start_r),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, end_r),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, none_r));
         pm_bind_capture(mt, pat->rest_name, rest_r);
     }
 }
@@ -4314,8 +4261,8 @@ static void pm_compile_sequence_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
 // Compile a single pattern against subject register.
 // Emits code that falls through on match, jumps to l_fail on mismatch.
 // Capture variables are bound as local MIR registers.
-static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
-                                PyPatternNode* pat, MIR_label_t l_fail) {
+static void pm_compile_pattern(PyMirTranspiler* mt, PmCompilerRegister subj,
+                                PyPatternNode* pat, PmCompilerLabel l_fail) {
     if (!pat) return;
 
     switch (pat->kind) {
@@ -4332,54 +4279,49 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
         break;
 
     case PY_PAT_LITERAL: {
-        MIR_reg_t lit_r;
+        PmCompilerRegister lit_r;
         if (pat->literal) {
             lit_r = pm_transpile_expression(mt, pat->literal);
         } else {
             lit_r = pm_emit_null(mt);
         }
         if (pat->literal_neg) {
-            lit_r = pm_call_1(mt, "py_negate", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, lit_r));
+            lit_r = pm_call_semantic_1(mt, "py_negate", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, lit_r));
         }
-        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, lit_r));
-        MIR_reg_t ok_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, eq_r));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, ok_t)));
+        PmCompilerRegister eq_r = pm_call_semantic_2(mt, "py_eq", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, lit_r));
+        PmCompilerRegister ok_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, eq_r));
+        pm_emit_branch_false(mt, ok_t, l_fail);
         break;
     }
 
     case PY_PAT_VALUE: {
         // Resolve dotted name as constant value and compare
         if (!pat->name) break;
-        MIR_reg_t val_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
-        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_r));
-        MIR_reg_t ok_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, eq_r));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, ok_t)));
+        PmCompilerRegister val_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
+        PmCompilerRegister eq_r = pm_call_semantic_2(mt, "py_eq", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, val_r));
+        PmCompilerRegister ok_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, eq_r));
+        pm_emit_branch_false(mt, ok_t, l_fail);
         break;
     }
 
     case PY_PAT_OR: {
         // Try each alternative; jump to l_match_end on first success
-        MIR_label_t l_end = pm_new_label(mt);
+        PmCompilerLabel l_end = pm_new_label(mt);
         PyAstNode* alt = pat->elements;
         while (alt) {
             PyAstNode* next = alt->next;
             if (next) {
                 // not the last: if this alternative fails, try next
-                MIR_label_t l_next = pm_new_label(mt);
+                PmCompilerLabel l_next = pm_new_label(mt);
                 pm_compile_pattern(mt, subj, (PyPatternNode*)alt, l_next);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                    MIR_new_label_op(mt->em.ctx, l_end)));
+                pm_emit_jump(mt, l_end);
                 pm_emit_label(mt, l_next);
             } else {
                 // last alternative: fail goes to l_fail
@@ -4409,21 +4351,19 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
 
     case PY_PAT_MAPPING: {
         // 1. Check subject is a mapping
-        MIR_reg_t map_ok = pm_call_1(mt, "py_match_is_mapping", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj));
-        MIR_reg_t map_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, map_ok));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, map_t)));
+        PmCompilerRegister map_ok = pm_call_semantic_1(mt, "py_match_is_mapping", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj));
+        PmCompilerRegister map_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, map_ok));
+        pm_emit_branch_false(mt, map_t, l_fail);
 
         // 2. For each KV pair: check key exists, get value, match sub-pattern
-        MIR_reg_t keys_list = pm_call_1(mt, "py_list_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+        PmCompilerRegister keys_list = pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+            pm_call_operand_i64_immediate(0));
         for (PyAstNode* kv = pat->kv_pairs; kv; kv = kv->next) {
             PyPatternKVNode* kvn = (PyPatternKVNode*)kv;
             // key is a literal or value pattern — emit its expression
-            MIR_reg_t key_r;
+            PmCompilerRegister key_r;
             if (kvn->key_pat) {
                 PyPatternNode* kp = (PyPatternNode*)kvn->key_pat;
                 if (kp->kind == PY_PAT_LITERAL && kp->literal) {
@@ -4439,31 +4379,29 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
                 key_r = pm_emit_null(mt);
             }
             // check key exists: py_contains(subject, key)
-            MIR_reg_t has_r = pm_call_2(mt, "py_contains", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
-            MIR_reg_t has_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, has_r));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-                MIR_new_label_op(mt->em.ctx, l_fail),
-                MIR_new_reg_op(mt->em.ctx, has_t)));
+            PmCompilerRegister has_r = pm_call_semantic_2(mt, "py_contains", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
+            PmCompilerRegister has_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, has_r));
+            pm_emit_branch_false(mt, has_t, l_fail);
             // get value and match sub-pattern
-            MIR_reg_t val_r = pm_call_2(mt, "py_dict_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
+            PmCompilerRegister val_r = pm_call_semantic_2(mt, "py_dict_get", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
             if (kvn->val_pat) {
                 pm_compile_pattern(mt, val_r, (PyPatternNode*)kvn->val_pat, l_fail);
             }
             // track key for **rest
-            pm_call_2(mt, "py_list_append", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, keys_list),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, key_r));
+            pm_call_semantic_2(mt, "py_list_append", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, keys_list),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, key_r));
         }
         // 3. Bind **rest if present
         if (pat->rest_name) {
-            MIR_reg_t rest_r = pm_call_2(mt, "py_match_mapping_rest", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, keys_list));
+            PmCompilerRegister rest_r = pm_call_semantic_2(mt, "py_match_mapping_rest", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, keys_list));
             pm_bind_capture(mt, pat->rest_name, rest_r);
         }
         break;
@@ -4472,30 +4410,29 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
     case PY_PAT_CLASS: {
         // 1. Resolve class name and check isinstance
         if (!pat->name) break;
-        MIR_reg_t cls_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
-        MIR_reg_t inst_r = pm_call_2(mt, "py_builtin_isinstance", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cls_r));
-        MIR_reg_t inst_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, inst_r));
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-            MIR_new_label_op(mt->em.ctx, l_fail),
-            MIR_new_reg_op(mt->em.ctx, inst_t)));
+        PmCompilerRegister cls_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
+        PmCompilerRegister inst_r = pm_call_semantic_2(mt, "py_builtin_isinstance", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, cls_r));
+        PmCompilerRegister inst_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, inst_r));
+        pm_emit_branch_false(mt, inst_t, l_fail);
 
         // 2. Positional patterns: use __match_args__ to get attribute names
         int pos = 0;
         for (PyAstNode* e = pat->elements; e; e = e->next, pos++) {
             // get __match_args__[pos] to find the attribute name
-            MIR_reg_t match_args_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cls_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pm_box_string_literal(mt, "__match_args__", 14)));
-            MIR_reg_t pos_r = pm_box_int_const(mt, pos);
-            MIR_reg_t attr_name_r = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, match_args_r),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pos_r));
-            MIR_reg_t attr_val_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, attr_name_r));
+            PmCompilerRegister match_args_name = pm_box_string_literal(mt, "__match_args__", 14);
+            PmCompilerRegister match_args_r = pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, cls_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, match_args_name));
+            PmCompilerRegister pos_r = pm_box_int_const(mt, pos);
+            PmCompilerRegister attr_name_r = pm_call_semantic_2(mt, "py_subscript_get", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, match_args_r),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, pos_r));
+            PmCompilerRegister attr_val_r = pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, attr_name_r));
             pm_compile_pattern(mt, attr_val_r, (PyPatternNode*)e, l_fail);
         }
 
@@ -4503,10 +4440,10 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
         for (PyAstNode* kw = pat->kv_pairs; kw; kw = kw->next) {
             PyPatternNode* kwp = (PyPatternNode*)kw;
             if (!kwp->name) continue;
-            MIR_reg_t attr_r = pm_box_string_literal(mt, kwp->name->chars, (int)kwp->name->len);
-            MIR_reg_t val_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, subj),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, attr_r));
+            PmCompilerRegister attr_r = pm_box_string_literal(mt, kwp->name->chars, (int)kwp->name->len);
+            PmCompilerRegister val_r = pm_call_semantic_2(mt, "py_getattr", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, subj),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, attr_r));
             if (kwp->literal) {
                 pm_compile_pattern(mt, val_r, (PyPatternNode*)kwp->literal, l_fail);
             } else {
@@ -4533,15 +4470,15 @@ static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
 // Transpile a match statement
 static void pm_transpile_match(PyMirTranspiler* mt, PyMatchNode* mn) {
     // evaluate subject
-    MIR_reg_t subj = pm_transpile_expression(mt, mn->subject);
+    PmCompilerRegister subj = pm_transpile_expression(mt, mn->subject);
 
-    MIR_label_t l_match_end = pm_new_label(mt);
+    PmCompilerLabel l_match_end = pm_new_label(mt);
 
     for (PyAstNode* c = mn->cases; c; c = c->next) {
         PyCaseNode* cn = (PyCaseNode*)c;
         if (!cn->pattern) continue;
 
-        MIR_label_t l_case_fail = pm_new_label(mt);
+        PmCompilerLabel l_case_fail = pm_new_label(mt);
 
         // push scope for captures within this case
         pm_push_scope(mt);
@@ -4551,19 +4488,16 @@ static void pm_transpile_match(PyMirTranspiler* mt, PyMatchNode* mn) {
 
         // compile guard if present
         if (cn->guard) {
-            MIR_reg_t g_r = pm_transpile_expression(mt, cn->guard);
-            MIR_reg_t g_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, g_r));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-                MIR_new_label_op(mt->em.ctx, l_case_fail),
-                MIR_new_reg_op(mt->em.ctx, g_t)));
+            PmCompilerRegister g_r = pm_transpile_expression(mt, cn->guard);
+            PmCompilerRegister g_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, g_r));
+            pm_emit_branch_false(mt, g_t, l_case_fail);
         }
 
         // compile body
         pm_transpile_block(mt, cn->body);
 
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-            MIR_new_label_op(mt->em.ctx, l_match_end)));
+        pm_emit_jump(mt, l_match_end);
 
         // fail path: pattern or guard did not match
         pm_emit_label(mt, l_case_fail);
@@ -4744,7 +4678,8 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
 
                             if (parent_ns.item != ItemNull.item) {
                                 // attach submodule as attribute of parent package
-                                Item key = {.item = s2it(heap_create_name(rel_name + comp_start, comp_len))};
+                                Item key = pm_hosted_name_from_utf8_n(
+                                    rel_name + comp_start, (size_t)comp_len);
                                 py_dict_set(parent_ns, key, sub_ns);
                             }
                             parent_ns = sub_ns;
@@ -4828,14 +4763,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         break;
     case PY_AST_NODE_BREAK:
         if (mt->loop_depth > 0) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                MIR_new_label_op(mt->em.ctx, mt->loop_stack[mt->loop_depth - 1].break_label)));
+            pm_emit_jump(mt, mt->loop_stack[mt->loop_depth - 1].break_label);
         }
         break;
     case PY_AST_NODE_CONTINUE:
         if (mt->loop_depth > 0) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                MIR_new_label_op(mt->em.ctx, mt->loop_stack[mt->loop_depth - 1].continue_label)));
+            pm_emit_jump(mt, mt->loop_stack[mt->loop_depth - 1].continue_label);
         }
         break;
     case PY_AST_NODE_PASS:
@@ -4859,31 +4792,29 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 if (!fc_target->capture_is_nonlocal[ci]) { all_nonlocal = false; break; }
             }
 
-            MIR_reg_t env = 0;
-            MIR_reg_t closure = 0;
+            PmCompilerRegister env = 0;
+            PmCompilerRegister closure = 0;
             if (all_nonlocal && mt->scope_env_reg != 0) {
                 // pass the parent's shared env directly — no new alloc needed
                 env = mt->scope_env_reg;
             } else {
                 // Allocate the Function before its environment so a collection
                 // cannot observe a newly allocated environment without an owner.
-                MIR_reg_t fptr = pm_new_reg(mt, "cfp", MIR_T_I64);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, fptr),
-                    MIR_new_ref_op(mt->em.ctx, fc_target->func_item)));
-                closure = pm_call_3(mt, "py_new_closure", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->param_count),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->capture_count));
-                env = pm_call_1(mt, "py_closure_get_env", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
+                PmCompilerRegister fptr = pm_new_reg(mt, "cfp", PM_COMPILER_VALUE_I64);
+                pm_emit_i64_reference_move(mt, fptr, fc_target->func_item);
+                closure = pm_call_semantic_3(mt, "py_new_closure", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                    pm_call_operand_i64_immediate(fc_target->param_count),
+                    pm_call_operand_i64_immediate(fc_target->capture_count));
+                env = pm_call_semantic_1(mt, "py_closure_get_env", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, closure));
                 // store each captured variable into env slots
                 for (int ci = 0; ci < fc_target->capture_count; ci++) {
                     PyMirVarEntry* cvar = pm_find_var(mt, fc_target->captures[ci]);
                     if (cvar) {
                         if (cvar->from_env) {
                             // load from parent's env first, then store into child env
-                            MIR_reg_t loaded = pm_load_env_slot(mt, cvar->env_reg, cvar->env_slot);
+                            PmCompilerRegister loaded = pm_load_env_slot(mt, cvar->env_reg, cvar->env_slot);
                             pm_store_env_slot(mt, env, ci, loaded);
                         } else {
                             pm_store_env_slot(mt, env, ci, cvar->reg);
@@ -4892,62 +4823,54 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 }
             }
             if (closure == 0) {
-                MIR_reg_t fptr = pm_new_reg(mt, "cfp", MIR_T_I64);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, fptr),
-                    MIR_new_ref_op(mt->em.ctx, fc_target->func_item)));
-                closure = pm_call_4(mt, "py_new_closure_with_env", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->param_count),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, env),
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->capture_count));
+                PmCompilerRegister fptr = pm_new_reg(mt, "cfp", PM_COMPILER_VALUE_I64);
+                pm_emit_i64_reference_move(mt, fptr, fc_target->func_item);
+                closure = pm_call_semantic_4(mt, "py_new_closure_with_env", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                    pm_call_operand_i64_immediate(fc_target->param_count),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, env),
+                    pm_call_operand_i64_immediate(fc_target->capture_count));
             }
-            closure = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
+            closure = pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, closure));
             // assign to local variable
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
             pm_set_var(mt, vname, closure);
             // Phase C: apply decorators to the closure (bottom-to-top)
             if (fdef->decorators) {
-                MIR_reg_t dec_result = pm_apply_decorators(mt, closure, fdef->decorators);
+                PmCompilerRegister dec_result = pm_apply_decorators(mt, closure, fdef->decorators);
                 PyMirVarEntry* ventry = pm_find_var(mt, vname);
                 if (ventry && !ventry->from_env) {
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, ventry->reg),
-                        MIR_new_reg_op(mt->em.ctx, dec_result)));
+                    pm_emit_i64_register_move(mt, ventry->reg, dec_result);
                 }
             }
         } else if (fc_target && !fc_target->is_closure && fc_target->func_item && fdef->decorators) {
             // non-closure function with decorators: build function item, apply decorators, store as var
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
-            MIR_reg_t fptr = pm_new_reg(mt, "dfp", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_new_ref_op(mt->em.ctx, fc_target->func_item)));
-            MIR_reg_t fn_item = pm_call_2(mt, "py_new_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->param_count));
+            PmCompilerRegister fptr = pm_new_reg(mt, "dfp", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_reference_move(mt, fptr, fc_target->func_item);
+            PmCompilerRegister fn_item = pm_call_semantic_2(mt, "py_new_function", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                pm_call_operand_i64_immediate(fc_target->param_count));
             if (fc_target->has_kwargs) {
-                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item));
+                pm_call_semantic_1(mt, "py_set_kwargs_flag", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item));
             }
-            fn_item = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item));
-            MIR_reg_t dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
+            fn_item = pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item));
+            PmCompilerRegister dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
             // store as local var — shadows local_funcs lookup for subsequent references
-            MIR_reg_t var_reg = pm_new_reg(mt, vname, MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, var_reg),
-                MIR_new_reg_op(mt->em.ctx, dec_result)));
+            PmCompilerRegister var_reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+            pm_emit_i64_register_move(mt, var_reg, dec_result);
             pm_set_var(mt, vname, var_reg);
             // if there's a module-level slot for this name, also store there
             int midx = pm_get_global_var_index(mt, vname);
             if (midx >= 0) {
-                pm_call_void_2(mt, "py_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, var_reg));
+                pm_call_semantic_void_2(mt, "py_set_module_var",
+                    pm_call_operand_i64_immediate(midx),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, var_reg));
             }
         }
         // non-closures without decorators are already registered in local_funcs by pm_compile_function
@@ -4957,23 +4880,23 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         PyClassDefNode* cls = (PyClassDefNode*)stmt;
 
         // 1. build name string item
-        MIR_reg_t name_reg = pm_box_string_literal(mt,
+        PmCompilerRegister name_reg = pm_box_string_literal(mt,
             cls->name->chars, cls->name->len);
 
         // 2. build bases list
-        MIR_reg_t bases_reg = pm_call_1(mt, "py_list_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, 0));
+        PmCompilerRegister bases_reg = pm_call_semantic_1(mt, "py_list_new", PM_COMPILER_VALUE_I64,
+            pm_call_operand_i64_immediate(0));
         PyAstNode* base = cls->bases;
         while (base) {
-            MIR_reg_t base_val = pm_transpile_expression(mt, base);
-            pm_call_2(mt, "py_list_append", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, bases_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, base_val));
+            PmCompilerRegister base_val = pm_transpile_expression(mt, base);
+            pm_call_semantic_2(mt, "py_list_append", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, bases_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, base_val));
             base = base->next;
         }
 
         // 3. build methods dict — gather methods belonging to this class
-        MIR_reg_t methods_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+        PmCompilerRegister methods_reg = pm_call_semantic_0(mt, "py_dict_new", PM_COMPILER_VALUE_I64);
         for (int fi = 0; fi < mt->func_count; fi++) {
             PyFuncCollected* fc = &mt->func_entries[fi];
             if (!fc->is_method) continue;
@@ -4985,19 +4908,17 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 continue;  // nested function inside a method — skip
             if (!fc->func_item) continue;
 
-            MIR_reg_t fptr = pm_new_reg(mt, "mfp", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_new_ref_op(mt->em.ctx, fc->func_item)));
-            MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc->param_count));
+            PmCompilerRegister fptr = pm_new_reg(mt, "mfp", PM_COMPILER_VALUE_I64);
+            pm_emit_i64_reference_move(mt, fptr, fc->func_item);
+            PmCompilerRegister fn_item_reg = pm_call_semantic_2(mt, "py_new_function", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fptr),
+                pm_call_operand_i64_immediate(fc->param_count));
             if (fc->has_kwargs) {
-                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+                pm_call_semantic_1(mt, "py_set_kwargs_flag", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
             }
-            fn_item_reg = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+            fn_item_reg = pm_call_semantic_1(mt, "py_mark_mir_public_abi", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
 
             // Phase F1: detect @prop.setter / @prop.deleter decorator patterns.
             // When the first decorator expression is an attribute access like `celsius.setter`,
@@ -5016,26 +4937,26 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                         bool is_deleter = (strncmp(attr_kind, "deleter", 7) == 0 && attr_dec->attribute->len == 7);
                         if (is_setter || is_deleter) {
                             PyIdentifierNode* prop_id = (PyIdentifierNode*)attr_dec->object;
-                            MIR_reg_t pname_reg = pm_box_string_literal(mt,
+                            PmCompilerRegister pname_reg = pm_box_string_literal(mt,
                                 prop_id->name->chars, prop_id->name->len);
                             // get the existing property descriptor from the methods dict
-                            MIR_reg_t existing_prop = pm_call_2(mt, "py_dict_get", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pname_reg));
-                            MIR_reg_t updated_prop;
+                            PmCompilerRegister existing_prop = pm_call_semantic_2(mt, "py_dict_get", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, pname_reg));
+                            PmCompilerRegister updated_prop;
                             if (is_setter) {
-                                updated_prop = pm_call_2(mt, "py_property_setter", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, existing_prop),
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+                                updated_prop = pm_call_semantic_2(mt, "py_property_setter", PM_COMPILER_VALUE_I64,
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, existing_prop),
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
                             } else {
-                                updated_prop = pm_call_2(mt, "py_property_deleter", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, existing_prop),
-                                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+                                updated_prop = pm_call_semantic_2(mt, "py_property_deleter", PM_COMPILER_VALUE_I64,
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, existing_prop),
+                                    pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
                             }
-                            pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, pname_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, updated_prop));
+                            pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, pname_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, updated_prop));
                             handled_as_prop_accessor = true;
                         }
                     }
@@ -5047,12 +4968,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (fc->node && fc->node->decorators) {
                 fn_item_reg = pm_apply_decorators(mt, fn_item_reg, fc->node->decorators);
             }
-            MIR_reg_t mname_reg = pm_box_string_literal(mt,
+            PmCompilerRegister mname_reg = pm_box_string_literal(mt,
                 fc->name, strlen(fc->name));
-            pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mname_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
+            pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, mname_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, fn_item_reg));
         }
 
         // 3b. execute class body non-method statements: assignments to simple names
@@ -5083,13 +5004,13 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                             }
                         }
                         if (!is_method) {
-                            MIR_reg_t val_reg = pm_transpile_expression(mt, asgn->right);
-                            MIR_reg_t aname_reg = pm_box_string_literal(mt,
+                            PmCompilerRegister val_reg = pm_transpile_expression(mt, asgn->right);
+                            PmCompilerRegister aname_reg = pm_box_string_literal(mt,
                                 id_node->name->chars, id_node->name->len);
-                            pm_call_3(mt, "py_dict_set", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, aname_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_reg));
+                            pm_call_semantic_3(mt, "py_dict_set", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, aname_reg),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, val_reg));
                         }
                     }
                 }
@@ -5099,49 +5020,45 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         }
 
         // 4. call py_class_new(name, bases, methods) — or metaclass(name, bases, methods)
-        MIR_reg_t class_reg;
+        PmCompilerRegister class_reg;
         if (cls->metaclass) {
             // Phase F5: metaclass specified — call metaclass(name, bases, methods) directly
-            MIR_reg_t meta_reg = pm_transpile_expression(mt, cls->metaclass);
+            PmCompilerRegister meta_reg = pm_transpile_expression(mt, cls->metaclass);
             Item args_arr[3];
             (void)args_arr;
             // use py_call_function via a temporary args array: build it on the stack
             // emit: call py_class_new_meta(meta, name, bases, methods)
-            class_reg = pm_call_4(mt, "py_class_new_meta", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, meta_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, name_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, bases_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg));
+            class_reg = pm_call_semantic_4(mt, "py_class_new_meta", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, meta_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, name_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, bases_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg));
         } else {
-            class_reg = pm_call_3(mt, "py_class_new", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, name_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, bases_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, methods_reg));
+            class_reg = pm_call_semantic_3(mt, "py_class_new", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, name_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, bases_reg),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, methods_reg));
         }
 
         // 5. store class as a local scope variable AND as a module var (for super() in methods)
         char class_var_name[132];
         snprintf(class_var_name, sizeof(class_var_name),
             "_py_%.*s", (int)cls->name->len, cls->name->chars);
-        MIR_reg_t reg = pm_new_reg(mt, class_var_name, MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, reg),
-            MIR_new_reg_op(mt->em.ctx, class_reg)));
+        PmCompilerRegister reg = pm_new_reg(mt, class_var_name, PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, reg, class_reg);
         pm_set_var(mt, class_var_name, reg);
         // Phase C: apply class decorators (bottom-to-top)
         if (cls->decorators) {
-            MIR_reg_t dec_result = pm_apply_decorators(mt, reg, cls->decorators);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, reg),
-                MIR_new_reg_op(mt->em.ctx, dec_result)));
+            PmCompilerRegister dec_result = pm_apply_decorators(mt, reg, cls->decorators);
+            pm_emit_i64_register_move(mt, reg, dec_result);
         }
         // also store in module var so methods can retrieve it
         {
             int midx = pm_get_global_var_index(mt, class_var_name);
             if (midx >= 0) {
-                pm_call_void_2(mt, "py_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, reg));
+                pm_call_semantic_void_2(mt, "py_set_module_var",
+                    pm_call_operand_i64_immediate(midx),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, reg));
             }
         }
         break;
@@ -5156,25 +5073,24 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
     }
     case PY_AST_NODE_ASSERT: {
         PyAssertNode* assert_n = (PyAssertNode*)stmt;
-        MIR_reg_t test = pm_transpile_expression(mt, assert_n->test);
-        MIR_reg_t truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, test));
-        MIR_label_t l_ok = pm_new_label(mt);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_ok),
-            MIR_new_reg_op(mt->em.ctx, truthy)));
+        PmCompilerRegister test = pm_transpile_expression(mt, assert_n->test);
+        PmCompilerRegister truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, test));
+        PmCompilerLabel l_ok = pm_new_label(mt);
+        pm_emit_branch_true(mt, truthy, l_ok);
         // assert failed → raise
-        MIR_reg_t exc_type = pm_box_string_literal(mt, "AssertionError", 14);
-        MIR_reg_t exc_msg;
+        PmCompilerRegister exc_type = pm_box_string_literal(mt, "AssertionError", 14);
+        PmCompilerRegister exc_msg;
         if (assert_n->message) {
             exc_msg = pm_transpile_expression(mt, assert_n->message);
         } else {
             exc_msg = pm_box_string_literal(mt, "assertion failed", 16);
         }
-        MIR_reg_t exc = pm_call_2(mt, "py_new_exception", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_type),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_msg));
-        pm_call_void_1(mt, "py_raise",
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc));
+        PmCompilerRegister exc = pm_call_semantic_2(mt, "py_new_exception", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_type),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_msg));
+        pm_call_semantic_void_1(mt, "py_raise",
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, exc));
         pm_emit_label(mt, l_ok);
         break;
     }
@@ -5189,12 +5105,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (target->node_type == PY_AST_NODE_ATTRIBUTE) {
                 // del obj.attr — invoke py_delattr(obj, "attr")
                 PyAttributeNode* attr_node = (PyAttributeNode*)target;
-                MIR_reg_t obj_reg = pm_transpile_expression(mt, attr_node->object);
-                MIR_reg_t attr_name_reg = pm_box_string_literal(mt,
+                PmCompilerRegister obj_reg = pm_transpile_expression(mt, attr_node->object);
+                PmCompilerRegister attr_name_reg = pm_box_string_literal(mt,
                     attr_node->attribute->chars, attr_node->attribute->len);
-                pm_call_2(mt, "py_delattr", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, obj_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, attr_name_reg));
+                pm_call_semantic_2(mt, "py_delattr", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, obj_reg),
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, attr_name_reg));
             }
             // del var / del obj[key] — simplified no-op for now
             target = target->next;
@@ -5204,28 +5120,26 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
     case PY_AST_NODE_RAISE: {
         PyRaiseNode* rn = (PyRaiseNode*)stmt;
         if (rn->value) {
-            MIR_reg_t exc = pm_transpile_expression(mt, rn->value);
-            pm_call_void_1(mt, "py_raise",
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc));
+            PmCompilerRegister exc = pm_transpile_expression(mt, rn->value);
+            pm_call_semantic_void_1(mt, "py_raise",
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc));
         } else {
-            pm_call_void_1(mt, "py_raise",
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL));
+            pm_call_semantic_void_1(mt, "py_raise",
+                pm_call_operand_i64_immediate((int64_t)PY_ITEM_NULL_VAL));
         }
         // if inside a try block, jump to handler; otherwise return from function
         if (mt->try_depth > 0) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                MIR_new_label_op(mt->em.ctx, mt->try_handler_labels[mt->try_depth - 1])));
+            pm_emit_jump(mt, mt->try_handler_labels[mt->try_depth - 1]);
         } else {
-            pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-                MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
+            pm_emit_item_return_i64_immediate(mt, (int64_t)PY_ITEM_NULL_VAL);
         }
         break;
     }
     case PY_AST_NODE_TRY: {
         PyTryNode* tn = (PyTryNode*)stmt;
-        MIR_label_t l_handler = pm_new_label(mt);
-        MIR_label_t l_end = pm_new_label(mt);
-        MIR_label_t l_finally = tn->finally_body ? pm_new_label(mt) : l_end;
+        PmCompilerLabel l_handler = pm_new_label(mt);
+        PmCompilerLabel l_end = pm_new_label(mt);
+        PmCompilerLabel l_finally = tn->finally_body ? pm_new_label(mt) : l_end;
 
         // push try handler label so raise can jump here
         if (!pm_require_capacity(mt, mt->try_depth, PM_MAX_TRY_HANDLERS,
@@ -5241,23 +5155,19 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 while (s) {
                     pm_transpile_statement(mt, s);
                     // check exception after each statement
-                    MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
-                    MIR_reg_t chk_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, chk));
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                        MIR_new_label_op(mt->em.ctx, l_handler),
-                        MIR_new_reg_op(mt->em.ctx, chk_t)));
+                    PmCompilerRegister chk = pm_call_semantic_0(mt, "py_check_exception", PM_COMPILER_VALUE_I64);
+                    PmCompilerRegister chk_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                        pm_call_operand_register(PM_COMPILER_VALUE_I64, chk));
+                    pm_emit_branch_true(mt, chk_t, l_handler);
                     s = s->next;
                 }
             } else {
                 pm_transpile_block(mt, body);
                 // single check at the end
-                MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
-                MIR_reg_t chk_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, chk));
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                    MIR_new_label_op(mt->em.ctx, l_handler),
-                    MIR_new_reg_op(mt->em.ctx, chk_t)));
+                PmCompilerRegister chk = pm_call_semantic_0(mt, "py_check_exception", PM_COMPILER_VALUE_I64);
+                PmCompilerRegister chk_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, chk));
+                pm_emit_branch_true(mt, chk_t, l_handler);
             }
         }
 
@@ -5265,23 +5175,22 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         if (mt->try_depth > 0) mt->try_depth--;
 
         // no exception → jump to finally/end
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-            MIR_new_label_op(mt->em.ctx, l_finally)));
+        pm_emit_jump(mt, l_finally);
 
         // handler label
         pm_emit_label(mt, l_handler);
 
         if (tn->handlers) {
             // clear exception
-            MIR_reg_t exc_val = pm_call_0(mt, "py_clear_exception", MIR_T_I64);
+            PmCompilerRegister exc_val = pm_call_semantic_0(mt, "py_clear_exception", PM_COMPILER_VALUE_I64);
 
             // handle each except clause
-            MIR_label_t l_no_match = pm_new_label(mt); // fallback: re-raise if no handler matches
+            PmCompilerLabel l_no_match = pm_new_label(mt); // fallback: re-raise if no handler matches
             PyAstNode* handler = tn->handlers;
             while (handler) {
                 if (handler->node_type == PY_AST_NODE_EXCEPT) {
                     PyExceptNode* en = (PyExceptNode*)handler;
-                    MIR_label_t l_next_handler = pm_new_label(mt);
+                    PmCompilerLabel l_next_handler = pm_new_label(mt);
 
                     // if except has a type filter (e.g., except ValueError),
                     // check if exception type matches
@@ -5297,11 +5206,11 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
 
                         if (!catch_all) {
                             // get the exception's type string
-                            MIR_reg_t exc_type = pm_call_1(mt, "py_exception_get_type", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_val));
+                            PmCompilerRegister exc_type = pm_call_semantic_1(mt, "py_exception_get_type", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_val));
 
                             // get the expected type name as a string
-                            MIR_reg_t expected_type;
+                            PmCompilerRegister expected_type;
                             if (en->type->node_type == PY_AST_NODE_IDENTIFIER) {
                                 PyIdentifierNode* tid = (PyIdentifierNode*)en->type;
                                 expected_type = pm_box_string_literal(mt, tid->name->chars, tid->name->len);
@@ -5310,14 +5219,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                             }
 
                             // compare: py_eq(exc_type, expected_type)
-                            MIR_reg_t match = pm_call_2(mt, "py_eq", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_type),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, expected_type));
-                            MIR_reg_t match_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, match));
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BF,
-                                MIR_new_label_op(mt->em.ctx, l_next_handler),
-                                MIR_new_reg_op(mt->em.ctx, match_truthy)));
+                            PmCompilerRegister match = pm_call_semantic_2(mt, "py_eq", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_type),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, expected_type));
+                            PmCompilerRegister match_truthy = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, match));
+                            pm_emit_branch_false(mt, match_truthy, l_next_handler);
                         }
                     }
                     // bind exception to name if present
@@ -5326,22 +5233,17 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                         snprintf(vname, sizeof(vname), "_py_%.*s", (int)en->name->len, en->name->chars);
                         PyMirVarEntry* var = pm_find_var(mt, vname);
                         if (var) {
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, var->reg),
-                                MIR_new_reg_op(mt->em.ctx, exc_val)));
+                            pm_emit_i64_register_move(mt, var->reg, exc_val);
                         } else {
-                            MIR_reg_t reg = pm_new_reg(mt, vname, MIR_T_I64);
-                            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->em.ctx, reg),
-                                MIR_new_reg_op(mt->em.ctx, exc_val)));
+                            PmCompilerRegister reg = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+                            pm_emit_i64_register_move(mt, reg, exc_val);
                             pm_set_var(mt, vname, reg);
                         }
                     }
 
                     // emit handler body
                     pm_transpile_block(mt, en->body);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-                        MIR_new_label_op(mt->em.ctx, l_finally)));
+                    pm_emit_jump(mt, l_finally);
 
                     pm_emit_label(mt, l_next_handler);
                 }
@@ -5349,8 +5251,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
 
             // no handler matched → re-raise
-            pm_call_void_1(mt, "py_raise",
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_val));
+            pm_call_semantic_void_1(mt, "py_raise",
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_val));
             pm_emit_label(mt, l_no_match);
         }
 
@@ -5407,18 +5309,16 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         // bind namespace map to _py_<localname>
         char vname[132];
         snprintf(vname, sizeof(vname), "_py_%.*s", local_len, local_name);
-        MIR_reg_t val_reg = pm_new_reg(mt, "imp_ns", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, val_reg),
-            MIR_new_int_op(mt->em.ctx, (int64_t)ns.item)));
+        PmCompilerRegister val_reg = pm_new_reg(mt, "imp_ns", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_immediate(mt, val_reg, (int64_t)ns.item);
         pm_set_var(mt, vname, val_reg);
 
         // also store as module var so nested functions (generators/coroutines) can access it
         int midx = pm_get_global_var_index(mt, vname);
         if (midx >= 0) {
-            pm_call_void_2(mt, "py_set_module_var",
-                MIR_T_I64, MIR_new_int_op(mt->em.ctx, midx),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_reg));
+            pm_call_semantic_void_2(mt, "py_set_module_var",
+                pm_call_operand_i64_immediate(midx),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, val_reg));
         }
 
         log_debug("py-mir: import '%.*s' → '%s'", mod_len, mod_name, vname);
@@ -5435,25 +5335,21 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         PyWithNode* wn = (PyWithNode*)stmt;
 
         // 1. evaluate context manager expression
-        MIR_reg_t mgr_reg = pm_transpile_expression(mt, wn->items);
-        MIR_reg_t mgr_saved = pm_new_reg(mt, "with_mgr", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, mgr_saved),
-            MIR_new_reg_op(mt->em.ctx, mgr_reg)));
+        PmCompilerRegister mgr_reg = pm_transpile_expression(mt, wn->items);
+        PmCompilerRegister mgr_saved = pm_new_reg(mt, "with_mgr", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, mgr_saved, mgr_reg);
 
         // 2. call __enter__, check for exception
-        MIR_label_t l_with_exc  = pm_new_label(mt);
-        MIR_label_t l_with_end  = pm_new_label(mt);
+        PmCompilerLabel l_with_exc  = pm_new_label(mt);
+        PmCompilerLabel l_with_end  = pm_new_label(mt);
 
-        MIR_reg_t enter_val = pm_call_1(mt, "py_context_enter", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mgr_saved));
+        PmCompilerRegister enter_val = pm_call_semantic_1(mt, "py_context_enter", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, mgr_saved));
         {
-            MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
-            MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, chk));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                MIR_new_label_op(mt->em.ctx, l_with_end),
-                MIR_new_reg_op(mt->em.ctx, chkt)));
+            PmCompilerRegister chk = pm_call_semantic_0(mt, "py_check_exception", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister chkt = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, chk));
+            pm_emit_branch_true(mt, chkt, l_with_end);
         }
 
         // 3. bind as-target if present
@@ -5461,10 +5357,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             char vname[132];
             snprintf(vname, sizeof(vname), "_py_%.*s",
                 (int)wn->target->len, wn->target->chars);
-            MIR_reg_t vr = pm_new_reg(mt, vname, MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, vr),
-                MIR_new_reg_op(mt->em.ctx, enter_val)));
+            PmCompilerRegister vr = pm_new_reg(mt, vname, PM_COMPILER_VALUE_I64);
+            pm_emit_i64_register_move(mt, vr, enter_val);
             pm_set_var(mt, vname, vr);
         }
 
@@ -5481,22 +5375,18 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 PyAstNode* s2 = ((PyBlockNode*)body)->statements;
                 while (s2) {
                     pm_transpile_statement(mt, s2);
-                    MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
-                    MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, chk));
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                        MIR_new_label_op(mt->em.ctx, l_with_exc),
-                        MIR_new_reg_op(mt->em.ctx, chkt)));
+                    PmCompilerRegister chk = pm_call_semantic_0(mt, "py_check_exception", PM_COMPILER_VALUE_I64);
+                    PmCompilerRegister chkt = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                        pm_call_operand_register(PM_COMPILER_VALUE_I64, chk));
+                    pm_emit_branch_true(mt, chkt, l_with_exc);
                     s2 = s2->next;
                 }
             } else {
                 pm_transpile_block(mt, body);
-                MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
-                MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, chk));
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                    MIR_new_label_op(mt->em.ctx, l_with_exc),
-                    MIR_new_reg_op(mt->em.ctx, chkt)));
+                PmCompilerRegister chk = pm_call_semantic_0(mt, "py_check_exception", PM_COMPILER_VALUE_I64);
+                PmCompilerRegister chkt = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                    pm_call_operand_register(PM_COMPILER_VALUE_I64, chk));
+                pm_emit_branch_true(mt, chkt, l_with_exc);
             }
         }
 
@@ -5505,37 +5395,34 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
 
         // 6. normal exit: __exit__(None, None, None)
         {
-            MIR_reg_t n1 = pm_emit_null(mt);
-            MIR_reg_t n2 = pm_emit_null(mt);
-            MIR_reg_t n3 = pm_emit_null(mt);
-            pm_call_4(mt, "py_context_exit", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mgr_saved),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, n1),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, n2),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, n3));
+            PmCompilerRegister n1 = pm_emit_null(mt);
+            PmCompilerRegister n2 = pm_emit_null(mt);
+            PmCompilerRegister n3 = pm_emit_null(mt);
+            pm_call_semantic_4(mt, "py_context_exit", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, mgr_saved),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, n1),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, n2),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, n3));
         }
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP,
-            MIR_new_label_op(mt->em.ctx, l_with_end)));
+        pm_emit_jump(mt, l_with_end);
 
         // 7. exception handler: call __exit__ with exception info
         pm_emit_label(mt, l_with_exc);
         {
-            MIR_reg_t exc_val = pm_call_0(mt, "py_clear_exception", MIR_T_I64);
-            MIR_reg_t null_tb = pm_emit_null(mt);
-            MIR_reg_t suppress = pm_call_4(mt, "py_context_exit", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, mgr_saved),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_val),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_val),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, null_tb));
-            MIR_reg_t supp_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, suppress));
+            PmCompilerRegister exc_val = pm_call_semantic_0(mt, "py_clear_exception", PM_COMPILER_VALUE_I64);
+            PmCompilerRegister null_tb = pm_emit_null(mt);
+            PmCompilerRegister suppress = pm_call_semantic_4(mt, "py_context_exit", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, mgr_saved),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_val),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_val),
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, null_tb));
+            PmCompilerRegister supp_t = pm_call_semantic_1(mt, "py_is_truthy", PM_COMPILER_VALUE_I64,
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, suppress));
             // if suppress=true: jump to end (swallow the exception)
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                MIR_new_label_op(mt->em.ctx, l_with_end),
-                MIR_new_reg_op(mt->em.ctx, supp_t)));
+            pm_emit_branch_true(mt, supp_t, l_with_end);
             // if suppress=false: re-raise
-            pm_call_void_1(mt, "py_raise",
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, exc_val));
+            pm_call_semantic_void_1(mt, "py_raise",
+                pm_call_operand_register(PM_COMPILER_VALUE_I64, exc_val));
         }
 
         pm_emit_label(mt, l_with_end);
@@ -5584,10 +5471,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     char vname[132];
                     snprintf(vname, sizeof(vname), "_py_%.*s",
                         (int)key_str->len, key_str->chars);
-                    MIR_reg_t val_reg = pm_new_reg(mt, "star_imp", MIR_T_I64);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, val_reg),
-                        MIR_new_int_op(mt->em.ctx, (int64_t)value.item)));
+                    PmCompilerRegister val_reg = pm_new_reg(mt, "star_imp", PM_COMPILER_VALUE_I64);
+                    pm_emit_i64_immediate(mt, val_reg, (int64_t)value.item);
                     pm_set_var(mt, vname, val_reg);
                     log_debug("py-mir: star import '%.*s' → '%s'",
                         (int)key_str->len, key_str->chars, vname);
@@ -5678,7 +5563,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
 
                     // get from namespace
                     ns = rooted_ns.get();
-                    Item key = {.item = s2it(heap_create_name(sym_name, sym_len))};
+                    Item key = pm_hosted_name_from_utf8_n(sym_name, (size_t)sym_len);
                     ns = rooted_ns.get();
                     // Python module namespaces are Python maps. Keeping lookup
                     // in the Python map API prevents imports from depending on
@@ -5712,18 +5597,16 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                         // store as a variable in current scope with _py_ prefix
                         char vname[128];
                         snprintf(vname, sizeof(vname), "_py_%.*s", local_len, local_name);
-                        MIR_reg_t val_reg = pm_new_reg(mt, "imp", MIR_T_I64);
-                        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->em.ctx, val_reg),
-                            MIR_new_int_op(mt->em.ctx, (int64_t)value.item)));
+                        PmCompilerRegister val_reg = pm_new_reg(mt, "imp", PM_COMPILER_VALUE_I64);
+                        pm_emit_i64_immediate(mt, val_reg, (int64_t)value.item);
                         pm_set_var(mt, vname, val_reg);
 
                         // also store as module var for export and nested function access
                         int imp_midx = pm_get_global_var_index(mt, vname);
                         if (imp_midx >= 0) {
-                            pm_call_void_2(mt, "py_set_module_var",
-                                MIR_T_I64, MIR_new_int_op(mt->em.ctx, imp_midx),
-                                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val_reg));
+                            pm_call_semantic_void_2(mt, "py_set_module_var",
+                                pm_call_operand_i64_immediate(imp_midx),
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, val_reg));
                         }
 
                         log_debug("py-mir: imported '%.*s' as '%s'", sym_len, sym_name, vname);
@@ -5969,23 +5852,17 @@ static void pm_gen_emit_restore(PyMirTranspiler* mt) {
     for (int i = 0; i < mt->gen_local_count; i++) {
         PyMirVarEntry* v = pm_find_var(mt, mt->gen_local_names[i]);
         if (v && !v->from_env) {
-            MIR_reg_t loaded = pm_load_env_slot(mt, mt->gen_frame_reg, mt->gen_local_frame_slots[i]);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, v->reg),
-                MIR_new_reg_op(mt->em.ctx, loaded)));
+            PmCompilerRegister loaded = pm_load_env_slot(mt, mt->gen_frame_reg, mt->gen_local_frame_slots[i]);
+            pm_emit_i64_register_move(mt, v->reg, loaded);
         }
     }
 }
 
-// Store a 64-bit integer into a raw pointer's slot (used to set frame[0] = state).
+// Slot zero is Python generator state and stays behind its runtime helper.
 static void pm_gen_store_state(PyMirTranspiler* mt, int64_t state_val) {
-    MIR_reg_t addr = pm_new_reg(mt, "gfst", MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, addr),
-        MIR_new_reg_op(mt->em.ctx, mt->gen_frame_reg)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, addr, 0, 1),
-        MIR_new_int_op(mt->em.ctx, state_val)));
+    pm_call_semantic_2(mt, "py_gen_frame_state_store", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, mt->gen_frame_reg),
+        pm_call_operand_i64_immediate(state_val));
 }
 
 // Forward-declare pm_transpile_statement (used by pm_transpile_for_gen).
@@ -5998,22 +5875,20 @@ static void pm_transpile_for_gen(PyMirTranspiler* mt, PyForNode* forn) {
     snprintf(iter_vname, sizeof(iter_vname), "_py__git_%d", mt->gen_iter_count++);
 
     // evaluate iterable
-    MIR_reg_t iterable = pm_transpile_expression(mt, forn->right);
+    PmCompilerRegister iterable = pm_transpile_expression(mt, forn->right);
     // create iterator object
-    MIR_reg_t iter_item = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, iterable));
+    PmCompilerRegister iter_item = pm_call_semantic_1(mt, "py_get_iterator", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable));
 
     // store in pre-registered gen_local register
     PyMirVarEntry* iter_var = pm_find_var(mt, iter_vname);
     if (iter_var && !iter_var->from_env) {
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, iter_var->reg),
-            MIR_new_reg_op(mt->em.ctx, iter_item)));
+        pm_emit_i64_register_move(mt, iter_var->reg, iter_item);
     }
 
-    MIR_label_t l_start    = pm_new_label(mt);
-    MIR_label_t l_continue = pm_new_label(mt);
-    MIR_label_t l_end      = pm_new_label(mt);
+    PmCompilerLabel l_start    = pm_new_label(mt);
+    PmCompilerLabel l_continue = pm_new_label(mt);
+    PmCompilerLabel l_end      = pm_new_label(mt);
 
     if (!pm_require_capacity(mt, mt->loop_depth, PM_MAX_LOOPS, "nested loops")) return;
     mt->loop_stack[mt->loop_depth].continue_label = l_continue;
@@ -6023,16 +5898,14 @@ static void pm_transpile_for_gen(PyMirTranspiler* mt, PyForNode* forn) {
     pm_emit_label(mt, l_start);
 
     // get next item from iterator
-    MIR_reg_t cur_iter = (iter_var && !iter_var->from_env) ? iter_var->reg : iter_item;
-    MIR_reg_t item = pm_call_1(mt, "py_iterator_next", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, cur_iter));
+    PmCompilerRegister cur_iter = (iter_var && !iter_var->from_env) ? iter_var->reg : iter_item;
+    PmCompilerRegister item = pm_call_semantic_1(mt, "py_iterator_next", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, cur_iter));
 
     // check for stop iteration
-    MIR_reg_t is_stop = pm_call_1(mt, "py_is_stop_iteration", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, item));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-        MIR_new_label_op(mt->em.ctx, l_end),
-        MIR_new_reg_op(mt->em.ctx, is_stop)));
+    PmCompilerRegister is_stop = pm_call_semantic_1(mt, "py_is_stop_iteration", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, item));
+    pm_emit_branch_true(mt, is_stop, l_end);
 
     // assign loop target
     if (forn->left && forn->left->node_type == PY_AST_NODE_IDENTIFIER) {
@@ -6041,9 +5914,7 @@ static void pm_transpile_for_gen(PyMirTranspiler* mt, PyForNode* forn) {
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
         PyMirVarEntry* var = pm_find_var(mt, vname);
         if (var && !var->from_env) {
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, var->reg),
-                MIR_new_reg_op(mt->em.ctx, item)));
+            pm_emit_i64_register_move(mt, var->reg, item);
         }
     }
 
@@ -6051,7 +5922,7 @@ static void pm_transpile_for_gen(PyMirTranspiler* mt, PyForNode* forn) {
     pm_transpile_block(mt, forn->body);
 
     pm_emit_label(mt, l_continue);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_start)));
+    pm_emit_jump(mt, l_start);
     pm_emit_label(mt, l_end);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -7083,17 +6954,15 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     int mir_param_count = fc->param_count + offset;
 
     // ---- Step 4: Save transpiler state ----
-    MIR_item_t old_func_item      = mt->em.func_item;
-    MIR_func_t old_func           = mt->em.func;
-    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
+    void*      old_function_state = pm_suspend_hosted_function_state(mt);
     int        old_scope_depth    = mt->scope_depth;
     int        old_func_index     = mt->current_func_index;
-    MIR_reg_t  old_env_reg        = mt->scope_env_reg;
+    PmCompilerRegister  old_env_reg        = mt->scope_env_reg;
     int        old_env_slot_count = mt->scope_env_slot_count;
     bool       old_in_generator   = mt->in_generator;
     bool       old_in_async       = mt->in_async;
-    MIR_reg_t  old_gen_frame_reg  = mt->gen_frame_reg;
-    MIR_reg_t  old_gen_sent_reg   = mt->gen_sent_reg;
+    PmCompilerRegister  old_gen_frame_reg  = mt->gen_frame_reg;
+    PmCompilerRegister  old_gen_sent_reg   = mt->gen_sent_reg;
     int        old_gen_ycount     = mt->gen_yield_count;
     int        old_gen_lcount     = mt->gen_local_count;
     int        old_gen_iter_count = mt->gen_iter_count;
@@ -7107,9 +6976,9 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     char rp2_buf[] = "_py__scalar_home";
     const char* resume_params[] = {rp0_buf, rp1_buf, rp2_buf};
     const uint8_t resume_param_kinds[] = {1, 0, 1};
-    MIR_item_t resume_func_item = NULL;
-    MIR_func_t resume_func = NULL;
-    if (!pm_create_hosted_item_function_typed(mt->em.ctx, resume_name, 3,
+    PmCompilerFunctionItem resume_func_item = NULL;
+    PmCompilerFunction resume_func = NULL;
+    if (!pm_create_hosted_item_function_typed(mt, resume_name, 3,
             resume_params, resume_param_kinds, &resume_func_item, &resume_func)) {
         log_error("py-mir: host could not create generator resume function '%s'", resume_name);
         mt->has_compile_error = true;
@@ -7125,8 +6994,8 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     mt->scope_env_slot_count = 0;
     mt->in_generator       = true;
     mt->in_async           = fc->is_async;
-    mt->gen_frame_reg      = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_gen_frame");
-    mt->gen_sent_reg       = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_gen_sent");
+    mt->gen_frame_reg      = pm_lookup_hosted_function_register(mt, "_gen_frame");
+    mt->gen_sent_reg       = pm_lookup_hosted_function_register(mt, "_gen_sent");
     mt->gen_yield_count    = 0;
     mt->gen_iter_count     = 0;
 
@@ -7144,34 +7013,31 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // pre-create MIR regs for ALL locals and register them in scope
     for (int li = 0; li < num_locals; li++) {
-        MIR_reg_t r = pm_new_reg(mt, mt->gen_local_names[li], MIR_T_I64);
+        PmCompilerRegister r = pm_new_reg(mt, mt->gen_local_names[li], PM_COMPILER_VALUE_I64);
         pm_set_var(mt, mt->gen_local_names[li], r);
     }
 
     // Emit dispatch table: load state, branch to body_start or resume labels
-    MIR_label_t l_body_start = pm_new_label(mt);
-    MIR_label_t l_exhausted  = pm_new_label(mt);
+    PmCompilerLabel l_body_start = pm_new_label(mt);
+    PmCompilerLabel l_exhausted  = pm_new_label(mt);
 
-    // load state = frame[0]
-    MIR_reg_t state_reg = pm_new_reg(mt, "gen_state", MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, state_reg),
-        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, mt->gen_frame_reg, 0, 1)));
+    // Load the Python-owned resume state without exposing frame layout to MIR.
+    PmCompilerRegister state_reg = pm_call_semantic_1(mt, "py_gen_frame_state_load", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, mt->gen_frame_reg));
 
-    // BEQ state == 0 → l_body_start
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BEQ,
-        MIR_new_label_op(mt->em.ctx, l_body_start),
-        MIR_new_reg_op(mt->em.ctx, state_reg),
-        MIR_new_int_op(mt->em.ctx, 0)));
+    // Resume-state dispatch stays semantic: compare then branch through the
+    // host descriptor instead of exposing a raw MIR conditional opcode.
+    PmCompilerRegister state_is_body = pm_new_reg(mt, "gen_state_body", PM_COMPILER_VALUE_I64);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_EQ, state_is_body, state_reg, 0, 0);
+    pm_emit_branch_true(mt, state_is_body, l_body_start);
 
     // BEQ state == N+1 → gen_yield_labels[N] for each yield point
     for (int i = 0; i < yield_count && i < 32; i++) {
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BEQ,
-            MIR_new_label_op(mt->em.ctx, mt->gen_yield_labels[i]),
-            MIR_new_reg_op(mt->em.ctx, state_reg),
-            MIR_new_int_op(mt->em.ctx, i + 1)));
+        PmCompilerRegister state_is_yield = pm_new_reg(mt, "gen_state_yield", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_EQ, state_is_yield, state_reg, 0, i + 1);
+        pm_emit_branch_true(mt, state_is_yield, mt->gen_yield_labels[i]);
     }
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_exhausted)));
+    pm_emit_jump(mt, l_exhausted);
 
     // --- body start: restore all locals (params from frame, others = ItemNull) ---
     pm_emit_label(mt, l_body_start);
@@ -7185,15 +7051,15 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     pm_gen_store_state(mt, -1);
     if (fc->is_async) {
         // async def with no explicit return: store None as the coroutine return value
-        MIR_reg_t none_r = pm_emit_null(mt);
-        pm_call_1(mt, "py_coro_set_return", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, none_r));
+        PmCompilerRegister none_r = pm_emit_null(mt);
+        pm_call_semantic_1(mt, "py_coro_set_return", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, none_r));
     }
-    MIR_reg_t si_reg = pm_call_0(mt, "py_stop_iteration", MIR_T_I64);
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, si_reg)));
+    PmCompilerRegister si_reg = pm_call_semantic_0(mt, "py_stop_iteration", PM_COMPILER_VALUE_I64);
+    pm_emit_item_return_register(mt, si_reg);
 
     pm_finish_function_frame(mt, resume_name);
-    pm_finish_hosted_mir_function(mt->em.ctx);
+    pm_finish_hosted_mir_function_current(mt);
     pm_pop_scope(mt);
 
     // restore transpiler state (but keep gen_local_names for wrapper compilation)
@@ -7214,8 +7080,8 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     snprintf(param_name_bufs[mir_param_count], 128, "_py__scalar_home");
     param_kinds[mir_param_count] = 1;
     mir_param_count++;
-    MIR_func_t wrapper_func = NULL;
-    if (!pm_create_hosted_item_function_typed(mt->em.ctx, fn_name, mir_param_count,
+    PmCompilerFunction wrapper_func = NULL;
+    if (!pm_create_hosted_item_function_typed(mt, fn_name, mir_param_count,
             (const char* const*)param_name_bufs, param_kinds, &fc->func_item,
             &wrapper_func)) {
         log_error("py-mir: host could not create generator wrapper '%s'", fn_name);
@@ -7227,34 +7093,31 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     pm_enable_scalar_return_home(mt, "_py__scalar_home");
 
     // load address of resume function as i64
-    MIR_reg_t rptr = pm_new_reg(mt, "genfptr", MIR_T_I64);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-        MIR_new_reg_op(mt->em.ctx, rptr),
-        MIR_new_ref_op(mt->em.ctx, resume_func_item)));
+    PmCompilerRegister rptr = pm_new_reg(mt, "genfptr", PM_COMPILER_VALUE_I64);
+    pm_emit_i64_reference_move(mt, rptr, resume_func_item);
 
     // gen = py_gen_create(rptr, frame_size) or py_coro_create(rptr, frame_size) for async
     const char* create_fn = fc->is_async ? "py_coro_create" : "py_gen_create";
-    MIR_reg_t gen_obj = pm_call_2(mt, create_fn, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, rptr),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, frame_size));
+    PmCompilerRegister gen_obj = pm_call_semantic_2(mt, create_fn, PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, rptr),
+        pm_call_operand_i64_immediate(frame_size));
 
     // frame_ptr = py_gen_get_frame_c(gen_obj) — raw uint64_t* as i64
-    MIR_reg_t fptr_reg = pm_call_1(mt, "py_gen_get_frame_c", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, gen_obj));
+    PmCompilerRegister fptr_reg = pm_call_semantic_1(mt, "py_gen_get_frame_c", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, gen_obj));
 
     // store params into frame slots 1..param_count
     for (int i = 0; i < fc->param_count && i < num_locals; i++) {
-        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
-            param_name_bufs[i + offset]);
+        PmCompilerRegister preg = pm_lookup_hosted_function_register(mt, param_name_bufs[i + offset]);
         pm_store_env_slot(mt, fptr_reg, i + 1, preg);
     }
 
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, gen_obj)));
+    pm_emit_item_return_register(mt, gen_obj);
     pm_finish_function_frame(mt, fn_name);
-    pm_finish_hosted_mir_function(mt->em.ctx);
+    pm_finish_hosted_mir_function_current(mt);
 
     // restore remaining parent state
-    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
+    pm_restore_hosted_function(mt, old_function_state);
     mt->scope_depth       = old_scope_depth;
     mt->gen_local_count   = old_gen_lcount;
 
@@ -7307,8 +7170,8 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     param_kinds[mir_param_count] = 1;
     mir_param_count++;
 
-    MIR_func_t lambda_func = NULL;
-    if (!pm_create_hosted_item_function_typed(mt->em.ctx, lc->name, mir_param_count,
+    PmCompilerFunction lambda_func = NULL;
+    if (!pm_create_hosted_item_function_typed(mt, lc->name, mir_param_count,
             (const char* const*)param_name_bufs, param_kinds, &lc->func_item,
             &lambda_func)) {
         log_error("py-mir: host could not create lambda '%s'", lc->name);
@@ -7316,11 +7179,9 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
         return;
     }
 
-    MIR_item_t old_func_item = mt->em.func_item;
-    MIR_func_t old_func = mt->em.func;
-    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
+    void* old_function_state = pm_suspend_hosted_function_state(mt);
     int old_scope_depth = mt->scope_depth;
-    MIR_reg_t old_env_reg = mt->scope_env_reg;
+    PmCompilerRegister old_env_reg = mt->scope_env_reg;
     int old_env_slot_count = mt->scope_env_slot_count;
 
     pm_select_hosted_function(mt, lc->func_item, lambda_func);
@@ -7330,26 +7191,19 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     pm_push_scope(mt);
 
     for (int i = 0; i < lc->param_count && i < 16; i++) {
-        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
-            param_name_bufs[i + offset]);
+        PmCompilerRegister preg = pm_lookup_hosted_function_register(mt, param_name_bufs[i + offset]);
         pm_set_var(mt, param_name_bufs[i + offset], preg);
     }
 
     // if this is a closure, load captured variables from env
     if (lc->is_closure) {
-        MIR_reg_t env_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__env");
+        PmCompilerRegister env_reg = pm_lookup_hosted_function_register(mt, "_py__env");
         mt->scope_env_reg = env_reg;
         mt->scope_env_slot_count = lc->capture_count;
         for (int i = 0; i < lc->capture_count; i++) {
-            MIR_reg_t var_reg = pm_new_reg(mt, "cvar", MIR_T_I64);
-            MIR_reg_t addr = pm_new_reg(mt, "eaddr", MIR_T_I64);
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_ADD,
-                MIR_new_reg_op(mt->em.ctx, addr),
-                MIR_new_reg_op(mt->em.ctx, env_reg),
-                MIR_new_int_op(mt->em.ctx, i * 8)));
-            pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                MIR_new_reg_op(mt->em.ctx, var_reg),
-                MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, addr, 0, 1)));
+            // Closure environments have neutral slot ownership; use the
+            // reviewed runtime helper rather than exposing their raw layout.
+            PmCompilerRegister var_reg = pm_load_env_slot(mt, env_reg, i);
             pm_set_var(mt, lc->captures[i], var_reg);
         }
     } else {
@@ -7357,14 +7211,14 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
         mt->scope_env_slot_count = 0;
     }
 
-    MIR_reg_t body_val = pm_transpile_expression(mt, lam->body);
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, body_val)));
+    PmCompilerRegister body_val = pm_transpile_expression(mt, lam->body);
+    pm_emit_item_return_register(mt, body_val);
 
     pm_finish_function_frame(mt, lc->name);
-    pm_finish_hosted_mir_function(mt->em.ctx);
+    pm_finish_hosted_mir_function_current(mt);
 
     pm_pop_scope(mt);
-    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
+    pm_restore_hosted_function(mt, old_function_state);
     mt->scope_depth = old_scope_depth;
     mt->scope_env_reg = old_env_reg;
     mt->scope_env_slot_count = old_env_slot_count;
@@ -7437,8 +7291,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     param_kinds[mir_param_count] = 1;
     mir_param_count++;
 
-    MIR_func_t compiled_func = NULL;
-    if (!pm_create_hosted_item_function_typed(mt->em.ctx, fn_name, mir_param_count,
+    PmCompilerFunction compiled_func = NULL;
+    if (!pm_create_hosted_item_function_typed(mt, fn_name, mir_param_count,
             (const char* const*)param_name_bufs, param_kinds, &fc->func_item,
             &compiled_func)) {
         log_error("py-mir: host could not create function '%s'", fn_name);
@@ -7447,12 +7301,10 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     }
 
     // save parent state
-    MIR_item_t old_func_item = mt->em.func_item;
-    MIR_func_t old_func = mt->em.func;
-    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
+    void* old_function_state = pm_suspend_hosted_function_state(mt);
     int old_scope_depth = mt->scope_depth;
     int old_func_index = mt->current_func_index;
-    MIR_reg_t old_env_reg = mt->scope_env_reg;
+    PmCompilerRegister old_env_reg = mt->scope_env_reg;
     int old_env_slot_count = mt->scope_env_slot_count;
 
     pm_select_hosted_function(mt, fc->func_item, compiled_func);
@@ -7469,39 +7321,34 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // register params as variables
     for (int i = 0; i < fc->param_count && i < 16; i++) {
-        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
-            param_name_bufs[i + offset]);
+        PmCompilerRegister preg = pm_lookup_hosted_function_register(mt, param_name_bufs[i + offset]);
         pm_set_var(mt, param_name_bufs[i + offset], preg);
     }
 
     // if function has *args, build a list from the varargs pointer + count
     if (fc->has_star_args) {
-        MIR_reg_t va_ptr = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__varargs");
-        MIR_reg_t va_cnt = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__varargc");
+        PmCompilerRegister va_ptr = pm_lookup_hosted_function_register(mt, "_py__varargs");
+        PmCompilerRegister va_cnt = pm_lookup_hosted_function_register(mt, "_py__varargc");
         // call py_build_list_from_args(ptr, count) → list Item
-        MIR_reg_t star_list = pm_call_2(mt, "py_build_list_from_args", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, va_ptr),
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, va_cnt));
-        MIR_reg_t star_reg = pm_new_reg(mt, fc->star_args_name, MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, star_reg),
-            MIR_new_reg_op(mt->em.ctx, star_list)));
+        PmCompilerRegister star_list = pm_call_semantic_2(mt, "py_build_list_from_args", PM_COMPILER_VALUE_I64,
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, va_ptr),
+            pm_call_operand_register(PM_COMPILER_VALUE_I64, va_cnt));
+        PmCompilerRegister star_reg = pm_new_reg(mt, fc->star_args_name, PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, star_reg, star_list);
         pm_set_var(mt, fc->star_args_name, star_reg);
     }
 
     // if function has **kwargs, bind the kwargs map param to the user's variable
     if (fc->has_kwargs) {
-        MIR_reg_t kw_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__kwargs_map");
-        MIR_reg_t kw_var = pm_new_reg(mt, fc->kwargs_name, MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, kw_var),
-            MIR_new_reg_op(mt->em.ctx, kw_reg)));
+        PmCompilerRegister kw_reg = pm_lookup_hosted_function_register(mt, "_py__kwargs_map");
+        PmCompilerRegister kw_var = pm_new_reg(mt, fc->kwargs_name, PM_COMPILER_VALUE_I64);
+        pm_emit_i64_register_move(mt, kw_var, kw_reg);
         pm_set_var(mt, fc->kwargs_name, kw_var);
     }
 
     // if this is a closure, load captured variables from env
     if (fc->is_closure) {
-        MIR_reg_t env_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__env");
+        PmCompilerRegister env_reg = pm_lookup_hosted_function_register(mt, "_py__env");
         mt->scope_env_reg = env_reg;
         mt->scope_env_slot_count = fc->capture_count;
         for (int i = 0; i < fc->capture_count; i++) {
@@ -7510,15 +7357,9 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
                 pm_set_env_var(mt, fc->captures[i], env_reg, i);
             } else {
                 // read-only: load once into a local register
-                MIR_reg_t var_reg = pm_new_reg(mt, "cvar", MIR_T_I64);
-                MIR_reg_t addr = pm_new_reg(mt, "eaddr", MIR_T_I64);
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_ADD,
-                    MIR_new_reg_op(mt->em.ctx, addr),
-                    MIR_new_reg_op(mt->em.ctx, env_reg),
-                    MIR_new_int_op(mt->em.ctx, i * 8)));
-                pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->em.ctx, var_reg),
-                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, addr, 0, 1)));
+                // Capture slot layout is runtime-owned and may change; this
+                // import keeps the generated function on the neutral ABI.
+                PmCompilerRegister var_reg = pm_load_env_slot(mt, env_reg, i);
                 pm_set_var(mt, fc->captures[i], var_reg);
             }
         }
@@ -7530,8 +7371,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // if this function has nonlocal children, allocate a shared env and route
     // shared vars through it — both this function and its children access the same env
     if (fc->has_nonlocal_children) {
-        MIR_reg_t shared_env = pm_call_1(mt, "py_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc->shared_env_count));
+        PmCompilerRegister shared_env = pm_call_semantic_1(mt, "py_alloc_env", PM_COMPILER_VALUE_I64,
+            pm_call_operand_i64_immediate(fc->shared_env_count));
         mt->scope_env_reg = shared_env;
         mt->scope_env_slot_count = fc->shared_env_count;
         for (int si = 0; si < fc->shared_env_count; si++) {
@@ -7554,22 +7395,16 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
             if (dp->node_type == PY_AST_NODE_DEFAULT_PARAMETER) {
                 PyParamNode* pp = (PyParamNode*)dp;
                 if (pp->default_value) {
-                    MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
+                    PmCompilerRegister preg = pm_lookup_hosted_function_register(mt,
                         param_name_bufs[pi + offset]);
-                    MIR_reg_t is_null = pm_new_reg(mt, "dnull", MIR_T_I64);
-                    MIR_label_t l_no_default = pm_new_label(mt);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_NE,
-                        MIR_new_reg_op(mt->em.ctx, is_null),
-                        MIR_new_reg_op(mt->em.ctx, preg),
-                        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT,
-                        MIR_new_label_op(mt->em.ctx, l_no_default),
-                        MIR_new_reg_op(mt->em.ctx, is_null)));
+                    PmCompilerRegister is_null = pm_new_reg(mt, "dnull", PM_COMPILER_VALUE_I64);
+                    PmCompilerLabel l_no_default = pm_new_label(mt);
+                    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_NE, is_null, preg, 0,
+                        (int64_t)PY_ITEM_NULL_VAL);
+                    pm_emit_branch_true(mt, is_null, l_no_default);
                     // param was null → evaluate default expression and assign
-                    MIR_reg_t def_val = pm_transpile_expression(mt, pp->default_value);
-                    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->em.ctx, preg),
-                        MIR_new_reg_op(mt->em.ctx, def_val)));
+                    PmCompilerRegister def_val = pm_transpile_expression(mt, pp->default_value);
+                    pm_emit_i64_register_move(mt, preg, def_val);
                     pm_emit_label(mt, l_no_default);
                 }
             }
@@ -7581,8 +7416,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // ===== TCO Setup =====
     bool use_tco = pm_should_use_tco(fc);
     PyFuncCollected* saved_tco_func = mt->tco_func;
-    MIR_label_t saved_tco_label = mt->tco_label;
-    MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
+    PmCompilerLabel saved_tco_label = mt->tco_label;
+    PmCompilerRegister saved_tco_count_reg = mt->tco_count_reg;
     bool saved_tail_position = mt->in_tail_position;
     bool saved_block_returned = mt->block_returned;
 
@@ -7591,42 +7426,36 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         mt->tco_func = fc;
 
         // create iteration counter register, init to 0
-        mt->tco_count_reg = pm_new_reg(mt, "tco_count", MIR_T_I64);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, mt->tco_count_reg),
-            MIR_new_int_op(mt->em.ctx, 0)));
+        mt->tco_count_reg = pm_new_reg(mt, "tco_count", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_immediate(mt, mt->tco_count_reg, 0);
 
         // create the TCO loop label
-        mt->tco_label = MIR_new_label(mt->em.ctx);
-        pm_emit(mt, mt->tco_label);
+        mt->tco_label = pm_new_label(mt);
+        pm_emit_label(mt, mt->tco_label);
 
         // increment counter: tco_count = tco_count + 1
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_ADD,
-            MIR_new_reg_op(mt->em.ctx, mt->tco_count_reg),
-            MIR_new_reg_op(mt->em.ctx, mt->tco_count_reg),
-            MIR_new_int_op(mt->em.ctx, 1)));
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_ADD, mt->tco_count_reg,
+            mt->tco_count_reg, 0, 1);
 
         // guard: if tco_count > LAMBDA_TCO_MAX_ITERATIONS, call overflow error
-        MIR_label_t ok_label = pm_new_label(mt);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BLE, MIR_new_label_op(mt->em.ctx, ok_label),
-            MIR_new_reg_op(mt->em.ctx, mt->tco_count_reg),
-            MIR_new_int_op(mt->em.ctx, LAMBDA_TCO_MAX_ITERATIONS)));
+        PmCompilerLabel ok_label = pm_new_label(mt);
+        PmCompilerRegister below_limit = pm_new_reg(mt, "tco_below_limit", PM_COMPILER_VALUE_I64);
+        pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, below_limit,
+            mt->tco_count_reg, 0, LAMBDA_TCO_MAX_ITERATIONS);
+        pm_emit_branch_true(mt, below_limit, ok_label);
 
         // overflow path: call lambda_stack_overflow_error(func_name)
         // lambda_stack_overflow_error takes a const char* — pass a raw C string pointer
         String* fn_str = name_pool_create_len(mt->tp->name_pool, fc->name, strlen(fc->name));
-        MIR_reg_t fn_name_ptr = pm_new_reg(mt, "tco_fn", MIR_T_P);
-        pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
-            MIR_new_reg_op(mt->em.ctx, fn_name_ptr),
-            MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)fn_str->chars)));
+        PmCompilerRegister fn_name_ptr = pm_new_reg(mt, "tco_fn", PM_COMPILER_VALUE_POINTER);
+        pm_emit_i64_immediate(mt, fn_name_ptr, (int64_t)(uintptr_t)fn_str->chars);
         // Keep the pointer ABI identical to the shared side-stack error call;
         // an I64 variant created a second same-name MIR prototype at finalize.
-        pm_call_void_1(mt, "lambda_stack_overflow_error",
-            MIR_T_P, MIR_new_reg_op(mt->em.ctx, fn_name_ptr));
+        pm_call_semantic_void_1(mt, "lambda_stack_overflow_error",
+            pm_call_operand_register(PM_COMPILER_VALUE_POINTER, fn_name_ptr));
 
         // emit a ret after overflow call (unreachable but needed for MIR validation)
-        pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-            MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
+        pm_emit_item_return_i64_immediate(mt, (int64_t)PY_ITEM_NULL_VAL);
 
         pm_emit_label(mt, ok_label);
         mt->in_tail_position = false;
@@ -7637,11 +7466,10 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     pm_transpile_block(mt, fc->node->body);
 
     // ensure function ends with a return
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
+    pm_emit_item_return_i64_immediate(mt, (int64_t)PY_ITEM_NULL_VAL);
 
     pm_finish_function_frame(mt, fn_name);
-    pm_finish_hosted_mir_function(mt->em.ctx);
+    pm_finish_hosted_mir_function_current(mt);
 
     // restore TCO state
     mt->tco_func = saved_tco_func;
@@ -7652,7 +7480,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // restore parent state
     pm_pop_scope(mt);
-    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
+    pm_restore_hosted_function(mt, old_function_state);
     mt->scope_depth = old_scope_depth;
     mt->current_func_index = old_func_index;
     mt->scope_env_reg = old_env_reg;
@@ -7797,8 +7625,8 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
         if (fc->is_method) continue;  // methods are accessed via py_getattr
         char fn_name[260];
         pm_make_mir_func_name(mt, fc, fn_name, sizeof(fn_name));
-        MIR_item_t fwd = NULL;
-        if (!pm_create_hosted_function_forward(mt->em.ctx, fn_name, &fwd)) {
+        PmCompilerFunctionItem fwd = NULL;
+        if (!pm_create_hosted_function_forward(mt, fn_name, &fwd)) {
             log_error("py-mir: host could not declare forward function '%s'", fn_name);
             mt->has_compile_error = true;
             return;
@@ -7819,9 +7647,9 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     // Phase 4: create py_main function
     const char* main_params[] = {"ctx", "_py__scalar_home"};
     const uint8_t main_param_kinds[] = {0, 1};
-    MIR_item_t main_function_item = NULL;
-    MIR_func_t main_function = NULL;
-    if (!pm_create_hosted_item_function_typed(mt->em.ctx, "py_main", 2,
+    PmCompilerFunctionItem main_function_item = NULL;
+    PmCompilerFunction main_function = NULL;
+    if (!pm_create_hosted_item_function_typed(mt, "py_main", 2,
             main_params, main_param_kinds,
             &main_function_item, &main_function)) {
         log_error("py-mir: host could not create py_main");
@@ -7830,16 +7658,13 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     }
     pm_select_hosted_function(mt, main_function_item, main_function);
     mt->in_main = true;
-    pm_begin_function_frame(mt, pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "ctx"));
-    mt->em.frame.incoming_scalar_home = pm_lookup_hosted_function_register(
-        mt->em.ctx, mt->em.func, "_py__scalar_home");
-    mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
-    mt->em.frame.plan.accepts_caller_scalar_home = true;
+    pm_begin_function_frame(mt, pm_lookup_hosted_function_register(mt, "ctx"));
+    pm_enable_scalar_return_home(mt, "_py__scalar_home");
 
     pm_push_scope(mt);
 
     // transpile top-level statements
-    MIR_reg_t last_result = pm_emit_null(mt);
+    PmCompilerRegister last_result = pm_emit_null(mt);
     PyAstNode* s = program->body;
     while (s) {
         if (s->node_type == PY_AST_NODE_FUNCTION_DEF) {
@@ -7867,11 +7692,10 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     }
 
     // return last result
-    pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1,
-        MIR_new_reg_op(mt->em.ctx, last_result)));
+    pm_emit_item_return_register(mt, last_result);
 
     pm_finish_function_frame(mt, "py_main");
-    pm_finish_hosted_mir_function(mt->em.ctx);
+    pm_finish_hosted_mir_function_current(mt);
     pm_pop_scope(mt);
     mt->in_main = false;
 }
@@ -7922,7 +7746,7 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     py_runtime_set_data_session(runtime_input);
 
     // init MIR context
-    MIR_context_t ctx = pm_create_hosted_mir_context();
+    void* ctx = pm_create_hosted_mir_context();
     if (!ctx) {
         log_error("py-mir: MIR context init failed");
         py_transpiler_destroy(tp);
@@ -7941,18 +7765,21 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
     mt->tp = tp;
-    mt->em.ctx = ctx;
-    mt->em.call_owner = mt;
-    mt->em.note_mir_call = pm_note_mir_call;
-    mt->em.before_may_gc_call = pm_before_may_gc_call;
-    mt->em.root_call_value = pm_root_call_value;
-    mt->em.after_call_result = pm_after_call_result;
-    mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
+    if (!pm_create_hosted_compiler_cursor(mt, ctx)) {
+        log_error("py-mir: host could not create compiler cursor");
+        pm_destroy_hosted_compiler_cursor(mt);
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
     mt->filename = filename;
     mt->host_execution = host_execution;
     mt->frame_runtime_slot = pm_hosted_frame_runtime_slot(host_execution);
     if (!mt->frame_runtime_slot) {
         log_error("py-mir: host did not provide an active frame runtime slot");
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
         pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
@@ -7975,9 +7802,17 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
         }
     }
 
-    mt->em.import_cache = em_import_cache_new(64);
+    if (!pm_hosted_import_cache_init(mt)) {
+        log_error("py-mir: host could not initialize compiler import cache");
+        pm_destroy_hosted_compiler_cursor(mt);
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
     mt->local_funcs  = py_local_func_new(32);
-    mt->var_scopes[0] = em_var_scope_new(16);
+    mt->var_scopes[0] = pm_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 
@@ -7985,11 +7820,12 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     mt->module = pm_create_hosted_mir_module(ctx, "py_script");
     if (!mt->module) {
         log_error("py-mir: host could not create Python MIR module");
-        hashmap_free(mt->em.import_cache);
+        pm_hosted_import_cache_destroy(mt);
         hashmap_free(mt->local_funcs);
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
         pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
@@ -7997,18 +7833,15 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Keep shared-emitter telemetry scoped to this lowering activation.
-    PyMirTranspiler* saved_telemetry_owner = py_mir_telemetry_owner;
-    py_mir_telemetry_owner = mt;
     pm_transpile_ast(mt, ast);
-    py_mir_telemetry_owner = saved_telemetry_owner;
 
     if (mt->has_compile_error) {
-        hashmap_free(mt->em.import_cache);
+        pm_hosted_import_cache_destroy(mt);
         hashmap_free(mt->local_funcs);
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
         pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
@@ -8018,13 +7851,14 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
 
     // Finalization stays host-owned so guest code cannot depend on the MIR
     // module lifecycle implementation or its load ordering.
-    if (!pm_finalize_and_load_hosted_mir_module(mt->em.ctx, mt->module)) {
+    if (!pm_finalize_and_load_hosted_mir_module_current(mt, mt->module)) {
         log_error("py-mir: host could not finalize Python MIR module");
-        hashmap_free(mt->em.import_cache);
+        pm_hosted_import_cache_destroy(mt);
         hashmap_free(mt->local_funcs);
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
         pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
@@ -8032,32 +7866,43 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
         return (Item){.item = ITEM_ERROR};
     }
 
-#ifndef NDEBUG
-    // developer diagnostic; --no-log suppresses it like every other optional
-    // MIR artifact. The private-path/release contract is Lambda/JS/TS only.
-    if (mir_dump_instrumentation_enabled()) {
-        mir_dump_write_context(ctx, "temp/py_mir_dump.txt", false);
+    // The host owns compiler diagnostic policy and the artifact path, so this
+    // debug-only hook cannot make Python depend on MIR dump internals.
+    if (py_hosted_execution_api && py_hosted_execution_api->struct_size >=
+            JUBE_GUEST_EXECUTION_API_H7C_DEBUG_DUMP_SIZE &&
+            py_hosted_execution_api->mir_debug_dump_if_enabled) {
+        py_hosted_execution_api->mir_debug_dump_if_enabled(ctx);
     }
-#endif
 
     // link and generate
     if (!pm_link_hosted_module(host_execution, ctx)) {
         log_error("py-mir: host could not link Python MIR module");
-        pm_destroy_hosted_mir_context(ctx);
-        py_transpiler_destroy(tp);
-        return (Item){.item = ITEM_ERROR};
-    }
-
-    // find py_main
-    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function(ctx, "py_main");
-
-    if (!py_main) {
-        log_error("py-mir: failed to find py_main");
-        hashmap_free(mt->em.import_cache);
+        // The cursor owns frame/import state tied to this context; destroy it
+        // before context teardown so a failed link cannot retain stale handles.
+        pm_hosted_import_cache_destroy(mt);
         hashmap_free(mt->local_funcs);
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        pm_destroy_hosted_compiler_cursor(mt);
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // find py_main
+    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function_current(mt, "py_main");
+
+    if (!py_main) {
+        log_error("py-mir: failed to find py_main");
+        pm_hosted_import_cache_destroy(mt);
+        hashmap_free(mt->local_funcs);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
         pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
@@ -8074,11 +7919,12 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     }
 
     // cleanup
-    hashmap_free(mt->em.import_cache);
+    pm_hosted_import_cache_destroy(mt);
     hashmap_free(mt->local_funcs);
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
+    pm_destroy_hosted_compiler_cursor(mt);
     mem_free(mt);
 
     pm_destroy_hosted_mir_context(ctx);
@@ -8094,11 +7940,11 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
 // ============================================================================
 
 #define PM_MAX_MODULE_CONTEXTS 64
-static MIR_context_t pm_module_mir_contexts[PM_MAX_MODULE_CONTEXTS];
+static void* pm_module_mir_contexts[PM_MAX_MODULE_CONTEXTS];
 static int pm_module_mir_context_count = 0;
 static void* pm_module_owned_execution = NULL;
 
-static void pm_defer_mir_cleanup(MIR_context_t ctx) {
+static void pm_defer_mir_cleanup(void* ctx) {
     if (pm_module_mir_context_count < PM_MAX_MODULE_CONTEXTS) {
         pm_module_mir_contexts[pm_module_mir_context_count++] = ctx;
     } else {
@@ -8137,7 +7983,7 @@ static Item pm_module_namespace_create(void) {
 }
 
 static Item pm_module_namespace_get(Item namespace_obj, const char* name) {
-    Item key = {.item = s2it(heap_create_name(name))};
+    Item key = pm_hosted_name_from_utf8_n(name, strlen(name));
     return py_dict_get(namespace_obj, key);
 }
 
@@ -8177,15 +8023,16 @@ public:
     void retain_current_session() { restore_ = false; }
 };
 
-static void pm_module_lowering_cleanup(PyMirTranspiler* mt, MIR_context_t mir_context,
+static void pm_module_lowering_cleanup(PyMirTranspiler* mt, void* mir_context,
                                        PyTranspiler* transpiler, JubeHostedSource* source,
                                        bool defer_mir_context) {
     if (mt) {
-        hashmap_free(mt->em.import_cache);
+        pm_hosted_import_cache_destroy(mt);
         hashmap_free(mt->local_funcs);
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        pm_destroy_hosted_compiler_cursor(mt);
         mem_free(mt);
     }
     if (mir_context) {
@@ -8262,7 +8109,7 @@ Item load_py_module(void* host_execution, const char* py_path) {
         return ItemNull;
     }
 
-    MIR_context_t ctx = pm_create_hosted_mir_context();
+    void* ctx = pm_create_hosted_mir_context();
     if (!ctx) {
         log_error("py-mir: module: MIR context init failed for '%s'", py_path);
         py_transpiler_destroy(tp);
@@ -8280,13 +8127,15 @@ Item load_py_module(void* host_execution, const char* py_path) {
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
     mt->tp = tp;
-    mt->em.ctx = ctx;
-    mt->em.call_owner = mt;
-    mt->em.note_mir_call = pm_note_mir_call;
-    mt->em.before_may_gc_call = pm_before_may_gc_call;
-    mt->em.root_call_value = pm_root_call_value;
-    mt->em.after_call_result = pm_after_call_result;
-    mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
+    if (!pm_create_hosted_compiler_cursor(mt, ctx)) {
+        log_error("py-mir: module: host could not create compiler cursor for '%s'", py_path);
+        pm_destroy_hosted_compiler_cursor(mt);
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_module_source_release(&source_record);
+        return ItemNull;
+    }
     mt->filename = py_path;
     mt->host_execution = host_execution;
     mt->frame_runtime_slot = pm_hosted_frame_runtime_slot(host_execution);
@@ -8295,9 +8144,13 @@ Item load_py_module(void* host_execution, const char* py_path) {
         pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
         return ItemNull;
     }
-    mt->em.import_cache = em_import_cache_new(64);
+    if (!pm_hosted_import_cache_init(mt)) {
+        log_error("py-mir: module: host could not initialize compiler import cache for '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
     mt->local_funcs  = py_local_func_new(32);
-    mt->var_scopes[0] = em_var_scope_new(16);
+    mt->var_scopes[0] = pm_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 
@@ -8309,12 +8162,9 @@ Item load_py_module(void* host_execution, const char* py_path) {
     }
 
     // transpile AST to MIR (compiles all functions + py_main)
-    PyMirTranspiler* saved_telemetry_owner = py_mir_telemetry_owner;
-    py_mir_telemetry_owner = mt;
     pm_transpile_ast(mt, ast);
-    py_mir_telemetry_owner = saved_telemetry_owner;
 
-    if (!pm_finalize_and_load_hosted_mir_module(mt->em.ctx, mt->module)) {
+    if (!pm_finalize_and_load_hosted_mir_module_current(mt, mt->module)) {
         log_error("py-mir: module: host could not finalize '%s'", py_path);
         pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
         return ItemNull;
@@ -8335,7 +8185,7 @@ Item load_py_module(void* host_execution, const char* py_path) {
     }
 
     // execute py_main to run module-level code (assignments, etc.)
-    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function(ctx, "py_main");
+    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function_current(mt, "py_main");
     if (py_main) {
         py_reset_module_vars();
         Item ignored_result = ItemError;
@@ -8355,13 +8205,13 @@ Item load_py_module(void* host_execution, const char* py_path) {
         // get the JIT-compiled function pointer by name
         char mir_name[140];
         snprintf(mir_name, sizeof(mir_name), "_%s", fc->name);
-        void* func_ptr = pm_find_hosted_mir_function(ctx, mir_name);
+        void* func_ptr = pm_find_hosted_mir_function_current(mt, mir_name);
 
         if (func_ptr) {
             // Use to_fn_n to create a Lambda Function* compatible with Python
             // calling convention; a JavaScript function has a different layout.
             Item val = {.function = to_fn_n((fn_ptr)func_ptr, fc->param_count)};
-            Item key = {.item = s2it(heap_create_name(fc->name))};
+            Item key = pm_hosted_name_from_utf8_n(fc->name, strlen(fc->name));
             py_dict_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
         }
@@ -8377,7 +8227,7 @@ Item load_py_module(void* host_execution, const char* py_path) {
         if (value.item == ItemNull.item) continue;
         // strip _py_ prefix for the export key
         const char* export_name = (strncmp(var_name, "_py_", 4) == 0) ? var_name + 4 : var_name;
-        Item key = {.item = s2it(heap_create_name(export_name))};
+        Item key = pm_hosted_name_from_utf8_n(export_name, strlen(export_name));
         // functions exported above take priority over module vars
         Item existing = py_dict_get(ns, key);
         bool not_found = (existing.item == ItemNull.item || get_type_id(existing) == LMD_TYPE_UNDEFINED);

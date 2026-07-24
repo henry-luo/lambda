@@ -71,13 +71,22 @@ jube_load_language_module
 module_state
 module_begin_loading
 module_publish
-static MIR_reg_t pm_load_side_stack_runtime(
+static PmCompilerRegister pm_load_side_stack_runtime(
 MIR_new_mem_op
-static void pm_emit_side_stack_overflow(
+static void pm_begin_function_frame(
 """
     with_sources(checker, {checker.PYTHON_MIR_LOWERING: lowering},
                  checker.check_python_import_lowering_uses_module_graph,
                  "raw frame-runtime memory load")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: '"../runtime/mir_dump.h"'},
+                 checker.check_python_mir_dump_uses_hosted_service,
+                 "hosted MIR debug service")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: "heap_create_name("},
+                 checker.check_python_mir_lowering_uses_hosted_name_service,
+                 "hosted name service")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: '"../runtime/transpiler.hpp"'},
+                 checker.check_python_mir_lowering_uses_hosted_name_service,
+                 "hosted name service")
     identity_lowering = lowering.replace("MIR_new_mem_op\n", "em_new_reg(\n")
     with_sources(checker, {checker.PYTHON_MIR_LOWERING: identity_lowering},
                  checker.check_python_import_lowering_uses_module_graph,
@@ -108,11 +117,301 @@ static void pm_emit_branch_false(
 static void pm_emit_label(
 mir_label_emit
 em_emit_label(
-static MIR_reg_t pm_load_side_stack_runtime(
+static PmCompilerRegister pm_load_side_stack_runtime(
 """
     with_sources(checker, {checker.PYTHON_MIR_LOWERING: label_lowering},
                  checker.check_python_labels_use_hosted_emission_service,
                  "raw label emission")
+    i64_lowering = """\
+static void pm_emit_i64_operation(
+pm_emit_hosted_instruction
+MIR_new_insn(
+static void pm_emit_item_return_operand(
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: i64_lowering},
+                 checker.check_python_i64_operations_use_hosted_instruction_service,
+                 "raw integer-operation MIR construction")
+    numeric_lowering = """\\
+static PmCompilerRegister pm_box_int_reg(
+pm_emit_i64_operation
+pm_emit_f64_operation
+pm_emit_i64_register_move
+pm_emit_branch_true
+pm_emit_branch_false
+pm_emit_jump
+MIR_new_insn(
+// ============================================================================
+// TCO helpers
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: numeric_lowering},
+                 checker.check_python_numeric_lowering_uses_hosted_instruction_service,
+                 "native numeric lowering retains raw MIR construction")
+    call_lowering = """\\
+static PmCompilerRegister pm_emit_hosted_runtime_call_operands(
+mir_runtime_import_call_emit
+em_call_1(
+struct PmArgScope
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: call_lowering},
+                 checker.check_python_runtime_calls_use_hosted_call_service,
+                 "shared raw call emission")
+    direct_call_lowering = """\\
+static void pm_emit_local_direct_call(
+mir_local_direct_call_emit
+MIR_new_insn_arr(
+static void pm_emit_label(
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: direct_call_lowering},
+                 checker.check_python_local_direct_calls_use_hosted_call_service,
+                 "raw local-direct-call emission")
+    return_lowering = """\\
+static void pm_emit_item_return_operand(
+mir_item_return_emit
+MIR_new_ret_insn(
+static void pm_emit_local_direct_call(
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: return_lowering},
+                 checker.check_python_item_returns_use_hosted_return_service,
+                 "raw Item-return emission")
+    raw_instruction_decoder = """\\
+static void pm_emit(PyMirTranspiler* mt, MIR_insn_t insn)
+em_emit_insn(&mt->em, insn)
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: raw_instruction_decoder},
+                 checker.check_python_lowering_has_no_raw_instruction_decoder,
+                 "raw MIR instruction decoder")
+    frame_lowering = """\\
+static void pm_finish_function_frame(
+mir_function_frame_finalize
+em_finalize_scalar_homes
+// Call helpers
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: frame_lowering},
+                 checker.check_python_frame_finalization_uses_hosted_service,
+                 "raw frame finalization")
+    reference_move_lowering = """\\
+static void pm_emit_i64_reference_move(
+JUBE_COMPILER_INSN_MOVE_I64_REFERENCE
+pm_emit_hosted_instruction
+MIR_new_ref_op(
+static void pm_emit_f64_operation(
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: reference_move_lowering},
+                 checker.check_python_reference_moves_use_hosted_instruction_service,
+                 "raw opaque-reference move emission")
+    root_candidate_lowering = """\\
+mir_compiler_cursor_create
+pm_root_call_value(
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: root_candidate_lowering},
+                 checker.check_python_root_candidates_use_hosted_service,
+                 "direct root-candidate callback")
+    frame_adapter_lowering = """\\
+static void pm_begin_function_frame(
+mir_function_frame_begin
+mir_function_frame_scalar_return_home_set
+mir_function_frame_finalize
+mt->em.frame
+// ============================================================================
+// Call helpers
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: frame_adapter_lowering},
+                 checker.check_python_function_frames_use_hosted_services,
+                 "direct MirEmitter frame-layout access")
+    import_cache_lowering = """\\
+mir_compiler_import_cache_init
+mir_compiler_import_cache_destroy
+mir_local_direct_call_prototype_get_or_create
+mt->em.import_cache
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: import_cache_lowering},
+                 checker.check_python_import_cache_uses_hosted_services,
+                 "direct import-cache ownership")
+    function_selection_lowering = """\\
+static void pm_select_hosted_function(
+mir_function_state_suspend
+mir_function_select
+mir_function_state_restore
+mt->em.func_item =
+static bool pm_require_capacity(
+mir_function_register_lookup_current
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: function_selection_lowering},
+                 checker.check_python_function_selection_uses_hosted_services,
+                 "direct function-state ownership")
+    current_lowering = """\\
+static PmCompilerRegister pm_new_reg(
+mir_function_register_create_current
+mir_label_create_current
+mir_instruction_emit_current
+mir_label_emit_current
+mir_function_frame_runtime_load_current
+mt->em.ctx
+static void pm_begin_function_frame(
+mir_function_finish_current
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: current_lowering},
+                 checker.check_python_current_lowering_uses_hosted_cursor_services,
+                 "direct current compiler state")
+    cursor_construction_lowering = """\\
+mir_item_function_create_typed_current
+mir_function_forward_create_current
+mir_module_finalize_and_load_current
+mir_function_lookup_current
+pm_create_hosted_item_function_typed(mt->em.ctx
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: cursor_construction_lowering},
+                 checker.check_python_cursor_construction_uses_hosted_services,
+                 "direct cursor construction")
+    scalar_home_lowering = """\\
+mir_scalar_home_create_current
+mir_scalar_home_bind_current
+em_scalar_home_new(&mt->em)
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: scalar_home_lowering},
+                 checker.check_python_scalar_homes_use_hosted_services,
+                 "direct scalar-home ownership")
+    opaque_cursor_lowering = """\\
+mir_compiler_cursor_create
+mir_compiler_cursor_destroy
+compiler_cursor
+MirEmitter em
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: opaque_cursor_lowering},
+                 checker.check_python_compiler_cursor_is_opaque,
+                 "concrete compiler cursor state")
+    opaque_artifact_lowering = """\\
+void* compiler_context
+void* module
+MIR_context_t
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: opaque_artifact_lowering},
+                 checker.check_python_compilation_artifacts_are_opaque,
+                 "concrete compilation artifact")
+    private_mir_type_lowering = """\\
+PmCompilerRegister
+PmCompilerLabel
+PmCompilerFunctionItem
+PmCompilerFunction
+MIR_reg_t
+"""
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: private_mir_type_lowering},
+                 checker.check_python_lowering_has_no_private_mir_types,
+                 "private MIR type dependency")
+    stale_cursor_registry = """\\
+static void* jube_host_mir_cursor_register(
+static MirEmitter* jube_host_mir_cursor_emitter(
+static void jube_host_mir_cursor_unregister(
+static void jube_host_mir_compiler_cursor_destroy(
+jube_host_mir_cursor_unregister(compiler_cursor);
+jube_host_mir_cursor_dispose(emitter);
+static int jube_host_mir_next_service(
+MirEmitter* emitter = (MirEmitter*)compiler_cursor;
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: stale_cursor_registry},
+                 checker.check_hosted_compiler_cursor_rejects_stale_handles,
+                 "raw compiler cursor pointer")
+    release_first_registry = stale_cursor_registry.replace(
+        "jube_host_mir_cursor_unregister(compiler_cursor);\njube_host_mir_cursor_dispose(emitter);",
+        "jube_host_mir_cursor_dispose(emitter);\njube_host_mir_cursor_unregister(compiler_cursor);").replace(
+        "MirEmitter* emitter = (MirEmitter*)compiler_cursor;\n", "")
+    with_sources(checker, {checker.JUBE_REGISTRY: release_first_registry},
+                 checker.check_hosted_compiler_cursor_rejects_stale_handles,
+                 "invalidate compiler cursor")
+    context_first_registry = """\\
+static void jube_host_mir_cursor_invalidate_context(
+static void jube_host_mir_context_destroy(
+MIR_finish(
+jube_host_mir_cursor_invalidate_context(mir_context);
+static void* jube_host_mir_module_create(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: context_first_registry},
+                 checker.check_hosted_compiler_context_invalidates_cursors,
+                 "invalidate compiler cursors before MIR context release")
+    unowned_function_registry = """\\
+static bool jube_host_mir_cursor_track_function(
+static bool jube_host_mir_cursor_owns_function(
+static int jube_host_mir_function_select(
+MIR_get_item_func(
+jube_host_mir_cursor_owns_function(
+static int jube_host_mir_function_state_restore(
+static int jube_host_mir_item_function_create_typed_current(
+static int jube_host_mir_function_forward_create_current(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: unowned_function_registry},
+                 checker.check_hosted_compiler_function_handles_are_owner_checked,
+                 "function ownership before MIR lookup")
+    raw_state_registry = """\\
+struct JubeMirFunctionStateToken {};
+static void* jube_host_mir_state_token_register(
+static JubeMirStateTokenEntry* jube_host_mir_state_token_find(
+static void jube_host_mir_state_tokens_discard_slot(
+static int jube_host_mir_function_state_suspend(
+jube_host_mir_state_token_register(compiler_cursor, state)
+static int jube_host_mir_function_select(
+static int jube_host_mir_function_state_restore(
+JubeMirFunctionStateToken* state = (JubeMirFunctionStateToken*)state_token;
+static int jube_host_mir_function_register_lookup_current(
+static void jube_host_mir_compiler_cursor_destroy(
+jube_host_mir_state_tokens_discard_slot(
+static void jube_host_mir_debug_dump_if_enabled(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: raw_state_registry},
+                 checker.check_hosted_compiler_state_tokens_are_opaque,
+                 "raw compiler state token")
+    unowned_label_registry = """\\
+static bool jube_host_mir_cursor_track_label(
+static bool jube_host_mir_cursor_owns_label(
+static int jube_host_mir_label_create_current(
+jube_host_mir_cursor_track_label(
+static int jube_host_mir_instruction_emit_current(
+static int jube_host_mir_label_emit_current(
+jube_host_mir_label_emit(
+jube_host_mir_cursor_owns_label(
+static int jube_host_mir_function_frame_runtime_load_current(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: unowned_label_registry},
+                 checker.check_hosted_compiler_labels_are_owner_checked,
+                 "label ownership before emission")
+    unowned_direct_call_registry = """\\
+static bool jube_host_mir_cursor_track_prototype(
+static bool jube_host_mir_cursor_owns_prototype(
+static bool jube_host_mir_cursor_owns_function_item(
+static int jube_host_mir_local_direct_call_emit(
+MIR_new_ref_op(
+jube_host_mir_cursor_owns_prototype(
+jube_host_mir_cursor_owns_function_item(
+static int jube_host_mir_item_return_emit(
+static int jube_host_mir_local_direct_call_prototype_get_or_create(
+jube_host_mir_cursor_track_prototype(
+static int jube_host_mir_function_state_suspend(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: unowned_direct_call_registry},
+                 checker.check_hosted_compiler_direct_call_handles_are_owner_checked,
+                 "direct-call ownership before MIR operands")
+    raw_module_registry = """\\
+static void* jube_host_mir_module_register(
+static MIR_module_t jube_host_mir_module_from_handle(
+static void jube_host_mir_module_unregister(
+static void jube_host_mir_modules_invalidate_context(
+static void* jube_host_mir_module_create(
+MIR_new_module(
+static int jube_host_mir_module_finalize_and_load(
+MIR_finish_module(
+static void* jube_host_mir_function_lookup(
+"""
+    with_sources(checker, {checker.JUBE_REGISTRY: raw_module_registry},
+                 checker.check_hosted_compiler_module_handles_are_owner_checked,
+                 "register opaque compiler module handles")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: "MIR_new_mem_op("},
+                 checker.check_python_lowering_has_no_raw_memory_or_call_construction,
+                 "raw MIR memory/call construction")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: "MIR_new_insn("},
+                 checker.check_python_lowering_has_no_raw_instruction_construction,
+                 "raw MIR instruction construction")
+    with_sources(checker, {checker.PYTHON_MIR_LOWERING: "MIR_new_reg_op("},
+                 checker.check_python_lowering_has_no_raw_call_operand_construction,
+                 "raw MIR call operand construction")
     manifest = """{
   \"host_build_id\": \"stale-host\"
 }\n"""

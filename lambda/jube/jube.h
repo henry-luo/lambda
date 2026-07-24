@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260724-h7e17"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260724-h7e38"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -69,16 +69,74 @@ enum JubeCompilerInstructionOpcode {
     JUBE_COMPILER_INSN_BRANCH_FALSE = 6,
     JUBE_COMPILER_INSN_BRANCH_NOT_EQUAL_I64_IMMEDIATE = 7,
     JUBE_COMPILER_INSN_BRANCH_GREATER_EQUAL_I64_IMMEDIATE = 8,
+    JUBE_COMPILER_INSN_I64_OPERATION = 9,
+    JUBE_COMPILER_INSN_MOVE_I64_REFERENCE = 10,
+    JUBE_COMPILER_INSN_F64_OPERATION = 11,
+};
+
+enum JubeCompilerI64Operation {
+    JUBE_COMPILER_I64_LSH = 0,
+    JUBE_COMPILER_I64_RSH = 1,
+    JUBE_COMPILER_I64_AND = 2,
+    JUBE_COMPILER_I64_OR = 3,
+    JUBE_COMPILER_I64_LE = 4,
+    JUBE_COMPILER_I64_GE = 5,
+    JUBE_COMPILER_I64_ADD = 6,
+    JUBE_COMPILER_I64_SUB = 7,
+    JUBE_COMPILER_I64_MUL = 8,
+    JUBE_COMPILER_I64_DIV = 9,
+    JUBE_COMPILER_I64_MOD = 10,
+    JUBE_COMPILER_I64_XOR = 11,
+    JUBE_COMPILER_I64_NEG = 12,
+    JUBE_COMPILER_I64_LT = 13,
+    JUBE_COMPILER_I64_GT = 14,
+    JUBE_COMPILER_I64_EQ = 15,
+    JUBE_COMPILER_I64_NE = 16,
+};
+
+enum JubeCompilerF64Operation {
+    JUBE_COMPILER_F64_FROM_I64 = 0,
+    JUBE_COMPILER_F64_DIV = 1,
+    JUBE_COMPILER_F64_ADD = 2,
+    JUBE_COMPILER_F64_SUB = 3,
+    JUBE_COMPILER_F64_MUL = 4,
+    JUBE_COMPILER_F64_LT = 5,
+    JUBE_COMPILER_F64_LE = 6,
+    JUBE_COMPILER_F64_GT = 7,
+    JUBE_COMPILER_F64_GE = 8,
+    JUBE_COMPILER_F64_EQ = 9,
+    JUBE_COMPILER_F64_NE = 10,
+};
+
+// Calls use only semantic register/immediate operands. The guest cannot
+// smuggle a MIR operand, memory reference, label, or import item through this
+// descriptor; import resolution and all call-effect bookkeeping stay host-side.
+enum JubeCompilerCallOperandKind {
+    JUBE_COMPILER_CALL_OPERAND_REGISTER = 0,
+    JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE = 1,
+    JUBE_COMPILER_CALL_OPERAND_F64_IMMEDIATE = 2,
 };
 
 typedef struct JubeCompilerInstruction {
     uint32_t opcode;
     uint32_t destination_register;
     uint32_t source_register;
+    uint32_t right_register;
+    uint32_t operation;
     int64_t immediate_i64;
     double immediate_f64;
     void* target_label;
+    void* source_reference;
 } JubeCompilerInstruction;
+
+typedef struct JubeCompilerCallOperand {
+    uint8_t value_kind;
+    uint8_t operand_kind;
+    uint16_t reserved;
+    uint32_t register_id;
+    int64_t immediate_i64;
+    double immediate_f64;
+} JubeCompilerCallOperand;
 typedef struct JubeLanguageDef JubeLanguageDef;
 typedef struct JubeLanguageSession JubeLanguageSession;
 typedef struct JubeLanguageSessionConfig JubeLanguageSessionConfig;
@@ -346,6 +404,9 @@ struct JubeHostDataAPI {
     // registration; a hosted language receives only the resulting Item.
     Item (*map_new)(void* session);
     Item (*function_new)(void* session, void* function_ptr, int param_count);
+    // Names may carry explicit source slices; preserve their byte length so a
+    // guest never needs a host string allocator or NUL-terminated workaround.
+    Item (*name_from_utf8_n)(void* session, const char* text, size_t length);
 };
 
 struct JubeHostValueAPI {
@@ -758,6 +819,105 @@ struct JubeGuestExecutionAPI {
     // Places a previously host-created opaque label in the current function.
     // The guest cannot manufacture label instructions or observe their layout.
     int (*mir_label_emit)(void* mir_context, void* function_item, void* label);
+    // Emits a runtime import through the shared host call builder. The compiler
+    // cursor is private implementation state borrowed only for this call; the
+    // host resolves import metadata, roots safepoint values, tracks exceptions,
+    // and adopts scalar results before returning an opaque register identity.
+    int (*mir_runtime_import_call_emit)(void* compiler_cursor,
+        const char* function_name, uint8_t result_kind,
+        uint32_t operand_count, const JubeCompilerCallOperand* operands,
+        bool discard_result, uint32_t* out_result_register);
+    // Emits an already-resolved synchronous local call. Prototype and target
+    // are context-bound opaque handles; arguments stay register/immediate
+    // descriptors and the host retains the borrowed-frame call classification.
+    int (*mir_local_direct_call_emit)(void* compiler_cursor,
+        const char* function_name, void* prototype_item, void* target_item,
+        uint32_t result_register, uint32_t operand_count,
+        const JubeCompilerCallOperand* operands);
+    // Emits an Item return through the active host-owned frame policy. The
+    // host selects the frame return-register jump or a direct MIR return.
+    int (*mir_item_return_emit)(void* compiler_cursor,
+        const JubeCompilerCallOperand* value);
+    // Completes a public Item-return frame after lowering has selected its
+    // semantic return paths. Root write-back, scalar homes, prologue patching,
+    // overflow handling, and terminal returns remain host-owned.
+    int (*mir_function_frame_finalize)(void* compiler_cursor,
+        const char* debug_name);
+    // Writes the guest MIR developer artifact when host instrumentation is
+    // enabled. The host owns both the dump policy and output path, so a guest
+    // never imports compiler diagnostics or chooses arbitrary filesystem paths.
+    void (*mir_debug_dump_if_enabled)(void* mir_context);
+    // Records a possible Item call result for the active frame. The host owns
+    // root-candidate storage and its layout; guests supply only the opaque
+    // compiler cursor and register identity.
+    int (*mir_frame_root_candidate_note)(void* compiler_cursor,
+        uint32_t register_id);
+    // Starts the standard public Item-return frame. The host owns every
+    // frame field, including root/scalar bases and entry policy.
+    int (*mir_function_frame_begin)(void* compiler_cursor,
+        uint32_t runtime_register);
+    // Binds the caller-provided scalar-return home to the active public frame.
+    // The register identity is opaque; the frame policy remains host-owned.
+    int (*mir_function_frame_scalar_return_home_set)(void* compiler_cursor,
+        uint32_t home_register);
+    // Initializes/destroys the host-owned cache used by shared runtime imports
+    // and guest-local direct-call prototypes.
+    int (*mir_compiler_import_cache_init)(void* compiler_cursor,
+        uint32_t initial_capacity);
+    void (*mir_compiler_import_cache_destroy)(void* compiler_cursor);
+    // Returns a cached or newly-created local direct-call prototype. The cache
+    // key and parameter descriptors are guest semantics; MIR item ownership is
+    // entirely host-side.
+    int (*mir_local_direct_call_prototype_get_or_create)(void* compiler_cursor,
+        const char* cache_key, const char* prototype_name,
+        uint32_t parameter_count, const uint8_t* parameter_kinds,
+        void** out_prototype_item);
+    // Saves, selects, and restores the host-owned current-function state.
+    // A saved-state token is opaque and consumed by restore.
+    int (*mir_function_state_suspend)(void* compiler_cursor,
+        void** out_state_token);
+    int (*mir_function_select)(void* compiler_cursor, void* function_item,
+        void* function);
+    int (*mir_function_state_restore)(void* compiler_cursor,
+        void* state_token);
+    // Looks up an argument register in the currently selected function and
+    // records it for host-owned call/root analysis.
+    int (*mir_function_register_lookup_current)(void* compiler_cursor,
+        const char* register_name, uint32_t* out_register);
+    // Cursor-only lowering helpers keep the current context/function and
+    // register-name counter private to the host.
+    int (*mir_function_register_create_current)(void* compiler_cursor,
+        const char* prefix, uint8_t value_kind, uint32_t* out_register);
+    int (*mir_label_create_current)(void* compiler_cursor, void** out_label);
+    int (*mir_instruction_emit_current)(void* compiler_cursor,
+        const JubeCompilerInstruction* instruction);
+    int (*mir_label_emit_current)(void* compiler_cursor, void* label);
+    int (*mir_function_frame_runtime_load_current)(void* compiler_cursor,
+        void* frame_runtime_slot, uint32_t* out_runtime_register);
+    void (*mir_function_finish_current)(void* compiler_cursor);
+    // Current-cursor construction/lifecycle helpers keep the MIR context
+    // private while returning only context-bound opaque handles.
+    int (*mir_item_function_create_typed_current)(void* compiler_cursor,
+        const char* function_name, uint32_t parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        void** out_function_item, void** out_function);
+    int (*mir_function_forward_create_current)(void* compiler_cursor,
+        const char* function_name, void** out_function_item);
+    int (*mir_module_finalize_and_load_current)(void* compiler_cursor,
+        void* mir_module);
+    void* (*mir_function_lookup_current)(void* compiler_cursor,
+        const char* function_name);
+    // Allocates and binds a caller-owned scalar result home in the active
+    // host frame. The guest receives only its logical identity and address.
+    int (*mir_scalar_home_create_current)(void* compiler_cursor,
+        int32_t* out_home_id, uint32_t* out_address_register);
+    int (*mir_scalar_home_bind_current)(void* compiler_cursor,
+        int32_t home_id, uint32_t value_register);
+    // Creates the host-owned shared compiler cursor for one MIR context. The
+    // cursor retains emitter layout, call metadata wiring, and frame state.
+    int (*mir_compiler_cursor_create)(void* mir_context,
+        void** out_compiler_cursor);
+    void (*mir_compiler_cursor_destroy)(void* compiler_cursor);
 };
 
 // Module graph operations retain host path/state ownership. The execution
@@ -909,7 +1069,36 @@ struct JubeLanguageDef {
 #define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_label_create)
 #define JUBE_GUEST_EXECUTION_API_H7C_LABEL_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_instruction_emit)
 #define JUBE_GUEST_EXECUTION_API_H7C_INSTRUCTION_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_label_emit)
-#define JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE sizeof(JubeGuestExecutionAPI)
+#define JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_runtime_import_call_emit)
+#define JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CALL_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_local_direct_call_emit)
+#define JUBE_GUEST_EXECUTION_API_H7C_LOCAL_DIRECT_CALL_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_item_return_emit)
+#define JUBE_GUEST_EXECUTION_API_H7C_ITEM_RETURN_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_function_frame_finalize)
+#define JUBE_GUEST_EXECUTION_API_H7C_FRAME_FINALIZE_SIZE offsetof(JubeGuestExecutionAPI, mir_debug_dump_if_enabled)
+#define JUBE_GUEST_EXECUTION_API_H7C_DEBUG_DUMP_SIZE offsetof(JubeGuestExecutionAPI, mir_frame_root_candidate_note)
+#define JUBE_GUEST_EXECUTION_API_H7C_ROOT_CANDIDATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_frame_begin)
+#define JUBE_GUEST_EXECUTION_API_H7C_FRAME_BEGIN_SIZE offsetof(JubeGuestExecutionAPI, mir_function_frame_scalar_return_home_set)
+#define JUBE_GUEST_EXECUTION_API_H7C_FRAME_SCALAR_HOME_SIZE offsetof(JubeGuestExecutionAPI, mir_compiler_import_cache_init)
+#define JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CACHE_INIT_SIZE offsetof(JubeGuestExecutionAPI, mir_compiler_import_cache_destroy)
+#define JUBE_GUEST_EXECUTION_API_H7C_IMPORT_CACHE_DESTROY_SIZE offsetof(JubeGuestExecutionAPI, mir_local_direct_call_prototype_get_or_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_LOCAL_PROTO_CACHE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_state_suspend)
+#define JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_STATE_SUSPEND_SIZE offsetof(JubeGuestExecutionAPI, mir_function_select)
+#define JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_SELECT_SIZE offsetof(JubeGuestExecutionAPI, mir_function_state_restore)
+#define JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_STATE_RESTORE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_register_lookup_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_REGISTER_LOOKUP_SIZE offsetof(JubeGuestExecutionAPI, mir_function_register_create_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_REGISTER_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_label_create_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_LABEL_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_instruction_emit_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_INSTRUCTION_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_label_emit_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_LABEL_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_function_frame_runtime_load_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FRAME_RUNTIME_LOAD_SIZE offsetof(JubeGuestExecutionAPI, mir_function_finish_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FUNCTION_FINISH_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_create_typed_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_TYPED_FUNCTION_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_forward_create_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FORWARD_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_module_finalize_and_load_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_MODULE_FINALIZE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_lookup_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_FUNCTION_LOOKUP_SIZE offsetof(JubeGuestExecutionAPI, mir_scalar_home_create_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_SCALAR_HOME_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_scalar_home_bind_current)
+#define JUBE_GUEST_EXECUTION_API_H7C_CURRENT_SCALAR_HOME_BIND_SIZE offsetof(JubeGuestExecutionAPI, mir_compiler_cursor_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_COMPILER_CURSOR_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_compiler_cursor_destroy)
+#define JUBE_GUEST_EXECUTION_API_H7C_COMPILER_CURSOR_DESTROY_SIZE sizeof(JubeGuestExecutionAPI)
 #define JUBE_MODULE_GRAPH_API_V1_SIZE sizeof(JubeModuleGraphAPI)
 #define JUBE_HOST_LANG_API_V1_SIZE offsetof(JubeHostLangAPI, source)
 #define JUBE_HOST_LANG_API_H7A_SIZE offsetof(JubeHostLangAPI, execution)
@@ -924,7 +1113,8 @@ struct JubeLanguageDef {
 #define JUBE_HOST_DATA_API_CLOSURE_ENV_SIZE offsetof(JubeHostDataAPI, item_slots_store)
 #define JUBE_HOST_DATA_API_SLOT_STORE_SIZE offsetof(JubeHostDataAPI, item_slots_load)
 #define JUBE_HOST_DATA_API_SLOT_LOAD_SIZE offsetof(JubeHostDataAPI, map_new)
-#define JUBE_HOST_DATA_API_FULL_SIZE sizeof(JubeHostDataAPI)
+#define JUBE_HOST_DATA_API_FULL_SIZE offsetof(JubeHostDataAPI, name_from_utf8_n)
+#define JUBE_HOST_DATA_API_H7E30_NAME_SIZE sizeof(JubeHostDataAPI)
 #define JUBE_HOST_API_DATA_SIZE sizeof(JubeHostAPI)
 
 struct JubeModuleDef {

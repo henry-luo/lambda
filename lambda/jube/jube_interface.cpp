@@ -1209,25 +1209,61 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     return 0;
 }
 
+static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_roots) {
+    if (!trec) return;
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (unregister_roots && host && host->gc) {
+        if (trec->prototype_rooted) host->gc->unregister_root(&trec->prototype.item);
+        for (int j = 0; j < trec->member_count; j++) {
+            JubeMemberRecord* rec = &trec->members[j];
+            if (rec->method_fn_rooted) host->gc->unregister_root(&rec->method_fn.item);
+        }
+    }
+    for (int j = 0; j < trec->member_count; j++) {
+        JubeMemberRecord* rec = &trec->members[j];
+        if (rec->snake_name) mem_free(rec->snake_name);
+        if (rec->camel_name) mem_free(rec->camel_name);
+        if (rec->const_str) mem_free(rec->const_str);
+    }
+    if (trec->members) mem_free(trec->members);
+    if (trec->index) hashmap_free(trec->index);
+    mem_free(trec);
+}
+
+static bool jube_interface_record_belongs_to_module(const JubeTypeRecord* trec,
+                                                     const JubeModuleDef* module) {
+    if (!trec || !module || !module->types || module->type_count <= 0) return false;
+    for (int32_t i = 0; i < module->type_count; i++) {
+        if (trec->type == &module->types[i]) return true;
+    }
+    return false;
+}
+
+extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
+    for (int i = 0; i < s_type_record_count;) {
+        JubeTypeRecord* trec = s_type_records[i];
+        if (!jube_interface_record_belongs_to_module(trec, module)) {
+            i++;
+            continue;
+        }
+        // Registration rollback must release module-owned compiled records
+        // before dlclose, because the type descriptors live in that image.
+        jube_interface_release_record(trec, true);
+        s_type_record_count--;
+        s_type_records[i] = s_type_records[s_type_record_count];
+        s_type_records[s_type_record_count] = NULL;
+    }
+}
+
 // process-exit teardown: frees the compiled records so the memtrack zero-leak
 // gate stays honest. Runs after GC-heap destruction, so rooted Items inside
 // records are already dead memory — only the C-side allocations are released.
 extern "C" void jube_interface_cleanup(void) {
-    for (int i = 0; i < s_type_record_count; i++) {
-        JubeTypeRecord* trec = s_type_records[i];
-        if (!trec) continue;
-        for (int j = 0; j < trec->member_count; j++) {
-            JubeMemberRecord* rec = &trec->members[j];
-            if (rec->snake_name) mem_free(rec->snake_name);
-            if (rec->camel_name) mem_free(rec->camel_name);
-            if (rec->const_str) mem_free(rec->const_str);
-        }
-        if (trec->members) mem_free(trec->members);
-        if (trec->index) hashmap_free(trec->index);
-        mem_free(trec);
-        s_type_records[i] = NULL;
+    while (s_type_record_count > 0) {
+        int index = --s_type_record_count;
+        jube_interface_release_record(s_type_records[index], false);
+        s_type_records[index] = NULL;
     }
-    s_type_record_count = 0;
 }
 
 static int jube_compile_types_in(const JubeModuleDef* module, const char* source,
@@ -1296,5 +1332,10 @@ extern "C" int jube_compile_module_interface(const JubeModuleDef* module) {
 
     ts_tree_delete(tree);
     ts_parser_delete(parser);
+    if (rc != 0) {
+        // A multi-type declaration may compile a prefix before a later type
+        // fails; leave no dispatch records visible from that failed module.
+        jube_interface_remove_module(module);
+    }
     return rc;
 }

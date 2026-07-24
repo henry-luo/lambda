@@ -4,6 +4,8 @@
 #include "../runtime/ast.hpp"
 #include "../runtime/module_registry.h"
 #include "../runtime/transpiler.hpp"
+#include "../runtime/mir_emitter_shared.hpp"
+#include "../runtime/mir_dump.h"
 #include "../runtime/sys_func_registry.h"
 #include "../format/format.h"
 #include "../input/css/dom_element.hpp"
@@ -17,6 +19,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/arraylist.h"
 #include "../runtime/gc/gc_heap.h"
 #include <string.h>
 #include <stdlib.h>
@@ -31,7 +34,11 @@
 #endif
 
 #define JUBE_STATIC_MODULE_CAPACITY 64
+#define JUBE_MANIFEST_DEPENDENCY_CAPACITY 32
+#define JUBE_MANIFEST_PATH_CAPACITY 1024
 #define JUBE_GUEST_EXECUTION_MAGIC 0x4A474558u
+#define JUBE_MIR_CURSOR_INDEX_BITS 16u
+#define JUBE_MIR_CURSOR_INDEX_MASK ((uintptr_t)((1u << JUBE_MIR_CURSOR_INDEX_BITS) - 1u))
 
 typedef struct JubeStaticModuleEntry {
     const JubeModuleDef* module;
@@ -44,6 +51,433 @@ static int jube_static_modules_count = 0;
 static bool jube_dynamic_modules_from_env_loaded = false;
 static bool jube_manifest_paths_scanned = false;
 static char jube_host_module_root[1024];
+static char jube_manifest_loading_paths[JUBE_MANIFEST_DEPENDENCY_CAPACITY][JUBE_MANIFEST_PATH_CAPACITY];
+static int jube_manifest_loading_depth = 0;
+
+struct JubeMirCursorSlot {
+    MirEmitter* emitter;
+    uint32_t generation;
+    ArrayList* function_handles;
+    ArrayList* label_handles;
+    ArrayList* prototype_handles;
+};
+
+struct JubeMirModuleSlot {
+    MIR_module_t module;
+    MIR_context_t context;
+    uint32_t generation;
+};
+
+struct JubeMirFunctionHandle {
+    MIR_item_t item;
+    MIR_func_t function;
+};
+
+struct JubeMirLabelHandle {
+    MIR_label_t label;
+};
+
+struct JubeMirPrototypeHandle {
+    MIR_item_t item;
+};
+
+struct JubeMirFunctionStateToken {
+    MIR_item_t function_item;
+    MIR_func_t function;
+    MirFunctionArgumentState arguments;
+};
+
+struct JubeMirStateTokenEntry {
+    void* token;
+    JubeMirCursorSlot* owner_slot;
+    JubeMirFunctionStateToken* state;
+};
+
+static ArrayList* jube_mir_cursor_slots = NULL;
+static ArrayList* jube_mir_module_slots = NULL;
+static ArrayList* jube_mir_state_tokens = NULL;
+static uintptr_t jube_mir_state_token_next = 1;
+
+// Context identities remain raw host-owned values until every compatibility
+// service can be moved to the same tagged registry without changing teardown.
+static MIR_context_t jube_host_mir_context_from_handle(void* mir_context) {
+    return (MIR_context_t)mir_context;
+}
+
+static MIR_context_t jube_host_mir_context_from_argument(void* mir_context) {
+    return (MIR_context_t)mir_context;
+}
+
+static void jube_host_mir_context_slots_cleanup(void) {
+}
+
+static JubeMirModuleSlot* jube_host_mir_module_slot(void* mir_module) {
+    uintptr_t token = (uintptr_t)mir_module;
+    uint32_t index = (uint32_t)(token & JUBE_MIR_CURSOR_INDEX_MASK);
+    uint32_t generation = (uint32_t)(token >> JUBE_MIR_CURSOR_INDEX_BITS);
+    if (!index || !generation || !jube_mir_module_slots ||
+            index > (uint32_t)jube_mir_module_slots->length) return NULL;
+    JubeMirModuleSlot* slot = (JubeMirModuleSlot*)
+        jube_mir_module_slots->data[index - 1];
+    return slot && slot->module && slot->generation == generation ? slot : NULL;
+}
+
+static void* jube_host_mir_module_register(MIR_context_t context, MIR_module_t module) {
+    if (!context || !module) return NULL;
+    if (!jube_mir_module_slots) {
+        jube_mir_module_slots = arraylist_new(8);
+        if (!jube_mir_module_slots) return NULL;
+    }
+    for (int i = 0; i < jube_mir_module_slots->length; i++) {
+        JubeMirModuleSlot* slot = (JubeMirModuleSlot*)jube_mir_module_slots->data[i];
+        if (!slot || slot->module) continue;
+        slot->generation++;
+        if (slot->generation == 0) slot->generation++;
+        slot->context = context;
+        slot->module = module;
+        return (void*)(uintptr_t)(((uint64_t)slot->generation <<
+            JUBE_MIR_CURSOR_INDEX_BITS) | (uint64_t)(i + 1));
+    }
+    if (jube_mir_module_slots->length >= (int)JUBE_MIR_CURSOR_INDEX_MASK) return NULL;
+    JubeMirModuleSlot* slot = (JubeMirModuleSlot*)mem_calloc(1,
+        sizeof(JubeMirModuleSlot), MEM_CAT_SYSTEM);
+    if (!slot) return NULL;
+    slot->context = context;
+    slot->module = module;
+    slot->generation = 1;
+    if (!arraylist_append(jube_mir_module_slots, slot)) {
+        mem_free(slot);
+        return NULL;
+    }
+    int index = jube_mir_module_slots->length;
+    return (void*)(uintptr_t)(((uint64_t)slot->generation <<
+        JUBE_MIR_CURSOR_INDEX_BITS) | (uint64_t)index);
+}
+
+static MIR_module_t jube_host_mir_module_from_handle(MIR_context_t context,
+        void* mir_module) {
+    JubeMirModuleSlot* slot = jube_host_mir_module_slot(mir_module);
+    return slot && slot->context == context ? slot->module : NULL;
+}
+
+static void jube_host_mir_module_unregister(void* mir_module) {
+    JubeMirModuleSlot* slot = jube_host_mir_module_slot(mir_module);
+    if (slot) {
+        slot->module = NULL;
+        slot->context = NULL;
+    }
+}
+
+static void jube_host_mir_modules_invalidate_context(MIR_context_t context) {
+    if (!context || !jube_mir_module_slots) return;
+    for (int i = 0; i < jube_mir_module_slots->length; i++) {
+        JubeMirModuleSlot* slot = (JubeMirModuleSlot*)jube_mir_module_slots->data[i];
+        if (slot && slot->module && slot->context == context) {
+            slot->module = NULL;
+            slot->context = NULL;
+        }
+    }
+}
+
+static void jube_host_mir_module_slots_cleanup(void) {
+    if (!jube_mir_module_slots) return;
+    for (int i = 0; i < jube_mir_module_slots->length; i++) {
+        mem_free(jube_mir_module_slots->data[i]);
+    }
+    arraylist_free(jube_mir_module_slots);
+    jube_mir_module_slots = NULL;
+}
+
+static JubeMirCursorSlot* jube_host_mir_cursor_slot(void* compiler_cursor) {
+    uintptr_t token = (uintptr_t)compiler_cursor;
+    uint32_t index = (uint32_t)(token & JUBE_MIR_CURSOR_INDEX_MASK);
+    uint32_t generation = (uint32_t)(token >> JUBE_MIR_CURSOR_INDEX_BITS);
+    if (!index || !generation || !jube_mir_cursor_slots ||
+            index > (uint32_t)jube_mir_cursor_slots->length) return NULL;
+    JubeMirCursorSlot* slot = (JubeMirCursorSlot*)
+        jube_mir_cursor_slots->data[index - 1];
+    return slot && slot->generation == generation ? slot : NULL;
+}
+
+static void* jube_host_mir_cursor_register(MirEmitter* emitter) {
+    if (!emitter) return NULL;
+    if (!jube_mir_cursor_slots) {
+        jube_mir_cursor_slots = arraylist_new(8);
+        if (!jube_mir_cursor_slots) return NULL;
+    }
+    for (int i = 0; i < jube_mir_cursor_slots->length; i++) {
+        JubeMirCursorSlot* slot = (JubeMirCursorSlot*)jube_mir_cursor_slots->data[i];
+        if (!slot || slot->emitter) continue;
+        slot->generation++;
+        if (slot->generation == 0) slot->generation++;
+        slot->emitter = emitter;
+        return (void*)(uintptr_t)(((uint64_t)slot->generation <<
+            JUBE_MIR_CURSOR_INDEX_BITS) | (uint64_t)(i + 1));
+    }
+    if (jube_mir_cursor_slots->length >= (int)JUBE_MIR_CURSOR_INDEX_MASK) return NULL;
+    JubeMirCursorSlot* slot = (JubeMirCursorSlot*)mem_calloc(1,
+        sizeof(JubeMirCursorSlot), MEM_CAT_SYSTEM);
+    if (!slot) return NULL;
+    slot->emitter = emitter;
+    slot->generation = 1;
+    if (!arraylist_append(jube_mir_cursor_slots, slot)) {
+        mem_free(slot);
+        return NULL;
+    }
+    int index = jube_mir_cursor_slots->length;
+    return (void*)(uintptr_t)(((uint64_t)slot->generation <<
+        JUBE_MIR_CURSOR_INDEX_BITS) | (uint64_t)index);
+}
+
+static MirEmitter* jube_host_mir_cursor_emitter(void* compiler_cursor) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    return slot ? slot->emitter : NULL;
+}
+
+static void jube_host_mir_cursor_unregister(void* compiler_cursor) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (slot) slot->emitter = NULL;
+}
+
+static void jube_host_mir_cursor_function_handles_cleanup(JubeMirCursorSlot* slot) {
+    if (!slot || !slot->function_handles) return;
+    for (int i = 0; i < slot->function_handles->length; i++) {
+        mem_free(slot->function_handles->data[i]);
+    }
+    arraylist_free(slot->function_handles);
+    slot->function_handles = NULL;
+}
+
+static void jube_host_mir_cursor_label_handles_cleanup(JubeMirCursorSlot* slot) {
+    if (!slot || !slot->label_handles) return;
+    for (int i = 0; i < slot->label_handles->length; i++) {
+        mem_free(slot->label_handles->data[i]);
+    }
+    arraylist_free(slot->label_handles);
+    slot->label_handles = NULL;
+}
+
+static void jube_host_mir_cursor_prototype_handles_cleanup(JubeMirCursorSlot* slot) {
+    if (!slot || !slot->prototype_handles) return;
+    for (int i = 0; i < slot->prototype_handles->length; i++) {
+        mem_free(slot->prototype_handles->data[i]);
+    }
+    arraylist_free(slot->prototype_handles);
+    slot->prototype_handles = NULL;
+}
+
+static bool jube_host_mir_cursor_track_function(void* compiler_cursor,
+        MIR_item_t item, MIR_func_t function) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !item) return false;
+    if (!slot->function_handles) {
+        slot->function_handles = arraylist_new(8);
+        if (!slot->function_handles) return false;
+    }
+    JubeMirFunctionHandle* handle = (JubeMirFunctionHandle*)mem_calloc(1,
+        sizeof(JubeMirFunctionHandle), MEM_CAT_SYSTEM);
+    if (!handle) return false;
+    handle->item = item;
+    handle->function = function;
+    if (!arraylist_append(slot->function_handles, handle)) {
+        mem_free(handle);
+        return false;
+    }
+    return true;
+}
+
+static bool jube_host_mir_cursor_owns_function(void* compiler_cursor,
+        MIR_item_t item, MIR_func_t function) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !slot->function_handles) return false;
+    for (int i = 0; i < slot->function_handles->length; i++) {
+        JubeMirFunctionHandle* handle = (JubeMirFunctionHandle*)
+            slot->function_handles->data[i];
+        if (handle && handle->item == item && handle->function == function) return true;
+    }
+    return false;
+}
+
+static bool jube_host_mir_cursor_owns_function_item(void* compiler_cursor,
+        MIR_item_t item) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !slot->function_handles) return false;
+    for (int i = 0; i < slot->function_handles->length; i++) {
+        JubeMirFunctionHandle* handle = (JubeMirFunctionHandle*)
+            slot->function_handles->data[i];
+        if (handle && handle->item == item) return true;
+    }
+    return false;
+}
+
+static bool jube_host_mir_cursor_track_prototype(void* compiler_cursor,
+        MIR_item_t item) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !item) return false;
+    if (!slot->prototype_handles) {
+        slot->prototype_handles = arraylist_new(8);
+        if (!slot->prototype_handles) return false;
+    }
+    JubeMirPrototypeHandle* handle = (JubeMirPrototypeHandle*)mem_calloc(1,
+        sizeof(JubeMirPrototypeHandle), MEM_CAT_SYSTEM);
+    if (!handle) return false;
+    handle->item = item;
+    if (!arraylist_append(slot->prototype_handles, handle)) {
+        mem_free(handle);
+        return false;
+    }
+    return true;
+}
+
+static bool jube_host_mir_cursor_owns_prototype(void* compiler_cursor,
+        MIR_item_t item) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !slot->prototype_handles) return false;
+    for (int i = 0; i < slot->prototype_handles->length; i++) {
+        JubeMirPrototypeHandle* handle = (JubeMirPrototypeHandle*)
+            slot->prototype_handles->data[i];
+        if (handle && handle->item == item) return true;
+    }
+    return false;
+}
+
+static bool jube_host_mir_cursor_track_label(void* compiler_cursor, MIR_label_t label) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !label) return false;
+    if (!slot->label_handles) {
+        slot->label_handles = arraylist_new(8);
+        if (!slot->label_handles) return false;
+    }
+    JubeMirLabelHandle* handle = (JubeMirLabelHandle*)mem_calloc(1,
+        sizeof(JubeMirLabelHandle), MEM_CAT_SYSTEM);
+    if (!handle) return false;
+    handle->label = label;
+    if (!arraylist_append(slot->label_handles, handle)) {
+        mem_free(handle);
+        return false;
+    }
+    return true;
+}
+
+static bool jube_host_mir_cursor_owns_label(void* compiler_cursor, MIR_label_t label) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !slot->label_handles) return false;
+    for (int i = 0; i < slot->label_handles->length; i++) {
+        JubeMirLabelHandle* handle = (JubeMirLabelHandle*)slot->label_handles->data[i];
+        if (handle && handle->label == label) return true;
+    }
+    return false;
+}
+
+static JubeMirStateTokenEntry* jube_host_mir_state_token_find(void* token,
+        int* out_index) {
+    if (out_index) *out_index = -1;
+    if (!token || !jube_mir_state_tokens) return NULL;
+    for (int i = 0; i < jube_mir_state_tokens->length; i++) {
+        JubeMirStateTokenEntry* entry = (JubeMirStateTokenEntry*)
+            jube_mir_state_tokens->data[i];
+        if (entry && entry->token == token) {
+            if (out_index) *out_index = i;
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static void jube_host_mir_state_token_remove_at(int index) {
+    if (!jube_mir_state_tokens || index < 0 || index >= jube_mir_state_tokens->length) return;
+    JubeMirStateTokenEntry* entry = (JubeMirStateTokenEntry*)
+        jube_mir_state_tokens->data[index];
+    if (entry) {
+        mem_free(entry->state);
+        mem_free(entry);
+    }
+    arraylist_remove(jube_mir_state_tokens, index);
+}
+
+static void jube_host_mir_state_tokens_discard_slot(JubeMirCursorSlot* slot) {
+    if (!slot || !jube_mir_state_tokens) return;
+    for (int i = jube_mir_state_tokens->length - 1; i >= 0; i--) {
+        JubeMirStateTokenEntry* entry = (JubeMirStateTokenEntry*)
+            jube_mir_state_tokens->data[i];
+        if (entry && entry->owner_slot == slot) jube_host_mir_state_token_remove_at(i);
+    }
+}
+
+static void jube_host_mir_state_tokens_cleanup(void) {
+    if (!jube_mir_state_tokens) return;
+    while (jube_mir_state_tokens->length > 0) {
+        jube_host_mir_state_token_remove_at(jube_mir_state_tokens->length - 1);
+    }
+    arraylist_free(jube_mir_state_tokens);
+    jube_mir_state_tokens = NULL;
+}
+
+static void* jube_host_mir_state_token_register(void* compiler_cursor,
+        JubeMirFunctionStateToken* state) {
+    JubeMirCursorSlot* slot = jube_host_mir_cursor_slot(compiler_cursor);
+    if (!slot || !slot->emitter || !state ||
+            jube_mir_state_token_next > (UINTPTR_MAX >> 1)) return NULL;
+    if (!jube_mir_state_tokens) {
+        jube_mir_state_tokens = arraylist_new(8);
+        if (!jube_mir_state_tokens) return NULL;
+    }
+    JubeMirStateTokenEntry* entry = (JubeMirStateTokenEntry*)mem_calloc(1,
+        sizeof(JubeMirStateTokenEntry), MEM_CAT_SYSTEM);
+    if (!entry) return NULL;
+    entry->token = (void*)(uintptr_t)((jube_mir_state_token_next++ << 1) | 1u);
+    entry->owner_slot = slot;
+    entry->state = state;
+    if (!arraylist_append(jube_mir_state_tokens, entry)) {
+        mem_free(entry);
+        return NULL;
+    }
+    return entry->token;
+}
+
+static void jube_host_mir_cursor_dispose(MirEmitter* emitter) {
+    if (!emitter) return;
+    if (emitter->import_cache) hashmap_free(emitter->import_cache);
+    em_frame_dispose(emitter);
+    mem_free(emitter);
+}
+
+static void jube_host_mir_cursor_invalidate_context(void* mir_context) {
+    if (!mir_context || !jube_mir_cursor_slots) return;
+    for (int i = 0; i < jube_mir_cursor_slots->length; i++) {
+        JubeMirCursorSlot* slot = (JubeMirCursorSlot*)jube_mir_cursor_slots->data[i];
+        if (!slot || !slot->emitter || slot->emitter->ctx != mir_context) continue;
+        // Context destruction invalidates every dependent cursor first, so a
+        // later guest call cannot follow its emitter into a finished MIR context.
+        jube_host_mir_cursor_dispose(slot->emitter);
+        slot->emitter = NULL;
+        jube_host_mir_state_tokens_discard_slot(slot);
+        jube_host_mir_cursor_function_handles_cleanup(slot);
+        jube_host_mir_cursor_label_handles_cleanup(slot);
+        jube_host_mir_cursor_prototype_handles_cleanup(slot);
+    }
+}
+
+static void jube_host_mir_cursor_slots_cleanup(void) {
+    if (jube_mir_cursor_slots) {
+        for (int i = 0; i < jube_mir_cursor_slots->length; i++) {
+            JubeMirCursorSlot* slot = (JubeMirCursorSlot*)jube_mir_cursor_slots->data[i];
+            if (slot) {
+                jube_host_mir_cursor_dispose(slot->emitter);
+                jube_host_mir_state_tokens_discard_slot(slot);
+                jube_host_mir_cursor_function_handles_cleanup(slot);
+                jube_host_mir_cursor_label_handles_cleanup(slot);
+                jube_host_mir_cursor_prototype_handles_cleanup(slot);
+            }
+            mem_free(slot);
+        }
+        arraylist_free(jube_mir_cursor_slots);
+        jube_mir_cursor_slots = NULL;
+    }
+    jube_host_mir_state_tokens_cleanup();
+    jube_host_mir_module_slots_cleanup();
+    jube_host_mir_context_slots_cleanup();
+}
 extern __thread EvalContext* context;
 extern "C" Context* _lambda_rt;
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -829,37 +1263,50 @@ static void jube_host_mir_context_destroy(void* mir_context) {
     if (!mir_context) return;
     // A hosted compiler may retain generated function pointers, so its own
     // lifetime policy decides when this host-owned context is released.
+    jube_host_mir_cursor_invalidate_context(mir_context);
+    jube_host_mir_modules_invalidate_context((MIR_context_t)mir_context);
     MIR_finish((MIR_context_t)mir_context);
 }
 
 static void* jube_host_mir_module_create(void* mir_context, const char* module_name) {
     if (!mir_context || !module_name || !*module_name) return NULL;
-    return MIR_new_module((MIR_context_t)mir_context, module_name);
+    MIR_module_t module = MIR_new_module((MIR_context_t)mir_context, module_name);
+    if (!module) return NULL;
+    // Module handles are host-table identities so a guest cannot pass a raw
+    // MIR module from another cursor or reuse one after finalization.
+    return jube_host_mir_module_register((MIR_context_t)mir_context, module);
 }
 
 static int jube_host_mir_module_finalize_and_load(void* mir_context, void* mir_module) {
     if (!mir_context || !mir_module) return -1;
-    MIR_finish_module((MIR_context_t)mir_context);
-    MIR_load_module((MIR_context_t)mir_context, (MIR_module_t)mir_module);
+    MIR_context_t context = (MIR_context_t)mir_context;
+    MIR_module_t module = jube_host_mir_module_from_handle(context, mir_module);
+    if (!module) return -1;
+    MIR_finish_module(context);
+    MIR_load_module(context, module);
+    jube_host_mir_module_unregister(mir_module);
     return 0;
 }
 
 static void* jube_host_mir_function_lookup(void* mir_context, const char* function_name) {
-    if (!mir_context || !function_name || !*function_name) return NULL;
-    return find_func((MIR_context_t)mir_context, function_name);
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_name || !*function_name) return NULL;
+    return find_func(context, function_name);
 }
 
 static void jube_host_mir_function_finish(void* mir_context) {
-    if (!mir_context) return;
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context) return;
     // The host owns MIR function lifecycle so a guest does not bind to MIR's
     // private context representation or finalization symbol.
-    MIR_finish_func((MIR_context_t)mir_context);
+    MIR_finish_func(context);
 }
 
 static int jube_host_mir_item_function_create(void* mir_context, const char* function_name,
         uint32_t parameter_count, const char* const* parameter_names,
         void** out_function_item, void** out_function) {
-    if (!mir_context || !function_name || !*function_name || !out_function_item ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_name || !*function_name || !out_function_item ||
         !out_function || (parameter_count > 0 && !parameter_names) ||
         parameter_count > 1024) return -1;
     MIR_var_t* parameters = NULL;
@@ -875,7 +1322,7 @@ static int jube_host_mir_item_function_create(void* mir_context, const char* fun
         }
     }
     MIR_type_t result_type = MIR_T_I64;
-    MIR_item_t function_item = MIR_new_func_arr((MIR_context_t)mir_context, function_name,
+    MIR_item_t function_item = MIR_new_func_arr(context, function_name,
         1, &result_type, parameter_count, parameters);
     if (parameters) mem_free(parameters);
     if (!function_item) return -1;
@@ -890,7 +1337,8 @@ static int jube_host_mir_item_function_create_typed(void* mir_context,
         const char* function_name, uint32_t parameter_count,
         const char* const* parameter_names, const uint8_t* parameter_kinds,
         void** out_function_item, void** out_function) {
-    if (!mir_context || !function_name || !*function_name || !out_function_item ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_name || !*function_name || !out_function_item ||
             !out_function || (parameter_count > 0 && (!parameter_names || !parameter_kinds)) ||
             parameter_count > 1024) return -1;
     MIR_var_t* parameters = NULL;
@@ -907,19 +1355,20 @@ static int jube_host_mir_item_function_create_typed(void* mir_context,
         }
     }
     MIR_type_t return_type = MIR_T_I64;
-    MIR_item_t item = MIR_new_func_arr((MIR_context_t)mir_context, function_name,
+    MIR_item_t item = MIR_new_func_arr(context, function_name,
         1, &return_type, parameter_count, parameters);
     if (parameters) mem_free(parameters);
     if (!item) return -1;
     *out_function_item = item;
-    *out_function = MIR_get_item_func((MIR_context_t)mir_context, item);
+    *out_function = MIR_get_item_func(context, item);
     return *out_function ? 0 : -1;
 }
 
 static int jube_host_mir_item_function_proto_create_typed(void* mir_context,
         const char* prototype_name, uint32_t parameter_count,
         const uint8_t* parameter_kinds, void** out_prototype_item) {
-    if (!mir_context || !prototype_name || !*prototype_name || !out_prototype_item ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !prototype_name || !*prototype_name || !out_prototype_item ||
             (parameter_count > 0 && !parameter_kinds) || parameter_count > 1024) return -1;
     MIR_var_t* parameters = NULL;
     char (*parameter_names)[16] = NULL;
@@ -944,7 +1393,7 @@ static int jube_host_mir_item_function_proto_create_typed(void* mir_context,
         }
     }
     MIR_type_t result_type = MIR_T_I64;
-    MIR_item_t prototype = MIR_new_proto_arr((MIR_context_t)mir_context,
+    MIR_item_t prototype = MIR_new_proto_arr(context,
         prototype_name, 1, &result_type, parameter_count, parameters);
     if (parameters) mem_free(parameters);
     if (parameter_names) mem_free(parameter_names);
@@ -956,13 +1405,13 @@ static int jube_host_mir_item_function_proto_create_typed(void* mir_context,
 static int jube_host_mir_function_frame_runtime_load(void* mir_context,
         void* function_item, void* function, void* frame_runtime_slot,
         uint32_t* out_runtime_register) {
-    if (!mir_context || !function_item || !function || !frame_runtime_slot ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_item || !function || !frame_runtime_slot ||
             !out_runtime_register || !jube_active_guest_execution ||
             !jube_active_guest_execution->activation_active ||
             frame_runtime_slot != (void*)&_lambda_rt) {
         return -1;
     }
-    MIR_context_t context = (MIR_context_t)mir_context;
     MIR_item_t item = (MIR_item_t)function_item;
     MIR_func_t target = MIR_get_item_func(context, item);
     if (!target || target != (MIR_func_t)function) return -1;
@@ -987,7 +1436,8 @@ static int jube_host_mir_function_frame_runtime_load(void* mir_context,
 static int jube_host_mir_function_register_create(void* mir_context, void* function,
         int* inout_register_counter, const char* prefix, uint8_t value_kind,
         uint32_t* out_register) {
-    if (!mir_context || !function || !inout_register_counter || !prefix || !*prefix ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function || !inout_register_counter || !prefix || !*prefix ||
             !out_register || *inout_register_counter < 0) return -1;
     MIR_type_t type = MIR_T_I64;
     if (value_kind == JUBE_COMPILER_VALUE_F64) type = MIR_T_D;
@@ -999,7 +1449,7 @@ static int jube_host_mir_function_register_create(void* mir_context, void* funct
     // Preserve the shared emitter's monotonic naming sequence while keeping
     // MIR register allocation and pointer-class coercion host-owned.
     (*inout_register_counter)++;
-    MIR_reg_t reg = MIR_new_func_reg((MIR_context_t)mir_context, (MIR_func_t)function,
+    MIR_reg_t reg = MIR_new_func_reg(context, (MIR_func_t)function,
         type, name);
     if (!reg) return -1;
     *out_register = (uint32_t)reg;
@@ -1007,8 +1457,9 @@ static int jube_host_mir_function_register_create(void* mir_context, void* funct
 }
 
 static int jube_host_mir_label_create(void* mir_context, void** out_label) {
-    if (!mir_context || !out_label) return -1;
-    MIR_label_t label = MIR_new_label((MIR_context_t)mir_context);
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !out_label) return -1;
+    MIR_label_t label = MIR_new_label(context);
     if (!label) return -1;
     *out_label = label;
     return 0;
@@ -1016,10 +1467,10 @@ static int jube_host_mir_label_create(void* mir_context, void** out_label) {
 
 static int jube_host_mir_instruction_emit(void* mir_context, void* function_item,
         const JubeCompilerInstruction* instruction) {
-    if (!mir_context || !function_item || !instruction) {
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_item || !instruction) {
         return -1;
     }
-    MIR_context_t context = (MIR_context_t)mir_context;
     MIR_item_t item = (MIR_item_t)function_item;
     MIR_insn_t emitted = NULL;
     switch (instruction->opcode) {
@@ -1040,6 +1491,12 @@ static int jube_host_mir_instruction_emit(void* mir_context, void* function_item
         emitted = MIR_new_insn(context, MIR_MOV,
             MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
             MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register));
+        break;
+    case JUBE_COMPILER_INSN_MOVE_I64_REFERENCE:
+        if (!instruction->destination_register || !instruction->source_reference) return -1;
+        emitted = MIR_new_insn(context, MIR_MOV,
+            MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
+            MIR_new_ref_op(context, (MIR_item_t)instruction->source_reference));
         break;
     case JUBE_COMPILER_INSN_MOVE_F64_REGISTER:
         if (!instruction->destination_register || !instruction->source_register) return -1;
@@ -1080,6 +1537,72 @@ static int jube_host_mir_instruction_emit(void* mir_context, void* function_item
             MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register),
             MIR_new_int_op(context, instruction->immediate_i64));
         break;
+    case JUBE_COMPILER_INSN_I64_OPERATION: {
+        if (!instruction->destination_register || !instruction->source_register) return -1;
+        MIR_insn_code_t opcode = MIR_MOV;
+        switch (instruction->operation) {
+        case JUBE_COMPILER_I64_LSH: opcode = MIR_LSH; break;
+        case JUBE_COMPILER_I64_RSH: opcode = MIR_RSH; break;
+        case JUBE_COMPILER_I64_AND: opcode = MIR_AND; break;
+        case JUBE_COMPILER_I64_OR: opcode = MIR_OR; break;
+        case JUBE_COMPILER_I64_LE: opcode = MIR_LE; break;
+        case JUBE_COMPILER_I64_GE: opcode = MIR_GE; break;
+        case JUBE_COMPILER_I64_ADD: opcode = MIR_ADD; break;
+        case JUBE_COMPILER_I64_SUB: opcode = MIR_SUB; break;
+        case JUBE_COMPILER_I64_MUL: opcode = MIR_MUL; break;
+        case JUBE_COMPILER_I64_DIV: opcode = MIR_DIV; break;
+        case JUBE_COMPILER_I64_MOD: opcode = MIR_MOD; break;
+        case JUBE_COMPILER_I64_XOR: opcode = MIR_XOR; break;
+        case JUBE_COMPILER_I64_NEG: opcode = MIR_NEG; break;
+        case JUBE_COMPILER_I64_LT: opcode = MIR_LT; break;
+        case JUBE_COMPILER_I64_GT: opcode = MIR_GT; break;
+        case JUBE_COMPILER_I64_EQ: opcode = MIR_EQ; break;
+        case JUBE_COMPILER_I64_NE: opcode = MIR_NE; break;
+        default: return -1;
+        }
+        if (instruction->operation == JUBE_COMPILER_I64_NEG) {
+            emitted = MIR_new_insn(context, opcode,
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register));
+            break;
+        }
+        MIR_op_t right = instruction->right_register
+            ? MIR_new_reg_op(context, (MIR_reg_t)instruction->right_register)
+            : MIR_new_int_op(context, instruction->immediate_i64);
+        emitted = MIR_new_insn(context, opcode,
+            MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
+            MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register), right);
+        break;
+    }
+    case JUBE_COMPILER_INSN_F64_OPERATION:
+        if (!instruction->destination_register || !instruction->source_register) return -1;
+        if (instruction->operation == JUBE_COMPILER_F64_FROM_I64) {
+            emitted = MIR_new_insn(context, MIR_I2D,
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register));
+        } else if (instruction->right_register) {
+            MIR_insn_code_t opcode = MIR_DDIV;
+            switch (instruction->operation) {
+            case JUBE_COMPILER_F64_ADD: opcode = MIR_DADD; break;
+            case JUBE_COMPILER_F64_SUB: opcode = MIR_DSUB; break;
+            case JUBE_COMPILER_F64_MUL: opcode = MIR_DMUL; break;
+            case JUBE_COMPILER_F64_DIV: opcode = MIR_DDIV; break;
+            case JUBE_COMPILER_F64_LT: opcode = MIR_DLT; break;
+            case JUBE_COMPILER_F64_LE: opcode = MIR_DLE; break;
+            case JUBE_COMPILER_F64_GT: opcode = MIR_DGT; break;
+            case JUBE_COMPILER_F64_GE: opcode = MIR_DGE; break;
+            case JUBE_COMPILER_F64_EQ: opcode = MIR_DEQ; break;
+            case JUBE_COMPILER_F64_NE: opcode = MIR_DNE; break;
+            default: return -1;
+            }
+            emitted = MIR_new_insn(context, opcode,
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->destination_register),
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->source_register),
+                MIR_new_reg_op(context, (MIR_reg_t)instruction->right_register));
+        } else {
+            return -1;
+        }
+        break;
     default:
         return -1;
     }
@@ -1091,18 +1614,556 @@ static int jube_host_mir_instruction_emit(void* mir_context, void* function_item
 }
 
 static int jube_host_mir_label_emit(void* mir_context, void* function_item, void* label) {
-    if (!mir_context || !function_item || !label) return -1;
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_item || !label) return -1;
     // Only the host materializes a label instruction, preserving the context
     // ownership of the opaque label identity across the module boundary.
-    MIR_append_insn((MIR_context_t)mir_context, (MIR_item_t)function_item,
+    MIR_append_insn(context, (MIR_item_t)function_item,
         (MIR_label_t)label);
     return 0;
 }
 
+static MIR_type_t jube_host_compiler_value_type(uint8_t value_kind) {
+    switch (value_kind) {
+    case JUBE_COMPILER_VALUE_I64: return MIR_T_I64;
+    case JUBE_COMPILER_VALUE_F64: return MIR_T_D;
+    case JUBE_COMPILER_VALUE_POINTER: return MIR_T_P;
+    default: return MIR_T_UNDEF;
+    }
+}
+
+static int jube_host_mir_runtime_import_call_emit(void* compiler_cursor,
+        const char* function_name, uint8_t result_kind, uint32_t operand_count,
+        const JubeCompilerCallOperand* operands, bool discard_result,
+        uint32_t* out_result_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func || !emitter->func_item ||
+            !function_name || !*function_name || operand_count > MIR_SHARED_MAX_CALL_ARGS ||
+            (operand_count > 0 && !operands) || (!discard_result && !out_result_register)) {
+        return -1;
+    }
+    MIR_type_t result_type = jube_host_compiler_value_type(result_kind);
+    if (result_type == MIR_T_UNDEF) return -1;
+    MIR_type_t argument_types[MIR_SHARED_MAX_CALL_ARGS] = {};
+    MIR_op_t argument_ops[MIR_SHARED_MAX_CALL_ARGS] = {};
+    for (uint32_t i = 0; i < operand_count; i++) {
+        const JubeCompilerCallOperand* operand = &operands[i];
+        argument_types[i] = jube_host_compiler_value_type(operand->value_kind);
+        if (argument_types[i] == MIR_T_UNDEF) return -1;
+        switch (operand->operand_kind) {
+        case JUBE_COMPILER_CALL_OPERAND_REGISTER:
+            if (!operand->register_id) return -1;
+            argument_ops[i] = MIR_new_reg_op(emitter->ctx, (MIR_reg_t)operand->register_id);
+            break;
+        case JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE:
+            if (argument_types[i] == MIR_T_D) return -1;
+            argument_ops[i] = MIR_new_int_op(emitter->ctx, operand->immediate_i64);
+            break;
+        case JUBE_COMPILER_CALL_OPERAND_F64_IMMEDIATE:
+            if (argument_types[i] != MIR_T_D) return -1;
+            argument_ops[i] = MIR_new_double_op(emitter->ctx, operand->immediate_f64);
+            break;
+        default:
+            return -1;
+        }
+    }
+    // The shared emitter owns import caching, exact safepoint roots, exception
+    // effects, and scalar-return adoption; bypassing it loses GC invariants.
+    if (discard_result) {
+        em_call_void_with_args(emitter, function_name, (int)operand_count,
+            argument_types, argument_ops, true);
+        return 0;
+    }
+    MIR_reg_t result = em_call_with_args(emitter, function_name, result_type,
+        (int)operand_count, argument_types, argument_ops, true);
+    if (!result) return -1;
+    *out_result_register = (uint32_t)result;
+    return 0;
+}
+
+static int jube_host_mir_local_direct_call_emit(void* compiler_cursor,
+        const char* function_name, void* prototype_item, void* target_item,
+        uint32_t result_register, uint32_t operand_count,
+        const JubeCompilerCallOperand* operands) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func_item || !function_name ||
+            !*function_name || !prototype_item || !target_item || !result_register ||
+            operand_count > 21 || (operand_count > 0 && !operands)) {
+        return -1;
+    }
+    // Direct-call items are private MIR references; reject foreign cursor
+    // provenance before building any MIR operand from them.
+    if (!jube_host_mir_cursor_owns_prototype(compiler_cursor,
+            (MIR_item_t)prototype_item) || !jube_host_mir_cursor_owns_function_item(
+            compiler_cursor, (MIR_item_t)target_item)) return -1;
+    MIR_op_t call_operands[24] = {};
+    call_operands[0] = MIR_new_ref_op(emitter->ctx, (MIR_item_t)prototype_item);
+    call_operands[1] = MIR_new_ref_op(emitter->ctx, (MIR_item_t)target_item);
+    call_operands[2] = MIR_new_reg_op(emitter->ctx, (MIR_reg_t)result_register);
+    for (uint32_t i = 0; i < operand_count; i++) {
+        const JubeCompilerCallOperand* operand = &operands[i];
+        switch (operand->operand_kind) {
+        case JUBE_COMPILER_CALL_OPERAND_REGISTER:
+            if (!operand->register_id) return -1;
+            call_operands[3 + i] = MIR_new_reg_op(emitter->ctx,
+                (MIR_reg_t)operand->register_id);
+            break;
+        case JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE:
+            call_operands[3 + i] = MIR_new_int_op(emitter->ctx, operand->immediate_i64);
+            break;
+        default:
+            return -1;
+        }
+    }
+    // A local target borrows its synchronous argument frame; classifying it as
+    // unknown would reject valid caller-owned scalar result homes.
+    em_emit_borrowed_call(emitter, function_name,
+        MIR_new_insn_arr(emitter->ctx, MIR_CALL, (int)(operand_count + 3), call_operands));
+    return 0;
+}
+
+static int jube_host_mir_item_return_emit(void* compiler_cursor,
+        const JubeCompilerCallOperand* value) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func_item || !value ||
+            value->value_kind != JUBE_COMPILER_VALUE_I64) return -1;
+    MIR_op_t operand = {};
+    switch (value->operand_kind) {
+    case JUBE_COMPILER_CALL_OPERAND_REGISTER:
+        if (!value->register_id) return -1;
+        operand = MIR_new_reg_op(emitter->ctx, (MIR_reg_t)value->register_id);
+        break;
+    case JUBE_COMPILER_CALL_OPERAND_I64_IMMEDIATE:
+        operand = MIR_new_int_op(emitter->ctx, value->immediate_i64);
+        break;
+    default:
+        return -1;
+    }
+    if (emitter->frame.active) {
+        em_emit_insn(emitter, MIR_new_insn(emitter->ctx, MIR_MOV,
+            MIR_new_reg_op(emitter->ctx, emitter->frame.return_reg), operand));
+        em_emit_insn(emitter, MIR_new_insn(emitter->ctx, MIR_JMP,
+            MIR_new_label_op(emitter->ctx, emitter->frame.return_label)));
+        return 0;
+    }
+    em_emit_insn(emitter, MIR_new_ret_insn(emitter->ctx, 1, operand));
+    return 0;
+}
+
+static int jube_host_mir_function_frame_finalize(void* compiler_cursor,
+        const char* debug_name) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func || !emitter->func_item ||
+            !emitter->frame.active || !debug_name || !*debug_name) {
+        return -1;
+    }
+    MirFrameState* frame = &emitter->frame;
+    frame->plan.debug_name = debug_name;
+    em_emit_label(emitter, frame->return_label);
+
+    MirRootWriteBackResult roots = {};
+    em_finalize_semantic_root_write_back(emitter, frame->root_base,
+        frame->anchor, false, 0, &frame->gc_candidates,
+        &frame->gc_candidate_count, &frame->gc_candidate_capacity,
+        &frame->gc_candidate_by_reg, &frame->gc_candidate_by_reg_capacity,
+        frame->gc_call_sites, frame->gc_call_site_count, &roots, debug_name);
+    frame->root_slot_count = roots.stable_slots + roots.scratch_slots;
+    frame->root_store_count = roots.inserted_stores;
+    em_finalize_scalar_homes(emitter);
+
+    if (frame->item_return) {
+        MIR_reg_t returned = frame->return_reg;
+        if (!frame->incoming_scalar_home) return -1;
+        returned = em_adopt_scalar_item(emitter, frame->scalar_return_mode,
+            returned, frame->runtime, offsetof(Context, side_number_top),
+            frame->number_base, frame->incoming_scalar_home);
+        if (returned != frame->return_reg) {
+            em_emit_insn(emitter, MIR_new_insn(emitter->ctx, MIR_MOV,
+                MIR_new_reg_op(emitter->ctx, frame->return_reg),
+                MIR_new_reg_op(emitter->ctx, returned)));
+        }
+    } else {
+        em_store_frame_top(emitter, frame->runtime,
+            offsetof(Context, side_number_top), frame->number_base);
+    }
+    if (frame->root_slot_count > 0) {
+        em_store_frame_top(emitter, frame->runtime,
+            offsetof(Context, side_root_top), frame->root_base);
+    }
+    em_emit_insn(emitter, MIR_new_ret_insn(emitter->ctx, 1,
+        MIR_new_reg_op(emitter->ctx, frame->return_reg)));
+
+    em_finalize_frame_prologue(emitter, frame->plan.entry_mode,
+        offsetof(Context, side_root_top), offsetof(Context, side_root_limit),
+        offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
+        offsetof(Context, side_root_commit_limit));
+    frame->active = false;
+    // Overflow handling follows frame teardown so the callee cannot observe
+    // transient root or scalar-home state from a completed guest frame.
+    em_call_void_1(emitter, "lambda_stack_overflow_error", MIR_T_P,
+        MIR_new_int_op(emitter->ctx, (int64_t)(uintptr_t)"py-side-stack"), true);
+    em_emit_insn(emitter, MIR_new_ret_insn(emitter->ctx, 1,
+        MIR_new_uint_op(emitter->ctx, (uint64_t)ITEM_NULL)));
+    em_finalize_function_metadata(emitter);
+    em_frame_dispose(emitter);
+    return 0;
+}
+
+static int jube_host_mir_note_root_candidate(MirEmitter* emitter,
+        MIR_reg_t register_id) {
+    if (!emitter || !emitter->frame.active || !register_id) return -1;
+    // Call-result roots belong to the active host frame so finalization sees
+    // the same candidate set that the shared call builder recorded.
+    return em_root_note_candidate(&emitter->frame.gc_candidates,
+        &emitter->frame.gc_candidate_count, &emitter->frame.gc_candidate_capacity,
+        &emitter->frame.gc_candidate_by_reg,
+        &emitter->frame.gc_candidate_by_reg_capacity, register_id,
+        JIT_VALUE_UNKNOWN, 0) ? 0 : -1;
+}
+
+static int jube_host_mir_frame_root_candidate_note(void* compiler_cursor,
+        uint32_t register_id) {
+    return jube_host_mir_note_root_candidate(jube_host_mir_cursor_emitter(compiler_cursor),
+        (MIR_reg_t)register_id);
+}
+
+static int jube_host_mir_function_frame_begin(void* compiler_cursor,
+        uint32_t runtime_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func || !emitter->func_item ||
+            !runtime_register) {
+        return -1;
+    }
+    // Reset before allocation so a guest cannot carry frame roots or scalar
+    // homes across independently lowered functions.
+    em_frame_dispose(emitter);
+    MirFrameState* frame = &emitter->frame;
+    frame->return_type = MIR_T_I64;
+    frame->item_return = true;
+    frame->scalar_return_mode = MIR_SCALAR_RETURN_DYNAMIC;
+    frame->runtime = (MIR_reg_t)runtime_register;
+    frame->root_base = em_new_reg(emitter, "py_root_frame", MIR_T_I64);
+    frame->number_base = em_new_reg(emitter, "py_number_frame", MIR_T_I64);
+    frame->anchor = em_new_label(emitter);
+    frame->return_label = em_new_label(emitter);
+    frame->return_reg = em_new_reg(emitter, "py_return_value", MIR_T_I64);
+    if (!frame->root_base || !frame->number_base || !frame->anchor ||
+            !frame->return_label || !frame->return_reg) {
+        em_frame_dispose(emitter);
+        return -1;
+    }
+    frame->plan.entry_kind = FN_ENTRY_PUBLIC_WRAPPER;
+    frame->plan.entry_mode = MIR_ENTRY_CHECKED;
+    frame->active = true;
+    em_emit_label(emitter, frame->anchor);
+    return 0;
+}
+
+static int jube_host_mir_function_frame_scalar_return_home_set(void* compiler_cursor,
+        uint32_t home_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->frame.active || !home_register) return -1;
+    MirFrameState* frame = &emitter->frame;
+    frame->incoming_scalar_home = (MIR_reg_t)home_register;
+    frame->plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    frame->plan.accepts_caller_scalar_home = true;
+    return 0;
+}
+
+static int jube_host_mir_compiler_import_cache_init(void* compiler_cursor,
+        uint32_t initial_capacity) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !initial_capacity || emitter->import_cache) return -1;
+    emitter->import_cache = em_import_cache_new((int)initial_capacity);
+    return emitter->import_cache ? 0 : -1;
+}
+
+static void jube_host_mir_compiler_import_cache_destroy(void* compiler_cursor) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->import_cache) return;
+    hashmap_free(emitter->import_cache);
+    emitter->import_cache = NULL;
+}
+
+static int jube_host_mir_local_direct_call_prototype_get_or_create(
+        void* compiler_cursor, const char* cache_key, const char* prototype_name,
+        uint32_t parameter_count, const uint8_t* parameter_kinds,
+        void** out_prototype_item) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->import_cache || !cache_key ||
+            !*cache_key || !prototype_name || !*prototype_name ||
+            !out_prototype_item || (parameter_count && !parameter_kinds)) {
+        return -1;
+    }
+    MirImportCacheEntry key = {};
+    int key_length = snprintf(key.name, sizeof(key.name), "%s", cache_key);
+    if (key_length <= 0 || (size_t)key_length >= sizeof(key.name)) return -1;
+    MirImportCacheEntry* cached =
+        (MirImportCacheEntry*)hashmap_get(emitter->import_cache, &key);
+    if (cached) {
+        if (!cached->entry.proto) return -1;
+        if (!jube_host_mir_cursor_owns_prototype(compiler_cursor,
+                cached->entry.proto)) return -1;
+        *out_prototype_item = cached->entry.proto;
+        return 0;
+    }
+    void* prototype_item = NULL;
+    if (jube_host_mir_item_function_proto_create_typed(emitter->ctx, prototype_name,
+            parameter_count, parameter_kinds, &prototype_item) != 0 || !prototype_item) {
+        return -1;
+    }
+    MirImportCacheEntry new_entry = {};
+    snprintf(new_entry.name, sizeof(new_entry.name), "%s", cache_key);
+    new_entry.entry.proto = (MIR_item_t)prototype_item;
+    hashmap_set(emitter->import_cache, &new_entry);
+    if (!jube_host_mir_cursor_track_prototype(compiler_cursor,
+            (MIR_item_t)prototype_item)) return -1;
+    *out_prototype_item = prototype_item;
+    return 0;
+}
+
+static int jube_host_mir_function_state_suspend(void* compiler_cursor,
+        void** out_state_token) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !out_state_token) return -1;
+    JubeMirFunctionStateToken* state = (JubeMirFunctionStateToken*)mem_calloc(1,
+        sizeof(JubeMirFunctionStateToken), MEM_CAT_SYSTEM);
+    if (!state) return -1;
+    state->function_item = emitter->func_item;
+    state->function = emitter->func;
+    state->arguments = em_function_arguments_suspend(emitter);
+    void* token = jube_host_mir_state_token_register(compiler_cursor, state);
+    if (!token) {
+        em_function_arguments_restore(emitter, state->arguments);
+        mem_free(state);
+        return -1;
+    }
+    *out_state_token = token;
+    return 0;
+}
+
+static int jube_host_mir_function_select(void* compiler_cursor,
+        void* function_item, void* function) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !function_item || !function) return -1;
+    MIR_item_t item = (MIR_item_t)function_item;
+    // MIR_get_item_func only checks the item kind, so host provenance must
+    // reject a handle from another cursor before it reaches MIR state.
+    if (!jube_host_mir_cursor_owns_function(compiler_cursor, item,
+            (MIR_func_t)function)) return -1;
+    MIR_func_t selected = MIR_get_item_func(emitter->ctx, item);
+    if (!selected || selected != (MIR_func_t)function) return -1;
+    emitter->func_item = item;
+    emitter->func = selected;
+    em_function_arguments_clear(emitter);
+    return 0;
+}
+
+static int jube_host_mir_function_state_restore(void* compiler_cursor,
+        void* state_token) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    int state_index = -1;
+    JubeMirStateTokenEntry* entry = jube_host_mir_state_token_find(state_token,
+        &state_index);
+    // The token registry validates opaque identity before examining private
+    // state, so forged or stale token values cannot dereference freed memory.
+    if (!emitter || !entry || entry->owner_slot != jube_host_mir_cursor_slot(
+            compiler_cursor) || !entry->state) return -1;
+    JubeMirFunctionStateToken* state = entry->state;
+    emitter->func_item = state->function_item;
+    emitter->func = state->function;
+    em_function_arguments_restore(emitter, state->arguments);
+    jube_host_mir_state_token_remove_at(state_index);
+    return 0;
+}
+
+static int jube_host_mir_function_register_lookup_current(void* compiler_cursor,
+        const char* register_name, uint32_t* out_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func || !register_name ||
+            !*register_name || !out_register) return -1;
+    MIR_reg_t register_id = MIR_reg(emitter->ctx, register_name, emitter->func);
+    if (!register_id) return -1;
+    // Argument identities feed the host liveness analysis; recording them here
+    // prevents guests from mutating the emitter's tracking array directly.
+    em_function_argument_register(emitter, register_id);
+    *out_register = (uint32_t)register_id;
+    return 0;
+}
+
+static int jube_host_mir_function_register_create_current(void* compiler_cursor,
+        const char* prefix, uint8_t value_kind, uint32_t* out_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func) return -1;
+    return jube_host_mir_function_register_create(emitter->ctx, emitter->func,
+        &emitter->reg_counter, prefix, value_kind, out_register);
+}
+
+static int jube_host_mir_label_create_current(void* compiler_cursor,
+        void** out_label) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !out_label) return -1;
+    if (jube_host_mir_label_create(emitter->ctx, out_label) != 0) return -1;
+    return jube_host_mir_cursor_track_label(compiler_cursor,
+        (MIR_label_t)*out_label) ? 0 : -1;
+}
+
+static int jube_host_mir_instruction_emit_current(void* compiler_cursor,
+        const JubeCompilerInstruction* instruction) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    return emitter && emitter->ctx && emitter->func_item
+        ? jube_host_mir_instruction_emit(emitter->ctx, emitter->func_item, instruction) : -1;
+}
+
+static int jube_host_mir_label_emit_current(void* compiler_cursor, void* label) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !emitter->func_item ||
+            !jube_host_mir_cursor_owns_label(compiler_cursor, (MIR_label_t)label)) {
+        return -1;
+    }
+    return jube_host_mir_label_emit(emitter->ctx, emitter->func_item, label);
+}
+
+static int jube_host_mir_function_frame_runtime_load_current(void* compiler_cursor,
+        void* frame_runtime_slot, uint32_t* out_runtime_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    return emitter && emitter->ctx && emitter->func_item && emitter->func
+        ? jube_host_mir_function_frame_runtime_load(emitter->ctx, emitter->func_item,
+            emitter->func, frame_runtime_slot, out_runtime_register) : -1;
+}
+
+static void jube_host_mir_function_finish_current(void* compiler_cursor) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (emitter && emitter->ctx) jube_host_mir_function_finish(emitter->ctx);
+}
+
+static int jube_host_mir_function_forward_create(void* mir_context,
+        const char* function_name, void** out_function_item);
+
+static int jube_host_mir_item_function_create_typed_current(void* compiler_cursor,
+        const char* function_name, uint32_t parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        void** out_function_item, void** out_function) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !out_function_item || !out_function) return -1;
+    if (jube_host_mir_item_function_create_typed(emitter->ctx, function_name,
+            parameter_count, parameter_names, parameter_kinds, out_function_item,
+            out_function) != 0) return -1;
+    return jube_host_mir_cursor_track_function(compiler_cursor,
+        (MIR_item_t)*out_function_item, (MIR_func_t)*out_function) ? 0 : -1;
+}
+
+static int jube_host_mir_function_forward_create_current(void* compiler_cursor,
+        const char* function_name, void** out_function_item) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->ctx || !out_function_item) return -1;
+    if (jube_host_mir_function_forward_create(emitter->ctx, function_name,
+            out_function_item) != 0) return -1;
+    return jube_host_mir_cursor_track_function(compiler_cursor,
+        (MIR_item_t)*out_function_item, NULL) ? 0 : -1;
+}
+
+static int jube_host_mir_module_finalize_and_load_current(void* compiler_cursor,
+        void* mir_module) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    return emitter && emitter->ctx
+        ? jube_host_mir_module_finalize_and_load(emitter->ctx, mir_module) : -1;
+}
+
+static void* jube_host_mir_function_lookup_current(void* compiler_cursor,
+        const char* function_name) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    return emitter && emitter->ctx
+        ? jube_host_mir_function_lookup(emitter->ctx, function_name) : NULL;
+}
+
+static int jube_host_mir_scalar_home_create_current(void* compiler_cursor,
+        int32_t* out_home_id, uint32_t* out_address_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !out_home_id || !out_address_register) return -1;
+    int home_id = em_scalar_home_new(emitter);
+    MIR_reg_t address = em_materialize_frame_ref(emitter,
+        em_scalar_home_ref(emitter, home_id));
+    if (home_id <= 0 || !address) return -1;
+    // The active frame owns scalar-home fixups, so guest lowering cannot
+    // allocate a result address that escapes its current compilation frame.
+    *out_home_id = home_id;
+    *out_address_register = (uint32_t)address;
+    return 0;
+}
+
+static int jube_host_mir_scalar_home_bind_current(void* compiler_cursor,
+        int32_t home_id, uint32_t value_register) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || home_id <= 0 || !value_register) return -1;
+    em_scalar_home_bind(emitter, home_id, (MIR_reg_t)value_register);
+    return 0;
+}
+
+static bool jube_host_mir_lookup_import_metadata(const char* name,
+        JitImportMetadata* out_metadata) {
+    return name && out_metadata && jit_import_get_metadata(name, out_metadata);
+}
+
+static void jube_host_mir_root_call_value(void* compiler_cursor,
+        MIR_reg_t register_id) {
+    jube_host_mir_note_root_candidate(jube_host_mir_cursor_emitter(compiler_cursor), register_id);
+}
+
+static int jube_host_mir_compiler_cursor_create(void* mir_context,
+        void** out_compiler_cursor) {
+    MIR_context_t context = jube_host_mir_context_from_handle(mir_context);
+    if (!context || !out_compiler_cursor) return -1;
+    MirEmitter* emitter = (MirEmitter*)mem_calloc(1, sizeof(MirEmitter), MEM_CAT_SYSTEM);
+    if (!emitter) return -1;
+    emitter->ctx = context;
+    void* compiler_cursor = jube_host_mir_cursor_register(emitter);
+    if (!compiler_cursor) {
+        mem_free(emitter);
+        return -1;
+    }
+    emitter->call_owner = compiler_cursor;
+    // The host keeps call metadata and root tracking in the same emitter that
+    // owns frame fixups, so no guest-built compiler state can diverge.
+    emitter->root_call_value = jube_host_mir_root_call_value;
+    emitter->lookup_import_metadata = jube_host_mir_lookup_import_metadata;
+    *out_compiler_cursor = compiler_cursor;
+    return 0;
+}
+
+static void jube_host_mir_compiler_cursor_destroy(void* compiler_cursor) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter) return;
+    // Invalidate the opaque handle before freeing emitter state so stale guest
+    // uses are rejected by the handle table instead of dereferencing memory.
+    jube_host_mir_cursor_unregister(compiler_cursor);
+    jube_host_mir_state_tokens_discard_slot(
+        jube_host_mir_cursor_slot(compiler_cursor));
+    jube_host_mir_cursor_function_handles_cleanup(
+        jube_host_mir_cursor_slot(compiler_cursor));
+    jube_host_mir_cursor_label_handles_cleanup(
+        jube_host_mir_cursor_slot(compiler_cursor));
+    jube_host_mir_cursor_prototype_handles_cleanup(
+        jube_host_mir_cursor_slot(compiler_cursor));
+    jube_host_mir_cursor_dispose(emitter);
+}
+
+static void jube_host_mir_debug_dump_if_enabled(void* mir_context) {
+#if !defined(NDEBUG)
+    MIR_context_t context = jube_host_mir_context_from_handle(mir_context);
+    if (context && mir_dump_instrumentation_enabled()) {
+        mir_dump_write_context(context, "temp/py_mir_dump.txt", false);
+    }
+#else
+    (void)mir_context;
+#endif
+}
+
 static int jube_host_mir_function_forward_create(void* mir_context,
         const char* function_name, void** out_function_item) {
-    if (!mir_context || !function_name || !*function_name || !out_function_item) return -1;
-    MIR_item_t function_item = MIR_new_forward((MIR_context_t)mir_context, function_name);
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function_name || !*function_name || !out_function_item) return -1;
+    MIR_item_t function_item = MIR_new_forward(context, function_name);
     if (!function_item) return -1;
     // A forward item is owned by the module context; publishing its raw MIR
     // layout would let a guest outlive or mutate the host compilation graph.
@@ -1112,7 +2173,8 @@ static int jube_host_mir_function_forward_create(void* mir_context,
 
 static int jube_host_mir_item_function_proto_create(void* mir_context,
         const char* prototype_name, uint32_t parameter_count, void** out_prototype_item) {
-    if (!mir_context || !prototype_name || !*prototype_name || !out_prototype_item ||
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !prototype_name || !*prototype_name || !out_prototype_item ||
         parameter_count > 1024) return -1;
     MIR_var_t* parameters = NULL;
     char (*parameter_names)[16] = NULL;
@@ -1131,7 +2193,7 @@ static int jube_host_mir_item_function_proto_create(void* mir_context,
         }
     }
     MIR_type_t result_type = MIR_T_I64;
-    MIR_item_t prototype = MIR_new_proto_arr((MIR_context_t)mir_context, prototype_name,
+    MIR_item_t prototype = MIR_new_proto_arr(context, prototype_name,
         1, &result_type, parameter_count, parameters);
     if (parameters) mem_free(parameters);
     if (parameter_names) mem_free(parameter_names);
@@ -1144,12 +2206,13 @@ static int jube_host_mir_item_function_proto_create(void* mir_context,
 
 static int jube_host_mir_function_register_lookup(void* mir_context, void* function,
         const char* register_name, uint32_t* out_register) {
-    if (!mir_context || !function || !register_name || !*register_name || !out_register) {
+    MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    if (!context || !function || !register_name || !*register_name || !out_register) {
         return -1;
     }
     // MIR's function register table stays host-private; only the numeric
     // register identity required by the lowering service crosses this boundary.
-    *out_register = MIR_reg((MIR_context_t)mir_context, register_name, (MIR_func_t)function);
+    *out_register = MIR_reg(context, register_name, (MIR_func_t)function);
     return 0;
 }
 
@@ -1302,6 +2365,12 @@ static Item jube_host_data_name_from_utf8(void* session, const char* text) {
     return (Item){.item = s2it(heap_create_name(text))};
 }
 
+static Item jube_host_data_name_from_utf8_n(void* session, const char* text,
+                                             size_t length) {
+    if (!jube_host_data_input(session) || !text) return ItemNull;
+    return (Item){.item = s2it(heap_create_name(text, length))};
+}
+
 static int jube_host_data_map_set(void* session, Item map, Item key, Item value) {
     Input* input = jube_host_data_input(session);
     if (!input || get_type_id(map) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) {
@@ -1411,6 +2480,7 @@ static const JubeHostDataAPI jube_host_data_api = {
     jube_host_data_item_slots_load,
     jube_host_data_map_new,
     jube_host_data_function_new,
+    jube_host_data_name_from_utf8_n,
 };
 
 static int jube_host_module_loading_namespace(void* execution_context,
@@ -1535,6 +2605,35 @@ static const JubeGuestExecutionAPI jube_host_execution_api = {
     jube_host_mir_label_create,
     jube_host_mir_instruction_emit,
     jube_host_mir_label_emit,
+    jube_host_mir_runtime_import_call_emit,
+    jube_host_mir_local_direct_call_emit,
+    jube_host_mir_item_return_emit,
+    jube_host_mir_function_frame_finalize,
+    jube_host_mir_debug_dump_if_enabled,
+    jube_host_mir_frame_root_candidate_note,
+    jube_host_mir_function_frame_begin,
+    jube_host_mir_function_frame_scalar_return_home_set,
+    jube_host_mir_compiler_import_cache_init,
+    jube_host_mir_compiler_import_cache_destroy,
+    jube_host_mir_local_direct_call_prototype_get_or_create,
+    jube_host_mir_function_state_suspend,
+    jube_host_mir_function_select,
+    jube_host_mir_function_state_restore,
+    jube_host_mir_function_register_lookup_current,
+    jube_host_mir_function_register_create_current,
+    jube_host_mir_label_create_current,
+    jube_host_mir_instruction_emit_current,
+    jube_host_mir_label_emit_current,
+    jube_host_mir_function_frame_runtime_load_current,
+    jube_host_mir_function_finish_current,
+    jube_host_mir_item_function_create_typed_current,
+    jube_host_mir_function_forward_create_current,
+    jube_host_mir_module_finalize_and_load_current,
+    jube_host_mir_function_lookup_current,
+    jube_host_mir_scalar_home_create_current,
+    jube_host_mir_scalar_home_bind_current,
+    jube_host_mir_compiler_cursor_create,
+    jube_host_mir_compiler_cursor_destroy,
 };
 
 static const JubeModuleGraphAPI jube_host_module_graph_api = {
@@ -1795,13 +2894,18 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     if (module->init) {
         int rc = module->init(&jube_host_api);
         if (rc != 0) {
+            log_error("JUBE_REG: %s module '%s' init failed with code %d",
+                      source_label ? source_label : "Jube", module->name, rc);
+            // init may allocate module-owned state before reporting failure, so
+            // pair it with shutdown before the descriptor becomes unreachable.
+            if (module->shutdown) module->shutdown();
             jube_static_modules_count--;
             jube_static_modules[slot].module = NULL;
             jube_static_modules[slot].initialized = false;
             jube_static_modules[slot].dynamic_handle = NULL;
+            // Dynamic descriptors live in their image; never dereference one
+            // after dlclose while reporting registration rollback.
             jube_close_dynamic_handle(dynamic_handle);
-            log_error("JUBE_REG: %s module '%s' init failed with code %d",
-                      source_label ? source_label : "Jube", module->name, rc);
             return -1;
         }
     }
@@ -1809,14 +2913,15 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     // DOM3: compile the module's interface declaration against its binding
     // tables; a half-valid interface must fail registration, not limp along.
     if (jube_compile_module_interface(module) != 0) {
+        log_error("JUBE_REG: %s module '%s' interface compilation failed",
+                  source_label ? source_label : "Jube", module->name);
         if (module->shutdown) module->shutdown();
+        jube_interface_remove_module(module);
         jube_static_modules_count--;
         jube_static_modules[slot].module = NULL;
         jube_static_modules[slot].initialized = false;
         jube_static_modules[slot].dynamic_handle = NULL;
         jube_close_dynamic_handle(dynamic_handle);
-        log_error("JUBE_REG: %s module '%s' interface compilation failed",
-                  source_label ? source_label : "Jube", module->name);
         return -1;
     }
 
@@ -1830,6 +2935,23 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     // such as heap_cleanup must run for it after successful registration.
     jube_static_modules[slot].initialized = true;
     return 0;
+}
+
+static void jube_rollback_registered_modules(int first_index) {
+    if (first_index < 0) first_index = 0;
+    while (jube_static_modules_count > first_index) {
+        int index = --jube_static_modules_count;
+        JubeStaticModuleEntry entry = jube_static_modules[index];
+        jube_static_modules[index].module = NULL;
+        jube_static_modules[index].initialized = false;
+        jube_static_modules[index].dynamic_handle = NULL;
+        if (!entry.module) continue;
+        // Dependency loading is transactional: remove every host-side record
+        // before closing the image that owns its descriptor and callbacks.
+        jube_interface_remove_module(entry.module);
+        if (entry.initialized && entry.module->shutdown) entry.module->shutdown();
+        jube_close_dynamic_handle(entry.dynamic_handle);
+    }
 }
 
 int jube_register_static_module(const JubeModuleDef* module) {
@@ -2005,6 +3127,139 @@ static bool jube_manifest_array_contains(const char* text, const char* key,
     return false;
 }
 
+static bool jube_manifest_string_array(const char* text, const char* key,
+                                       char values[][128], int capacity, int* out_count) {
+    if (out_count) *out_count = 0;
+    if (!text || !key || !values || capacity <= 0 || !out_count) return false;
+    char quoted_key[128];
+    int key_length = snprintf(quoted_key, sizeof(quoted_key), "\"%s\"", key);
+    if (key_length <= 0 || (size_t)key_length >= sizeof(quoted_key)) return false;
+    const char* cursor = strstr(text, quoted_key);
+    if (!cursor) return true;
+    cursor += key_length;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    if (*cursor != ':') return false;
+    cursor++;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    if (*cursor != '[') return false;
+    cursor++;
+    while (*cursor && *cursor != ']') {
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n' || *cursor == ',') cursor++;
+        if (*cursor == ']') break;
+        if (*cursor != '\"' || *out_count >= capacity) return false;
+        cursor++;
+        const char* end = cursor;
+        while (*end && *end != '\"') {
+            if (*end == '\\') return false;
+            end++;
+        }
+        size_t value_length = (size_t)(end - cursor);
+        if (*end != '\"' || value_length == 0 || value_length >= sizeof(values[0])) {
+            return false;
+        }
+        memcpy(values[*out_count], cursor, value_length);
+        values[*out_count][value_length] = '\0';
+        (*out_count)++;
+        cursor = end + 1;
+    }
+    return *cursor == ']';
+}
+
+static bool jube_manifest_name_matches(const char* text, const char* expected_name) {
+    char module_name[128];
+    return text && expected_name &&
+        jube_manifest_string(text, "name", module_name, sizeof(module_name)) &&
+        strcmp(module_name, expected_name) == 0;
+}
+
+static bool jube_manifest_resource_path_is_safe(const char* path) {
+    if (!path || !*path || path[0] == '/' || path[0] == '\\') return false;
+    const char* component = path;
+    for (const char* cursor = path;; cursor++) {
+        if (*cursor == ':' || *cursor == '\0' || *cursor == '/' || *cursor == '\\') {
+            size_t component_length = (size_t)(cursor - component);
+            if (component_length == 0 ||
+                (component_length == 1 && component[0] == '.') ||
+                (component_length == 2 && component[0] == '.' && component[1] == '.')) {
+                return false;
+            }
+            if (*cursor == '\0') return true;
+            component = cursor + 1;
+        }
+    }
+}
+
+static bool jube_manifest_path_has_name(const char* manifest_path, const char* expected_name) {
+    char* text = NULL;
+    if (!jube_manifest_read_file(manifest_path, &text)) return false;
+    bool matches = jube_manifest_name_matches(text, expected_name);
+    free(text);
+    return matches;
+}
+
+static bool jube_find_sibling_manifest(const char* manifest_path, const char* module_name,
+                                       char* out_path, size_t out_size) {
+    if (!manifest_path || !module_name || !*module_name || !out_path || out_size == 0) {
+        return false;
+    }
+    const char* slash = strrchr(manifest_path, '/');
+    if (!slash) return false;
+    size_t module_dir_length = (size_t)(slash - manifest_path);
+    if (module_dir_length == 0 || module_dir_length >= JUBE_MANIFEST_PATH_CAPACITY) return false;
+    char module_dir[JUBE_MANIFEST_PATH_CAPACITY];
+    memcpy(module_dir, manifest_path, module_dir_length);
+    module_dir[module_dir_length] = '\0';
+    char* parent_slash = strrchr(module_dir, '/');
+    if (parent_slash) *parent_slash = '\0';
+    const char* root = module_dir[0] ? module_dir : "/";
+    char candidate[JUBE_MANIFEST_PATH_CAPACITY];
+    int written = snprintf(candidate, sizeof(candidate), "%s/module.json", root);
+    if (written > 0 && (size_t)written < sizeof(candidate) &&
+        jube_manifest_path_has_name(candidate, module_name)) {
+        if (strlen(candidate) >= out_size) return false;
+        strcpy(out_path, candidate);
+        return true;
+    }
+
+    char selected[JUBE_MANIFEST_PATH_CAPACITY] = {};
+#if defined(_WIN32)
+    char search_path[JUBE_MANIFEST_PATH_CAPACITY];
+    written = snprintf(search_path, sizeof(search_path), "%s\\*", root);
+    if (written <= 0 || (size_t)written >= sizeof(search_path)) return false;
+    WIN32_FIND_DATAA entry;
+    HANDLE find_handle = FindFirstFileA(search_path, &entry);
+    if (find_handle == INVALID_HANDLE_VALUE) return false;
+    do {
+        if (entry.cFileName[0] == '.' || !(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+        written = snprintf(candidate, sizeof(candidate), "%s/%s/module.json", root,
+                           entry.cFileName);
+        if (written <= 0 || (size_t)written >= sizeof(candidate) ||
+            !jube_manifest_path_has_name(candidate, module_name)) continue;
+        if (!selected[0] || strcmp(candidate, selected) < 0) strcpy(selected, candidate);
+    } while (FindNextFileA(find_handle, &entry));
+    FindClose(find_handle);
+#else
+    DIR* dir = opendir(root);
+    if (!dir) return false;
+    struct dirent* entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        written = snprintf(candidate, sizeof(candidate), "%s/%s/module.json", root,
+                           entry->d_name);
+        if (written <= 0 || (size_t)written >= sizeof(candidate) ||
+            !jube_manifest_path_has_name(candidate, module_name)) continue;
+        if (!selected[0] || strcmp(candidate, selected) < 0) strcpy(selected, candidate);
+    }
+    closedir(dir);
+#endif
+    if (!selected[0] || strlen(selected) >= out_size) return false;
+    strcpy(out_path, selected);
+    return true;
+}
+
 static bool jube_manifest_uint32(const char* text, const char* key, uint32_t* out) {
     if (out) *out = 0;
     if (!text || !key || !out) return false;
@@ -2095,14 +3350,37 @@ static bool jube_manifest_verify_library_sha256(const char* library_path,
     return strcmp(digest_hex, expected_hex) == 0;
 }
 
-static bool jube_load_manifest_path(const char* manifest_path, const char* selector) {
+// Returns 1 when this manifest was loaded, 0 when it does not match the
+// requested selector, and -1 when a selected manifest or dependency failed.
+static int jube_load_manifest_path_internal(const char* manifest_path, const char* selector,
+                                            const char* expected_name) {
     char* text = NULL;
-    if (!jube_manifest_read_file(manifest_path, &text)) return false;
-    bool selected = jube_manifest_matches_selector(text, selector);
+    // Roots may contain only per-module subdirectories; a missing direct
+    // module.json is not a selected-manifest failure and must not mask them.
+    if (!jube_manifest_read_file(manifest_path, &text)) return 0;
+    bool selected = selector ? jube_manifest_matches_selector(text, selector) :
+        jube_manifest_name_matches(text, expected_name);
     if (!selected) {
         free(text);
-        return false;
+        return 0;
     }
+    if (jube_manifest_loading_depth >= JUBE_MANIFEST_DEPENDENCY_CAPACITY) {
+        log_error("JUBE_REG: dependency depth exceeded at manifest '%s'", manifest_path);
+        free(text);
+        return -1;
+    }
+    for (int i = 0; i < jube_manifest_loading_depth; i++) {
+        if (strcmp(jube_manifest_loading_paths[i], manifest_path) == 0) {
+            log_error("JUBE_REG: dependency cycle includes manifest '%s'", manifest_path);
+            free(text);
+            return -1;
+        }
+    }
+    if (strlen(manifest_path) >= sizeof(jube_manifest_loading_paths[0])) {
+        free(text);
+        return -1;
+    }
+    strcpy(jube_manifest_loading_paths[jube_manifest_loading_depth++], manifest_path);
     char library[512];
     char entry[128];
     char module_name[128];
@@ -2128,19 +3406,49 @@ static bool jube_load_manifest_path(const char* manifest_path, const char* selec
     if (!valid) {
         log_error("JUBE_REG: manifest '%s' is malformed or incompatible", manifest_path);
         free(text);
-        return true;
+        jube_manifest_loading_depth--;
+        return -1;
+    }
+    char dependencies[JUBE_MANIFEST_DEPENDENCY_CAPACITY][128];
+    int dependency_count = 0;
+    if (!jube_manifest_string_array(text, "dependencies", dependencies,
+                                    JUBE_MANIFEST_DEPENDENCY_CAPACITY, &dependency_count)) {
+        log_error("JUBE_REG: manifest '%s' has malformed dependencies", manifest_path);
+        free(text);
+        jube_manifest_loading_depth--;
+        return -1;
+    }
+    char resources[JUBE_MANIFEST_DEPENDENCY_CAPACITY][128];
+    int resource_count = 0;
+    if (!jube_manifest_string_array(text, "resources", resources,
+                                    JUBE_MANIFEST_DEPENDENCY_CAPACITY, &resource_count)) {
+        log_error("JUBE_REG: manifest '%s' has malformed resources", manifest_path);
+        free(text);
+        jube_manifest_loading_depth--;
+        return -1;
+    }
+    for (int i = 0; i < resource_count; i++) {
+        if (!jube_manifest_resource_path_is_safe(resources[i])) {
+            log_error("JUBE_REG: manifest '%s' has unsafe resource path '%s'",
+                      manifest_path, resources[i]);
+            free(text);
+            jube_manifest_loading_depth--;
+            return -1;
+        }
     }
     const char* slash = strrchr(manifest_path, '/');
     if (!slash) {
         free(text);
-        return false;
+        jube_manifest_loading_depth--;
+        return -1;
     }
     size_t dir_length = (size_t)(slash - manifest_path);
     char library_path[1024];
     if (dir_length + 1 + strlen(library) >= sizeof(library_path)) {
         log_error("JUBE_REG: library path is too long for manifest '%s'", manifest_path);
         free(text);
-        return true;
+        jube_manifest_loading_depth--;
+        return -1;
     }
     memcpy(library_path, manifest_path, dir_length);
     library_path[dir_length] = '/';
@@ -2148,15 +3456,49 @@ static bool jube_load_manifest_path(const char* manifest_path, const char* selec
     if (!jube_manifest_verify_library_sha256(library_path, manifest_digest)) {
         log_error("JUBE_REG: library integrity check failed for '%s'", library_path);
         free(text);
-        return true;
+        jube_manifest_loading_depth--;
+        return -1;
+    }
+    int transaction_start = jube_static_modules_count;
+    for (int i = 0; i < dependency_count; i++) {
+        const char* dependency_name = dependencies[i];
+        if (strcmp(dependency_name, module_name) == 0 ||
+            jube_find_static_module_index(dependency_name) >= 0) {
+            if (strcmp(dependency_name, module_name) == 0) {
+                log_error("JUBE_REG: manifest '%s' depends on itself", manifest_path);
+                jube_rollback_registered_modules(transaction_start);
+                free(text);
+                jube_manifest_loading_depth--;
+                return -1;
+            }
+            continue;
+        }
+        char dependency_manifest[JUBE_MANIFEST_PATH_CAPACITY];
+        if (!jube_find_sibling_manifest(manifest_path, dependency_name,
+                                        dependency_manifest, sizeof(dependency_manifest)) ||
+            jube_load_manifest_path_internal(dependency_manifest, NULL, dependency_name) != 1 ||
+            jube_find_static_module_index(dependency_name) < 0) {
+            log_error("JUBE_REG: manifest '%s' dependency '%s' is unavailable or failed",
+                      manifest_path, dependency_name);
+            jube_rollback_registered_modules(transaction_start);
+            free(text);
+            jube_manifest_loading_depth--;
+            return -1;
+        }
     }
     free(text);
     // A selected but unavailable module is still a handled discovery result:
     // callers can issue a useful missing-language diagnostic instead of trying
     // to parse the guest source as Lambda.
-    jube_load_dynamic_module_checked(library_path, has_entry ? entry : NULL,
-                                     module_name, module_version);
-    return true;
+    int rc = jube_load_dynamic_module_checked(library_path, has_entry ? entry : NULL,
+                                              module_name, module_version);
+    if (rc != 0) jube_rollback_registered_modules(transaction_start);
+    jube_manifest_loading_depth--;
+    return rc == 0 ? 1 : -1;
+}
+
+static bool jube_load_manifest_path(const char* manifest_path, const char* selector) {
+    return jube_load_manifest_path_internal(manifest_path, selector, NULL) != 0;
 }
 
 static bool jube_manifest_path_matches_selector(const char* manifest_path,
@@ -2292,6 +3634,12 @@ void jube_modules_runtime_reset(void) {
             module->runtime_reset();
         }
     }
+}
+
+void jube_registry_cleanup(void) {
+    // Retired cursor slots are process-lifetime metadata, but must be released
+    // before memtrack shutdown after their emitters have been destroyed.
+    jube_host_mir_cursor_slots_cleanup();
 }
 
 const JubeModuleDef* jube_find_static_module(const char* name) {

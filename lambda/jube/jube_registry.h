@@ -20,6 +20,8 @@ const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
 const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 void jube_notify_heap_cleanup(void* heap);
+// Releases process-lifetime Jube registry allocations before memtrack shutdown.
+void jube_registry_cleanup(void);
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 void jube_modules_runtime_reset(void);
 

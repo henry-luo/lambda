@@ -30,12 +30,12 @@ depends only on public Jube headers and entry points.
 |---|---|---|
 | H0 | Partial | Deterministic coupling inventory and split Python GC target exist. ADR closure, dated evidence archive, and release baselines/performance evidence are missing. |
 | H1 | Substantially implemented | Architecture checker with synthetic regression self-tests, strict script/golden inventory, configurable host, `requires_lang_python`, absent-module package smoke, and a fresh Lambda baseline exist. Cross-platform and release-performance evidence is still missing. |
-| H2 | Partial | Size/version/capability/build-ID negotiation and partitioned service tables exist. The legacy JS-backed value table remains, and the requested ABI negative/conformance suite is not present. |
+| H2 | Partial | Size/version/capability/build-ID negotiation and partitioned service tables exist. The POSIX dynamic matrix rejects undersized and unsupported module descriptors before initialization, but the broader requested ABI conformance suite and legacy JS-backed value-table removal remain. |
 | H3 | Operational final path; checkpoint coverage incomplete | Generic alias, `run --lang`, and extension dispatch exist; `main.cpp` has no Python branch. The isolated dispatch matrix covers aliases, normalized aliases/extensions, help, `run --lang`, and deterministic duplicate-bundle selection; the full parity/registry lifecycle matrix is not archived. |
 | H4 | Functional path implemented; acceptance incomplete | The 161 `py_*` runtime imports are module-owned and registered through `JubeRuntimeCatalogAPI`; core ownership is removed. Collision/signature/effect/caching conformance tests remain. |
 | H5 | Functional boundary mostly implemented | Python has no `js_*` source or dynamic import and uses neutral data/root services. The complete per-operation ownership contract and the full cross-boundary stress matrix remain. |
 | H6 | Functional core mostly implemented | Host activation/recovery/JIT lifecycle and common module-graph services are in use. The language session is still only a marker, the Python-owned session-state design is incomplete, and the full failure/repetition matrix is missing. |
-| H7 | **Incomplete — primary architecture blocker** | H7D lifecycle finalization is implemented and H7C now has host-owned runtime-load, identity-allocation, and validated semantic move services. H7A/H7B/H7C remain open: Python still includes host AST/transpiler/data/MIR headers and constructs most raw MIR operations. |
+| H7 | Functional opaque compiler boundary; acceptance incomplete | H7D lifecycle and H7C compiler/frame finalization are host-owned. Python lowering uses opaque compiler/context/module handles and semantic identities only: it has no private `MIR_*` types, `mir.h`, shared-emitter header, or raw MIR construction. Live negative coverage now includes stale/manufactured cursors, context-before-cursor invalidation, cross-cursor function/state/label/prototype/module use, forged state tokens, and consumed modules. Remaining acceptance work is raw-context/legacy-service provenance, generated-MIR/call-metadata comparison, residual non-compiler header reduction, and cross-platform/stress evidence. |
 | H8 | Partial | External `lang-python` target, manifest discovery, build-ID/integrity checks, rollback, POSIX/macOS loading, and the macOS negative-loader matrix exist. The module still imports internal host/library symbols, and Linux/Windows and static/dynamic parity remain incomplete. |
 | H9 | Substantially implemented | One host target, compatibility symlink, standard/full package split, identical-host check, and absent/full smoke targets exist. Legacy `requires_jube_exe` metadata remains for Ruby/Bash, and current release performance evidence is missing. |
 | H10 | Incomplete | Static Python registration is removed and runtime docs were started. Final allowlist reduction, ADR/design status, audit, platform matrix, sanitizer/stress archive, and performance closeout remain. |
@@ -48,6 +48,9 @@ is not marked complete merely because its happy-path implementation exists.
 - The current corpus contains **42** `test_py_*.py` scripts and 42 matching
   goldens, not the 41 pairs used by the original plan. The GTest runner
   therefore contains 43 tests including the inventory check.
+- The current h7e47 refresh rebuilt the release host and `lang-python` module;
+  the 43-test Python GTest harness, copied-bundle loader-negative matrix, and
+  source/binary architecture checker (including its synthetic self-test) pass.
 - `make check-hosted-python-architecture` initially failed because the checker
   still referenced pre-regrouping paths such as `lambda/build_ast.cpp`. The
   checker was repaired to follow `lambda/runtime/...` and now passes, including
@@ -76,8 +79,15 @@ is not marked complete merely because its happy-path implementation exists.
   cases for a missing library, corrupt/incomplete manifests, wrong base/hosted
   ABI, wrong host build ID, missing checksum, checksum mismatch, and a missing
   entry symbol. `make test-jube-module-integrity` separately verifies that a
-  tampered library is rejected before the module initializer can run. Missing
-  capability/dependency and genuine initializer-failure coverage remain.
+  tampered library is rejected before the module initializer can run. The POSIX
+  matrix now also rejects a missing manifest dependency and proves rollback:
+  it loads a dependency, makes its dependent initializer fail, then observes the
+  dependency shutdown before returning the stable unavailable/incompatible
+  result. It separately builds test-only modules whose validated initializer
+  fails or whose language descriptor asks for an unavailable capability:
+  failure invokes cleanup without publishing a language, while capability
+  negotiation rejects the module before its initializer runs. It separately
+  rejects undersized and unsupported descriptor ABI values before initialization.
 - `make build-test` now refreshes the manifest after its debug `all` build
   rewrites `lang-python`; otherwise the correctly enforced digest check would
   leave the development bundle unloadable after a test-only rebuild.
@@ -137,6 +147,118 @@ is not marked complete merely because its happy-path implementation exists.
   Python corpus, dispatch, loader-negative, and architecture self-checker
   gates. Arithmetic/comparison instruction construction, calls, memory
   operations, and frame/root finalization remain H7C work.
+- The `h7e18` pair adds a validated semantic integer-operation descriptor with
+  explicit register-or-immediate right operands. Python's common Item unbox
+  shifts and integer range/tag construction now use host-owned `LSH`, `RSH`,
+  `LE`, `GE`, `AND`, and `OR` emission. The focused integer-overflow golden,
+  full 43-test Python corpus, forced-GC closure gate, dispatch,
+  loader-negative, and architecture checks pass on the matching release pair.
+  General arithmetic/comparison construction, calls, memory operations, and
+  shared frame/root finalization remain H7C work.
+- The `h7e19` pair extends the same semantic operation surface for optimized
+  native integer arithmetic: add/subtract/multiply/floor-divide/modulo,
+  shifts, and bitwise operations are selected by Python but emitted by the
+  host. The root host was force-relinked after the build-ID update to avoid a
+  stale incremental registry artifact; the matching module and host pass the
+  full 43-test Python corpus. Dynamic fallback arithmetic/comparisons, calls,
+  memory operations, and shared frame/root finalization remain H7C work.
+- The `h7e20` pair adds the unary native integer negation form to that same
+  descriptor, removing the optimized unary path's raw `MIR_NEG` construction.
+  The architecture self-checker also rejects raw constructors inside the
+  semantic integer-operation adapter. The matching release host/module pair
+  passes the full 43-test Python corpus.
+  Dynamic fallback arithmetic/comparisons, calls, memory operations, and
+  shared frame/root finalization remain H7C work.
+- The `h7e21` pair extends semantic integer operations through the optimized
+  native comparison path (`<`, `<=`, `>`, `>=`, `==`, and `!=`), leaving Python
+  to choose comparison semantics and the host to construct the MIR. The
+  matching release pair passes the full 43-test Python corpus. Dynamic
+  fallback comparisons, calls, memory operations, and shared frame/root
+  finalization remain H7C work.
+- The `h7e22` pair moves all Python runtime-import call instruction emission
+  through a tail-appended host service. Python supplies only typed
+  register/immediate values; the host reconstructs the permitted operands and
+  invokes the existing shared call builder, which retains import-cache,
+  `JitImportMetadata`, safepoint-root, exception-effect, and scalar-return
+  adoption behavior. The architecture self-checker rejects a return to direct
+  shared call emission. The matching release pair passes the full 43-test
+  Python corpus, forced-GC closure/generator goldens, isolated dispatch,
+  loader-negative, and architecture gates. This remains an H7C extraction:
+  Python still owns the surrounding emitter state and uses raw MIR operands in
+  non-call lowering, while memory operations and frame/root finalization have
+  not yet become host-owned opaque-builder services.
+- The `h7e23` pair extends the host-owned call surface to resolved synchronous
+  local Python functions. Python now passes only host-created opaque prototype
+  and target handles plus semantic register/immediate arguments; the host
+  builds the direct call and retains the shared borrowed-frame classification,
+  which is required for caller-owned scalar-result homes. The architecture
+  self-checker rejects a return to guest-side `MIR_CALL` construction. The
+  matching release pair passes the full 43-test Python corpus and forced-GC
+  closure/generator goldens. This does not complete H7C: the guest still owns
+  surrounding emitter state plus non-call raw MIR lowering, memory operations,
+  and frame/root finalization.
+- The `h7e24` pair moves Item-return control flow behind the host service. The
+  host now selects either the active frame's return-register jump or a direct
+  return, preserving the shared frame invariant while Python supplies only the
+  semantic returned Item. Generic I64/F64 register and immediate moves now
+  also reuse the validated host semantic-instruction service when Python's
+  existing lowering requests them; reference-backed moves remain explicit raw
+  debt. The matching release host/module pair passes the full 43-test Python
+  corpus and the architecture gate. Return-token creation, other raw
+  instructions, memory operations, and frame/root finalization still leave
+  H7C incomplete.
+- The `h7e25` pair extends the same generic semantic-instruction descriptor
+  for opaque function-reference moves. Python no longer materializes the MIR
+  reference-backed move used to publish generated function pointers; the host
+  accepts only a host-created opaque reference and emits the move. The matching
+  release pair passes the hosted architecture gate and the full 43-test Python
+  corpus. Memory operations and frame/root finalization remain H7C work.
+- The same h7e25 module checkpoint removes closure-environment raw memory
+  loads: closure capture lowering now calls the existing neutral `py_env_load`
+  runtime import, preserving its registered call/ownership contract instead of
+  depending on the environment's word layout. Only generator-frame state
+  load/store memory operands remain in Python lowering. The rebuilt release
+  module passes the hosted architecture gate and the full 43-test corpus.
+- The h7e25 checkpoint also removes the final generator-frame raw memory
+  operands. Python-owned `py_gen_frame_state_load/store` helpers own slot zero
+  of the generator frame (a raw resume-state word, not an `Item`), so MIR
+  lowering no longer constructs a memory operand for that layout. The rebuilt
+  module passes the full 43-test corpus and the forced-GC generator golden.
+- The same h7e25 module build routes generic three-operand integer lowering
+  (register left operand and register/immediate right operand) through the
+  host's existing validated integer-operation descriptor. Unusual operand
+  shapes remain explicit H7C debt. The rebuilt module passes the full 43-test
+  corpus.
+- The h7e25 module build also forwards generic jump and truth-branch lowering
+  through the existing host semantic control-flow forms. The rebuilt module
+  passes the hosted architecture gate and the full 43-test corpus.
+- The same h7e25 module build forwards generic immediate `BNE`/`BGE` lowering
+  through the host's existing compare-and-branch forms. The rebuilt module
+  passes the full 43-test corpus.
+- Generic immediate `BEQ`/`BLE` lowering in the h7e25 module now composes the
+  existing host integer comparison and truth-branch descriptors rather than
+  adding representation-specific ABI forms. The rebuilt module passes the
+  full 43-test corpus.
+- The `h7e26` pair extends the existing generic semantic-instruction
+  descriptor with native I64-to-F64 conversion and F64 division, removing
+  Python-side construction for those float fast-path instructions. The
+  matching release pair passes the hosted architecture gate and the full
+  43-test Python corpus.
+- The `h7e27` pair completes the native float fast-path operation family in
+  that descriptor: add/subtract/multiply/divide and ordered comparisons are
+  selected by Python but constructed by the host. The matching release pair
+  passes the hosted architecture gate and the full 43-test Python corpus.
+- The `h7e28` pair moves public Python frame completion behind the opaque
+  guest-execution service. The host now owns root liveness write-back,
+  scalar-home adoption, frame-top restoration, prologue patching, overflow
+  handling, terminal returns, and metadata disposal; Python supplies only the
+  completed frame's debug name. This preserves the existing order—overflow is
+  emitted only after the guest frame has been torn down—without exposing
+  `Context` offsets or root/scalar layout through the module. The matching
+  release pair passes the full 43-test corpus, forced-GC closure/generator
+  goldens, loader-negative matrix, and source/binary architecture gates. H7C
+  remains incomplete because Python still owns surrounding emitter state and
+  raw instruction construction outside the migrated semantic families.
 - The current `make test-lambda-baseline` run passes all 2,104 input-baseline
   cases and all 1,492 Lambda-runner cases with zero failures. This is current
   shared-host evidence; Test262, platform, and performance acceptance remain
@@ -180,20 +302,24 @@ The runnable product path is now a unified host plus an external Python module:
 
 ### Still outstanding before closure
 
-1. **Finish H7C as one cohesive opaque compiler-builder service.** Python
-   lowering still includes the shared MIR emitter and constructs raw MIR
-   instructions/operands. The completed lifecycle and selected-constructor
-   services are interim extraction steps, not the final boundary. The host
-   must own opaque compiler/module/function/block/value/import handles and
-   frame/root/scalar-home finalization while Python retains only semantic
-   lowering choices.
-2. **Complete the H7A/H7B header-boundary reduction.** Python still includes
-   internal AST/transpiler/MIR/data-layout headers. Replace those dependencies
-   with reviewed public Jube source, AST/profile, analysis, and compiler
-   projections; do not expose C++ record layouts as an ABI shortcut.
-3. **Close the remaining negative and parity coverage.** Add stale/wrong-owner
-   handle, use-after-finalize, invalid construction order, repeated-session,
-   static/dynamic parity, loader failure/rollback, and module-retention tests.
+1. **Close H7C's remaining negative/conformance acceptance.** The opaque
+   compiler cursor, state tokens, function/label/prototype/module artifacts,
+   semantic identities, frame/root/scalar-home state, and MIR construction are
+   now host-owned. The live fixture covers stale/manufactured cursors,
+   context-before-cursor invalidation, cross-cursor function/state/label/
+   prototype/module use, forged state tokens, and consumed modules. Extend
+   coverage to raw context/legacy-service provenance and compare representative
+   generated MIR/call metadata before declaring that boundary complete.
+2. **Complete the remaining H7A/H7B header-boundary reduction.** Python
+   lowering no longer includes internal compiler/MIR headers, but other Python
+   sources still need a reviewed inventory and public Jube source, AST/profile,
+   and analysis projections where required; do not expose C++ record layouts as
+   an ABI shortcut.
+3. **Close the remaining negative and parity coverage.** Add repeated-session,
+   static/dynamic parity, module-retention, cross-platform loader failure, and
+   remaining construction-order tests that respect nested-function compilation
+   semantics; do not reject the legitimate empty outer function selection that
+   is suspended while lowering nested Python functions.
 4. **Complete release acceptance.** Add supported-platform Windows loader
    validation, sanitizer/stress evidence, and release-performance measurements.
 5. **Close H10 documentation and audit work.** Reduce the permanent internal
@@ -1153,6 +1279,320 @@ passes the full Python corpus, forced-GC closure/generator checks, dispatch,
 loader-negative, and binary-aware architecture gates. Raw operand/instruction
 construction and shared emitter internals remain H7C work.
 
+**Implementation update (2026-07-24, h7e29).** Python's optional MIR dump
+now crosses a tail-appended host debug service. The host applies the existing
+instrumentation policy and retains the fixed `temp/py_mir_dump.txt` artifact
+path, so the module no longer includes the internal MIR-dump header or chooses
+an arbitrary host filesystem destination. This only removes a developer
+compiler-header dependency; opaque MIR builder work remains H7C's main gap.
+
+**Implementation update (2026-07-24, h7e30).** The neutral data membrane now
+provides a length-aware name constructor. Python MIR lowering uses it for
+literal embedding, import slices, module namespaces, and exports, preserving
+the existing byte-length contract without a temporary NUL-terminated copy. The
+module no longer includes the private heap API or calls `heap_create_name`; the
+architecture verifier rejects either regression. This is a narrow H7A/H5
+header-and-allocation-boundary reduction, not the remaining opaque MIR builder
+migration. The same audit removed stale `transpiler.hpp` and `mir-gen.h`
+includes from Python lowering; its remaining MIR dependency is explicit and
+tracked by H7C rather than inherited through umbrella compiler headers.
+
+**Implementation follow-up (2026-07-24, h7e30 module rebuild).** Native
+integer and floating-point arithmetic, optimized numeric comparison, integer
+boxing, boolean short-circuiting, Python `not`, method fallback dispatch,
+conditional expressions, comprehensions, ordinary conditionals/loops, range
+loops, lambda function references, direct returns, generator/yield control
+flow, ordinary assignment, unpacking, and optimized integer augmented
+assignment now construct no raw MIR instructions: they select the existing
+semantic instruction descriptors for moves, arithmetic, conversions,
+branches, jumps, returns, and opaque function references. The only formerly
+asymmetric tagged-`OR` form is now emitted as the equivalent
+register-left/immediate-right descriptor form, so it no longer bypasses host
+validation. The architecture self-test rejects raw instruction, label, or
+reference construction throughout the native numeric lowering region. The
+rebuilt external module passes the binary-aware architecture check,
+loader-negative matrix, all 43 Python goldens, and forced-GC generator and
+closure goldens. This is a bounded H7C source migration with no new public
+ABI: raw call-operand construction and the remaining direct emitter type
+dependency still keep the opaque-builder acceptance checklist open.
+
+**Implementation follow-up (2026-07-24, h7e30 module rebuild 2).** Every
+Python lowering site now emits control flow, returns, moves, numeric
+operations, conversions, and opaque references through the host services; the
+architecture gate rejects all raw MIR instruction, return, and label
+constructors in `transpile_py_mir.cpp`. The former raw instruction decoder is
+now unreferenced and retained only as temporary call-operand migration debt;
+its fallback cannot be reached by lowering. Raw register/immediate operand
+construction for the already-hosted runtime-call adapter, the direct
+`MirEmitter` type dependency, and final removal of that decoder remain H7C
+work. The rebuilt module passes the source/binary architecture checks,
+loader-negative matrix, all 43 Python goldens, and forced-GC generator output.
+
+**Implementation follow-up (2026-07-24, h7e30 module rebuild 3).** The shared
+runtime-call path now accepts public `JubeCompilerCallOperand` records directly,
+and Python lowering has been migrated through expression evaluation, builtin and
+method dispatch, direct/generic calls (including keyword-result homes),
+attribute/subscript access, collection construction, f-strings, comprehensions,
+lambda/closure creation, `yield`/`await` iterator calls, ordinary and augmented
+assignment, and basic branch tests. These sites no longer construct raw MIR
+register, integer, or double operands; the remaining raw-operand count in the
+source fell from 407 to 157 and is confined to later loop, import/class, pattern,
+exception, and generator-support lowering. The now-unused legacy five-operand
+call helper was removed; the raw-operand decoder and other legacy helpers remain
+reachable from the unconverted families and must remain until those sites move.
+The rebuilt external module passes the binary-aware architecture check, the full
+43-test Python corpus, forced-GC generator golden, and `git diff --check`; this
+makes measurable H7C progress without claiming the opaque-builder boundary
+complete.
+
+**Implementation follow-up (2026-07-24, h7e30 module rebuild 4).** The
+semantic-operand migration now covers every Python lowering family, including
+loop variants, full `match` patterns, function/class materialization,
+exceptions, `with`, imports, generator state/frame helpers, varargs, closure
+setup, and TCO diagnostics. `transpile_py_mir.cpp` contains zero raw
+`MIR_new_reg_op`, `MIR_new_int_op`, or `MIR_new_double_op` construction sites;
+the legacy raw call-operand decoder and all legacy one-to-five operand call
+helpers were removed. The architecture gate and its self-test now reject any
+reintroduction of those constructors. The release module rebuild, binary-aware
+architecture gate, and all 43 Python goldens pass. A separate unused historical
+instruction decoder and the direct `MirEmitter` state dependency still prevent
+claiming H7C's full opaque-builder boundary complete.
+
+**Implementation follow-up (2026-07-24, h7e30 module rebuild 5).** Root
+candidate bookkeeping for runtime-call results is now a tail-appended host
+compiler service. Python supplies only its opaque compiler cursor and a register
+identity; the host owns the active frame's candidate arrays and records the
+same `JIT_VALUE_UNKNOWN` candidates used by shared call emission. The
+architecture checker and self-test reject a return to direct
+`em_root_note_candidate` use in Python lowering. A matched release host/module
+pair, forced-GC generator golden, all 43 Python goldens, and the binary-aware
+architecture gate pass. This narrows, but does not close, H7C: Python still
+owns broader `MirEmitter` frame/cache state and the unused historical
+instruction decoder remains to be deleted.
+
+**Implementation follow-up (2026-07-24, h7e31 module rebuild 6).** The
+remaining unused raw MIR instruction decoder has been deleted. Python lowering
+now has no fallback that accepts a `MIR_insn_t`, frees a raw instruction, or
+forwards a raw instruction to `em_emit_insn`; all live lowering selects the
+previously verified semantic instruction, call, return, root-candidate, and
+frame-finalization services. The exact host build ID was advanced to h7e31 for
+the root-candidate table tail, and the external module manifest was regenerated
+against that matched release pair. The source self-test and binary-aware
+architecture gate reject reintroduction of the decoder; loader-negative checks,
+all 43 Python goldens, forced-GC closure and generator output, and `git
+diff --check` pass. This closes the historical raw-instruction fallback, but
+not H7C: Python still directly owns broader `MirEmitter` function, frame, and
+import-cache state rather than the required opaque builder handles.
+
+**Implementation follow-up (2026-07-24, h7e32 module rebuild 7).** Public
+function-frame initialization and scalar-return-home binding are now
+tail-appended host compiler services. The host resets and creates the root and
+number bases, labels, return register, entry policy, and scalar-home policy;
+Python provides only opaque register identities. The architecture checker and
+its self-test reject any return to direct `mt->em.frame` layout access. The
+matched h7e32 release host/module pair passes the binary-aware architecture
+gate, loader-negative matrix, all 43 Python goldens, forced-GC closure and
+generator goldens, and `git diff --check`. H7C remains open because Python
+still directly holds `MirEmitter` function/context and import-cache state;
+those need opaque builder/module/function/import handles rather than further
+field-by-field leakage.
+
+**Implementation follow-up (2026-07-24, h7e33 module rebuild 8).** The host
+now owns the shared compiler import/prototype cache. Python initializes and
+destroys it through tail-appended services and asks the host to find or create
+local direct-call prototypes; it no longer touches `MirEmitter.import_cache`,
+`MirImportCacheEntry`, or the cache hashmap. This keeps runtime-import memoing
+and guest-local prototype reuse in one host-owned lifetime domain. The
+architecture checker and self-test reject direct cache ownership. The matched
+h7e33 release host/module pair passes the binary-aware architecture gate,
+loader-negative matrix, all 43 Python goldens, forced-GC closure and generator
+goldens, and `git diff --check`. H7C remains open because Python still stores
+direct `MirEmitter` context/function selection state; reaching the required
+opaque builder boundary needs those handles to move as a coherent next slice.
+
+**Implementation follow-up (2026-07-24, h7e34 module rebuild 9).** Current
+function selection, nested-function state suspension/restoration, and argument
+register tracking now cross tail-appended host services. Python no longer
+writes `MirEmitter.func` or `func_item`, stores `MirFunctionArgumentState`, or
+mutates the shared argument-register tracker; a saved-state token is opaque and
+consumed by the host on restoration. Current-function parameter lookup also
+records argument identities in the host, preserving liveness analysis without
+guest layout access. The architecture checker and self-test reject the retired
+direct paths. The matched h7e34 release host/module pair passes the
+binary-aware architecture gate, loader-negative matrix, all 43 Python goldens,
+forced-GC closure and generator goldens, and `git diff --check`. H7C remains
+open on broader direct compiler context/current-function reads and
+module/function handle construction; those must migrate as an opaque cursor
+rather than leak more `MirEmitter` fields.
+
+**Implementation follow-up (2026-07-24, h7e35 module rebuild 10).** Common
+Python lowering now uses cursor-only host services for register allocation,
+label creation and placement, semantic instruction emission, active-frame
+runtime loads, and function completion. The host owns the selected function,
+MIR context, and register-name counter for these operations; Python supplies
+only the opaque compiler cursor plus semantic descriptors or identities. The
+architecture checker and self-test reject direct `MirEmitter` context,
+function, function-item, or register-counter reads in the common lowering
+helpers. The matched h7e35 release host/module pair passes the binary-aware
+architecture gate, loader-negative matrix, all 43 Python goldens, forced-GC
+closure and generator goldens, and `git diff --check`. H7C remains open on the
+concentrated context-bearing module/function construction and module lifecycle
+wrappers, which must be consolidated behind opaque cursor services next.
+
+**Implementation follow-up (2026-07-24, h7e36 module rebuild 11).** Typed
+function creation, forward declarations, module finalization/loading, and
+function lookup now use cursor-only host services. Python passes its opaque
+compiler cursor plus names and semantic parameter descriptors; the host reads
+the private MIR context and returns only context-bound opaque handles. The
+architecture checker and its self-test reject every retired helper call that
+passes `mt->em.ctx` or the local `ctx` to those construction/lifecycle
+operations. The matched h7e36 release host/module pair passes the binary-aware
+architecture gate, loader-negative matrix, all 43 Python goldens, forced-GC
+closure and generator goldens, and `git diff --check`. H7C remains open:
+Python still creates and bootstraps a concrete `MirEmitter`, and several outer
+lifecycle/debug/link/cleanup wrappers still carry the context explicitly; the
+next slice must replace that bootstrap with a host-owned opaque compiler
+cursor rather than hiding individual operations one by one.
+
+**Implementation follow-up (2026-07-24, h7e37 module rebuild 12).** Scalar
+result-home allocation, address materialization, and result binding now use
+cursor-only host services. The host owns the active frame's logical-home
+counter, fixup records, and address-register emission; Python receives an
+opaque home identity and register identity only. The architecture checker and
+its self-test reject direct `em_scalar_home_*` and
+`em_materialize_frame_ref` calls from Python lowering. The matched h7e37
+release host/module pair passes the binary-aware architecture gate,
+loader-negative matrix, all 43 Python goldens, forced-GC closure and generator
+goldens, and `git diff --check`. H7C remains open on the concrete
+`MirEmitter` bootstrap and outer context-bearing lifecycle wrappers, which
+must become a host-owned opaque compiler cursor with an explicit lifetime.
+
+**Implementation follow-up (2026-07-24, h7e38 module rebuild 13).** Python
+now holds only a host-created opaque compiler cursor, rather than constructing
+or initializing a concrete `MirEmitter`. The host owns emitter allocation,
+context binding, runtime-import metadata lookup, root-candidate recording,
+frame state, import cache lifetime, and destruction; Python's lowering calls
+the existing cursor services through `void*` only. The architecture checker
+and self-test reject a Python `MirEmitter` field, direct `mt->em` access, and
+the retired guest root-candidate callback. Link-failure cleanup now destroys
+the cursor before its context, preserving that lifetime invariant. The matched
+h7e38 release host/module pair passes the binary-aware architecture gate,
+loader-negative matrix, all 43 Python goldens, forced-GC closure and generator
+goldens, and `git diff --check`. H7C remains open on replacing the remaining
+explicit MIR-context/module lifecycle wrappers and private MIR type exposure
+with opaque host compilation artifacts.
+
+**Implementation follow-up (2026-07-24, h7e39 module rebuild 14).** Python
+lowering now treats the compiler context and module as opaque `void*`
+artifacts throughout creation, linking, publication, deferred module cleanup,
+and destruction; it names neither `MIR_context_t` nor `MIR_module_t`. The
+architecture checker and self-test reject reintroduction of either concrete
+artifact type. The refreshed h7e38 host/h7e39 module pair passes the
+binary-aware architecture gate, loader-negative matrix, all 43 Python goldens,
+forced-GC closure and generator goldens, and `git diff --check`. H7C still
+requires reducing the remaining guest-visible private MIR value/function/label
+types and the associated internal compiler header dependencies to reviewed
+opaque identities.
+
+**Implementation follow-up (2026-07-24, h7e40 module rebuild 15).** Python
+lowering now names semantic register, label, function-item, function, and
+value-kind identities only; it has no `MIR_*` types, `mir.h` include, or
+`mir_emitter_shared.hpp` dependency. Its language-level variable scopes are
+separate Python records, so they cannot inherit private emitter frame/root
+layout. The architecture checker and self-test reject the retired MIR types
+and headers and require the semantic aliases. The refreshed h7e38 host/h7e40
+module pair passes the binary-aware architecture gate, loader-negative matrix,
+all 43 Python goldens, forced-GC closure and generator goldens, and `git
+diff --check`. H7C's opaque compiler boundary is now materially implemented;
+remaining closeout work is the broader proposal audit and any residual
+non-compiler host/internal dependencies identified by its staged gates.
+
+**Implementation follow-up (2026-07-24, h7e41 host rebuild).** The opaque
+compiler cursor is now a generation-checked host-table handle, rather than a
+guest-provided pointer cast to `MirEmitter`. Destruction invalidates the table
+entry before releasing emitter state, so a stale cursor is rejected without
+dereferencing freed storage. The table is explicitly released before memtrack
+shutdown; this fixed the 16-byte tracked leak first exposed by the forced-GC
+closure gate. The architecture checker and its self-test reject a return to a
+raw cursor cast or release-before-invalidation ordering. The loader-negative
+fixture now creates, destroys, then reuses a real cursor and also supplies a
+manufactured token; both must be rejected by the live host. It also destroys a
+context before reusing its still-held cursor; host context teardown invalidates
+and releases dependent cursors before `MIR_finish`, preventing that invalid
+order from reaching freed context state. The refreshed release host with the
+h7e40 module passes all 43 Python goldens, forced-GC closure and generator
+goldens, the source/binary architecture gates, loader-negative matrix, and
+`git diff --check`. Direct negative tests for the remaining opaque
+artifact/state-token families remain required H7C acceptance work.
+
+**Implementation follow-up (2026-07-24, h7e42 host rebuild).** Function
+handles created through a cursor are now recorded as host provenance. Function
+selection checks that provenance before calling `MIR_get_item_func`, because
+MIR itself only checks the item kind and would otherwise accept a handle from a
+different cursor. The live loader-negative fixture creates two contexts and
+cursors, creates a function in the second, and verifies that the first cannot
+select it. Provenance records are released with cursor/context teardown. The
+architecture checker and self-test preserve the order of owner validation
+before MIR lookup. The release host and h7e40 module pass all 43 Python
+goldens, forced-GC closure/generator goldens, loader-negative matrix, source/
+binary architecture gates, and `git diff --check`.
+
+**Implementation follow-up (2026-07-24, h7e43 host rebuild).** Suspended
+function-selection state tokens now record their creating cursor and reject
+restoration through another one; their rightful cursor can still restore and
+consume the token. The same live two-cursor loader fixture covers both this
+state-token case and the function-handle case, while the architecture checker
+and self-test reject removal of the owner binding/check. The refreshed release
+host and h7e40 module pass the loader-negative matrix and source/binary
+architecture gates. Remaining negative acceptance work concerns the other
+opaque artifact families plus generated-MIR/call-metadata comparison.
+
+**Implementation follow-up (2026-07-24, h7e44 host rebuild).** Labels made
+through a cursor now carry host provenance and current-cursor label emission
+rejects an unowned label before it reaches MIR. The two-cursor loader fixture
+creates a label with the second cursor after selecting the first cursor's own
+function, then verifies that first-cursor emission rejects the second label.
+Label provenance is released with the cursor/context. The architecture checker
+and self-test protect host validation before label emission. The refreshed
+release host with the h7e40 module passes all 43 Python goldens, forced-GC
+closure/generator goldens, loader-negative matrix, source/binary architecture
+gates, and `git diff --check`.
+
+**Implementation follow-up (2026-07-24, h7e45 host rebuild).** Local direct
+calls now require a prototype and target function/forward item recorded by the
+same cursor. Prototype creation and cursor-created forwards join the same
+provenance lifetime as function handles; cross-cursor prototype use is rejected
+before any raw MIR operand is made. The live two-cursor fixture creates the
+second cursor's cached prototype and verifies that the first cannot emit a call
+with it. The architecture checker and self-test lock that validation order.
+The release host with the h7e40 module passes the loader-negative matrix, all
+43 Python goldens, source/binary architecture gates, and `git diff --check`.
+
+**Implementation follow-up (2026-07-24, h7e46 host rebuild).** Suspended
+function state is now represented by a host-registered opaque token rather
+than a guest-dereferenced allocation. Registry lookup validates token identity
+and cursor ownership before inspecting saved function state; cursor, context,
+and process cleanup discard all associated tokens. The live two-cursor fixture
+now rejects cross-cursor restoration, a manufactured token, and a token reused
+after its cursor is destroyed, while still accepting the rightful restore. The
+architecture checker and its self-test reject reintroduction of a raw
+state-token dereference and require token cleanup with the cursor. The release
+host with the h7e40 module passes all 43 Python goldens, forced-GC closure and
+generator goldens, loader-negative matrix, source/binary architecture gates,
+and `git diff --check`.
+
+**Implementation follow-up (2026-07-24, h7e47 host rebuild).** MIR module
+artifacts now use a generation-checked host table bound to their creating MIR
+context. Finalization validates that binding before calling MIR, consumes the
+handle after loading, and context/process cleanup invalidates every remaining
+module handle. The live two-cursor fixture rejects both using the second
+context's module from the first cursor and re-finalizing an already-consumed
+module. The architecture checker and self-test require registration,
+validation-before-finalization, consumption, and context invalidation. The
+release host with the h7e40 module passes all 43 Python goldens, forced-GC
+closure and generator goldens, loader-negative matrix, source/binary
+architecture gates, and `git diff --check`.
+
 - [ ] Expose opaque MIR builder/module/function/block/value/import handles.
 - [ ] Wrap the existing `MirEmitter` operations needed by Python: function
   creation, values, branches, calls, returns, constants, roots, frames, scalar
@@ -1246,6 +1686,20 @@ without changing its behavior or descriptor.
   and failed initialization.
 - [ ] **H8.12** Confirm the host never unloads a successfully loaded module
   while JIT code or values may hold its function pointers.
+
+**Implementation update (2026-07-24, h7e28).** `module.json` now carries the
+empty `dependencies` and `resources` arrays for `lang-python`. The generic
+loader accepts an optional `dependencies` string array whose entries are exact
+module names. It resolves sibling manifests deterministically, loads entries
+in manifest order, detects cycles and self-dependencies, and treats the whole
+selected-manifest load as a transaction: a failed dependency or dependent
+registration shuts down and unloads only modules added by that transaction.
+`resources` is now also parsed as an optional string array and rejects absolute,
+drive-qualified, empty, `.` and `..` paths; resource lookup/use is intentionally
+not implied by this validation. The POSIX copied-bundle matrix covers an unsafe
+resource path, a missing dependency, and a successful dependency whose
+dependent fails initialization. Duplicate-language rollback, Windows execution,
+resource consumption, and the remaining H8 exit evidence are still outstanding.
 
 ### Exit gate
 

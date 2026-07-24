@@ -167,6 +167,8 @@ static const JubeRuntimeImport python_runtime_imports[] = {
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
     {"py_gen_create", FPTR(py_gen_create)},
     {"py_gen_get_frame_c", FPTR(py_gen_get_frame_c)},
+    {"py_gen_frame_state_load", FPTR(py_gen_frame_state_load)},
+    {"py_gen_frame_state_store", FPTR(py_gen_frame_state_store)},
     {"py_gen_next", FPTR(py_gen_next)},
     {"py_gen_send", FPTR(py_gen_send)},
     {"py_coro_create", FPTR(py_coro_create)},

@@ -91,6 +91,11 @@ extern "C" Item py_data_name_from_utf8(const char* text) {
     return py_hosted_data_api->name_from_utf8(py_data_session, text);
 }
 
+extern "C" Item py_data_name_from_utf8_n(const char* text, size_t length) {
+    if (!py_hosted_data_api || !py_hosted_data_api->name_from_utf8_n) return ItemNull;
+    return py_hosted_data_api->name_from_utf8_n(py_data_session, text, length);
+}
+
 extern "C" bool py_data_map_set(Item map, Item key, Item value) {
     return py_hosted_data_api && py_hosted_data_api->map_set &&
         py_hosted_data_api->map_set(py_data_session, map, key, value) == 0;
@@ -2686,6 +2691,19 @@ extern "C" int64_t py_gen_get_frame_c(Item gen) {
     Function* fn = gen.function;
     if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return 0;
     return (int64_t)(uintptr_t)fn->closure_env;
+}
+
+extern "C" int64_t py_gen_frame_state_load(int64_t frame_ptr) {
+    uint64_t* frame = (uint64_t*)(uintptr_t)frame_ptr;
+    return frame ? (int64_t)frame[0] : -1;
+}
+
+extern "C" int64_t py_gen_frame_state_store(int64_t frame_ptr, int64_t state) {
+    uint64_t* frame = (uint64_t*)(uintptr_t)frame_ptr;
+    if (!frame) return -1;
+    // Slot zero is the Python-owned generator resume-state ABI, never an Item.
+    frame[0] = (uint64_t)state;
+    return state;
 }
 
 // Advance a generator by sending ItemNull (used by next()).

@@ -165,13 +165,13 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->runtime_catalog->register_imports ||
         !host->runtime_catalog->lookup_import_metadata || !host->data ||
         host->data->api_version != JUBE_HOST_SERVICE_API_VERSION ||
-        host->data->struct_size < JUBE_HOST_DATA_API_FULL_SIZE ||
+        host->data->struct_size < JUBE_HOST_DATA_API_H7E30_NAME_SIZE ||
         !host->data->name_from_utf8 || !host->data->map_set ||
         !host->data->float_from_f64 || !host->data->format_json ||
         !host->data->closure_env_alloc || !host->data->closure_env_store ||
         !host->data->closure_env_load || !host->data->item_slots_store ||
         !host->data->item_slots_load || !host->data->map_new ||
-        !host->data->function_new ||
+        !host->data->function_new || !host->data->name_from_utf8_n ||
         !host->hosted_language ||
         host->hosted_language->api_version != JUBE_HOST_LANG_API_VERSION ||
         host->hosted_language->struct_size < JUBE_HOST_LANG_API_H7E2_ROOTS_SIZE ||
@@ -194,7 +194,7 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->session_memory->session_alloc ||
         !host->hosted_language->session_memory->session_free ||
         host->hosted_language->execution->api_version != JUBE_HOST_SERVICE_API_VERSION ||
-        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE ||
+        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_H7C_DEBUG_DUMP_SIZE ||
         !host->hosted_language->execution->execution_create ||
         !host->hosted_language->execution->execution_destroy ||
         !host->hosted_language->execution->execution_link_module ||
@@ -218,6 +218,11 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->execution->mir_label_create ||
         !host->hosted_language->execution->mir_instruction_emit ||
         !host->hosted_language->execution->mir_label_emit ||
+        !host->hosted_language->execution->mir_runtime_import_call_emit ||
+        !host->hosted_language->execution->mir_local_direct_call_emit ||
+        !host->hosted_language->execution->mir_item_return_emit ||
+        !host->hosted_language->execution->mir_function_frame_finalize ||
+        !host->hosted_language->execution->mir_debug_dump_if_enabled ||
         host->hosted_language->roots->api_version != JUBE_HOST_SERVICE_API_VERSION ||
         host->hosted_language->roots->struct_size < JUBE_HOST_ROOT_API_H5_PERSISTENT_SIZE ||
         !host->hosted_language->roots->root_frame_begin ||

@@ -17,6 +17,10 @@ extern "C" {
 // -1 on parse/cross-check failure — registration must then fail.
 int jube_compile_module_interface(const JubeModuleDef* module);
 
+// Removes records compiled for one module while its registration transaction
+// rolls back. The module descriptor must still be live while this runs.
+void jube_interface_remove_module(const JubeModuleDef* module);
+
 // True when the typedef has a compiled interface record set.
 bool jube_type_has_interface(const JubeTypeDef* type);
 

@@ -444,6 +444,7 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     js_reset_template_registry();
     // Jube compiled interface records are registry-lifetime tracked allocations.
     jube_interface_cleanup();
+    jube_registry_cleanup();
 }
 
 static size_t lambda_main_memtrack_shutdown_once(void) {

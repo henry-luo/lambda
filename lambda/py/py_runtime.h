@@ -244,6 +244,7 @@ const JubeHostRootAPI* py_hosted_root_api(void);
 void py_register_hosted_gc_root(uint64_t* slot);
 void py_register_hosted_gc_root_range(uint64_t* slots, size_t slot_count);
 Item py_data_name_from_utf8(const char* text);
+Item py_data_name_from_utf8_n(const char* text, size_t length);
 bool py_data_map_set(Item map, Item key, Item value);
 Item py_data_float_from_f64(double value);
 Item py_data_format_json(Item value);
@@ -266,6 +267,8 @@ bool py_is_stop_iteration(Item value);
 // ========================================================================
 Item    py_gen_create(void* resume_fn_ptr, int frame_size);
 int64_t py_gen_get_frame_c(Item gen);
+int64_t py_gen_frame_state_load(int64_t frame_ptr);
+int64_t py_gen_frame_state_store(int64_t frame_ptr, int64_t state);
 Item    py_gen_next(Item gen);
 Item    py_gen_send(Item gen, Item value);
 bool    py_is_generator(Item x);

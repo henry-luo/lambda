@@ -28,6 +28,7 @@ PYTHON_MIR_LOWERING = PYTHON_DIR / "transpile_py_mir.cpp"
 PYTHON_RUNTIME_IMPORTS = PYTHON_DIR / "python_runtime_imports.cpp"
 PYTHON_MODULE_DIR = ROOT / "modules" / "lang-python"
 JUBE_HEADER = ROOT / "lambda" / "jube" / "jube.h"
+JUBE_REGISTRY = ROOT / "lambda" / "jube" / "jube_registry.cpp"
 
 
 # The inventory is deliberately produced by the same tool that enforces the
@@ -284,6 +285,7 @@ def check_python_adapter_uses_hosted_services() -> None:
         "mir_label_create",
         "mir_instruction_emit",
         "mir_label_emit",
+        "mir_function_frame_finalize",
         "execution_activate",
         "execution_activate_import",
         "execution_run_main",
@@ -314,6 +316,27 @@ def check_python_frontend_has_no_monolithic_transpiler_header() -> None:
     source = text(PYTHON_DIR / "py_transpiler.hpp")
     if '"../transpiler.hpp"' in source:
         fail("lambda/py/py_transpiler.hpp retains the monolithic core transpiler header")
+
+
+def check_python_mir_dump_uses_hosted_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ('"../runtime/mir_dump.h"', "mir_dump_instrumentation_enabled(",
+                  "mir_dump_write_context("):
+        if token in source:
+            fail(f"lambda/py/transpile_py_mir.cpp bypasses hosted MIR debug service via {token}")
+    if "mir_debug_dump_if_enabled" not in source:
+        fail("lambda/py/transpile_py_mir.cpp does not use hosted MIR debug service")
+
+
+def check_python_mir_lowering_uses_hosted_name_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ('"../runtime/heap_api.h"', '"../runtime/transpiler.hpp"',
+                  "<mir-gen.h>", "heap_create_name("):
+        if token in source:
+            fail(f"lambda/py/transpile_py_mir.cpp bypasses hosted name service via {token}")
+    for token in ("pm_hosted_name_from_utf8_n", "py_data_name_from_utf8_n"):
+        if token not in source:
+            fail(f"lambda/py/transpile_py_mir.cpp does not use length-aware hosted name service {token}")
 
 
 def check_python_import_lowering_uses_module_graph() -> None:
@@ -364,8 +387,8 @@ def check_python_import_lowering_uses_module_graph() -> None:
             fail(f"Python compiler retains raw host execution internals via {token}")
     if '"_lambda_rt"' in source:
         fail("Python compiler retains direct _lambda_rt storage import")
-    runtime_loader_start = source.find("static MIR_reg_t pm_load_side_stack_runtime(")
-    runtime_loader_end = source.find("static void pm_emit_side_stack_overflow(",
+    runtime_loader_start = source.find("static PmCompilerRegister pm_load_side_stack_runtime(")
+    runtime_loader_end = source.find("static void pm_begin_function_frame(",
                                      runtime_loader_start)
     if runtime_loader_start < 0 or runtime_loader_end < 0 or "MIR_new_mem_op" in source[
             runtime_loader_start:runtime_loader_end]:
@@ -406,7 +429,7 @@ def check_python_truth_branches_use_hosted_instruction_service() -> None:
 def check_python_labels_use_hosted_emission_service() -> None:
     source = text(PYTHON_MIR_LOWERING)
     start = source.find("static void pm_emit_label(")
-    end = source.find("static MIR_reg_t pm_load_side_stack_runtime(", start)
+    end = source.find("static PmCompilerRegister pm_load_side_stack_runtime(", start)
     if start < 0 or end < 0:
         fail("Python compiler lost the hosted label-emission adapter")
     adapter = source[start:end]
@@ -414,6 +437,440 @@ def check_python_labels_use_hosted_emission_service() -> None:
         fail("Python compiler bypasses hosted label emission")
     if "em_emit_label(" in adapter or "MIR_append_insn(" in adapter:
         fail("Python compiler retains raw label emission")
+
+
+def check_python_i64_operations_use_hosted_instruction_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_i64_operation(")
+    end = source.find("static void pm_emit_item_return_operand(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler lost the hosted integer-operation adapter")
+    adapter = source[start:end]
+    if "pm_emit_hosted_instruction" not in adapter:
+        fail("Python compiler bypasses hosted instruction emission for integer operations")
+    for token in ("MIR_new_insn(", "MIR_new_reg_op(", "MIR_new_int_op("):
+        if token in adapter:
+            fail(f"Python compiler retains raw integer-operation MIR construction via {token}")
+
+
+def check_python_numeric_lowering_uses_hosted_instruction_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static PmCompilerRegister pm_box_int_reg(")
+    end = source.find("// ============================================================================\n// TCO helpers", start)
+    if start < 0 or end < 0:
+        fail("Python compiler lost the native numeric lowering boundary")
+    lowering = source[start:end]
+    for token in ("MIR_new_insn(", "MIR_new_label_op(", "MIR_new_ref_op("):
+        if token in lowering:
+            fail(f"Python native numeric lowering retains raw MIR construction via {token}")
+    for token in ("pm_emit_i64_operation", "pm_emit_f64_operation",
+                  "pm_emit_i64_register_move", "pm_emit_branch_true",
+                  "pm_emit_branch_false", "pm_emit_jump"):
+        if token not in lowering:
+            fail(f"Python native numeric lowering no longer uses hosted instruction service {token}")
+
+
+def check_python_runtime_calls_use_hosted_call_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static PmCompilerRegister pm_emit_hosted_runtime_call_operands(")
+    end = source.find("struct PmArgScope", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted runtime-call adapter")
+    adapter = source[start:end]
+    if "mir_runtime_import_call_emit" not in adapter:
+        fail("Python compiler does not use the hosted runtime-call service")
+    for token in ("em_call_", "em_call_void_"):
+        if token in adapter:
+            fail(f"Python compiler retains shared raw call emission via {token}")
+
+
+def check_python_local_direct_calls_use_hosted_call_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_local_direct_call(")
+    end = source.find("static void pm_emit_label(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted local-direct-call adapter")
+    adapter = source[start:end]
+    if "mir_local_direct_call_emit" not in adapter:
+        fail("Python compiler does not use the hosted local-direct-call service")
+    for token in ("em_emit_borrowed_call(", "MIR_new_insn_arr("):
+        if token in adapter:
+            fail(f"Python compiler retains raw local-direct-call emission via {token}")
+
+
+def check_python_item_returns_use_hosted_return_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_item_return_operand(")
+    end = source.find("static void pm_emit_local_direct_call(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted Item-return adapter")
+    adapter = source[start:end]
+    if "mir_item_return_emit" not in adapter:
+        fail("Python compiler does not use the hosted Item-return service")
+    for token in ("MIR_new_insn(", "MIR_new_ret_insn(", "MIR_JMP"):
+        if token in adapter:
+            fail(f"Python compiler retains raw Item-return emission via {token}")
+
+
+def check_python_lowering_has_no_raw_instruction_decoder() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("static void pm_emit(PyMirTranspiler* mt, MIR_insn_t insn)",
+                  "em_emit_insn(&mt->em, insn)", "_MIR_free_insn(mt->em.ctx, insn)"):
+        if token in source:
+            fail(f"Python compiler retains raw MIR instruction decoder via {token}")
+
+
+def check_python_frame_finalization_uses_hosted_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_finish_function_frame(")
+    end = source.find("// Call helpers", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted frame-finalization adapter")
+    adapter = source[start:end]
+    if "mir_function_frame_finalize" not in adapter:
+        fail("Python compiler does not use the hosted frame-finalization service")
+    for token in ("em_finalize_semantic_root_write_back", "em_finalize_scalar_homes",
+                  "em_finalize_frame_prologue", "em_finalize_function_metadata",
+                  "em_adopt_scalar_item", "em_store_frame_top", "MIR_new_ret_insn("):
+        if token in adapter:
+            fail(f"Python compiler retains raw frame finalization via {token}")
+
+
+def check_python_reference_moves_use_hosted_instruction_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_i64_reference_move(")
+    end = source.find("static void pm_emit_f64_operation(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted opaque-reference move adapter")
+    adapter = source[start:end]
+    if "JUBE_COMPILER_INSN_MOVE_I64_REFERENCE" not in adapter or \
+            "pm_emit_hosted_instruction" not in adapter:
+        fail("Python compiler does not use the hosted opaque-reference move service")
+    if "MIR_new_ref_op(" in adapter:
+        fail("Python compiler retains raw opaque-reference move emission")
+
+
+def check_python_root_candidates_use_hosted_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    if "mir_compiler_cursor_create" not in source:
+        fail("Python compiler does not use the host-owned root-candidate cursor")
+    for token in ("pm_root_call_value(", "mir_frame_root_candidate_note"):
+        if token in source:
+            fail(f"Python compiler retains direct root-candidate callback via {token}")
+
+
+def check_python_function_frames_use_hosted_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_begin_function_frame(")
+    end = source.find("// ============================================================================\n// Call helpers", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted frame adapters")
+    adapters = source[start:end]
+    for token in ("mir_function_frame_begin", "mir_function_frame_scalar_return_home_set",
+                  "mir_function_frame_finalize"):
+        if token not in adapters:
+            fail(f"Python compiler does not use hosted function-frame service {token}")
+    if "mt->em.frame" in source:
+        fail("Python compiler retains direct MirEmitter frame-layout access")
+
+
+def check_python_import_cache_uses_hosted_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("mir_compiler_import_cache_init",
+                  "mir_compiler_import_cache_destroy",
+                  "mir_local_direct_call_prototype_get_or_create"):
+        if token not in source:
+            fail(f"Python compiler does not use hosted import-cache service {token}")
+    for token in ("mt->em.import_cache", "MirImportCacheEntry"):
+        if token in source:
+            fail(f"Python compiler retains direct import-cache ownership via {token}")
+
+
+def check_python_function_selection_uses_hosted_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_select_hosted_function(")
+    end = source.find("static bool pm_require_capacity(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted function-selection adapters")
+    adapters = source[start:end]
+    for token in ("mir_function_select", "mir_function_state_restore"):
+        if token not in adapters:
+            fail(f"Python compiler does not use hosted function-state service {token}")
+    if "mir_function_state_suspend" not in source:
+        fail("Python compiler does not use hosted function-state suspension")
+    for token in ("mt->em.func_item =", "mt->em.func =", "em_function_arguments_"):
+        if token in source:
+            fail(f"Python compiler retains direct function-state ownership via {token}")
+    if "mir_function_register_lookup_current" not in source:
+        fail("Python compiler does not use hosted current-function register lookup")
+
+
+def check_python_current_lowering_uses_hosted_cursor_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static PmCompilerRegister pm_new_reg(")
+    end = source.find("static void pm_begin_function_frame(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler is missing the hosted current-lowering adapters")
+    adapters = source[start:end]
+    for token in ("mir_function_register_create_current", "mir_label_create_current",
+                  "mir_instruction_emit_current", "mir_label_emit_current",
+                  "mir_function_frame_runtime_load_current"):
+        if token not in adapters:
+            fail(f"Python compiler does not use hosted cursor service {token}")
+    for token in ("mt->em.ctx", "mt->em.func", "mt->em.func_item", "mt->em.reg_counter"):
+        if token in adapters:
+            fail(f"Python lowering retains direct current compiler state via {token}")
+    if "mir_function_finish_current" not in source:
+        fail("Python compiler does not use hosted current-function finalization")
+
+
+def check_python_cursor_construction_uses_hosted_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("mir_item_function_create_typed_current",
+                  "mir_function_forward_create_current",
+                  "mir_module_finalize_and_load_current",
+                  "mir_function_lookup_current"):
+        if token not in source:
+            fail(f"Python compiler does not use hosted cursor construction service {token}")
+    for token in ("pm_create_hosted_item_function_typed(mt->em.ctx",
+                  "pm_create_hosted_function_forward(mt->em.ctx",
+                  "pm_finalize_and_load_hosted_mir_module(mt->em.ctx",
+                  "pm_find_hosted_mir_function(ctx,"):
+        if token in source:
+            fail(f"Python compiler retains direct cursor construction via {token}")
+
+
+def check_python_scalar_homes_use_hosted_services() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("mir_scalar_home_create_current", "mir_scalar_home_bind_current"):
+        if token not in source:
+            fail(f"Python compiler does not use hosted scalar-home service {token}")
+    for token in ("em_scalar_home_new(&mt->em)",
+                  "em_scalar_home_bind(&mt->em)",
+                  "em_scalar_home_ref(&mt->em)",
+                  "em_materialize_frame_ref(&mt->em)"):
+        if token in source:
+            fail(f"Python compiler retains direct scalar-home ownership via {token}")
+
+
+def check_python_compiler_cursor_is_opaque() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("mir_compiler_cursor_create", "mir_compiler_cursor_destroy",
+                  "compiler_cursor"):
+        if token not in source:
+            fail(f"Python compiler does not use opaque compiler cursor service {token}")
+    for token in ("MirEmitter em", "mt->em", "emitter->ctx =",
+                  "lookup_import_metadata = pm_"):
+        if token in source:
+            fail(f"Python compiler retains concrete compiler cursor state via {token}")
+
+
+def check_python_compilation_artifacts_are_opaque() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("void* compiler_context", "void* module"):
+        if token not in source:
+            fail(f"Python compiler does not retain opaque compilation artifact {token}")
+    for token in ("MIR_context_t", "MIR_module_t"):
+        if token in source:
+            fail(f"Python compiler retains concrete compilation artifact via {token}")
+
+
+def check_python_lowering_has_no_private_mir_types() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("#include <mir.h>", "mir_emitter_shared.hpp",
+                  "MIR_reg_t", "MIR_label_t", "MIR_item_t", "MIR_func_t",
+                  "MIR_type_t", "MIR_T_"):
+        if token in source:
+            fail(f"Python compiler retains private MIR type dependency via {token}")
+    for token in ("PmCompilerRegister", "PmCompilerLabel",
+                  "PmCompilerFunctionItem", "PmCompilerFunction"):
+        if token not in source:
+            fail(f"Python compiler does not use semantic compiler identity {token}")
+
+
+def check_hosted_compiler_cursor_rejects_stale_handles() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_cursor_register", "jube_host_mir_cursor_emitter",
+                  "jube_host_mir_cursor_unregister"):
+        if token not in source:
+            fail(f"Jube host does not implement opaque compiler cursor service {token}")
+    if "MirEmitter* emitter = (MirEmitter*)compiler_cursor;" in source:
+        fail("Jube host accepts a raw compiler cursor pointer")
+    destroy_start = source.find("static void jube_host_mir_compiler_cursor_destroy(")
+    if destroy_start < 0:
+        fail("Jube host is missing compiler cursor destruction")
+    destroy_end = source.find("static int jube_host_mir_", destroy_start + 1)
+    if destroy_end < 0:
+        fail("Jube host compiler cursor destruction has no following service")
+    destroy = source[destroy_start:destroy_end]
+    invalidate = destroy.find("jube_host_mir_cursor_unregister(compiler_cursor);")
+    release = destroy.find("jube_host_mir_cursor_dispose(emitter);")
+    if invalidate < 0 or release < 0 or invalidate > release:
+        fail("Jube host does not invalidate compiler cursor before emitter release")
+
+
+def check_hosted_compiler_context_invalidates_cursors() -> None:
+    source = text(JUBE_REGISTRY)
+    if "jube_host_mir_cursor_invalidate_context" not in source:
+        fail("Jube host does not invalidate compiler cursors for a finished context")
+    destroy_start = source.find("static void jube_host_mir_context_destroy(")
+    destroy_end = source.find("static void* jube_host_mir_module_create(", destroy_start)
+    if destroy_start < 0 or destroy_end < 0:
+        fail("Jube host is missing opaque MIR context destruction")
+    destroy = source[destroy_start:destroy_end]
+    invalidate = destroy.find("jube_host_mir_cursor_invalidate_context(mir_context);")
+    finish = destroy.find("MIR_finish(")
+    if invalidate < 0 or finish < 0 or invalidate > finish:
+        fail("Jube host does not invalidate compiler cursors before MIR context release")
+
+
+def check_hosted_compiler_function_handles_are_owner_checked() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_cursor_track_function",
+                  "jube_host_mir_cursor_owns_function"):
+        if token not in source:
+            fail(f"Jube host does not track compiler function ownership via {token}")
+    select_start = source.find("static int jube_host_mir_function_select(")
+    select_end = source.find("static int jube_host_mir_function_state_restore(", select_start)
+    if select_start < 0 or select_end < 0:
+        fail("Jube host is missing compiler function selection")
+    select = source[select_start:select_end]
+    ownership = select.find("jube_host_mir_cursor_owns_function(")
+    mir_lookup = select.find("MIR_get_item_func(")
+    if ownership < 0 or mir_lookup < 0 or ownership > mir_lookup:
+        fail("Jube host does not validate compiler function ownership before MIR lookup")
+    create_start = source.find("static int jube_host_mir_item_function_create_typed_current(")
+    create_end = source.find("static int jube_host_mir_function_forward_create_current(",
+                             create_start)
+    if create_start < 0 or create_end < 0 or \
+            "jube_host_mir_cursor_track_function(" not in source[create_start:create_end]:
+        fail("Jube host does not record current compiler function ownership")
+
+
+def check_hosted_compiler_state_tokens_are_opaque() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_state_token_register",
+                  "jube_host_mir_state_token_find",
+                  "jube_host_mir_state_tokens_discard_slot"):
+        if token not in source:
+            fail(f"Jube host does not manage opaque compiler state tokens via {token}")
+    if "JubeMirFunctionStateToken* state = (JubeMirFunctionStateToken*)state_token;" in source:
+        fail("Jube host dereferences a raw compiler state token")
+    suspend_start = source.find("static int jube_host_mir_function_state_suspend(")
+    suspend_end = source.find("static int jube_host_mir_function_select(", suspend_start)
+    if suspend_start < 0 or suspend_end < 0 or \
+            "jube_host_mir_state_token_register(compiler_cursor, state)" not in \
+            source[suspend_start:suspend_end]:
+        fail("Jube host does not register an opaque compiler state token")
+    restore_start = source.find("static int jube_host_mir_function_state_restore(")
+    restore_end = source.find("static int jube_host_mir_function_register_lookup_current(",
+                              restore_start)
+    restore = source[restore_start:restore_end]
+    lookup = restore.find("jube_host_mir_state_token_find(state_token,")
+    state_access = restore.find("entry->state")
+    if restore_start < 0 or restore_end < 0 or lookup < 0 or state_access < 0 or \
+            lookup > state_access:
+        fail("Jube host does not validate an opaque compiler state token before use")
+    destroy_start = source.find("static void jube_host_mir_compiler_cursor_destroy(")
+    destroy_end = source.find("static void jube_host_mir_debug_dump_if_enabled(", destroy_start)
+    if destroy_start < 0 or destroy_end < 0 or \
+            "jube_host_mir_state_tokens_discard_slot(" not in source[destroy_start:destroy_end]:
+        fail("Jube host does not discard compiler state tokens with their cursor")
+
+
+def check_hosted_compiler_labels_are_owner_checked() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_cursor_track_label",
+                  "jube_host_mir_cursor_owns_label"):
+        if token not in source:
+            fail(f"Jube host does not track compiler label ownership via {token}")
+    create_start = source.find("static int jube_host_mir_label_create_current(")
+    create_end = source.find("static int jube_host_mir_instruction_emit_current(",
+                             create_start)
+    if create_start < 0 or create_end < 0 or \
+            "jube_host_mir_cursor_track_label(" not in source[create_start:create_end]:
+        fail("Jube host does not record current compiler label ownership")
+    emit_start = source.find("static int jube_host_mir_label_emit_current(")
+    emit_end = source.find("static int jube_host_mir_function_frame_runtime_load_current(",
+                           emit_start)
+    if emit_start < 0 or emit_end < 0:
+        fail("Jube host is missing current compiler label emission")
+    emit = source[emit_start:emit_end]
+    ownership = emit.find("jube_host_mir_cursor_owns_label(")
+    host_emit = emit.find("jube_host_mir_label_emit(")
+    if ownership < 0 or host_emit < 0 or ownership > host_emit:
+        fail("Jube host does not validate compiler label ownership before emission")
+
+
+def check_hosted_compiler_direct_call_handles_are_owner_checked() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_cursor_track_prototype",
+                  "jube_host_mir_cursor_owns_prototype",
+                  "jube_host_mir_cursor_owns_function_item"):
+        if token not in source:
+            fail(f"Jube host does not track compiler direct-call ownership via {token}")
+    call_start = source.find("static int jube_host_mir_local_direct_call_emit(")
+    call_end = source.find("static int jube_host_mir_item_return_emit(", call_start)
+    if call_start < 0 or call_end < 0:
+        fail("Jube host is missing local direct-call emission")
+    call = source[call_start:call_end]
+    prototype_check = call.find("jube_host_mir_cursor_owns_prototype(")
+    target_check = call.find("jube_host_mir_cursor_owns_function_item(")
+    raw_operand = call.find("MIR_new_ref_op(")
+    if prototype_check < 0 or target_check < 0 or raw_operand < 0 or \
+            prototype_check > raw_operand or target_check > raw_operand:
+        fail("Jube host does not validate direct-call ownership before MIR operands")
+    cache_start = source.find("static int jube_host_mir_local_direct_call_prototype_get_or_create(")
+    cache_end = source.find("static int jube_host_mir_function_state_suspend(", cache_start)
+    if cache_start < 0 or cache_end < 0 or \
+            "jube_host_mir_cursor_track_prototype(" not in source[cache_start:cache_end]:
+        fail("Jube host does not record local direct-call prototype ownership")
+
+
+def check_hosted_compiler_module_handles_are_owner_checked() -> None:
+    source = text(JUBE_REGISTRY)
+    for token in ("jube_host_mir_module_register",
+                  "jube_host_mir_module_from_handle",
+                  "jube_host_mir_module_unregister",
+                  "jube_host_mir_modules_invalidate_context"):
+        if token not in source:
+            fail(f"Jube host does not manage opaque compiler modules via {token}")
+    create_start = source.find("static void* jube_host_mir_module_create(")
+    create_end = source.find("static int jube_host_mir_module_finalize_and_load(",
+                             create_start)
+    if create_start < 0 or create_end < 0 or \
+            "jube_host_mir_module_register(" not in source[create_start:create_end]:
+        fail("Jube host does not register opaque compiler module handles")
+    finalize_start = source.find("static int jube_host_mir_module_finalize_and_load(")
+    finalize_end = source.find("static void* jube_host_mir_function_lookup(", finalize_start)
+    finalize = source[finalize_start:finalize_end]
+    lookup = finalize.find("jube_host_mir_module_from_handle(")
+    finish = finalize.find("MIR_finish_module(")
+    if finalize_start < 0 or finalize_end < 0 or lookup < 0 or finish < 0 or lookup > finish:
+        fail("Jube host does not validate compiler module ownership before finalization")
+    if "jube_host_mir_module_unregister(mir_module);" not in finalize:
+        fail("Jube host does not consume finalized compiler module handles")
+
+
+def check_python_lowering_has_no_raw_memory_or_call_construction() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("MIR_new_mem_op(", "MIR_new_call_insn(", "MIR_new_insn_arr("):
+        if token in source:
+            fail(f"Python compiler retains raw MIR memory/call construction via {token}")
+
+
+def check_python_lowering_has_no_raw_instruction_construction() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("MIR_new_insn(", "MIR_new_ret_insn(", "MIR_new_label("):
+        if token in source:
+            fail(f"Python compiler retains raw MIR instruction construction via {token}")
+
+
+def check_python_lowering_has_no_raw_call_operand_construction() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    for token in ("MIR_new_reg_op(", "MIR_new_int_op(", "MIR_new_double_op("):
+        if token in source:
+            fail(f"Python compiler retains raw MIR call operand construction via {token}")
 
 
 def check_dynamic_module_has_no_retired_host_imports() -> None:
@@ -503,11 +960,41 @@ def main() -> None:
     check_no_second_jube_runtime_target()
     check_python_adapter_uses_hosted_services()
     check_python_frontend_has_no_monolithic_transpiler_header()
+    check_python_mir_dump_uses_hosted_service()
+    check_python_mir_lowering_uses_hosted_name_service()
     check_python_runtime_catalog_uses_jube_api()
     check_python_import_lowering_uses_module_graph()
     check_python_literal_moves_use_hosted_instruction_service()
     check_python_truth_branches_use_hosted_instruction_service()
     check_python_labels_use_hosted_emission_service()
+    check_python_i64_operations_use_hosted_instruction_service()
+    check_python_numeric_lowering_uses_hosted_instruction_service()
+    check_python_runtime_calls_use_hosted_call_service()
+    check_python_local_direct_calls_use_hosted_call_service()
+    check_python_item_returns_use_hosted_return_service()
+    check_python_lowering_has_no_raw_instruction_decoder()
+    check_python_frame_finalization_uses_hosted_service()
+    check_python_reference_moves_use_hosted_instruction_service()
+    check_python_root_candidates_use_hosted_service()
+    check_python_function_frames_use_hosted_services()
+    check_python_import_cache_uses_hosted_services()
+    check_python_function_selection_uses_hosted_services()
+    check_python_current_lowering_uses_hosted_cursor_services()
+    check_python_cursor_construction_uses_hosted_services()
+    check_python_scalar_homes_use_hosted_services()
+    check_python_compiler_cursor_is_opaque()
+    check_python_compilation_artifacts_are_opaque()
+    check_python_lowering_has_no_private_mir_types()
+    check_hosted_compiler_cursor_rejects_stale_handles()
+    check_hosted_compiler_context_invalidates_cursors()
+    check_hosted_compiler_function_handles_are_owner_checked()
+    check_hosted_compiler_state_tokens_are_opaque()
+    check_hosted_compiler_labels_are_owner_checked()
+    check_hosted_compiler_direct_call_handles_are_owner_checked()
+    check_hosted_compiler_module_handles_are_owner_checked()
+    check_python_lowering_has_no_raw_memory_or_call_construction()
+    check_python_lowering_has_no_raw_instruction_construction()
+    check_python_lowering_has_no_raw_call_operand_construction()
     check_dynamic_module_has_no_retired_host_imports()
     check_dynamic_manifest_matches_host_build()
     print("HOSTED_PY_ARCH: passed")
