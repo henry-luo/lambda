@@ -13119,6 +13119,34 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
 static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home);
 
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
+extern "C" void heap_unregister_gc_root_range(uint64_t* base);
+
+// A `with` scope must not leak into a called function, so the call boundary
+// copies the caller's active with-scope objects into a native-stack array and
+// installs the callee's own (usually empty) with-env into the global stack.
+// That native copy is then the ONLY live reference to those scope objects while
+// the callee runs, so a GC during the callee would free them and the post-call
+// restore would write dangling pointers back. This RAII guard registers the
+// saved array as an exact GC root range for exactly that span and unregisters
+// before the native frame returns (by which point the values are back in the
+// GC-rooted global with-stack). Only pays a cost when a with-scope is actually
+// active across the call (depth > 0).
+struct JsSavedWithScopeRoots {
+    uint64_t* base;
+    JsSavedWithScopeRoots(Item* stack, int depth) : base(nullptr) {
+        if (depth > 0) {
+            base = (uint64_t*)stack;
+            heap_register_gc_root_range(base, depth);
+        }
+    }
+    ~JsSavedWithScopeRoots() {
+        if (base) heap_unregister_gc_root_range(base);
+    }
+    JsSavedWithScopeRoots(const JsSavedWithScopeRoots&) = delete;
+    JsSavedWithScopeRoots& operator=(const JsSavedWithScopeRoots&) = delete;
+};
+
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
@@ -13646,6 +13674,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         // Enter the callee's lexical with-environment, then restore caller state.
         Item saved_with_stack[16];
         int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+        JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
         if (fn->func_ptr || fn->with_env_depth > 0) {
             js_with_set_stack(fn->with_env, fn->with_env_depth);
         }
@@ -13725,6 +13754,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     // Enter the callee's lexical with-environment, then restore caller state.
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
     if (fn->func_ptr || fn->with_env_depth > 0) {
         js_with_set_stack(fn->with_env, fn->with_env_depth);
     }
@@ -28116,12 +28146,18 @@ static void js_wrapper_set_proto(Item obj, const char* ctor_name, int ctor_len) 
 
 // Create a Number wrapper object with [[NumberData]] in __primitiveValue__.
 extern "C" Item js_new_number_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_NUMBER);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    js_property_set(obj, pv_key, js_to_number(arg));
-    js_wrapper_set_proto(obj, "Number", 6);
-    return obj;
+    // Every step here allocates (class stamp clones the typemap, heap_create_name,
+    // js_to_number, js_property_set can grow the map, wrapper_set_proto reads the
+    // constructor). The half-built wrapper is referenced only by this local, so
+    // it must stay exact-rooted or a collection mid-construction frees it.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    js_class_stamp(obj_root.get(), JS_CLASS_NUMBER);
+    js_property_set(obj_root.get(), pv_key_root.get(), js_to_number(arg_root.get()));
+    js_wrapper_set_proto(obj_root.get(), "Number", 6);
+    return obj_root.get();
 }
 
 // ES spec: new Number(arg) — checks symbol before creating wrapper
@@ -28139,32 +28175,43 @@ extern "C" Item js_new_number_checked(Item arg) {
 
 // Create a Boolean wrapper object
 extern "C" Item js_new_boolean_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_BOOLEAN);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    js_property_set(obj, pv_key, js_to_boolean(arg));
-    js_wrapper_set_proto(obj, "Boolean", 7);
-    return obj;
+    // See js_new_number_wrapper: keep the unfinished wrapper exact-rooted across
+    // every allocating construction step.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    js_class_stamp(obj_root.get(), JS_CLASS_BOOLEAN);
+    js_property_set(obj_root.get(), pv_key_root.get(), js_to_boolean(arg_root.get()));
+    js_wrapper_set_proto(obj_root.get(), "Boolean", 7);
+    return obj_root.get();
 }
 
 // Create a String wrapper object
 extern "C" Item js_new_string_wrapper(Item arg) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_STRING);
-    Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-    Item str_val = js_to_string(arg);
-    js_property_set(obj, pv_key, str_val);
+    // See js_new_number_wrapper: the wrapper is built across many allocating
+    // calls (class stamp, two heap_create_name keys, js_to_string, two
+    // js_property_set, wrapper_set_proto, three attr marks) while referenced only
+    // by these locals — all must stay exact-rooted so a mid-construction
+    // collection cannot free the half-built map or the wrapped string.
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+    Rooted<Item> str_val_root(roots, js_to_string(arg_root.get()));
+    js_class_stamp(obj_root.get(), JS_CLASS_STRING);
+    js_property_set(obj_root.get(), pv_key_root.get(), str_val_root.get());
     // Also set length property
-    String* s = it2s(str_val);
+    String* s = it2s(str_val_root.get());
     int len = s ? (int)js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Rooted<Item> len_key_root(roots, (Item){.item = s2it(heap_create_name("length", 6))});
     Item len_val = (Item){.item = i2it(len)};
-    js_property_set(obj, len_key, len_val);
-    js_wrapper_set_proto(obj, "String", 6);
-    js_mark_non_writable(obj, len_key);
-    js_mark_non_enumerable(obj, len_key);
-    js_mark_non_configurable(obj, len_key);
-    return obj;
+    js_property_set(obj_root.get(), len_key_root.get(), len_val);
+    js_wrapper_set_proto(obj_root.get(), "String", 6);
+    js_mark_non_writable(obj_root.get(), len_key_root.get());
+    js_mark_non_enumerable(obj_root.get(), len_key_root.get());
+    js_mark_non_configurable(obj_root.get(), len_key_root.get());
+    return obj_root.get();
 }
 
 // ToObject conversion: wraps primitives into their corresponding wrapper objects
@@ -28175,26 +28222,33 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
     // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-        Item obj = js_new_object();
-        js_class_stamp(obj, JS_CLASS_SYMBOL);
-        Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-        js_property_set(obj, pv_key, value);
-        js_wrapper_set_proto(obj, "Symbol", 6);
-        return obj;
+        // exact-root the half-built wrapper across the allocating steps (see
+        // js_new_number_wrapper) — an unrooted obj is freed by a mid-build GC.
+        RootFrame roots((Context*)context, 3);
+        Rooted<Item> value_root(roots, value);
+        Rooted<Item> obj_root(roots, js_new_object());
+        Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+        js_class_stamp(obj_root.get(), JS_CLASS_SYMBOL);
+        js_property_set(obj_root.get(), pv_key_root.get(), value_root.get());
+        js_wrapper_set_proto(obj_root.get(), "Symbol", 6);
+        return obj_root.get();
     }
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
     if (js_is_bigint_egress(value)) {
-        // BigInt wrapper object with __primitiveValue__
-        Item obj = js_new_object();
-        js_class_stamp(obj, JS_CLASS_BIGINT);
-        Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+        // BigInt wrapper object with __primitiveValue__; exact-root as above.
+        RootFrame roots((Context*)context, 4);
+        Rooted<Item> value_root(roots, value);
+        Rooted<Item> obj_root(roots, js_new_object());
+        Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
+        js_class_stamp(obj_root.get(), JS_CLASS_BIGINT);
         // native int64/uint64 egress as BigInt, but wrapper methods require the
         // canonical mpdec-unlimited representation in [[BigIntData]].
-        Item pv = js_is_native_bigint_egress(value) ? js_native_bigint_to_bigint(value) : value;
-        js_property_set(obj, pv_key, pv);
-        js_wrapper_set_proto(obj, "BigInt", 6);
-        return obj;
+        Rooted<Item> pv_root(roots, js_is_native_bigint_egress(value_root.get())
+            ? js_native_bigint_to_bigint(value_root.get()) : value_root.get());
+        js_property_set(obj_root.get(), pv_key_root.get(), pv_root.get());
+        js_wrapper_set_proto(obj_root.get(), "BigInt", 6);
+        return obj_root.get();
     }
     // null and undefined throw TypeError in spec, but return empty object here for safety
     return js_new_object();
@@ -34213,6 +34267,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     Item prev_global = js_vm_swap_global_this(sandbox);
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
     js_with_push(sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
@@ -39785,12 +39840,15 @@ extern "C" Item js_module_namespace_create(Item exports_map) {
 // =============================================================================
 
 extern "C" Item js_text_encoder_new(void) {
-    Item obj = js_new_object();
-    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
-    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
-    js_property_set(obj, k, v);
-    js_class_stamp(obj, JS_CLASS_TEXT_ENCODER);
-    return obj;
+    // exact-root the object across the allocating property-set and class-stamp
+    // (typemap clone) — an unrooted obj is freed by a mid-construction GC.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> k_root(roots, (Item){.item = s2it(heap_create_name("encoding"))});
+    Rooted<Item> v_root(roots, (Item){.item = s2it(heap_create_name("utf-8"))});
+    js_property_set(obj_root.get(), k_root.get(), v_root.get());
+    js_class_stamp(obj_root.get(), JS_CLASS_TEXT_ENCODER);
+    return obj_root.get();
 }
 
 static int js_text_encoder_utf8_len(const char* chars, int byte_len) {
@@ -40165,12 +40223,17 @@ extern "C" Item js_weakref_new(Item target) {
     if (!js_can_be_held_weakly(target)) {
         return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
     }
-    Item obj = js_new_object();
-    js_collection_link_prototype(obj, "WeakRef", 7);
-    js_class_stamp(obj, JS_CLASS_WEAK_REF);
-    Item target_key = (Item){.item = s2it(heap_create_name("__weakref_target__", 18))};
-    js_property_set(obj, target_key, target);
-    return obj;
+    // exact-root obj (and the borrowed target) across prototype link, class
+    // stamp, key alloc, and property set — an unrooted obj is freed by a
+    // mid-construction GC.
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> obj_root(roots, js_new_object());
+    js_collection_link_prototype(obj_root.get(), "WeakRef", 7);
+    js_class_stamp(obj_root.get(), JS_CLASS_WEAK_REF);
+    Rooted<Item> target_key_root(roots, (Item){.item = s2it(heap_create_name("__weakref_target__", 18))});
+    js_property_set(obj_root.get(), target_key_root.get(), target_root.get());
+    return obj_root.get();
 }
 
 extern "C" Item js_weakref_deref(Item this_val) {
@@ -40189,14 +40252,20 @@ extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
     if (get_type_id(cleanup_callback) != LMD_TYPE_FUNC) {
         return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
     }
-    Item obj = js_new_object();
-    js_collection_link_prototype(obj, "FinalizationRegistry", 20);
-    js_class_stamp(obj, JS_CLASS_FINALIZATION_REGISTRY);
-    Item cb_key = (Item){.item = s2it(heap_create_name("__fr_cleanup__", 14))};
-    js_property_set(obj, cb_key, cleanup_callback);
-    Item cells_key = (Item){.item = s2it(heap_create_name("__fr_cells__", 12))};
-    js_property_set(obj, cells_key, js_array_new(0));
-    return obj;
+    // exact-root obj (and the borrowed callback) across prototype link, class
+    // stamp, two key allocs, the cells array alloc, and two property sets — an
+    // unrooted obj is freed by a mid-construction GC (register() would then be
+    // missing from the collected object).
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> cleanup_root(roots, cleanup_callback);
+    Rooted<Item> obj_root(roots, js_new_object());
+    js_collection_link_prototype(obj_root.get(), "FinalizationRegistry", 20);
+    js_class_stamp(obj_root.get(), JS_CLASS_FINALIZATION_REGISTRY);
+    Rooted<Item> cb_key_root(roots, (Item){.item = s2it(heap_create_name("__fr_cleanup__", 14))});
+    js_property_set(obj_root.get(), cb_key_root.get(), cleanup_root.get());
+    Rooted<Item> cells_key_root(roots, (Item){.item = s2it(heap_create_name("__fr_cells__", 12))});
+    js_property_set(obj_root.get(), cells_key_root.get(), js_array_new(0));
+    return obj_root.get();
 }
 
 static Item js_finalization_registry_cells(Item registry) {

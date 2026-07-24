@@ -311,6 +311,27 @@
       "language": "js",
       "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication.",
       "budgets": {
+        "darwin-debug": {
+          "module_insns": 7406,
+          "functions": {
+            "js_main": {
+              "insns": 3536
+            },
+            "Tune6ExactCollection_m128_128": {
+              "insns": 17
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 7,
+              "root_stores": 841,
+              "scalar_homes": 6,
+              "number_scratch": 0,
+              "safepoints": 1603
+            }
+          ]
+        },
         "default": {
           "module_insns": 7389,
           "functions": {

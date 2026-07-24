@@ -75,6 +75,11 @@ fi
 
 echo "Setting up Mac native compilation dependencies..."
 
+# Select the full Xcode toolchain so debug builds use its current compiler and sanitizer runtime.
+echo "Configuring Xcode developer tools..."
+sudo xcodebuild -license accept
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
 # Check for required tools
 check_tool() {
     local tool="$1"
