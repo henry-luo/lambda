@@ -53,7 +53,11 @@ typedef struct gc_object_slab {
     struct gc_object_slab* next;// next slab in chain for this size class
 } gc_object_slab_t;
 
-// Slab range entry for fast ownership lookup via binary search
+// Slab range entry for fast ownership lookup via binary search.
+// Deliberately kept to two words: this array is the binary search's working
+// set, and widening it measurably costs cache density on slab-rich heaps.
+// The owning slab lives in the parallel `range_slabs` array instead, read only
+// once after the search hits.
 typedef struct gc_slab_range {
     uint8_t* base;          // slab memory start
     uint8_t* end;           // slab memory end (exclusive)
@@ -81,6 +85,11 @@ typedef struct gc_object_zone {
 
     // Fast ownership lookup: sorted array of slab ranges + min/max bounds
     gc_slab_range_t* slab_ranges;   // sorted by base address
+    // Owning slab per range, parallel to slab_ranges. NULL entries are bump
+    // blocks registered by gc_heap.c, which the zone never claims. Holding the
+    // slab here turns the post-search slot-alignment check into O(1); it used
+    // to re-walk every size class's slab chain and dominated the mark phase.
+    gc_object_slab_t** range_slabs;
     size_t range_count;             // number of entries in slab_ranges
     size_t range_capacity;          // allocated capacity of slab_ranges
     uint8_t* min_addr;              // minimum slab base address (fast rejection)
@@ -139,6 +148,13 @@ void gc_object_zone_free(gc_object_zone_t* oz, gc_header_t* header);
  * Check if a pointer falls within any object zone slab.
  */
 int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr);
+
+/**
+ * Register a non-slab address range (a gc_heap bump block) so it participates
+ * in the zone's min/max bounds and sorted range array. Such ranges never claim
+ * ownership from gc_object_zone_owns — the heap performs their exact-slot check.
+ */
+void gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes);
 
 /**
  * Get the size class index for a given user data size.

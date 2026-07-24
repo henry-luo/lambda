@@ -132,6 +132,40 @@ typedef struct gc_weak_slot {
 } gc_weak_slot_t;
 
 /**
+ * Open-addressed pointer set holding every malloc-backed (large) object.
+ *
+ * Conservative native-stack scanning is retired, so the registry only ever
+ * answers exact user-pointer questions — it never needs to locate the range
+ * that contains an interior address. Sortedness therefore buys nothing, while
+ * the sorted array it replaced paid O(n) per insert and per remove (an O(n^2)
+ * cliff on any workload allocating many >GC_LARGE_OBJECT_THRESHOLD objects).
+ *
+ * The table is malloc-backed like the objects it tracks: the GC allocator must
+ * not key its own bookkeeping off a structure allocating through the pools it
+ * manages.
+ */
+typedef struct gc_large_set {
+    gc_header_t** slots;   // slot holds the header; key is (header + 1); NULL = empty
+    size_t capacity;       // power of two, 0 when unallocated
+    size_t count;          // live entries
+} gc_large_set_t;
+
+// Tuning counters for the large-object registry and the mark-path ownership
+// check. Always compiled (increments sit on already-out-of-line paths) and
+// dumped at heap teardown when LAMBDA_GC_STATS is set in the environment.
+typedef struct gc_tune_stats {
+    uint64_t large_add_calls;       // gc_large_object_add invocations
+    uint64_t large_add_probes;      // cumulative probe steps taken by inserts
+    uint64_t large_remove_calls;    // gc_large_object_remove invocations
+    uint64_t large_find_calls;      // exact-lookup invocations
+    uint64_t large_find_probes;     // cumulative probe steps taken by lookups
+    uint64_t large_rehashes;        // table growth events
+    size_t   large_peak_count;      // peak live large-object count
+    uint64_t mark_collections;      // collections whose mark phase was timed
+    uint64_t mark_nanos;            // cumulative mark-phase wall time (ns)
+} gc_tune_stats_t;
+
+/**
  * GCHeap - manages all GC-tracked allocations.
  *
  * Uses dual-zone architecture:
@@ -159,9 +193,7 @@ typedef struct gc_bump_block {
 typedef struct gc_heap {
     Pool* pool;                     // underlying rpmalloc memory pool
     gc_header_t* all_objects;       // linked list head (most recent allocation first)
-    gc_header_t** large_objects;    // sorted malloc-backed objects for exact pointer lookup
-    int large_object_count;
-    int large_object_capacity;
+    gc_large_set_t large_objects;   // malloc-backed objects, keyed by exact user pointer
     uint8_t* bump_cursor;           // bump-pointer allocation cursor (hot path)
     uint8_t* bump_end;              // end of current bump block
     gc_object_zone_t* object_zone;  // non-moving object struct allocator
@@ -239,7 +271,14 @@ typedef struct gc_heap {
     gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions
 
     void* mem_node;                 // MemContext registration node (NULL if untracked)
+
+    gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
 } gc_heap_t;
+
+/**
+ * Snapshot the tuning counters for this heap. Safe to call at any time.
+ */
+gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc);
 
 /**
  * Create a new GC heap with its own memory pool.

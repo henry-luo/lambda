@@ -39,6 +39,10 @@ struct VarEntry {
     MIR_type_t mir_type;
     TypeId type_id;
     TypeId elem_type;
+    // elem_type came from a declared annotation rather than from local fill()
+    // narrowing, so the representation is only guaranteed at function entry.
+    // Indexed fast paths must re-check the runtime elem_type before using it.
+    bool elem_type_guarded;
     NumSizedType num_type;
     int env_offset;
     bool is_state_var;

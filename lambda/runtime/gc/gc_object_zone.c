@@ -39,15 +39,17 @@ size_t gc_object_zone_class_size(int cls) {
     return SIZE_CLASSES[cls];
 }
 
-// register a slab's address range for fast binary-search ownership lookup
-static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes) {
+// register a slab's address range for fast binary-search ownership lookup.
+// `slab` may be NULL for non-slab ranges (bump blocks registered by gc_heap.c).
+static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes,
+                                gc_object_slab_t* slab) {
     uint8_t* end = base + bytes;
 
     // update global min/max bounds
     if (!oz->min_addr || base < oz->min_addr) oz->min_addr = base;
     if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
 
-    // grow array if needed
+    // grow arrays if needed (slab_ranges and range_slabs stay parallel)
     if (oz->range_count >= oz->range_capacity) {
         size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
         gc_slab_range_t* new_ranges = (gc_slab_range_t*)realloc(oz->slab_ranges,
@@ -57,6 +59,13 @@ static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t byte
             return;
         }
         oz->slab_ranges = new_ranges;
+        gc_object_slab_t** new_slabs = (gc_object_slab_t**)realloc(oz->range_slabs,
+            new_cap * sizeof(gc_object_slab_t*));
+        if (!new_slabs) {
+            log_error("gc_object_zone: failed to grow range_slabs array");
+            return;
+        }
+        oz->range_slabs = new_slabs;
         oz->range_capacity = new_cap;
     }
 
@@ -72,11 +81,20 @@ static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t byte
     if (lo < oz->range_count) {
         memmove(&oz->slab_ranges[lo + 1], &oz->slab_ranges[lo],
                 (oz->range_count - lo) * sizeof(gc_slab_range_t));
+        memmove(&oz->range_slabs[lo + 1], &oz->range_slabs[lo],
+                (oz->range_count - lo) * sizeof(gc_object_slab_t*));
     }
 
     oz->slab_ranges[lo].base = base;
     oz->slab_ranges[lo].end = end;
+    oz->range_slabs[lo] = slab;
     oz->range_count++;
+}
+
+// Public entry for gc_heap.c to register a non-slab ownership range (bump block).
+void gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes) {
+    if (!oz || !base || bytes == 0) return;
+    register_slab_range(oz, base, bytes, NULL);
 }
 
 // allocate a new slab for the given size class from the pool
@@ -107,7 +125,7 @@ static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     slab->next = NULL;
 
     oz->slab_count++;
-    register_slab_range(oz, memory, slab_bytes);
+    register_slab_range(oz, memory, slab_bytes, slab);
     log_debug("gc_object_zone: allocated slab class=%d slot_size=%zu slots=%zu bytes=%zu",
               cls, slot_size, slot_count, slab_bytes);
     return slab;
@@ -147,8 +165,9 @@ void gc_object_zone_destroy(gc_object_zone_t* oz) {
             slab = next;
         }
     }
-    // free sorted range array
+    // free sorted range arrays
     free(oz->slab_ranges);
+    free(oz->range_slabs);
     log_debug("gc_object_zone_destroy: freed %zu slabs, %zu allocs, %zu frees",
               oz->slab_count, oz->total_slots_allocated, oz->total_slots_freed);
     free(oz);
@@ -302,21 +321,28 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
     if (lo >= oz->range_count) return 0;
     if (p < oz->slab_ranges[lo].base || p >= oz->slab_ranges[lo].end) return 0;
 
+    // Non-slab ranges (bump blocks) are not object-zone slots; gc_heap.c owns
+    // their exact-slot check.
+    gc_object_slab_t* slab = oz->range_slabs[lo];
+    if (!slab) return 0;
+#ifndef NDEBUG
+    // Slabs are freed only by gc_object_zone_destroy, which drops the whole
+    // range array with them. If any path ever retires a slab mid-run it must
+    // also remove its range, or mark would follow a dangling pointer here.
+    if (slab->base != oz->slab_ranges[lo].base) {
+        log_error("gc_object_zone_owns: stale slab range base=%p slab=%p",
+            (void*)oz->slab_ranges[lo].base, (void*)slab);
+        abort();
+    }
+#endif
+
     // Exact Item roots must name an allocated user slot, never an interior slab
     // address, before the collector accepts the pointer as a managed object.
-    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
-        size_t slot_size = sizeof(gc_header_t) + SIZE_CLASSES[cls];
-        gc_object_slab_t* slab = oz->slabs[cls];
-        while (slab) {
-            uint8_t* fresh_end = slab->base + slab->next_fresh * slab->slot_size;
-            if (p >= slab->base + sizeof(gc_header_t) && p < fresh_end) {
-                uintptr_t delta = (uintptr_t)(p - (slab->base + sizeof(gc_header_t)));
-                if (delta % slot_size == 0) return 1;
-                return 0;
-            }
-            slab = slab->next;
-        }
-    }
-
-    return 0;
+    // The binary search already identified the owning slab, so this is O(1):
+    // the slot must be aligned and below the slab's fresh-allocation watermark.
+    size_t slot_size = slab->slot_size;
+    uint8_t* first_user = slab->base + sizeof(gc_header_t);
+    if (p < first_user) return 0;
+    if (p >= slab->base + slab->next_fresh * slot_size) return 0;
+    return ((uintptr_t)(p - first_user) % slot_size) == 0;
 }

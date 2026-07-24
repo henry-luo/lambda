@@ -16,6 +16,14 @@
 #include "../../js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+// Monotonic nanosecond clock for the mark-phase tuning counter.
+static inline uint64_t gc_now_nanos(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+}
 
 // Hosts may batch native-lifetime work released by weak callbacks. The weak
 // default keeps the collector independent when no host integration is linked.
@@ -127,62 +135,144 @@ static void* gc_header_user_ptr(gc_header_t* header) {
     return header ? (void*)(header + 1) : NULL;
 }
 
-static int gc_large_object_find(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr || gc->large_object_count <= 0) return -1;
-    uintptr_t target = (uintptr_t)ptr;
-    int lo = 0, hi = gc->large_object_count;
-    while (lo < hi) {
-        int mid = lo + (hi - lo) / 2;
-        uintptr_t mid_ptr = (uintptr_t)gc_header_user_ptr(gc->large_objects[mid]);
-        if (mid_ptr < target) lo = mid + 1;
-        else hi = mid;
+// ============================================================================
+// Large-object registry (open-addressed pointer set — see gc_large_set_t)
+// ============================================================================
+
+#define GC_LARGE_SET_INITIAL 256
+
+// Fibonacci-multiplicative hash. Large objects are malloc'd, so the low 4 bits
+// of the user pointer carry no entropy — shift them out before mixing.
+static inline size_t gc_large_hash(const void* ptr) {
+    uint64_t v = (uint64_t)(uintptr_t)ptr >> 4;
+    v *= UINT64_C(0x9E3779B97F4A7C15);
+    v ^= v >> 29;
+    return (size_t)v;
+}
+
+// Locate the slot for `ptr`: the entry holding it, or the first empty slot on
+// its probe chain. Returns the probe length through *probes.
+static inline size_t gc_large_set_slot(const gc_large_set_t* set, void* ptr,
+        uint64_t* probes) {
+    size_t mask = set->capacity - 1;
+    size_t idx = gc_large_hash(ptr) & mask;
+    uint64_t steps = 1;
+    while (set->slots[idx] && gc_header_user_ptr(set->slots[idx]) != ptr) {
+        idx = (idx + 1) & mask;
+        steps++;
     }
-    if (lo < gc->large_object_count && gc_header_user_ptr(gc->large_objects[lo]) == ptr) {
-        return lo;
+    if (probes) *probes += steps;
+    return idx;
+}
+
+// Insert into a table known to have room and known not to contain `header`.
+static inline void gc_large_set_insert_fresh(gc_large_set_t* set, gc_header_t* header,
+        uint64_t* probes) {
+    size_t idx = gc_large_set_slot(set, gc_header_user_ptr(header), probes);
+    set->slots[idx] = header;
+    set->count++;
+}
+
+static int gc_large_set_grow(gc_heap_t* gc, gc_large_set_t* set) {
+    size_t new_cap = set->capacity ? set->capacity * 2 : GC_LARGE_SET_INITIAL;
+    gc_header_t** new_slots = (gc_header_t**)calloc(new_cap, sizeof(gc_header_t*));
+    if (!new_slots) {
+        log_error("gc_large_set_grow: calloc failed for %zu slots", new_cap);
+        return 0;
     }
-    return -1;
+    gc_large_set_t rebuilt = { new_slots, new_cap, 0 };
+    for (size_t i = 0; i < set->capacity; i++) {
+        if (set->slots[i]) gc_large_set_insert_fresh(&rebuilt, set->slots[i], NULL);
+    }
+    free(set->slots);
+    *set = rebuilt;
+    gc->tune.large_rehashes++;
+    return 1;
+}
+
+static int gc_large_object_contains(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr || gc->large_objects.count == 0) return 0;
+    gc->tune.large_find_calls++;
+    size_t idx = gc_large_set_slot(&gc->large_objects, ptr, &gc->tune.large_find_probes);
+    return gc->large_objects.slots[idx] != NULL;
 }
 
 static int gc_large_object_add(gc_heap_t* gc, gc_header_t* header) {
     if (!gc || !header) return 0;
+    gc_large_set_t* set = &gc->large_objects;
+    gc->tune.large_add_calls++;
+    // Keep the load factor at or below ~0.7; linear probing degrades sharply above it.
+    if (set->count + 1 > set->capacity - set->capacity / 4 - set->capacity / 32) {
+        if (!gc_large_set_grow(gc, set)) return 0;
+    }
     void* ptr = gc_header_user_ptr(header);
-    if (gc_large_object_find(gc, ptr) >= 0) return 1;
-    if (gc->large_object_count >= gc->large_object_capacity) {
-        int new_cap = gc->large_object_capacity ? gc->large_object_capacity * 2 : 256;
-        gc_header_t** new_objects = (gc_header_t**)realloc(gc->large_objects,
-            (size_t)new_cap * sizeof(gc_header_t*));
-        if (!new_objects) {
-            log_error("gc_large_object_add: realloc failed for %d objects", new_cap);
-            return 0;
-        }
-        gc->large_objects = new_objects;
-        gc->large_object_capacity = new_cap;
-    }
-
-    uintptr_t target = (uintptr_t)ptr;
-    int pos = 0;
-    while (pos < gc->large_object_count &&
-           (uintptr_t)gc_header_user_ptr(gc->large_objects[pos]) < target) {
-        pos++;
-    }
-    if (pos < gc->large_object_count) {
-        memmove(&gc->large_objects[pos + 1], &gc->large_objects[pos],
-            (size_t)(gc->large_object_count - pos) * sizeof(gc_header_t*));
-    }
-    gc->large_objects[pos] = header;
-    gc->large_object_count++;
+    size_t idx = gc_large_set_slot(set, ptr, &gc->tune.large_add_probes);
+    if (set->slots[idx]) return 1;  // already registered — duplicate add is a no-op success
+    set->slots[idx] = header;
+    set->count++;
+    if (set->count > gc->tune.large_peak_count) gc->tune.large_peak_count = set->count;
     return 1;
 }
 
 static void gc_large_object_remove(gc_heap_t* gc, gc_header_t* header) {
-    if (!gc || !header || gc->large_object_count <= 0) return;
-    int idx = gc_large_object_find(gc, gc_header_user_ptr(header));
-    if (idx < 0) return;
-    if (idx < gc->large_object_count - 1) {
-        memmove(&gc->large_objects[idx], &gc->large_objects[idx + 1],
-            (size_t)(gc->large_object_count - idx - 1) * sizeof(gc_header_t*));
+    if (!gc || !header || gc->large_objects.count == 0) return;
+    gc_large_set_t* set = &gc->large_objects;
+    void* ptr = gc_header_user_ptr(header);
+    size_t mask = set->capacity - 1;
+    size_t idx = gc_large_set_slot(set, ptr, NULL);
+    if (!set->slots[idx]) {
+#ifndef NDEBUG
+        // Every GC_FLAG_LARGE header is registered once at allocation and
+        // removed once at sweep. A miss means the registry and all_objects
+        // have diverged, which would let is_gc_object bless a freed pointer.
+        log_error("gc_large_object_remove: header %p was never registered", (void*)header);
+        abort();
+#endif
+        return;
     }
-    gc->large_object_count--;
+    gc->tune.large_remove_calls++;
+
+    // Backward-shift deletion: linear probing cannot use tombstones here without
+    // unbounded chain growth, since sweep churns the whole table every collection.
+    size_t hole = idx;
+    for (size_t i = (idx + 1) & mask; set->slots[i]; i = (i + 1) & mask) {
+        size_t home = gc_large_hash(gc_header_user_ptr(set->slots[i])) & mask;
+        // move the entry down only when the hole lies on its probe chain
+        if (((i - home) & mask) >= ((i - hole) & mask)) {
+            set->slots[hole] = set->slots[i];
+            hole = i;
+        }
+    }
+    set->slots[hole] = NULL;
+    set->count--;
+}
+
+gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc) {
+    gc_tune_stats_t empty;
+    memset(&empty, 0, sizeof(empty));
+    return gc ? gc->tune : empty;
+}
+
+static void gc_dump_tune_stats(const gc_heap_t* gc) {
+    if (!gc || !getenv("LAMBDA_GC_STATS")) return;
+    const gc_tune_stats_t* t = &gc->tune;
+    // log_notice, not log_debug/log_info: those are compiled out under NDEBUG
+    // and these counters exist to be read from release builds.
+    log_notice(
+        "gc-tune-stats: large_adds=%llu add_probes=%llu (%.2f/add) "
+        "removes=%llu finds=%llu find_probes=%llu (%.2f/find) rehashes=%llu "
+        "peak_large=%zu live_large=%zu | mark_collections=%llu mark_ms=%.3f\n",
+        (unsigned long long)t->large_add_calls,
+        (unsigned long long)t->large_add_probes,
+        t->large_add_calls ? (double)t->large_add_probes / (double)t->large_add_calls : 0.0,
+        (unsigned long long)t->large_remove_calls,
+        (unsigned long long)t->large_find_calls,
+        (unsigned long long)t->large_find_probes,
+        t->large_find_calls ? (double)t->large_find_probes / (double)t->large_find_calls : 0.0,
+        (unsigned long long)t->large_rehashes,
+        t->large_peak_count, gc->large_objects.count,
+        (unsigned long long)t->mark_collections,
+        (double)t->mark_nanos / 1.0e6);
 }
 
 // ============================================================================
@@ -208,45 +298,12 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
     block->size = block_size;
     block->next = NULL;
 
-    // Register with object zone so gc_object_zone_owns() recognizes bump pointers.
-    // This enables GC mark/sweep to find bump-allocated objects.
-    // Use the internal register_slab_range function via the public class_size API
-    // — actually we need direct access. We'll register via a helper.
-    // For now, register the range directly in the object zone's sorted range array.
+    // Register the block with the object zone's sorted range array so it joins
+    // the zone's min/max fast-rejection bounds. The zone reports no ownership
+    // for these ranges (slab == NULL); gc_bump_block_owns_exact does the exact
+    // slot check for bump-allocated objects.
     if (gc->object_zone) {
-        // Reuse the same ownership infrastructure: register the bump block as a "slab range"
-        gc_object_zone_t* oz = gc->object_zone;
-        uint8_t* end = memory + block_size;
-
-        // update global min/max bounds
-        if (!oz->min_addr || memory < oz->min_addr) oz->min_addr = memory;
-        if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
-
-        // grow array if needed
-        if (oz->range_count >= oz->range_capacity) {
-            size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
-            gc_slab_range_t* new_ranges = (gc_slab_range_t*)realloc(oz->slab_ranges,
-                new_cap * sizeof(gc_slab_range_t));
-            if (new_ranges) {
-                oz->slab_ranges = new_ranges;
-                oz->range_capacity = new_cap;
-            }
-        }
-
-        // binary search for insertion point
-        size_t lo = 0, hi = oz->range_count;
-        while (lo < hi) {
-            size_t mid = lo + (hi - lo) / 2;
-            if (oz->slab_ranges[mid].base < memory) lo = mid + 1;
-            else hi = mid;
-        }
-        if (lo < oz->range_count) {
-            memmove(&oz->slab_ranges[lo + 1], &oz->slab_ranges[lo],
-                    (oz->range_count - lo) * sizeof(gc_slab_range_t));
-        }
-        oz->slab_ranges[lo].base = memory;
-        oz->slab_ranges[lo].end = end;
-        oz->range_count++;
+        gc_object_zone_register_range(gc->object_zone, memory, block_size);
     }
 
     log_debug("gc_alloc_bump_block: allocated %zu byte bump block at %p", block_size, memory);
@@ -498,9 +555,12 @@ void gc_heap_destroy(gc_heap_t* gc) {
         gc->weak_slots = NULL;
     }
 
-    if (gc->large_objects) {
-        free(gc->large_objects);
-        gc->large_objects = NULL;
+    gc_dump_tune_stats(gc);
+    if (gc->large_objects.slots) {
+        free(gc->large_objects.slots);
+        gc->large_objects.slots = NULL;
+        gc->large_objects.capacity = 0;
+        gc->large_objects.count = 0;
     }
 
     // free bump block metadata (block memory is pool-allocated)
@@ -1112,7 +1172,7 @@ static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
 static int is_gc_object(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
-    if (gc_large_object_find(gc, ptr) >= 0) return 1;
+    if (gc_large_object_contains(gc, ptr)) return 1;
     if (gc_bump_block_owns_exact(gc, ptr)) return 1;
     return 0;
 }
@@ -1977,6 +2037,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     // reset mark stack
     gc->mark_top = 0;
+    uint64_t mark_start_ns = gc_now_nanos();
 
     // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
     uint64_t gc_roots_token = GC_PROFILE_ENTER("gc_mark_roots");
@@ -2018,6 +2079,8 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
     int traced_count = gc_drain_mark_stack(gc);
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
+    gc->tune.mark_nanos += gc_now_nanos() - mark_start_ns;
+    gc->tune.mark_collections++;
 
     log_debug("gc_collect: traced %d objects total", traced_count);
     // Release builds compile debug logging away; retain the accounting above
