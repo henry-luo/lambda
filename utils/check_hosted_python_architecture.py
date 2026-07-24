@@ -279,6 +279,11 @@ def check_python_adapter_uses_hosted_services() -> None:
         "mir_function_forward_create",
         "mir_item_function_proto_create",
         "mir_function_register_lookup",
+        "mir_function_frame_runtime_load",
+        "mir_function_register_create",
+        "mir_label_create",
+        "mir_instruction_emit",
+        "mir_label_emit",
         "execution_activate",
         "execution_activate_import",
         "execution_run_main",
@@ -359,6 +364,56 @@ def check_python_import_lowering_uses_module_graph() -> None:
             fail(f"Python compiler retains raw host execution internals via {token}")
     if '"_lambda_rt"' in source:
         fail("Python compiler retains direct _lambda_rt storage import")
+    runtime_loader_start = source.find("static MIR_reg_t pm_load_side_stack_runtime(")
+    runtime_loader_end = source.find("static void pm_emit_side_stack_overflow(",
+                                     runtime_loader_start)
+    if runtime_loader_start < 0 or runtime_loader_end < 0 or "MIR_new_mem_op" in source[
+            runtime_loader_start:runtime_loader_end]:
+        fail("Python compiler retains a raw frame-runtime memory load")
+    for token in ("em_new_reg(", "em_new_label("):
+        if token in source:
+            fail(f"Python compiler retains direct compiler identity allocation via {token}")
+
+
+def check_python_literal_moves_use_hosted_instruction_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_i64_immediate(")
+    end = source.find("static void pm_emit_f64_immediate(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler lost the hosted integer-immediate move adapter")
+    adapter = source[start:end]
+    if "pm_emit_hosted_instruction" not in adapter:
+        fail("Python compiler bypasses hosted instruction emission for literals")
+    for token in ("MIR_new_insn(", "MIR_new_reg_op(", "MIR_new_int_op("):
+        if token in adapter:
+            fail(f"Python compiler retains raw literal MIR construction via {token}")
+
+
+def check_python_truth_branches_use_hosted_instruction_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_branch_true(")
+    end = source.find("static void pm_emit_branch_false(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler lost the hosted truth-branch adapter")
+    adapter = source[start:end]
+    if "pm_emit_hosted_instruction" not in adapter:
+        fail("Python compiler bypasses hosted instruction emission for truth branches")
+    for token in ("MIR_new_insn(", "MIR_new_label_op(", "MIR_new_reg_op("):
+        if token in adapter:
+            fail(f"Python compiler retains raw truth-branch MIR construction via {token}")
+
+
+def check_python_labels_use_hosted_emission_service() -> None:
+    source = text(PYTHON_MIR_LOWERING)
+    start = source.find("static void pm_emit_label(")
+    end = source.find("static MIR_reg_t pm_load_side_stack_runtime(", start)
+    if start < 0 or end < 0:
+        fail("Python compiler lost the hosted label-emission adapter")
+    adapter = source[start:end]
+    if "mir_label_emit" not in adapter:
+        fail("Python compiler bypasses hosted label emission")
+    if "em_emit_label(" in adapter or "MIR_append_insn(" in adapter:
+        fail("Python compiler retains raw label emission")
 
 
 def check_dynamic_module_has_no_retired_host_imports() -> None:
@@ -450,6 +505,9 @@ def main() -> None:
     check_python_frontend_has_no_monolithic_transpiler_header()
     check_python_runtime_catalog_uses_jube_api()
     check_python_import_lowering_uses_module_graph()
+    check_python_literal_moves_use_hosted_instruction_service()
+    check_python_truth_branches_use_hosted_instruction_service()
+    check_python_labels_use_hosted_emission_service()
     check_dynamic_module_has_no_retired_host_imports()
     check_dynamic_manifest_matches_host_build()
     print("HOSTED_PY_ARCH: passed")

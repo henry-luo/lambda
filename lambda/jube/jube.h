@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260721-h7e9"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260724-h7e17"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -46,6 +46,39 @@ typedef struct JubeRuntimeCatalogAPI JubeRuntimeCatalogAPI;
 typedef struct JubeRuntimeImport JubeRuntimeImport;
 typedef struct JubeRuntimeImportMetadata JubeRuntimeImportMetadata;
 typedef struct JubeModuleNamespaceOps JubeModuleNamespaceOps;
+
+// Public compiler value kinds are intentionally narrower than MIR_type_t.
+// Hosted languages may request only ABI-relevant register classes; the host
+// retains the implementation-specific MIR representation.
+enum JubeCompilerValueKind {
+    JUBE_COMPILER_VALUE_I64 = 0,
+    JUBE_COMPILER_VALUE_F64 = 1,
+    JUBE_COMPILER_VALUE_POINTER = 2,
+};
+
+// A hosted compiler emits only semantic instruction forms.  These remain
+// intentionally smaller than MIR's opcode and operand surface so the host
+// retains validation, representation, and instruction ownership.
+enum JubeCompilerInstructionOpcode {
+    JUBE_COMPILER_INSN_MOVE_I64_IMMEDIATE = 0,
+    JUBE_COMPILER_INSN_MOVE_F64_IMMEDIATE = 1,
+    JUBE_COMPILER_INSN_MOVE_I64_REGISTER = 2,
+    JUBE_COMPILER_INSN_MOVE_F64_REGISTER = 3,
+    JUBE_COMPILER_INSN_JUMP = 4,
+    JUBE_COMPILER_INSN_BRANCH_TRUE = 5,
+    JUBE_COMPILER_INSN_BRANCH_FALSE = 6,
+    JUBE_COMPILER_INSN_BRANCH_NOT_EQUAL_I64_IMMEDIATE = 7,
+    JUBE_COMPILER_INSN_BRANCH_GREATER_EQUAL_I64_IMMEDIATE = 8,
+};
+
+typedef struct JubeCompilerInstruction {
+    uint32_t opcode;
+    uint32_t destination_register;
+    uint32_t source_register;
+    int64_t immediate_i64;
+    double immediate_f64;
+    void* target_label;
+} JubeCompilerInstruction;
 typedef struct JubeLanguageDef JubeLanguageDef;
 typedef struct JubeLanguageSession JubeLanguageSession;
 typedef struct JubeLanguageSessionConfig JubeLanguageSessionConfig;
@@ -703,6 +736,28 @@ struct JubeGuestExecutionAPI {
     int (*mir_item_function_proto_create_typed)(void* mir_context,
         const char* prototype_name, uint32_t parameter_count,
         const uint8_t* parameter_kinds, void** out_prototype_item);
+    // Emits the activation-scoped runtime-token load used by shared frame
+    // setup. The host checks the active function relationship and never lets
+    // a guest name arbitrary host storage in a generated load.
+    int (*mir_function_frame_runtime_load)(void* mir_context, void* function_item,
+        void* function, void* frame_runtime_slot, uint32_t* out_runtime_register);
+    // Allocate compiler identities through the host.  The guest owns only its
+    // monotonic naming counter; MIR register/label representation remains
+    // host-private and each returned identity is context-bound.
+    int (*mir_function_register_create)(void* mir_context, void* function,
+        int* inout_register_counter, const char* prefix, uint8_t value_kind,
+        uint32_t* out_register);
+    // MIR labels are pointer-backed, so this stays an opaque pointer rather
+    // than truncating the host identity to a numeric register-sized value.
+    int (*mir_label_create)(void* mir_context, void** out_label);
+    // Appends a validated semantic instruction to the current opaque
+    // function. The descriptor cannot carry a raw MIR opcode or memory
+    // operand, which keeps generated-code authority in the host.
+    int (*mir_instruction_emit)(void* mir_context, void* function_item,
+        const JubeCompilerInstruction* instruction);
+    // Places a previously host-created opaque label in the current function.
+    // The guest cannot manufacture label instructions or observe their layout.
+    int (*mir_label_emit)(void* mir_context, void* function_item, void* label);
 };
 
 // Module graph operations retain host path/state ownership. The execution
@@ -849,7 +904,12 @@ struct JubeLanguageDef {
 #define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE offsetof(JubeGuestExecutionAPI, execution_run_main_into)
 #define JUBE_GUEST_EXECUTION_API_H7C_RUN_MAIN_INTO_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_create_typed)
 #define JUBE_GUEST_EXECUTION_API_H7C_TYPED_FUNCTION_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_proto_create_typed)
-#define JUBE_GUEST_EXECUTION_API_H7C_TYPED_PROTO_CREATE_SIZE sizeof(JubeGuestExecutionAPI)
+#define JUBE_GUEST_EXECUTION_API_H7C_TYPED_PROTO_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_frame_runtime_load)
+#define JUBE_GUEST_EXECUTION_API_H7C_FRAME_RUNTIME_LOAD_SIZE offsetof(JubeGuestExecutionAPI, mir_function_register_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_label_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_LABEL_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_instruction_emit)
+#define JUBE_GUEST_EXECUTION_API_H7C_INSTRUCTION_EMIT_SIZE offsetof(JubeGuestExecutionAPI, mir_label_emit)
+#define JUBE_GUEST_EXECUTION_API_H7C_LABEL_EMIT_SIZE sizeof(JubeGuestExecutionAPI)
 #define JUBE_MODULE_GRAPH_API_V1_SIZE sizeof(JubeModuleGraphAPI)
 #define JUBE_HOST_LANG_API_V1_SIZE offsetof(JubeHostLangAPI, source)
 #define JUBE_HOST_LANG_API_H7A_SIZE offsetof(JubeHostLangAPI, execution)

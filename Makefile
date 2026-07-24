@@ -474,7 +474,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -830,6 +830,21 @@ test-jube-module-integrity: build build-lang-python
 		echo "tampered lang-python library was accepted"; exit 1; \
 	fi
 	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/jube-integrity/stderr
+
+# Loader rejection matrix for the external Python module.  It uses copied
+# bundles so no test case can alter the active development module.
+test-jube-module-loader-negative: build build-lang-python
+	@python3 utils/test_jube_module_loader_negative.py
+
+# Generic hosted-language dispatch must work before the language descriptor is
+# loaded, including aliases and case-normalized source extensions.
+test-jube-language-dispatch: build build-lang-python
+	@python3 utils/test_jube_language_dispatch.py
+
+# The source checker must prove its own retired-boundary rules with synthetic
+# regressions, not merely pass because the current tree happens to be clean.
+test-hosted-python-architecture-checker:
+	@python3 utils/test_hosted_python_architecture_checker.py
 
 release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube
@@ -2536,6 +2551,9 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	fi
 	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
 	$(call run_make_with_error_summary,tests,debug_native,,all)
+	@# The debug "all" target also rebuilds lang-python; refresh its manifest
+	@# before restoring the release host so loader integrity never sees stale bytes.
+	@$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
 	@# Restore release lambda.exe over the debug one
 	@if [ -f .lambda_build_backup.exe ]; then \
 		echo "Restoring release lambda.exe..."; \
