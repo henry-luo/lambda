@@ -5,14 +5,14 @@
 // (py_add, py_subtract, etc.) take and return Items.
 
 #include "py_transpiler.hpp"
-#include "../mir_dump.h"
+#include "../runtime/mir_dump.h"
 #include "py_runtime.h"
 #include "py_bigint.h"
 #include "py_async.h"
 #include "py_stdlib.h"
 #include "../lambda-data.hpp"
 #define MIR_EMITTER_NO_DIRECT_REGISTER_LOOKUP 1
-#include "../mir_emitter_shared.hpp"
+#include "../runtime/mir_emitter_shared.hpp"
 #include "../jube/jube_language.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
@@ -20,7 +20,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../runtime/heap_api.h"
 #include <mir.h>
 #include <mir-gen.h>

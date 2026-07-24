@@ -1,4 +1,4 @@
-#include "../transpiler.hpp"
+#include "transpiler.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -7,15 +7,15 @@
 #include "../../lib/hashmap.h"
 #include "gc/gc_heap.h"
 #include "mem_factory_rt.h"
-#include "../lambda-error.h"
+#include "lambda-error.h"
 #include "../jube/jube_registry.h"
 #include "../js/js_runtime.h"
 #include "../js/js_exec_profile_weak.h"
 #include "../js/js_typed_array.h"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include "side_stack.h"
-#include "../binary.h"
+#include "../core/binary.h"
 #include <mpdecimal.h>
 #include <math.h>
 #include <errno.h>

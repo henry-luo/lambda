@@ -6,8 +6,8 @@
 #include "../../lib/mem_context.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
-#include "../name_pool.hpp"
-#include "../shape_pool.hpp"
+#include "name_pool.hpp"
+#include "shape_pool.hpp"
 
 NamePool* mem_name_pool_create(MemContext* ctx, Pool* backing, NamePool* parent,
                                MemRole role, const char* label);

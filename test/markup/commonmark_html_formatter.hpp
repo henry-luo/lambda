@@ -13,7 +13,7 @@
 
 #include <string>
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/mark_reader.hpp"
+#include "../../lambda/core/mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 
 // CommonMark HTML formatting context

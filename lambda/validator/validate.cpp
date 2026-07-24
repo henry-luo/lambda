@@ -1,7 +1,7 @@
 #include "validator_internal.hpp"
-#include "../mark_reader.hpp"  // MarkReader API for type-safe traversal
-#include "../re2_wrapper.hpp"  // for pattern_full_match
-#include "../lambda-decimal.hpp"  // for decimal literal comparison
+#include "../core/mark_reader.hpp"  // MarkReader API for type-safe traversal
+#include "../runtime/re2_wrapper.hpp"  // for pattern_full_match
+#include "../core/lambda-decimal.hpp"  // for decimal literal comparison
 
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
 // init_validation_session) are now in validate_helpers.cpp

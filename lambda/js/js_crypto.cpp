@@ -16,7 +16,7 @@
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include "../../lib/mem.h"

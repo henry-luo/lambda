@@ -30,7 +30,7 @@
 #include "../lambda/js/js_dom_observers.h"
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/transpiler.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 extern "C" {
 #include "../lib/url.h"
 }

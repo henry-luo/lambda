@@ -35,7 +35,7 @@
 
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lib/log.h"
 #include "../lib/url.h"
 

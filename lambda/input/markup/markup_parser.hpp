@@ -14,7 +14,7 @@
 #include "markup_common.hpp"
 #include "format_adapter.hpp"
 #include "../input-context.hpp"
-#include "../../mark_builder.hpp"
+#include "../../io/mark_builder.hpp"
 
 // Forward declaration for HTML5 parser
 struct Html5Parser;

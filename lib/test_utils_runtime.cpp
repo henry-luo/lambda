@@ -17,7 +17,7 @@
 // Pulls in MIR + lambda-data + ast. Heavy but unavoidable for the runtime
 // fixture; tests that don't need it should not list this .cpp under
 // additional_sources.
-#include "../lambda/transpiler.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 
 // Defined in lambda/runner.cpp; we just need to flip the pointer.
 extern __thread EvalContext* context;

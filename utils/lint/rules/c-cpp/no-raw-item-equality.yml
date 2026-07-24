@@ -14,6 +14,6 @@ rule:
     - pattern: $A == $B.item
     - pattern: $A != $B.item
 files:
-  - "lambda/vmap.cpp"
-  - "lambda/render_map.cpp"
+  - "lambda/runtime/vmap.cpp"
+  - "lambda/runtime/render_map.cpp"
   - "lib/lambda_typed.hpp"

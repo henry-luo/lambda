@@ -30,8 +30,8 @@
 #include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
-#include "../lambda/mark_reader.hpp"
-#include "../lambda/render_map.h"
+#include "../lambda/core/mark_reader.hpp"
+#include "../lambda/runtime/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -483,7 +483,7 @@ bool dom_boundary_from_source_pos(DomNode* dom_root,
 //             | { kind: 'node', path: [int, ...] }         (node)
 // ---------------------------------------------------------------------------
 
-#include "../lambda/mark_builder.hpp"
+#include "../lambda/io/mark_builder.hpp"
 
 static Item path_to_item(MarkBuilder& mb, const SourcePathC* p) {
     ArrayBuilder arr = mb.array();

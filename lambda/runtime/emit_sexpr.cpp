@@ -20,8 +20,8 @@
 //   expr                        ; expression (produces output)
 
 #include "emit_sexpr.h"
-#include "../transpiler.hpp"
-#include "../lambda-decimal.hpp"
+#include "transpiler.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 

@@ -5,7 +5,7 @@
 
 #include "bash_expand.h"
 #include "bash_runtime.h"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/utf.h"

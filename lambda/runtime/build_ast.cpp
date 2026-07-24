@@ -1,0 +1,10275 @@
+#include "transpiler.hpp"
+#include "../core/lambda-decimal.hpp"
+#include "lambda-number-types.hpp"
+#include "lambda-error.h"
+#ifndef SIMPLE_SCHEMA_PARSER
+#include "module_registry.h"
+#include "../jube/jube_language.h"
+#include "../jube/jube_registry.h"
+#endif
+#include "../../lib/hashmap.h"
+#include "../../lib/datetime.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/str.h"
+#include "../../lib/strview.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/file.h"
+#include "../../lib/recursion_guard.hpp"
+#include <errno.h>
+#include <stdlib.h>
+
+// Caps build_expr recursion so a pathologically nested source reports an error
+// instead of overflowing the stack (and tripping the SIGSEGV recovery). Well above
+// any real expression nesting; input-data nesting is already capped by the parsers.
+#define MAX_BUILD_DEPTH 1000
+
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
+AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
+AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node);
+AstNode* build_return_type_pattern(Transpiler* tp, TSNode node);
+AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
+
+// Forward declarations for pattern building
+AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
+AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
+AstNode* build_concat_type(Transpiler* tp, TSNode node);
+AstNode* build_negation_type(Transpiler* tp, TSNode node);
+AstNode* build_grouped_type(Transpiler* tp, TSNode node);
+AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
+AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
+
+// Forward declarations for pipe expression building
+AstNode* build_current_expr(Transpiler* tp, TSNode node);
+
+// Forward declaration for let_block (uses build_let_expr defined later)
+AstNode* build_let_expr(Transpiler* tp, TSNode let_node);
+
+// Forward declaration for imported module resolution
+static const char* resolve_imported_module(Transpiler* tp, StrView* name);
+
+// Forward declaration for type building (used by query expressions)
+AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
+
+// Forward declaration for function building (used by object type methods)
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global);
+
+// Forward declaration for view/edit template building
+AstNode* build_view_stam(Transpiler* tp, TSNode view_node);
+
+// Forward declaration for apply; (splat) statement
+AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node);
+
+// Forward declaration for object type building (used by pub type)
+AstNode* build_object_type(Transpiler* tp, TSNode type_node);
+
+// System function definitions — single source of truth in sys_func_registry.cpp
+// See lambda/sys_func_registry.cpp for the complete table.
+extern SysFuncInfo sys_func_defs[];
+extern const int sys_func_def_count;
+
+// ============================================================================
+// O(1) System Function Lookup via Hashmap
+// ============================================================================
+// Two hashmaps:
+//   1. sys_func_map: composite key (name, arg_count) → SysFuncInfo*
+//      Used by get_sys_func_info() and get_sys_func_for_method()
+//   2. sys_func_name_set: name-only key → bool sentinel
+//      Used by is_sys_func_name()
+// Both are lazily initialized on first access.
+
+// Composite key for (name, arg_count) lookups
+typedef struct {
+    const char* name;
+    int name_len;
+    int arg_count;
+    SysFuncInfo* info;
+} SysFuncEntry;
+
+// Name-only key for existence checks
+typedef struct {
+    const char* name;
+    int name_len;
+} SysFuncNameEntry;
+
+static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
+static struct hashmap* sys_func_name_set = NULL;   // name → exists
+
+typedef struct JubeSysFuncRecord {
+    SysFuncInfo info;
+    char name[128];
+    char c_func_name[128];
+} JubeSysFuncRecord;
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static JubeSysFuncRecord* jube_sys_func_records = NULL;
+static int jube_sys_func_record_count = 0;
+#endif
+
+static uint64_t sys_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncEntry* e = (const SysFuncEntry*)item;
+    // hash the name and mix in arg_count
+    uint64_t h = hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+    h ^= (uint64_t)(e->arg_count + 2) * 0x9E3779B97F4A7C15ULL;  // +2 to keep -1 distinct
+    return h;
+}
+
+static int sys_func_compare(const void* a, const void* b, void* udata) {
+    const SysFuncEntry* ea = (const SysFuncEntry*)a;
+    const SysFuncEntry* eb = (const SysFuncEntry*)b;
+    if (ea->arg_count != eb->arg_count) return ea->arg_count - eb->arg_count;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static uint64_t sys_func_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SysFuncNameEntry* e = (const SysFuncNameEntry*)item;
+    return hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+}
+
+static int sys_func_name_compare(const void* a, const void* b, void* udata) {
+    const SysFuncNameEntry* ea = (const SysFuncNameEntry*)a;
+    const SysFuncNameEntry* eb = (const SysFuncNameEntry*)b;
+    if (ea->name_len != eb->name_len) return ea->name_len - eb->name_len;
+    return strncmp(ea->name, eb->name, ea->name_len);
+}
+
+static void register_sys_func_info(SysFuncInfo* info) {
+    if (!info || !info->name) return;
+    int name_len = (int)strlen(info->name);
+
+    SysFuncEntry entry = {
+        .name = info->name,
+        .name_len = name_len,
+        .arg_count = info->arg_count,
+        .info = info
+    };
+    hashmap_set(sys_func_map, &entry);
+
+    SysFuncNameEntry name_entry = {
+        .name = info->name,
+        .name_len = name_len
+    };
+    hashmap_set(sys_func_name_set, &name_entry);
+}
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static int jube_signature_arg_count(const char* signature) {
+    if (!signature) return -1;
+    const char* open = strchr(signature, '(');
+    const char* close = open ? strchr(open, ')') : NULL;
+    if (!open || !close || close < open) return -1;
+
+    const char* p = open + 1;
+    while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= close) return 0;
+
+    int count = 1;
+    while (p < close) {
+        if (*p == ',') count++;
+        p++;
+    }
+    return count;
+}
+
+static bool jube_type_name_matches(const char* text, const char* name) {
+    size_t name_len = strlen(name);
+    if (strncmp(text, name, name_len) != 0) return false;
+    char next = text[name_len];
+    return next == '\0' || next == ' ' || next == '\t' || next == '\n' ||
+        next == '\r' || next == ',' || next == ')';
+}
+
+static TypeId jube_signature_type_id(const char* text) {
+    if (!text) return LMD_TYPE_ANY;
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+
+    if (jube_type_name_matches(text, "null")) return LMD_TYPE_NULL;
+    if (jube_type_name_matches(text, "bool")) return LMD_TYPE_BOOL;
+    if (jube_type_name_matches(text, "int64")) return LMD_TYPE_INT64;
+    if (jube_type_name_matches(text, "int")) return LMD_TYPE_INT;
+    if (jube_type_name_matches(text, "float")) return LMD_TYPE_FLOAT;
+    if (jube_type_name_matches(text, "string")) return LMD_TYPE_STRING;
+
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->types || module->type_count <= 0) continue;
+        for (int j = 0; j < module->type_count; j++) {
+            const JubeTypeDef* type = &module->types[j];
+            if (type->name && jube_type_name_matches(text, type->name)) {
+                return LMD_TYPE_VMAP;
+            }
+        }
+    }
+    return LMD_TYPE_ANY;
+}
+
+static TypeId jube_signature_first_param_type_id(const char* signature) {
+    if (!signature) return LMD_TYPE_ANY;
+    const char* open = strchr(signature, '(');
+    const char* close = open ? strchr(open, ')') : NULL;
+    if (!open || !close || close < open) return LMD_TYPE_ANY;
+
+    const char* p = open + 1;
+    while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= close) return LMD_TYPE_ANY;
+
+    const char* colon = p;
+    while (colon < close && *colon != ':' && *colon != ',') colon++;
+    if (colon >= close || *colon != ':') return LMD_TYPE_ANY;
+    return jube_signature_type_id(colon + 1);
+}
+
+static Type* jube_type_from_type_id(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_NULL: return &TYPE_NULL;
+    case LMD_TYPE_BOOL: return &TYPE_BOOL;
+    case LMD_TYPE_INT: return &TYPE_INT;
+    case LMD_TYPE_INT64: return &TYPE_INT64;
+    case LMD_TYPE_FLOAT: return &TYPE_FLOAT;
+    case LMD_TYPE_STRING: return &TYPE_STRING;
+    default: return &TYPE_ANY;
+    }
+}
+
+static Type* jube_signature_return_type(const char* signature) {
+    if (!signature) return &TYPE_ANY;
+    const char* arrow = strstr(signature, "->");
+    if (!arrow) return &TYPE_ANY;
+    return jube_type_from_type_id(jube_signature_type_id(arrow + 2));
+}
+
+static bool jube_extract_native_c_name(const char* native_signature, char* out, size_t out_size) {
+    if (!native_signature || !out || out_size == 0) return false;
+    const char* open = strchr(native_signature, '(');
+    if (!open) return false;
+
+    const char* end = open;
+    while (end > native_signature && (*(end - 1) == ' ' || *(end - 1) == '\t')) end--;
+    const char* start = end;
+    while (start > native_signature) {
+        char ch = *(start - 1);
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') || ch == '_') {
+            start--;
+        } else {
+            break;
+        }
+    }
+    if (start == end) return false;
+
+    size_t len = (size_t)(end - start);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return true;
+}
+
+static int jube_count_module_functions(void) {
+    jube_register_builtin_modules();
+
+    int count = 0;
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->functions || module->function_count <= 0) continue;
+        count += module->function_count;
+    }
+    return count;
+}
+
+static void register_jube_sys_funcs(void) {
+    if (jube_sys_func_records) return;
+
+    int total = jube_count_module_functions();
+    if (total <= 0) return;
+
+    jube_sys_func_records = (JubeSysFuncRecord*)calloc((size_t)total, sizeof(JubeSysFuncRecord));
+    if (!jube_sys_func_records) {
+        log_error("JUBE_AST: failed to allocate %d descriptor sys-func records", total);
+        return;
+    }
+
+    int out = 0;
+    int module_count = jube_static_module_count();
+    for (int i = 0; i < module_count; i++) {
+        const JubeModuleDef* module = jube_static_module_at(i);
+        if (!module || !module->name || !module->functions || module->function_count <= 0) continue;
+        for (int j = 0; j < module->function_count; j++) {
+            const JubeFuncDef* fn = &module->functions[j];
+            if (!fn->name || (!fn->native_func && !fn->func)) continue;
+
+            JubeSysFuncRecord* record = &jube_sys_func_records[out++];
+            snprintf(record->name, sizeof(record->name), "%s_%s", module->name, fn->name);
+            if (!jube_extract_native_c_name(fn->native_signature,
+                    record->c_func_name, sizeof(record->c_func_name))) {
+                snprintf(record->c_func_name, sizeof(record->c_func_name), "%s", record->name);
+            }
+
+            record->info.fn = SYSFUNC_JUBE_MODULE;
+            record->info.name = record->name;
+            record->info.arg_count = jube_signature_arg_count(fn->signature);
+            record->info.return_type = jube_signature_return_type(fn->signature);
+            record->info.is_proc = false;
+            record->info.is_overloaded = false;
+            record->info.is_method_eligible = (fn->flags & JUBE_FN_METHOD_ELIGIBLE) != 0;
+            record->info.first_param_type = jube_signature_first_param_type_id(fn->signature);
+            record->info.can_raise = false;
+            record->info.c_ret_type = C_RET_ITEM;
+            record->info.c_arg_conv = C_ARG_ITEM;
+            record->info.c_func_name = record->c_func_name;
+            record->info.func_ptr = fn->native_func ? fn->native_func : fn->func;
+            record->info.native_c_name = NULL;
+            record->info.native_func_ptr = NULL;
+            record->info.native_returns_float = false;
+            record->info.native_arg_count = 0;
+
+            // Descriptor functions are registered as module-prefixed sys funcs
+            // so legacy MIR call lowering sees the same metadata shape.
+            register_sys_func_info(&record->info);
+        }
+    }
+    jube_sys_func_record_count = out;
+}
+#endif
+
+static void init_sys_func_maps() {
+    if (sys_func_map) return;  // already initialized
+
+    const size_t count = (size_t)sys_func_def_count;
+
+    sys_func_map = hashmap_new(sizeof(SysFuncEntry), count * 2,
+        0, 0, sys_func_hash, sys_func_compare, NULL, NULL);
+
+    sys_func_name_set = hashmap_new(sizeof(SysFuncNameEntry), count * 2,
+        0, 0, sys_func_name_hash, sys_func_name_compare, NULL, NULL);
+
+    for (size_t i = 0; i < count; i++) {
+        register_sys_func_info(&sys_func_defs[i]);
+    }
+
+    int dynamic_count = 0;
+#ifndef SIMPLE_SCHEMA_PARSER
+    register_jube_sys_funcs();
+    dynamic_count = jube_sys_func_record_count;
+#endif
+
+    // Release logging strips log_info arguments, so keep this counter observed under -Werror.
+    (void)dynamic_count;
+    log_info("sys_func maps initialized: %zu static entries, %d Jube entries, %zu unique names",
+             count, dynamic_count, hashmap_count(sys_func_name_set));
+}
+
+void ensure_sys_func_maps_initialized() {
+    init_sys_func_maps();
+}
+
+extern "C" fn_ptr find_dynamic_sys_func_import(const char* c_func_name) {
+    if (!c_func_name) return NULL;
+    init_sys_func_maps();
+#ifndef SIMPLE_SCHEMA_PARSER
+    for (int i = 0; i < jube_sys_func_record_count; i++) {
+        SysFuncInfo* info = &jube_sys_func_records[i].info;
+        if (info->c_func_name && strcmp(info->c_func_name, c_func_name) == 0) {
+            return info->func_ptr;
+        }
+    }
+#endif
+    return NULL;
+}
+
+// Check if a name matches any system function (regardless of arg count)
+// Returns true if the name is reserved for system functions
+bool is_sys_func_name(const char* name, int name_len) {
+    init_sys_func_maps();
+    SysFuncNameEntry key = { .name = name, .name_len = name_len };
+    return hashmap_get(sys_func_name_set, &key) != NULL;
+}
+
+SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
+    init_sys_func_maps();
+
+    SysFuncEntry key = {
+        .name = name->str,
+        .name_len = (int)name->length,
+        .arg_count = arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
+    }
+
+    // fallback: match variadic functions (arg_count == -1)
+    key.arg_count = -1;
+    found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (found) {
+        log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
+        return found->info;
+    }
+
+    log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+    return NULL;
+}
+
+static SysFuncInfo* get_unambiguous_sys_func_value(StrView* name) {
+    init_sys_func_maps();
+
+    SysFuncInfo* found = NULL;
+    for (int i = 0; i < sys_func_def_count; i++) {
+        int name_len = (int)strlen(sys_func_defs[i].name);
+        if (name_len != (int)name->length || strncmp(sys_func_defs[i].name, name->str, name->length) != 0) {
+            continue;
+        }
+        if (!sys_func_defs[i].func_ptr) return NULL;
+        if (found) return NULL;
+        found = &sys_func_defs[i];
+    }
+#ifndef SIMPLE_SCHEMA_PARSER
+    for (int i = 0; i < jube_sys_func_record_count; i++) {
+        SysFuncInfo* info = &jube_sys_func_records[i].info;
+        int name_len = (int)strlen(info->name);
+        if (name_len != (int)name->length || strncmp(info->name, name->str, name->length) != 0) {
+            continue;
+        }
+        if (!info->func_ptr) return NULL;
+        if (found) return NULL;
+        found = info;
+    }
+#endif
+    return found;
+}
+
+// Look up a system function for method-style call: obj.method(args)
+// This searches for a sys func where arg_count includes the object (+1)
+// and validates that the function is method-eligible and type-compatible
+SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count, TypeId obj_type_id) {
+    init_sys_func_maps();
+
+    // method_arg_count is the count of arguments in parentheses (not including obj)
+    // sys func arg_count includes the object, so we add 1
+    int total_arg_count = method_arg_count + 1;
+
+    SysFuncEntry key = {
+        .name = method_name->str,
+        .name_len = (int)method_name->length,
+        .arg_count = total_arg_count,
+        .info = NULL
+    };
+    const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
+    if (!found) {
+        log_debug("method_call no sys func: %.*s, args=%d",
+            (int)method_name->length, method_name->str, total_arg_count);
+        return NULL;
+    }
+
+    SysFuncInfo* info = found->info;
+
+    // Check if this function is method-eligible
+    if (!info->is_method_eligible) {
+        log_debug("method_call sys func '%.*s' not method-eligible",
+            (int)method_name->length, method_name->str);
+        return NULL;
+    }
+
+    // Check type compatibility with first parameter
+    if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
+        if (info->first_param_type != obj_type_id) {
+            bool type_compatible = false;
+            if (!type_compatible) {
+                log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
+                    (int)method_name->length, method_name->str,
+                    info->first_param_type, obj_type_id);
+                return NULL;
+            }
+        }
+    }
+
+    log_debug("method_call found sys func: %.*s, args=%d",
+        (int)method_name->length, method_name->str, total_arg_count);
+    return info;
+}
+
+static bool is_global_simple_type(const Type* type);
+
+static Type* unwrap_simple_type_type(Type* type) {
+    while (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        TypeType* type_type = (TypeType*)type;
+        if (!type_type->type) break;
+        type = type_type->type;
+    }
+    return type;
+}
+
+static bool type_is_sized_integer(Type* type) {
+    type = unwrap_simple_type_type(type);
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_UINT64) return true;
+    if (type->type_id != LMD_TYPE_NUM_SIZED) return false;
+    NumSizedType st = type_num_sized_kind(type);
+    return st != NUM_FLOAT16 && st != NUM_FLOAT32;
+}
+
+static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) {
+    arg_elem = unwrap_simple_type_type(arg_elem);
+    expected_elem = unwrap_simple_type_type(expected_elem);
+    if (!arg_elem || !expected_elem) return true;
+
+    TypeId arg_tid = arg_elem->type_id;
+    if (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_TYPE) return true;
+    LambdaNumericKind expected_numeric = lambda_numeric_kind_from_type(expected_elem);
+    if (lambda_numeric_is_sized(expected_numeric)) {
+        // A sized array annotation is an explicit destination conversion boundary,
+        // just like an annotated scalar slot; its store performs the lane conversion.
+        return lambda_numeric_kind_from_type(arg_elem) != LAMBDA_NUM_INVALID ||
+               arg_tid == LMD_TYPE_BOOL;
+    }
+    switch (expected_elem->type_id) {
+    case LMD_TYPE_INT:
+        return is_integer_type_id(arg_tid) ||
+               arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
+    case LMD_TYPE_FLOAT:
+        return is_numeric_type_id(arg_tid) || arg_tid == LMD_TYPE_BOOL;
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+        return is_integer_type_id(arg_tid) ||
+               arg_tid == LMD_TYPE_UINT64 || arg_tid == LMD_TYPE_BOOL ||
+               type_is_sized_integer(arg_elem);
+    default:
+        return false;
+    }
+}
+
+static bool ast_is_numeric_literal_syntax(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) {
+            return node->type && node->type->is_literal &&
+                lambda_numeric_kind_from_type(node->type) != LAMBDA_NUM_INVALID;
+        }
+        // Identifier types can carry constant/literal metadata from their binding,
+        // but the source expression itself is not a literal-zero diagnostic site.
+        if (primary->expr->node_type == AST_NODE_IDENT) return false;
+        node = primary->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
+            return ast_is_numeric_literal_syntax(unary->operand);
+        }
+    }
+    return false;
+}
+
+static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) {
+    arg_type = unwrap_simple_type_type(arg_type);
+    param_type = unwrap_simple_type_type(param_type);
+    if (!arg_type || !param_type || param_type->kind != TYPE_KIND_UNARY) return false;
+
+    TypeUnary* unary = (TypeUnary*)param_type;
+    Type* expected_elem = unwrap_simple_type_type(unary->operand);
+    if (!expected_elem) return false;
+    if (expected_elem->type_id != LMD_TYPE_INT &&
+        expected_elem->type_id != LMD_TYPE_FLOAT &&
+        expected_elem->type_id != LMD_TYPE_INT64 &&
+        expected_elem->type_id != LMD_TYPE_UINT64) {
+        return false;
+    }
+
+    if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
+
+    TypeArray* arr_type = (TypeArray*)arg_type;
+    if (!arr_type->nested) return arr_type->length == 0;
+    return typed_array_element_compatible(arr_type->nested, expected_elem);
+}
+
+static Type* typed_array_expected_element(Type* param_type) {
+    param_type = unwrap_simple_type_type(param_type);
+    if (!param_type || param_type->kind != TYPE_KIND_UNARY) return NULL;
+
+    TypeUnary* unary = (TypeUnary*)param_type;
+    Type* expected_elem = unwrap_simple_type_type(unary->operand);
+    if (!expected_elem) return NULL;
+    if (expected_elem->type_id != LMD_TYPE_INT &&
+        expected_elem->type_id != LMD_TYPE_FLOAT &&
+        expected_elem->type_id != LMD_TYPE_INT64 &&
+        expected_elem->type_id != LMD_TYPE_UINT64) {
+        return NULL;
+    }
+    return expected_elem;
+}
+
+static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
+    if (!arg || !arg->type) return true;
+
+    Type* expected_elem = typed_array_expected_element(param_type);
+    if (!expected_elem) return false;
+
+    Type* arg_type = unwrap_simple_type_type(arg->type);
+    if (!arg_type) return true;
+    if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
+
+    TypeArray* arr_type = (TypeArray*)arg_type;
+    if (arr_type->nested) {
+        return typed_array_element_compatible(arr_type->nested, expected_elem);
+    }
+
+    if (arg->node_type != AST_NODE_ARRAY) {
+        return true;
+    }
+
+    AstNode* item = ((AstArrayNode*)arg)->item;
+    while (item) {
+        if (item->node_type != AST_NODE_ASSIGN &&
+            item->type && item->type->type_id != LMD_TYPE_ANY &&
+            !typed_array_element_compatible(item->type, expected_elem)) {
+            return false;
+        }
+        item = item->next;
+    }
+    return true;
+}
+
+static bool typed_array_literal_elements_compatible(AstNode* node, Type* expected_elem) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (!node || node->node_type != AST_NODE_ARRAY) return true;
+    AstNode* item = ((AstArrayNode*)node)->item;
+    while (item) {
+        if (item->node_type != AST_NODE_ASSIGN &&
+            item->type && item->type->type_id != LMD_TYPE_ANY &&
+            !typed_array_element_compatible(item->type, expected_elem)) {
+            return false;
+        }
+        item = item->next;
+    }
+    return true;
+}
+
+static bool is_global_simple_type(const Type* type) {
+    return type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
+           type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_DECIMAL ||
+           type == &TYPE_INTEGER_VALUE ||
+           type == &TYPE_NUMBER || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
+           type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
+           type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY ||
+           type == &TYPE_MAP || type == &TYPE_ELMT || type == &TYPE_OBJECT ||
+           type == &TYPE_FUNC || type == &TYPE_TYPE || type == &TYPE_ANY ||
+           type == &TYPE_ERROR || type == &TYPE_I8 || type == &TYPE_I16 ||
+           type == &TYPE_I32 || type == &TYPE_U8 || type == &TYPE_U16 ||
+           type == &TYPE_U32 || type == &TYPE_F16 || type == &TYPE_F32 ||
+           type == &TYPE_UINT64;
+}
+
+static inline bool is_param_full_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT ||
+           type_id == LMD_TYPE_ELEMENT;
+}
+
+static inline bool is_static_spread_scalar_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_BOOL ||
+           is_numeric_type_id(type_id) || type_id == LMD_TYPE_DTIME ||
+           is_text_type_id(type_id);
+}
+
+static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
+    if (!arg_type || !param_type) return true;  // unknown types are compatible
+    if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
+    if (arg_type->type_id == LMD_TYPE_ANY) return true;  // any arg can pass to typed param (runtime check)
+    LambdaNumericKind arg_numeric = lambda_numeric_kind_from_type(arg_type);
+    LambdaNumericKind param_numeric = lambda_numeric_kind_from_type(param_type);
+    if (arg_numeric != LAMBDA_NUM_INVALID && param_numeric != LAMBDA_NUM_INVALID) {
+        return lambda_numeric_kind_exactly_embeds(arg_numeric, param_numeric);
+    }
+    if (arg_type->type_id == param_type->type_id) return true;
+
+    // handle union types (e.g., T | error from T^ syntax)
+    // if param is a union type, check if arg matches either side
+    // for TypeParam with complex types, use full_type if available
+    Type* actual_param = param_full_type ? param_full_type : param_type;
+
+    bool can_read_extended_kind = actual_param && !is_global_simple_type(actual_param);
+
+    if (can_read_extended_kind && is_array_family_type_id(actual_param->type_id) &&
+        typed_array_annotation_compatible(arg_type, actual_param)) {
+        return true;
+    }
+
+    if (can_read_extended_kind && actual_param->kind == TYPE_KIND_BINARY) {
+        TypeBinary* union_type = (TypeBinary*)actual_param;
+        if (union_type->op == OPERATOR_UNION) {
+            // unwrap TypeType if present
+            Type* left = unwrap_simple_type_type(union_type->left);
+            Type* right = unwrap_simple_type_type(union_type->right);
+            // arg matches if compatible with either side of the union
+            if (types_compatible_with_full(arg_type, left, NULL) ||
+                types_compatible_with_full(arg_type, right, NULL)) {
+                return true;
+            }
+        }
+    }
+
+    if (param_type == &TYPE_NUMBER) {
+        // `number` is an abstract type keyword; no runtime TypeId carries it.
+        if (IS_NUMERIC_ID(arg_type->type_id)) return true;
+    }
+    return false;
+}
+
+static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
+    if (!tp || !node || !out) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (!node || !node->type || !node->type->is_literal) return false;
+
+    switch (node->type->type_id) {
+    case LMD_TYPE_NULL:
+        *out = ItemNull;
+        return true;
+    case LMD_TYPE_BOOL: {
+        StrView text = ts_node_source(tp, node->node);
+        out->item = b2it(strview_equal(&text, "true") ? BOOL_TRUE : BOOL_FALSE);
+        return true;
+    }
+    case LMD_TYPE_INT: {
+        StrView source = ts_node_source(tp, node->node);
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+        int64_t value = strtoll(num_str, NULL, 0);
+        mem_free(num_str);
+        out->item = i2it(value);
+        return true;
+    }
+    case LMD_TYPE_INT64: {
+        TypeInt64* t = (TypeInt64*)node->type;
+        out->item = l2it(&t->int64_val);
+        return true;
+    }
+    case LMD_TYPE_FLOAT: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        *out = lambda_float_ptr_to_item(&t->double_val);
+        return true;
+    }
+    case LMD_TYPE_FLOAT64: {
+        TypeFloat* t = (TypeFloat*)node->type;
+        *out = lambda_float_ptr_to_item(&t->double_val);
+        return true;
+    }
+    case LMD_TYPE_DTIME:
+        // Static containers cannot own a GC datetime.  Leave this expression
+        // dynamic so its runtime path materializes a traced heap object.
+        return false;
+    case LMD_TYPE_DECIMAL: {
+        TypeDecimal* t = (TypeDecimal*)node->type;
+        out->item = c2it(t->decimal);
+        return true;
+    }
+    case LMD_TYPE_STRING: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = s2it(t->string);
+        return true;
+    }
+    case LMD_TYPE_SYMBOL: {
+        TypeString* t = (TypeString*)node->type;
+        out->item = y2it((Symbol*)t->string);
+        return true;
+    }
+    case LMD_TYPE_BINARY: {
+        TypeBinaryConst* t = (TypeBinaryConst*)node->type;
+        out->item = x2it(t->binary);
+        return true;
+    }
+    case LMD_TYPE_NUM_SIZED: {
+        TypeNumSized* t = (TypeNumSized*)node->type;
+        out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits);
+        return true;
+    }
+    case LMD_TYPE_UINT64: {
+        TypeUint64* t = (TypeUint64*)node->type;
+        out->item = u2it(&t->uint64_val);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
+    if (!ast_is_numeric_literal_syntax(node)) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        node = ((AstUnaryNode*)node)->operand;
+    }
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return false;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT: return item.get_int56() == 0;
+    case LMD_TYPE_INT64: return item.get_int64() == 0;
+    case LMD_TYPE_UINT64: return item.get_uint64() == 0;
+    case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return item.get_double() == 0.0;
+    case LMD_TYPE_NUM_SIZED:
+        return item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32 ?
+            item.get_num_sized_as_double() == 0.0 :
+            item.get_num_sized_as_int64() == 0;
+    case LMD_TYPE_DECIMAL: return decimal_item_is_zero(item);
+    default: return false;
+    }
+}
+
+static Type* ast_called_type_target(AstNode* function) {
+    while (function && function->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)function;
+        if (!primary->expr) break;
+        function = primary->expr;
+    }
+    if (!function || !function->type || function->type->type_id != LMD_TYPE_TYPE) return NULL;
+    TypeType* type_type = (TypeType*)function->type;
+    return type_type->type;
+}
+
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
+    bool negate = false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) break;
+        node = primary->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
+            negate = (unary->op == OPERATOR_NEG);
+            node = unary->operand;
+        }
+    }
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return false;
+    TypeId type_id = get_type_id(item);
+    int64_t value = 0;
+    if (type_id == LMD_TYPE_INT) {
+        value = item.get_int56();
+    } else if (type_id == LMD_TYPE_INT64) {
+        value = item.get_int64();
+    } else if (type_id == LMD_TYPE_UINT64) {
+        uint64_t u = item.get_uint64();
+        if (u > (uint64_t)INT64_MAX) return false;
+        value = (int64_t)u;
+    } else if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return false;
+        value = item.get_num_sized_as_int64();
+    } else {
+        return false;
+    }
+    *out = negate ? -value : value;
+    return true;
+}
+
+static bool constant_fits_sized_integer(NumSizedType num_type, int64_t value) {
+    switch (num_type) {
+    case NUM_INT8:   return value >= INT8_MIN && value <= INT8_MAX;
+    case NUM_INT16:  return value >= INT16_MIN && value <= INT16_MAX;
+    case NUM_INT32:  return value >= INT32_MIN && value <= INT32_MAX;
+    case NUM_UINT8:  return value >= 0 && value <= UINT8_MAX;
+    case NUM_UINT16: return value >= 0 && value <= UINT16_MAX;
+    case NUM_UINT32: return value >= 0 && (uint64_t)value <= UINT32_MAX;
+    default:         return true;
+    }
+}
+
+// check if arg_type is compatible with param_type for function calls
+bool types_compatible(Type* arg_type, Type* param_type) {
+    return types_compatible_with_full(arg_type, param_type, NULL);
+}
+
+static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* second_arg) {
+    Type* left = first_arg ? first_arg->type : NULL;
+    Type* right = second_arg ? second_arg->type : NULL;
+    switch (fn) {
+    case SYSFUNC_BAND:
+    case SYSFUNC_BOR:
+    case SYSFUNC_BXOR: {
+        LambdaNumericDecision decision = lambda_numeric_classify(
+            LAMBDA_NUM_OP_BITWISE, lambda_numeric_kind_from_type(left),
+            lambda_numeric_kind_from_type(right));
+        return decision.valid ? lambda_numeric_type_from_kind(decision.result) : NULL;
+    }
+    case SYSFUNC_BNOT: {
+        LambdaNumericKind kind = lambda_numeric_kind_from_type(left);
+        if (lambda_numeric_is_sized_integer(kind)) return left;
+        if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER) {
+            return lambda_numeric_type_from_kind(kind);
+        }
+        return NULL;
+    }
+    case SYSFUNC_SHL:
+    case SYSFUNC_SHR: {
+        LambdaNumericDecision decision = lambda_numeric_classify(
+            LAMBDA_NUM_OP_SHIFT, lambda_numeric_kind_from_type(left),
+            lambda_numeric_kind_from_type(right));
+        return decision.valid ? lambda_numeric_type_from_kind(decision.result) : NULL;
+    }
+    case SYSFUNC_USHR: {
+        LambdaNumericKind kind = lambda_numeric_kind_from_type(left);
+        if (lambda_numeric_is_sized_integer(kind)) {
+            return lambda_numeric_type_from_kind(lambda_numeric_sized_kind(
+                1, lambda_numeric_sized_bits(kind)));
+        }
+        // Lambda's unsized int follows the documented ToUint32 lane.
+        return kind == LAMBDA_NUM_INT ? &TYPE_U32 : NULL;
+    }
+    default:
+        return NULL;
+    }
+}
+
+// Record a type error and check if we should continue transpiling
+void record_type_error(Transpiler* tp, int line, const char* format, ...) {
+    tp->error_count++;
+
+    // Format error message
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+
+    // Create structured error
+    SourceLocation loc = src_loc(tp->reference, line, 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(ERR_TYPE_MISMATCH, error_msg, &loc);
+
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+
+    // Also log for backward compatibility
+    log_error("type_error (line %d): %s", line, error_msg);
+
+    // Check threshold
+    if (tp->error_count >= tp->max_errors) {
+        log_error("error_threshold: max errors (%d) reached", tp->max_errors);
+    }
+}
+
+// Record a semantic error with error code
+void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
+    tp->error_count++;
+
+    // Get location from TSNode
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    // Format error message
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+
+    // Create structured error with span
+    SourceLocation loc = src_loc_span(tp->reference,
+        start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(code, error_msg, &loc);
+
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+
+    // Also log for backward compatibility
+    log_error("error[E%d] at %s:%u:%u: %s", code,
+        tp->reference ? tp->reference : "<unknown>",
+        start.row + 1, start.column + 1, error_msg);
+
+    // Check threshold
+    if (tp->error_count >= tp->max_errors) {
+        log_error("error_threshold: max errors (%d) reached", tp->max_errors);
+    }
+}
+
+// Check if should continue transpiling based on error count
+bool should_continue_transpiling(Transpiler* tp) {
+    return tp->error_count < tp->max_errors;
+}
+
+// Forward declaration for closure capture analysis
+void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
+                                 NameScope* global_scope, FnCapture** captures);
+
+// Check if a scope is an ancestor of another scope
+bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
+    NameScope* scope = descendant;
+    while (scope) {
+        if (scope == ancestor) return true;
+        scope = scope->parent;
+    }
+    return false;
+}
+
+// Check if a name entry is defined in a scope or any of its descendant scopes (local to function)
+// This includes variables declared in while blocks, if blocks, for loops, etc.
+bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
+    if (!entry) return false;
+
+    // With the entry->scope field, we can now check if the entry's defining scope
+    // is fn_scope itself or a descendant of fn_scope (nested block within the function).
+    // If yes, the variable is local to this function; if no, it's a capture from outer scope.
+
+    NameScope* entry_scope = entry->scope;
+    if (!entry_scope) {
+        // Fallback for entries without scope info (shouldn't happen for var/let)
+        // Check if entry is directly in fn_scope
+        NameEntry* e = fn_scope->first;
+        while (e) {
+            if (e == entry) return true;
+            e = e->next;
+        }
+        return false;
+    }
+
+    // Check if entry_scope is fn_scope or a descendant of fn_scope
+    NameScope* scope = entry_scope;
+    while (scope) {
+        if (scope == fn_scope) return true;
+        scope = scope->parent;
+    }
+
+    return false;
+}
+
+// Check if a name entry is in global scope
+bool is_global_entry(NameEntry* entry, NameScope* global_scope) {
+    if (!global_scope) return false;
+    NameEntry* e = global_scope->first;
+    while (e) {
+        if (e == entry) return true;
+        e = e->next;
+    }
+    return false;
+}
+
+static bool is_object_field_entry(NameEntry* entry) {
+    return entry && entry->node && entry->node->node_type == AST_NODE_KEY_EXPR;
+}
+
+static AstNode* unwrap_primary_node(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        node = primary->expr;
+    }
+    return node;
+}
+
+static AstIdentNode* compound_root_ident(AstNode* node) {
+    node = unwrap_primary_node(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return compound_root_ident(field->object);
+    }
+    return NULL;
+}
+
+static bool same_name_string(String* a, String* b) {
+    return a == b || (a && b && a->len == b->len && memcmp(a->chars, b->chars, a->len) == 0);
+}
+
+static bool type_exact_match(Type* left, TypeParam* right) {
+    if (!left || !right) return true;
+    Type* right_full = right->full_type ? right->full_type : (Type*)right;
+    if (!right_full) return true;
+    if (left->type_id != right_full->type_id) return false;
+    if (left->kind != right_full->kind) return false;
+    if (left->kind == TYPE_KIND_UNARY) {
+        TypeUnary* lu = (TypeUnary*)left;
+        TypeUnary* ru = (TypeUnary*)right_full;
+        Type* lo = lu->operand;
+        Type* ro = ru->operand;
+        if (lo && lo->type_id == LMD_TYPE_TYPE && lo->kind == TYPE_KIND_SIMPLE) lo = ((TypeType*)lo)->type;
+        if (ro && ro->type_id == LMD_TYPE_TYPE && ro->kind == TYPE_KIND_SIMPLE) ro = ((TypeType*)ro)->type;
+        return lo && ro && lo->type_id == ro->type_id;
+    }
+    return true;
+}
+
+static void validate_compound_mutable_root(Transpiler* tp, TSNode assign_node, AstNode* object) {
+    AstIdentNode* root = compound_root_ident(object);
+    if (!root || !root->entry) return;
+    if (root->entry->is_mutable) return;
+    // Interior writes are writes to the root binding for Lambda's mutability
+    // model; allowing them through a let root makes aliases observe mutation.
+    record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+        "cannot mutate through immutable binding '%.*s'. declare it with `var` or pass it as `var`.",
+        (int)root->name->len, root->name->chars);
+}
+
+// Add a capture to the list if not already present
+void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* entry) {
+    // Check if already captured
+    FnCapture* c = *captures;
+    while (c) {
+        if (c->lambda_name == name || (c->lambda_name && name &&
+            c->lambda_name->len == name->len &&
+            memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
+            return; // already captured
+        }
+        c = c->next;
+    }
+
+    // Add new capture
+    FnCapture* capture = (FnCapture*)pool_calloc(tp->pool, sizeof(FnCapture));
+    capture->lambda_name = name;
+    if (name) {
+        int name_len = name->len < sizeof(capture->name) - 1 ? (int)name->len : (int)sizeof(capture->name) - 1;
+        memcpy(capture->name, name->chars, name_len);
+        capture->name[name_len] = '\0';
+        memcpy(capture->scope_env_key, capture->name, (size_t)name_len + 1);
+    }
+    capture->entry = entry;
+    capture->scope_env_slot = -1;
+    capture->grandparent_slot = -1;
+    capture->parent_env_link_slot_override = -1;
+    capture->is_mutable = false;
+    capture->next = *captures;
+    *captures = capture;
+    log_debug("capture added: %.*s", (int)name->len, name->chars);
+}
+
+// Mark an existing capture as mutable (called when assignment to captured var is detected)
+void mark_capture_mutable(FnCapture** captures, String* name) {
+    FnCapture* c = *captures;
+    while (c) {
+        if (c->lambda_name == name || (c->lambda_name && name &&
+            c->lambda_name->len == name->len &&
+            memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
+            c->is_mutable = true;
+            log_debug("capture marked mutable: %.*s", (int)name->len, name->chars);
+            return;
+        }
+        c = c->next;
+    }
+}
+
+// Recursively collect captures from an AST node
+void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
+                                 NameScope* global_scope, FnCapture** captures) {
+    if (!node) return;
+
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (ident->entry && ident->entry->node) {
+            // Object fields in method scope are implicit receiver slots, not
+            // closure captures; method write-back owns their mutation rules.
+            if (is_object_field_entry(ident->entry)) break;
+            // Check if this identifier refers to a variable from an enclosing scope
+            // (not local to fn_scope, not global, not an import)
+            if (!ident->entry->import &&
+                !is_local_to_scope(ident->entry, fn_scope) &&
+                !is_global_entry(ident->entry, global_scope)) {
+                add_capture(tp, captures, ident->name, ident->entry);
+            }
+        }
+        break;
+    }
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        collect_captures_from_node(tp, pri->expr, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        collect_captures_from_node(tp, un->operand, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)node;
+        collect_captures_from_node(tp, bin->left, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, bin->right, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        collect_captures_from_node(tp, if_node->cond, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, if_node->then, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, if_node->otherwise, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match_node = (AstMatchNode*)node;
+        collect_captures_from_node(tp, match_node->scrutinee, fn_scope, global_scope, captures);
+        AstMatchArm* arm = match_node->first_arm;
+        while (arm) {
+            collect_captures_from_node(tp, arm->body, fn_scope, global_scope, captures);
+            arm = (AstMatchArm*)arm->next;
+        }
+        break;
+    }
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM: {
+        AstForNode* for_node = (AstForNode*)node;
+        // Note: loop variable is local, handled by fn_scope extension
+        AstNode* loop = for_node->loop;
+        while (loop) {
+            if (loop->node_type == AST_NODE_LOOP) {
+                // Must cast to AstLoopNode (not AstNamedNode) — AstLoopNode has
+                // an extra index_name field before 'as', so the offset differs.
+                AstLoopNode* loop_var = (AstLoopNode*)loop;
+                collect_captures_from_node(tp, loop_var->as, fn_scope, global_scope, captures);
+            }
+            loop = loop->next;
+        }
+        collect_captures_from_node(tp, for_node->then, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* while_node = (AstWhileNode*)node;
+        collect_captures_from_node(tp, while_node->cond, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, while_node->body, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        collect_captures_from_node(tp, call->function, fn_scope, global_scope, captures);
+        AstNode* arg = call->argument;
+        while (arg) {
+            collect_captures_from_node(tp, arg, fn_scope, global_scope, captures);
+            arg = arg->next;
+        }
+        break;
+    }
+    case AST_NODE_START: {
+        AstStartNode* start = (AstStartNode*)node;
+        collect_captures_from_node(tp, (AstNode*)start->call, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        collect_captures_from_node(tp, field->object, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, field->field, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_LIST:
+    case AST_NODE_CONTENT:
+    case AST_NODE_ARRAY: {
+        AstListNode* list = (AstListNode*)node;
+        AstNode* item = list->item;
+        while (item) {
+            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_MAP: {
+        AstMapNode* map = (AstMapNode*)node;
+        AstNode* item = map->item;
+        while (item) {
+            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_LOOP: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        // check if the assignment target is a captured variable from an enclosing scope
+        if (is_object_field_entry(assign->target_entry)) {
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
+        if (assign->target_entry && !assign->target_entry->import &&
+            !is_local_to_scope(assign->target_entry, fn_scope) &&
+            !is_global_entry(assign->target_entry, global_scope)) {
+            add_capture(tp, captures, assign->target, assign->target_entry);
+            mark_capture_mutable(captures, assign->target);
+        }
+        // also collect captures from the value expression
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        AstIdentNode* root = compound_root_ident(assign->object);
+        if (root && is_object_field_entry(root->entry)) {
+            collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+            break;
+        }
+        if (root && root->entry && !root->entry->import &&
+            !is_local_to_scope(root->entry, fn_scope) &&
+            !is_global_entry(root->entry, global_scope)) {
+            add_capture(tp, captures, root->name, root->entry);
+            mark_capture_mutable(captures, root->name);
+        }
+        collect_captures_from_node(tp, assign->object, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_RETURN_STAM: {
+        AstReturnNode* ret = (AstReturnNode*)node;
+        collect_captures_from_node(tp, ret->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM: {
+        AstLetNode* let = (AstLetNode*)node;
+        AstNode* decl = let->declare;
+        while (decl) {
+            collect_captures_from_node(tp, decl, fn_scope, global_scope, captures);
+            decl = decl->next;
+        }
+        break;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: {
+        // Nested functions: we need to propagate any captures that the nested function
+        // has which come from scopes ABOVE the current function's scope.
+        // This ensures that intermediate functions capture variables needed by their
+        // nested functions for closure environment construction.
+        AstFuncNode* nested_fn = (AstFuncNode*)node;
+        if (nested_fn->captures) {
+            FnCapture* cap = nested_fn->captures;
+            while (cap) {
+                // Check if this captured variable is NOT local to the current function's scope
+                // and NOT global. If so, the current function also needs to capture it.
+                if (cap->entry && !cap->entry->import &&
+                    !is_local_to_scope(cap->entry, fn_scope) &&
+                    !is_global_entry(cap->entry, global_scope)) {
+                    add_capture(tp, captures, cap->lambda_name, cap->entry);
+                }
+                cap = cap->next;
+            }
+        }
+        break;
+    }
+    default:
+        // Other node types don't need capture analysis
+        break;
+    }
+}
+
+// Analyze captures for a function node
+void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
+    fn_node->captures = nullptr;
+    collect_captures_from_node(tp, fn_node->body, fn_node->vars, global_scope, &fn_node->captures);
+    if (!fn_node->analysis) {
+        fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
+    }
+    fn_node->analysis->captures = fn_node->captures;
+    fn_node->analysis->capture_count = 0;
+
+    if (fn_node->captures) {
+        log_debug("function %.*s has captures:",
+            fn_node->name ? (int)fn_node->name->len : 5,
+            fn_node->name ? fn_node->name->chars : "anon");
+        FnCapture* c = fn_node->captures;
+        while (c) {
+            fn_node->analysis->capture_count++;
+            String* capture_name = c->lambda_name;
+            log_debug("  - %.*s", (int)capture_name->len, capture_name->chars);
+            if (c->is_mutable) {
+                record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
+                    (int)capture_name->len, capture_name->chars);
+            }
+            c = c->next;
+        }
+    }
+}
+
+// Find the global scope by walking up the parent chain
+NameScope* find_global_scope(NameScope* scope) {
+    while (scope && scope->parent) {
+        scope = scope->parent;
+    }
+    return scope;
+}
+
+// str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
+
+AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
+    AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
+    memset(ast_node, 0, size);
+    ast_node->node_type = node_type;  ast_node->node = node;
+    return ast_node;
+}
+
+void* alloc_const(Transpiler* tp, size_t size) {
+    void* bytes = pool_alloc(tp->pool, size);
+    memset(bytes, 0, size);
+    return bytes;
+}
+
+// extract name text from an identifier or symbol node
+// for identifiers, returns the source text as-is
+// for symbols, strips the surrounding single quotes
+static StrView node_name_text(Transpiler* tp, TSNode node) {
+    StrView text = ts_node_source(tp, node);
+    if (ts_node_symbol(node) == SYM_SYMBOL && text.length >= 2) {
+        text.str++;
+        text.length -= 2;
+    }
+    return text;
+}
+
+// check if a name is a reserved type keyword
+bool is_type_keyword(StrView name) {
+    static const char* type_keywords[] = {
+        "null", "any", "error", "bool", "int", "int64", "float", "f64", "decimal", "integer", "number",
+        "date", "time", "datetime", "symbol", "string", "binary",
+        "list", "array", "map", "element", "entity", "object", "type", "function",
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64"
+    };
+    for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
+        if (strview_equal(&name, type_keywords[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_reserved_identifier_keyword(StrView name) {
+    return strview_equal(&name, "last");
+}
+
+// lookup a name in the current scope only (not in parent scopes)
+// returns the existing entry if found, NULL otherwise
+NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
+    NameEntry* entry = tp->current_scope->first;
+    while (entry) {
+        if (entry->name == name ||  // pointer comparison (interned strings)
+            (entry->name->len == name->len &&
+             memcmp(entry->name->chars, name->chars, name->len) == 0)) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
+    log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
+
+    StrView name_view = {node->name->chars, node->name->len};
+    if (is_reserved_identifier_keyword(name_view)) {
+        int line = ts_node_start_point(node->node).row + 1;
+        // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
+        record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
+            (int)name_view.length, name_view.str);
+    }
+
+    // check for duplicate definition in current scope
+    NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
+    if (existing) {
+        record_semantic_error(tp, node->node, ERR_DUPLICATE_DEFINITION,
+            "duplicate definition of '%.*s' in the same scope",
+            (int)node->name->len, node->name->chars);
+        // continue anyway to allow further error checking
+    }
+
+    NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+    entry->name = node->name;
+    entry->node = (AstNode*)node;  entry->import = import;
+    entry->scope = tp->current_scope;  // track which scope this variable belongs to
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
+// let_block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
+AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
+    log_debug("build let_block expr");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, block_node, sizeof(AstListNode));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    ast_node->list_type = type;
+
+    // push scope for let bindings
+    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    scope->parent = tp->current_scope;
+    tp->current_scope = scope;
+    ast_node->vars = scope;
+
+    // process children: let_expr nodes are declarations, last non-let child is the body
+    AstNode* prev_declare = NULL;
+    AstNode* body = NULL;
+    TSNode child = ts_node_named_child(block_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol sym = ts_node_symbol(child);
+        TSNode next = ts_node_next_named_sibling(child);
+        if (sym == sym_let_expr) {
+            AstNode* decl = build_let_expr(tp, child);
+            if (decl) {
+                if (!prev_declare)
+                    ast_node->declare = decl;
+                else
+                    prev_declare->next = decl;
+                prev_declare = decl;
+            }
+        } else {
+            // last expression is the body
+            body = build_expr(tp, child);
+        }
+        child = next;
+    }
+
+    ast_node->item = body;
+    type->length = body ? 1 : 0;
+    ast_node->type = body ? body->type : alloc_type(tp->pool, LMD_TYPE_NULL, sizeof(Type));
+
+    // pop scope
+    tp->current_scope = scope->parent;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_array(Transpiler* tp, TSNode array_node) {
+    log_debug("build array expr");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    TypeArray* type = (TypeArray*)ast_node->type;
+
+    // check if array has let expressions - push scope to contain their bindings
+    bool has_let = false;
+    {
+        TSNode scan = ts_node_named_child(array_node, 0);
+        while (!ts_node_is_null(scan)) {
+            if (ts_node_symbol(scan) == sym_let_expr) {
+                has_let = true;
+                break;
+            }
+            scan = ts_node_next_named_sibling(scan);
+        }
+    }
+    NameScope* saved_scope = tp->current_scope;
+    if (has_let) {
+        NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        scope->parent = tp->current_scope;
+        tp->current_scope = scope;
+    }
+
+    TSNode child = ts_node_named_child(array_node, 0);
+    AstNode* prev_item = NULL;  Type* nested_type = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) {
+                ast_node->item = item;
+                // let bindings are transparent - they don't contribute array elements
+                if (item->node_type != AST_NODE_ASSIGN) {
+                    nested_type = item->type;
+                    type->length++;
+                }
+                log_debug("DEBUG: First array item type_id: %d", item->type ? item->type->type_id : -1);
+            }
+            else {
+                prev_item->next = item;
+                // let bindings are transparent - skip for type/length tracking
+                if (item->node_type != AST_NODE_ASSIGN) {
+                    log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d",
+                        item->type ? item->type->type_id : -1, nested_type ? nested_type->type_id : -1);
+                    if (nested_type && item->type->type_id != nested_type->type_id) {
+                        log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
+                        nested_type = NULL;
+                    }
+                    // for NUM_SIZED, also check sub-type uniformity
+                    else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED) {
+                        NumSizedType a_num_type = type_num_sized_kind(nested_type);
+                        NumSizedType b_num_type = type_num_sized_kind(item->type);
+                        if (a_num_type != b_num_type) {
+                            log_debug("DEBUG: NUM_SIZED sub-type mismatch (%d vs %d), resetting nested_type to NULL",
+                                a_num_type, b_num_type);
+                            nested_type = NULL;
+                        }
+                    }
+                    type->length++;
+                }
+            }
+            prev_item = item;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    if (has_let) {
+        tp->current_scope = saved_scope;
+    }
+
+    type->nested = nested_type;
+    log_debug("DEBUG: Final array nested_type_id: %d", nested_type ? nested_type->type_id : -1);
+    return (AstNode*)ast_node;
+}
+
+// check if an identifier is a path scheme keyword (http, https, sys)
+// NOTE: file and cwd are no longer keywords - use / and . instead
+// returns the PathScheme if it is, or -1 if not
+static int get_path_scheme_from_name(StrView name) {
+    if (strview_equal(&name, "http")) return PATH_SCHEME_HTTP;
+    if (strview_equal(&name, "https")) return PATH_SCHEME_HTTPS;
+    if (strview_equal(&name, "sys")) return PATH_SCHEME_SYS;
+    return -1;  // not a path scheme
+}
+
+// Add a namespace binding to the transpiler context
+static void add_namespace(Transpiler* tp, String* prefix, Target* target) {
+    NamespaceEntry* entry = (NamespaceEntry*)pool_calloc(tp->pool, sizeof(NamespaceEntry));
+    entry->prefix = prefix;
+    entry->target = target;
+    entry->next = tp->namespaces;
+    tp->namespaces = entry;
+    log_debug("namespace added: %.*s", (int)prefix->len, prefix->chars);
+}
+
+// Lookup a namespace by prefix string
+// returns the NamespaceEntry if found, NULL if not
+static NamespaceEntry* lookup_namespace(Transpiler* tp, String* prefix) {
+    NamespaceEntry* entry = tp->namespaces;
+    while (entry) {
+        if (entry->prefix->len == prefix->len &&
+            memcmp(entry->prefix->chars, prefix->chars, prefix->len) == 0) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+// Lookup a namespace by prefix StrView
+static NamespaceEntry* lookup_namespace_strview(Transpiler* tp, StrView prefix) {
+    NamespaceEntry* entry = tp->namespaces;
+    while (entry) {
+        if (entry->prefix->len == prefix.length &&
+            memcmp(entry->prefix->chars, prefix.str, prefix.length) == 0) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+// check if a member_expr chain starts with a path scheme (file, http, https, sys)
+// and collect all segment names if so
+// returns the PathScheme if it's a path, or -1 if it's a regular member expression
+static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList* segments) {
+    TSSymbol symbol = ts_node_symbol(node);
+
+    // New path tokens: /, ., ..
+    // _path_prefix is a hidden token, so standalone path_root/path_self won't appear
+    // path_parent is still a separate visible symbol for parent_expr
+    if (symbol == SYM_PATH_PARENT) {
+        return PATH_SCHEME_PARENT; // .. is parent path
+    }
+
+    // path_expr: _path_prefix optional(field)
+    if (symbol == SYM_PATH_EXPR) {
+        // determine scheme from path_expr source text (first char(s) are the prefix)
+        StrView source = ts_node_source(tp, node);
+        int scheme;
+        if (source.length >= 1 && source.str[0] == '/') {
+            scheme = PATH_SCHEME_FILE;
+        } else if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
+            scheme = PATH_SCHEME_PARENT;
+        } else {
+            scheme = PATH_SCHEME_REL;
+        }
+
+        // check for optional field
+        TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
+        if (!ts_node_is_null(field_node)) {
+            TSSymbol field_sym = ts_node_symbol(field_node);
+            if (field_sym == SYM_IDENT || field_sym == SYM_SYMBOL) {
+                StrView field_name = ts_node_source(tp, field_node);
+                if (field_sym == SYM_SYMBOL && field_name.length >= 2) {
+                    field_name.str++;
+                    field_name.length -= 2;
+                }
+                String* pooled = name_pool_create_strview(tp->name_pool, field_name);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = pooled;
+                seg->type = LPATH_SEG_NORMAL;
+                arraylist_append(segments, seg);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD) {
+                StrView wc_src = ts_node_source(tp, field_node);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
+                arraylist_append(segments, seg);
+            }
+        }
+        return scheme;
+    }
+
+    if (symbol == SYM_IDENT) {
+        // base case: check if this identifier is a path scheme (http, https, sys)
+        StrView name = ts_node_source(tp, node);
+        int scheme = get_path_scheme_from_name(name);
+        if (scheme >= 0) {
+            // it's a path scheme root, don't add it to segments
+            return scheme;
+        }
+        return -1;  // regular identifier, not a path
+    }
+    else if (symbol == SYM_MEMBER_EXPR) {
+        // recursive case: check the object (left side)
+        TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
+        TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
+
+        // first recurse to check if the object is a path
+        int scheme = collect_path_segments_if_path(tp, object_node, segments);
+        if (scheme >= 0) {
+            // the object is part of a path, add the field as a segment
+            // field can be identifier, symbol, or wildcard
+            TSSymbol field_sym = ts_node_symbol(field_node);
+            if (field_sym == SYM_IDENT || field_sym == SYM_SYMBOL) {
+                StrView field_name = ts_node_source(tp, field_node);
+                // for symbols, strip the quotes
+                if (field_sym == SYM_SYMBOL && field_name.length >= 2) {
+                    field_name.str++;
+                    field_name.length -= 2;
+                }
+                String* pooled = name_pool_create_strview(tp->name_pool, field_name);
+                // Store segment with type info
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = pooled;
+                seg->type = LPATH_SEG_NORMAL;
+                arraylist_append(segments, seg);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD) {
+                StrView wc_src = ts_node_source(tp, field_node);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
+                arraylist_append(segments, seg);
+            }
+            return scheme;
+        }
+        return -1;  // not a path
+    }
+    else if (symbol == SYM_PRIMARY_EXPR) {
+        // unwrap primary_expr
+        TSNode child = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(child)) {
+            return collect_path_segments_if_path(tp, child, segments);
+        }
+        return -1;
+    }
+
+    return -1;  // unknown node type, not a path
+}
+
+// build a path expression from a member_expr chain that starts with a path scheme
+static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, ArrayList* segments) {
+    log_debug("build_path_expr: scheme=%d, segment_count=%d", scheme, segments->length);
+
+    AstPathNode* path_node = (AstPathNode*)alloc_ast_node(tp, AST_NODE_PATH_EXPR, node, sizeof(AstPathNode));
+    path_node->scheme = scheme;
+    path_node->segment_count = segments->length;
+
+    // allocate array for segments in the pool
+    if (segments->length > 0) {
+        path_node->segments = (AstPathSegment*)pool_calloc(tp->pool, segments->length * sizeof(AstPathSegment));
+        for (int i = 0; i < segments->length; i++) {
+            AstPathSegment* src = (AstPathSegment*)segments->data[i];
+            path_node->segments[i] = *src;  // copy the segment info
+            if (src->name) {
+                log_debug("  segment[%d]: %.*s (type=%d)", i, (int)src->name->len, src->name->chars, src->type);
+            } else {
+                log_debug("  segment[%d]: <wildcard> (type=%d)", i, src->type);
+            }
+        }
+    } else {
+        path_node->segments = NULL;
+    }
+
+    path_node->type = &TYPE_PATH;
+    return (AstNode*)path_node;
+}
+
+
+
+// both index and member exprs
+AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_type) {
+    log_debug("build field expr");
+    AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, node_type, array_node, sizeof(AstFieldNode));
+    TSNode object_node = ts_node_child_by_field_id(array_node, FIELD_OBJECT);
+    ast_node->object = build_expr(tp, object_node);
+
+    TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
+    if (node_type == AST_NODE_MEMBER_EXPR && (ts_node_symbol(field_node) == SYM_IDENT || ts_node_symbol(field_node) == SYM_BASE_TYPE)) {
+        // handle id node directly without name lookup
+        AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
+        StrView var_name = ts_node_source(tp, field_node);
+        id_node->name = name_pool_create_strview(tp->name_pool, var_name);
+        log_debug("member expr field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
+        ast_node->field = (AstNode*)id_node;
+
+        // In v2 namespaces, e.ns.attr is chained access: (e.ns).attr
+        // The sub-map desugaring stores ns attrs as ns: {attr: val}, so
+        // e.ns returns the sub-map and .attr accesses the key within it.
+        // No merging needed — just check for ns.value → qualified symbol.
+        if (ast_node->object && ast_node->object->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)ast_node->object;
+            // Check if object is just a namespace prefix identifier (for ns.value syntax)
+            // e.g., ns.value where ns is a namespace prefix
+            if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ns_ident = (AstIdentNode*)pri->expr;
+                NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
+                if (ns_entry) {
+                    // ns.value becomes a symbol literal with qualified name
+                    // Create qualified name: ns.value
+                    size_t ns_len = ns_ident->name->len;
+                    size_t val_len = id_node->name->len;
+                    size_t total_len = ns_len + 1 + val_len;  // ns.value
+                    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
+                    memcpy(buf, ns_ident->name->chars, ns_len);
+                    buf[ns_len] = '.';
+                    memcpy(buf + ns_len + 1, id_node->name->chars, val_len);
+                    buf[total_len] = '\0';
+                    log_debug("namespace symbol created: '%.*s'", (int)total_len, buf);
+
+                    // Build a symbol type with the qualified name
+                    TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL, sizeof(TypeString));
+                    sym_type->is_const = 1;
+                    sym_type->is_literal = 1;
+                    // Allocate Symbol struct (has ns field)
+                    Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
+                    sym->ns = ns_entry->target;  // set namespace target
+                    sym->len = total_len;
+                    memcpy(sym->chars, buf, total_len);
+                    sym->chars[total_len] = '\0';
+                    sym_type->string = (String*)sym;
+                    arraylist_append(tp->const_list, sym);
+                    sym_type->const_index = tp->const_list->length - 1;
+
+                    // Return a primary node with symbol type
+                    AstPrimaryNode* sym_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                    sym_node->type = (Type*)sym_type;
+                    return (AstNode*)sym_node;
+                }
+
+                // Check for math module constants: math.pi, math.e (also via alias)
+                StrView ns_view = {ns_ident->name->chars, (size_t)ns_ident->name->len};
+                const char* ns_resolved = resolve_imported_module(tp, &ns_view);
+                if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
+                    if (id_node->name->len == 7 && memcmp(id_node->name->chars, "max_int", 7) == 0) {
+                        TypeInt64* it = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
+                        it->int64_val = INT56_MAX;
+                        arraylist_append(tp->const_list, &it->int64_val);
+                        it->const_index = tp->const_list->length - 1;
+                        it->is_const = 1;  it->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)it;
+                        return (AstNode*)pn;
+                    }
+                    double const_val = 0.0;
+                    bool is_math_const = false;
+                    if (id_node->name->len == 2 && memcmp(id_node->name->chars, "pi", 2) == 0) {
+                        const_val = 3.14159265358979323846;
+                        is_math_const = true;
+                    } else if (id_node->name->len == 1 && id_node->name->chars[0] == 'e') {
+                        const_val = 2.71828182845904523536;
+                        is_math_const = true;
+                    }
+                    if (is_math_const) {
+                        TypeFloat* ft = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                        ft->double_val = const_val;
+                        arraylist_append(tp->const_list, &ft->double_val);
+                        ft->const_index = tp->const_list->length - 1;
+                        ft->is_const = 1;  ft->is_literal = 1;
+                        AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pn->type = (Type*)ft;
+                        return (AstNode*)pn;
+                    }
+                }
+
+                // Check if object is an aliased import prefix (e.g., helper.val)
+                // by looking up the qualified name "object.field" in scope
+                size_t obj_len = ns_ident->name->len;
+                size_t fld_len = id_node->name->len;
+                size_t q_len = obj_len + 1 + fld_len;
+                char q_buf[256];
+                if (q_len < sizeof(q_buf)) {
+                    memcpy(q_buf, ns_ident->name->chars, obj_len);
+                    q_buf[obj_len] = '.';
+                    memcpy(q_buf + obj_len + 1, id_node->name->chars, fld_len);
+                    q_buf[q_len] = '\0';
+                    StrView q_view = {q_buf, q_len};
+                    NameEntry* q_entry = lookup_name(tp, q_view);
+                    if (q_entry && q_entry->import) {
+                        log_debug("aliased import var resolved: %s", q_buf);
+                        // build as a direct identifier reference
+                        AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node(
+                            tp, AST_NODE_IDENT, array_node, sizeof(AstIdentNode));
+                        resolved->name = q_entry->name;
+                        resolved->entry = q_entry;
+                        if (q_entry->import && q_entry->node->type->type_id != LMD_TYPE_FUNC) {
+                            // For container types (array, list, map, element, etc.), use the
+                            // original type directly to preserve nested type info (e.g.
+                            // TypeArray::nested). Allocating a bare Type loses this info,
+                            // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                            Type* orig = q_entry->node->type;
+                            TypeId tid = orig->type_id;
+                            if (tid >= LMD_TYPE_CONTAINER) {
+                                resolved->type = orig;
+                            } else {
+                                resolved->type = alloc_type(tp->pool, tid, sizeof(Type));
+                                resolved->type->is_const = 0;
+                            }
+                        } else {
+                            resolved->type = q_entry->node->type ? q_entry->node->type : &TYPE_ANY;
+                        }
+                        // wrap in primary node to match expected AST structure
+                        AstPrimaryNode* pri_node = (AstPrimaryNode*)alloc_ast_node(
+                            tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pri_node->expr = (AstNode*)resolved;
+                        pri_node->type = resolved->type;
+                        return (AstNode*)pri_node;
+                    }
+                }
+            }
+        }
+    }
+    else {
+        AstNode* old_last_object = tp->last_index_object;
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth++;
+            tp->last_index_object = ast_node->object;
+        }
+        ast_node->field = build_expr(tp, field_node);
+        if (node_type == AST_NODE_INDEX_EXPR) {
+            tp->subscript_depth--;
+            tp->last_index_object = old_last_object;
+        }
+    }
+
+    // For index_expr, collect additional comma-separated field children into a
+    // chain via ->next, enabling multi-dim subscripts like arr[i, j, k].
+    if (node_type == AST_NODE_INDEX_EXPR && ast_node->field) {
+        AstNode* tail = ast_node->field;
+        TSTreeCursor cur = ts_tree_cursor_new(array_node);
+        bool ok = ts_tree_cursor_goto_first_child(&cur);
+        bool seen_first = false;
+        while (ok) {
+            TSSymbol fid = ts_tree_cursor_current_field_id(&cur);
+            if (fid == FIELD_FIELD) {
+                if (!seen_first) {
+                    seen_first = true;  // first FIELD_FIELD was already built above
+                } else {
+                    TSNode extra_field = ts_tree_cursor_current_node(&cur);
+                    AstNode* old_last_object = tp->last_index_object;
+                    tp->subscript_depth++;
+                    tp->last_index_object = ast_node->object;
+                    AstNode* next_idx = build_expr(tp, extra_field);
+                    tp->subscript_depth--;
+                    tp->last_index_object = old_last_object;
+                    if (next_idx) {
+                        tail->next = next_idx;
+                        tail = next_idx;
+                    }
+                }
+            }
+            ok = ts_tree_cursor_goto_next_sibling(&cur);
+        }
+        ts_tree_cursor_delete(&cur);
+    }
+
+    // defensive check: if either object or field building failed, return error
+    if (!ast_node->object || !ast_node->field) {
+        record_semantic_error(tp, array_node, ERR_SYNTAX_ERROR,
+            "Failed to build field expression - invalid object or field");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    // additional safety: check if object has valid type
+    if (!ast_node->object->type) {
+        record_semantic_error(tp, array_node, ERR_INTERNAL_ERROR,
+            "Field expression object missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TypeId obj_tid = ast_node->object->type->type_id;
+    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+        // element type depends on the array's elem_type, but at AST phase we don't know it yet
+        // default to ANY; the transpiler will refine this
+        ast_node->type = &TYPE_ANY;
+    }
+    else if (obj_tid == LMD_TYPE_ARRAY) {
+        ast_node->type = &TYPE_ANY;
+    }
+    else if (obj_tid == LMD_TYPE_BINARY) {
+        // Scalar binary indexes are u8 values; range indexes retain binary type.
+        ast_node->type = ast_node->field->type && ast_node->field->type->type_id == LMD_TYPE_RANGE
+            ? &TYPE_BINARY : &TYPE_U8;
+    }
+    else if (ast_node->object->type->type_id == LMD_TYPE_MAP
+          || ast_node->object->type->type_id == LMD_TYPE_OBJECT) {
+        // resolve field type from map/object shape for unboxed access optimization
+        TypeMap* map_type = (TypeMap*)ast_node->object->type;
+        if (map_type->struct_name && map_type->shape
+            && ast_node->field && ast_node->field->node_type == AST_NODE_IDENT) {
+            AstIdentNode* field_id = (AstIdentNode*)ast_node->field;
+            Type* resolved_type = NULL;
+            FOR_EACH_MAP_FIELD(map_type, se) {
+                if (se->name && (int)se->name->length == (int)field_id->name->len
+                    && strncmp(se->name->str, field_id->name->chars, se->name->length) == 0) {
+                    // found — unwrap TypeType for type-defined maps
+                    Type* ft = se->type;
+                    if (ft && ft->type_id == LMD_TYPE_TYPE) {
+                        ft = ((TypeType*)ft)->type;
+                    }
+                    resolved_type = ft;
+                    break;
+                }
+            }
+            if (resolved_type) {
+                TypeId rid = resolved_type->type_id;
+                // only resolve scalar types that have matching unbox functions
+                if (is_native_numeric_type_id(rid)
+                    || rid == LMD_TYPE_BOOL || rid == LMD_TYPE_STRING) {
+                    ast_node->type = alloc_type(tp->pool, rid, sizeof(Type));
+                } else {
+                    ast_node->type = &TYPE_ANY;
+                }
+            } else {
+                ast_node->type = &TYPE_ANY;  // field not in shape (e.g. method name)
+            }
+        } else {
+            ast_node->type = &TYPE_ANY;
+        }
+    }
+    else {
+        ast_node->type = &TYPE_ANY;
+    }
+    return (AstNode*)ast_node;
+}
+
+// Forward declaration: check if AST node contains ~ (current_item) reference
+bool has_current_item_ref(AstNode* node);
+
+// Helper: check if TSNode contains ~ (current_item) reference before building AST
+// This is used to determine if pipe expression needs argument injection
+static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
+    if (ts_node_is_null(node)) return false;
+
+    TSSymbol symbol = ts_node_symbol(node);
+
+    // Check for current_expr (~ or ~#)
+    if (symbol == sym_current_expr) {
+        return true;
+    }
+
+    // Recursively check children
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        if (tsnode_has_current_item_ref(tp, child)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool strview_matches_string(StrView* view, String* str) {
+    return view && str && view->length == str->len &&
+        strncmp(view->str, str->chars, view->length) == 0;
+}
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static void add_jube_module_import(Transpiler* tp, String* module, String* alias) {
+    JubeModuleImport* entry = (JubeModuleImport*)pool_calloc(tp->pool, sizeof(JubeModuleImport));
+    entry->module = module;
+    entry->alias = alias;
+    entry->next = tp->jube_module_imports;
+    tp->jube_module_imports = entry;
+}
+#endif
+
+static const char* registered_jube_module_name(StrView* name) {
+#ifndef SIMPLE_SCHEMA_PARSER
+    char module_name[128];
+    if (!name || name->length >= sizeof(module_name)) return NULL;
+    memcpy(module_name, name->str, name->length);
+    module_name[name->length] = '\0';
+    jube_register_builtin_modules();
+    const JubeModuleDef* module = jube_find_static_module(module_name);
+    return module ? module->name : NULL;
+#else
+    (void)name;
+    return NULL;
+#endif
+}
+
+// Check if an identifier matches a built-in or descriptor-backed module name,
+// or a registered alias for one. Returns the real module name if matched.
+static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
+    if (strview_equal(name, "math")) return "math";
+    if (strview_equal(name, "io")) return "io";
+    // check aliases
+    if (strview_matches_string(name, tp->builtin_alias_math)) return "math";
+    if (strview_matches_string(name, tp->builtin_alias_io)) return "io";
+    for (JubeModuleImport* import = tp->jube_module_imports; import; import = import->next) {
+        if (import->alias && strview_matches_string(name, import->alias)) return import->module->chars;
+    }
+    return registered_jube_module_name(name);
+}
+
+static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
+    if (!module || !func_name) return NULL;
+    char prefixed[128];
+    snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
+        module, (int)func_name->length, func_name->str);
+    StrView prefixed_view = strview_from_cstr(prefixed);
+    return get_sys_func_info(&prefixed_view, arg_count);
+}
+
+static SysFuncInfo* lookup_global_imported_sys_func(Transpiler* tp, StrView* func_name, int arg_count) {
+    const char* modules[] = { NULL, NULL };
+    int mod_count = 0;
+    if (tp->builtin_import_math) modules[mod_count++] = "math";
+    if (tp->builtin_import_io) modules[mod_count++] = "io";
+    for (int mi = 0; mi < mod_count; mi++) {
+        SysFuncInfo* info = lookup_module_prefixed_sys_func(modules[mi], func_name, arg_count);
+        if (info) return info;
+    }
+    for (JubeModuleImport* import = tp->jube_module_imports; import; import = import->next) {
+        if (import->alias) continue;
+        SysFuncInfo* info = lookup_module_prefixed_sys_func(import->module->chars, func_name, arg_count);
+        if (info) return info;
+    }
+    return NULL;
+}
+
+AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
+    log_debug("build call expr: %d", symbol);
+    AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp,
+        AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+
+    // count no. of arguments
+    int arg_count = 0;
+    TSTreeCursor cursor = ts_tree_cursor_new(call_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_ARGUMENT) { arg_count++; }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    log_debug("arg count: %d", arg_count);
+
+    // build function name
+    TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
+    TSSymbol fn_symbol = ts_node_symbol(function_node);
+
+    // Check if this is a method-style call: obj.method(args)
+    // In this case, function_node is a primary_expr containing a member_expr
+    bool is_method_call = false;
+    TSNode member_node = {0};
+    TSNode object_node = {0};
+    TSNode method_name_node = {0};
+    StrView method_name = {0};
+
+    if (fn_symbol == SYM_PRIMARY_EXPR) {
+        // Look for member_expr inside primary_expr
+        TSNode inner = ts_node_child(function_node, 0);
+        if (!ts_node_is_null(inner) && ts_node_symbol(inner) == SYM_MEMBER_EXPR) {
+            member_node = inner;
+            is_method_call = true;
+        }
+    } else if (fn_symbol == SYM_MEMBER_EXPR) {
+        member_node = function_node;
+        is_method_call = true;
+    }
+
+    if (is_method_call) {
+        object_node = ts_node_child_by_field_id(member_node, FIELD_OBJECT);
+        method_name_node = ts_node_child_by_field_id(member_node, FIELD_FIELD);
+        method_name = ts_node_source(tp, method_name_node);
+        log_debug("method_call detected: obj.%.*s() with %d args",
+            (int)method_name.length, method_name.str, arg_count);
+    }
+
+    // For method calls, first build the object to get its type for validation
+    AstNode* method_object = NULL;
+    TypeId obj_type_id = LMD_TYPE_ANY;
+    bool user_method_is_proc = false;
+
+    // Check if this is a module call (e.g., io.copy() or hostobj_demo.answer()).
+    // Modules are identified by name or alias and don't require building the object.
+    bool is_imported_module_call = false;
+    StrView module_name = {0};
+    const char* resolved_module = NULL;  // real module name (e.g., "math" even when alias is "m")
+    if (is_method_call && !ts_node_is_null(object_node)) {
+        // Check if object is a simple identifier that matches a built-in module
+        TSSymbol obj_symbol = ts_node_symbol(object_node);
+        if (obj_symbol == SYM_PRIMARY_EXPR) {
+            TSNode inner = ts_node_child(object_node, 0);
+            if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
+                module_name = ts_node_source(tp, inner);
+                resolved_module = resolve_imported_module(tp, &module_name);
+                if (resolved_module) {
+                    // Check if module.method is already defined via aliased import
+                    char qbuf[256];
+                    snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
+                        (int)module_name.length, module_name.str,
+                        (int)method_name.length, method_name.str);
+                    StrView qview = strview_from_cstr(qbuf);
+                    NameEntry* qualified = lookup_name(tp, qview);
+                    if (qualified == NULL) {
+                        is_imported_module_call = true;
+                        log_debug("module call detected: %.*s.%.*s() -> %s",
+                            (int)module_name.length, module_name.str,
+                            (int)method_name.length, method_name.str, resolved_module);
+                    } else {
+                        log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                        resolved_module = NULL;
+                    }
+                }
+            }
+        } else if (obj_symbol == sym_identifier) {
+            module_name = ts_node_source(tp, object_node);
+            resolved_module = resolve_imported_module(tp, &module_name);
+            if (resolved_module) {
+                char qbuf[256];
+                snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
+                    (int)module_name.length, module_name.str,
+                    (int)method_name.length, method_name.str);
+                StrView qview = strview_from_cstr(qbuf);
+                NameEntry* qualified = lookup_name(tp, qview);
+                if (qualified == NULL) {
+                    is_imported_module_call = true;
+                    log_debug("module call detected: %.*s.%.*s() -> %s",
+                        (int)module_name.length, module_name.str,
+                        (int)method_name.length, method_name.str, resolved_module);
+                } else {
+                    log_debug("qualified name '%s' found in scope, skipping builtin detection", qbuf);
+                    resolved_module = NULL;
+                }
+            }
+        }
+    }
+
+    bool is_aliased_import_call = false;
+    if (is_method_call && !is_imported_module_call && !ts_node_is_null(object_node)) {
+        // Check if object.method is an aliased import call (e.g., helper.add())
+        // by looking up the qualified name "object.method" in scope
+        if (module_name.length > 0 && method_name.length > 0) {
+            char qualified_buf[256];
+            snprintf(qualified_buf, sizeof(qualified_buf), "%.*s.%.*s",
+                (int)module_name.length, module_name.str,
+                (int)method_name.length, method_name.str);
+            StrView qualified_view = strview_from_cstr(qualified_buf);
+            NameEntry* qualified_entry = lookup_name(tp, qualified_view);
+            if (qualified_entry && qualified_entry->import) {
+                // resolved as an aliased import function call
+                log_debug("aliased import call resolved: %s", qualified_buf);
+                is_aliased_import_call = true;
+                AstIdentNode* ident_node = (AstIdentNode*)alloc_ast_node(
+                    tp, AST_NODE_IDENT, function_node, sizeof(AstIdentNode));
+                ident_node->name = qualified_entry->name;
+                ident_node->entry = qualified_entry;
+                ident_node->type = qualified_entry->node->type;
+                // Wrap in a primary_expr for consistency with transpiler expectations
+                AstPrimaryNode* primary_node = (AstPrimaryNode*)alloc_ast_node(
+                    tp, AST_NODE_PRIMARY, function_node, sizeof(AstPrimaryNode));
+                primary_node->expr = (AstNode*)ident_node;
+                primary_node->type = ident_node->type;
+                ast_node->function = (AstNode*)primary_node;
+                if (ident_node->type && ident_node->type->type_id == LMD_TYPE_FUNC) {
+                    TypeFunc* func_type = (TypeFunc*)ident_node->type;
+                    if (func_type->is_proc && !tp->current_scope->is_proc) {
+                        record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                            "procedure '%s' cannot be called in a function", qualified_buf);
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                    if (func_type->can_raise) {
+                        ast_node->can_raise = true;
+                        ast_node->type = &TYPE_ANY;
+                    } else {
+                        ast_node->type = func_type->returned ? func_type->returned : &TYPE_ANY;
+                    }
+                } else {
+                    ast_node->type = &TYPE_ANY;
+                }
+            }
+        }
+        if (!is_aliased_import_call) {
+            method_object = build_expr(tp, object_node);
+            if (method_object && method_object->type) {
+                obj_type_id = method_object->type->type_id;
+            }
+        }
+    }
+
+    // Try to resolve as sys func
+    StrView func_name = ts_node_source(tp, function_node);
+    SysFuncInfo* sys_func_info = NULL;
+
+    // For module calls, construct the full function name (e.g., math_sqrt)
+    // Use resolved_module (real name) instead of module_name (may be alias)
+    if (is_aliased_import_call) {
+        // Already resolved above - skip sys func and regular call resolution
+    }
+    else if (is_imported_module_call) {
+        char full_name[128];
+        snprintf(full_name, sizeof(full_name), "%s_%.*s",
+            resolved_module,
+            (int)method_name.length, method_name.str);
+        StrView full_name_view = strview_from_cstr(full_name);
+        sys_func_info = get_sys_func_info(&full_name_view, arg_count);
+        if (sys_func_info) {
+            log_debug("module call resolved to sys func: %s", sys_func_info->name);
+        } else {
+            // Report unknown module function
+            record_semantic_error(tp, call_node, ERR_UNDEFINED_FUNCTION,
+                "unknown function '%.*s.%.*s'",
+                (int)module_name.length, module_name.str,
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+    }
+    else if (is_method_call) {
+        // For map, element, and object types, check user-defined fields/methods first
+        // before sys func lookup. This lets member fields take precedence over built-in
+        // functions (e.g., a field named "sum" on a map should shadow the built-in sum()).
+        bool has_user_member = false;
+        if (method_object && method_object->type) {
+            TypeId tid = obj_type_id;
+            // Check shape entries (fields) for map, vmap, element, and object types
+            if (is_map_family_type_id(tid)) {
+                TypeMap* map_type = (TypeMap*)method_object->type;
+                FOR_EACH_MAP_FIELD(map_type, se) {
+                    if (se->name && se->name->length == method_name.length &&
+                        strncmp(se->name->str, method_name.str, method_name.length) == 0) {
+                        has_user_member = true;
+                        log_debug("method_call: member field '%.*s' takes precedence over sys func",
+                            (int)method_name.length, method_name.str);
+                        break;
+                    }
+                }
+            }
+            // Also check object method table
+            if (!has_user_member && tid == LMD_TYPE_OBJECT) {
+                TypeObject* obj_type = (TypeObject*)method_object->type;
+                for (TypeObject* owner = obj_type; owner && !has_user_member;
+                        owner = owner->base) {
+                    for (TypeMethod* m = owner->methods; m; m = m->next) {
+                        if (m->name && m->name->length == method_name.length &&
+                            strncmp(m->name->str, method_name.str, method_name.length) == 0) {
+                            has_user_member = true;
+                            user_method_is_proc = m->is_proc;
+                            log_debug("method_call: user-defined method '%.*s' takes precedence over sys func",
+                                (int)method_name.length, method_name.str);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!has_user_member) {
+            // Try method-style lookup: obj.method(args) -> method(obj, args)
+            sys_func_info = get_sys_func_for_method(&method_name, arg_count, obj_type_id);
+            if (sys_func_info) {
+                log_debug("method_call resolved to sys func: %s", sys_func_info->name);
+            }
+        }
+    }
+
+    if (!sys_func_info && !is_method_call) {
+        // Traditional function call lookup
+        // If in pipe context without ~ reference, lookup with extra arg
+        int lookup_arg_count = arg_count + tp->pipe_inject_args;
+
+        // Check if the function name resolves in user scope first;
+        // user-defined functions shadow system functions with the same name
+        NameEntry* user_name = lookup_name(tp, func_name);
+        bool user_shadows = (user_name != NULL && user_name->node != NULL &&
+            user_name->node->node_type == AST_NODE_FUNC);
+
+        if (!user_shadows) {
+            sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
+            if (sys_func_info && tp->pipe_inject_args > 0) {
+                log_debug("pipe inject: lookup %.*s with %d args (was %d)",
+                    (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
+                ast_node->pipe_inject = true;
+            }
+        }
+        // Global import fallback: if `import math;`, `import io;`, or a
+        // descriptor-backed native module import was used,
+        // try prefixing the function name with the module name (e.g., sqrt -> math_sqrt)
+        if (!sys_func_info) {
+            sys_func_info = lookup_global_imported_sys_func(tp, &func_name, lookup_arg_count);
+            if (sys_func_info) {
+                log_debug("global import resolved: %.*s -> %s",
+                    (int)func_name.length, func_name.str, sys_func_info->name);
+                if (tp->pipe_inject_args > 0) {
+                    ast_node->pipe_inject = true;
+                }
+            }
+        }
+    }
+
+    if (sys_func_info) {
+        log_debug("build sys call");
+        if (sys_func_info->is_proc) {
+            if (!tp->current_scope->is_proc) {
+                const char* fn_name = is_method_call ? method_name.str : func_name.str;
+                int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
+                    fn_name_len, fn_name);
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+        }
+        AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp,
+            AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
+        fn_node->fn_info = sys_func_info;
+        fn_node->type = sys_func_info->return_type;
+        ast_node->function = (AstNode*)fn_node;
+        // if sys function can raise errors, result type is Item (union of success and error)
+        if (sys_func_info->can_raise) {
+            ast_node->can_raise = true;
+            ast_node->type = &TYPE_ANY;
+        } else {
+            ast_node->type = fn_node->type;
+        }
+
+        // For method calls, prepend the object as the first argument
+        if (is_method_call && method_object) {
+            ast_node->argument = method_object;
+            log_debug("method_call prepended object as first arg, type=%d", obj_type_id);
+        }
+    }
+    else if (!is_aliased_import_call) {
+        if (is_method_call) {
+            // Not a sys func method call - could be a user-defined method on the object
+            // For now, fall back to building as a regular member expression call
+            log_debug("method_call not resolved as sys func, building as regular call");
+        }
+        ast_node->function = build_expr(tp, function_node);
+        if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
+            TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
+            if (func_type->is_proc && !tp->current_scope->is_proc) {
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
+                    (int)func_name.length, func_name.str);
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+            // If function can raise errors, result type is Item (union of success and error)
+            if (func_type->can_raise) {
+                ast_node->can_raise = true;
+                ast_node->type = &TYPE_ANY;
+            } else {
+                ast_node->type = func_type->returned;
+            }
+            if (!ast_node->type) { // e.g. recursive fn
+                ast_node->type = &TYPE_ANY;
+            }
+            if (ast_node->type && ast_node->type->is_const) {
+                // replicate the type to remove is_const flag - todo: fast path for const fn
+                ast_node->type = alloc_type(tp->pool, ast_node->type->type_id, sizeof(Type));
+            }
+        }
+        else {
+            ast_node->type = &TYPE_ANY;
+        }
+    }
+
+    if (is_method_call && user_method_is_proc) {
+        if (!tp->current_scope || !tp->current_scope->is_proc) {
+            record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                "procedure method '%.*s' cannot be called in a function",
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+        AstIdentNode* receiver_root = compound_root_ident(method_object);
+        if (!receiver_root || !receiver_root->entry || !receiver_root->entry->is_mutable) {
+            // A pn method writes its implicit self parameter back on return, so a
+            // let-rooted receiver would otherwise appear to succeed and lose the write.
+            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                "mutating method '%.*s' needs a `var` binding receiver",
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+        ast_node->is_proc_method = true;
+    }
+
+    // build arguments
+    cursor = ts_tree_cursor_new(call_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+    // For method calls with sys func, arguments are appended after the object
+    AstNode* prev_argument = is_method_call && sys_func_info ? method_object : NULL;
+    while (has_node) {
+        // check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_ARGUMENT) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode* argument = build_expr(tp, child);
+            log_debug("got argument: %p, &t: %p, node_type %d, type: %d", argument, argument->type, argument->node_type, argument->type->type_id);
+            if (prev_argument == NULL) {
+                ast_node->argument = argument;
+            }
+            else {
+                prev_argument->next = argument;
+            }
+            prev_argument = argument;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    if (!sys_func_info && ast_node->function && arg_count == 1) {
+        Type* target_type = ast_called_type_target(ast_node->function);
+        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
+                target_type->type_id == LMD_TYPE_UINT64 || target_type->type_id == LMD_TYPE_FLOAT64)) {
+            ast_node->type = target_type;
+            if (target_type->type_id == LMD_TYPE_NUM_SIZED) {
+                NumSizedType num_type = type_num_sized_kind(target_type);
+                if (num_type != NUM_FLOAT16 && num_type != NUM_FLOAT32) {
+                    int64_t const_value = 0;
+                    if (ast_constant_integer_value(tp, ast_node->argument, &const_value) &&
+                            !constant_fits_sized_integer(num_type, const_value)) {
+                        // Constant conversions follow Go: invalid constants are rejected before truncating.
+                        record_semantic_error(tp, call_node, ERR_INVALID_NUMBER,
+                            "constant conversion to %s overflows", get_num_sized_type_name(num_type));
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
+        }
+    }
+
+    if (sys_func_info) {
+        AstNode* first_arg = ast_node->argument;
+        AstNode* second_arg = first_arg ? first_arg->next : NULL;
+        Type* bitwise_type = infer_bitwise_call_type(sys_func_info->fn, first_arg, second_arg);
+        if (bitwise_type) {
+            ast_node->type = bitwise_type;
+            if (ast_node->function && ast_node->function->node_type == AST_NODE_SYS_FUNC) {
+                ast_node->function->type = bitwise_type;
+            }
+        }
+    }
+
+    // Validate argument types against parameter types (for user-defined functions)
+    if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
+        TypeParam* expected_param = func_type->param;
+        AstNode* arg = ast_node->argument;
+        int arg_index = 0;
+        int line = ts_node_start_point(call_node).row + 1;
+        String* var_arg_roots[64];
+        int var_arg_root_count = 0;
+
+        while (arg && expected_param) {
+            if (expected_param->is_var_param) {
+                AstIdentNode* root = compound_root_ident(arg);
+                if (!root || !root->entry || !root->entry->is_mutable) {
+                    record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                        "argument %d for `var` parameter must be a mutable `var` binding",
+                        arg_index + 1);
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                } else {
+                    for (int i = 0; i < var_arg_root_count; i++) {
+                        if (same_name_string(var_arg_roots[i], root->name)) {
+                            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
+                                "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                                arg_index + 1);
+                            break;
+                        }
+                    }
+                    if (var_arg_root_count < 64) {
+                        var_arg_roots[var_arg_root_count++] = root->name;
+                    }
+                }
+                if (!type_exact_match(arg->type, expected_param)) {
+                    Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+                    record_type_error(tp, line,
+                        "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
+                        arg_index + 1,
+                        get_type_name(full_type->type_id),
+                        arg->type ? get_type_name(arg->type->type_id) : "unknown");
+                    if (!should_continue_transpiling(tp)) {
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                }
+            }
+            bool compatible = types_compatible_with_full(arg->type, (Type*)expected_param, expected_param->full_type);
+            if (!compatible) {
+                Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+                compatible = typed_array_argument_compatible(arg, full_type);
+            }
+            if (arg->type && !compatible) {
+                // surface language type names; raw TypeId numbers made call errors hard to act on.
+                record_type_error(tp, line,
+                    "argument %d expected %s, got %s",
+                    arg_index + 1,
+                    get_type_name(expected_param->type_id),
+                    get_type_name(arg->type->type_id));
+                if (!should_continue_transpiling(tp)) {
+                    ast_node->type = &TYPE_ERROR;
+                    return (AstNode*)ast_node;
+                }
+            }
+            arg = arg->next;
+            expected_param = expected_param->next;
+            arg_index++;
+        }
+    }
+
+    // check for '^' propagation operator on the call
+    TSNode propagate_node = ts_node_child_by_field_id(call_node, FIELD_PROPAGATE);
+    if (!ts_node_is_null(propagate_node)) {
+        ast_node->propagate = true;
+        log_debug("call has '^' propagation operator");
+        // '^' is only valid on can_raise calls
+        if (!ast_node->can_raise) {
+            const char* fn_name = is_method_call ? method_name.str : func_name.str;
+            int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
+            record_semantic_error(tp, call_node, ERR_SEMANTIC_ERROR,
+                "'^' used on '%.*s' which does not return errors",
+                fn_name_len, fn_name);
+        }
+    }
+
+    log_debug("end building call expr type: %p, %d, is_const:%d, can_raise:%d, propagate:%d",
+        ast_node->type, ast_node->type->type_id, ast_node->type->is_const, ast_node->can_raise, ast_node->propagate);
+    return (AstNode*)ast_node;
+}
+
+NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
+    // lookup the name
+    NameScope* scope = tp->current_scope;
+    FIND_VAR_NAME:
+    NameEntry* entry = scope->first;
+    int entry_count = 0;
+    while (entry) {
+        entry_count++;
+        if (entry_count > 1000) {  // Safety check for infinite loops
+            log_error("ERROR: Too many entries in scope - possible infinite loop in entry list");
+            return NULL;
+        }
+
+        StrView entry_name = strview_init(entry->name->chars, entry->name->len);
+        log_debug("checking name: %.*s vs. %.*s",
+            (int)entry_name.length, entry_name.str, (int)var_name.length, var_name.str);
+        if (strview_eq(&entry_name, &var_name)) {
+            break;
+        }
+        entry = entry->next;
+    }
+    if (!entry) {
+        if (scope->parent) {
+            // Defensive check: prevent infinite loop if parent pointer is circular
+            if (scope == scope->parent) {
+                log_error("Error: circular parent scope detected - breaking to prevent infinite loop");
+                return NULL;
+            }
+            scope = scope->parent;
+            log_debug("checking parent scope: %p", scope);
+            goto FIND_VAR_NAME;
+        }
+        log_debug("missing identifier %.*s", (int)var_name.length, var_name.str);
+        return NULL;
+    }
+    else {
+        log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
+        return entry;
+    }
+}
+
+AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
+    log_debug("building identifier");
+    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
+
+    // get the identifier name from source and create pooled string
+    StrView var_name = ts_node_source(tp, id_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
+
+    // lookup the name
+    log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
+    NameEntry* entry = lookup_name(tp, var_name);
+    if (!entry) {
+        // In 'that' clause, rewrite bare identifier to ~.name (member access on current item)
+        // Name resolution order: 1) scope names, 2) ~.name fields, 3) system properties
+        if (tp->in_that_clause) {
+            log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
+                (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
+            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node(tp,
+                AST_NODE_MEMBER_EXPR, id_node, sizeof(AstFieldNode));
+            // create ~ (current item) as the object
+            AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, id_node, sizeof(AstNode));
+            current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+            field_node->object = current_item;
+            // use the identifier as the field name (without scope lookup)
+            ast_node->type = &TYPE_ANY;
+            field_node->field = (AstNode*)ast_node;
+            field_node->type = &TYPE_ANY;
+            return (AstNode*)field_node;
+        }
+        // Global import: resolve math constants (pi, e) when `import math;` is active
+        if (tp->builtin_import_math) {
+            double const_val = 0.0;
+            bool is_math_const = false;
+            if (var_name.length == 2 && memcmp(var_name.str, "pi", 2) == 0) {
+                const_val = 3.14159265358979323846;
+                is_math_const = true;
+            } else if (var_name.length == 1 && var_name.str[0] == 'e') {
+                const_val = 2.71828182845904523536;
+                is_math_const = true;
+            }
+            if (is_math_const) {
+                TypeFloat* ft = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                ft->double_val = const_val;
+                arraylist_append(tp->const_list, &ft->double_val);
+                ft->const_index = tp->const_list->length - 1;
+                ft->is_const = 1;  ft->is_literal = 1;
+                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, id_node, sizeof(AstPrimaryNode));
+                pn->type = (Type*)ft;
+                log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
+                return (AstNode*)pn;
+            }
+        }
+        SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
+        if (sys_value) {
+            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
+                AST_NODE_SYS_FUNC, id_node, sizeof(AstSysFuncNode));
+            TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+            fn_type->param_count = sys_value->arg_count;
+            fn_type->required_param_count = sys_value->arg_count;
+            fn_type->returned = sys_value->return_type;
+            fn_type->is_proc = sys_value->is_proc;
+            fn_type->can_raise = sys_value->can_raise;
+            sys_node->fn_info = sys_value;
+            sys_node->type = (Type*)fn_type;
+            return (AstNode*)sys_node;
+        }
+        // ident is used for member access, thus we return TYPE_ANY
+        ast_node->type = &TYPE_ANY;
+    }
+    else {
+        log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
+        ast_node->entry = entry;
+        if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
+            // clone and remove is_const flag
+            // todo: full type clone
+            log_debug("got imported identifier %.*s from module %.*s",
+                (int)entry->name->len, entry->name->chars,
+                (int)entry->import->module.length, entry->import->module.str);
+            if (entry->node->type->type_id == LMD_TYPE_TYPE) {
+                // for imported type definitions (pub type T = ...), preserve the full TypeType wrapper
+                ast_node->type = entry->node->type;
+            } else {
+                // For container types (array, list, map, element, etc.), use the
+                // original type directly to preserve nested type info (e.g.
+                // TypeArray::nested). Allocating a bare Type loses this info,
+                // causing wrong accessor functions (e.g. array_get vs array_int_get).
+                Type* orig = entry->node->type;
+                TypeId tid = orig->type_id;
+                if (tid >= LMD_TYPE_CONTAINER) {
+                    ast_node->type = orig;
+                } else {
+                    ast_node->type = alloc_type(tp->pool, tid, sizeof(Type));
+                    ast_node->type->is_const = 0;
+                }
+            }
+        }
+        else {
+            log_debug("Debug: entry->node->type is %p for identifier %.*s",
+                entry->node->type, (int)entry->name->len, entry->name->chars);
+            ast_node->type = entry->node->type;
+            // For function parameters with complex type annotations,
+            // use the full_type pointer to get the real type (not the TypeParam copy).
+            // This enables direct struct access (Phase 2/3/7) on typed params.
+            if (entry->node->node_type == AST_NODE_PARAM && entry->node->type) {
+                TypeId ptid = entry->node->type->type_id;
+                if (entry->node->type->kind == TYPE_KIND_UNARY ||
+                    is_param_full_type_id(ptid)) {
+                    TypeParam* pt = (TypeParam*)entry->node->type;
+                    if (pt->full_type) {
+                        ast_node->type = pt->full_type;
+                    }
+                }
+            }
+            if (entry->is_mutable && entry->type_widened && !entry->has_type_annotation) {
+                // widened vars must read as ANY so later map/element shapes do not
+                // retain the null-shaped initializer and discard reassigned values.
+                ast_node->type = &TYPE_ANY;
+            }
+            if (!ast_node->type) {
+                log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY",
+                    (int)entry->name->len, entry->name->chars);
+                ast_node->type = &TYPE_ANY;
+            }
+            // Special handling: if identifier refers to a type definition, wrap type in TypeType
+            else if (entry->node->node_type == AST_NODE_TYPE_STAM) {
+                TypeType* type_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                type_type->type = entry->node->type;
+                ast_node->type = (Type*)type_type;
+                log_debug("Wrapped type definition %.*s in TypeType",
+                    (int)entry->name->len, entry->name->chars);
+            }
+            // Handle string/symbol pattern definitions - wrap in TypeType for use in type expressions
+            else if (entry->node->node_type == AST_NODE_STRING_PATTERN ||
+                     entry->node->node_type == AST_NODE_SYMBOL_PATTERN) {
+                TypeType* type_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                type_type->type = entry->node->type;  // TypePattern*
+                ast_node->type = (Type*)type_type;
+                log_debug("Wrapped pattern definition %.*s in TypeType",
+                    (int)entry->name->len, entry->name->chars);
+            }
+        }
+        if (ast_node->type) {
+            log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
+        }
+        else {
+            log_debug("ident %p type: null", ast_node);
+        }
+    }
+    return (AstNode*)ast_node;
+}
+
+Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    // Phase 3: empty strings are values; empty symbol/binary values remain absent.
+    // With single-token strings/symbols, we parse the raw token text directly
+    // Binary is now a single token: b'content'
+    String* str;
+    log_debug("build lit string with symbol: %d", symbol);
+
+    // Handle binary separately — extract content between b' and '
+    if (symbol == SYM_BINARY) {
+        TypeBinaryConst* str_type = (TypeBinaryConst*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeBinaryConst));
+        str_type->is_const = 1;  str_type->is_literal = 1;
+
+        int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+        const char* raw = tp->source + start;
+        int raw_len = end - start;
+
+        // Skip b' prefix (2 chars) and trailing ' (1 char)
+        const char* content_start = raw + 2;
+        int content_len = raw_len - 3;
+
+        StrBuf* decoded = strbuf_new_cap((size_t)content_len + 1);
+        int err_off = 0;
+        int decoded_len = decoded ?
+            str_binary_payload_decode(content_start, content_len, decoded, &err_off) : -1;
+        if (decoded_len < 0) {
+            // Binary constants must enter the runtime as bytes; retaining malformed
+            // source text here makes every later length/print operation ambiguous.
+            record_semantic_error(tp, node, ERR_SYNTAX_ERROR,
+                "invalid binary literal payload at byte %d", err_off);
+            if (decoded) strbuf_free(decoded);
+            return &TYPE_ERROR;
+        }
+        if (decoded_len == 0) {
+            log_debug("build_lit_string: empty binary literal, returning null type");
+            strbuf_free(decoded);
+            return &LIT_NULL;
+        }
+
+        Binary* binary = pool_binary_from_bytes(tp->pool, decoded->str, (size_t)decoded_len);
+        str_type->binary = binary;
+        strbuf_free(decoded);
+
+        arraylist_append(tp->const_list, binary);
+        str_type->const_index = tp->const_list->length - 1;
+        return (Type*)str_type;
+    }
+
+    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+    int raw_len = end - start;
+    const char* raw = tp->source + start;
+
+    // Determine quote character and content boundaries
+    char quote_char = (symbol == SYM_STRING) ? '"' : '\'';  // symbols use single quotes
+
+    // Skip opening quote
+    if (raw_len < 2 || raw[0] != quote_char || raw[raw_len - 1] != quote_char) {
+        log_error("Invalid string literal format: %.*s", raw_len, raw);
+        return &LIT_NULL;
+    }
+
+    const char* content_start = raw + 1;
+    int content_len = raw_len - 2;  // exclude both quotes
+
+    // Empty symbol literals are rejected by grammar; keep a null fallback for generated/stale parsers.
+    if (content_len == 0) {
+        if (symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol literal, returning null type");
+            return &LIT_NULL;
+        }
+    }
+
+    TypeString* str_type = (TypeString*)alloc_type(tp->pool,
+        symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(TypeString));
+    str_type->is_const = 1;  str_type->is_literal = 1;
+
+    // Check if there are any escape sequences in the content
+    bool has_escape = false;
+    for (int i = 0; i < content_len; i++) {
+        if (content_start[i] == '\\') {
+            has_escape = true;
+            break;
+        }
+    }
+
+    if (!has_escape) {
+        // No escapes - simple copy
+        if (symbol == SYM_SYMBOL) {
+            // Allocate as Symbol (has ns field before chars)
+            Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
+            sym->ns = NULL;
+            memcpy(sym->chars, content_start, content_len);
+            sym->chars[content_len] = '\0';
+            sym->len = content_len;
+            str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
+        } else {
+            str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+            memcpy(str->chars, content_start, content_len);
+            str->chars[content_len] = '\0';
+            str->len = content_len;
+            str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+        }
+        str_type->string = str;
+    }
+    else {
+        // Has escape sequences - process them
+        StringBuf *str_buf = stringbuf_new(tp->pool);
+
+        for (int i = 0; i < content_len; i++) {
+            if (content_start[i] == '\\' && i + 1 < content_len) {
+                char escape_char = content_start[i + 1];
+                switch (escape_char) {
+                case '"':
+                    stringbuf_append_char(str_buf, '"');
+                    i++;
+                    break;
+                case '\'':
+                    stringbuf_append_char(str_buf, '\'');
+                    i++;
+                    break;
+                case '\\':
+                    stringbuf_append_char(str_buf, '\\');
+                    i++;
+                    break;
+                case '/':
+                    stringbuf_append_char(str_buf, '/');
+                    i++;
+                    break;
+                case 'b':
+                    stringbuf_append_char(str_buf, '\b');
+                    i++;
+                    break;
+                case 'f':
+                    stringbuf_append_char(str_buf, '\f');
+                    i++;
+                    break;
+                case 'n':
+                    stringbuf_append_char(str_buf, '\n');
+                    i++;
+                    break;
+                case 'r':
+                    stringbuf_append_char(str_buf, '\r');
+                    i++;
+                    break;
+                case 't':
+                    stringbuf_append_char(str_buf, '\t');
+                    i++;
+                    break;
+                case 'u':
+                    // Handle Unicode escape sequences: \uXXXX or \u{...}
+                    if (i + 5 < content_len && content_start[i + 2] != '{') {
+                        // \uXXXX format (exactly 4 hex digits)
+                        char hex_digits[5] = {0};
+                        memcpy(hex_digits, content_start + i + 2, 4);
+                        char* endptr;
+                        uint32_t code_point = strtoul(hex_digits, &endptr, 16);
+                        if (endptr == hex_digits + 4) {
+                            // Check for surrogate pairs (used for characters > U+FFFF like emojis)
+                            // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
+                            if (code_point >= 0xD800 && code_point <= 0xDBFF) {
+                                // This is a high surrogate, look for low surrogate
+                                if (i + 11 < content_len &&
+                                    content_start[i + 6] == '\\' && content_start[i + 7] == 'u') {
+                                    char hex_low[5] = {0};
+                                    memcpy(hex_low, content_start + i + 8, 4);
+                                    char* endptr_low;
+                                    uint32_t low_surrogate = strtoul(hex_low, &endptr_low, 16);
+                                    if (endptr_low == hex_low + 4 &&
+                                        low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                                        // Valid surrogate pair - combine into full codepoint
+                                        code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                                        i += 6; // skip extra \uXXXX for low surrogate
+                                    } else {
+                                        // Not a valid low surrogate, output replacement char
+                                        code_point = 0xFFFD;
+                                    }
+                                } else {
+                                    // Lone high surrogate - output replacement character
+                                    code_point = 0xFFFD;
+                                }
+                            } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
+                                // Lone low surrogate - output replacement character
+                                code_point = 0xFFFD;
+                            }
+
+                            // Convert Unicode code point to UTF-8
+                            if (code_point <= 0x7F) {
+                                stringbuf_append_char(str_buf, (char)code_point);
+                            } else if (code_point <= 0x7FF) {
+                                stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            } else if (code_point <= 0xFFFF) {
+                                stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            } else {
+                                // 4-byte UTF-8 encoding for code points > 0xFFFF (emojis, etc.)
+                                stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            }
+                            i += 5;  // skip \uXXXX
+                        } else {
+                            log_error("Invalid Unicode escape: \\u%s", hex_digits);
+                            stringbuf_append_char(str_buf, '\\');
+                            stringbuf_append_char(str_buf, 'u');
+                            i++;
+                        }
+                    }
+                    else if (i + 3 < content_len && content_start[i + 2] == '{') {
+                        // \u{...} format (variable length hex digits)
+                        const char* hex_start = content_start + i + 3;
+                        const char* hex_end = NULL;
+                        for (const char* p = hex_start; p < content_start + content_len; p++) {
+                            if (*p == '}') {
+                                hex_end = p;
+                                break;
+                            }
+                        }
+                        if (hex_end && hex_end > hex_start) {
+                            int hex_len = hex_end - hex_start;
+                            char* hex_str = (char*)mem_alloc(hex_len + 1, MEM_CAT_AST);
+                            memcpy(hex_str, hex_start, hex_len);
+                            hex_str[hex_len] = '\0';
+                            char* endptr;
+                            uint32_t code_point = strtoul(hex_str, &endptr, 16);
+                            if (endptr == hex_str + hex_len && code_point <= 0x10FFFF) {
+                                // Convert Unicode code point to UTF-8
+                                if (code_point <= 0x7F) {
+                                    stringbuf_append_char(str_buf, (char)code_point);
+                                } else if (code_point <= 0x7FF) {
+                                    stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                } else if (code_point <= 0xFFFF) {
+                                    stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                } else {
+                                    // 4-byte UTF-8 encoding for code points > 0xFFFF
+                                    stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                }
+                                i = (hex_end - content_start);  // position at '}'
+                            } else {
+                                log_error("Invalid Unicode escape: \\u{%s}", hex_str);
+                                stringbuf_append_char(str_buf, '\\');
+                                stringbuf_append_char(str_buf, 'u');
+                                i++;
+                            }
+                            mem_free(hex_str);
+                        } else {
+                            log_error("Malformed Unicode escape sequence");
+                            stringbuf_append_char(str_buf, '\\');
+                            stringbuf_append_char(str_buf, 'u');
+                            i++;
+                        }
+                    } else {
+                        log_error("Invalid Unicode escape sequence length");
+                        stringbuf_append_char(str_buf, '\\');
+                        stringbuf_append_char(str_buf, 'u');
+                        i++;
+                    }
+                    break;
+                default:
+                    // Unknown escape sequence, keep as-is
+                    log_warn("Unknown escape sequence: \\%c", escape_char);
+                    stringbuf_append_char(str_buf, '\\');
+                    stringbuf_append_char(str_buf, escape_char);
+                    i++;
+                    break;
+                }
+            } else {
+                stringbuf_append_char(str_buf, content_start[i]);
+            }
+        }
+
+        // Convert StringBuf to String
+        str = stringbuf_to_string(str_buf);
+        str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
+        log_debug("final string: %.*s", str->len, str->chars);
+
+        // Escapes can only produce empty solid values through generated/stale parsers.
+        if (str->len == 0 && symbol == SYM_SYMBOL) {
+            log_debug("build_lit_string: empty symbol after escape processing, returning null type");
+            return &LIT_NULL;
+        }
+
+        // For symbols, re-allocate as Symbol struct (different layout from String)
+        if (symbol == SYM_SYMBOL) {
+            int slen = str->len;
+            Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
+            sym->ns = NULL;
+            memcpy(sym->chars, str->chars, slen);
+            sym->chars[slen] = '\0';
+            sym->len = slen;
+            str = (String*)sym;  // store as String* in TypeString
+        }
+        str_type->string = str;
+    }
+    // add to const list
+    arraylist_append(tp->const_list, str);
+    str_type->const_index = tp->const_list->length - 1;
+    return (Type*)str_type;
+}
+
+Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+
+    TypeDateTime* dt_type = (TypeDateTime*)alloc_type(tp->pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
+    dt_type->is_const = 1;  dt_type->is_literal = 1;
+
+    // Token is t'...' — skip the t' prefix and trailing '
+    const char* raw = tp->source + start;
+    int raw_len = end - start;
+    const char* datetime_start = raw + 2;  // skip t'
+    int datetime_len = raw_len - 3;        // exclude t' and trailing '
+
+    // Skip leading/trailing whitespace inside the quotes
+    while (datetime_len > 0 && *datetime_start == ' ') { datetime_start++; datetime_len--; }
+    while (datetime_len > 0 && datetime_start[datetime_len - 1] == ' ') { datetime_len--; }
+
+    // Parse the DateTime string directly using ast_pool
+    char* parse_end = NULL;
+    DateTime* dt = datetime_parse(tp->pool, datetime_start, DATETIME_PARSE_LAMBDA, &parse_end);
+
+    // Check if parsing was successful
+    // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
+    // On error: dt == NULL and parse_end == datetime_start (no progress)
+    if (dt && parse_end > datetime_start) {
+        log_debug("parsed datetime fields: %d, %d, %d, %d, %d",
+            dt->year_month, dt->day, dt->hour, dt->minute, dt->second);
+    }
+    else {
+        // Fallback to default if parsing fails
+        log_debug("Failed to parse datetime: %.*s, using default", datetime_len, datetime_start);
+        return NULL;
+    }
+
+    dt_type->datetime = *dt;
+
+    // Add to const list
+    arraylist_append(tp->const_list, &dt_type->datetime);
+    dt_type->const_index = tp->const_list->length - 1;
+    log_debug("build lit datetime: %.*s, type: %d", datetime_len, datetime_start, dt_type->type_id);
+    return (Type*)dt_type;
+}
+
+Type* build_lit_int64(Transpiler* tp, TSNode node) {
+    TypeInt64* item_type = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(TypeInt64));
+    StrView source = ts_node_source(tp, node);
+    char* endptr;
+    int64_t value = strtoll(source.str, &endptr, 0);
+    item_type->int64_val = value;
+    arraylist_append(tp->const_list, &item_type->int64_val);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    return (Type*)item_type;
+}
+
+static int decimal_literal_significant_digits(const char* str);
+static bool n_literal_is_integer(const char* str);
+
+Type* build_lit_float(Transpiler* tp, TSNode node) {
+    TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+    // C supports inf and nan
+    log_debug("build lit float");
+    const char* num_str = tp->source + ts_node_start_byte(node);
+    // check if there's sign
+    bool has_sign = false;
+    if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
+    while (*num_str == ' ' || *num_str == '\t' || *num_str == '\n' || *num_str == '\r') { num_str++; } // skip leading spaces
+    // str_to_double_default() does not handle 'inf', 'nan' — add special handling
+    log_debug("build lit float: %s", num_str);
+    // add special handling for "inf", "-inf", "nan"
+    if (str_istarts_with_const(num_str, strlen(num_str), "inf")) {
+        item_type->double_val = INFINITY;
+        log_debug("build lit float: inf");
+        if (has_sign) { item_type->double_val = -item_type->double_val; }
+    }
+    else if (str_istarts_with_const(num_str, strlen(num_str), "nan")) {
+        item_type->double_val = NAN;
+        log_debug("build lit float: nan");
+    }
+    else { // normal float parsing
+        item_type->double_val = str_to_double_default(num_str, strlen(num_str), 0.0);
+        log_debug("build lit float: %s, value: %f", num_str, item_type->double_val);
+        if (has_sign) { item_type->double_val = -item_type->double_val; }
+    }
+    arraylist_append(tp->const_list, &item_type->double_val);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    return (Type*)item_type;
+}
+
+Type* build_lit_decimal(Transpiler* tp, TSNode node) {
+    TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
+    StrView num_sv = ts_node_source(tp, node);
+    char* num_str = strview_to_cstr(&num_sv);
+    char suffix_char = num_sv.str[num_sv.length - 1];
+    if (suffix_char == 'N') {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "decimal literal suffix 'N' has been retired; use 'm' for decimal or 'n' for integer");
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    if (suffix_char == 'n' || suffix_char == 'm') {
+        num_str[num_sv.length - 1] = '\0';  // clear the suffix
+    }
+    log_debug("build lit decimal: %s", num_str);
+
+    // A.5 suffix split (Lambda_Semantics_Number_Model.md): the suffix alone
+    // names the type — 'n' is integer always, 'm' is decimal always. The old
+    // lexical test survives only as the validity guard on 'n': a fractional
+    // or negative-exponent spelling cannot be an integer.
+    bool is_integer_literal = (suffix_char == 'n');
+    if (is_integer_literal && !n_literal_is_integer(num_str)) {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "'n' literal must be integer-valued; use the 'm' suffix for decimal (e.g. 1.5m)");
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+
+    // Allocate heap-allocated Decimal structure
+    Decimal* decimal;
+    decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
+    item_type->decimal = decimal;
+
+    bool needs_unlimited_decimal =
+        decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
+    decimal->unlimited = is_integer_literal ? DECIMAL_BIGINT :
+        (needs_unlimited_decimal ? 1 : 0);
+
+    // literal digits are preserved exactly by selecting the necessary tier.
+    decimal->dec_val = decimal_parse_str(num_str,
+        decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
+    if (!decimal->dec_val) {
+        log_error("Error: Failed to parse decimal: %s", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+
+    // Add to const list
+    arraylist_append(tp->const_list, item_type->decimal);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    mem_free(num_str);
+    return (Type*)item_type;
+}
+
+// Parse a sized integer suffix and return the NumSizedType and suffix length
+// Returns -1 if no valid suffix found
+static int parse_sized_int_suffix(const char* str, int len, NumSizedType* out_num_type) {
+    // check from end of string for i8/i16/i32/i64/u8/u16/u32/u64
+    if (len >= 2) {
+        char c1 = str[len - 2], c2 = str[len - 1];
+        if (c1 == 'i' && c2 == '8') { *out_num_type = NUM_INT8; return 2; }
+        if (c1 == 'u' && c2 == '8') { *out_num_type = NUM_UINT8; return 2; }
+    }
+    if (len >= 3) {
+        char c1 = str[len - 3], c2 = str[len - 2], c3 = str[len - 1];
+        if (c1 == 'i' && c2 == '1' && c3 == '6') { *out_num_type = NUM_INT16; return 3; }
+        if (c1 == 'i' && c2 == '3' && c3 == '2') { *out_num_type = NUM_INT32; return 3; }
+        if (c1 == 'i' && c2 == '6' && c3 == '4') { *out_num_type = (NumSizedType)0xFF; return 3; } // i64 = existing INT64
+        if (c1 == 'u' && c2 == '1' && c3 == '6') { *out_num_type = NUM_UINT16; return 3; }
+        if (c1 == 'u' && c2 == '3' && c3 == '2') { *out_num_type = NUM_UINT32; return 3; }
+        if (c1 == 'u' && c2 == '6' && c3 == '4') { *out_num_type = (NumSizedType)0xFE; return 3; } // u64 = UINT64
+    }
+    return -1;
+}
+
+static int decimal_literal_significant_digits(const char* str) {
+    bool seen_nonzero = false;
+    bool saw_digit = false;
+    int digits = 0;
+    for (const char* p = str; *p; p++) {
+        char ch = *p;
+        if (ch == 'e' || ch == 'E') break;
+        if (ch < '0' || ch > '9') continue;
+        saw_digit = true;
+        if (ch != '0') seen_nonzero = true;
+        if (seen_nonzero) digits++;
+    }
+    return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
+static bool n_literal_is_integer(const char* str) {
+    bool has_dot = false;
+    bool has_negative_exponent = false;
+    for (const char* p = str; *p; p++) {
+        if (*p == '.') {
+            has_dot = true;
+        } else if (*p == 'e' || *p == 'E') {
+            const char* exp = p + 1;
+            if (*exp == '+' || *exp == '-') {
+                has_negative_exponent = (*exp == '-');
+            }
+            break;
+        }
+    }
+    return !has_dot && !has_negative_exponent;
+}
+
+static bool sized_literal_is_decimal(const char* str) {
+    const char* p = str;
+    if (*p == '+' || *p == '-') p++;
+    return !(p[0] == '0' && (p[1] == 'x' || p[1] == 'X' ||
+                             p[1] == 'o' || p[1] == 'O' ||
+                             p[1] == 'b' || p[1] == 'B'));
+}
+
+static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal) {
+    switch (num_type) {
+        case NUM_INT8:   return decimal_literal ? 128ULL : 0xFFULL;
+        case NUM_INT16:  return decimal_literal ? 32768ULL : 0xFFFFULL;
+        case NUM_INT32:  return decimal_literal ? 2147483648ULL : 0xFFFFFFFFULL;
+        case NUM_UINT8:  return 0xFFULL;
+        case NUM_UINT16: return 0xFFFFULL;
+        case NUM_UINT32: return 0xFFFFFFFFULL;
+        default:         return UINT64_MAX;
+    }
+}
+
+// Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
+Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
+    StrView source = ts_node_source(tp, node);
+    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+    memcpy(num_str, source.str, source.length);
+    num_str[source.length] = '\0';
+
+    NumSizedType num_type;
+    int suffix_len = parse_sized_int_suffix(num_str, source.length, &num_type);
+    if (suffix_len < 0) {
+        log_error("Invalid sized integer suffix: %s", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    num_str[source.length - suffix_len] = '\0';  // strip suffix
+
+    char* endptr;
+    errno = 0;
+    uint64_t raw_value = strtoull(num_str, &endptr, 0);
+    if (errno == ERANGE || endptr == num_str || *endptr != '\0') {
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "invalid sized integer literal '%s'", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    bool decimal_literal = sized_literal_is_decimal(num_str);
+    uint64_t limit = sized_literal_limit(num_type, decimal_literal);
+    if (raw_value > limit) {
+        // sized constants are checked before packing so invalid source cannot silently truncate.
+        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+            "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+    // sized integer literals are fixed-width, so non-decimal input may still
+    // denote raw bits, but decimal input is range-checked before packing.
+    int64_t value;
+    __builtin_memcpy(&value, &raw_value, sizeof(value));
+    mem_free(num_str);
+
+    // i64 suffix → use existing INT64 type
+    if (num_type == 0xFF) {
+        TypeInt64* item_type = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(TypeInt64));
+        item_type->int64_val = value;
+        int64_t* heap_val = (int64_t*)pool_alloc(tp->pool, sizeof(int64_t));
+        *heap_val = value;
+        arraylist_append(tp->const_list, heap_val);
+        item_type->const_index = tp->const_list->length - 1;
+        item_type->is_const = 1;  item_type->is_literal = 1;
+        return (Type*)item_type;
+    }
+
+    // u64 suffix → use UINT64 type
+    if (num_type == 0xFE) {
+        TypeUint64* item_type = (TypeUint64*)alloc_type(tp->pool, LMD_TYPE_UINT64, sizeof(TypeUint64));
+        item_type->uint64_val = raw_value;
+        uint64_t* heap_val = (uint64_t*)pool_alloc(tp->pool, sizeof(uint64_t));
+        *heap_val = raw_value;
+        arraylist_append(tp->const_list, heap_val);
+        item_type->const_index = tp->const_list->length - 1;
+        item_type->is_const = 1;  item_type->is_literal = 1;
+        return (Type*)item_type;
+    }
+
+    // sized numeric: pack inline
+    TypeNumSized* item_type = (TypeNumSized*)alloc_type(tp->pool, LMD_TYPE_NUM_SIZED, sizeof(TypeNumSized));
+    item_type->num_type = num_type;
+    // store raw 32-bit value based on sub-type
+    switch (num_type) {
+        case NUM_INT8:   item_type->raw_bits = (uint32_t)(uint8_t)raw_value; break;
+        case NUM_INT16:  item_type->raw_bits = (uint32_t)(uint16_t)raw_value; break;
+        case NUM_INT32:  item_type->raw_bits = (uint32_t)(uint32_t)raw_value; break;
+        case NUM_UINT8:  item_type->raw_bits = (uint32_t)(uint8_t)raw_value; break;
+        case NUM_UINT16: item_type->raw_bits = (uint32_t)(uint16_t)raw_value; break;
+        case NUM_UINT32: item_type->raw_bits = (uint32_t)raw_value; break;
+        default: item_type->raw_bits = 0; break;
+    }
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    log_debug("build_lit_sized_integer: type=%s value=%lld raw_bits=%u",
+              get_num_sized_type_name(num_type), value, item_type->raw_bits);
+    return (Type*)item_type;
+}
+
+// Build AST type for sized float literal (e.g., 3.14f32, 0.5f16)
+Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
+    StrView source = ts_node_source(tp, node);
+    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+    memcpy(num_str, source.str, source.length);
+    num_str[source.length] = '\0';
+
+    // detect suffix: f16, f32, f64
+    NumSizedType num_type = NUM_FLOAT32;  // default
+    int suffix_len = 3;
+
+    if (source.length >= 3) {
+        const char* suffix = num_str + source.length - 3;
+        if (suffix[0] == 'f' && suffix[1] == '1' && suffix[2] == '6') {
+            num_type = NUM_FLOAT16;
+        } else if (suffix[0] == 'f' && suffix[1] == '3' && suffix[2] == '2') {
+            num_type = NUM_FLOAT32;
+        } else if (suffix[0] == 'f' && suffix[1] == '6' && suffix[2] == '4') {
+            num_str[source.length - 3] = '\0';
+            double dval = strtod(num_str, NULL);
+            mem_free(num_str);
+            // f64 is an alias for Lambda float; producing a distinct tag makes type() observable.
+            TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+            item_type->double_val = dval;
+            double* heap_val = (double*)pool_alloc(tp->pool, sizeof(double));
+            *heap_val = dval;
+            arraylist_append(tp->const_list, heap_val);
+            item_type->const_index = tp->const_list->length - 1;
+            item_type->is_const = 1;  item_type->is_literal = 1;
+            return (Type*)item_type;
+        }
+    }
+
+    num_str[source.length - suffix_len] = '\0';
+    double dval = strtod(num_str, NULL);
+    mem_free(num_str);
+
+    TypeNumSized* item_type = (TypeNumSized*)alloc_type(tp->pool, LMD_TYPE_NUM_SIZED, sizeof(TypeNumSized));
+    item_type->num_type = num_type;
+    if (num_type == NUM_FLOAT32) {
+        item_type->raw_bits = f32_to_bits((float)dval);
+    } else {
+        item_type->raw_bits = (uint32_t)f32_to_f16_bits((float)dval);
+    }
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    log_debug("build_lit_sized_float: type=%s dval=%g raw_bits=%u",
+              get_num_sized_type_name(num_type), dval, item_type->raw_bits);
+    return (Type*)item_type;
+}
+
+// helper: returns Type* for base_type node (used in primary_expr context)
+Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        return (Type*)&LIT_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        return (Type*)&LIT_TYPE_ANY;
+    }
+    else if (strview_equal(&type_name, "bool")) {
+        return (Type*)&LIT_TYPE_BOOL;
+    }
+    else if (strview_equal(&type_name, "int") || strview_equal(&type_name, "int64")) {
+        return (Type*)&LIT_TYPE_INT;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        return (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "decimal")) {
+        return (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        return (Type*)&LIT_TYPE_INTEGER;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        return (Type*)&LIT_TYPE_NUMBER;
+    }
+    else if (strview_equal(&type_name, "string")) {
+        return (Type*)&LIT_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        return (Type*)&LIT_TYPE_SYMBOL;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        return (Type*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        return (Type*)&LIT_TYPE_TIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        return (Type*)&LIT_TYPE_DATE;
+    }
+    else if (strview_equal(&type_name, "binary")) {
+        return (Type*)&LIT_TYPE_BINARY;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        return (Type*)&LIT_TYPE_LIST;
+    }
+    else if (strview_equal(&type_name, "range")) {
+        return (Type*)&LIT_TYPE_RANGE;
+    }
+    else if (strview_equal(&type_name, "array")) {
+        return (Type*)&LIT_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        return (Type*)&LIT_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "element") || strview_equal(&type_name, "entity")) {
+        return (Type*)&LIT_TYPE_ELMT;
+    }
+    else if (strview_equal(&type_name, "object")) {
+        return (Type*)&LIT_TYPE_OBJECT;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        return (Type*)&LIT_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "type")) {
+        return (Type*)&LIT_TYPE_TYPE;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        return (Type*)&LIT_TYPE_ERROR;
+    }
+    // sized numeric type names
+    else if (strview_equal(&type_name, "i8")) {
+        return (Type*)&LIT_TYPE_I8;
+    }
+    else if (strview_equal(&type_name, "i16")) {
+        return (Type*)&LIT_TYPE_I16;
+    }
+    else if (strview_equal(&type_name, "i32")) {
+        return (Type*)&LIT_TYPE_I32;
+    }
+    else if (strview_equal(&type_name, "i64")) {
+        return (Type*)&LIT_TYPE_INT64;
+    }
+    else if (strview_equal(&type_name, "u8")) {
+        return (Type*)&LIT_TYPE_U8;
+    }
+    else if (strview_equal(&type_name, "u16")) {
+        return (Type*)&LIT_TYPE_U16;
+    }
+    else if (strview_equal(&type_name, "u32")) {
+        return (Type*)&LIT_TYPE_U32;
+    }
+    else if (strview_equal(&type_name, "u64")) {
+        return (Type*)&LIT_TYPE_U64;
+    }
+    else if (strview_equal(&type_name, "f16")) {
+        return (Type*)&LIT_TYPE_F16;
+    }
+    else if (strview_equal(&type_name, "f32")) {
+        return (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        return (Type*)&LIT_TYPE_FLOAT;
+    }
+    else {
+        log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
+        return &TYPE_ERROR;
+    }
+}
+
+AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
+    log_debug("*** DEBUG: build_primary_expr called ***");
+    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
+    TSNode child = ts_node_named_child(pri_node, 0);
+    if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
+
+    // infer data type
+    TSSymbol symbol = ts_node_symbol(child);
+
+    // unwrap expr wrapper node (no longer inlined in grammar)
+    if (symbol == SYM_EXPR) {
+        child = ts_node_named_child(child, 0);
+        if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
+        symbol = ts_node_symbol(child);
+    }
+    log_debug("*** DEBUG: symbol=%d ***", symbol);
+    if (symbol == SYM_BASE_TYPE) {
+        // base_type in primary_expr context - check if it's "null" (value) vs other built-in types (type reference)
+        StrView type_name = ts_node_source(tp, child);
+        if (strview_equal(&type_name, "null")) {
+            // "null" as value literal
+            ast_node->type = &LIT_NULL;
+        }
+        else {
+            // other built-in types are type expressions - delegate to build_expr which calls build_base_type
+            ast_node->expr = build_expr(tp, child);
+            ast_node->type = ast_node->expr->type;
+        }
+    }
+    else if (symbol == SYM_NAMED_VALUE) {
+        StrView text = ts_node_source(tp, child);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            ast_node->type = &LIT_BOOL;
+        } else {
+            ast_node->type = build_lit_float(tp, child);
+        }
+    }
+    else if (symbol == SYM_INT) {
+        // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
+        StrView source = ts_node_source(tp, child);
+        // Create a null-terminated string for strtoll
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+
+        char* endptr;
+        errno = 0;
+        int64_t value = strtoll(num_str, &endptr, 0);
+        mem_free(num_str);
+
+        log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
+        if (errno == ERANGE || value < INT56_MIN || value > INT56_MAX) {
+            record_semantic_error(tp, child, ERR_INVALID_NUMBER,
+                "integer literal is outside compact int range; use an explicit suffix or decimal literal");
+            ast_node->type = &TYPE_ERROR;
+        }
+        else {
+            ast_node->type = &LIT_INT;
+        }
+    }
+    else if (symbol == SYM_DECIMAL) {
+        ast_node->type = build_lit_decimal(tp, child);
+    }
+    else if (symbol == SYM_FLOAT) {
+        ast_node->type = build_lit_float(tp, child);
+    }
+    else if (symbol == SYM_SIZED_INT) {
+        ast_node->type = build_lit_sized_integer(tp, child);
+    }
+    else if (symbol == SYM_SIZED_FLOAT) {
+        ast_node->type = build_lit_sized_float(tp, child);
+    }
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
+        ast_node->type = build_lit_string(tp, child, symbol);
+    }
+    else if (symbol == SYM_DATETIME) {
+        ast_node->type = build_lit_datetime(tp, child, symbol);
+    }
+    else if (symbol == SYM_IDENT) {
+        ast_node->expr = build_identifier(tp, child);
+        if (ast_node->expr->type->is_const) {
+            // replicate the type to remove is_const flag - todo: fast path for const ident
+            ast_node->type = alloc_type(tp->pool, ast_node->expr->type->type_id, sizeof(Type));
+        }
+        else {
+            ast_node->type = ast_node->expr->type;
+        }
+    }
+    else if (symbol == SYM_LAST_INDEX) {
+        if (tp->subscript_depth <= 0) {
+            record_semantic_error(tp, child, ERR_SYNTAX_ERROR,
+                "`last` is only valid inside subscripts and `limit last` clauses");
+        }
+        AstNode* last_node = alloc_ast_node(tp, AST_NODE_LAST_INDEX, child, sizeof(AstNode));
+        last_node->type = &TYPE_INT;
+        ast_node->expr = last_node;
+        ast_node->type = &TYPE_INT;
+    }
+    else if (symbol == SYM_ARRAY) {
+        ast_node->expr = build_array(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_MAP) {
+        // check for {TypeName} pattern: map with single identifier resolving to object type
+        uint32_t named_count = ts_node_named_child_count(child);
+        if (named_count == 1) {
+            TSNode only = ts_node_named_child(child, 0);
+            TSSymbol os = ts_node_symbol(only);
+            if (os == SYM_PRIMARY_EXPR) {
+                only = ts_node_named_child(only, 0);
+                if (!ts_node_is_null(only)) os = ts_node_symbol(only);
+            }
+            if (os == SYM_IDENT) {
+                StrView name = ts_node_source(tp, only);
+                NameEntry* entry = lookup_name(tp, name);
+                if (entry && entry->node && entry->node->type) {
+                    Type* resolved = entry->node->type;
+                    if (resolved->type_id == LMD_TYPE_TYPE) {
+                        Type* inner = ((TypeType*)resolved)->type;
+                        if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                            log_debug("build_primary_expr: detected {%.*s} as empty object literal", (int)name.length, name.str);
+                            TypeObject* obj_type = (TypeObject*)inner;
+                            AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                                AST_NODE_OBJECT_LITERAL, child, sizeof(AstObjectLiteralNode));
+                            obj_node->type_name = name_pool_create_strview(tp->name_pool, name);
+                            obj_node->type = (Type*)obj_type;
+                            obj_node->item = NULL;
+                            ast_node->expr = (AstNode*)obj_node;
+                            ast_node->type = (Type*)obj_type;
+                            return (AstNode*)ast_node;
+                        }
+                    }
+                }
+            }
+        }
+        ast_node->expr = build_map(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_ELEMENT) {
+        ast_node->expr = build_elmt(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_PATH_EXPR) {
+        // path_expr: (/ | . | ..) with optional field
+        ArrayList* segments = arraylist_new(8);
+        int scheme = collect_path_segments_if_path(tp, child, segments);
+        ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
+        ast_node->type = ast_node->expr->type;
+        arraylist_free(segments);
+    }
+    else if (symbol == SYM_MEMBER_EXPR) {
+        // first check if this is a path expression (file.x.y, http.x.y, etc.)
+        ArrayList* segments = arraylist_new(8);
+        int scheme = collect_path_segments_if_path(tp, child, segments);
+        if (scheme >= 0) {
+            // it's a path expression
+            ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
+            ast_node->type = ast_node->expr->type;
+        } else {
+            // regular member expression
+            ast_node->expr = build_field_expr(tp, child, AST_NODE_MEMBER_EXPR);
+            ast_node->type = ast_node->expr->type;
+        }
+        arraylist_free(segments);
+    }
+    else if (symbol == SYM_INDEX_EXPR) {
+        // Check if this is a path index expression (path[expr])
+        // Path subscripts add dynamic segments, unlike regular index expressions
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        TSNode field_node = ts_node_child_by_field_id(child, FIELD_FIELD);
+
+        // Check if the object is a path expression
+        ArrayList* segments = arraylist_new(8);
+        int scheme = collect_path_segments_if_path(tp, object_node, segments);
+
+        if (scheme >= 0) {
+            // It's a path subscript expression: path[expr]
+            // Build it as a special AST_NODE_PATH_INDEX_EXPR
+            AstPathIndexNode* path_idx = (AstPathIndexNode*)alloc_ast_node(tp, AST_NODE_PATH_INDEX_EXPR, child, sizeof(AstPathIndexNode));
+            path_idx->base_path = build_path_expr(tp, object_node, (PathScheme)scheme, segments);
+            path_idx->segment_expr = build_expr(tp, field_node);
+            path_idx->type = &TYPE_PATH;  // result is still a path
+            ast_node->expr = (AstNode*)path_idx;
+            ast_node->type = path_idx->type;
+        } else {
+            // Regular index expression
+            ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
+            ast_node->type = ast_node->expr->type;
+        }
+        arraylist_free(segments);
+    }
+    else if (symbol == SYM_CALL_EXPR) { // || symbol == SYM_SYS_FUNC
+        ast_node->expr = build_call_expr(tp, child, symbol);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_QUERY_EXPR) {
+        // query expression: expr?T (recursive) or expr.?T (direct)
+        AstQueryNode* query_node = (AstQueryNode*)alloc_ast_node(tp, AST_NODE_QUERY_EXPR, child, sizeof(AstQueryNode));
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        query_node->object = build_expr(tp, object_node);
+        TSNode query_type_node = ts_node_child_by_field_id(child, FIELD_QUERY);
+        query_node->query = build_primary_type(tp, query_type_node);
+        // determine direct vs recursive from the operator field
+        TSNode op_node = ts_node_child_by_field_id(child, FIELD_OP);
+        StrView op = ts_node_source(tp, op_node);
+        query_node->direct = (op.length == 2);  // ".?" is direct, "?" is recursive
+        // query always returns a list of matches
+        query_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+        log_debug("build query_expr: direct=%d", query_node->direct);
+        ast_node->expr = (AstNode*)query_node;
+        ast_node->type = query_node->type;
+    }
+    else if (symbol == SYM_PARENT_EXPR) {
+        // parent access: expr.. for .parent, expr.._.. for .parent.parent
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        AstParentNode* parent_node = (AstParentNode*)alloc_ast_node(tp, AST_NODE_PARENT_EXPR, child, sizeof(AstParentNode));
+        parent_node->object = build_expr(tp, object_node);
+
+        // count the depth: each path_parent (..) adds one level
+        int depth = 0;
+        uint32_t child_count = ts_node_child_count(child);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode c = ts_node_child(child, i);
+            if (ts_node_symbol(c) == SYM_PATH_PARENT) {
+                depth++;
+            }
+        }
+        parent_node->depth = depth > 0 ? depth : 1;  // at least 1 for single ..
+        log_debug("build parent_expr: depth=%d", parent_node->depth);
+
+        // type inherits from object
+        if (parent_node->object && parent_node->object->type) {
+            parent_node->type = parent_node->object->type;
+        }
+        ast_node->expr = (AstNode*)parent_node;
+        ast_node->type = parent_node->type;
+    }
+    else if (symbol == SYM_CURRENT_EXPR) {
+        ast_node->expr = build_current_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else { // from _parenthesized_expr
+        ast_node->expr = build_expr(tp, child);
+        if (ast_node->expr) {
+            ast_node->type = ast_node->expr->type;
+        } else {
+            // build_expr returned NULL (e.g., comment-only parenthesized expr or parse error)
+            record_semantic_error(tp, child, ERR_INVALID_LITERAL, "Empty or invalid parenthesized expression");
+            return (AstNode*)ast_node;
+        }
+    }
+    log_debug("end build primary expr");
+    return (AstNode*)ast_node;
+}
+
+// Build type negation expression: !T → any ! T (exclude type)
+// Creates a TypeBinary(OPERATOR_EXCLUDE, any, T) so that `x is !string` works
+AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
+    log_debug("build type negation expr (!T)");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    // Build the operand (the type to negate)
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    ast_node->right = build_expr(tp, operand_node);
+    if (!ast_node->right) {
+        log_error("Error: build_type_negation_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Create synthetic "any" node for the left side
+    AstPrimaryNode* any_node = (AstPrimaryNode*)alloc_ast_node(tp,
+        AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
+    any_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ((TypeType*)any_node->type)->type = &TYPE_ANY;
+    ast_node->left = (AstNode*)any_node;
+
+    ast_node->op = OPERATOR_EXCLUDE;
+    ast_node->op_str = {.str = "!", .length = 1};
+
+    type->left = ast_node->left->type;
+    type->right = ast_node->right->type;
+    type->op = OPERATOR_EXCLUDE;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+
+    log_debug("type negation expr created: any ! T, index: %d", type->type_index);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node);
+
+AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
+    log_debug("build unary expr");
+
+    // Check for ! operator early — it means type negation, not logical NOT
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    if (strview_equal(&op, "!")) {
+        return build_type_negation_expr(tp, bi_node);
+    }
+    // * operator is spread — route to build_spread_expr
+    if (strview_equal(&op, "*")) {
+        return build_spread_expr(tp, bi_node);
+    }
+
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
+    ast_node->op_str = op;
+    if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
+    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
+    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
+    else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_IS_ERROR; }
+
+    TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+
+    // Defensive validation: ensure operand was built successfully
+    if (!ast_node->operand) {
+        log_error("Error: build_unary_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Additional validation: ensure operand has valid type
+    if (!ast_node->operand->type) {
+        log_error("Error: build_unary_expr operand missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // More robust type inference based on operator and operand type
+    TypeId operand_type = ast_node->operand->type->type_id;
+    TypeId type_id;
+
+    if (ast_node->op == OPERATOR_NOT || ast_node->op == OPERATOR_IS_ERROR) {
+        type_id = LMD_TYPE_BOOL;
+    }
+    else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
+        // For numeric unary operators (+/-), preserve the operand type if numeric
+        if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+            ast_node->type = ast_node->operand->type;
+            log_debug("end build unary expr");
+            return (AstNode*)ast_node;
+        }
+        if (IS_NUMERIC_ID(operand_type)) {
+            type_id = operand_type;  // Preserve the exact numeric type
+        }
+        else {
+            type_id = LMD_TYPE_ANY;  // Non-numeric types need runtime handling
+        }
+    }
+    else {
+        log_error("Error: build_unary_expr unknown operator");
+        type_id = LMD_TYPE_ANY;  // Default fallback
+    }
+
+    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+
+    log_debug("end build unary expr");
+    return (AstNode*)ast_node;
+}
+
+// build spread expression: *expr
+AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
+    log_debug("build spread expr");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_SPREAD, sp_node, sizeof(AstUnaryNode));
+    ast_node->op = OPERATOR_SPREAD;
+    ast_node->op_str = StrView{"*", 1};
+
+    TSNode operand_node = ts_node_child_by_field_id(sp_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+
+    if (!ast_node->operand) {
+        log_error("Error: build_spread_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if (!ast_node->operand->type) {
+        log_error("Error: build_spread_expr operand missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // spread expression has the same type as its operand (the items will be spread)
+    ast_node->type = ast_node->operand->type;
+
+    // Check: spread on a static scalar expression is redundant and likely a mistake.
+    // e.g., *5, *"hello", *true, *null — these have no elements to spread.
+    {
+        Type* op_type = ast_node->operand->type;
+        if (op_type && op_type->is_literal) {
+            TypeId tid = op_type->type_id;
+            if (is_static_spread_scalar_type_id(tid)) {
+                record_semantic_error(tp, sp_node, ERR_SEMANTIC_ERROR,
+                    "Spread operator '*' is redundant on scalar value");
+            }
+        }
+    }
+
+    log_debug("end build spread expr");
+    return (AstNode*)ast_node;
+}
+
+// Helper: check if operator is a relational comparison (<, <=, >, >=)
+static inline bool is_relational_op(Operator op) {
+    return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
+}
+
+static inline bool is_elementwise_comparison_op(Operator op) {
+    return op >= OPERATOR_ELEM_EQ && op <= OPERATOR_ELEM_GE;
+}
+
+static bool is_direct_elementwise_comparison(AstNode* node) {
+    node = unwrap_primary_node(node);
+    return node && node->node_type == AST_NODE_BINARY &&
+        is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
+}
+
+static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond, const char* context) {
+    if (!cond) return;
+    TSPoint point = ts_node_start_point(cond_node);
+    int line = (int)point.row + 1;
+
+    if (is_direct_elementwise_comparison(cond)) {
+        // masks are containers and therefore truthy; condition sites need an explicit scalar reduction.
+        log_warn("lambda_condition_lint: line %d: elementwise comparison used as %s condition; use any(...), all(...), sum(mask), or a[mask] explicitly",
+            line, context);
+        return;
+    }
+
+    TypeId cond_type = cond->type ? cond->type->type_id : LMD_TYPE_ANY;
+    if (is_container_type_id(cond_type)) {
+        // containers are truthy by design, so a container condition is almost always a missing scalar predicate.
+        log_warn("lambda_condition_lint: line %d: %s condition has container type %s, which is always truthy; use len(...), any(...), all(...), or an explicit comparison",
+            line, context, get_type_name(cond_type));
+    }
+}
+
+static bool is_magnitude_numeric_type(TypeId type_id) {
+    return is_numeric_type_id(type_id);
+}
+
+static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
+    if (left_type == LMD_TYPE_ANY || right_type == LMD_TYPE_ANY) return true;
+    if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) return true;
+    if (is_magnitude_numeric_type(left_type) && is_magnitude_numeric_type(right_type)) return true;
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) return true;
+    if (left_type == LMD_TYPE_DTIME && right_type == LMD_TYPE_DTIME) return true;
+    return false;
+}
+
+static bool known_numeric_array_type(Type* type) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (type->type_id != LMD_TYPE_ARRAY) return false;
+    TypeArray* array_type = (TypeArray*)type;
+    return array_type->nested &&
+        lambda_numeric_kind_from_type(array_type->nested) != LAMBDA_NUM_INVALID;
+}
+
+static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
+    if (!ast_node || ast_node->op != OPERATOR_IS || !ast_node->right) return;
+    AstNode* rhs = ast_node->right;
+    if (rhs->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)rhs;
+        rhs = primary->expr;
+    }
+    if (!rhs || rhs->node_type != AST_NODE_ARRAY) return;
+
+    AstArrayNode* arr = (AstArrayNode*)rhs;
+    Type* nested_type = NULL;
+    int64_t length = 0;
+    for (AstNode* item = arr->item; item; item = item->next) {
+        if (!item->type) return;
+        Type* actual_type = item->type;
+        if (item->type->type_id == LMD_TYPE_TYPE) actual_type = ((TypeType*)item->type)->type;
+        else if (!item->type->is_literal) return;
+        if (!actual_type) return;
+        if (!nested_type) nested_type = actual_type;
+        else if (nested_type->type_id != actual_type->type_id) nested_type = NULL;
+        length++;
+    }
+    if (length == 0) return;
+
+    // `is [T]` parses as an array literal; reinterpret literal/type-valued items as tuple patterns.
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    node_type->type = (Type*)type;
+    type->nested = nested_type;
+    type->length = length;
+    type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)length);
+    type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)length);
+    int64_t index = 0;
+    for (AstNode* item = arr->item; item; item = item->next) {
+        if (item->type->type_id == LMD_TYPE_TYPE) {
+            type->item_patterns[index].type = item->type;
+            type->item_is_type_pattern[index] = 1;
+        }
+        else {
+            Item literal = ItemNull;
+            if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+        }
+        index++;
+    }
+    if (type->length == 1 && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
+    arraylist_append(tp->type_list, node_type);
+    type->type_index = tp->type_list->length - 1;
+    rhs->node_type = AST_NODE_ARRAY_TYPE;
+    rhs->type = (Type*)node_type;
+}
+
+static bool pipe_rhs_is_legacy_file_target(TSNode node) {
+    TSSymbol sym = ts_node_symbol(node);
+    if (sym == SYM_EXPR || sym == SYM_PRIMARY_EXPR) {
+        TSNode child = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(child)) sym = ts_node_symbol(child);
+    }
+    return sym == SYM_STRING || sym == SYM_PATH_EXPR;
+}
+
+static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
+    if (!ast_node || ast_node->op != OPERATOR_UNION ||
+        !ast_node->left || !ast_node->right ||
+        !ast_node->left->type || !ast_node->right->type ||
+        ast_node->left->type->type_id != LMD_TYPE_TYPE ||
+        ast_node->right->type->type_id != LMD_TYPE_TYPE) {
+        return false;
+    }
+
+    // Phase 6 makes `|` union in expression position too; type-valued operands
+    // must build a first-class binary type instead of falling into runtime ops.
+    ast_node->node_type = AST_NODE_BINARY_TYPE;
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    node_type->type = (Type*)type;
+    type->left = ((TypeType*)ast_node->left->type)->type;
+    type->right = ((TypeType*)ast_node->right->type)->type;
+    type->op = OPERATOR_UNION;
+    ast_node->type = (Type*)node_type;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return true;
+}
+
+static AstNode* promote_bare_pipe_sysfunc(Transpiler* tp, TSNode right_node, AstNode* built_right) {
+    AstNode* target = built_right;
+    if (target && target->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)target;
+        if (primary->expr) target = primary->expr;
+    }
+
+    StrView func_name = {0};
+    if (target && target->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)target;
+        if (ident->entry) return NULL;
+        func_name.str = ident->name->chars;
+        func_name.length = ident->name->len;
+    } else if (target && target->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys = (AstSysFuncNode*)target;
+        if (!sys->fn_info) return NULL;
+        func_name = strview_from_cstr(sys->fn_info->name);
+    } else {
+        return NULL;
+    }
+
+    NameEntry* user_name = lookup_name(tp, func_name);
+    if (user_name && user_name->node && user_name->node->node_type == AST_NODE_FUNC) {
+        return NULL;
+    }
+
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, 1);
+    if (!sys_func_info) {
+        sys_func_info = lookup_global_imported_sys_func(tp, &func_name, 1);
+    }
+    if (!sys_func_info) return NULL;
+
+    if (sys_func_info->is_proc && (!tp->current_scope || !tp->current_scope->is_proc)) {
+        record_semantic_error(tp, right_node, ERR_PROC_IN_FN,
+            "procedure '%.*s' cannot be called in a function",
+            (int)func_name.length, func_name.str);
+    }
+
+    AstCallNode* call = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, right_node, sizeof(AstCallNode));
+    AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, AST_NODE_SYS_FUNC, right_node, sizeof(AstSysFuncNode));
+    fn_node->fn_info = sys_func_info;
+    fn_node->type = sys_func_info->return_type;
+    call->function = (AstNode*)fn_node;
+    call->argument = NULL;
+    // Bare sysfunc pipe RHS has no call node, so inject before lowering sees an undefined identifier.
+    call->pipe_inject = true;
+    call->propagate = false;
+    call->can_raise = sys_func_info->can_raise;
+    call->type = sys_func_info->can_raise ? &TYPE_ANY : sys_func_info->return_type;
+    return (AstNode*)call;
+}
+
+AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
+    log_debug("build binary expr");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
+    TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
+    ast_node->left = build_expr(tp, left_node);
+
+    // Defensive validation: ensure left operand was built successfully
+    if (!ast_node->left) {
+        log_error("Error: build_binary_expr failed to build left operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    strview_trim(&op);
+    ast_node->op_str = op;
+    if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
+    else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
+    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
+    else if (strview_equal(&op, "++")) { ast_node->op = OPERATOR_JOIN; }
+    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
+    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
+    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
+    else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
+    else if (strview_equal(&op, "div")) { ast_node->op = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
+    else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
+    else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }
+    else if (strview_equal(&op, "<")) { ast_node->op = OPERATOR_LT; }
+    else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
+    else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
+    else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
+    else if (strview_equal(&op, "eq")) { ast_node->op = OPERATOR_ELEM_EQ; }
+    else if (strview_equal(&op, "ne")) { ast_node->op = OPERATOR_ELEM_NE; }
+    else if (strview_equal(&op, "lt")) { ast_node->op = OPERATOR_ELEM_LT; }
+    else if (strview_equal(&op, "le")) { ast_node->op = OPERATOR_ELEM_LE; }
+    else if (strview_equal(&op, "gt")) { ast_node->op = OPERATOR_ELEM_GT; }
+    else if (strview_equal(&op, "ge")) { ast_node->op = OPERATOR_ELEM_GE; }
+    else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
+    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
+    else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
+    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
+    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
+    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
+    else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
+    else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
+    else if (strview_equal(&op, "at")) { ast_node->op = OPERATOR_AT; }
+    else {
+        log_error("Error: build_binary_expr unknown operator: %.*s", (int)op.length, op.str);
+        ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
+    }
+
+    // For pipe operator: check if RHS uses ~ (current_item)
+    // If not, inject the left side as first argument at call lookup time
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    bool pipe_inject = false;
+    if (ast_node->op == OPERATOR_PIPE) {
+        if (!tsnode_has_current_item_ref(tp, right_node)) {
+            if (pipe_rhs_is_legacy_file_target(right_node)) {
+                // `|>` is now the pipe operator; file output is explicit.
+                record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+                    "file output has moved; use output(data, file)");
+            }
+            tp->pipe_inject_args = 1;
+            pipe_inject = true;
+            log_debug("pipe without ~: will inject first arg");
+        }
+    }
+
+    // For 'that' operator: enable implicit ~.name resolution for bare identifiers
+    bool is_that = strview_equal(&op, "that");
+    bool old_in_that = tp->in_that_clause;
+    if (is_that) tp->in_that_clause = true;
+
+    ast_node->right = build_expr(tp, right_node);
+
+    // Reset pipe_inject_args after building right side
+    if (pipe_inject) {
+        tp->pipe_inject_args = 0;
+    }
+    // Reset that clause flag
+    tp->in_that_clause = old_in_that;
+
+    // Defensive validation: ensure right operand was built successfully
+    if (!ast_node->right) {
+        log_error("Error: build_binary_expr failed to build right operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if (pipe_inject && ast_node->op == OPERATOR_PIPE) {
+        AstNode* pipe_call = promote_bare_pipe_sysfunc(tp, right_node, ast_node->right);
+        if (pipe_call) ast_node->right = pipe_call;
+    }
+
+    normalize_is_array_type_rhs(tp, ast_node);
+    if (promote_type_union_expr(tp, ast_node)) {
+        return (AstNode*)ast_node;
+    }
+
+    // Special case: 'expr is nan' — IEEE NaN check
+    // nan is a float value, not a type, so 'is' type-check doesn't work.
+    // Detect NaN literal on RHS and rewrite to OPERATOR_IS_NAN (unary-like check).
+    if (ast_node->op == OPERATOR_IS) {
+        AstNode* rhs = ast_node->right;
+        if (rhs->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)rhs;
+            if (pri->type && pri->type->type_id == LMD_TYPE_FLOAT) {
+                TypeFloat* ft = (TypeFloat*)pri->type;
+                if (__builtin_isnan(ft->double_val)) {
+                    log_debug("build_binary_expr: detected 'expr is nan', rewriting to OPERATOR_IS_NAN");
+                    ast_node->op = OPERATOR_IS_NAN;
+                    ast_node->type = &TYPE_BOOL;
+                    return (AstNode*)ast_node;
+                }
+            }
+        }
+    }
+
+    // Chained comparison transformation: a < b < c => (a < b) and (b < c)
+    // Detect when left operand is a comparison and current op is also a comparison
+    if (is_relational_op(ast_node->op) && ast_node->left->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* left_cmp = (AstBinaryNode*)ast_node->left;
+        if (is_relational_op(left_cmp->op)) {
+            log_debug("chained comparison detected: transforming to AND");
+            // Transform: (a op1 b) op2 c  =>  (a op1 b) and (b op2 c)
+            // Create a new comparison node for: b op2 c
+            AstBinaryNode* right_cmp = (AstBinaryNode*)pool_calloc(tp->pool, sizeof(AstBinaryNode));
+            right_cmp->node_type = AST_NODE_BINARY;
+            right_cmp->node = bi_node;
+            right_cmp->left = left_cmp->right;  // reuse 'b' from left comparison
+            right_cmp->op = ast_node->op;       // op2
+            right_cmp->op_str = ast_node->op_str;
+            right_cmp->right = ast_node->right; // c
+            right_cmp->type = &TYPE_BOOL;
+
+            // Transform current node into AND node
+            ast_node->left = (AstNode*)left_cmp;  // left stays the same (a op1 b)
+            ast_node->op = OPERATOR_AND;
+            ast_node->op_str = {.str = "and", .length = 3};
+            ast_node->right = (AstNode*)right_cmp;
+            ast_node->type = &TYPE_BOOL;  // AND produces bool
+
+            return (AstNode*)ast_node;
+        }
+    }
+
+    // Additional validation: ensure both operands have valid types
+    if (!ast_node->left->type || !ast_node->right->type) {
+        log_error("Error: build_binary_expr operands missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
+        ast_static_numeric_literal_is_zero(tp, ast_node->right)) {
+        // A literal integral zero is knowable before lowering; rejecting it
+        // here keeps static diagnostics aligned with the runtime error contract.
+        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+            "integral division or remainder by literal zero");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
+    log_debug("left type: %d, right type: %d", left_type, right_type);
+    if (is_relational_op(ast_node->op) && !known_magnitude_comparable(left_type, right_type)) {
+        record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+            "ordered comparison has no magnitude for these types; use sort() for total ordering");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    TypeId type_id;
+    Type* complete_numeric_type = NULL;
+    bool arithmetic_op = ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB ||
+        ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV ||
+        ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD;
+    bool left_numeric_array = known_numeric_array_type(ast_node->left->type);
+    bool right_numeric_array = known_numeric_array_type(ast_node->right->type);
+    bool left_numeric_scalar = lambda_numeric_kind_from_type(ast_node->left->type) != LAMBDA_NUM_INVALID;
+    bool right_numeric_scalar = lambda_numeric_kind_from_type(ast_node->right->type) != LAMBDA_NUM_INVALID;
+    if (arithmetic_op &&
+        ((left_numeric_array && (right_numeric_array || right_numeric_scalar)) ||
+         (right_numeric_array && left_numeric_scalar))) {
+        // Numeric vector operations finalize to ArrayNum. Describing their
+        // result as the source TypeArray made C2MIR call array_get on an
+        // ArrayNum pointer after a vector expression.
+        type_id = LMD_TYPE_ARRAY_NUM;
+    }
+    else if (arithmetic_op && ast_node->op == OPERATOR_ADD &&
+        left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
+        type_id = LMD_TYPE_ARRAY;
+    }
+    else if (arithmetic_op) {
+        LambdaNumericOpFamily family = ast_node->op == OPERATOR_ADD ? LAMBDA_NUM_OP_ADD :
+            ast_node->op == OPERATOR_SUB ? LAMBDA_NUM_OP_SUB :
+            ast_node->op == OPERATOR_MUL ? LAMBDA_NUM_OP_MUL :
+            ast_node->op == OPERATOR_DIV ? LAMBDA_NUM_OP_TRUE_DIV :
+            ast_node->op == OPERATOR_IDIV ? LAMBDA_NUM_OP_IDIV : LAMBDA_NUM_OP_MOD;
+        LambdaNumericDecision decision = lambda_numeric_classify(family,
+            lambda_numeric_kind_from_type(ast_node->left->type),
+            lambda_numeric_kind_from_type(ast_node->right->type));
+        if (decision.valid) {
+            complete_numeric_type = lambda_numeric_type_from_kind(decision.result);
+            type_id = complete_numeric_type->type_id;
+        } else {
+            LambdaNumericKind left_kind = lambda_numeric_kind_from_type(ast_node->left->type);
+            LambdaNumericKind right_kind = lambda_numeric_kind_from_type(ast_node->right->type);
+            if (left_kind != LAMBDA_NUM_INVALID && right_kind != LAMBDA_NUM_INVALID) {
+                // A fully known scalar pair that has no numeric-domain rule is
+                // an invalid program, not a request for dynamic dispatch.
+                record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+                    "operator '%.*s' is not defined for %s and %s",
+                    (int)op.length, op.str,
+                    get_type_name(left_type), get_type_name(right_type));
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+            type_id = LMD_TYPE_ANY;
+        }
+    }
+    else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR) {
+        type_id = LMD_TYPE_ANY;  // based on truthy idiom, not simple logic and/or
+    }
+    else if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE ||
+        ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE ||
+        ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
+        is_elementwise_comparison_op(ast_node->op) ||
+        ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN ||
+        ast_node->op == OPERATOR_AT) {
+        type_id = LMD_TYPE_BOOL;
+
+        // Keyword comparisons are the explicit element-wise family.  Symbolic
+        // < <= > >= stay scalar so array masks cannot leak into control flow.
+        if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
+            bool l_native = (is_native_numeric_type_id(left_type));
+            bool r_native = (is_native_numeric_type_id(right_type));
+            if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
+            else                           type_id = LMD_TYPE_ANY;
+        }
+        else if (is_elementwise_comparison_op(ast_node->op)) {
+            bool l_arr = is_array_family_type_id(left_type);
+            bool r_arr = is_array_family_type_id(right_type);
+            type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ANY;
+        }
+
+        // equality is total: incompatible concrete families compile and evaluate
+        // to false/true instead of becoming a static type error.
+    }
+    else if (ast_node->op == OPERATOR_TO) {
+        type_id = LMD_TYPE_RANGE;
+    }
+    else if (ast_node->op == OPERATOR_PIPE || ast_node->op == OPERATOR_WHERE) {
+        // pipe operators: change node type to AST_NODE_PIPE
+        ast_node->node_type = AST_NODE_PIPE;
+        // determine result type based on operation
+        if (ast_node->op == OPERATOR_WHERE) {
+            // where preserves input collection type
+            type_id = left_type;
+        } else {
+            // pipe: if using ~ (current item), always produces Array;
+            // otherwise it's "inject first arg" and result type follows the right side
+            if (has_current_item_ref(ast_node->right)) {
+                type_id = LMD_TYPE_ARRAY;
+            } else {
+                type_id = right_type;
+            }
+        }
+    }
+    else {  // OPERATOR_JOIN, etc.
+        type_id = LMD_TYPE_ANY;
+    }
+    if (complete_numeric_type) {
+        ast_node->type = complete_numeric_type;
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    } else if (type_id >= LMD_TYPE_CONTAINER) {
+        // reuse existing type from the branch that determined the type_id
+        // to preserve full struct layout (TypeMap, TypeArray, etc.)
+        Type* reuse_type = (type_id == right_type && ast_node->right->type) ?
+            ast_node->right->type : (type_id == left_type && ast_node->left->type) ?
+            ast_node->left->type : NULL;
+        ast_node->type = reuse_type ? reuse_type : &TYPE_ANY;
+    } else {
+        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    }
+    log_debug("end build binary expr");
+    return (AstNode*)ast_node;
+}
+
+// check if expression contains ~ or ~# references (pipe context references)
+bool has_current_item_ref(AstNode* node) {
+    if (!node) return false;
+
+    switch (node->node_type) {
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+        return true;
+    case AST_NODE_PRIMARY:
+        return has_current_item_ref(((AstPrimaryNode*)node)->expr);
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        return has_current_item_ref(((AstUnaryNode*)node)->operand);
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE:
+        return has_current_item_ref(((AstBinaryNode*)node)->left) ||
+               has_current_item_ref(((AstBinaryNode*)node)->right);
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        return has_current_item_ref(if_node->cond) ||
+               has_current_item_ref(if_node->then) ||
+               has_current_item_ref(if_node->otherwise);
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match_node = (AstMatchNode*)node;
+        if (has_current_item_ref(match_node->scrutinee)) return true;
+        AstMatchArm* arm = match_node->first_arm;
+        while (arm) {
+            arm = (AstMatchArm*)arm->next;
+        }
+        return false;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (has_current_item_ref(call->function)) return true;
+        AstNode* arg = call->argument;
+        while (arg) {
+            if (has_current_item_ref(arg)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        return has_current_item_ref(((AstFieldNode*)node)->object) ||
+               has_current_item_ref(((AstFieldNode*)node)->field);
+    case AST_NODE_ARRAY: {
+        AstNode* item = ((AstArrayNode*)node)->item;
+        while (item) {
+            if (has_current_item_ref(item)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    case AST_NODE_MAP: {
+        AstNode* item = ((AstMapNode*)node)->item;
+        while (item) {
+            if (has_current_item_ref(item)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_ASSIGN:
+        return has_current_item_ref(((AstNamedNode*)node)->as);
+    default:
+        return false;
+    }
+}
+
+// build current item reference (~)
+AstNode* build_current_expr(Transpiler* tp, TSNode node) {
+    uint32_t len = ts_node_end_byte(node) - ts_node_start_byte(node);
+    bool is_index = (len == 2); // ~# is 2 chars, ~ is 1
+    if (is_index) {
+        log_debug("build current index (~#)");
+        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        return ast_node;
+    } else {
+        log_debug("build current item (~)");
+        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        return ast_node;
+    }
+}
+
+static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
+    AstPrimaryNode* null_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY,
+        source_node, sizeof(AstPrimaryNode));
+    null_node->type = &LIT_NULL;
+    null_node->expr = NULL;
+    return (AstNode*)null_node;
+}
+
+// Unified build_if_expr: handles both expression and block forms
+// When a branch is a content block, creates a new scope for variable shadowing
+AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
+    log_debug("build if expr");
+    AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfNode));
+    TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
+    ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "if");
+
+    // Defensive validation: ensure condition was built successfully
+    if (!ast_node->cond) {
+        log_error("Error: build_if_expr failed to build condition expression");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Build 'then' branch — create scope if it's a content block
+    TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
+    bool then_is_block = (!ts_node_is_null(then_node) && ts_node_symbol(then_node) == SYM_CONTENT);
+    if (then_is_block) {
+        NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        then_scope->parent = tp->current_scope;
+        then_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = then_scope;
+    }
+    if (ts_node_is_null(then_node)) {
+        // empty branch blocks are legal no-ops; represent them as null so pn control flow continues.
+        ast_node->then = build_null_noop(tp, if_node);
+    } else {
+        ast_node->then = build_expr(tp, then_node);
+    }
+    if (then_is_block) {
+        tp->current_scope = tp->current_scope->parent;  // restore scope
+    }
+
+    // Defensive validation: ensure then clause was built successfully
+    if (!ast_node->then) {
+        log_error("Error: build_if_expr failed to build then expression");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Build 'else' branch — create scope if it's a content block
+    TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
+    if (ts_node_is_null(else_node)) {
+        // empty else blocks have no content field; missing else and no-op else both evaluate to null.
+        ast_node->otherwise = NULL;
+    }
+    else {
+        bool else_is_block = (ts_node_symbol(else_node) == SYM_CONTENT);
+        if (else_is_block) {
+            NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+            else_scope->parent = tp->current_scope;
+            else_scope->is_proc = tp->current_scope->is_proc;
+            tp->current_scope = else_scope;
+        }
+        ast_node->otherwise = build_expr(tp, else_node);
+        if (else_is_block) {
+            tp->current_scope = tp->current_scope->parent;  // restore scope
+        }
+        // Defensive validation: if else node exists, ensure it was built successfully
+        if (!ast_node->otherwise) {
+            log_error("Error: build_if_expr failed to build else expression");
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+    }
+
+    // Additional validation: ensure expressions have valid types
+    if (!ast_node->cond->type || !ast_node->then->type ||
+        (ast_node->otherwise && !ast_node->otherwise->type)) {
+        log_error("Error: build_if_expr expressions missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // Determine the type of the if expression
+    TypeId then_type_id = ast_node->then->type->type_id;
+    TypeId else_type_id = ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL;
+
+    Type* else_type = ast_node->otherwise ? ast_node->otherwise->type : NULL;
+    LambdaNumericDecision numeric_join = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
+        lambda_numeric_kind_from_type(ast_node->then->type),
+        lambda_numeric_kind_from_type(else_type));
+    if (numeric_join.valid) {
+        ast_node->type = lambda_numeric_type_from_kind(numeric_join.result);
+    } else if (then_type_id != else_type_id) {
+        ast_node->type = &TYPE_ANY;
+    } else if (then_type_id >= LMD_TYPE_CONTAINER) {
+        // reuse branch type to preserve full struct (TypeMap, TypeArray, etc.)
+        ast_node->type = ast_node->then->type;
+    } else {
+        ast_node->type = ast_node->then->type;
+    }
+    log_debug("end build if expr");
+    return (AstNode*)ast_node;
+}
+
+// build a match expression from Tree-sitter CST node
+AstNode* build_match(Transpiler* tp, TSNode match_node) {
+    log_debug("build match expr");
+    AstMatchNode* ast_node = (AstMatchNode*)alloc_ast_node(tp, AST_NODE_MATCH_EXPR, match_node, sizeof(AstMatchNode));
+
+    // build scrutinee expression
+    TSNode scrutinee_node = ts_node_child_by_field_id(match_node, FIELD_SCRUTINEE);
+    ast_node->scrutinee = build_expr(tp, scrutinee_node);
+    if (!ast_node->scrutinee) {
+        log_error("build_match: failed to build scrutinee expression");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // iterate over children to find match arms and default arms
+    AstMatchArm* first_arm = NULL;
+    AstMatchArm* last_arm = NULL;
+    int arm_count = 0;
+    TypeId result_type_id = LMD_TYPE_NULL;
+    bool need_any_type = false;
+
+    uint32_t child_count = ts_node_child_count(match_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(match_node, i);
+        if (!ts_node_is_named(child)) continue;
+        TSSymbol sym = ts_node_symbol(child);
+
+        bool is_arm = (sym == SYM_MATCH_ARM);
+        bool is_default = (sym == SYM_MATCH_DEFAULT);
+        if (!is_arm && !is_default) continue;
+
+        AstMatchArm* arm = (AstMatchArm*)alloc_ast_node(tp, AST_NODE_MATCH_ARM, child, sizeof(AstMatchArm));
+
+        // build pattern (type expression) — NULL for default arm
+        if (is_arm) {
+            TSNode pattern_node = ts_node_child_by_field_id(child, FIELD_PATTERN);
+            arm->pattern = build_expr(tp, pattern_node);
+        } else {
+            arm->pattern = NULL;
+        }
+
+        // create a new scope for the arm body (like if_stam branches)
+        NameScope* arm_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        arm_scope->parent = tp->current_scope;
+        arm_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = arm_scope;
+
+        // build arm body
+        TSNode body_node = ts_node_child_by_field_id(child, FIELD_BODY);
+        arm->body = build_expr(tp, body_node);
+
+        tp->current_scope = arm_scope->parent; // restore scope
+
+        // type inference: track union of all arm body types
+        if (arm->body && arm->body->type) {
+            TypeId body_type_id = arm->body->type->type_id;
+            if (arm_count == 0) {
+                result_type_id = body_type_id;
+            } else if (body_type_id != result_type_id) {
+                need_any_type = true;
+            }
+        }
+
+        // link arm into list
+        if (!first_arm) first_arm = arm;
+        else last_arm->next = (AstNode*)arm;
+        last_arm = arm;
+        arm_count++;
+    }
+
+    ast_node->first_arm = first_arm;
+    ast_node->arm_count = arm_count;
+
+    // result type: if all arms have same type, use it; otherwise ANY
+    if (need_any_type) {
+        ast_node->type = &TYPE_ANY;
+    } else if (result_type_id >= LMD_TYPE_CONTAINER && first_arm && first_arm->type) {
+        // reuse arm type to preserve full struct (TypeMap, TypeArray, etc.)
+        ast_node->type = first_arm->type;
+    } else {
+        ast_node->type = alloc_type(tp->pool, result_type_id, sizeof(Type));
+    }
+
+    log_debug("end build match expr: %d arms", arm_count);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_list(Transpiler* tp, TSNode list_node) {
+    log_debug("build list");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    ast_node->list_type = type;
+    ast_node->type = &TYPE_ANY;  // list returns Item, not List
+
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
+
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_declare = NULL, * prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        log_debug("build_list: processing child");
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            log_debug("build_list: got item with node_type %d", item->node_type);
+            if (item->node_type == AST_NODE_ASSIGN) {
+                AstNode* declare = item;
+                log_debug("got declare type %d", declare->node_type);
+                if (prev_declare == NULL) {
+                    ast_node->declare = declare;
+                }
+                else {
+                    prev_declare->next = declare;
+                }
+                prev_declare = declare;
+            }
+            else { // normal list item
+                log_debug("build_list: adding item as list item, incrementing length from %ld to %ld", type->length, type->length + 1);
+                if (!prev_item) {
+                    ast_node->item = item;
+                }
+                else {
+                    prev_item->next = item;
+                }
+                prev_item = item;
+                type->length++;
+            }
+        }
+        else {
+            log_debug("build_list: got null item");
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    if (!ast_node->declare && type->length == 1) {
+        tp->current_scope = ast_node->vars->parent;  // Fix scope restoration
+        log_debug("build_list: returning single item with type %d", ast_node->item->type->type_id);
+        return ast_node->item;
+    }
+    tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named);
+
+AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definition) {
+    // Check if this is a decomposition (multiple names)
+    // Count name fields to detect decomposition pattern
+    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int name_count = 0;
+    bool has_decompose_field = false;
+    bool is_named_decompose = false;
+
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            name_count++;
+        }
+        if (field_id == FIELD_DECOMPOSE) {
+            has_decompose_field = true;
+            // Check if it's 'at' or '='
+            TSNode decompose_node = ts_tree_cursor_current_node(&cursor);
+            TSSymbol sym = ts_node_symbol(decompose_node);
+            if (sym == anon_sym_at) {
+                is_named_decompose = true;
+            }
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // If multiple names or explicit decompose field, use decomposition
+    if (name_count > 1 || has_decompose_field) {
+        return build_decompose_expr(tp, asn_node, is_named_decompose);
+    }
+
+    // Single variable assignment (existing logic)
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
+    StrView name_view = node_name_text(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    // check for error destructuring: let a^err = expr
+    TSNode error_name_node = ts_node_child_by_field_id(asn_node, FIELD_ERROR);
+    if (!ts_node_is_null(error_name_node)) {
+        StrView err_view = node_name_text(tp, error_name_node);
+        ast_node->error_name = name_pool_create_strview(tp->name_pool, err_view);
+        log_debug("error destructuring: %.*s^%.*s", (int)name_view.length, name_view.str,
+            (int)err_view.length, err_view.str);
+    }
+
+    // check if the variable name is a reserved type keyword
+    if (!is_type_definition && is_type_keyword(name_view)) {
+        int line = ts_node_start_point(name).row + 1;
+        record_type_error(tp, line, "Error: '%.*s' is a reserved type keyword and cannot be used as a variable name",
+            (int)name_view.length, name_view.str);
+    }
+
+    TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
+
+    // handle type definitions vs variable assignments differently
+    if (is_type_definition) {
+        // for type statements: type Name = TypeExpr
+        // build the type expression - the result's type field is a TypeType* wrapper
+
+        // Pre-register the type name before building the body to support self-referencing
+        // types (e.g., type Node = {left: Node, right: Node}). Without this, the self-reference
+        // resolves to TYPE_ANY, breaking direct field access optimization.
+        TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+        TypeMap* pre_map = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        pre_map->struct_name = ast_node->name->chars;
+        pre_type->type = (Type*)pre_map;
+        ast_node->type = (Type*)pre_type;
+        push_name(tp, ast_node, NULL);
+
+        if (ts_node_is_null(val_node)) {
+            log_error("type definition: missing type expression");
+            ast_node->type = &TYPE_ANY;
+            ast_node->as = nullptr;
+        } else {
+            AstNode* type_expr = build_expr(tp, val_node);
+            ast_node->as = type_expr;
+            if (type_expr && type_expr->type) {
+                ast_node->type = type_expr->type;  // Keep as TypeType* wrapper
+                // propagate declaration name to TypeMap for direct field access optimization
+                Type* inner = type_expr->type;
+                if (inner && inner->type_id == LMD_TYPE_TYPE) {
+                    Type* actual = ((TypeType*)inner)->type;
+                    if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && ast_node->name) {
+                        ((TypeMap*)actual)->struct_name = ast_node->name->chars;
+                    }
+                }
+            } else {
+                log_warn("type definition: failed to build type expression");
+                ast_node->type = &TYPE_ANY;
+            }
+        }
+    } else {
+        // for variable assignments: let name = value or let name: type = value
+        if (ts_node_is_null(val_node)) {
+            log_error("assignment: missing value expression");
+            ast_node->as = nullptr;
+            ast_node->type = &TYPE_ANY;
+        } else {
+            ast_node->as = build_expr(tp, val_node);
+
+            // determine the type of the variable
+            if (ts_node_is_null(type_node)) {
+                ast_node->type = ast_node->as->type;
+            }
+            else {
+                AstNode* type_expr = build_expr(tp, type_node);
+                // validate that type_expr is actually a type (TypeType)
+                if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                    ast_node->type = ((TypeType*)type_expr->type)->type;
+
+                    // for named map types: build direct-access shape entries on the
+                    // map literal's own TypeMap.  The named type definition has
+                    // TypeType wrappers on its shape entries; unwrap them so that
+                    // the transpiler's can_direct check sees raw types and emits
+                    // direct byte-offset construction with proper conversions.
+                    {
+                        Type* ann = ast_node->type;
+                        AstNode* rhs = ast_node->as;
+                        if (rhs && rhs->node_type == AST_NODE_PRIMARY)
+                            rhs = ((AstPrimaryNode*)rhs)->expr;
+                        if (ann && ann->type_id == LMD_TYPE_MAP && ann != &TYPE_MAP
+                            && ((TypeMap*)ann)->struct_name
+                            && rhs && rhs->node_type == AST_NODE_MAP
+                            && rhs->type && rhs->type->type_id == LMD_TYPE_MAP) {
+                            TypeMap* named = (TypeMap*)ann;
+                            TypeMap* literal = (TypeMap*)rhs->type;
+                            // copy byte_size and length from named type
+                            literal->byte_size = named->byte_size;
+                            literal->length = named->length;
+                            literal->has_named_shape = true;  // mark as safe for direct stores
+                            // rebuild shape entries with unwrapped types
+                            ShapeEntry* src = named->shape;
+                            ShapeEntry* prev = nullptr;
+                            ShapeEntry* first = nullptr;
+                            while (src) {
+                                ShapeEntry* dst = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                                dst->name = src->name;
+                                dst->byte_offset = src->byte_offset;
+                                // unwrap TypeType wrapper to get the actual storage type
+                                Type* ft = src->type;
+                                if (ft && ft->type_id == LMD_TYPE_TYPE) {
+                                    Type* inner = ((TypeType*)ft)->type;
+                                    if (inner) ft = inner;
+                                }
+                                dst->type = ft;
+                                dst->next = nullptr;
+                                if (!first) first = dst;
+                                if (prev) prev->next = dst;
+                                prev = dst;
+                                src = src->next;
+                            }
+                            literal->shape = first;
+                        }
+                    }
+
+                    // compile-time type check: annotation vs RHS type
+                    // when the annotation is an occurrence type (e.g., int[], float+)
+                    // and the RHS is a literal array with known element types, verify compatibility
+                    Type* ann_type = ast_node->type;
+                    Type* rhs_type = ast_node->as ? ast_node->as->type : nullptr;
+                    if (ann_type && ann_type->type_id == LMD_TYPE_ARRAY) {
+                        TypeArray* ann_arr = (TypeArray*)ann_type;
+                        if (ann_arr->item_patterns && ann_arr->length == 1) {
+                            Type* ann_elem = ann_arr->nested;
+                            if (ann_elem && ann_elem->type_id == LMD_TYPE_TYPE) ann_elem = ((TypeType*)ann_elem)->type;
+                            if (rhs_type && rhs_type->type_id == LMD_TYPE_ARRAY) {
+                                TypeArray* rhs_arr = (TypeArray*)rhs_type;
+                                if (rhs_arr->length != 1) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "array annotation [T] expects exactly one item; did you mean `%s[]`?",
+                                        ann_elem ? get_type_name(ann_elem->type_id) : "T");
+                                }
+                            }
+                        }
+                    }
+                    if (ann_type && !is_global_simple_type(ann_type) &&
+                        ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
+                        TypeUnary* unary = (TypeUnary*)ann_type;
+                        // unwrap the TypeType wrapper on the operand
+                        Type* expected_elem = unary->operand;
+                        if (expected_elem && !is_global_simple_type(expected_elem) &&
+                            expected_elem->type_id == LMD_TYPE_TYPE && expected_elem->kind == TYPE_KIND_SIMPLE) {
+                            expected_elem = ((TypeType*)expected_elem)->type;
+                        }
+                        if (expected_elem && rhs_type->type_id == LMD_TYPE_ARRAY) {
+                            TypeArray* arr_type = (TypeArray*)rhs_type;
+                            if (arr_type->nested) {
+                                // RHS has known element type — check compatibility
+                                TypeId expected_tid = expected_elem->type_id;
+                                TypeId actual_tid = arr_type->nested->type_id;
+                                if (expected_tid != actual_tid &&
+                                    !types_compatible(arr_type->nested, expected_elem) &&
+                                    !typed_array_element_compatible(arr_type->nested, expected_elem)) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "array element type mismatch: expected %s, but got %s",
+                                        get_type_name(expected_tid), get_type_name(actual_tid));
+                                }
+                            } else if (arr_type->length > 0) {
+                                // Mixed literals may still be assignment-compatible through
+                                // numeric widening; nonliteral arrays are checked by runtime coercion.
+                                if (!typed_array_literal_elements_compatible(ast_node->as, expected_elem)) {
+                                    int line = ts_node_start_point(asn_node).row + 1;
+                                    record_type_error(tp, line,
+                                        "cannot assign mixed-type array to %s[]: all elements must be %s",
+                                        get_type_name(expected_elem->type_id),
+                                        get_type_name(expected_elem->type_id));
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    StrView type_str = ts_node_source(tp, type_node);
+                    log_error("Error: invalid type annotation '%.*s' - not a valid type",
+                        (int)type_str.length, type_str.str);
+                    tp->error_count++;
+                    ast_node->type = &TYPE_ANY;
+                }
+            }
+        }
+    }
+
+    // enforce error handling: if RHS is a can_raise call without '?', must use error destructuring
+    if (!is_type_definition && ast_node->as) {
+        // unwrap primary wrapper to find the actual call
+        AstNode* value = ast_node->as;
+        if (value->node_type == AST_NODE_PRIMARY) {
+            value = ((AstPrimaryNode*)value)->expr;
+        }
+        if (value && value->node_type == AST_NODE_CALL_EXPR) {
+            AstCallNode* call = (AstCallNode*)value;
+            if (call->can_raise && !call->propagate && !ast_node->error_name) {
+                record_semantic_error(tp, asn_node, ERR_UNHANDLED_ERROR,
+                    "error from '%.*s' must be handled: use 'let %.*s^err = %.*s(...)' or '%.*s(...)?'",
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars);
+            }
+        }
+    }
+
+    // push the name to the name stack (skip for type definitions - already pushed early
+    // to support self-referencing types like `type Node = {left: Node}`)
+    if (!is_type_definition) {
+        push_name(tp, ast_node, NULL);
+    }
+
+    // also push the error name if error destructuring is used
+    if (ast_node->error_name) {
+        AstNamedNode* err_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+        err_var->name = ast_node->error_name;
+        err_var->type = &TYPE_ANY;  // error variable is Item type
+        err_var->as = nullptr;
+        push_name(tp, err_var, NULL);
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// Build decomposition expression: let a, b = expr OR let a, b at expr
+AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
+    log_debug("build decompose expr, is_named=%d", is_named);
+
+    // Count names first
+    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int name_count = 0;
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            name_count++;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    if (name_count == 0) {
+        log_error("decompose: no variable names found");
+        return nullptr;
+    }
+
+    AstDecomposeNode* ast_node = (AstDecomposeNode*)alloc_ast_node(tp, AST_NODE_DECOMPOSE, asn_node, sizeof(AstDecomposeNode));
+    ast_node->name_count = name_count;
+    ast_node->is_named = is_named;
+    ast_node->names = (String**)pool_calloc(tp->pool, sizeof(String*) * name_count);
+
+    // Collect all names
+    cursor = ts_tree_cursor_new(asn_node);
+    has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int idx = 0;
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            TSNode name_node = ts_tree_cursor_current_node(&cursor);
+            StrView name_view = node_name_text(tp, name_node);
+            ast_node->names[idx] = name_pool_create_strview(tp->name_pool, name_view);
+            log_debug("decompose name[%d]: %.*s", idx, (int)name_view.length, name_view.str);
+            idx++;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // Build the source expression
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
+    if (ts_node_is_null(val_node)) {
+        log_error("decompose: missing source expression");
+        ast_node->as = nullptr;
+        ast_node->type = &TYPE_ANY;
+    } else {
+        ast_node->as = build_expr(tp, val_node);
+        ast_node->type = &TYPE_ANY;  // decomposition itself doesn't have a single type
+    }
+
+    // Push all names to the name stack
+    for (int i = 0; i < name_count; i++) {
+        // Create a temporary named node for each variable
+        AstNamedNode* var_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+        var_node->name = ast_node->names[i];
+        var_node->type = &TYPE_ANY;  // type will be determined at runtime
+        var_node->as = nullptr;
+        push_name(tp, var_node, NULL);
+    }
+
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
+    TSNode type_node = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
+    return build_assign_expr(tp, type_node, false);  // let expressions are not type definitions
+}
+
+// check if a CST subtree contains string-pattern-specific nodes
+static bool cst_has_pattern_nodes(TSNode node) {
+    TSSymbol sym = ts_node_symbol(node);
+    if (sym == sym_pattern_char_class || sym == sym_concat_type ||
+        sym == sym_grouped_type || sym == sym_string) {
+        return true;
+    }
+    uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        if (cst_has_pattern_nodes(ts_node_child(node, i))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+    // For type_stam: detect string/symbol pattern by checking expression content
+    bool is_string_pattern = false;
+    if (symbol == SYM_TYPE_DEFINE) {
+        // check first declare's 'as' field for pattern-specific nodes
+        TSNode first_declare = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
+        if (!ts_node_is_null(first_declare)) {
+            TSNode as_node = ts_node_child_by_field_id(first_declare, FIELD_AS);
+            if (!ts_node_is_null(as_node)) {
+                is_string_pattern = cst_has_pattern_nodes(as_node);
+            }
+        }
+    }
+
+    // For string/symbol pattern definitions, build pattern nodes
+    if (is_string_pattern) {
+        // Build from declare children (type_assign aliased as assign_expr)
+        TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+        bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+        AstNode* first = NULL;
+        AstNode* prev = NULL;
+        while (has_node) {
+            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+            if (field_id == FIELD_DECLARE) {
+                TSNode child = ts_tree_cursor_current_node(&cursor);
+                AstNode* pattern = build_string_pattern(tp, child, false);
+                if (pattern) {
+                    if (prev) prev->next = pattern;
+                    else first = pattern;
+                    prev = pattern;
+                }
+            }
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
+        return first;
+    }
+
+    // detect 'pub': let_stam uses choice('let','pub') so check first child symbol;
+    // type_stam uses optional field('pub','pub') so check FIELD_PUB
+    bool is_pub = false;
+    if (symbol == SYM_LET_STAM) {
+        TSNode first = ts_node_child(let_node, 0);
+        is_pub = !ts_node_is_null(first) && ts_node_symbol(first) == anon_sym_pub;
+    } else if (symbol == SYM_TYPE_DEFINE) {
+        TSNode pub_node = ts_node_child_by_field_id(let_node, FIELD_PUB);
+        is_pub = !ts_node_is_null(pub_node);
+    }
+
+    AstNodeType node_type = is_pub ? AST_NODE_PUB_STAM :
+        symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM : AST_NODE_LET_STAM;
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp,
+        node_type, let_node, sizeof(AstLetNode));
+
+    // determine if this is a type definition based on the parent symbol
+    bool is_type_definition = (symbol == SYM_TYPE_DEFINE);
+
+    // 'let' can have multiple name-value declarations
+    TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_declare = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            TSSymbol child_symbol = ts_node_symbol(child);
+
+            AstNode* declare = NULL;
+            if (child_symbol == SYM_OBJECT_TYPE) {
+                // pub type Counter { ... } — object type definition wrapped in pub
+                declare = build_object_type(tp, child);
+                if (declare) {
+                    ((AstObjectTypeNode*)declare)->is_public = true;
+                }
+            } else if (child_symbol == SYM_ASSIGN_EXPR) {
+                // pub x = expr  OR  pub type T = type_expr (aliased as assign_expr)
+                declare = build_assign_expr(tp, child, is_type_definition);
+            } else {
+                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR or SYM_OBJECT_TYPE but got symbol %d", child_symbol);
+                // skip invalid node and continue - defensive recovery
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
+
+            // additional defensive check
+            if (!declare) {
+                log_error("Error: build_let_and_type_stam failed to build declaration");
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
+            if (prev_declare == NULL) {
+                ast_node->declare = declare;
+            }
+            else {
+                prev_declare->next = declare;
+            }
+            prev_declare = declare;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // let statement does not have 'then' clause
+    ast_node->type = &LIT_NULL;  // let stam returns null
+    return (AstNode*)ast_node;
+}
+
+// ==================== Namespace Attribute Desugaring ====================
+// Desugar ns.attr: val → ns: {attr: val} at AST build time (v2 namespace design)
+
+// Find dotted_name node from attr_name or direct name node
+// Returns the dotted_name TSNode, or a null TSNode if not found
+static TSNode find_dotted_name_in_name(TSNode name_node) {
+    TSSymbol sym = ts_node_symbol(name_node);
+    if (sym == sym_dotted_name) return name_node;
+    if (sym == sym_attr_name) {
+        // attr_name wraps the actual name node
+        TSNode child = ts_node_named_child(name_node, 0);
+        if (!ts_node_is_null(child) && ts_node_symbol(child) == sym_dotted_name) {
+            return child;
+        }
+    }
+    TSNode null_node = {};
+    return null_node;
+}
+
+// Build a synthetic map node wrapping a single key-value pair: {attr_name: val_expr}
+// Used for desugaring ns.attr: val → ns: {attr: val}
+static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name, AstNode* val_expr, TSNode source_node) {
+    AstMapNode* map_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, source_node, sizeof(AstMapNode));
+    TypeMap* map_type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    map_node->type = (Type*)map_type;
+
+    // create key_expr: attr_name: val_expr
+    AstNamedNode* key_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, source_node, sizeof(AstNamedNode));
+    key_node->name = name_pool_create_strview(tp->name_pool, attr_name);
+    key_node->as = val_expr;
+    key_node->type = val_expr->type;
+    map_node->item = (AstNode*)key_node;
+
+    // create shape entry
+    ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+    name_view->str = key_node->name->chars;
+    name_view->length = key_node->name->len;
+    entry->name = name_view;
+    entry->type = val_expr->type;
+    entry->byte_offset = 0;
+
+    map_type->shape = entry;
+    map_type->length = 1;
+    map_type->byte_size = type_info[val_expr->type->type_id].byte_size;
+
+    arraylist_append(tp->type_list, map_type);
+    map_type->type_index = tp->type_list->length - 1;
+
+    return (AstNode*)map_node;
+}
+
+// Merge two map AST nodes: append src map's items and shape entries to dst map
+// Used when multiple ns.attr attrs share the same ns prefix
+static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_item) {
+    if (!dst_item || !src_item) return;
+    if (dst_item->type->type_id != LMD_TYPE_MAP || src_item->type->type_id != LMD_TYPE_MAP) return;
+
+    AstMapNode* dst = (AstMapNode*)dst_item;
+    AstMapNode* src = (AstMapNode*)src_item;
+    TypeMap* dst_type = (TypeMap*)dst->type;
+    TypeMap* src_type = (TypeMap*)src->type;
+
+    // append src items to dst item linked list
+    AstNode* last_item = dst->item;
+    while (last_item && last_item->next) last_item = last_item->next;
+    if (last_item) last_item->next = src->item;
+    else dst->item = src->item;
+
+    // append src shape entries to dst shape linked list
+    ShapeEntry* last_entry = dst_type->shape;
+    while (last_entry && last_entry->next) last_entry = last_entry->next;
+    if (last_entry) {
+        // update byte_offset for merged entries
+        int byte_offset = last_entry->byte_offset + type_info[last_entry->type->type_id].byte_size;
+        ShapeEntry* src_entry = src_type->shape;
+        while (src_entry) {
+            src_entry->byte_offset = byte_offset;
+            byte_offset += type_info[src_entry->type->type_id].byte_size;
+            src_entry = src_entry->next;
+        }
+        last_entry->next = src_type->shape;
+    } else {
+        dst_type->shape = src_type->shape;
+    }
+
+    dst_type->length += src_type->length;
+    dst_type->byte_size += src_type->byte_size;
+}
+
+// Find an existing named item (key_expr) in a linked list by key name
+// Returns the AstNamedNode if found, NULL otherwise
+static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name) {
+    AstNode* item = first_item;
+    while (item) {
+        if (item->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* named = (AstNamedNode*)item;
+            if (named->name && named->name->len == name->len &&
+                memcmp(named->name->chars, name->chars, name->len) == 0) {
+                return named;
+            }
+        }
+        item = item->next;
+    }
+    return NULL;
+}
+
+StrView build_key_string(Transpiler* tp, TSNode key_node) {
+    log_debug("build key string");
+    TSSymbol symbol = ts_node_symbol(key_node);
+    switch (symbol) {
+    case sym_attr_name: {
+        // attr_name wraps the actual name node (dotted_name, symbol, or identifier)
+        TSNode name_child = ts_node_child_by_field_id(key_node, field_name);
+        if (!ts_node_is_null(name_child)) {
+            return build_key_string(tp, name_child);
+        }
+        // No name field means it's a simple name - get first named child
+        TSNode first_child = ts_node_named_child(key_node, 0);
+        if (!ts_node_is_null(first_child)) {
+            return build_key_string(tp, first_child);
+        }
+        // fallback: try anonymous child (e.g., '*' key)
+        TSNode anon_child = ts_node_child(key_node, 0);
+        if (!ts_node_is_null(anon_child)) {
+            return build_key_string(tp, anon_child);
+        }
+        return (StrView) { .str = NULL, .length = 0 };
+    }
+    case sym_dotted_name: {
+        // a.b.'c' - return the full text including dots
+        int start_byte = ts_node_start_byte(key_node);
+        int end_byte = ts_node_end_byte(key_node);
+        return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+    }
+    case SYM_SYMBOL:  case SYM_STRING: {
+        // todo: handle string and symbol escape
+        int start_byte = ts_node_start_byte(key_node) + 1; // skip the first quote
+        int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
+        return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+    }
+    case SYM_IDENT:
+    case SYM_BASE_TYPE:
+    case SYM_LAST_INDEX: {
+        return (StrView)ts_node_source(tp, key_node);
+    }
+    case anon_sym_STAR: {
+        // spread key: *:expr
+        return (StrView) { .str = "*", .length = 1 };
+    }
+    default:
+        log_debug("unknown key type %d", symbol);
+        return (StrView) { .str = NULL, .length = 0 };
+    }
+}
+
+AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
+    log_debug("build_key_expr");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
+    if (ts_node_is_null(name)) {
+        log_error("build_key_expr: missing name field");
+        ast_node->name = name_pool_create_strview(tp->name_pool, (StrView){.str = "", .length = 0});
+        ast_node->type = &TYPE_ANY;
+        ast_node->as = nullptr;
+        return ast_node;
+    }
+
+    // Check for dotted_name to desugar: ns.attr: val → ns: {attr: val}
+    TSNode dotted_node = find_dotted_name_in_name(name);
+    if (!ts_node_is_null(dotted_node)) {
+        // first named child is the namespace prefix, second is the local attr name
+        TSNode ns_node = ts_node_named_child(dotted_node, 0);
+        TSNode local_node = ts_node_named_child(dotted_node, 1);
+        if (!ts_node_is_null(ns_node) && !ts_node_is_null(local_node)) {
+            StrView ns_prefix = node_name_text(tp, ns_node);
+            StrView local_name = node_name_text(tp, local_node);
+            log_debug("ns attr desugar: %.*s.%.*s → %.*s: {%.*s: val}",
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str,
+                (int)ns_prefix.length, ns_prefix.str,
+                (int)local_name.length, local_name.str);
+
+            // set key to ns prefix only
+            ast_node->name = name_pool_create_strview(tp->name_pool, ns_prefix);
+
+            // build value expression
+            TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+            AstNode* val_expr = ts_node_is_null(val_node) ? nullptr : build_expr(tp, val_node);
+            if (!val_expr) {
+                log_error("build_key_expr: missing value for ns.attr");
+                ast_node->type = &TYPE_ANY;
+                ast_node->as = nullptr;
+                return ast_node;
+            }
+
+            // wrap in map: {local_name: val_expr}
+            ast_node->as = build_ns_attr_map(tp, local_name, val_expr, pair_node);
+            ast_node->type = ast_node->as->type;
+            return ast_node;
+        }
+    }
+
+    // Normal (non-namespaced) key handling
+    StrView name_view = build_key_string(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+    if (ts_node_is_null(val_node)) {
+        log_error("build_key_expr: missing value field");
+        ast_node->type = &TYPE_ANY;
+        ast_node->as = nullptr;
+        return ast_node;
+    }
+
+    log_debug("build key as");
+    ast_node->as = build_expr(tp, val_node);
+
+    // determine the type of the field
+    ast_node->type = ast_node->as->type;
+    return ast_node;
+}
+
+AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build type annotation");
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        ast_node->type = (Type*)&LIT_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        ast_node->type = (Type*)&LIT_TYPE_ANY;
+    }
+    else if (strview_equal(&type_name, "bool")) {
+        ast_node->type = (Type*)&LIT_TYPE_BOOL;
+    }
+    else if (strview_equal(&type_name, "int")) {
+        ast_node->type = (Type*)&LIT_TYPE_INT;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "decimal")) {
+        ast_node->type = (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "integer")) {
+        ast_node->type = (Type*)&LIT_TYPE_INTEGER;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        ast_node->type = (Type*)&LIT_TYPE_NUMBER;
+    }
+    else if (strview_equal(&type_name, "string")) {
+        ast_node->type = (Type*)&LIT_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        ast_node->type = (Type*)&LIT_TYPE_SYMBOL;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        ast_node->type = (Type*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        ast_node->type = (Type*)&LIT_TYPE_TIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        ast_node->type = (Type*)&LIT_TYPE_DATE;
+    }
+    else if (strview_equal(&type_name, "binary")) {
+        ast_node->type = (Type*)&LIT_TYPE_BINARY;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        ast_node->type = (Type*)&LIT_TYPE_LIST;
+    }
+    else if (strview_equal(&type_name, "range")) {
+        ast_node->type = (Type*)&LIT_TYPE_RANGE;
+    }
+    else if (strview_equal(&type_name, "array")) {
+        ast_node->type = (Type*)&LIT_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        ast_node->type = (Type*)&LIT_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "element")) {
+        ast_node->type = (Type*)&LIT_TYPE_ELMT;
+    }
+    else if (strview_equal(&type_name, "object")) {
+        ast_node->type = (Type*)&LIT_TYPE_OBJECT;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        ast_node->type = (Type*)&LIT_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "type")) {
+        ast_node->type = (Type*)&LIT_TYPE_TYPE;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        ast_node->type = (Type*)&LIT_TYPE_ERROR;
+    }
+    // sized numeric type names
+    else if (strview_equal(&type_name, "i8")) {
+        ast_node->type = (Type*)&LIT_TYPE_I8;
+    }
+    else if (strview_equal(&type_name, "i16")) {
+        ast_node->type = (Type*)&LIT_TYPE_I16;
+    }
+    else if (strview_equal(&type_name, "i32")) {
+        ast_node->type = (Type*)&LIT_TYPE_I32;
+    }
+    else if (strview_equal(&type_name, "i64")) {
+        ast_node->type = (Type*)&LIT_TYPE_INT64;
+    }
+    else if (strview_equal(&type_name, "u8")) {
+        ast_node->type = (Type*)&LIT_TYPE_U8;
+    }
+    else if (strview_equal(&type_name, "u16")) {
+        ast_node->type = (Type*)&LIT_TYPE_U16;
+    }
+    else if (strview_equal(&type_name, "u32")) {
+        ast_node->type = (Type*)&LIT_TYPE_U32;
+    }
+    else if (strview_equal(&type_name, "u64")) {
+        ast_node->type = (Type*)&LIT_TYPE_U64;
+    }
+    else if (strview_equal(&type_name, "f16")) {
+        ast_node->type = (Type*)&LIT_TYPE_F16;
+    }
+    else if (strview_equal(&type_name, "f32")) {
+        ast_node->type = (Type*)&LIT_TYPE_F32;
+    }
+    else if (strview_equal(&type_name, "f64")) {
+        // f64 is accepted on input but canonicalizes to float.
+        ast_node->type = (Type*)&LIT_TYPE_FLOAT;
+    }
+    else {
+        log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);
+        ast_node->type = (Type*)&LIT_TYPE_ERROR;
+    }
+    log_debug("built base type %.*s, type_id %d", (int)type_name.length, type_name.str,
+        ((TypeType*)ast_node->type)->type->type_id);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
+    log_debug("build list type");
+
+    // Count children first to check for single-element case
+    uint32_t child_count = ts_node_named_child_count(list_node);
+
+    // If single element, unwrap it - this makes (expr) just return expr
+    // This is important for pattern context where ("a" to "z") should be a range_type
+    if (child_count == 1) {
+        TSNode child = ts_node_named_child(list_node, 0);
+        return build_expr(tp, child);
+    }
+
+    // Multi-element list type
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
+    TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ast_node->type = node_type;
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    node_type->type = (Type*)type;  ast_node->list_type = type;
+
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) {
+                ast_node->item = item;
+            }
+            else {
+                prev_item->next = item;
+            }
+            prev_item = item;
+            type->length++;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
+    log_debug("build array type");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    uint32_t child_count = ts_node_named_child_count(array_node);
+    if (child_count > 0) {
+        type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * child_count);
+        type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * child_count);
+    }
+    TSNode child = ts_node_named_child(array_node, 0);
+    AstNode* prev_item = NULL;  Type* nested_type = NULL;
+    int64_t index = 0;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) {
+                ast_node->item = item;  nested_type = item->type;
+            }
+            else {
+                prev_item->next = item;
+                if (nested_type && item->type->type_id != nested_type->type_id) {
+                    nested_type = NULL;  // type mismatch, reset the nested type to NULL
+                }
+            }
+            prev_item = item;
+            if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
+                type->item_patterns[index].type = item->type;
+                type->item_is_type_pattern[index] = 1;
+            }
+            else {
+                Item literal = ItemNull;
+                if (ast_static_literal_item(tp, item, &literal)) type->item_patterns[index] = literal;
+            }
+            type->length++;
+            index++;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    type->nested = nested_type;
+    if (type->length == 1 && type->item_is_type_pattern && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+    }
+
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)ast_node;
+}
+
+// ============================================================================
+// Resolve base type for inheritance: returns the parent TypeObject*, or NULL
+// Also copies parent fields into child shape entries (parent fields first).
+// ============================================================================
+static TypeObject* resolve_base_type(Transpiler* tp, TSNode base_node, TypeObject* obj_type,
+    ShapeEntry** prev_entry_out, int* byte_offset_out) {
+    if (ts_node_is_null(base_node)) return NULL;
+
+    // resolve the base type identifier
+    StrView base_name = ts_node_source(tp, base_node);
+    NameEntry* base_entry = lookup_name(tp, base_name);
+    if (!base_entry || !base_entry->node || !base_entry->node->type) {
+        log_error("build_object_type: unknown base type '%.*s'", (int)base_name.length, base_name.str);
+        return NULL;
+    }
+
+    // unwrap TypeType to get TypeObject
+    Type* resolved = base_entry->node->type;
+    if (resolved->type_id == LMD_TYPE_TYPE) {
+        resolved = ((TypeType*)resolved)->type;
+    }
+    if (!resolved || resolved->type_id != LMD_TYPE_OBJECT) {
+        log_error("build_object_type: base type '%.*s' is not an object type", (int)base_name.length, base_name.str);
+        return NULL;
+    }
+
+    TypeObject* base_type = (TypeObject*)resolved;
+    obj_type->base = base_type;
+    log_debug("build_object_type: resolved base type '%.*s' with %lld fields",
+        (int)base_name.length, base_name.str, base_type->length);
+
+    // copy parent shape entries into child (parent fields come first)
+    ShapeEntry* prev_entry = NULL;
+    int byte_offset = 0;
+    for (ShapeEntry* parent_se = base_type->shape; parent_se; parent_se = parent_se->next) {
+        ShapeEntry* se = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+        se->name = parent_se->name;
+        se->type = parent_se->type;
+        se->byte_offset = byte_offset;
+        se->next = NULL;
+        if (!prev_entry) { obj_type->shape = se; }
+        else { prev_entry->next = se; }
+        prev_entry = se;
+        obj_type->length++;
+        byte_offset += sizeof(void*);
+    }
+
+    *prev_entry_out = prev_entry;
+    *byte_offset_out = byte_offset;
+    return base_type;
+}
+
+// ============================================================================
+// Push parent fields into scope so child methods can reference them (implicit this)
+// ============================================================================
+static void push_inherited_fields_to_scope(Transpiler* tp, TypeObject* base_type) {
+    if (!base_type) return;
+    FOR_EACH_MAP_FIELD(base_type, se) {
+        if (!se->name) continue;
+        // create a lightweight AstNamedNode to push field into scope
+        AstNamedNode* field_ref = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
+        field_ref->node_type = AST_NODE_KEY_EXPR;
+        field_ref->type = se->type;
+        field_ref->name = name_pool_create_len(tp->name_pool, se->name->str, se->name->length);
+        push_name(tp, field_ref, NULL);
+    }
+}
+
+// ============================================================================
+// Object type definition: type Point { x: float, y: float; fn magnitude() => ... }
+// ============================================================================
+AstNode* build_content_type(Transpiler* tp, TSNode list_node); // forward declaration
+
+AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build_object_type");
+    AstObjectTypeNode* ast_node = (AstObjectTypeNode*)alloc_ast_node(tp,
+        AST_NODE_OBJECT_TYPE, type_node, sizeof(AstObjectTypeNode));
+    // detect 'pub' field on object_type
+    TSNode pub_node = ts_node_child_by_field_id(type_node, FIELD_PUB);
+    ast_node->is_public = !ts_node_is_null(pub_node);
+    ast_node->local_type_index = -1;
+
+    // allocate TypeObject (extends TypeMap) for this object type definition
+    TypeObject* obj_type = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
+    obj_type->type_id = LMD_TYPE_OBJECT;
+    obj_type->kind = 0;
+    obj_type->base = NULL;
+    obj_type->methods = NULL;
+    obj_type->methods_last = NULL;
+    obj_type->method_count = 0;
+    obj_type->constraint = NULL;
+    obj_type->constraint_fn = NULL;
+
+    // wrap in TypeType so it behaves as a type value
+    TypeType* tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    tt->type = (Type*)obj_type;
+    ast_node->type = (Type*)tt;
+
+    // get type name
+    TSNode name_node = ts_node_child_by_field_id(type_node, FIELD_NAME);
+    StrView name = node_name_text(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name);
+    obj_type->type_name.str = ast_node->name->chars;
+    obj_type->type_name.length = ast_node->name->len;
+    // set struct_name for direct field access optimization (Phase 5/6)
+    obj_type->struct_name = ast_node->name->chars;
+    log_debug("build_object_type: name='%.*s'", (int)name.length, name.str);
+
+    // get optional base type (inheritance)
+    TSNode base_node = ts_node_child_by_field_id(type_node, FIELD_BASE);
+    if (!ts_node_is_null(base_node)) {
+        ast_node->base_type = build_expr(tp, base_node);
+        log_debug("build_object_type: has base type");
+    } else {
+        ast_node->base_type = NULL;
+    }
+
+    // iterate children to find fields (attr), methods (fn_stam/fn_expr_stam), and constraints
+    // Two-pass approach: first collect fields, then build methods with fields in scope
+    TSNode child = ts_node_named_child(type_node, 0);
+    AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    AstNode* prev_method = NULL;
+
+    // Resolve inheritance: copy parent fields into child shape (parent fields first)
+    TypeObject* base_type_obj = resolve_base_type(tp, base_node, obj_type, &prev_entry, &byte_offset);
+    AstNode* prev_constraint = NULL;
+    ast_node->methods = NULL;
+    ast_node->constraints = NULL;
+    ast_node->content = NULL;
+
+    // Pass 1: build fields, content schema, and constraints (no methods yet)
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+
+        if (symbol == SYM_COMMENT) {
+            // skip
+        }
+        else if (symbol == SYM_ATTR) {
+            // field declaration: name: type_expr [= default]
+            AstNode* item = (AstNode*)build_key_expr(tp, child);
+            if (item) {
+                if (!prev_field) { ast_node->item = item; }
+                else { prev_field->next = item; }
+                prev_field = item;
+
+                // build shape entry for this field
+                ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                String* pooled_name = ((AstNamedNode*)item)->name;
+                StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                name_view->str = pooled_name->chars;
+                name_view->length = pooled_name->len;
+                shape_entry->name = name_view;
+                // unwrap TypeType to get the actual field data type
+                Type* field_type = item->type;
+                if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                    field_type = ((TypeType*)field_type)->type;
+                }
+                shape_entry->type = field_type;
+                shape_entry->byte_offset = byte_offset;
+                // read optional default value expression
+                TSNode default_node = ts_node_child_by_field_id(child, FIELD_DEFAULT);
+                if (!ts_node_is_null(default_node)) {
+                    shape_entry->default_value = build_expr(tp, default_node);
+                    log_debug("build_object_type: field '%.*s' has default value",
+                        (int)name_view->length, name_view->str);
+                }
+                if (!prev_entry) { obj_type->shape = shape_entry; }
+                else { prev_entry->next = shape_entry; }
+                prev_entry = shape_entry;
+
+                obj_type->length++;
+                byte_offset += sizeof(void*);  // all fields stored as Item (8 bytes)
+            }
+        }
+        else if (symbol == SYM_THAT_CONSTRAINT) {
+            // object-level constraint: that (expr) - enable implicit ~.name resolution
+            TSNode constraint_expr = ts_node_child_by_field_id(child, FIELD_CONSTRAINT);
+            if (!ts_node_is_null(constraint_expr)) {
+                bool old_in_that = tp->in_that_clause;
+                tp->in_that_clause = true;
+                AstNode* constraint = build_expr(tp, constraint_expr);
+                tp->in_that_clause = old_in_that;
+                if (constraint) {
+                    if (!prev_constraint) { ast_node->constraints = constraint; }
+                    else { prev_constraint->next = constraint; }
+                    prev_constraint = constraint;
+                    // store last constraint on the type (for single constraint)
+                    obj_type->constraint = constraint;
+                }
+            }
+        }
+        else if (symbol == SYM_CONTENT_TYPE) {
+            // content schema: when present, type acts as element type
+            ast_node->content = build_content_type(tp, child);
+            log_debug("build_object_type: has content schema");
+        }
+
+        child = ts_node_next_named_sibling(child);
+    }
+
+    // Create a temporary sub-scope for field names so methods can reference them
+    NameScope* obj_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    obj_scope->parent = tp->current_scope;
+    tp->current_scope = obj_scope;
+
+    // Push field names into scope so methods can reference them (implicit this)
+    // First push inherited fields from parent
+    push_inherited_fields_to_scope(tp, base_type_obj);
+    // Then push own fields, unwrap TypeType to get the actual data type
+    AstNode* field_node = ast_node->item;
+    while (field_node) {
+        if (field_node->node_type == AST_NODE_KEY_EXPR) {
+            AstNamedNode* fn = (AstNamedNode*)field_node;
+            Type* orig_type = fn->type;
+            if (orig_type && orig_type->type_id == LMD_TYPE_TYPE) {
+                fn->type = ((TypeType*)orig_type)->type;
+            }
+            push_name(tp, fn, NULL);
+        }
+        field_node = field_node->next;
+    }
+
+    // Pass 2: build methods with fields in scope
+    child = ts_node_named_child(type_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+            // method declaration
+            AstNode* method = build_func(tp, child, true, false);
+            if (method) {
+                if (!prev_method) { ast_node->methods = method; }
+                else { prev_method->next = method; }
+                prev_method = method;
+
+                // create TypeMethod entry for runtime method table
+                AstFuncNode* fn_method = (AstFuncNode*)method;
+                TypeMethod* tm = (TypeMethod*)pool_calloc(tp->pool, sizeof(TypeMethod));
+                StrView* method_name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                method_name_view->str = fn_method->name->chars;
+                method_name_view->length = fn_method->name->len;
+                tm->name = method_name_view;
+                tm->compiled_fn = NULL;  // populated after JIT compilation
+                tm->is_proc = (method->node_type == AST_NODE_PROC);
+                tm->next = NULL;
+                if (!obj_type->methods) { obj_type->methods = tm; }
+                else { obj_type->methods_last->next = tm; }
+                obj_type->methods_last = tm;
+                obj_type->method_count++;
+            }
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    obj_type->byte_size = byte_offset;
+    obj_type->last = prev_entry;
+
+    // Restore scope (pop the temporary field scope)
+    tp->current_scope = obj_scope->parent;
+
+    // register the type in the type list (store TypeType wrapper for consistency with other types)
+    arraylist_append(tp->type_list, tt);
+    obj_type->type_index = tp->type_list->length - 1;
+
+    // register the type name in the current scope so it can be resolved
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
+
+    log_debug("build_object_type: '%.*s' with %d fields, %d methods",
+        (int)name.length, name.str, obj_type->length, obj_type->method_count);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
+    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeMap* type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    TSNode child = ts_node_named_child(map_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    // map type does not support dynamic expr in the body
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        // Skip comments in map type definition
+        if (symbol == SYM_COMMENT) {
+            child = ts_node_next_named_sibling(child);
+            continue;
+        }
+
+        AstNode* item = (AstNode*)build_key_expr(tp, child);
+        if (item && ((AstNamedNode*)item)->name) {
+            if (!prev_item) { ast_node->item = item; }
+            else { prev_item->next = item; }
+            prev_item = item;
+
+            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+            // Convert pooled String* to StrView* for shape entry
+            String* pooled_name = ((AstNamedNode*)item)->name;
+            StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+            name_view->str = pooled_name->chars;
+            name_view->length = pooled_name->len;
+            shape_entry->name = name_view;
+            shape_entry->type = item->type;
+            shape_entry->byte_offset = byte_offset;
+            if (!prev_entry) { type->shape = shape_entry; }
+            else { prev_entry->next = shape_entry; }
+            prev_entry = shape_entry;
+            type->length++;  byte_offset += sizeof(void*);
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    type->byte_size = byte_offset;
+
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
+    log_debug("build content type");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    ast_node->type = ast_node->list_type = type;
+
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) ast_node->item = item;
+            else prev_item->next = item;
+            prev_item = item;
+            type->length++;
+        }
+        // else comment or error
+        child = ts_node_next_named_sibling(child);
+    }
+    log_debug("end building content type: %ld", type->length);
+    return ast_node;
+}
+
+AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
+    log_debug("build element type");
+    AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp,
+        AST_NODE_ELMT_TYPE, elmt_node, sizeof(AstElementNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeElmt* type = (TypeElmt*)alloc_type(tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    TSNode child = ts_node_named_child(elmt_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_COMMENT) {} // skip comments
+        else if (symbol == SYM_IDENT) {  // element name
+            StrView name = ts_node_source(tp, child);
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            // Convert pooled String* to StrView for TypeElmt
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+        }
+        else if (symbol == SYM_CONTENT_TYPE) {  // element content
+            ast_node->content = build_content_type(tp, child);
+        }
+        else {  // attrs
+            AstNode* item = (AstNode*)build_key_expr(tp, child);
+            if (!prev_item) { ast_node->item = item; }
+            else { prev_item->next = item; }
+            prev_item = item;
+
+            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+            // Convert pooled String* to StrView* for shape entry
+            String* pooled_name = ((AstNamedNode*)item)->name;
+            StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+            name_view->str = pooled_name->chars;
+            name_view->length = pooled_name->len;
+            shape_entry->name = name_view;
+            shape_entry->type = item->type;
+            shape_entry->byte_offset = byte_offset;
+            if (!prev_entry) { type->shape = shape_entry; }
+            else { prev_entry->next = shape_entry; }
+            prev_entry = shape_entry;
+
+            type->length++;  byte_offset += sizeof(void*);
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
+    type->content_length = ast_node->content ? ((TypeList*)ast_node->content->type)->length : 0;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
+    log_debug("build fn type");
+    AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, func_node, sizeof(AstFuncNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    ((TypeType*)ast_node->type)->type = (Type*)fn_type;
+
+    // build the params
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
+    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNamedNode* prev_param = NULL;  int param_count = 0;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {  // param declaration
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode* param = build_param_expr(tp, child, true);
+            log_debug("got param type %d", param->node_type);
+            if (prev_param == NULL) {
+                ast_node->param = param;
+                fn_type->param = (TypeParam*)param->type;
+            }
+            else {
+                prev_param->next = (AstNode*)param;
+                ((TypeParam*)prev_param->type)->next = (TypeParam*)param->type;
+            }
+            prev_param = param;  param_count++;
+        }
+        else if (field_id == FIELD_TYPE) {  // return type
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode* type_expr = build_expr(tp, child);
+            // validate that type_expr is actually a type (TypeType)
+            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                fn_type->returned = ((TypeType*)type_expr->type)->type;
+            } else {
+                StrView type_str = ts_node_source(tp, child);
+                log_error("Error: invalid return type '%.*s' - not a valid type",
+                    (int)type_str.length, type_str.str);
+                tp->error_count++;
+                fn_type->returned = &TYPE_ANY;
+            }
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    fn_type->param_count = param_count;
+
+    arraylist_append(tp->type_list, ast_node->type);
+    fn_type->type_index = tp->type_list->length - 1;
+    log_debug("func type index: %d", fn_type->type_index);
+    return (AstNode*)ast_node;
+}
+
+// build range type: start to end (e.g. 1 to 10, 'a' to 'z')
+// constructs as a binary node with OPERATOR_TO and type LMD_TYPE_RANGE
+AstNode* build_range_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build range type");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY, type_node, sizeof(AstBinaryNode));
+    ast_node->op = OPERATOR_TO;
+    ast_node->type = &TYPE_RANGE;
+
+    TSNode start_node = ts_node_child_by_field_id(type_node, FIELD_START);
+    TSNode end_node = ts_node_child_by_field_id(type_node, FIELD_END);
+
+    if (!ts_node_is_null(start_node)) {
+        ast_node->left = build_expr(tp, start_node);
+    }
+    if (!ts_node_is_null(end_node)) {
+        ast_node->right = build_expr(tp, end_node);
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// build constrained type: base_type where (constraint)
+// e.g. int where (5 < ~ < 10), string where (len(~) > 0)
+AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build constrained type");
+    AstConstrainedTypeNode* ast_node = (AstConstrainedTypeNode*)alloc_ast_node(tp,
+        AST_NODE_CONSTRAINED_TYPE, type_node, sizeof(AstConstrainedTypeNode));
+
+    // Build base type
+    TSNode base_node = ts_node_child_by_field_id(type_node, FIELD_BASE);
+    if (!ts_node_is_null(base_node)) {
+        ast_node->base = build_expr(tp, base_node);
+    }
+
+    // Build constraint expression (inside 'that' clause: enable implicit ~.name resolution)
+    TSNode constraint_node = ts_node_child_by_field_id(type_node, FIELD_CONSTRAINT);
+    if (!ts_node_is_null(constraint_node)) {
+        bool old_in_that = tp->in_that_clause;
+        tp->in_that_clause = true;
+        ast_node->constraint = build_expr(tp, constraint_node);
+        tp->in_that_clause = old_in_that;
+    }
+
+    // Create TypeConstrained directly (not wrapped in TypeType)
+    // TypeConstrained inherits from Type with type_id = LMD_TYPE_TYPE and kind = TYPE_KIND_CONSTRAINED
+    TypeConstrained* constrained = (TypeConstrained*)alloc_type_kind(tp->pool,
+        TYPE_KIND_CONSTRAINED, sizeof(TypeConstrained));
+
+    // Get the inner type from the base (unwrap if TypeType)
+    if (ast_node->base && ast_node->base->type) {
+        if (ast_node->base->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* base_type_type = (TypeType*)ast_node->base->type;
+            constrained->base = base_type_type->type;
+        } else {
+            constrained->base = ast_node->base->type;
+        }
+    } else {
+        constrained->base = &TYPE_ANY;
+    }
+    constrained->constraint = ast_node->constraint;
+
+    // Set ast_node->type to the TypeConstrained directly (no TypeType wrapper)
+    ast_node->type = (Type*)constrained;
+
+    // Add to type_list for runtime const_type() access
+    arraylist_append(tp->type_list, ast_node->type);
+    constrained->type_index = tp->type_list->length - 1;
+
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build primary type");
+    TSNode child = ts_node_named_child(type_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        switch (symbol) {
+        case SYM_BASE_TYPE:
+            return build_base_type(tp, child);
+        case SYM_ARRAY_TYPE:
+            return build_array_type(tp, child);
+        case SYM_LIST_TYPE:
+            return build_list_type(tp, child);
+        case SYM_MAP_TYPE:
+            return build_map_type(tp, child);
+        case SYM_ELEMENT_TYPE:
+            return build_element_type(tp, child);
+        case SYM_FN_TYPE:
+            return build_func_type(tp, child);
+        case SYM_RANGE_TYPE:
+            return build_range_type(tp, child);
+        case SYM_PATTERN_CHAR_CLASS:
+            return build_pattern_char_class(tp, child);
+        case SYM_COMMENT:
+            break; // skip comments
+        default: // literal values
+            return build_expr(tp, child);
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    return NULL;
+}
+
+// Build a return_occurrence_type: (base_type | identifier) occurrence?
+// This is a simplified type used only in return type context to avoid map_type ambiguity
+AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node) {
+    log_debug("build return occurrence type");
+    uint32_t child_count = ts_node_named_child_count(node);
+    if (child_count == 0) {
+        // anonymous children only — try first child
+        TSNode child = ts_node_child(node, 0);
+        return build_expr(tp, child);
+    }
+    // Check if there's an occurrence modifier
+    TSNode first = ts_node_named_child(node, 0);
+    if (child_count == 1) {
+        // just base_type or identifier, no occurrence
+        return build_expr(tp, first);
+    }
+    // Has occurrence: treat like occurrence_type
+    return build_occurrence_type(tp, node);
+}
+
+// Build a return_type_pattern: return_occurrence_type (('|'|'&'|'!') return_occurrence_type)*
+// If single type, delegates. If multiple, builds a binary type chain.
+AstNode* build_return_type_pattern(Transpiler* tp, TSNode node) {
+    log_debug("build return type pattern");
+    // Collect all 'type' field children
+    uint32_t count = ts_node_child_count(node);
+    
+    // First type child
+    TSNode first_type = ts_node_child_by_field_id(node, FIELD_TYPE);
+    if (ts_node_is_null(first_type)) {
+        log_error("return type pattern: no type children");
+        return NULL;
+    }
+    
+    AstNode* result = build_return_occurrence_type(tp, first_type);
+    
+    // Check for operator + type pairs
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_child(node, i);
+        StrView child_str = ts_node_source(tp, child);
+        if (child_str.length == 1 && (child_str.str[0] == '|' || child_str.str[0] == '&' || child_str.str[0] == '!')) {
+            // next named sibling should be the right type
+            i++;
+            while (i < count) {
+                TSNode right_child = ts_node_child(node, i);
+                if (ts_node_is_named(right_child)) {
+                    AstNode* right = build_return_occurrence_type(tp, right_child);
+                    // build binary type node
+                    AstBinaryNode* bin = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+                    bin->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+                    ((TypeType*)bin->type)->type = (Type*)type;
+                    bin->left = result;
+                    bin->right = right;
+                    bin->op_str = child_str;
+                    if (child_str.str[0] == '|') bin->op = OPERATOR_UNION;
+                    else if (child_str.str[0] == '&') bin->op = OPERATOR_OR;
+                    else if (child_str.str[0] == '!') bin->op = OPERATOR_EXCLUDE;
+                    type->left = result->type;
+                    type->right = right->type;
+                    type->op = bin->op;
+                    arraylist_append(tp->type_list, bin->type);
+                    type->type_index = tp->type_list->length - 1;
+                    result = (AstNode*)bin;
+                    break;
+                }
+                i++;
+            }
+        }
+    }
+    return result;
+}
+
+AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
+    log_debug("build binary type");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
+    ast_node->left = build_expr(tp, left_node);
+
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
+    if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_OR; }
+    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
+    log_debug("unknown operator: %.*s", (int)op.length, op.str);
+
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    ast_node->right = build_expr(tp, right_node);
+
+    type->left = ast_node->left->type;
+    type->right = ast_node->right->type;
+    type->op = ast_node->op;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+    log_debug("binary type index: %d", type->type_index);
+    return (AstNode*)ast_node;
+}
+
+// Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
+// Sets min_count and max_count; max_count=-1 means unbounded
+static void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
+    *min_count = 0;
+    *max_count = -1;  // unbounded by default
+
+    if (op_str.length < 2 || op_str.str[0] != '[') {
+        return;
+    }
+
+    // [] - any count (equivalent to *)
+    if (op_str.length == 2 && op_str.str[1] == ']') {
+        *min_count = 0;
+        *max_count = -1;
+        return;
+    }
+
+    if (op_str.length < 3) {
+        return;
+    }
+
+    // skip opening bracket
+    const char* p = op_str.str + 1;
+    const char* end = op_str.str + op_str.length;
+
+    // parse first number
+    int n1 = 0;
+    while (p < end && *p >= '0' && *p <= '9') {
+        n1 = n1 * 10 + (*p - '0');
+        p++;
+    }
+    *min_count = n1;
+
+    // skip whitespace
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+
+    if (p < end) {
+        if (*p == ']') {
+            // [n] - exact count
+            *max_count = n1;
+        } else if (*p == '+') {
+            // [n+] - unbounded minimum
+            *max_count = -1;
+        } else if (*p == ',') {
+            // [n, m] - range
+            p++;  // skip comma
+            while (p < end && (*p == ' ' || *p == '\t')) p++;  // skip whitespace
+            int n2 = 0;
+            while (p < end && *p >= '0' && *p <= '9') {
+                n2 = n2 * 10 + (*p - '0');
+                p++;
+            }
+            *max_count = n2;
+        }
+    }
+
+    log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
+}
+
+// Build return type node with optional error type: T or T^E or T^
+// Returns a TypeType wrapping TypeFunc with the return type info
+AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
+    log_debug("build return type");
+
+    // Get the "ok" field (required - the success return type)
+    TSNode ok_node = ts_node_child_by_field_id(return_type_node, field_ok);
+    if (ts_node_is_null(ok_node)) {
+        log_error("Error: return type missing success type");
+        return NULL;
+    }
+
+    AstNode* ok_type_expr = build_expr(tp, ok_node);
+    if (!ok_type_expr) {
+        log_error("Error: failed to parse success return type");
+        return NULL;
+    }
+
+    // Validate that ok_type_expr is actually a type (TypeType)
+    Type* ok_type = NULL;
+    if (ok_type_expr->type && ok_type_expr->type->type_id == LMD_TYPE_TYPE) {
+        ok_type = ((TypeType*)ok_type_expr->type)->type;
+    } else {
+        StrView type_str = ts_node_source(tp, ok_node);
+        log_error("Error: invalid return type '%.*s' - not a valid type",
+            (int)type_str.length, type_str.str);
+        ok_type = &TYPE_ANY;
+    }
+
+    // Check for optional error type: T^E or T^
+    TSNode error_node = ts_node_child_by_field_id(return_type_node, field_error);
+    Type* error_type = NULL;
+    bool can_raise = false;
+
+    // Check if there's a ^ in the return type (either T^E or T^.)
+    // The ^ token indicates the function can raise errors
+    TSTreeCursor cursor = ts_tree_cursor_new(return_type_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_child) {
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        StrView child_str = ts_node_source(tp, child);
+        if (child_str.length == 1 && child_str.str[0] == '^') {
+            can_raise = true;
+            break;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    if (!ts_node_is_null(error_node)) {
+        // error_node is an error_type_pattern: 'error' | '.' | identifier
+        TSSymbol error_symbol = ts_node_symbol(error_node);
+        StrView error_str = ts_node_source(tp, error_node);
+
+        if (error_symbol == SYM_RETURN_TYPE_PATTERN) {
+            // Get the actual child: 'error', '.', or identifier
+            TSNode child = ts_node_child(error_node, 0);
+            if (!ts_node_is_null(child)) {
+                error_symbol = ts_node_symbol(child);
+                error_str = ts_node_source(tp, child);
+            }
+        }
+
+        // Check what kind of error type pattern we have
+        if (strview_equal(&error_str, "error")) {
+            // 'error' keyword - use base error type
+            error_type = &TYPE_ERROR;
+        } else if (error_symbol == sym_identifier) {
+            // Named error type - look it up
+            AstNode* error_type_expr = build_expr(tp, error_node);
+            if (error_type_expr && error_type_expr->type && error_type_expr->type->type_id == LMD_TYPE_TYPE) {
+                error_type = ((TypeType*)error_type_expr->type)->type;
+            } else {
+                log_error("Error: invalid error type '%.*s' - not a valid type",
+                    (int)error_str.length, error_str.str);
+                error_type = &TYPE_ERROR;
+            }
+        } else {
+            // Fallback - treat as generic error
+            error_type = &TYPE_ERROR;
+        }
+        can_raise = true;
+    } else if (can_raise) {
+        // T^ - any error type (inferred)
+        error_type = &TYPE_ERROR;
+    }
+
+    // Create a temporary structure to hold the return type info
+    // We'll return the ok_type_expr with additional info attached via a wrapper
+    // For now, we'll use a special approach: store error_type info in the type list
+    // and return the ok_type_expr augmented with metadata
+
+    // Store the error type and can_raise info in a custom way
+    // For function declarations, the caller (build_func) will extract this info
+    // We'll use a TypeFunc wrapper to carry the return type + error type info
+    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, return_type_node, sizeof(AstFuncNode));
+    wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
+
+    fn_type_info->returned = ok_type;
+    fn_type_info->error_type = error_type;
+    fn_type_info->can_raise = can_raise;
+
+    log_debug("return type: ok=%d, error=%d, can_raise=%d",
+        ok_type ? ok_type->type_id : -1,
+        error_type ? error_type->type_id : -1,
+        can_raise);
+
+    return (AstNode*)wrapper_node;
+}
+
+AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
+    log_debug("build occurrence type");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    // initialize occurrence counts to defaults
+    type->min_count = 0;
+    type->max_count = -1;
+
+    TSNode op_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERATOR);
+    TSSymbol op_symbol = ts_node_symbol(op_node);
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
+
+    // The op_node is the 'occurrence' node which is a choice of '?', '+', '*', or occurrence_count
+    // When it's occurrence_count, we need to check the first child or the source text
+    // Check if op_symbol is 'occurrence' (the parent choice) and if it contains occurrence_count
+    if (op_symbol == sym_occurrence) {
+        // Get the first child which should be the actual choice
+        TSNode actual_op = ts_node_child(op_node, 0);
+        if (!ts_node_is_null(actual_op)) {
+            op_symbol = ts_node_symbol(actual_op);
+            log_debug("occurrence child symbol: %d (SYM_OCCURRENCE_COUNT=%d)", op_symbol, SYM_OCCURRENCE_COUNT);
+        }
+    }
+
+    log_debug("build occurrence: op_symbol=%d, SYM_OCCURRENCE_COUNT=%d, op='%.*s'",
+              op_symbol, SYM_OCCURRENCE_COUNT, (int)op.length, op.str);
+
+    if (op_symbol == SYM_OCCURRENCE_COUNT) {
+        // Handle [n], [n, m], [n+] syntax
+        ast_node->op = OPERATOR_REPEAT;
+        parse_occurrence_count(op, &type->min_count, &type->max_count);
+        log_debug("occurrence count: %.*s -> min=%d, max=%d", (int)op.length, op.str, type->min_count, type->max_count);
+    } else if (strview_equal(&op, "?")) {
+        ast_node->op = OPERATOR_OPTIONAL;
+        type->min_count = 0;
+        type->max_count = 1;
+    } else if (strview_equal(&op, "+")) {
+        ast_node->op = OPERATOR_ONE_MORE;
+        type->min_count = 1;
+        type->max_count = -1;
+    } else if (strview_equal(&op, "*")) {
+        ast_node->op = OPERATOR_ZERO_MORE;
+        type->min_count = 0;
+        type->max_count = -1;
+    } else {
+        log_debug("unknown operator: %.*s", (int)op.length, op.str);
+    }
+
+    type->op = ast_node->op;
+
+    TSNode operand_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+    type->operand = ast_node->operand->type;
+
+    // Register the type in the type list for runtime access
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    log_debug("occurrence type index: %d, op=%d, min=%d, max=%d", type->type_index, type->op, type->min_count, type->max_count);
+
+    // log_debug("built occurrence type with modifier '%c' for base type %d", modifier, node_type->type->type_id);
+    return (AstNode*)ast_node;
+}
+
+// todo: build reference type
+
+AstNode* build_map(Transpiler* tp, TSNode map_node) {
+    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    TypeMap* type = (TypeMap*)ast_node->type;
+
+    TSNode child = ts_node_named_child(map_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_COMMENT) {  // skip comments
+            child = ts_node_next_named_sibling(child);  continue;
+        }
+        // named map item; *:expr is a map_item with key name "*" (spread)
+        AstNode* item;
+        bool is_spread = false;
+        if (symbol == SYM_MAP_ITEM) {
+            AstNamedNode* key_expr = build_key_expr(tp, child);
+            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                // spread: *:expr — extract the value expression
+                item = key_expr->as;
+                is_spread = true;
+            } else {
+                item = (AstNode*)key_expr;
+            }
+        } else {
+            item = build_expr(tp, child);
+        }
+        if (!item) { log_error("build_map: null expr item");  break; }
+
+        if (!prev_item) { ast_node->item = item; }
+        else { prev_item->next = item; }
+        prev_item = item;
+
+        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+        if (!is_spread) {
+            // convert pooled String* to StrView* for shape entry
+            String* pooled_name = ((AstNamedNode*)item)->name;
+            StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+            name_view->str = pooled_name->chars;
+            name_view->length = pooled_name->len;
+            shape_entry->name = name_view;
+        }
+        else {
+            shape_entry->name = NULL;
+        }
+        shape_entry->type = item->type;
+        if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
+            log_error("invalid map item type %s, should be map or any", get_type_name(item->type->type_id));
+        }
+        shape_entry->byte_offset = byte_offset;
+        if (!prev_entry) { type->shape = shape_entry; }
+        else { prev_entry->next = shape_entry; }
+        prev_entry = shape_entry;
+
+        type->length++;
+        byte_offset += (!is_spread) ? type_info[item->type->type_id].byte_size : sizeof(void*);
+        child = ts_node_next_named_sibling(child);
+    }
+    type->byte_size = byte_offset;
+
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
+    log_debug("build element expr");
+
+    // first pass: extract the tag name to check if it's an object type
+    TSNode first_child = ts_node_named_child(elmt_node, 0);
+    TSSymbol first_sym = ts_node_symbol(first_child);
+    StrView tag_name = {};
+    if (first_sym == SYM_IDENT) {
+        tag_name = ts_node_source(tp, first_child);
+    } else if (first_sym == SYM_SYMBOL) {
+        tag_name = ts_node_source(tp, first_child);
+        if (tag_name.length >= 2) { tag_name.str++; tag_name.length -= 2; }
+    } else if (first_sym == sym_dotted_name) {
+        int sb = ts_node_start_byte(first_child);
+        int eb = ts_node_end_byte(first_child);
+        tag_name = { .str = tp->source + sb, .length = static_cast<size_t>(eb - sb) };
+    }
+
+    // check if tag name resolves to an object type definition
+    if (tag_name.length > 0) {
+        NameEntry* entry = lookup_name(tp, tag_name);
+        if (entry && entry->node && entry->node->type) {
+            Type* resolved = entry->node->type;
+            if (resolved->type_id == LMD_TYPE_TYPE) {
+                Type* inner = ((TypeType*)resolved)->type;
+                if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                    // build as object literal instead of element
+                    log_debug("build_elmt: detected <%.*s> as object type, building object literal", (int)tag_name.length, tag_name.str);
+                    TypeObject* obj_type = (TypeObject*)inner;
+                    AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                        AST_NODE_OBJECT_LITERAL, elmt_node, sizeof(AstObjectLiteralNode));
+                    obj_node->type_name = name_pool_create_strview(tp->name_pool, tag_name);
+                    obj_node->type = (Type*)obj_type;
+                    obj_node->item = NULL;
+
+                    // parse children: attrs and spread become items
+                    AstNode* prev_item = NULL;
+                    TSNode child = ts_node_named_child(elmt_node, 0);
+                    int name_start = ts_node_start_byte(first_child);
+                    while (!ts_node_is_null(child)) {
+                        TSSymbol symbol = ts_node_symbol(child);
+                        int child_start = (int)ts_node_start_byte(child);
+                        if (symbol == SYM_COMMENT || child_start == name_start) {
+                            child = ts_node_next_named_sibling(child);
+                            continue;
+                        }
+                        AstNode* item;
+                        if (symbol == SYM_ATTR) {
+                            AstNamedNode* key_expr = build_key_expr(tp, child);
+                            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                                // spread: *:expr — extract value as source
+                                AstNode* source_inner = key_expr->as;
+                                if (source_inner) {
+                                    if (source_inner->node_type == AST_NODE_IDENT || source_inner->node_type == AST_NODE_CURRENT_ITEM) {
+                                        AstPrimaryNode* wrapper = (AstPrimaryNode*)alloc_ast_node(tp,
+                                            AST_NODE_PRIMARY, child, sizeof(AstPrimaryNode));
+                                        wrapper->expr = source_inner;
+                                        wrapper->type = source_inner->type;
+                                        item = (AstNode*)wrapper;
+                                    } else {
+                                        item = source_inner;
+                                    }
+                                } else {
+                                    item = NULL;
+                                }
+                            } else {
+                                item = (AstNode*)key_expr;
+                            }
+                        } else {
+                            child = ts_node_next_named_sibling(child);
+                            continue;
+                        }
+                        if (item) {
+                            if (!prev_item) { obj_node->item = item; }
+                            else { prev_item->next = item; }
+                            prev_item = item;
+                        }
+                        child = ts_node_next_named_sibling(child);
+                    }
+                    return (AstNode*)obj_node;
+                }
+            }
+        }
+    }
+
+    // not an object type — build as normal element
+    AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp,
+        AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
+    TypeElmt* type = (TypeElmt*)alloc_type(tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    ast_node->type = (Type*)type;
+
+    TSNode child = ts_node_named_child(elmt_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_COMMENT) {} // skip comments
+        else if (symbol == SYM_IDENT) {  // element name
+            StrView name = ts_node_source(tp, child);
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            // Convert pooled String* to StrView for TypeElmt
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+        }
+        else if (symbol == sym_dotted_name) {  // dotted element name (a.b.'c')
+            int start_byte = ts_node_start_byte(child);
+            int end_byte = ts_node_end_byte(child);
+            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+            // look up namespace prefix (first segment) and set TypeElmt.ns
+            TSNode ns_node = ts_node_named_child(child, 0);
+            if (!ts_node_is_null(ns_node)) {
+                StrView ns_prefix = node_name_text(tp, ns_node);
+                NamespaceEntry* ns_entry = lookup_namespace_strview(tp, ns_prefix);
+                if (ns_entry) {
+                    type->ns = ns_entry->target;
+                    log_debug("element ns resolved: %.*s → target %p", (int)ns_prefix.length, ns_prefix.str, ns_entry->target);
+                }
+            }
+        }
+        else if (symbol == SYM_SYMBOL) {  // element name as symbol 'name'
+            int start_byte = ts_node_start_byte(child) + 1; // skip leading quote
+            int end_byte = ts_node_end_byte(child) - 1; // skip trailing quote
+            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+        }
+        else if (symbol == SYM_CONTENT) {  // element content
+            ast_node->content = build_content(tp, child, false, false);
+        }
+        else {  // attrs (including spread *:expr)
+            AstNode* item;
+            bool is_spread = false;
+            if (symbol == SYM_ATTR) {
+                AstNamedNode* key_expr = build_key_expr(tp, child);
+                if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                    // spread: *:expr — extract value expression
+                    item = key_expr->as;
+                    is_spread = true;
+                } else {
+                    item = (AstNode*)key_expr;
+                }
+            } else {
+                child = ts_node_next_named_sibling(child);
+                continue;
+            }
+            if (!item) { child = ts_node_next_named_sibling(child); continue; }
+
+            // check for ns attr merging: if key already exists and both are maps, merge
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* new_key = (AstNamedNode*)item;
+                AstNamedNode* existing = find_existing_named_item(ast_node->item, new_key->name);
+                if (existing && existing->as && new_key->as &&
+                    existing->as->type->type_id == LMD_TYPE_MAP && new_key->as->type->type_id == LMD_TYPE_MAP) {
+                    merge_ns_attr_maps(tp, existing->as, new_key->as);
+                    existing->type = existing->as->type;
+                    log_debug("merged ns attr map for key '%.*s'", (int)new_key->name->len, new_key->name->chars);
+                    child = ts_node_next_named_sibling(child);
+                    continue;  // skip adding new entry
+                }
+            }
+
+            if (!prev_item) { ast_node->item = item; }
+            else { prev_item->next = item; }
+            prev_item = item;
+
+            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+            if (!is_spread) {
+                // Convert pooled String* to StrView* for shape entry
+                String* pooled_name = ((AstNamedNode*)item)->name;
+                StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                name_view->str = pooled_name->chars;
+                name_view->length = pooled_name->len;
+                shape_entry->name = name_view;
+            }
+            else {
+                shape_entry->name = NULL;
+            }
+            shape_entry->type = item->type;
+            if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
+                log_debug("invalid map item type %d, should be map or any", item->type->type_id);
+            }
+            shape_entry->byte_offset = byte_offset;
+            if (!prev_entry) { type->shape = shape_entry; }
+            else { prev_entry->next = shape_entry; }
+            prev_entry = shape_entry;
+
+            type->length++;
+            byte_offset += (!is_spread) ? type_info[item->type->type_id].byte_size : sizeof(void*);
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
+    type->content_length = ast_node->content ?
+        (ast_node->content->node_type == AST_NODE_CONTENT ? ((AstListNode*)ast_node->content)->list_type->length : 1) : 0;
+    return (AstNode*)ast_node;
+}
+
+static bool join_expr_mentions_name(AstNode* node, String* name) {
+    if (!node || !name) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node) return false;
+
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ident->name == name || (ident->name && ident->name->len == name->len &&
+            memcmp(ident->name->chars, name->chars, name->len) == 0);
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        // A field-name identifier is not a value binding; only the receiver can mention the loop var.
+        return join_expr_mentions_name(field->object, name);
+    }
+    case AST_NODE_INDEX_EXPR:
+    {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return join_expr_mentions_name(field->object, name) ||
+               join_expr_mentions_name(field->field, name);
+    }
+    case AST_NODE_PATH_INDEX_EXPR: {
+        AstPathIndexNode* path_idx = (AstPathIndexNode*)node;
+        return join_expr_mentions_name(path_idx->base_path, name) ||
+               join_expr_mentions_name(path_idx->segment_expr, name);
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)node;
+        return join_expr_mentions_name(bin->left, name) ||
+               join_expr_mentions_name(bin->right, name);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        return join_expr_mentions_name(un->operand, name);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (join_expr_mentions_name(call->function, name)) return true;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (join_expr_mentions_name(arg, name)) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+static void append_join_key_spec(Transpiler* tp, AstLoopNode* loop, AstNode* prior_expr, AstNode* new_expr) {
+    AstJoinKey* spec = (AstJoinKey*)alloc_ast_node(tp, AST_NODE_JOIN_KEY, loop->node, sizeof(AstJoinKey));
+    spec->prior_expr = prior_expr;
+    spec->new_expr = new_expr;
+    if (!loop->join_keys) {
+        loop->join_keys = spec;
+    } else {
+        AstJoinKey* tail = loop->join_keys;
+        while (tail->next) tail = (AstJoinKey*)tail->next;
+        tail->next = (AstNode*)spec;
+    }
+    loop->join_key_count++;
+}
+
+static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_expr) {
+    AstNode* expr = on_expr;
+    while (expr && expr->node_type == AST_NODE_PRIMARY) {
+        expr = ((AstPrimaryNode*)expr)->expr;
+    }
+    if (!expr || expr->node_type != AST_NODE_BINARY) {
+        log_error("Error: join 'on' must be an equality or 'and' of equalities");
+        return;
+    }
+
+    AstBinaryNode* bin = (AstBinaryNode*)expr;
+    if (bin->op == OPERATOR_AND) {
+        build_join_key_specs(tp, loop, bin->left);
+        build_join_key_specs(tp, loop, bin->right);
+        return;
+    }
+    if (bin->op != OPERATOR_EQ) {
+        log_error("Error: join 'on' only supports equality conditions; put non-equi filters in 'where'");
+        return;
+    }
+
+    bool left_new = join_expr_mentions_name(bin->left, loop->name);
+    bool right_new = join_expr_mentions_name(bin->right, loop->name);
+    if (left_new == right_new) {
+        log_error("Error: each join equality must reference the new source '%.*s' on exactly one side",
+            (int)loop->name->len, loop->name->chars);
+        return;
+    }
+    if (left_new) append_join_key_spec(tp, loop, bin->right, bin->left);
+    else append_join_key_spec(tp, loop, bin->left, bin->right);
+}
+
+AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
+    log_debug("build loop expr");
+    AstLoopNode* ast_node = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstLoopNode));
+    ast_node->index_name = NULL;  // default: no index variable
+    ast_node->key_filter = LOOP_KEY_ALL;  // default: iterate all entries
+    ast_node->key_only = false;
+    ast_node->optional = false;
+
+    TSNode op_node = ts_node_child_by_field_id(loop_node, FIELD_OP);
+    if (!ts_node_is_null(op_node)) {
+        StrView op_view = ts_node_source(tp, op_node);
+        if (strview_equal(&op_view, "at")) {
+            // `for k at item` is key-only iteration; values remain available via `for k, v in item`.
+            ast_node->key_filter = LOOP_KEY_SYMBOL;
+            ast_node->key_only = true;
+        }
+    }
+
+    // Check for optional index variable (first identifier in 'for k, v in expr')
+    TSNode index_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX);
+    if (!ts_node_is_null(index_node)) {
+        int start_byte = ts_node_start_byte(index_node);
+        StrView index_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(index_node) - start_byte };
+        ast_node->index_name = name_pool_create_strview(tp->name_pool, index_view);
+        log_debug("loop has index variable: %.*s", (int)index_view.length, index_view.str);
+
+        // Check for optional type annotation on index variable (k:int or k:symbol)
+        TSNode index_type_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX_TYPE);
+        if (!ts_node_is_null(index_type_node)) {
+            StrView type_view = ts_node_source(tp, index_type_node);
+            if (strview_equal(&type_view, "int")) {
+                ast_node->key_filter = LOOP_KEY_INT;
+                log_debug("loop key filter: int (indexed only)");
+            } else if (strview_equal(&type_view, "symbol")) {
+                ast_node->key_filter = LOOP_KEY_SYMBOL;
+                log_debug("loop key filter: symbol (keyed only)");
+            } else {
+                log_error("Error: unsupported loop key type '%.*s', expected 'int' or 'symbol'",
+                    (int)type_view.length, type_view.str);
+            }
+        }
+    }
+
+    // Get the main variable name
+    TSNode name = ts_node_child_by_field_id(loop_node, FIELD_NAME);
+    int start_byte = ts_node_start_byte(name);
+    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    TSNode optional_node = ts_node_child_by_field_id(loop_node, FIELD_OPTIONAL);
+    ast_node->optional = !ts_node_is_null(optional_node);
+
+    TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
+    ast_node->as = build_expr(tp, expr_node);
+
+    // determine the type of the loop variable
+    Type* expr_type = ast_node->as->type;
+    if (ast_node->key_only) {
+        ast_node->type = &TYPE_ANY;
+    }
+    else if (expr_type->type_id == LMD_TYPE_ARRAY) {
+        TypeArray* array_type = (TypeArray*)expr_type;
+        if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
+            ast_node->type = array_type->nested;
+        }
+        else {
+            log_debug("Warning: Invalid nested type in array during loop AST building, using TYPE_ANY");
+            ast_node->type = &TYPE_ANY;
+        }
+    }
+    else if (expr_type->type_id == LMD_TYPE_RANGE) {
+        ast_node->type = &TYPE_INT;
+    }
+    else if (expr_type->type_id == LMD_TYPE_BINARY) {
+        // Iteration exposes the same sized byte scalar as direct indexing.
+        ast_node->type = &TYPE_U8;
+    }
+    else {
+        // for maps/elements/any: value type is any
+        ast_node->type = &TYPE_ANY;
+    }
+
+    // push the index name to the name stack if present
+    if (ast_node->index_name) {
+        AstNamedNode* index_entry = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstNamedNode));
+        index_entry->name = ast_node->index_name;
+        // key type depends on filter and container type:
+        // LOOP_KEY_INT -> always int; LOOP_KEY_SYMBOL -> always symbol/string
+        // LOOP_KEY_ALL -> could be either, use ANY
+        if (ast_node->key_filter == LOOP_KEY_INT) {
+            index_entry->type = &TYPE_INT;
+        } else if (ast_node->key_filter == LOOP_KEY_SYMBOL) {
+            index_entry->type = &TYPE_ANY;  // symbol at runtime
+        } else {
+            index_entry->type = &TYPE_ANY;  // could be int or symbol
+        }
+        push_name(tp, index_entry, NULL);
+    }
+
+    // push the main name to the name stack
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
+
+    TSNode on_node = ts_node_child_by_field_id(loop_node, FIELD_ON);
+    if (!ts_node_is_null(on_node)) {
+        ast_node->on = build_expr(tp, on_node);
+        if (ast_node->on) {
+            build_join_key_specs(tp, ast_node, ast_node->on);
+        }
+    } else if (ast_node->optional) {
+        log_error("Error: optional join marker '?' requires an 'on' condition");
+    }
+    return (AstNode*)ast_node;
+}
+
+// Helper: build order_spec node
+AstNode* build_order_spec(Transpiler* tp, TSNode spec_node) {
+    log_debug("build order spec");
+    AstOrderSpec* ast_node = (AstOrderSpec*)alloc_ast_node(tp, AST_NODE_ORDER_SPEC, spec_node, sizeof(AstOrderSpec));
+
+    TSNode expr_node = ts_node_child_by_field_id(spec_node, FIELD_EXPR);
+    ast_node->expr = build_expr(tp, expr_node);
+
+    // Check for direction (asc/desc)
+    TSNode dir_node = ts_node_child_by_field_id(spec_node, FIELD_DIR);
+    if (!ts_node_is_null(dir_node)) {
+        StrView dir_text = ts_node_source(tp, dir_node);
+        ast_node->descending = (strview_equal(&dir_text, "desc") || strview_equal(&dir_text, "descending"));
+    } else {
+        ast_node->descending = false;  // default ascending
+    }
+
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// Helper: build for_let_clause node (reuses AstNamedNode)
+AstNode* build_for_let_clause(Transpiler* tp, TSNode let_node) {
+    log_debug("build for let clause");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, let_node, sizeof(AstNamedNode));
+
+    TSNode name_node = ts_node_child_by_field_id(let_node, FIELD_NAME);
+    if (ts_node_is_null(name_node)) {
+        log_error("for_let_clause: name_node is null");
+        return (AstNode*)ast_node;
+    }
+    StrView name_view = ts_node_source(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+    log_debug("for_let_clause: name = %.*s", (int)name_view.length, name_view.str);
+
+    TSNode value_node = ts_node_child_by_field_id(let_node, FIELD_VALUE);
+    if (ts_node_is_null(value_node)) {
+        log_error("for_let_clause: value_node is null");
+        ast_node->as = NULL;
+        ast_node->type = &TYPE_ANY;
+    } else {
+        const char* value_type = ts_node_type(value_node);
+        log_debug("for_let_clause: value_node type = %s", value_type);
+        log_debug("for_let_clause: building value expression");
+        ast_node->as = build_expr(tp, value_node);
+        if (ast_node->as == NULL) {
+            log_error("for_let_clause: build_expr returned NULL for type %s", value_type);
+        }
+        ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
+    }
+
+    // Register in current scope
+    push_name(tp, ast_node, NULL);
+
+    return (AstNode*)ast_node;
+}
+
+static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
+    AstNode* scan = key_expr;
+    while (scan && scan->node_type == AST_NODE_PRIMARY) {
+        scan = ((AstPrimaryNode*)scan)->expr;
+    }
+    if (!scan || scan->node_type != AST_NODE_MEMBER_EXPR) {
+        return NULL;
+    }
+    AstNode* field = ((AstFieldNode*)scan)->field;
+    while (field && field->node_type == AST_NODE_PRIMARY) {
+        field = ((AstPrimaryNode*)field)->expr;
+    }
+    if (!field || field->node_type != AST_NODE_IDENT) {
+        return NULL;
+    }
+    return ((AstIdentNode*)field)->name;
+}
+
+static bool group_alias_exists(AstGroupKey* first, String* alias) {
+    for (AstGroupKey* key = first; key; key = (AstGroupKey*)key->next) {
+        if (key->alias == alias) return true;
+        if (key->alias && alias && key->alias->len == alias->len &&
+            memcmp(key->alias->chars, alias->chars, alias->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
+    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    scope->parent = for_node->vars ? for_node->vars->parent : tp->current_scope;
+    scope->is_proc = tp->current_scope ? tp->current_scope->is_proc : false;
+    tp->current_scope = scope;
+}
+
+// Helper: build group by clause
+AstNode* build_group_clause(Transpiler* tp, TSNode group_node) {
+    log_debug("build group clause");
+    AstGroupClause* ast_node = (AstGroupClause*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, group_node, sizeof(AstGroupClause));
+
+    // Get the group name (from 'into name')
+    TSNode name_node = ts_node_child_by_field_id(group_node, FIELD_NAME);
+    StrView name_view = ts_node_source(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    // Build key specs (linked list)
+    TSTreeCursor cursor = ts_tree_cursor_new(group_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstGroupKey* prev_key = NULL;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_SPEC) {
+            TSNode spec_node = ts_tree_cursor_current_node(&cursor);
+            AstGroupKey* key_spec = (AstGroupKey*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, spec_node, sizeof(AstGroupKey));
+            TSNode key_node = ts_node_child_by_field_id(spec_node, FIELD_KEY);
+            key_spec->expr = build_expr(tp, key_node);
+
+            TSNode alias_node = ts_node_child_by_field_id(spec_node, FIELD_ALIAS);
+            if (!ts_node_is_null(alias_node)) {
+                StrView alias_view = ts_node_source(tp, alias_node);
+                key_spec->alias = name_pool_create_strview(tp->name_pool, alias_view);
+            } else {
+                key_spec->alias = infer_group_key_alias(tp, key_spec->expr);
+                if (!key_spec->alias) {
+                    log_error("Error: group by computed key requires an explicit 'as' alias");
+                }
+            }
+            if (key_spec->alias && group_alias_exists(ast_node->keys, key_spec->alias)) {
+                log_error("Error: duplicate group by key name '%.*s'; use an explicit unique alias",
+                    (int)key_spec->alias->len, key_spec->alias->chars);
+            }
+
+            if (prev_key == NULL) {
+                ast_node->keys = key_spec;
+            } else {
+                prev_key->next = (AstNode*)key_spec;
+            }
+            prev_key = key_spec;
+            ast_node->key_count++;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// Helper function to build all for clauses (shared between for_expr and for_stam)
+// Three-pass approach:
+// Pass 1: Process loop declarations to register loop vars in scope
+// Pass 2: Process let clauses (can reference loop vars)
+// Pass 3: Process where, group, order, limit, offset (can reference both)
+void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
+    TSTreeCursor cursor = ts_tree_cursor_new(for_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_loop = NULL;
+    AstNode* prev_let = NULL;
+    AstNode* prev_order = NULL;
+
+    // PASS 1: Process loop declarations to register loop vars in scope
+    log_debug("for clauses pass 1: loop declarations");
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+
+        if (field_id == FIELD_DECLARE) {
+            // Loop binding
+            AstNode* loop = build_loop_expr(tp, child);
+            log_debug("got loop type %d", loop->node_type);
+            if (prev_loop == NULL) {
+                ast_node->loop = loop;
+            } else {
+                prev_loop->next = loop;
+            }
+            prev_loop = loop;
+        }
+
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // PASS 2: Process let clauses (can reference loop vars)
+    log_debug("for clauses pass 2: let clauses");
+    cursor = ts_tree_cursor_new(for_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+
+        if (field_id == FIELD_LET) {
+            // Let clause - also registers name in scope
+            AstNode* let_clause = build_for_let_clause(tp, child);
+            if (prev_let == NULL) {
+                ast_node->let_clause = let_clause;
+            } else {
+                prev_let->next = let_clause;
+            }
+            prev_let = let_clause;
+        }
+
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // PASS 3: Process clauses that reference variables (where, group, order, limit, offset)
+    // These are now nested inside a for_clauses node
+    log_debug("for clauses pass 3: where/group/order/limit/offset");
+
+    // Find the for_clauses child node
+    TSNode clauses_node = {0};
+    uint32_t child_count = ts_node_child_count(for_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(for_node, i);
+        if (ts_node_symbol(child) == sym_for_clauses) {
+            clauses_node = child;
+            break;
+        }
+    }
+
+    if (!ts_node_is_null(clauses_node)) {
+        cursor = ts_tree_cursor_new(clauses_node);
+        has_node = ts_tree_cursor_goto_first_child(&cursor);
+
+        while (has_node) {
+            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+
+            if (field_id == FIELD_WHERE || ts_node_symbol(child) == sym_for_where_clause) {
+                // Where clause - get the condition expression
+                TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
+                ast_node->where = build_expr(tp, cond_node);
+                lint_condition_expr(tp, cond_node, ast_node->where, "where");
+            }
+            else if (field_id == FIELD_GROUP) {
+                // Group by clause
+                ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
+                // grouping starts a post-group scope so row/let bindings cannot leak into aggregate clauses.
+                enter_for_group_scope(tp, ast_node);
+                // Register group name in scope as an element; row bindings deliberately remain inaccessible after grouping.
+                if (ast_node->group && ast_node->group->name) {
+                    AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
+                    group_var->name = ast_node->group->name;
+                    group_var->type = &TYPE_ELMT;
+                    push_name(tp, group_var, NULL);
+                }
+            }
+            else if (field_id == FIELD_ORDER) {
+                // Order by clause - contains multiple order_spec
+                TSTreeCursor order_cursor = ts_tree_cursor_new(child);
+                bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
+                while (has_spec) {
+                    TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
+                    if (spec_field == FIELD_SPEC) {
+                        TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
+                        AstNode* order_spec = build_order_spec(tp, spec_node);
+                        if (prev_order == NULL) {
+                            ast_node->order = order_spec;
+                        } else {
+                            prev_order->next = order_spec;
+                        }
+                        prev_order = order_spec;
+                    }
+                    has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
+                }
+                ts_tree_cursor_delete(&order_cursor);
+            }
+            else if (field_id == FIELD_LIMIT) {
+                // Limit clause
+                TSNode last_node = ts_node_child_by_field_id(child, FIELD_LAST);
+                ast_node->limit_from_end = !ts_node_is_null(last_node);
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->limit = build_expr(tp, count_node);
+            }
+            else if (field_id == FIELD_OFFSET) {
+                // Offset clause
+                TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+                ast_node->offset = build_expr(tp, count_node);
+            }
+
+            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        }
+        ts_tree_cursor_delete(&cursor);
+    } // end if for_clauses node found
+
+    if (!ast_node->loop) {
+        log_error("Error: missing for loop declare");
+    }
+}
+
+AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
+    log_debug("build for expr");
+    AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
+    // Type will be determined after processing the 'then' expression
+
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
+
+    // Build all clauses (loop, let, where, group, order, limit, offset)
+    build_for_clauses(tp, for_node, ast_node);
+
+    TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
+    ast_node->then = build_expr(tp, then_node);
+
+    // determine for-expr type
+    if (!ast_node->then) {
+        log_debug("missing for then");
+        ast_node->type = &TYPE_ERROR;  // fallback
+    }
+    else {
+        log_debug("got for then type %d", ast_node->then->node_type);
+        // For expression type should be Item | List containing the element type
+        // TypeList* type_list = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+        // type_list->nested = ast_node->then->type;
+        ast_node->type = &TYPE_ANY;
+    }
+
+    tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
+    log_debug("build for stam");
+    AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_STAM, for_node, sizeof(AstForNode));
+
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = tp->current_scope->is_proc;  // inherit proc context
+    tp->current_scope = ast_node->vars;
+
+    // Build all clauses (loop, let, where, group, order, limit, offset)
+    build_for_clauses(tp, for_node, ast_node);
+
+    TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
+    ast_node->then = build_expr(tp, then_node);
+    log_debug("got for then type %d", ast_node->then->node_type);
+
+    // for statement returns type
+    ast_node->type = &TYPE_ANY;
+    tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+// `apply;` (splat) statement: re-dispatch each child of the matched item (~)
+// through the template registry. Equivalent to `for (c in ~) apply(c)`.
+// Synthesizes the for-expr AST so existing MIR codegen handles it.
+AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
+    log_debug("build apply stam (splat)");
+
+    // synthesize: for (c$apply in ~) apply(c$apply)
+    AstForNode* for_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, apply_node, sizeof(AstForNode));
+    for_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    for_node->vars->parent = tp->current_scope;
+    for_node->vars->is_proc = tp->current_scope->is_proc;
+    tp->current_scope = for_node->vars;
+
+    // synthesize loop binding `c$apply in ~`
+    AstLoopNode* loop = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, apply_node, sizeof(AstLoopNode));
+    StrView c_name = { .str = "c$apply", .length = 7 };
+    loop->name = name_pool_create_strview(tp->name_pool, c_name);
+    loop->index_name = NULL;
+    loop->key_filter = LOOP_KEY_ALL;
+
+    // current item ~ as the source
+    AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, apply_node, sizeof(AstNode));
+    current_item->type = &TYPE_ANY;
+    loop->as = current_item;
+    loop->type = &TYPE_ANY;
+
+    // register the loop var in scope
+    push_name(tp, (AstNamedNode*)loop, NULL);
+    for_node->loop = (AstNode*)loop;
+    for_node->let_clause = NULL;
+    for_node->where = NULL;
+    for_node->group = NULL;
+    for_node->order = NULL;
+    for_node->limit = NULL;
+    for_node->offset = NULL;
+
+    // synthesize body: apply(c$apply)
+    StrView apply_name = { .str = "apply", .length = 5 };
+    SysFuncInfo* apply_info = get_sys_func_info(&apply_name, 1);
+    if (!apply_info) {
+        log_error("apply_stam: 'apply' sys func (arity 1) not found");
+        for_node->then = NULL;
+        for_node->type = &TYPE_ERROR;
+        tp->current_scope = for_node->vars->parent;
+        return (AstNode*)for_node;
+    }
+    AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
+        AST_NODE_SYS_FUNC, apply_node, sizeof(AstSysFuncNode));
+    sys_node->fn_info = apply_info;
+    sys_node->type = apply_info->return_type;
+
+    AstIdentNode* arg = (AstIdentNode*)alloc_ast_node(tp,
+        AST_NODE_IDENT, apply_node, sizeof(AstIdentNode));
+    arg->name = loop->name;
+    arg->entry = lookup_name(tp, c_name);
+    arg->type = &TYPE_ANY;
+
+    AstCallNode* call = (AstCallNode*)alloc_ast_node(tp,
+        AST_NODE_CALL_EXPR, apply_node, sizeof(AstCallNode));
+    call->function = (AstNode*)sys_node;
+    call->argument = (AstNode*)arg;
+    call->pipe_inject = false;
+    call->propagate = false;
+    call->can_raise = false;
+    call->type = &TYPE_ANY;
+
+    for_node->then = (AstNode*)call;
+    for_node->type = &TYPE_ANY;
+
+    tp->current_scope = for_node->vars->parent;
+    return (AstNode*)for_node;
+}
+
+// while statement (procedural only)
+AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
+    log_debug("build while stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'while' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    AstWhileNode* ast_node = (AstWhileNode*)alloc_ast_node(tp, AST_NODE_WHILE_STAM, while_node, sizeof(AstWhileNode));
+
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = true;
+    tp->current_scope = ast_node->vars;
+
+    // build condition
+    TSNode cond_node = ts_node_child_by_field_id(while_node, FIELD_COND);
+    ast_node->cond = build_expr(tp, cond_node);
+    lint_condition_expr(tp, cond_node, ast_node->cond, "while");
+    log_debug("got while cond type %d", ast_node->cond ? ast_node->cond->node_type : -1);
+
+    // build body
+    TSNode body_node = ts_node_child_by_field_id(while_node, FIELD_BODY);
+    ast_node->body = build_expr(tp, body_node);
+    log_debug("got while body type %d", ast_node->body ? ast_node->body->node_type : -1);
+
+    ast_node->type = &TYPE_ANY;
+    tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+// break statement (procedural only)
+AstNode* build_break_stam(Transpiler* tp, TSNode break_node) {
+    log_debug("build break stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'break' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_BREAK_STAM, break_node, sizeof(AstNode));
+    ast_node->type = &TYPE_ANY;
+    return ast_node;
+}
+
+// continue statement (procedural only)
+AstNode* build_continue_stam(Transpiler* tp, TSNode continue_node) {
+    log_debug("build continue stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'continue' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CONTINUE_STAM, continue_node, sizeof(AstNode));
+    ast_node->type = &TYPE_ANY;
+    return ast_node;
+}
+
+// return statement (procedural only)
+AstNode* build_return_stam(Transpiler* tp, TSNode return_node) {
+    log_debug("build return stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'return' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    AstReturnNode* ast_node = (AstReturnNode*)alloc_ast_node(tp, AST_NODE_RETURN_STAM, return_node, sizeof(AstReturnNode));
+
+    // build optional return value
+    TSNode value_node = ts_node_child_by_field_id(return_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+    } else {
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_NULL;
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// raise statement - raises an error to the caller
+// Allowed in:
+// 1. Procedural functions (pn) - can always raise
+// 2. Pure functions (fn) with error return type (T^E or T@)
+AstNode* build_raise_stam(Transpiler* tp, TSNode raise_node) {
+    log_debug("build raise stam");
+
+    // Check if we're in a context where raise is allowed
+    // For now, we allow raise in procedures (is_proc=true) and will add
+    // function error type checking later for full error handling support
+    // TODO: Also allow in pure functions with error return type
+    if (!tp->current_scope->is_proc) {
+        // For now, log warning but continue - this allows raise in fn bodies
+        log_debug("'raise' in pure function - function should have error return type");
+    }
+
+    AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_STAM, raise_node, sizeof(AstRaiseNode));
+
+    // raise_stam now wraps a raise_expr child — get the value from it
+    TSNode raise_expr_node = ts_node_child(raise_node, 0);
+    TSNode value_node = ts_node_is_null(raise_expr_node) ? raise_expr_node
+                        : ts_node_child_by_field_id(raise_expr_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
+    } else {
+        log_error("Error: 'raise' requires an error expression");
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_ERROR;
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// raise expression (functional) - raises an error in expression context
+AstNode* build_raise_expr(Transpiler* tp, TSNode raise_node) {
+    log_debug("build raise expr");
+
+    AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_EXPR, raise_node, sizeof(AstRaiseNode));
+
+    // build required error value
+    TSNode value_node = ts_node_child_by_field_id(raise_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
+    } else {
+        log_error("Error: 'raise' requires an error expression");
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_ERROR;
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// var statement for mutable variables (procedural only)
+AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
+    log_debug("build var stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'var' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    // Reuse the let statement builder but mark as VAR_STAM
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_VAR_STAM, var_node, sizeof(AstLetNode));
+
+    // Build declarations (same logic as build_let_and_type_stam for let)
+    TSTreeCursor cursor = ts_tree_cursor_new(var_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_declare = NULL;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode* assign = build_assign_expr(tp, child, false);
+            if (assign && assign->node_type == AST_NODE_ASSIGN) {
+                AstNamedNode* named = (AstNamedNode*)assign;
+                // mark the name entry as mutable (var)
+                NameEntry* entry = lookup_name_in_current_scope(tp, named->name);
+                if (entry) {
+                    entry->is_mutable = true;
+                    named->entry = entry;
+                    // check if type annotation was provided
+                    TSNode type_node = ts_node_child_by_field_id(child, FIELD_TYPE);
+                    entry->has_type_annotation = !ts_node_is_null(type_node);
+                }
+            }
+            if (prev_declare == NULL) {
+                ast_node->declare = assign;
+            } else {
+                prev_declare->next = assign;
+            }
+            prev_declare = assign;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// assignment statement for mutable variables (procedural only)
+// supports: x = val, arr[i] = val, obj.field = val
+AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
+    log_debug("build assign stam");
+
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: assignment statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+
+    // get target node — could be identifier, index_expr, or member_expr
+    TSNode target_node = ts_node_child_by_field_id(assign_node, FIELD_TARGET);
+    TSSymbol target_symbol = ts_node_symbol(target_node);
+
+    // build value expression (same for all cases)
+    TSNode value_node = ts_node_child_by_field_id(assign_node, FIELD_VALUE);
+
+    if (target_symbol == SYM_INDEX_EXPR) {
+        // arr[i] = val — compound index assignment
+        AstCompoundAssignNode* ast_node = (AstCompoundAssignNode*)alloc_ast_node(
+            tp, AST_NODE_INDEX_ASSIGN_STAM, assign_node, sizeof(AstCompoundAssignNode));
+
+        // build object (the array/container)
+        TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
+        ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
+
+        // build index expression(s) — multi-dim arr[i, j, k] = v chains keys via ->next
+        TSNode idx_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
+        ast_node->key = build_expr(tp, idx_node);
+        if (ast_node->key) {
+            AstNode* tail = ast_node->key;
+            TSTreeCursor cur = ts_tree_cursor_new(target_node);
+            bool ok = ts_tree_cursor_goto_first_child(&cur);
+            bool seen_first = false;
+            while (ok) {
+                TSSymbol fid = ts_tree_cursor_current_field_id(&cur);
+                if (fid == FIELD_FIELD) {
+                    if (!seen_first) {
+                        seen_first = true;
+                    } else {
+                        TSNode extra = ts_tree_cursor_current_node(&cur);
+                        AstNode* next_idx = build_expr(tp, extra);
+                        if (next_idx) { tail->next = next_idx; tail = next_idx; }
+                    }
+                }
+                ok = ts_tree_cursor_goto_next_sibling(&cur);
+            }
+            ts_tree_cursor_delete(&cur);
+        }
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstFieldNode* left = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_INDEX_EXPR, target_node, sizeof(AstFieldNode));
+        left->object = ast_node->object;
+        left->field = ast_node->key;
+        left->computed = true;
+        left->type = &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
+        ast_node->right = ast_node->value;
+
+        return (AstNode*)ast_node;
+    }
+    else if (target_symbol == SYM_MEMBER_EXPR) {
+        // obj.field = val — compound member assignment
+        AstCompoundAssignNode* ast_node = (AstCompoundAssignNode*)alloc_ast_node(
+            tp, AST_NODE_MEMBER_ASSIGN_STAM, assign_node, sizeof(AstCompoundAssignNode));
+
+        // build object (the map/element)
+        TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
+        ast_node->object = build_expr(tp, obj_node);
+        validate_compound_mutable_root(tp, assign_node, ast_node->object);
+
+        // build field name as identifier node
+        TSNode field_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
+        TSSymbol field_sym = ts_node_symbol(field_node);
+        if (field_sym == SYM_IDENT || field_sym == SYM_BASE_TYPE) {
+            AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
+            StrView var_name = ts_node_source(tp, field_node);
+            id_node->name = name_pool_create_strview(tp->name_pool, var_name);
+            log_debug("member assign field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
+            ast_node->key = (AstNode*)id_node;
+        }
+        else {
+            ast_node->key = build_expr(tp, field_node);
+        }
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstFieldNode* left = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_MEMBER_EXPR, target_node, sizeof(AstFieldNode));
+        left->object = ast_node->object;
+        left->field = ast_node->key;
+        left->computed = false;
+        left->type = &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
+        ast_node->right = ast_node->value;
+
+        return (AstNode*)ast_node;
+    }
+    else {
+        // simple variable assignment: x = val
+        AstAssignStamNode* ast_node = (AstAssignStamNode*)alloc_ast_node(tp, AST_NODE_ASSIGN_STAM, assign_node, sizeof(AstAssignStamNode));
+
+        // get target identifier
+        StrView target_str = ts_node_source(tp, target_node);
+        ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
+
+        // lookup target variable to get its type info
+        NameEntry* entry = lookup_name(tp, target_str);
+        ast_node->target_node = entry ? entry->node : NULL;
+        ast_node->target_entry = entry;
+        ast_node->op = OPERATOR_ASSIGN;
+        AstIdentNode* left = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, target_node, sizeof(AstIdentNode));
+        left->name = ast_node->target;
+        left->entry = entry;
+        left->type = (entry && entry->node && entry->node->type) ? entry->node->type : &TYPE_ANY;
+        ast_node->left = (AstNode*)left;
+
+        // check that the target is a mutable variable (declared with var)
+        // Exception: in pn method bodies, object fields (AST_NODE_KEY_EXPR) are mutable
+        bool is_field_in_pn = (entry && entry->node &&
+                               entry->node->node_type == AST_NODE_KEY_EXPR &&
+                               tp->current_scope && tp->current_scope->is_proc);
+        if (entry && !entry->is_mutable && !is_field_in_pn) {
+            if (entry->node->node_type == AST_NODE_PARAM) {
+                record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot assign to '%.*s': parameter bindings are immutable",
+                    (int)target_str.length, target_str.str);
+            }
+            else {
+                // immutable let bindings are intentional; point users at var for reassignment.
+                record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot assign to let binding '%.*s'. declare with `var` instead of `let`.",
+                    (int)target_str.length, target_str.str);
+            }
+        }
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+        ast_node->right = ast_node->value;
+
+        // type analysis for var assignment
+        if (entry && entry->is_mutable && ast_node->value && ast_node->value->type && entry->node->type) {
+            TypeId var_tid = entry->node->type->type_id;
+            TypeId val_tid = ast_node->value->type->type_id;
+
+            if (var_tid != val_tid) {
+                if (entry->has_type_annotation) {
+                    // type-annotated var: assignment must follow declared type
+                    // allow ANY/NULL values (will use runtime cast). A sized
+                    // destination is also an explicit conversion boundary and
+                    // retains the documented Go-style truncation/wrap behavior;
+                    // ordinary parameter passing still requires exact embedding.
+                    bool compatible = (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL);
+                    if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
+                    if (!compatible &&
+                            (var_tid == LMD_TYPE_NUM_SIZED || var_tid == LMD_TYPE_UINT64) &&
+                            lambda_numeric_kind_from_type(ast_node->value->type) != LAMBDA_NUM_INVALID) {
+                        compatible = true;
+                    }
+                    if (!compatible) {
+                        int line = ts_node_start_point(assign_node).row + 1;
+                        record_type_error(tp, line,
+                            "cannot assign %s value to var '%.*s' of type %s",
+                            get_type_name(val_tid),
+                            (int)target_str.length, target_str.str,
+                            get_type_name(var_tid));
+                    }
+                } else if (!entry->type_widened) {
+                    // non-annotated var: widen to Item if types differ
+                    // null-initialized vars must widen too; otherwise later map
+                    // literals keep a null-shaped field and drop reassigned values.
+                    if (var_tid != LMD_TYPE_ANY) {
+                        entry->type_widened = true;
+                        log_debug("var '%.*s' widened to Item (was %s, assigned %s)",
+                            (int)target_str.length, target_str.str,
+                            get_type_name(var_tid), get_type_name(val_tid));
+                    }
+                }
+            }
+        }
+
+        return (AstNode*)ast_node;
+    }
+}
+
+// returns NULL for variadic marker (...)
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) {
+    log_debug("build param expr");
+
+    // check for variadic marker (...)
+    TSNode variadic = ts_node_child_by_field_id(param_node, FIELD_VARIADIC);
+    if (!ts_node_is_null(variadic)) {
+        log_debug("build param: variadic marker found");
+        return NULL;  // special marker, will be handled by build_func
+    }
+
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(param_node, FIELD_NAME);
+    StrView name_str = node_name_text(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
+
+    // allocate TypeParam for this parameter
+    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
+    ast_node->type = (Type*)param_type;
+
+    TSNode var_node = ts_node_child_by_field_id(param_node, FIELD_VAR);
+    param_type->is_var_param = !ts_node_is_null(var_node);
+
+    // check optional marker (?)
+    TSNode optional_node = ts_node_child_by_field_id(param_node, FIELD_OPTIONAL);
+    param_type->is_optional = !ts_node_is_null(optional_node);
+
+    // check for default value expression
+    TSNode default_node = ts_node_child_by_field_id(param_node, FIELD_DEFAULT);
+    if (!ts_node_is_null(default_node)) {
+        param_type->default_value = build_expr(tp, default_node);
+        param_type->is_optional = true;  // param with default is implicitly optional
+    }
+
+    // determine the type of the parameter
+    TSNode type_node = ts_node_child_by_field_id(param_node, FIELD_TYPE);
+    if (!ts_node_is_null(type_node)) {
+        AstNode* type_expr = build_expr(tp, type_node);
+        // validate that type_expr is actually a type (TypeType)
+        if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* type_type = (TypeType*)type_expr->type;
+            if (type_type->type) {
+                bool was_optional = param_type->is_optional;
+                bool was_var_param = param_type->is_var_param;
+                AstNode* default_value = param_type->default_value;
+                // Copy base Type fields
+                *(Type*)param_type = *type_type->type;
+                param_type->is_optional = was_optional;
+                param_type->is_var_param = was_var_param;
+                param_type->default_value = default_value;
+                // For complex types (TypeBinary, TypeUnary) and named map/object types,
+                // store pointer to full type so that downstream code can access
+                // extended fields (shape, struct_name, methods, etc.)
+                if (!is_global_simple_type(type_type->type) &&
+                    type_type->type->kind == TYPE_KIND_BINARY) {
+                    param_type->full_type = type_type->type;
+                    log_debug("parameter has union type, storing full_type pointer");
+                } else if (!is_global_simple_type(type_type->type) &&
+                           type_type->type->kind == TYPE_KIND_UNARY) {
+                    param_type->full_type = type_type->type;
+                    log_debug("parameter has occurrence type, storing full_type pointer");
+                } else if (is_param_full_type_id(type_type->type->type_id)) {
+                    // Phase 7: store full TypeMap/TypeObject/TypeElmt so direct
+                    // struct access (Phase 2/3) works on typed function params
+                    param_type->full_type = type_type->type;
+                } else {
+                    param_type->full_type = NULL;
+                }
+            }
+        } else {
+            // invalid type annotation - log error but continue with ANY type
+            StrView type_str = ts_node_source(tp, type_node);
+            log_error("Error: invalid type annotation '%.*s' - not a valid type",
+                (int)type_str.length, type_str.str);
+            tp->error_count++;
+        }
+    }
+    else {
+        *(Type*)param_type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
+        param_type->full_type = NULL;
+    }
+
+    if (!is_type) {
+        push_name(tp, ast_node, NULL);
+        // Legacy pn parameters remain locally mutable; explicit `var` marks
+        // inout intent for Phase 5 call-site checks.
+        if (tp->current_scope && tp->current_scope->is_proc) {
+            NameEntry* entry = lookup_name_in_current_scope(tp, ast_node->name);
+            if (entry) {
+                entry->is_mutable = true;
+                entry->is_var_param = param_type->is_var_param;
+            }
+        }
+    }
+    return ast_node;
+}
+
+// build named argument in function call: name: value
+AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
+    log_debug("build named argument");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_NAMED_ARG, arg_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(arg_node, FIELD_NAME);
+    StrView name_str = node_name_text(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
+
+    TSNode value_node = ts_node_child_by_field_id(arg_node, FIELD_VALUE);
+    ast_node->as = build_expr(tp, value_node);
+    ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
+
+    log_debug("named argument: %s", ast_node->name);
+    return (AstNode*)ast_node;
+}
+
+static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
+    AstStartNode* ast_node = (AstStartNode*)alloc_ast_node(
+        tp, AST_NODE_START, start_node, sizeof(AstStartNode));
+    ast_node->type = &TYPE_ANY;
+    ast_node->owner_scope = tp->current_scope;
+
+    // The contextual scanner admits `start` only before a named call operand;
+    // accepting that spawn effect in an fn would violate the fn/pn boundary.
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        record_semantic_error(tp, start_node, ERR_PROC_IN_FN,
+            "`start` is only allowed inside a procedure (pn)");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TSNode operand_node = ts_node_child_by_field_id(start_node, FIELD_OPERAND);
+    AstNode* operand = build_expr(tp, operand_node);
+    log_debug("concurrency start AST: operand syntax=%s ast=%d",
+        ts_node_type(operand_node), operand ? (int)operand->node_type : -1);
+    if (operand && operand->node_type == AST_NODE_PRIMARY) {
+        operand = ((AstPrimaryNode*)operand)->expr;
+        log_debug("concurrency start AST: unwrapped primary ast=%d",
+            operand ? (int)operand->node_type : -1);
+    }
+    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) {
+        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
+            "`start` operand must be a procedure call");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    ast_node->call = (AstCallNode*)operand;
+    AstNode* callee = ast_node->call->function;
+    TypeFunc* fn_type = callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)callee->type : NULL;
+    if (!fn_type || !fn_type->is_proc) {
+        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
+            "`start` operand must resolve to a procedure (pn) call");
+        ast_node->type = &TYPE_ERROR;
+    }
+    return (AstNode*)ast_node;
+}
+
+// for both func expr and stam
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
+    log_debug("build function");
+    bool is_proc = false;
+    TSNode kind = ts_node_child_by_field_id(func_node, FIELD_KIND);
+    if (!ts_node_is_null(kind)) {
+        StrView kind_str = ts_node_source(tp, kind);
+        is_proc = strview_equal(&kind_str, "pn");
+    }
+    log_debug("is proc: %d", is_proc);
+
+    AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
+        is_proc ? AST_NODE_PROC : is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR,
+        func_node, sizeof(AstFuncNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    TypeFunc* fn_type = (TypeFunc*)ast_node->type;
+    fn_type->is_anonymous = !is_named;  fn_type->is_proc = is_proc;
+
+    // 'pub' flag
+    TSNode pub = ts_node_child_by_field_id(func_node, FIELD_PUB);
+    fn_type->is_public = !ts_node_is_null(pub);
+
+    // get the function name
+    if (is_named) {
+        TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
+        StrView name = node_name_text(tp, fn_name_node);
+
+        // check if name conflicts with a system function (only for global scope)
+        if (is_global && is_sys_func_name(name.str, name.length)) {
+            log_debug("user function '%.*s' shadows system function with same name",
+                (int)name.length, name.str);
+        }
+
+        ast_node->name = name_pool_create_strview(tp->name_pool, name);
+        // add fn name to current scope
+        push_name(tp, (AstNamedNode*)ast_node, NULL);
+    }
+
+    // build the params
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = is_proc;
+    tp->current_scope = ast_node->vars;
+    AstNamedNode* prev_param = NULL;  int param_count = 0;  int required_count = 0;
+    bool seen_optional = false;  // track if we've seen an optional param
+
+    // for anonymous fn_expr with untyped params: (a, b) => expr
+    // the grammar parses untyped arrow functions as fn_expr → expr... => body
+    // where the unnamed expr children (identifiers) before body are treated as parameters
+    if (!is_named) {
+        // iterate named children that have no field (untyped params are unfielded exprs)
+        TSTreeCursor pre_cursor = ts_tree_cursor_new(func_node);
+        bool has_pre = ts_tree_cursor_goto_first_child(&pre_cursor);
+        while (has_pre) {
+            TSSymbol pre_field = ts_tree_cursor_current_field_id(&pre_cursor);
+            TSNode child = ts_tree_cursor_current_node(&pre_cursor);
+            if (pre_field == 0 && ts_node_is_named(child)) {
+                // unnamed named child — could be an untyped param identifier
+                TSNode param_node = child;
+                TSSymbol child_sym = ts_node_symbol(param_node);
+                while (child_sym == sym_primary_expr) {
+                    param_node = ts_node_named_child(param_node, 0);
+                    child_sym = ts_node_symbol(param_node);
+                }
+                log_debug("fn_expr: unnamed child symbol=%d", child_sym);
+                if (child_sym == sym_identifier) {
+                    AstNamedNode* param = (AstNamedNode*)alloc_ast_node(tp,
+                        AST_NODE_PARAM, child, sizeof(AstNamedNode));
+                    StrView name_str = ts_node_source(tp, child);
+                    param->name = name_pool_create_strview(tp->name_pool, name_str);
+
+                    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
+                    *(Type*)param_type = TYPE_ANY;
+                    param_type->full_type = NULL;
+                    param->type = (Type*)param_type;
+                    push_name(tp, param, NULL);
+                    if (is_proc) {
+                        NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
+                        if (entry) entry->is_mutable = true;
+                    }
+
+                    if (prev_param == NULL) {
+                        ast_node->param = param;
+                        fn_type->param = param_type;
+                    } else {
+                        prev_param->next = (AstNode*)param;
+                        ((TypeParam*)prev_param->type)->next = param_type;
+                    }
+                    prev_param = param;  param_count++;  required_count++;
+                    log_debug("fn_expr: added untyped param '%.*s'",
+                        (int)name_str.length, name_str.str);
+                }
+            }
+            has_pre = ts_tree_cursor_goto_next_sibling(&pre_cursor);
+        }
+        ts_tree_cursor_delete(&pre_cursor);
+    }
+
+    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {  // param declaration
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode* param = build_param_expr(tp, child, false);
+
+            // check for variadic marker (NULL return from build_param_expr)
+            if (param == NULL) {
+                fn_type->is_variadic = true;
+                log_debug("function is variadic");
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
+
+            TypeParam* param_type = (TypeParam*)param->type;
+            log_debug("got param: %s, optional=%d", param->name, param_type->is_optional);
+
+            // validate param ordering: required params must come before optional
+            if (param_type->is_optional) {
+                seen_optional = true;
+            } else {
+                if (seen_optional) {
+                    log_error("required parameter '%s' cannot follow optional parameter", param->name);
+                }
+                required_count++;
+            }
+
+            if (prev_param == NULL) {
+                ast_node->param = param;
+                fn_type->param = param_type;
+            }
+            else {
+                prev_param->next = (AstNode*)param;
+                ((TypeParam*)prev_param->type)->next = param_type;
+            }
+            prev_param = param;  param_count++;
+        }
+        else if (field_id == FIELD_TYPE) {  // return type
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode* type_expr = build_expr(tp, child);
+            // validate that type_expr is actually a type (TypeType)
+            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                Type* inner_type = ((TypeType*)type_expr->type)->type;
+                // Check if it's a return_type wrapper (TypeFunc carrying return type + error type)
+                if (inner_type && inner_type->type_id == LMD_TYPE_FUNC) {
+                    TypeFunc* return_type_info = (TypeFunc*)inner_type;
+                    fn_type->returned = return_type_info->returned;
+                    fn_type->error_type = return_type_info->error_type;
+                    fn_type->can_raise = return_type_info->can_raise;
+                    log_debug("function return type: ok=%d, error=%d, can_raise=%d",
+                        fn_type->returned ? fn_type->returned->type_id : -1,
+                        fn_type->error_type ? fn_type->error_type->type_id : -1,
+                        fn_type->can_raise);
+                } else {
+                    // Regular type expression (no error type)
+                    fn_type->returned = inner_type;
+                    fn_type->error_type = NULL;
+                    fn_type->can_raise = false;
+                }
+            } else {
+                StrView type_str = ts_node_source(tp, child);
+                log_error("Error: invalid return type '%.*s' - not a valid type",
+                    (int)type_str.length, type_str.str);
+                tp->error_count++;
+                fn_type->returned = &TYPE_ANY;
+            }
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    fn_type->param_count = param_count;
+    fn_type->required_param_count = required_count;
+
+    // build the function body
+    // ast_node->locals = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    // ast_node->locals->parent = tp->current_scope;
+    // tp->current_scope = ast_node->locals;
+    TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
+    ast_node->body = build_expr(tp, fn_body_node);
+
+    // determine the function return type
+    if (!fn_type->returned) {
+        fn_type->returned = ast_node->body->type;
+    } else if (ast_node->body->type) {
+        // Validate declared return type against body type
+        if (!types_compatible(ast_node->body->type, fn_type->returned)) {
+            int line = ts_node_start_point(func_node).row + 1;
+            record_type_error(tp, line,
+                "function '%.*s' body returns type %s, declared return type %s",
+                (int)ast_node->name->len, ast_node->name->chars,
+                get_type_name(ast_node->body->type->type_id),
+                get_type_name(fn_type->returned->type_id));
+            // Keep declared return type for interface consistency
+        }
+    }
+
+    // restore parent namescope
+    tp->current_scope = ast_node->vars->parent;
+
+    // Analyze captures for closure support
+    NameScope* global_scope = find_global_scope(ast_node->vars);
+    analyze_captures(tp, ast_node, global_scope);
+
+    log_debug("end building fn");
+    return (AstNode*)ast_node;
+}
+
+// Build a view/edit template declaration
+AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
+    log_debug("build view/edit template");
+
+    AstViewNode* ast_node = (AstViewNode*)alloc_ast_node(tp,
+        AST_NODE_VIEW, view_node, sizeof(AstViewNode));
+    ast_node->type = &TYPE_ANY;
+
+    // determine view vs edit
+    TSNode kind = ts_node_child_by_field_id(view_node, FIELD_KIND);
+    if (!ts_node_is_null(kind)) {
+        StrView kind_str = ts_node_source(tp, kind);
+        ast_node->is_edit = strview_equal(&kind_str, "edit");
+    }
+    log_debug("is edit: %d", ast_node->is_edit);
+
+    // optional name (identifier followed by ':')
+    TSNode name_node = ts_node_child_by_field_id(view_node, FIELD_NAME);
+    if (!ts_node_is_null(name_node)) {
+        StrView name = node_name_text(tp, name_node);
+        ast_node->name = name_pool_create_strview(tp->name_pool, name);
+        log_debug("view template name: %.*s", (int)name.length, name.str);
+    }
+
+    // model pattern (required)
+    TSNode pattern_node = ts_node_child_by_field_id(view_node, FIELD_PATTERN);
+    if (!ts_node_is_null(pattern_node)) {
+        // view_pattern is a wrapper node — unwrap to get the actual type expression
+        TSSymbol pat_sym = ts_node_symbol(pattern_node);
+        if (pat_sym == SYM_VIEW_PATTERN) {
+            TSNode inner = ts_node_named_child(pattern_node, 0);
+            if (!ts_node_is_null(inner)) {
+                pattern_node = inner;
+            }
+        }
+        ast_node->pattern = build_expr(tp, pattern_node);
+    } else {
+        log_error("view/edit template missing required pattern");
+    }
+
+    // create scope for params, state, and body
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = false; // body is functional
+    tp->current_scope = ast_node->vars;
+
+    // add ~ (current item) to scope — it refers to the matched model item
+    // (this is inherent to view/edit — ~ is always available)
+
+    // build parameters (optional)
+    AstNamedNode* prev_param = NULL;
+    TSTreeCursor cursor = ts_tree_cursor_new(view_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode* param = build_param_expr(tp, child, false);
+            if (param != NULL) {
+                if (prev_param == NULL) {
+                    ast_node->param = param;
+                } else {
+                    prev_param->next = (AstNode*)param;
+                }
+                prev_param = param;
+            }
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // build state declarations (optional)
+    TSNode state_node = ts_node_child_by_field_id(view_node, FIELD_STATE);
+    if (!ts_node_is_null(state_node)) {
+        AstStateEntry* prev_state = NULL;
+        TSNode child = ts_node_named_child(state_node, 0);
+        while (!ts_node_is_null(child)) {
+            TSSymbol sym = ts_node_symbol(child);
+            if (sym == SYM_STATE_ENTRY) {
+                AstStateEntry* entry = (AstStateEntry*)alloc_ast_node(tp,
+                    AST_NODE_STATE_ENTRY, child, sizeof(AstStateEntry));
+                entry->type = &TYPE_ANY;
+
+                TSNode name = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name_str = node_name_text(tp, name);
+                entry->name = name_pool_create_strview(tp->name_pool, name_str);
+
+                TSNode value = ts_node_child_by_field_id(child, FIELD_VALUE);
+                if (!ts_node_is_null(value)) {
+                    entry->value = build_expr(tp, value);
+                }
+
+                log_debug("state entry: %.*s", (int)name_str.length, name_str.str);
+
+                // add state variable to scope (accessible in body and handlers)
+                AstNamedNode* state_named = (AstNamedNode*)alloc_ast_node(tp,
+                    AST_NODE_PARAM, child, sizeof(AstNamedNode));
+                state_named->name = entry->name;
+                state_named->type = entry->value ? entry->value->type : &TYPE_ANY;
+                push_name(tp, state_named, NULL);
+                // mark state vars mutable so handlers can assign to them
+                NameEntry* state_entry = lookup_name_in_current_scope(tp, entry->name);
+                if (state_entry) state_entry->is_mutable = true;
+
+                if (prev_state == NULL) {
+                    ast_node->state = entry;
+                } else {
+                    prev_state->next_state = entry;
+                }
+                prev_state = entry;
+            }
+            child = ts_node_next_named_sibling(child);
+        }
+    }
+
+    // build body (functional — fn semantics)
+    TSNode body_node = ts_node_child_by_field_id(view_node, FIELD_BODY);
+    if (!ts_node_is_null(body_node)) {
+        ast_node->body = build_expr(tp, body_node);
+    }
+
+    // build event handlers (procedural — pn semantics)
+    AstEventHandler* prev_handler = NULL;
+    cursor = ts_tree_cursor_new(view_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_HANDLER) {
+            TSNode handler_node = ts_tree_cursor_current_node(&cursor);
+
+            AstEventHandler* handler = (AstEventHandler*)alloc_ast_node(tp,
+                AST_NODE_EVENT_HANDLER, handler_node, sizeof(AstEventHandler));
+            handler->type = &TYPE_ANY;
+
+            // event name
+            TSNode event_node = ts_node_child_by_field_id(handler_node, FIELD_EVENT);
+            if (!ts_node_is_null(event_node)) {
+                StrView event_str = node_name_text(tp, event_node);
+                handler->event = name_pool_create_strview(tp->name_pool, event_str);
+                log_debug("event handler: %.*s", (int)event_str.length, event_str.str);
+            }
+
+            // handler scope (procedural)
+            handler->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+            handler->vars->parent = ast_node->vars; // inherits template scope (state vars, params)
+            handler->vars->is_proc = true; // handlers are procedural
+            tp->current_scope = handler->vars;
+
+            // optional event parameter
+            TSNode param_node = ts_node_child_by_field_id(handler_node, FIELD_DECLARE);
+            if (!ts_node_is_null(param_node)) {
+                handler->param = build_param_expr(tp, param_node, false);
+                // mark param as mutable in proc scope
+                if (handler->param) {
+                    NameEntry* entry = lookup_name_in_current_scope(tp, handler->param->name);
+                    if (entry) entry->is_mutable = true;
+                }
+            }
+
+            // handler body
+            TSNode handler_body = ts_node_child_by_field_id(handler_node, FIELD_BODY);
+            if (!ts_node_is_null(handler_body)) {
+                handler->body = build_expr(tp, handler_body);
+            }
+
+            // restore scope to template scope
+            tp->current_scope = ast_node->vars;
+
+            if (prev_handler == NULL) {
+                ast_node->handler = handler;
+            } else {
+                prev_handler->next_handler = handler;
+            }
+            prev_handler = handler;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // restore parent scope
+    tp->current_scope = ast_node->vars->parent;
+
+    // register named template in scope (update pre-registered placeholder if exists)
+    if (ast_node->name) {
+        NameEntry* existing = lookup_name_in_current_scope(tp, ast_node->name);
+        if (existing && existing->node && existing->node->node_type == AST_NODE_VIEW) {
+            // update pre-registered placeholder from pass 1
+            existing->node = (AstNode*)ast_node;
+        } else {
+            push_name(tp, (AstNamedNode*)ast_node, NULL);
+        }
+    }
+
+    log_debug("end building view/edit template");
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
+    log_debug("build content, is_global=%d", is_global);
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
+    TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    ast_node->list_type = type;
+    ast_node->type = &TYPE_ANY;  // content() returns Item, not List
+
+    // Two-pass compilation for top-level functions (only when is_global is true)
+    if (is_global) {
+        log_debug("pass 1: scanning for top-level function declarations");
+        // Pass 1: Scan and register all top-level function names with placeholder nodes
+        TSNode child = ts_node_named_child(list_node, 0);
+        while (!ts_node_is_null(child)) {
+            TSSymbol symbol = ts_node_symbol(child);
+            if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+                // Create minimal placeholder function node
+                bool is_proc = false;
+                TSNode kind = ts_node_child_by_field_id(child, FIELD_KIND);
+                if (!ts_node_is_null(kind)) {
+                    StrView kind_str = ts_node_source(tp, kind);
+                    is_proc = strview_equal(&kind_str, "pn");
+                }
+
+                AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node(tp,
+                    is_proc ? AST_NODE_PROC : AST_NODE_FUNC, child, sizeof(AstFuncNode));
+                fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+                TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                fn_type->is_anonymous = false;
+                fn_type->is_proc = is_proc;
+                fn_type->returned = &TYPE_ANY;  // Safe default for forward references
+
+                // Initialize required fields to prevent crashes
+                fn_node->param = NULL;
+                fn_node->body = NULL;
+                fn_node->vars = NULL;
+                fn_node->captures = NULL;
+
+                // Get function name and register it early
+                TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name = node_name_text(tp, fn_name_node);
+                fn_node->name = name_pool_create_strview(tp->name_pool, name);
+
+                log_debug("pass 1: registering function placeholder '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
+                push_name(tp, (AstNamedNode*)fn_node, NULL);
+            }
+            else if (symbol == SYM_OBJECT_TYPE) {
+                // pre-register object type placeholder so it can be forward-referenced
+                TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView obj_name = node_name_text(tp, obj_name_node);
+
+                AstObjectTypeNode* obj_node = (AstObjectTypeNode*)alloc_ast_node(tp,
+                    AST_NODE_OBJECT_TYPE, child, sizeof(AstObjectTypeNode));
+                obj_node->name = name_pool_create_strview(tp->name_pool, obj_name);
+                // create placeholder TypeType wrapping a minimal TypeObject
+                TypeObject* placeholder_obj = (TypeObject*)pool_calloc(tp->pool, sizeof(TypeObject));
+                placeholder_obj->type_id = LMD_TYPE_OBJECT;
+                placeholder_obj->type_name.str = obj_node->name->chars;
+                placeholder_obj->type_name.length = obj_node->name->len;
+                TypeType* placeholder_tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                placeholder_tt->type = (Type*)placeholder_obj;
+                obj_node->type = (Type*)placeholder_tt;
+                obj_node->base_type = NULL;
+                obj_node->methods = NULL;
+                obj_node->constraints = NULL;
+                obj_node->item = NULL;
+
+                // detect 'pub' field on object_type
+                TSNode pub_node = ts_node_child_by_field_id(child, FIELD_PUB);
+                obj_node->is_public = !ts_node_is_null(pub_node);
+
+                log_debug("pass 1: registering object type placeholder '%.*s'",
+                    (int)obj_name.length, obj_name.str);
+                push_name(tp, (AstNamedNode*)obj_node, NULL);
+            }
+            else if (symbol == SYM_VIEW_STAM) {
+                // pre-register named view/edit templates for forward references
+                TSNode tmpl_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                if (!ts_node_is_null(tmpl_name_node)) {
+                    StrView tmpl_name = node_name_text(tp, tmpl_name_node);
+                    AstViewNode* view_node = (AstViewNode*)alloc_ast_node(tp,
+                        AST_NODE_VIEW, child, sizeof(AstViewNode));
+                    view_node->name = name_pool_create_strview(tp->name_pool, tmpl_name);
+                    view_node->type = &TYPE_ANY;
+                    view_node->pattern = NULL;
+                    view_node->param = NULL;
+                    view_node->body = NULL;
+                    view_node->state = NULL;
+                    view_node->handler = NULL;
+                    view_node->vars = NULL;
+
+                    log_debug("pass 1: registering view template placeholder '%.*s'",
+                        (int)tmpl_name.length, tmpl_name.str);
+                    push_name(tp, (AstNamedNode*)view_node, NULL);
+                }
+            }
+            child = ts_node_next_named_sibling(child);
+        }
+    }
+
+    // Pass 2: build all content (functions and other expressions)
+    log_debug("pass 2: building content bodies");
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* item = NULL;
+
+        if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+            if (is_global) {
+                // For global functions, look up the pre-registered placeholder
+                TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name = node_name_text(tp, fn_name_node);
+                NameEntry* entry = lookup_name(tp, name);
+
+                if (entry && entry->node &&
+                    (entry->node->node_type == AST_NODE_FUNC || entry->node->node_type == AST_NODE_PROC)) {
+                    AstFuncNode* fn_node = (AstFuncNode*)entry->node;
+                    log_debug("pass 2: completing function '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
+
+                    // Now build the complete function body
+                    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+
+                    // 'pub' flag
+                    TSNode pub = ts_node_child_by_field_id(child, FIELD_PUB);
+                    fn_type->is_public = !ts_node_is_null(pub);
+
+                    // Build parameters
+                    fn_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+                    fn_node->vars->parent = tp->current_scope;
+                    fn_node->vars->is_proc = fn_type->is_proc;
+                    tp->current_scope = fn_node->vars;
+
+                    TSTreeCursor cursor = ts_tree_cursor_new(child);
+                    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+                    AstNamedNode* prev_param = NULL;
+                    int param_count = 0;
+                    int required_count = 0;
+                    bool seen_optional = false;
+                    bool has_declared_return_type = false;
+
+                    while (has_node) {
+                        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+                        if (field_id == FIELD_DECLARE) {
+                            TSNode param_child = ts_tree_cursor_current_node(&cursor);
+                            AstNamedNode* param = build_param_expr(tp, param_child, false);
+
+                            if (param == NULL) {
+                                fn_type->is_variadic = true;
+                                log_debug("function is variadic");
+                                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                                continue;
+                            }
+
+                            TypeParam* param_type = (TypeParam*)param->type;
+                            log_debug("got param: %.*s, optional=%d", (int)param->name->len, param->name->chars, param_type->is_optional);
+
+                            if (param_type->is_optional) {
+                                seen_optional = true;
+                            } else {
+                                if (seen_optional) {
+                                    log_error("required parameter '%.*s' cannot follow optional parameter", (int)param->name->len);
+                                }
+                                required_count++;
+                            }
+
+                            if (prev_param == NULL) {
+                                fn_node->param = param;
+                                fn_type->param = param_type;
+                            } else {
+                                prev_param->next = (AstNode*)param;
+                                ((TypeParam*)prev_param->type)->next = param_type;
+                            }
+                            prev_param = param;
+                            param_count++;
+                        }
+                        else if (field_id == FIELD_TYPE) {
+                            TSNode type_child = ts_tree_cursor_current_node(&cursor);
+                            AstNode* type_expr = build_expr(tp, type_child);
+                            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                                Type* inner_type = ((TypeType*)type_expr->type)->type;
+                                // Check if it's a return_type wrapper (TypeFunc carrying return type + error type)
+                                if (inner_type && inner_type->type_id == LMD_TYPE_FUNC) {
+                                    TypeFunc* return_type_info = (TypeFunc*)inner_type;
+                                    fn_type->returned = return_type_info->returned;
+                                    fn_type->error_type = return_type_info->error_type;
+                                    fn_type->can_raise = return_type_info->can_raise;
+                                    log_debug("pass 2 function return type: ok=%d, error=%d, can_raise=%d",
+                                        fn_type->returned ? fn_type->returned->type_id : -1,
+                                        fn_type->error_type ? fn_type->error_type->type_id : -1,
+                                        fn_type->can_raise);
+                                } else {
+                                    // Regular type expression (no error type)
+                                    fn_type->returned = inner_type;
+                                    fn_type->error_type = NULL;
+                                    fn_type->can_raise = false;
+                                }
+                                has_declared_return_type = true;
+                            } else {
+                                StrView type_str = ts_node_source(tp, type_child);
+                                log_error("Error: invalid return type '%.*s' - not a valid type",
+                                    (int)type_str.length, type_str.str);
+                                tp->error_count++;
+                                fn_type->returned = &TYPE_ANY;
+                            }
+                        }
+                        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                    }
+                    ts_tree_cursor_delete(&cursor);
+
+                    fn_type->param_count = param_count;
+                    fn_type->required_param_count = required_count;
+
+                    // Build function body
+                    TSNode fn_body_node = ts_node_child_by_field_id(child, FIELD_BODY);
+                    fn_node->body = build_expr(tp, fn_body_node);
+
+                    // If no return type was declared, keep it as &TYPE_ANY (Item)
+                    // This ensures forward-referenced functions work correctly
+                    if (!has_declared_return_type) {
+                        fn_type->returned = &TYPE_ANY;  // Safe for all forward refs
+                    }
+
+                    // Restore parent scope
+                    tp->current_scope = fn_node->vars->parent;
+
+                    // Analyze captures
+                    NameScope* global_scope = find_global_scope(fn_node->vars->parent);
+                    analyze_captures(tp, fn_node, global_scope);
+
+                    item = (AstNode*)fn_node;
+                    log_debug("pass 2: completed function '%.*s' with body=%p",
+                        (int)fn_node->name->len, fn_node->name->chars, fn_node->body);
+                } else {
+                    log_error("Error: failed to find pre-registered function for '%.*s'",
+                        (int)name.length, name.str);
+                    // Fallback: build normally
+                    item = build_func(tp, child, true, is_global);
+                }
+            } else {
+                // For non-global functions, use original single-pass behavior
+                item = build_func(tp, child, true, is_global);
+            }
+        } else if (symbol == SYM_OBJECT_TYPE && is_global) {
+            // For global object types, look up the pre-registered placeholder and complete it
+            TSNode obj_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            StrView obj_name = node_name_text(tp, obj_name_node);
+            NameEntry* entry = lookup_name(tp, obj_name);
+
+            if (entry && entry->node && entry->node->node_type == AST_NODE_OBJECT_TYPE) {
+                AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry->node;
+                TypeType* tt = (TypeType*)obj_node->type;
+                TypeObject* obj_type = (TypeObject*)tt->type;
+                // set struct_name for direct field access optimization (Phase 5/6)
+                obj_type->struct_name = obj_node->name->chars;
+                log_debug("pass 2: completing object type '%.*s'", (int)obj_name.length, obj_name.str);
+
+                // get optional base type
+                TSNode base_node = ts_node_child_by_field_id(child, FIELD_BASE);
+                if (!ts_node_is_null(base_node)) {
+                    obj_node->base_type = build_expr(tp, base_node);
+                }
+
+                // iterate children: fields, methods, constraints
+                // Two-pass: first fields/constraints, then push fields into scope, then methods
+                TSNode obj_child = ts_node_named_child(child, 0);
+                AstNode* prev_field = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+                AstNode* prev_method = NULL;
+                AstNode* prev_constraint = NULL;
+
+                // Resolve inheritance: copy parent fields into child shape (parent fields first)
+                TypeObject* base_type_obj = resolve_base_type(tp, base_node, obj_type, &prev_entry, &byte_offset);
+
+                // Pass 1: fields and constraints
+                while (!ts_node_is_null(obj_child)) {
+                    TSSymbol child_sym = ts_node_symbol(obj_child);
+                    if (child_sym == SYM_ATTR) {
+                        AstNode* field_item = (AstNode*)build_key_expr(tp, obj_child);
+                        if (field_item) {
+                            if (!prev_field) { obj_node->item = field_item; }
+                            else { prev_field->next = field_item; }
+                            prev_field = field_item;
+
+                            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+                            String* pooled_name = ((AstNamedNode*)field_item)->name;
+                            StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                            name_view->str = pooled_name->chars;
+                            name_view->length = pooled_name->len;
+                            shape_entry->name = name_view;
+                            // unwrap TypeType to get the actual field data type
+                            Type* field_type = field_item->type;
+                            if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                                field_type = ((TypeType*)field_type)->type;
+                            }
+                            shape_entry->type = field_type;
+                            shape_entry->byte_offset = byte_offset;
+                            // read optional default value expression
+                            TSNode default_node = ts_node_child_by_field_id(obj_child, FIELD_DEFAULT);
+                            if (!ts_node_is_null(default_node)) {
+                                shape_entry->default_value = build_expr(tp, default_node);
+                            }
+                            if (!prev_entry) { obj_type->shape = shape_entry; }
+                            else { prev_entry->next = shape_entry; }
+                            prev_entry = shape_entry;
+                            obj_type->length++;
+                            byte_offset += sizeof(void*);
+                        }
+                    } else if (child_sym == SYM_THAT_CONSTRAINT) {
+                        // object-level constraint: enable implicit ~.name resolution
+                        TSNode constraint_expr = ts_node_child_by_field_id(obj_child, FIELD_CONSTRAINT);
+                        if (!ts_node_is_null(constraint_expr)) {
+                            bool old_in_that = tp->in_that_clause;
+                            tp->in_that_clause = true;
+                            AstNode* constraint = build_expr(tp, constraint_expr);
+                            tp->in_that_clause = old_in_that;
+                            if (constraint) {
+                                if (!prev_constraint) { obj_node->constraints = constraint; }
+                                else { prev_constraint->next = constraint; }
+                                prev_constraint = constraint;
+                                obj_type->constraint = constraint;
+                            }
+                        }
+                    }
+                    obj_child = ts_node_next_named_sibling(obj_child);
+                }
+
+                // Create a temporary sub-scope for field names
+                NameScope* obj_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+                obj_scope->parent = tp->current_scope;
+                tp->current_scope = obj_scope;
+
+                // Push field names into scope so method bodies can reference them
+                // First push inherited fields from parent
+                push_inherited_fields_to_scope(tp, base_type_obj);
+                // Then push own fields, unwrap TypeType to get the actual data type
+                AstNode* field_scan = obj_node->item;
+                while (field_scan) {
+                    if (field_scan->node_type == AST_NODE_KEY_EXPR) {
+                        AstNamedNode* fn = (AstNamedNode*)field_scan;
+                        Type* orig_type = fn->type;
+                        if (orig_type && orig_type->type_id == LMD_TYPE_TYPE) {
+                            fn->type = ((TypeType*)orig_type)->type;
+                        }
+                        push_name(tp, fn, NULL);
+                    }
+                    field_scan = field_scan->next;
+                }
+
+                // Pass 2: methods (with fields in scope)
+                obj_child = ts_node_named_child(child, 0);
+                while (!ts_node_is_null(obj_child)) {
+                    TSSymbol child_sym = ts_node_symbol(obj_child);
+                    if (child_sym == SYM_FUNC_STAM || child_sym == SYM_FUNC_EXPR_STAM) {
+                        AstNode* method = build_func(tp, obj_child, true, false);
+                        if (method) {
+                            if (!prev_method) { obj_node->methods = method; }
+                            else { prev_method->next = method; }
+                            prev_method = method;
+
+                            // create TypeMethod entry for runtime method table
+                            AstFuncNode* fn_method = (AstFuncNode*)method;
+                            TypeMethod* tm = (TypeMethod*)pool_calloc(tp->pool, sizeof(TypeMethod));
+                            StrView* method_name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+                            method_name_view->str = fn_method->name->chars;
+                            method_name_view->length = fn_method->name->len;
+                            tm->name = method_name_view;
+                            tm->compiled_fn = NULL;
+                            tm->is_proc = (method->node_type == AST_NODE_PROC);
+                            tm->next = NULL;
+                            if (!obj_type->methods) { obj_type->methods = tm; }
+                            else { obj_type->methods_last->next = tm; }
+                            obj_type->methods_last = tm;
+                            obj_type->method_count++;
+                        }
+                    }
+                    obj_child = ts_node_next_named_sibling(obj_child);
+                }
+
+                obj_type->byte_size = byte_offset;
+                obj_type->last = prev_entry;
+
+                // Restore scope (pop the temporary field scope)
+                tp->current_scope = obj_scope->parent;
+
+                // register in type_list (store TypeType wrapper for const_type() runtime access)
+                arraylist_append(tp->type_list, tt);
+                obj_type->type_index = tp->type_list->length - 1;
+
+                item = (AstNode*)obj_node;
+                log_debug("pass 2: completed object type '%.*s' with %d fields, %d methods",
+                    (int)obj_name.length, obj_name.str, obj_type->length, obj_type->method_count);
+            } else {
+                log_error("pass 2: failed to find pre-registered object type '%.*s'", (int)obj_name.length, obj_name.str);
+                item = build_object_type(tp, child);
+            }
+        } else {
+            item = build_expr(tp, child);
+
+            // enforce error handling: bare can_raise call without '?' is an error
+            if (item) {
+                AstNode* check = item;
+                if (check->node_type == AST_NODE_PRIMARY) {
+                    check = ((AstPrimaryNode*)check)->expr;
+                }
+                if (check && check->node_type == AST_NODE_CALL_EXPR) {
+                    AstCallNode* call = (AstCallNode*)check;
+                    if (call->can_raise && !call->propagate) {
+                        // get function name for error message
+                        const char* fn_name = "function";
+                        int fn_name_len = 8;
+                        if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
+                            AstSysFuncNode* sys_fn = (AstSysFuncNode*)call->function;
+                            fn_name = sys_fn->fn_info->name;
+                            fn_name_len = (int)strlen(fn_name);
+                        }
+                        record_semantic_error(tp, child, ERR_UNHANDLED_ERROR,
+                            "error from '%.*s' must be handled: use '%.*s(...)?' to propagate or 'let result^err = %.*s(...)' to capture",
+                            fn_name_len, fn_name, fn_name_len, fn_name, fn_name_len, fn_name);
+                    }
+                }
+            }
+        }
+
+        if (item) {
+            if (!prev_item) {
+                ast_node->item = item;
+            }
+            else {
+                prev_item->next = item;
+            }
+            prev_item = item;
+            type->length++;
+        }
+        // else comment or error
+        child = ts_node_next_named_sibling(child);
+    }
+
+    log_debug("end building content item: %p, %ld", ast_node->item, type->length);
+    if (flattern && type->length == 1) { return ast_node->item; }
+    return ast_node;
+}
+
+AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol) {
+    log_debug("build lit node");
+    // string, symbol, binary, datetime, time
+    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, lit_node, sizeof(AstPrimaryNode));
+    // TSNode val_node = quoted_value ? ts_node_named_child(lit_node, 0) : lit_node;
+    ast_node->type = build_lit_string(tp, lit_node, symbol);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
+    // depth guard: bail (NULL, the existing error convention) before the recursion
+    // can overflow the stack on deeply nested source.
+    lam::RecursionGuard depth_guard(&tp->build_depth, MAX_BUILD_DEPTH);
+    if (!depth_guard) {
+        log_error("build_expr: expression nesting too deep (>%d) — aborting build", MAX_BUILD_DEPTH);
+        return NULL;
+    }
+    // get the function name
+    TSSymbol symbol = ts_node_symbol(expr_node);
+    log_debug("build_expr: %s", ts_node_type(expr_node));
+    switch (symbol) {
+    // Wrapper nodes - unwrap and recurse to single child
+    case SYM_EXPR: {
+        // expr is a wrapper node with a single named child
+        TSNode child = ts_node_named_child(expr_node, 0);
+        if (ts_node_is_null(child)) {
+            log_error("expr wrapper node has no child");
+            return NULL;
+        }
+        return build_expr(tp, child);
+    }
+    case SYM_TYPE_EXPR: {
+        // type_expr is a wrapper node with a single named child
+        TSNode child = ts_node_named_child(expr_node, 0);
+        if (ts_node_is_null(child)) {
+            log_error("type_expr wrapper node has no child");
+            return NULL;
+        }
+        return build_expr(tp, child);
+    }
+    case SYM_PRIMARY_EXPR:
+        return build_primary_expr(tp, expr_node);
+    case SYM_CALL_EXPR:
+        // `start_expr` names its call operand directly instead of routing it
+        // through primary_expr, so the shared call builder must accept both.
+        return build_call_expr(tp, expr_node, symbol);
+    case SYM_UNARY_EXPR:
+        return build_unary_expr(tp, expr_node);
+    case SYM_BINARY_EXPR:
+        return build_binary_expr(tp, expr_node);
+    case SYM_CURRENT_EXPR:
+        return build_current_expr(tp, expr_node);
+    case SYM_LET_EXPR:
+        return build_let_expr(tp, expr_node);
+    case SYM_LET_BLOCK:
+        return build_let_block(tp, expr_node);
+    case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
+        return build_let_and_type_stam(tp, expr_node, symbol);
+    case SYM_FOR_EXPR:
+        return build_for_expr(tp, expr_node);
+    case SYM_FOR_STAM:
+        return build_for_stam(tp, expr_node);
+    case SYM_WHILE_STAM:
+        return build_while_stam(tp, expr_node);
+    case SYM_BREAK_STAM:
+        return build_break_stam(tp, expr_node);
+    case SYM_CONTINUE_STAM:
+        return build_continue_stam(tp, expr_node);
+    case SYM_RETURN_STAM:
+        return build_return_stam(tp, expr_node);
+    case SYM_RAISE_STAM:
+        return build_raise_stam(tp, expr_node);
+    case SYM_RAISE_EXPR:
+        return build_raise_expr(tp, expr_node);
+    case SYM_VAR_STAM:
+        return build_var_stam(tp, expr_node);
+    case SYM_ASSIGN_STAM:
+        return build_assign_stam(tp, expr_node);
+    case SYM_APPLY_STAM:
+        return build_apply_stam(tp, expr_node);
+    case SYM_IF_EXPR:
+    case SYM_IF_STAM:
+        return build_if_expr(tp, expr_node);
+    case SYM_MATCH_EXPR:
+        return build_match(tp, expr_node);
+    case SYM_ASSIGN_EXPR:
+        return build_assign_expr(tp, expr_node, false);  // standalone assign_expr is not a type definition
+    case SYM_ARRAY:
+        return build_array(tp, expr_node);
+    case SYM_MAP: {
+        // check for {TypeName} pattern: map with single identifier resolving to object type
+        uint32_t named_count = ts_node_named_child_count(expr_node);
+        if (named_count == 1) {
+            TSNode only_child = ts_node_named_child(expr_node, 0);
+            TSSymbol cs = ts_node_symbol(only_child);
+            // unwrap primary_expr wrapper if present
+            if (cs == SYM_PRIMARY_EXPR) {
+                only_child = ts_node_named_child(only_child, 0);
+                if (!ts_node_is_null(only_child)) cs = ts_node_symbol(only_child);
+            }
+            if (cs == SYM_IDENT) {
+                StrView name = ts_node_source(tp, only_child);
+                NameEntry* entry = lookup_name(tp, name);
+                if (entry && entry->node && entry->node->type) {
+                    Type* resolved = entry->node->type;
+                    if (resolved->type_id == LMD_TYPE_TYPE) {
+                        Type* inner = ((TypeType*)resolved)->type;
+                        if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+                            // {TypeName} with all defaults — build as empty object literal
+                            log_debug("build_map: detected {%.*s} as empty object literal", (int)name.length, name.str);
+                            TypeObject* obj_type = (TypeObject*)inner;
+                            AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
+                                AST_NODE_OBJECT_LITERAL, expr_node, sizeof(AstObjectLiteralNode));
+                            obj_node->type_name = name_pool_create_strview(tp->name_pool, name);
+                            obj_node->type = (Type*)obj_type;
+                            obj_node->item = NULL;
+                            return (AstNode*)obj_node;
+                        }
+                    }
+                }
+            }
+        }
+        return build_map(tp, expr_node);
+    }
+    case SYM_OBJECT_TYPE:
+        return build_object_type(tp, expr_node);
+    case SYM_ELEMENT:
+        return build_elmt(tp, expr_node);
+    case SYM_ELEMENT_TYPE:
+        return build_element_type(tp, expr_node);
+    case SYM_CONTENT:
+        return build_content(tp, expr_node, true, false);
+    // SYM_LIST removed — list syntax no longer exists
+    case SYM_IDENT:
+        return build_identifier(tp, expr_node);
+    case SYM_FUNC_STAM:
+        return build_func(tp, expr_node, true, false);
+    case SYM_FUNC_EXPR_STAM:
+        return build_func(tp, expr_node, true, false);
+    case SYM_FUNC_EXPR:  // anonymous function
+        return build_func(tp, expr_node, false, false);
+    case SYM_VIEW_STAM:
+        return build_view_stam(tp, expr_node);
+    case SYM_STRING:  case SYM_SYMBOL:  case SYM_BINARY:
+        return build_lit_node(tp, expr_node, true, symbol);
+    case SYM_DATETIME: {
+        AstPrimaryNode* dt_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        dt_node->type = build_lit_datetime(tp, expr_node, symbol);
+        return (AstNode*)dt_node;
+    }
+    case SYM_NAMED_VALUE: {
+        AstPrimaryNode* nv_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        StrView text = ts_node_source(tp, expr_node);
+        if (strview_equal(&text, "true") || strview_equal(&text, "false")) {
+            nv_node->type = &LIT_BOOL;
+        } else {
+            nv_node->type = build_lit_float(tp, expr_node);
+        }
+        return (AstNode*)nv_node;
+    }
+    case SYM_INT: {
+        AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+
+        // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
+        StrView source = ts_node_source(tp, expr_node);
+
+        // Create a null-terminated string for strtoll
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+
+        char* endptr;
+        int64_t value = strtoll(num_str, &endptr, 0);
+        mem_free(num_str);
+
+        log_debug("SYM_INT: parsed value %lld, checking range", value);
+        // Check if the value fits in 56-bit signed integer range
+        if (INT56_MIN <= value && value <= INT56_MAX) {
+            log_debug("Using LIT_INT for value %lld", value);
+            i_node->type = &LIT_INT;
+        }
+        else { // promote to float for values outside int56 range
+            log_debug("Using float for value %lld (outside int56 range)", value);
+            i_node->type = build_lit_float(tp, expr_node);
+        }
+        return (AstNode*)i_node;
+    }
+    case SYM_FLOAT: {
+        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        f_node->type = build_lit_float(tp, expr_node);
+        return (AstNode*)f_node;
+    }
+    case SYM_SIZED_INT: {
+        AstPrimaryNode* si_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        si_node->type = build_lit_sized_integer(tp, expr_node);
+        return (AstNode*)si_node;
+    }
+    case SYM_SIZED_FLOAT: {
+        AstPrimaryNode* sf_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        sf_node->type = build_lit_sized_float(tp, expr_node);
+        return (AstNode*)sf_node;
+    }
+    case SYM_BASE_TYPE:
+        return build_base_type(tp, expr_node);
+    case SYM_PRIMARY_TYPE:
+        return build_primary_type(tp, expr_node);
+    case sym_unary_type:
+        return build_expr(tp, ts_node_named_child(expr_node, 0));
+    case SYM_BINARY_TYPE:
+        return build_binary_type(tp, expr_node);
+    case SYM_FN_TYPE:
+        return build_func_type(tp, expr_node);
+    case sym_occurrence_type:
+        return build_occurrence_type(tp, expr_node);
+    case SYM_RANGE_TYPE:
+        return build_range_type(tp, expr_node);
+    case SYM_CONSTRAINED_TYPE:
+        return build_constrained_type(tp, expr_node);
+    case sym_concat_type:
+        return build_concat_type(tp, expr_node);
+    case SYM_GROUPED_TYPE:
+        return build_grouped_type(tp, expr_node);
+    case sym_negation_type:
+        return build_negation_type(tp, expr_node);
+    case SYM_PATTERN_CHAR_CLASS:
+        return build_pattern_char_class(tp, expr_node);
+    case SYM_RETURN_TYPE:
+        return build_return_type(tp, expr_node);
+    case SYM_RETURN_TYPE_PATTERN:
+        return build_return_type_pattern(tp, expr_node);
+    case SYM_RETURN_OCCURRENCE_TYPE:
+        return build_return_occurrence_type(tp, expr_node);
+    case SYM_NAMED_ARGUMENT:
+        return build_named_argument(tp, expr_node);
+    case SYM_START_EXPR:
+        return build_start_expr(tp, expr_node);
+    case SYM_IMPORT_MODULE:
+        // already processed
+        return NULL;
+    case SYM_COMMENT:
+        return NULL;
+    default:
+        log_debug("unknown syntax node: %s", ts_node_type(expr_node));
+        return NULL;
+    }
+}
+
+// push a name with a qualified alias prefix (alias.name) for aliased imports
+static void push_qualified_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import, String* alias) {
+    // create qualified name: alias.original_name
+    size_t alias_len = alias->len;
+    size_t name_len = node->name->len;
+    size_t total_len = alias_len + 1 + name_len;  // alias.name
+    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
+    memcpy(buf, alias->chars, alias_len);
+    buf[alias_len] = '.';
+    memcpy(buf + alias_len + 1, node->name->chars, name_len);
+    buf[total_len] = '\0';
+    StrView qualified = {buf, total_len};
+    String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
+
+    log_debug("pushing qualified name %.*s", (int)qualified_name->len, qualified_name->chars);
+
+    NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+    entry->name = qualified_name;
+    entry->node = (AstNode*)node;  entry->import = import;
+    entry->scope = tp->current_scope;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
+void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
+    log_debug("declare_module_import");
+    // import module
+    if (!import_node->script) { log_error("Missing script");  return; }
+    log_debug("script reference: %s", import_node->script->reference);
+    // loop through the public functions in the module
+    if (!import_node->script->ast_root) { log_error("Missing AST root");  return; }
+    AstNode* node = import_node->script->ast_root;
+    // Defensive check: validate node type instead of using assert
+    if (node->node_type != AST_SCRIPT) {
+        log_error("Error: declare_module_import expected AST_SCRIPT but got node_type %d", node->node_type);
+        return;  // Defensive recovery - exit gracefully
+    }
+    bool has_alias = (import_node->alias != nullptr);
+    node = ((AstScript*)node)->child;
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) {
+            node = ((AstListNode*)node)->item;  // drill down
+            continue;
+        }
+        else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
+            AstFuncNode* func_node = (AstFuncNode*)node;
+            log_debug("got imported fn/pn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
+                ((TypeFunc*)func_node->type)->is_public);
+            if (((TypeFunc*)func_node->type)->is_public) {
+                if (has_alias) {
+                    push_qualified_name(tp, (AstNamedNode*)func_node, import_node, import_node->alias);
+                } else {
+                    push_name(tp, (AstNamedNode*)func_node, import_node);
+                }
+            }
+        }
+        else if (node->node_type == AST_NODE_PUB_STAM) {
+            AstLetNode* pub_node = (AstLetNode*)node;
+            AstNode* declare = pub_node->declare;
+            while (declare) {
+                if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+                    // exported object type — register in importing script's type_list
+                    AstObjectTypeNode* obj_node = (AstObjectTypeNode*)declare;
+                    Type* node_type = obj_node->type;
+                    if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)node_type;
+                        TypeObject* obj_type = (TypeObject*)tt->type;
+                        // re-register in importing script's type_list with new local index
+                        arraylist_append(tp->type_list, (void*)tt);
+                        obj_type->type_index = tp->type_list->length - 1;
+                        log_debug("registered imported object type '%.*s' at local index %d",
+                            (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
+                    }
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)obj_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)obj_node, import_node);
+                    }
+                    log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
+                } else {
+                    AstNamedNode* dec_node = (AstNamedNode*)declare;
+                    if (has_alias) {
+                        push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                    } else {
+                        push_name(tp, (AstNamedNode*)dec_node, import_node);
+                    }
+                    log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
+                    // also export the error variable for ^err destructuring
+                    if (dec_node->error_name) {
+                        AstNamedNode* err_var = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
+                        err_var->node_type = AST_NODE_ASSIGN;
+                        err_var->name = dec_node->error_name;
+                        err_var->type = &TYPE_ANY;
+                        err_var->as = nullptr;
+                        if (has_alias) {
+                            push_qualified_name(tp, err_var, import_node, import_node->alias);
+                        } else {
+                            push_name(tp, err_var, import_node);
+                        }
+                        log_debug("got pub error var: %.*s", (int)dec_node->error_name->len, dec_node->error_name->chars);
+                    }
+                    // re-register type aliases in importing script's type_list
+                    if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* tt = (TypeType*)dec_node->type;
+                        Type* inner = tt->type;
+                        if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
+                            || inner->type_id == LMD_TYPE_ARRAY)) {
+                            arraylist_append(tp->type_list, (void*)tt);
+                            ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
+                            log_debug("registered imported type alias '%.*s' at local index %d",
+                                (int)dec_node->name->len, dec_node->name->chars, ((TypeMap*)inner)->type_index);
+                        }
+                    }
+                }
+                declare = declare->next;
+            }
+        }
+        else if (node->node_type == AST_NODE_OBJECT_TYPE) {
+            // standalone pub object type (e.g. pub type Counter { ... })
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)node;
+            if (obj_node->is_public) {
+                Type* node_type = obj_node->type;
+                if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+                    TypeType* tt = (TypeType*)node_type;
+                    TypeObject* obj_type = (TypeObject*)tt->type;
+                    arraylist_append(tp->type_list, (void*)tt);
+                    obj_type->type_index = tp->type_list->length - 1;
+                    log_debug("registered imported object type '%.*s' at local index %d",
+                        (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
+                }
+                if (has_alias) {
+                    push_qualified_name(tp, (AstNamedNode*)obj_node, import_node, import_node->alias);
+                } else {
+                    push_name(tp, (AstNamedNode*)obj_node, import_node);
+                }
+                log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
+            }
+        }
+        node = node->next;
+    }
+}
+
+#ifndef SIMPLE_SCHEMA_PARSER
+static bool record_existing_lambda_import_failure(Transpiler* tp, TSNode import_node,
+        AstImportNode* ast_node, const char* resolved_path) {
+    if (!file_exists(resolved_path)) return false;
+
+    // Existing .ls modules that fail parse/compile must poison the importer;
+    // otherwise the fallback path can let the caller compile and run anyway.
+    record_semantic_error(tp, import_node, ERR_IMPORT_ERROR,
+        "failed to import Lambda module '%.*s': existing source '%s' did not compile",
+        (int)ast_node->module.length, ast_node->module.str, resolved_path);
+    return true;
+}
+
+static bool load_hosted_module_import(Transpiler* tp, AstImportNode* ast_node,
+                                      StrBuf* resolved_path) {
+    if (!tp || !ast_node || !resolved_path || resolved_path->length < 3) return false;
+    size_t base_length = resolved_path->length - 3; // remove the failed ".ls"
+    resolved_path->length = base_length;
+    resolved_path->str[base_length] = '\0';
+
+    int extension_count = jube_hosted_extension_count();
+    for (int i = 0; i < extension_count; i++) {
+        const char* extension = jube_hosted_extension_at(i);
+        if (!extension || !*extension) continue;
+        strbuf_append_char(resolved_path, '.');
+        strbuf_append_str(resolved_path, extension[0] == '.' ? extension + 1 : extension);
+
+        Item hosted_ns = ItemNull;
+        if (jube_load_hosted_module(tp->runtime, resolved_path->str,
+                                    tp->reference, &hosted_ns)) {
+            ast_node->script = (Script*)create_module_import_script(
+                resolved_path->str, hosted_ns, tp->runtime);
+            ast_node->is_cross_lang = true;
+            return ast_node->script != NULL;
+        }
+        resolved_path->length = base_length;
+        resolved_path->str[base_length] = '\0';
+    }
+
+    strbuf_append_str(resolved_path, ".ls");
+    return false;
+}
+#endif
+
+AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
+    log_debug("build_module_import");
+    AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
+        tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
+    ast_node->type = &TYPE_NULL;
+    TSTreeCursor cursor = ts_tree_cursor_new(import_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        if (field_id == FIELD_ALIAS) {
+            StrView alias = ts_node_source(tp, child);
+            ast_node->alias = name_pool_create_strview(tp->name_pool, alias);
+        }
+        else if (field_id == FIELD_MODULE) {
+            StrView module = ts_node_source(tp, child);
+            ast_node->module = module;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (ast_node->module.length) {
+        // Check for built-in module imports (e.g., `import math`, `import io`)
+        // Three modes:
+        //   1. No import statement: use as math.sqrt(x) — already works at call sites
+        //   2. Global import: `import math;` — allows sqrt(x) without prefix
+        //   3. Aliased import: `import m:math;` — allows m.sqrt(x) with alias prefix
+        if (strview_equal(&ast_node->module, "math")) {
+            if (ast_node->alias) {
+                tp->builtin_alias_math = ast_node->alias;
+                log_debug("built-in module aliased import: %.*s:%.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)ast_node->module.length, ast_node->module.str);
+            } else {
+                tp->builtin_import_math = true;
+                log_debug("built-in module global import: math");
+            }
+            return NULL;  // no AST node needed: resolved at call sites
+        }
+        if (strview_equal(&ast_node->module, "io")) {
+            if (ast_node->alias) {
+                tp->builtin_alias_io = ast_node->alias;
+                log_debug("built-in module aliased import: %.*s:%.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)ast_node->module.length, ast_node->module.str);
+            } else {
+                tp->builtin_import_io = true;
+                log_debug("built-in module global import: io");
+            }
+            return NULL;  // no AST node needed: resolved at call sites
+        }
+
+#ifndef SIMPLE_SCHEMA_PARSER
+        {
+            char module_buf[128];
+            if (ast_node->module.length < sizeof(module_buf)) {
+                memcpy(module_buf, ast_node->module.str, ast_node->module.length);
+                module_buf[ast_node->module.length] = '\0';
+                jube_register_builtin_modules();
+                const JubeModuleDef* module = jube_find_static_module(module_buf);
+                if (module) {
+                    StrView module_view = strview_from_cstr(module->name);
+                    String* module_name = name_pool_create_strview(tp->name_pool, module_view);
+                    add_jube_module_import(tp, module_name, ast_node->alias);
+                    log_debug("Jube module import: %.*s%s%.*s",
+                        ast_node->alias ? (int)ast_node->alias->len : 0,
+                        ast_node->alias ? ast_node->alias->chars : "",
+                        ast_node->alias ? ":" : "",
+                        (int)module_view.length, module_view.str);
+                    return NULL;  // no AST node needed: resolved at call sites
+                }
+            }
+        }
+#endif
+
+        // Check if module is a bare URI (symbol literal like 'http://...')
+        // This is a namespace-only import: import ns: 'url'
+        if (ast_node->module.str[0] == '\'') {
+            // strip quotes from URI
+            StrView uri = { .str = ast_node->module.str + 1, .length = ast_node->module.length - 2 };
+            if (ast_node->alias) {
+                Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
+                String* uri_string = name_pool_create_strview(tp->name_pool, uri);
+                target->original = uri_string->chars;
+                add_namespace(tp, ast_node->alias, target);
+                log_debug("bare URI namespace import: %.*s -> %.*s",
+                    (int)ast_node->alias->len, ast_node->alias->chars,
+                    (int)uri.length, uri.str);
+            } else {
+                log_error("bare URI import requires an alias: import alias: 'url'");
+            }
+            // bare URI imports do not load a script — return NULL so they
+            // are not added to the AST child list (no code generation needed)
+            return NULL;
+        }
+        else if (ast_node->module.str[0] == '.') {
+            // relative import: resolve relative to importing script's directory
+            const char* base_dir = tp->directory ? tp->directory : "./";
+            log_debug("import base dir: %s", base_dir);
+            StrBuf* buf = strbuf_new();
+            strbuf_append_format(buf, "%s%.*s", base_dir,
+                (int)ast_node->module.length - 1, ast_node->module.str + 1);
+            char* ch = buf->str + buf->length - (ast_node->module.length - 1);
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+            ast_node->is_relative = true;
+
+            #ifdef SIMPLE_SCHEMA_PARSER
+            ast_node->script = nullptr;
+            #else
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            if (ast_node->script && !ast_node->script->ast_root) {
+                ast_node->script = NULL; // stub from failed precompile — treat as absent
+            }
+            #endif
+
+            if (ast_node->script) {
+                declare_module_import(tp, ast_node);
+            }
+            else {
+                #ifndef SIMPLE_SCHEMA_PARSER
+                if (!record_existing_lambda_import_failure(tp, import_node, ast_node, buf->str)) {
+                // .ls failed — try .js fallback for cross-language import
+                buf->str[buf->length - 2] = 'j';
+                buf->str[buf->length - 1] = 's';
+                Item ns = load_js_module(tp->runtime, buf->str);
+                if (ns.item != ItemNull.item) {
+                    ast_node->script = (Script*)create_module_import_script(
+                        buf->str, ns, tp->runtime);
+                    ast_node->is_cross_lang = true;
+                    if (ast_node->script) {
+                        declare_module_import(tp, ast_node);
+                    }
+                } else if (load_hosted_module_import(tp, ast_node, buf)) {
+                    declare_module_import(tp, ast_node);
+                } else {
+                    log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str,
+                        tp->reference ? tp->reference : "<unknown>");
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
+                        "  Resolved path: %s\n  Importing script: %s\n",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str,
+                        tp->reference ? tp->reference : "<unknown>");
+                    }
+                }
+                #endif
+            }
+            strbuf_free(buf);
+        }
+        else {
+            // absolute import: resolve from lambda home (g_lambda_home).
+            // e.g. "lambda.package.chart.chart" →
+            //   dots → slashes: "lambda/package/chart/chart"
+            //   strip the first segment ("lambda") and replace with g_lambda_home:
+            //   "./lmd/package/chart/chart.ls"  (release)
+            //   "./lambda/package/chart/chart.ls"  (dev)
+            //
+            // The first segment of the module path is always "lambda" by convention
+            // (scripts write `import lambda.package.*`).  We strip it and prepend
+            // g_lambda_home so the same source works in both dev and release layouts.
+            log_debug("absolute import: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            StrBuf* buf = strbuf_new();
+
+            // Convert dot-separated module name to a slash-separated path
+            strbuf_append_format(buf, "./%.*s",
+                (int)ast_node->module.length, ast_node->module.str);
+            char* ch = buf->str + 2;  // skip "./"
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+
+            // Replace the first path segment ("lambda") with g_lambda_home.
+            // buf->str is "./lambda/…" — find the end of that first segment.
+            char* segment_end = strchr(buf->str + 2, '/');
+            if (segment_end) {
+                StrBuf* fixed = strbuf_new();
+                // skip leading "./" in g_lambda_home if present
+                const char* home = g_lambda_home;
+                if (home[0] == '.' && home[1] == '/') home += 2;
+                strbuf_append_str(fixed, "./");
+                strbuf_append_str(fixed, home);
+                strbuf_append_str(fixed, segment_end);  // "/package/…" remainder
+                strbuf_free(buf);
+                buf = fixed;
+            }
+            ast_node->is_relative = false;
+
+            #ifdef SIMPLE_SCHEMA_PARSER
+            ast_node->script = nullptr;
+            #else
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            if (ast_node->script && !ast_node->script->ast_root) {
+                ast_node->script = NULL; // stub from failed precompile — treat as absent
+            }
+            #endif
+
+            if (ast_node->script) {
+                declare_module_import(tp, ast_node);
+            }
+            else {
+                #ifndef SIMPLE_SCHEMA_PARSER
+                if (!record_existing_lambda_import_failure(tp, import_node, ast_node, buf->str)) {
+                // .ls failed — try .js fallback for cross-language import
+                buf->str[buf->length - 2] = 'j';
+                buf->str[buf->length - 1] = 's';
+                Item ns = load_js_module(tp->runtime, buf->str);
+                if (ns.item != ItemNull.item) {
+                    ast_node->script = (Script*)create_module_import_script(
+                        buf->str, ns, tp->runtime);
+                    ast_node->is_cross_lang = true;
+                    if (ast_node->script) {
+                        declare_module_import(tp, ast_node);
+                    }
+                } else if (load_hosted_module_import(tp, ast_node, buf)) {
+                    declare_module_import(tp, ast_node);
+                } else {
+                    log_error("Error: failed to load module '%.*s' (resolved: %s)",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str);
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
+                        "  Resolved path: %s\n",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str);
+                    }
+                }
+                #endif
+            }
+            strbuf_free(buf);
+        }
+    }
+    return (AstNode*)ast_node;
+}
+
+// ==================== String/Symbol Pattern Building ====================
+
+// Build pattern character class (\d, \w, \s, \a, .)
+AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
+    log_debug("build pattern char class");
+    AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+        alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
+
+    StrView source = ts_node_source(tp, node);
+
+    if (source.length == 2 && source.str[0] == '\\') {
+        switch (source.str[1]) {
+        case 'd': ast_node->char_class = PATTERN_DIGIT; break;
+        case 'w': ast_node->char_class = PATTERN_WORD; break;
+        case 's': ast_node->char_class = PATTERN_SPACE; break;
+        case 'a': ast_node->char_class = PATTERN_ALPHA; break;
+        default: ast_node->char_class = PATTERN_ANY; break;
+        }
+    } else {
+        // \. for any character
+        ast_node->char_class = PATTERN_ANY;
+    }
+
+    // Type is pattern
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build concat_type node — concatenation of type terms (for string/symbol patterns)
+// e.g. \d[3] "-" \d[3] "-" \d[4]
+// With recursive grammar: concat_type -> type_term type_term | concat_type type_term
+AstNode* build_concat_type(Transpiler* tp, TSNode node) {
+    log_debug("build concat_type (pattern concatenation)");
+    AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
+        alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
+    seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+
+    uint32_t child_count = ts_node_named_child_count(node);
+    log_debug("build_concat_type: %d children", child_count);
+
+    AstNode* prev = nullptr;
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        AstNode* child_node = build_expr(tp, child);
+        if (child_node) {
+            // Flatten nested concat_type nodes (due to recursive grammar)
+            if (child_node->node_type == AST_NODE_PATTERN_SEQ) {
+                AstPatternSeqNode* nested = (AstPatternSeqNode*)child_node;
+                if (prev) {
+                    prev->next = nested->first;
+                } else {
+                    seq_node->first = nested->first;
+                }
+                // Find the last node in the nested sequence
+                AstNode* last = nested->first;
+                while (last && last->next) {
+                    last = last->next;
+                }
+                prev = last;
+            } else {
+                if (prev) {
+                    prev->next = child_node;
+                } else {
+                    seq_node->first = child_node;
+                }
+                prev = child_node;
+            }
+        }
+    }
+    return (AstNode*)seq_node;
+}
+
+// Build grouped_type node — parenthesized string type expr with optional ! prefix and occurrence
+// e.g. ("a" \d[4])?, !("x" | "y"), ("a" to "z")+
+AstNode* build_grouped_type(Transpiler* tp, TSNode node) {
+    log_debug("build grouped_type");
+    // find the inner _string_type_expr child (skip '!', '(', ')')
+    AstNode* inner = nullptr;
+    uint32_t child_count = ts_node_child_count(node);
+    bool has_negation = false;
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        StrView text = ts_node_source(tp, child);
+        if (ts_node_is_named(child)) {
+            TSSymbol sym = ts_node_symbol(child);
+            if (sym == sym_occurrence) {
+                continue; // handled below
+            }
+            inner = build_expr(tp, child);
+        } else if (text.length == 1 && text.str[0] == '!') {
+            has_negation = true;
+        }
+    }
+    if (!inner) {
+        log_error("grouped_type: no inner expression found");
+        return nullptr;
+    }
+
+    // wrap in negation if ! prefix
+    if (has_negation) {
+        AstUnaryNode* neg_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+        neg_node->operand = inner;
+        neg_node->op = OPERATOR_NOT;
+        neg_node->op_str = {.str = "!", .length = 1};
+        neg_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        inner = (AstNode*)neg_node;
+    }
+
+    // wrap in occurrence if present
+    TSNode occ_node = ts_node_child_by_field_id(node, field_occurrence);
+    if (!ts_node_is_null(occ_node)) {
+        AstUnaryNode* occ = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, node, sizeof(AstUnaryNode));
+        occ->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+        TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+        ((TypeType*)occ->type)->type = (Type*)type;
+        type->min_count = 0;
+        type->max_count = -1;
+
+        StrView op = ts_node_source(tp, occ_node);
+        occ->op_str = op;
+
+        // parse occurrence kind
+        TSNode actual_op = ts_node_child(occ_node, 0);
+        TSSymbol op_symbol = ts_node_is_null(actual_op) ? ts_node_symbol(occ_node) : ts_node_symbol(actual_op);
+
+        if (op_symbol == SYM_OCCURRENCE_COUNT) {
+            occ->op = OPERATOR_REPEAT;
+            parse_occurrence_count(op, &type->min_count, &type->max_count);
+        } else if (strview_equal(&op, "?")) {
+            occ->op = OPERATOR_OPTIONAL;
+            type->min_count = 0; type->max_count = 1;
+        } else if (strview_equal(&op, "+")) {
+            occ->op = OPERATOR_ONE_MORE;
+            type->min_count = 1; type->max_count = -1;
+        } else if (strview_equal(&op, "*")) {
+            occ->op = OPERATOR_ZERO_MORE;
+            type->min_count = 0; type->max_count = -1;
+        }
+        type->op = occ->op;
+
+        occ->operand = inner;
+        type->operand = inner->type;
+        arraylist_append(tp->type_list, type);
+        type->type_index = tp->type_list->length - 1;
+        inner = (AstNode*)occ;
+    }
+
+    return inner;
+}
+
+// Build negation_type node — prefix ! operator (for string/symbol patterns)
+// e.g. !\d
+AstNode* build_negation_type(Transpiler* tp, TSNode node) {
+    log_debug("build negation_type (pattern negation)");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+    ast_node->op = OPERATOR_NOT;
+    ast_node->op_str = {.str = "!", .length = 1};
+
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build string/symbol pattern definition
+// Pattern body now uses _type_expr (unified grammar), built via build_expr()
+AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
+    log_debug("build %s pattern definition", is_symbol ? "symbol" : "string");
+
+    AstPatternDefNode* ast_node = (AstPatternDefNode*)
+        alloc_ast_node(tp, is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN,
+                       node, sizeof(AstPatternDefNode));
+    ast_node->is_symbol = is_symbol;
+
+    // Get pattern name
+    TSNode name_node = ts_node_child_by_field_id(node, FIELD_NAME);
+    StrView name_view = node_name_text(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    // Get pattern expression — from type_assign's 'as' field (or legacy 'pattern' field)
+    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_AS);
+    if (ts_node_is_null(pattern_node)) {
+        pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    }
+    ast_node->as = build_expr(tp, pattern_node);
+
+    // Type is pattern type
+    TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+    pattern_type->is_symbol = is_symbol;
+    pattern_type->pattern_index = -1;  // Will be set during compilation
+    pattern_type->re2 = nullptr;       // Will be compiled during transpilation
+    pattern_type->source = nullptr;
+    ast_node->type = (Type*)pattern_type;
+
+    // Register pattern name in current scope
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
+
+    log_debug("built pattern definition: %.*s", (int)ast_node->name->len, ast_node->name->chars);
+    return (AstNode*)ast_node;
+}
+
+typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
+
+static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+                            bool descend_functions) {
+    if (!node || !visitor(node, data)) return;
+
+    switch (node->node_type) {
+    case AST_SCRIPT: {
+        for (AstNode* child = ((AstScript*)node)->child; child; child = child->next) {
+            walk_lambda_ast(child, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_PRIMARY:
+        walk_lambda_ast(((AstPrimaryNode*)node)->expr, visitor, data, descend_functions);
+        break;
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        walk_lambda_ast(((AstUnaryNode*)node)->operand, visitor, data, descend_functions);
+        break;
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        walk_lambda_ast(binary->left, visitor, data, descend_functions);
+        walk_lambda_ast(binary->right, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        walk_lambda_ast(call->function, visitor, data, descend_functions);
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            walk_lambda_ast(arg, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_START:
+        walk_lambda_ast((AstNode*)((AstStartNode*)node)->call, visitor, data, descend_functions);
+        break;
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        walk_lambda_ast(branch->cond, visitor, data, descend_functions);
+        walk_lambda_ast(branch->then, visitor, data, descend_functions);
+        walk_lambda_ast(branch->otherwise, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        walk_lambda_ast(match->scrutinee, visitor, data, descend_functions);
+        for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+            walk_lambda_ast(arm->pattern, visitor, data, descend_functions);
+            walk_lambda_ast(arm->body, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT: {
+        AstNode* item = ((AstArrayNode*)node)->item;
+        for (; item; item = item->next) {
+            walk_lambda_ast(item, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_NAMED_ARG:
+    case AST_NODE_PARAM:
+        walk_lambda_ast(((AstNamedNode*)node)->as, visitor, data, descend_functions);
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        walk_lambda_ast(((AstAssignStamNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        walk_lambda_ast(assign->object, visitor, data, descend_functions);
+        walk_lambda_ast(assign->key, visitor, data, descend_functions);
+        walk_lambda_ast(assign->value, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        walk_lambda_ast(field->object, visitor, data, descend_functions);
+        walk_lambda_ast(field->field, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* loop = (AstWhileNode*)node;
+        walk_lambda_ast(loop->cond, visitor, data, descend_functions);
+        walk_lambda_ast(loop->body, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM: {
+        AstForNode* loop = (AstForNode*)node;
+        for (AstNode* binding = loop->loop; binding; binding = binding->next) {
+            AstLoopNode* loop_binding = (AstLoopNode*)binding;
+            walk_lambda_ast(loop_binding->as, visitor, data, descend_functions);
+            walk_lambda_ast(loop_binding->on, visitor, data, descend_functions);
+        }
+        for (AstNode* binding = loop->let_clause; binding; binding = binding->next) {
+            walk_lambda_ast(binding, visitor, data, descend_functions);
+        }
+        walk_lambda_ast(loop->where, visitor, data, descend_functions);
+        if (loop->group) {
+            for (AstGroupKey* key = loop->group->keys; key; key = (AstGroupKey*)key->next) {
+                walk_lambda_ast(key->expr, visitor, data, descend_functions);
+            }
+        }
+        for (AstNode* order = loop->order; order; order = order->next) {
+            walk_lambda_ast(((AstOrderSpec*)order)->expr, visitor, data, descend_functions);
+        }
+        walk_lambda_ast(loop->limit, visitor, data, descend_functions);
+        walk_lambda_ast(loop->offset, visitor, data, descend_functions);
+        walk_lambda_ast(loop->then, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        walk_lambda_ast(((AstReturnNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR:
+        walk_lambda_ast(((AstRaiseNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_PUB_STAM: {
+        for (AstNode* decl = ((AstLetNode*)node)->declare; decl; decl = decl->next) {
+            walk_lambda_ast(decl, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC:
+        if (descend_functions) {
+            walk_lambda_ast(((AstFuncNode*)node)->body, visitor, data, descend_functions);
+        }
+        break;
+    case AST_NODE_OBJECT_TYPE: {
+        AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+        for (AstNode* method = object->methods; method; method = method->next) {
+            walk_lambda_ast(method, visitor, data, descend_functions);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static AstNode* unwrap_primary_ast(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    return node;
+}
+
+static AstFuncNode* direct_pn_callee(AstCallNode* call) {
+    if (!call) return NULL;
+    AstNode* function = unwrap_primary_ast(call->function);
+    if (!function || function->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)function)->entry;
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_PROC) return NULL;
+    return (AstFuncNode*)entry->node;
+}
+
+static bool collect_concurrency_function(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        arraylist_append((ArrayList*)data, node);
+    }
+    return true;
+}
+
+typedef struct MayAwaitScan {
+    bool found;
+    bool indirect;
+    const char* cause;
+} MayAwaitScan;
+
+static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause) {
+    AstNode* function = call ? unwrap_primary_ast(call->function) : NULL;
+    if (function && function->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
+        if (info && info->is_async) {
+            if (cause) *cause = info->name;
+            return true;
+        }
+        return false;
+    }
+    if (!function || !function->type || function->type->type_id != LMD_TYPE_FUNC ||
+            !((TypeFunc*)function->type)->is_proc) return false;
+    AstFuncNode* callee = direct_pn_callee(call);
+    if (!callee) {
+        if (indirect) *indirect = true;
+        if (cause) *cause = "indirect pn call";
+        return true;
+    }
+    if (callee->analysis && callee->analysis->may_await) {
+        if (cause) *cause = callee->name ? callee->name->chars : "anonymous pn";
+        return true;
+    }
+    return false;
+}
+
+static bool scan_may_await_node(AstNode* node, void* data) {
+    MayAwaitScan* scan = (MayAwaitScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_START) {
+        AstStartNode* start = (AstStartNode*)node;
+        // Creating a child is synchronous, but the owning block's implicit
+        // structured join can suspend unless ownership escapes by return.
+        if (!start->escapes) {
+            scan->found = true;
+            scan->cause = "implicit scoped-task join";
+        }
+        return false;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+
+    bool indirect = false;
+    const char* cause = NULL;
+    if (call_may_await((AstCallNode*)node, &indirect, &cause)) {
+        scan->found = true;
+        scan->indirect = indirect;
+        scan->cause = cause;
+    }
+    return !scan->found;
+}
+
+typedef struct TaskContextScan {
+    bool found;
+} TaskContextScan;
+
+static bool scan_task_context_node(AstNode* node, void* data) {
+    TaskContextScan* scan = (TaskContextScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_START) {
+        scan->found = true;
+        return false;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+    AstCallNode* call = (AstCallNode*)node;
+    if (call_may_await(call, NULL, NULL)) {
+        scan->found = true;
+        return false;
+    }
+    AstFuncNode* callee = direct_pn_callee(call);
+    if (callee && callee->analysis && callee->analysis->needs_task_context) {
+        scan->found = true;
+        return false;
+    }
+    return true;
+}
+
+typedef struct AwaitPointScan {
+    int count;
+} AwaitPointScan;
+
+static bool count_await_point_node(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_START) return false;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type == AST_NODE_CALL_EXPR &&
+            call_may_await((AstCallNode*)node, NULL, NULL)) {
+        ((AwaitPointScan*)data)->count++;
+    }
+    if ((node->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)node)->propagate) ||
+            node->node_type == AST_NODE_RETURN_STAM ||
+            node->node_type == AST_NODE_RAISE_STAM ||
+            node->node_type == AST_NODE_ASSIGN_STAM ||
+            node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
+            node->node_type == AST_NODE_PIPE_FILE_STAM) {
+        // These syntax edges can leave a lexical block before its tail, so
+        // each owns an unwind continuation in the resumable transform.
+        ((AwaitPointScan*)data)->count++;
+    }
+    if (node->node_type == AST_NODE_CONTENT) {
+        // Every lexical content block in a resumable pn has a synthetic scope
+        // leave. Empty scopes return immediately; owning scopes may park.
+        ((AwaitPointScan*)data)->count++;
+    }
+    return true;
+}
+
+typedef struct ConcurrencyValidation {
+    Transpiler* tp;
+} ConcurrencyValidation;
+
+static AstStartNode* returned_start_node(AstNode* value) {
+    value = unwrap_primary_ast(value);
+    if (!value) return NULL;
+    if (value->node_type == AST_NODE_START) return (AstStartNode*)value;
+    if (value->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)value)->entry;
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_ASSIGN) return NULL;
+    AstNode* assigned = unwrap_primary_ast(((AstNamedNode*)entry->node)->as);
+    return assigned && assigned->node_type == AST_NODE_START ? (AstStartNode*)assigned : NULL;
+}
+
+static bool validate_concurrency_node(AstNode* node, void* data) {
+    ConcurrencyValidation* validation = (ConcurrencyValidation*)data;
+    if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstStartNode* start = returned_start_node(((AstReturnNode*)node)->value);
+        if (start) start->escapes = true;
+        return true;
+    }
+    if (node->node_type != AST_NODE_START) return true;
+
+    AstStartNode* start = (AstStartNode*)node;
+    AstFuncNode* callee = direct_pn_callee(start->call);
+    if (!callee) return false;
+    for (FnCapture* capture = callee->captures; capture; capture = capture->next) {
+        if (capture->entry && capture->entry->is_mutable) {
+            // A spawned task may resume after its lexical parent moves on, so
+            // borrowing an outer var by reference would create shared mutation.
+            record_semantic_error(validation->tp, start->node, ERR_INVALID_EXPR_CONTEXT,
+                "`start` cannot capture mutable var '%.*s'; copy it to a `let` value or use message passing",
+                (int)capture->lambda_name->len, capture->lambda_name->chars);
+        }
+    }
+    return false;
+}
+
+static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
+    ArrayList* functions = arraylist_new(16);
+    if (!functions) return;
+    walk_lambda_ast((AstNode*)script, collect_concurrency_function, functions, true);
+
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
+        fn->analysis->may_await = false;
+        fn->analysis->needs_task_context = false;
+        fn->analysis->has_indirect_pn_call = false;
+        fn->analysis->await_point_count = 0;
+        fn->analysis->may_await_cause = NULL;
+    }
+
+    // Escape marking must precede may-await closure inference because a
+    // returned handle suppresses the birth block's implicit join.
+    ConcurrencyValidation validation = {.tp = tp};
+    walk_lambda_ast((AstNode*)script, validate_concurrency_node, &validation, true);
+
+    // Re-scan to a fixed point because forward calls can make callers suspend
+    // only after the callee's bit becomes known.
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            if (fn->node_type != AST_NODE_PROC || fn->analysis->may_await) continue;
+            MayAwaitScan scan = {};
+            walk_lambda_ast(fn->body, scan_may_await_node, &scan, false);
+            if (scan.found) {
+                fn->analysis->may_await = true;
+                fn->analysis->has_indirect_pn_call = scan.indirect;
+                fn->analysis->may_await_cause = scan.cause;
+                changed = true;
+                if (strcmp(scan.cause, "implicit scoped-task join") == 0) {
+                    log_debug("concurrency explain: pn %.*s suspends because it owns an %s",
+                        fn->name ? (int)fn->name->len : 6,
+                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                } else {
+                    log_debug("concurrency explain: pn %.*s suspends because it calls %s",
+                        fn->name ? (int)fn->name->len : 6,
+                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                }
+            }
+        }
+    }
+
+    // A procedure that starts a child but never parks still needs a scheduler
+    // task so `self()` and scoped ownership have a concrete parent. Propagate
+    // that requirement independently from the may-await closure.
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            if (fn->node_type != AST_NODE_PROC || fn->analysis->needs_task_context) continue;
+            TaskContextScan scan = {};
+            walk_lambda_ast(fn->body, scan_task_context_node, &scan, false);
+            if (scan.found) {
+                fn->analysis->needs_task_context = true;
+                changed = true;
+            }
+        }
+    }
+
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        if (fn->node_type != AST_NODE_PROC || !fn->analysis->may_await) continue;
+        AwaitPointScan scan = {};
+        walk_lambda_ast(fn->body, count_await_point_node, &scan, false);
+        fn->analysis->await_point_count = scan.count;
+    }
+
+    arraylist_free(functions);
+}
+
+AstNode* build_script(Transpiler* tp, TSNode script_node) {
+    log_debug("build script");
+    AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
+    tp->current_scope = ast_node->global_vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+
+    // build the script body
+    TSNode child = ts_node_named_child(script_node, 0);
+    AstNode* prev = NULL;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* ast = NULL;
+        switch (symbol) {
+        case SYM_IMPORT_MODULE:
+            // import module (also handles namespace imports: import ns: 'url')
+            ast = build_module_import(tp, child);
+            break;
+        case SYM_CONTENT:
+            ast = build_content(tp, child, true, true);
+            break;
+        case SYM_COMMENT:
+            // skip comments
+            break;
+        default:
+            log_debug("unknown script child: %s", ts_node_type(child));
+        }
+        if (ast) {
+            if (!prev) ast_node->child = ast;
+            else { prev->next = ast; }
+            prev = ast;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    if (ast_node->child) ast_node->type = ast_node->child->type;
+    // Duplicate/invalid declarations can leave recovery placeholders linked
+    // into the partial AST; concurrency analysis is valid only after a clean build.
+    if (tp->error_count == 0) {
+        analyze_lambda_concurrency(tp, ast_node);
+    }
+    log_debug("build script child: %p", ast_node->child);
+    return (AstNode*)ast_node;
+}

@@ -16,10 +16,10 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON_DIR = ROOT / "lambda" / "py"
 MAIN = ROOT / "lambda" / "main.cpp"
-CORE_JIT_CATALOG = ROOT / "lambda" / "sys_func_registry.c"
+CORE_JIT_CATALOG = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
 CORE_IMPORTER = ROOT / "lambda" / "build_ast.cpp"
 CORE_TRANSPILE_HEADER = ROOT / "lambda" / "transpiler.hpp"
-CORE_AST = ROOT / "lambda" / "ast-core.hpp"
+CORE_AST = ROOT / "lambda" / "runtime" / "ast-core.hpp"
 BUILD_CONFIG = ROOT / "build_lambda_config.json"
 PYTHON_JUBE_ADAPTER = PYTHON_DIR / "python_jube_module.cpp"
 PYTHON_MIR_LOWERING = PYTHON_DIR / "transpile_py_mir.cpp"
@@ -210,7 +210,7 @@ def check_core_jit_catalog_has_no_python_ownership() -> None:
     forbidden = ("py/py_", '"py_')
     for token in forbidden:
         if token in source:
-            fail(f"lambda/sys_func_registry.c retains Python-owned JIT import token {token}")
+            fail(f"lambda/runtime/sys_func_registry.c retains Python-owned JIT import token {token}")
 
 
 def check_core_importer_has_no_python_loader() -> None:
@@ -225,7 +225,7 @@ def check_shared_ast_has_no_python_profile() -> None:
     source = text(CORE_AST)
     for token in ("LAMBDA_PYTHON", "py_profile", '"python"'):
         if token in source:
-            fail(f"lambda/ast-core.hpp retains Python-specific profile token {token}")
+            fail(f"lambda/runtime/ast-core.hpp retains Python-specific profile token {token}")
 
 
 def check_python_goldens_are_complete() -> None:

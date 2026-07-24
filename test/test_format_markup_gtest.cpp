@@ -7,8 +7,8 @@
 #include <string.h>
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_builder.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/format/format.h"
 #include "../lambda/format/format-markup.h"
 #include "../lambda/format/format-utils.h"

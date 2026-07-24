@@ -1,6 +1,6 @@
 
 #include "../lib/strbuf.h"
-#include "lambda-error.h"
+#include "runtime/lambda-error.h"
 #include <tree_sitter/api.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()

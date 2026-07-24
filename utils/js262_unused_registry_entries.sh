@@ -22,7 +22,7 @@
 set -eu -o pipefail
 
 STATS="${1:-./temp/jit_emit_stats}"
-REGISTRY="lambda/sys_func_registry.c"
+REGISTRY="lambda/runtime/sys_func_registry.c"
 
 if [[ ! -e "$STATS" ]]; then
     echo "missing telemetry data: $STATS" >&2

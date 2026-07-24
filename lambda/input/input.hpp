@@ -58,7 +58,7 @@ public:
 InputManager* input_manager_create();
 void input_manager_destroy(InputManager* mgr);
 
-#include "../mark_builder.hpp"
+#include "../io/mark_builder.hpp"
 
 #ifdef __cplusplus
 extern "C" {

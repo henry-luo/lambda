@@ -2,4 +2,4 @@
 // existence checks allocate/evaluate at runtime, so compile that section in
 // lambda-rt without duplicating the representation implementation.
 #define LAMBDA_PATH_RUNTIME_IMPLEMENTATION
-#include "../path.c"
+#include "../core/path.c"

@@ -6,7 +6,7 @@
  */
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"

@@ -18,10 +18,10 @@
 //   - Content strings remain fast with arena allocation
 
 #include "mark_builder.hpp"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
-#include "../mark_reader.hpp"  // for ArrayReader
+#include "../core/mark_reader.hpp"  // for ArrayReader
 #include "../core/lambda_typed.hpp"
 #include "../../lib/str.h"
 #include "../input/input.hpp"

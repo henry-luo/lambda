@@ -9,7 +9,7 @@
 #include "py_bigint.h"
 #include "../jube/jube.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"

@@ -4,7 +4,7 @@
 
 #include "parse_error.hpp"
 #include "source_tracker.hpp"
-#include "../mark_builder.hpp"
+#include "../io/mark_builder.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/memtrack.h"

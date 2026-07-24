@@ -18,5 +18,5 @@ rule:
 files:
   - "lambda/mark_builder.cpp"
   - "lambda/mark_reader.cpp"
-  - "lambda/print.cpp"
+  - "lambda/core/print.cpp"
   - "lambda/format/format-json.cpp"

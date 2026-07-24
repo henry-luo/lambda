@@ -2,7 +2,7 @@
 #include "format-utils.h"
 #include "format-utils.hpp"
 #include "html-defs.h"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "../input/css/css_symbol_hook.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"

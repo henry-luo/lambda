@@ -1,11 +1,11 @@
 #include "format.h"
 #include "format-utils.hpp"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/datetime.h"
 #include "../../lib/strbuf.h"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 
 // Forward declarations using MarkReader API with JsonContext
 static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& item, int indent);

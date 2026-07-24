@@ -24,7 +24,7 @@
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../input/css/dom_node.hpp"

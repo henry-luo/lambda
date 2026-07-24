@@ -14,7 +14,7 @@
 #include "js_property_attrs.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 

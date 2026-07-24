@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "../lambda/lambda.hpp"
-#include "../lambda/binary.h"
+#include "../lambda/core/binary.h"
 #include "../lib/log.h"
 
 extern "C" {

@@ -2,7 +2,7 @@
 #include "html5_token.h"
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
-#include "../../mark_builder.hpp"
+#include "../../io/mark_builder.hpp"
 #include "../../../lib/html_entities.h"
 #include "../input-utils.h"
 #include "../line_counter.hpp"

@@ -16,7 +16,7 @@
 #include "bash_ast.hpp"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/hashmap.h"

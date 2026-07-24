@@ -10,8 +10,8 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "view.hpp"
 #include "render.hpp"
-#include "../lambda/ast.hpp"
-#include "../lambda/mark_builder.hpp"
+#include "../lambda/runtime/ast.hpp"
+#include "../lambda/io/mark_builder.hpp"
 // str.h included via view.hpp
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"

@@ -8,7 +8,7 @@
  */
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "js_class.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"

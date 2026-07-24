@@ -23,7 +23,7 @@
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
-#include "../sysinfo.h"
+#include "../runtime/sysinfo.h"
 
 // Lambda format functions (C++ linkage)
 #include "../format/format.h"
@@ -490,7 +490,7 @@ extern "C" Item py_stdlib_sys_init(void) {
 
 // Internal: compile a Python-style regex string to a RE2 TypePattern*
 // Lambda patterns use AST; for Python's string patterns we create TypePattern directly.
-#include "../re2_wrapper.hpp"
+#include "../runtime/re2_wrapper.hpp"
 
 // We use RE2 directly since Python regex strings are RE2-compatible (mostly)
 #include <re2/re2.h>

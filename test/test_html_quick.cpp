@@ -1,6 +1,6 @@
 // Quick test to understand Lambda HTML parser behavior
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include <stdio.h>
 
 extern "C" {

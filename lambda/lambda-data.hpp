@@ -43,9 +43,9 @@ class SchemaValidator;
 #undef max
 #undef min
 
-#include "name_pool.hpp"
-#include "shape_pool.hpp"
-#include "ast-core.hpp"
+#include "core/name_pool.hpp"
+#include "core/shape_pool.hpp"
+#include "runtime/ast-core.hpp"
 
 // void *memcpy(void *dest, const void *src, size_t n);
 // void *memset(void *s, int c, size_t n);
@@ -96,7 +96,7 @@ typedef struct EvalContext : Context {
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h
-#include "utf_string.h"
+#include "core/utf_string.h"
 
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type

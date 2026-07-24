@@ -1,10 +1,10 @@
-#include "../transpiler.hpp"
+#include "transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/file.h"
 #include "../../lib/shell.h"
-#include "../utf_string.h"
+#include "../core/utf_string.h"
 #include "../format/format.h"
 #include "radiant_event_hook.h"
 

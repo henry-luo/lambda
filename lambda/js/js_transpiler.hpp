@@ -1,7 +1,7 @@
 #pragma once
 
 #include "js_ast.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 
 #ifdef __cplusplus
 extern "C" {

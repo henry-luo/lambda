@@ -2,7 +2,7 @@
 // Safe implementation with centralized type handling
 #include "format.h"
 #include "format-utils.hpp"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include <string.h>
 
 // forward declarations

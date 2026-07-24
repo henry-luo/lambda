@@ -5,7 +5,7 @@
 #include "js_runtime.h"
 #include "../module/radiant/radiant_history.hpp"
 #include "../input/css/dom_element.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"

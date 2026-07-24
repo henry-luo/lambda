@@ -11,10 +11,10 @@
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
 #include "../../lib/memtrack.h"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "validator.hpp"
-#include "../mark_reader.hpp"
-#include "../lambda-error.h"
+#include "../core/mark_reader.hpp"
+#include "../runtime/lambda-error.h"
 
 // External function declarations
 extern "C" {

@@ -18,9 +18,9 @@
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
-#include "../../mark_reader.hpp"  // For ElementReader
-#include "../../mark_editor.hpp"  // For MarkEditor
-#include "../../mark_builder.hpp" // For MarkBuilder
+#include "../../core/mark_reader.hpp"  // For ElementReader
+#include "../../io/mark_editor.hpp"  // For MarkEditor
+#include "../../io/mark_builder.hpp" // For MarkBuilder
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
 void element_dom_map_remove(HashMap* map, Element* elem);

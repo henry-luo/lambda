@@ -1,6 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "../../lib/file.h"
-#include "../lambda-error.h"
+#include "../runtime/lambda-error.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
 

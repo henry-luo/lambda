@@ -12,7 +12,7 @@
  */
 
 #include "lambda-stack.h"
-#include "../lambda-error.h"
+#include "lambda-error.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include <cstdio>

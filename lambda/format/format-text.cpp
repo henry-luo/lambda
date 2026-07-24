@@ -1,10 +1,10 @@
 #include "format.h"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include <string.h>
 #include <ctype.h>
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem_factory.h"
-#include "../mark_reader.hpp"
+#include "../core/mark_reader.hpp"
 #include "format-utils.hpp"
 
 // Forward declarations (MarkReader-based with context)

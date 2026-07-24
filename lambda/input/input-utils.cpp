@@ -5,7 +5,7 @@
 
 #include "input-utils.hpp"
 #include "../lambda-data.hpp"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"

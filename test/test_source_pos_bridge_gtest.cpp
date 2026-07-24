@@ -9,14 +9,14 @@
 #include <string.h>
 
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/render_map.h"
+#include "../lambda/runtime/render_map.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
 #include "../lib/test_utils.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/mark_builder.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
 #include "../radiant/event.hpp"
 
@@ -408,7 +408,7 @@ TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {
 // ---------------------------------------------------------------------------
 
 #include "../lambda/lambda.h"
-#include "../lambda/mark_reader.hpp"
+#include "../lambda/core/mark_reader.hpp"
 
 namespace {
 

@@ -14,7 +14,7 @@
 #include "py_class.h"
 #include "py_runtime.h"
 #include "../lambda-data.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>

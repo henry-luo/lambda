@@ -18,12 +18,12 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
-#include "../lambda/template_registry.h"
-#include "../lambda/render_map.h"
+#include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
-#include "../lambda/transpiler.hpp"   // Runtime (heap and name_pool)
-#include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
+#include "../lambda/runtime/transpiler.hpp"   // Runtime (heap and name_pool)
+#include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_property_set / js_array_new / js_array_push

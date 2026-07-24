@@ -10,9 +10,9 @@
 
 #include "py_bigint.h"
 #include "../lambda-data.hpp"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 #include "../lambda.h"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 #include "py_runtime.h"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"

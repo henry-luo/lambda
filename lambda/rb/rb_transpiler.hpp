@@ -2,7 +2,7 @@
 #pragma once
 
 #include "rb_ast.hpp"
-#include "../transpiler.hpp"
+#include "../runtime/transpiler.hpp"
 
 #ifdef __cplusplus
 extern "C" {

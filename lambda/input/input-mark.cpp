@@ -1,12 +1,12 @@
 #include "input.hpp"
-#include "../mark_builder.hpp"
+#include "../io/mark_builder.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/datetime.h"
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
-#include "../lambda-decimal.hpp"
+#include "../core/lambda-decimal.hpp"
 
 #include <string.h>
 

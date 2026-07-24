@@ -35,16 +35,16 @@
 #include "../lib/log.h"  // Add logging support
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
-#include "transpiler.hpp"  // For Runtime struct definition
-#include "ast.hpp"  // For print_root_item declaration
+#include "runtime/transpiler.hpp"  // For Runtime struct definition
+#include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_sexpr.h"  // For --emit-sexpr command
 
 // Error handling with stack traces
-#include "lambda-error.h"
+#include "runtime/lambda-error.h"
 #include "runtime/lambda-stack.h"
 
 // System info for sys.* paths
-#include "sysinfo.h"
+#include "runtime/sysinfo.h"
 
 #include "../radiant/radiant.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
