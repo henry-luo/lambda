@@ -7847,6 +7847,16 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
         return false;
     }
     ShapeEntry* entry = (ShapeEntry*)cached->entry;
+    // A shared constructor shape names storage that a sibling instance may not
+    // have assigned yet. Writing the raw slot here would leave the instance's
+    // ctor_reserved_mask set, so the value would be stored but stay invisible to
+    // reads and enumeration; creating the own property must go through the slow
+    // path, which clears the reservation (and honours prototype setters).
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+        return false;
+    }
     if (!js_store_ic_write_same_slot(entry, m->data, value, out_reason)) return false;
     return true;
 }
@@ -7888,6 +7898,13 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
     }
     if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_OFFSET;
+        return false;
+    }
+    // Reserved constructor slots are layout metadata, not own properties, so
+    // cache only the initialized state that ordinary lookup can observe.
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
     Item old_value = _map_read_field(entry, m->data);

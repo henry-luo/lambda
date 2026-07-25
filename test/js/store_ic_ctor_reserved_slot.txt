@@ -1,0 +1,4 @@
+0 object 0 0 strength|v1|v2|direction true true
+1 object 1 1 strength|v1|v2|direction true true
+2 object 2 2 strength|v1|v2|direction true true
+edit object 42 7 false
