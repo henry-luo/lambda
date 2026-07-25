@@ -1,6 +1,105 @@
 # Lambda Impl Plan: Tune 6 — Result12 Tail Elimination (LJS shape lookups + Lambda untyped maps + native math)
 
-**Status: PLANNED — 2026-07-24.**
+**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** T0 done, L1 done and landed,
+J2 implemented + measured + reverted, L2/L3/J1/J3 not started. **The T0 census
+overturned this plan's central premise — read §0.1 before doing any more work
+from it.**
+
+---
+
+## 0.1 Execution record and premise correction (2026-07-26)
+
+**T0.1 census (DONE)** — release-profile build, raw data in `temp/t6_census_*.tsv`:
+
+| bench | load_ic probes | hit mono | hit poly | miss | megamorphic |
+|---|---|---|---|---|---|
+| hashmap | 47,010,886 | 16,898,520 | 10,124,773 | 1,440,158 | **18,547,462** |
+| richards | 1,116,046 | 838,095 | 277,842 | **109** | 0 |
+| deltablue | 1,421,395 | 1,001,902 | 407,778 | 11,715 | 0 |
+| crypto_sha1 | *(no load_ic rows)* | | | | property_set 424,527 / 42 sites |
+
+**J1's premise is disproven.** The plan assumed prototype-chain misses dominate.
+richards misses on **0.01%** of probes and deltablue on 0.8% — the PIC has almost
+nothing to win there. What richards/deltablue actually pay is the per-hit C-call
+tax on a ~100%-hit IC, which is **J3**, not J1. J1 is deprioritised: do not build
+it until J3 lands and a fresh census shows proto misses actually dominating. Its
+companion fix (re-key shaped ctor/devirt fast paths by TypeMap identity instead
+of class-name strings, JS_07 §7.7) is independently worthwhile and can be
+salvaged on its own.
+
+**hashmap is megamorphic-dominated, but not for the reason §3.2 assumed.**
+Root cause, traced with temporary instrumentation on the IC install and the
+shape-detach paths:
+
+- Structurally identical HashMap instances get **pointer-distinct TypeMaps** —
+  one per `run()`. `Object.keys()` is identical across runs; the IC compares
+  shape pointers, so 5+ shapes ⇒ permanent megamorphic (there is no re-warm
+  once `JS_LOAD_IC_MEGAMORPHIC` is set).
+- The divergence is **not** detachment: `T6_DETACH_TRACE` fired zero times.
+  The shapes carry `is_shared_constructor_shape=0`, `is_transition_shared_shape=0`,
+  `is_private_clone=0` — they never entered any sharing scheme at all.
+- `map_put` (`lambda/input/input.cpp:474`) only consults the shared transition
+  table when `map_type_is_shared_js_shape(map_type)` is *already* true. An object
+  born unshaped from `js_new_object()` therefore grows a **private** TypeMap
+  chain field by field, and every instance ends up with its own.
+
+**So the real lever is a realm-owned shared root shape for plain objects**, so
+that field-by-field growth flows through the existing (already correct, already
+shared) transition table and structurally identical objects converge on one
+TypeMap. `EmptyMap` is a process-global singleton and must NOT be used as that
+root — hang it off `Input` so it dies with the realm's pool, per this plan's own
+realm-ownership constraint. This is the highest-value remaining item; it is what
+`hashmap` (worst LJS row), and probably `cd`/`havlak`, are actually waiting on.
+
+**J2 (DONE → REVERTED, §3.2).** Implemented as specified
+(`js_new_object_with_shape_cached` + per-site cell in `jm_transpile_object`).
+It works: a literal receiver site went 199,996/200,000 megamorphic →
+199,999/200,000 monomorphic. But it does not pay, because these rows'
+megamorphism comes from constructed objects, not literals. Isolated A/B on
+release (dedicated `LAMBDA_JS_SHARED_LITERAL_SHAPE` gate, ctor sharing on in
+both arms, 3-run medians): havlak2 94,757 vs 90,976 ms (**−4%**),
+jetstream/hashmap 67,549 vs 63,235 (**−7%**), splay +6%, navier +1%,
+richards/deltablue/crypto_sha1 flat. Gate was "havlak ≥2x" ⇒ not met, net
+negative ⇒ reverted per the plan's own demote-to-unshared rule. A comment at the
+emission site records the measurement so it is not retried blindly.
+
+Two things were kept from that work:
+- `test/js/object_literal_instance_isolation.js` + `.txt` — 12-case instance
+  isolation net (golden from Node), pinning what any future sharing scheme must
+  preserve.
+- A **real correctness fix** in `js_set_shaped_slot`: writing `null` to a slot a
+  sibling had tagged `T` left the entry claiming `T`, so the null read back as a
+  zero-valued `T` (e.g. `false`). Now detaches on T→NULL and retags; GC-safe
+  because the detach clones before the retag.
+
+**Pre-existing bug found, still open.** The same null-loses-its-tag defect exists
+on the `fn_map_set` path and is reachable via ordinary constructor sharing with
+no Tune6 code at all: `function P(v){this.x=v}` over `[false, null, false]`
+yields `false,false,false` (Node: `false,null,false`). The suppression is
+deliberate — `lambda/runtime/lambda-eval.cpp:6974` documents that downgrading a
+shared ShapeEntry to NULL would make GC skip tracing sibling container pointers —
+so the fix must detach first, exactly as the `js_set_shaped_slot` fix does.
+Tracked separately; out of scope here because Tune6 is a no-semantic-change plan.
+
+**L1 (DONE, landed, §4.1).** See §4.1 for the measured result. L1.2's hash-first
+path proved **unnecessary**: hoisting `strlen` and switching the per-field
+compare to the existing `typemap_shape_name_equals_id` (int name-id test first)
+captured the win with zero semantic risk, so the ordered scan, last-writer-wins
+and nested/spread recursion are all preserved by construction and the plan's
+duplicate-key/unnamed-entry hazard never arises.
+
+**Gates green at this checkpoint:** `test-lambda-baseline` 3617/3617,
+`test262-baseline` 40261/40261 zero regressions, `make node-baseline` 2039/3550
+— identical to clean master, verified by stashing (the stored node baseline is
+stale and reports ~1178 spurious `REGRESS` rows on master too), `make lint` no
+new findings.
+
+**Suggested order from here:** shared-root transition shapes (new, §0.1) →
+L3 (native math, self-contained) → J3 → L2. J1 only if a later census justifies it.
+
+---
+
+**Original plan status: PLANNED — 2026-07-24.**
 **Successor of:** `vibe/Lambda_Impl_Tune4.md` + `vibe/Lambda_Impl_Tune5.md`
 (both IMPLEMENTED, exit = Result12). Result12 moved the geo means (MIR 4.73x→3.01x,
 LJS 19.3x→15.1x) and proved the remaining tail is **not** GC, typed elements, or
@@ -232,7 +331,34 @@ set); zero-regression gates.
 
 ## 4. Track L — Lambda MIR untyped maps + native math (R6)
 
-### 4.1 Phase L1 — O(1) untyped map reads (1-2 days)
+### 4.1 Phase L1 — O(1) untyped map reads (1-2 days) — **DONE 2026-07-26**
+
+**Landed as L1.1 + a name-id fast compare; L1.2/L1.3 not needed.**
+`map_get_for_owner` and `_map_get` (`lambda/runtime/lambda-data-runtime.cpp`)
+now compute key length and `name_id` once at the public entry and thread them
+through the recursion via `*_keyed` helpers, comparing with the existing
+`typemap_shape_name_equals_id`. Previously `strlen(key)` was recomputed for
+*every* ShapeEntry compared, so a miss on an n-field map cost n strlens.
+
+Measured on release, 3-run medians, same host, "before" = `git checkout` of that
+one file:
+
+| benchmark | before | after | speedup |
+|---|---|---|---|
+| jetstream/richards.ls | 372.3 ms | 242.0 ms | **1.54x** |
+| awfy/havlak2.ls | 70.0 ms | 55.1 ms | **1.27x** |
+| jetstream/splay.ls | 226.5 ms | 184.1 ms | **1.23x** |
+| jetstream/crypto_sha1.ls | 245.2 ms | 208.6 ms | **1.18x** |
+| jetstream/navier_stokes.ls | 1110.8 ms | 964.2 ms | **1.15x** |
+
+No regressions. New test `test/lambda/map_duplicate_key_lookup.ls` + `.txt`
+(15 cases: duplicate literal keys, type-changing duplicates, spread shadowing in
+both directions, nested spread chains, absent key). Its golden was verified
+**identical on pre-L1 master**, so it pins existing behaviour rather than
+encoding the change.
+
+Original plan text follows.
+
 
 - **L1.1** `map_get_for_owner`/`_map_get`: hoist `strlen(key)` out of the loop
   (callers pass C strings; compute once). Mechanical, zero-risk, do first.

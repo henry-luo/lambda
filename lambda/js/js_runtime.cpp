@@ -3234,7 +3234,12 @@ static bool js_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!tm || (!tm->is_shared_constructor_shape && !tm->is_transition_shared_shape)) return false;
     if (field_type == value_type) return false;
-    if (field_type == LMD_TYPE_NULL || value_type == LMD_TYPE_NULL) return false;
+    // NULL→T is blueprint establishment (slots are born NULL and the first real
+    // write tags them), so it must not detach. T→NULL is a genuine per-instance
+    // divergence: the store below writes a null word but the entry keeps
+    // claiming T, so without detaching, a sibling sharing the blueprint would
+    // read this instance's null back as a zero-valued T (e.g. `false`).
+    if (field_type == LMD_TYPE_NULL) return false;
     return true;
 }
 
@@ -3368,7 +3373,10 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     }
     // Update ShapeEntry type in-place (NULL→type is the common constructor init path).
     // All shaped slots are 8 bytes so no reshape is needed.
-    if (field_type != value_type && value_type != LMD_TYPE_NULL) {
+    // Retag on T→NULL too: the slot now genuinely holds null, and leaving the
+    // old tag makes the null word read back as a zero-valued T. Detachment above
+    // has already given this instance a private entry when the shape was shared.
+    if (field_type != value_type) {
         entry->type = type_info[value_type].type;
     }
 }

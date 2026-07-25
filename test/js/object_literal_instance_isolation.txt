@@ -1,0 +1,16 @@
+1,1,changed,1,1
+2,2,2,2,2
+10,gone,10,10
+true,false,true,true
+only-first,none,none
+p|extra / p
+100,1,300
+9,1,9
+false,true
+number:0 string:str1 number:2 string:str3 number:4 string:str5
+0/0,10/1,20/2,30/3
+zam zam
+false,null,false,false
+7,7,null,7
+5,undef,5
+false,true

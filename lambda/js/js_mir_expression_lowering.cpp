@@ -11661,6 +11661,11 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
     int shape_count = 0;
     bool static_shape = jm_object_static_shape(mt, obj, &shape_names,
         &shape_lens, &shape_count);
+    // Tune6 J2 (measured, NOT adopted): a per-site shape cache here does make
+    // literal receivers monomorphic, but it regressed havlak2 ~4% and
+    // jetstream/hashmap ~7% and moved nothing else, because those rows'
+    // megamorphism comes from unshared *constructed* shapes, not literals.
+    // See vibe/Lambda_Impl_Tune6.md §3.2. Keep literals unshared.
     MIR_reg_t object = static_shape
         ? jm_call_3(mt, "js_new_object_with_shape", MIR_T_I64,
             MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_names),

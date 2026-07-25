@@ -2189,8 +2189,13 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
     }
 }
 
-static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_data,
-                              const char* key, bool* is_found) {
+// Tune6 L1: key length and name id are computed once by the public entry point
+// and threaded through the recursion. The previous shape re-ran strlen(key) for
+// every ShapeEntry compared, so a miss on an n-field map cost n strlens; the
+// name-id compare now rejects non-matching fields with a single int test.
+static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* map_data,
+                                    const char* key, int key_len, uint32_t key_id,
+                                    bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
     FOR_EACH_MAP_FIELD(map_type, field) {
@@ -2198,15 +2203,15 @@ static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_dat
             Map* nested_map = map_shape_field_to_map(map_data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
-                Item nested_result = map_get_for_owner((Container*)nested_map,
-                    (TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
+                Item nested_result = map_get_for_owner_keyed((Container*)nested_map,
+                    (TypeMap*)nested_map->type, nested_map->data, key, key_len,
+                    key_id, &nested_found);
                 if (nested_found) {
                     *is_found = true;
                     result = nested_result;
                 }
             }
-        } else if (field->name->length == strlen(key) &&
-                   memcmp(field->name->str, key, field->name->length) == 0) {
+        } else if (typemap_shape_name_equals_id(field, key, key_len, key_id)) {
             *is_found = true;
             result = map_read_field_for_owner(owner, field, map_data);
         }
@@ -2214,8 +2219,18 @@ static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_dat
     return result;
 }
 
+static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_data,
+                              const char* key, bool* is_found) {
+    if (!key) { *is_found = false; return ItemNull; }
+    int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
+    return map_get_for_owner_keyed(owner, map_type, map_data, key, key_len,
+                                   typemap_name_id(key, key_len), is_found);
+}
+
 // last-writer-wins: scan all entries in declaration order, keep the last match
-Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
+// Tune6 L1: same key precomputation as map_get_for_owner_keyed above.
+static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
+                           int key_len, uint32_t key_id, bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
     FOR_EACH_MAP_FIELD(map_type, field) {
@@ -2224,7 +2239,8 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
             Map* nested_map = map_shape_field_to_map(map_data, field);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                 bool nested_found;
-                Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
+                Item nested_result = _map_get_keyed((TypeMap*)nested_map->type,
+                    nested_map->data, key, key_len, key_id, &nested_found);
                 if (nested_found) {
                     *is_found = true;
                     result = nested_result;
@@ -2233,17 +2249,21 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
             }
         } else {
             // named field — direct match
-            if (strncmp(field->name->str, key, field->name->length) == 0 &&
-                strlen(key) == field->name->length) {
+            if (typemap_shape_name_equals_id(field, key, key_len, key_id)) {
                 *is_found = true;
                 result = _map_read_field(field, map_data);
                 // don't return — later entries may override
             }
         }
     }
-    if (!*is_found) {
-    }
     return result;
+}
+
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
+    if (!key) { *is_found = false; return ItemNull; }
+    int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
+    return _map_get_keyed(map_type, map_data, key, key_len,
+                          typemap_name_id(key, key_len), is_found);
 }
 
 Item map_get(Map* map, Item key) {
