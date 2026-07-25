@@ -1992,8 +1992,11 @@ weakening the rooting invariants.
 
 ## 17. JS runtime stack merges
 
-**Status:** implemented 2026-07-24. The execution record and verification
-gates are in `Lambda_Impl_Merge_Stack.md`.
+**Status:** implemented 2026-07-24; Merge A performance-repaired to its final
+form 2026-07-25 (see the §17.1 outcome note — the transitional `js_args_*`
+reimplementation described in the original decision was measured and removed).
+The execution record and verification gates are in
+`Lambda_Impl_Merge_Stack.md`.
 
 Three merges are decided, one per kind of duplication:
 
@@ -2069,6 +2072,20 @@ The zero-fill obligation moves from pop-time to push-time: slots are zeroed
 before the new top is published, for the same reason
 `lambda_root_frame_begin` zeroes — a collection during argument evaluation
 must never interpret stale words below the top as live roots.
+
+**Outcome (2026-07-25):** the `js_args_*` reimplementation above was landed as
+a transitional rooting proof and then **removed**: its per-call runtime calls
+and watermark updates regressed the recursive benchmarks ~43% (`fib`
+38.6→55.2). The retained final form has **no per-call argument ABI at all** —
+each generated function reserves its maximum lexically overlapping argument
+arity as a fixed suffix of its canonical side-root frame
+(`JsMirArgStackScope` / `jm_arg_frame_base`), call scopes store into stable
+frame-relative slots and clear them on normal completion, and exceptional
+routing clears all active scopes. Suspending (generator/async) argument lists
+keep the heap-env spill path. Measured 10–15% faster than Result12 on
+`fib`/`fibfp`/`cpstak`; `lambda_side_root_alloc_n` survives as the native-side
+primitive under `LambdaRootFrame`. Full record: `Lambda_Impl_Merge_Stack.md`
+Merge A Phase 4.
 
 **Boundary of Merge A:** it covers only the transient call-argument stack —
 the one structure whose contents are anonymous rooted `Item` slots with

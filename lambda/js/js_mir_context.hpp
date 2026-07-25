@@ -117,6 +117,7 @@ static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 static const uint64_t MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
+static const int JS_MIR_TDZ_CLOSURE_CAPTURE_MAX = 512;
 
 typedef MirImportEntry JsMirImportEntry;
 
@@ -124,6 +125,14 @@ struct JsLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
+
+typedef struct JsMirTdzClosureCapture {
+    MIR_reg_t env_reg;
+    int slot;
+    int binding_scope_depth;
+    bool is_transitive;
+    char name[128];
+} JsMirTdzClosureCapture;
 
 typedef enum JsExcTrack {
     JS_EXC_UNKNOWN = 0,
@@ -412,6 +421,10 @@ struct JsMirTranspiler {
     bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_has_env;
+    // Hoisted closures can be created while a later lexical binding is still
+    // TDZ. Retain every such cell until that binding initializes.
+    JsMirTdzClosureCapture tdz_closure_captures[JS_MIR_TDZ_CLOSURE_CAPTURE_MAX];
+    int tdz_closure_capture_count;
     bool allow_loop_let_scope_env_for_immediate_call;
     bool preserve_last_closure_env_after_readback;
     bool force_closure_env_copy;    // class field initializers need a stable lexical this cell

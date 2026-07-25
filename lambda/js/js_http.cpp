@@ -5824,6 +5824,7 @@ extern "C" Item js_http_agent_getName(Item options) {
     char port[32] = "";
     char local_addr[256] = "";
     char family_str[16] = "";
+    char socket_path[256] = "";
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item h = js_property_get(options, make_string_item("host"));
@@ -5870,9 +5871,27 @@ extern "C" Item js_http_agent_getName(Item options) {
                 snprintf(family_str, sizeof(family_str), "%d", fv);
             }
         }
+        Item sp = js_property_get(options, make_string_item("socketPath"));
+        if (get_type_id(sp) == LMD_TYPE_STRING) {
+            String* s = it2s(sp);
+            int len = (int)s->len < 255 ? (int)s->len : 255;
+            memcpy(socket_path, s->chars, len);
+            socket_path[len] = '\0';
+        }
     }
     char result[600];
-    snprintf(result, sizeof(result), "%s:%s:%s:%s", host, port, local_addr, family_str);
+    // Agent queue keys omit the family separator unless family is 4 or 6;
+    // socketPath is a separate suffix after that optional field.
+    int result_len = snprintf(result, sizeof(result), "%s:%s:%s", host, port, local_addr);
+    if (result_len < 0) result_len = 0;
+    if (family_str[0] && result_len < (int)sizeof(result)) {
+        result_len += snprintf(result + result_len, sizeof(result) - (size_t)result_len,
+                               ":%s", family_str);
+    }
+    if (socket_path[0] && result_len < (int)sizeof(result)) {
+        snprintf(result + result_len, sizeof(result) - (size_t)result_len,
+                 ":%s", socket_path);
+    }
     return make_string_item(result);
 }
 
@@ -5892,6 +5911,125 @@ extern "C" Item js_http_agent_createConnection(Item options, Item callback) {
     js_array_push(args, options);
     if (get_type_id(callback) == LMD_TYPE_FUNC) js_array_push(args, callback);
     return js_net_createConnection(args);
+}
+
+static void js_http_agent_queue_request(Item agent, Item name, Item request) {
+    Item requests = js_property_get(agent, make_string_item("requests"));
+    if (get_type_id(requests) != LMD_TYPE_MAP) {
+        requests = js_new_object();
+        js_property_set(agent, make_string_item("requests"), requests);
+    }
+    Item queue = js_property_get(requests, name);
+    if (get_type_id(queue) != LMD_TYPE_ARRAY) {
+        queue = js_array_new(0);
+        js_property_set(requests, name, queue);
+    }
+    js_array_push(queue, request);
+}
+
+static Item js_http_agent_take_free_socket(Item agent, Item name) {
+    Item free_sockets = js_property_get(agent, make_string_item("freeSockets"));
+    if (get_type_id(free_sockets) != LMD_TYPE_MAP) return make_js_undefined();
+    Item sockets = js_property_get(free_sockets, name);
+    if (get_type_id(sockets) != LMD_TYPE_ARRAY || js_array_length(sockets) == 0) {
+        return make_js_undefined();
+    }
+    Item pop = js_property_get(sockets, make_string_item("pop"));
+    Item socket = get_type_id(pop) == LMD_TYPE_FUNC
+        ? js_call_function(pop, sockets, NULL, 0) : make_js_undefined();
+    if (js_array_length(sockets) == 0) js_delete_property(free_sockets, name);
+    return socket;
+}
+
+static void js_http_agent_assign_socket(Item request, Item socket) {
+    Item on_socket = js_property_get(request, make_string_item("onSocket"));
+    if (get_type_id(on_socket) == LMD_TYPE_FUNC) {
+        js_call_function(on_socket, request, &socket, 1);
+    }
+}
+
+// Agent.addRequest(req, options[, port[, localAddress]])
+extern "C" Item js_http_agent_addRequest(Item request, Item options,
+                                           Item port, Item local_address) {
+    RootFrame roots((Context*)context, 10);
+    Rooted<Item> agent_root(roots, js_get_this());
+    Rooted<Item> request_root(roots, request);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> port_root(roots, port);
+    Rooted<Item> local_address_root(roots, local_address);
+    Rooted<Item> normalized_root(roots, js_new_object());
+    Rooted<Item> name_root(roots, ItemNull);
+    Rooted<Item> sockets_root(roots, ItemNull);
+    Rooted<Item> socket_root(roots, ItemNull);
+    Rooted<Item> agent_options_root(roots, ItemNull);
+
+    if (get_type_id(options_root.get()) == LMD_TYPE_STRING) {
+        js_property_set(normalized_root.get(), make_string_item("host"), options_root.get());
+        js_property_set(normalized_root.get(), make_string_item("port"), port_root.get());
+        js_property_set(normalized_root.get(), make_string_item("localAddress"),
+                        local_address_root.get());
+    } else {
+        agent_options_root.set(js_property_get(agent_root.get(), make_string_item("options")));
+        Item sources[2] = { options_root.get(), agent_options_root.get() };
+        js_object_assign(normalized_root.get(), sources, 2);
+        if (js_check_exception()) return ItemNull;
+    }
+
+    Item get_name = js_property_get(agent_root.get(), make_string_item("getName"));
+    if (get_type_id(get_name) != LMD_TYPE_FUNC) return make_js_undefined();
+    Item get_name_args[1] = { normalized_root.get() };
+    name_root.set(js_call_function(get_name, agent_root.get(), get_name_args, 1));
+    if (js_check_exception() || get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemNull;
+
+    Item sockets = js_property_get(agent_root.get(), make_string_item("sockets"));
+    if (get_type_id(sockets) != LMD_TYPE_MAP) {
+        sockets = js_new_object();
+        js_property_set(agent_root.get(), make_string_item("sockets"), sockets);
+    }
+    sockets_root.set(sockets);
+    Item active = js_property_get(sockets_root.get(), name_root.get());
+    if (get_type_id(active) != LMD_TYPE_ARRAY) {
+        active = js_array_new(0);
+        js_property_set(sockets_root.get(), name_root.get(), active);
+    }
+
+    socket_root.set(js_http_agent_take_free_socket(agent_root.get(), name_root.get()));
+    if (get_type_id(socket_root.get()) == LMD_TYPE_UNDEFINED) {
+        Item max_sockets = js_property_get(agent_root.get(), make_string_item("maxSockets"));
+        int64_t max_socket_count = 0;
+        if (!http_item_to_integral_int64(max_sockets, &max_socket_count)) {
+            max_socket_count = 256;
+        }
+        if (max_socket_count <= js_array_length(active)) {
+            js_http_agent_queue_request(agent_root.get(), name_root.get(), request_root.get());
+            return make_js_undefined();
+        }
+        Item create_connection = js_property_get(agent_root.get(), make_string_item("createConnection"));
+        if (get_type_id(create_connection) != LMD_TYPE_FUNC) {
+            js_http_agent_queue_request(agent_root.get(), name_root.get(), request_root.get());
+            return make_js_undefined();
+        }
+        Item connection_args[1] = { normalized_root.get() };
+        socket_root.set(js_call_function(create_connection, agent_root.get(), connection_args, 1));
+        if (js_check_exception()) return ItemNull;
+    }
+
+    js_array_push(active, socket_root.get());
+    js_http_agent_assign_socket(request_root.get(), socket_root.get());
+    return make_js_undefined();
+}
+
+static void js_http_agent_install_methods(Item agent) {
+    // Agent instances previously omitted addRequest, so direct Node Agent users
+    // called undefined even though request() itself bypasses this public entry point.
+    js_property_set(agent, make_string_item("getName"),
+        js_new_function((void*)js_http_agent_getName, 1));
+    js_property_set(agent, make_string_item("destroy"),
+        js_new_function((void*)js_http_agent_destroy, 0));
+    js_property_set(agent, make_string_item("createConnection"),
+        js_new_function((void*)js_http_agent_createConnection, 2));
+    js_property_set(agent, make_string_item("addRequest"),
+        js_new_function((void*)js_http_agent_addRequest, 4));
 }
 
 extern "C" Item js_http_ClientRequest(Item options_item, Item callback) {
@@ -5930,12 +6068,7 @@ extern "C" Item js_http_Agent(Item options) {
     js_property_set(agent, make_string_item("options"), options);
 
     // methods directly on agent (will also inherit from prototype)
-    js_property_set(agent, make_string_item("getName"),
-        js_new_function((void*)js_http_agent_getName, 1));
-    js_property_set(agent, make_string_item("destroy"),
-        js_new_function((void*)js_http_agent_destroy, 0));
-    js_property_set(agent, make_string_item("createConnection"),
-        js_new_function((void*)js_http_agent_createConnection, 2));
+    js_http_agent_install_methods(agent);
 
     return agent;
 }
@@ -6010,10 +6143,7 @@ extern "C" Item js_get_http_namespace(void) {
     js_property_set(agent, make_string_item("requests"), js_new_object());
     js_property_set(agent, make_string_item("sockets"), js_new_object());
     js_property_set(agent, make_string_item("freeSockets"), js_new_object());
-    js_property_set(agent, make_string_item("getName"),
-        js_new_function((void*)js_http_agent_getName, 1));
-    js_property_set(agent, make_string_item("destroy"),
-        js_new_function((void*)js_http_agent_destroy, 0));
+    js_http_agent_install_methods(agent);
     js_property_set(http_namespace, make_string_item("globalAgent"), agent);
 
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage

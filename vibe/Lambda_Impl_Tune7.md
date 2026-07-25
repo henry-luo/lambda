@@ -6,15 +6,22 @@
 `Lambda_Tuning_Proposal.md` **R4** ("Reduce dynamic-call overhead", slices
 R4.1–R4.4) as a phased plan.
 
-**Baseline assumptions (verify at T0, do not re-litigate):**
+**Baseline assumptions (verified 2026-07-25 against the landed merges):**
 
-1. **`vibe/Lambda_Impl_Merge_Stack.md` Merges A/B/C are COMPLETE.** In
-   particular Merge A: call-argument frames live on the **side-root region**
-   (marks are `side_root_top` values), the private `js_args_stack` is deleted,
-   and above-top slots stay zeroed. This plan *depends* on that lifetime fact
-   (Phase C2). Merge A's Phase 4 (inline save/restore of the two `js_args_*`
-   C calls) is deferred-by-default there; if it did not land, **C2.4 adopts it
-   verbatim**.
+1. **`vibe/Lambda_Impl_Merge_Stack.md` Merges A/B/C are COMPLETE and
+   performance-repaired.** Merge A's final form has **no per-call argument
+   ABI at all**: each generated function reserves its maximum lexically
+   overlapping argument arity as a **fixed suffix of its canonical side-root
+   frame** (`JsMirArgStackScope` / `jm_arg_frame_base`,
+   `js_mir_completion.cpp:210`); call scopes store args into stable
+   frame-relative slots and clear them on completion. Consequences for this
+   plan: the former C2.4 (adopting Merge A's inline-save/restore Phase 4) is
+   **moot and deleted** — the `js_args_*` protocol no longer exists — and the
+   C2 premise strengthens: a JIT-edge `args` pointer is *always* a
+   caller-frame suffix address inside `[side_root_base, side_root_top)`.
+   The repair also landed `JS_FUNC_FLAG_USES_WITH` (1024) and gated
+   `js_with_set_stack` install/restore behind real `with` state — part of
+   §0 row 11 is therefore already done.
 2. **`vibe/Lambda_Impl_Online_Exception (done).md` is landed** — the per-call
    exception-poll tax (R5's emission side) is owned there and is **out of
    scope** here; only residual poll counts appear in the exit measurement.
@@ -22,7 +29,9 @@ R4.1–R4.4) as a phased plan.
    its `JsFunction` via the PIC; what is left of `obj.m(a,b)` is exactly the
    dispatcher/trampoline sequence this plan slims. All Tune7 gates are ratios
    against a same-day Result13-state baseline; absolute thresholds are set
-   when Result13's numbers are in hand (§7).
+   when Result13's numbers are in hand (§7). Note the post-merge fib/fibfp/
+   cpstak numbers already beat Result12 by 10–15%; Result13 re-baselines all
+   call rows before this plan's phases are measured.
 
 **Diagnosis provenance:** source verification of `js_call_function_impl` /
 `js_invoke_fn` / call-site emission, 2026-07-24. `file:line` refs verified same
@@ -39,9 +48,13 @@ excepted). Two hard rules inherited from R4 and CLAUDE rule 15:
   is GC-visible via canonical slots, the side-root region, or a rooted global
   — proven, not assumed. Forced-GC stress runs on every phase.
 
-Gates at every phase boundary: `test-lambda-baseline` 100%, test262 baseline
-(40261) zero regressions, `make node-baseline` (3528) zero regressions, MT7
-emission budgets lifted only deliberately with dump diffs quoted.
+Gates at every phase boundary: `test-lambda-baseline` 100% (3,609 at the
+post-merge baseline), test262 baseline (40,261) zero regressions,
+`make node-baseline` **no new failures vs the current honest baseline** (the
+absolute count is red with ~1,473 pre-Result12 compatibility defects exposed
+by the beforeExit exception-preservation fix — see
+`Lambda_Impl_Merge_Stack.md`; gate on the per-test pass/fail delta, not the
+count), MT7 emission budgets lifted only deliberately with dump diffs quoted.
 
 ---
 
@@ -54,15 +67,15 @@ path (`js_call_function_impl`, `js_runtime.cpp:13294`):
 |---|---|---|---|
 | 1 | Exception poll after the call | inlined / elided by online-exception tracker | **Done (R5)** |
 | 2 | Method/property lookup | PIC (Tune6 J1) or IC hit | **Tune6** |
-| 3 | Args save/restore marks | 2 C calls per argument-carrying call | **Merge A P4 → C2.4** |
+| 3 | Args save/restore marks | eliminated — fixed frame-suffix slots, zero per-call ABI (Merge A repair, 2026-07-25) | **Done (Merge A)** |
 | 4 | Depth guard + debug name stack | thread-local 64-deep name push/pop **maintained in release** (`:13298–13307`) | **C1.3** |
-| 5 | `RootFrame(2 + argc)` + per-arg copy loop | every arg re-copied into fresh root slots (`:13314–13323`) even when args already live in the (merged) side-root region | **C2** |
+| 5 | `RootFrame(2 + argc)` + per-arg copy loop | every arg re-copied into fresh root slots (`:13314–13323`) even though a JIT-edge `args` pointer is now always a caller-frame suffix address in the side-root region | **C2** |
 | 6 | Non-callable / proxy / `.call`-polyfill checks | 3 branches + map probes on the miss paths (`:13328–13353`) | stays (cold) |
 | 7 | Scalar-home borrow logic | `LAMBDA_SCALAR_HOME` + ABI flag test (`:13393–13402`) | stays (cheap) |
 | 8 | Bound-function branch, `OrdinaryCallBindThis` coercion (duplicated in bound + plain blocks, `:13623`/`:13723`) | branchy, mostly-false tests | **C1** (folded into shape test) |
 | 9 | ~10 save/install/restore pairs: `this`, `new.target` + pending handshake, module vars, realm swap check, eval-initializer flag, generator proto (`js_property_get`!), derived-ctor TDZ, private-home class, vm-stack source | the bulk of the function | **C1** |
 | 10 | `js_function_home_class` per call | **hash lookup** on `fn->properties_map` (`js_runtime.cpp:513`); early-out only when the map is empty | **C1.1** |
-| 11 | `with`-stack save + set per call | `js_with_save_stack` + `js_with_set_stack` (`js_globals.cpp:16379/:16390`) run on **every** call (`fn->func_ptr || with_env_depth > 0` — `func_ptr` is non-null for all compiled functions); set re-registers roots + clears + invalidates the binding cache | **C1** |
+| 11 | `with`-stack save + set per call | **install/restore now gated** by `saved_with_depth > 0 \|\| with_env_depth > 0 \|\| JS_FUNC_FLAG_USES_WITH` (Merge A repair); residual per call = the unconditional `js_with_save_stack` C call + no-op `JsSavedWithScopeRoots` RAII | **mostly done; C1 folds the residual save into the lane's depth test** |
 | 12 | `this`/`new.target` global round-trips | 4+ global loads/stores even for callees that never observe them | **C3** |
 | 13 | Arg adaptation (pad/clamp/rest) + 16-case arity switch × {env} × {ABI} | `js_invoke_fn_raw` (`js_runtime.cpp:9425–9616`) | **C4** (measured) |
 | 14 | Calls that shouldn't be dynamic at all | native eligibility requires INT/FLOAT *return* (phase 1.75, `js_mir_module_batch_lowering.cpp:5823`) — numeric-param/boxed-return functions are excluded | **C4.1 (R4.1)** |
@@ -78,19 +91,32 @@ GC frequency × live set (R7), unboxed slot storage (OI-9), interpreter link mod
   that order, on every dynamic call. The full state save/restore block is
   duplicated once for the bound path (`:13644–13714`) and once for the plain
   path (`:13717–13795`).
-- **`JsFunction`** (`js_function.hpp:9`): `uint16_t flags` uses bits 1..512
-  (`:54–63`) — **6 bits free**; the struct already carries every field the
-  fast-lane predicate needs (`with_env_depth`, `home_global`,
+- **`JsFunction`** (`js_function.hpp:9`): `uint16_t flags` uses bits 1..1024
+  (`:54–64`; 1024 = `JS_FUNC_FLAG_USES_WITH`, added by the Merge A repair) —
+  **5 bits free** (2048/4096/8192/16384/32768); the struct already carries
+  every field the fast-lane predicate needs (`with_env_depth`, `home_global`,
   `vm_stack_filename/source`, `eval_initializer_context`, `bound_args`,
   `builtin_id`, `module_vars`) *except* home-class, which hides behind a
   `properties_map` hash probe.
+- **Merged argument frames** (post-Merge-A final form): a call/new expression
+  owns a `JsMirArgStackScope` with a stable `base_slot` in the caller frame's
+  argument suffix; `jm_arg_frame_base` is one ADD patched to
+  `root_slot_count * 8` at finalization (`js_mir_hashmap_scope_utils.cpp:465`);
+  scopes clear their slots on completion and exceptional routing clears all
+  active scopes (`jm_clear_active_arg_frames`). The
+  `test/mir/js/arg_frame_roots.mir-check` fixture forbids any per-call
+  save/push/restore symbol from reappearing.
 - **Home-class single writer:** the only writer funnels through
   `js_property_set(fn_item, home_key=__home_class__, home)`
   (`js_runtime.cpp:611`) — one choke point for a `HAS_HOME_CLASS` flag.
 - **`with` save/set:** `js_with_save_stack` copies `min(depth,16)` Items and
-  returns depth (`js_globals.cpp:16379`); `js_with_set_stack` re-registers the
-  root range, clears deeper entries, and invalidates the with-binding cache
-  (`:16390`). Both run unconditionally per call (row 11's gate).
+  returns depth; `js_with_set_stack` re-registers the root range, clears
+  deeper entries, and invalidates the with-binding cache. Post-repair, the
+  set/restore pair runs only under `switched_with_stack`
+  (`js_runtime.cpp:13767`); the save C call still runs unconditionally —
+  the row-11 residual. The `USES_WITH` flag exists because an early `return`
+  from a `with` body bypasses its generated pop, so call dispatch must still
+  restore an empty entry stack for such callees.
 - **Trampoline:** `js_invoke_fn_raw` pads/clamps/rest-builds
   (`js_runtime.cpp:9461–9496`), then dispatches through typed casts `P0..P16H`
   (`:9425–9458`, switch bodies `:9526–9615`). `JS_FUNC_FLAG_MIR_PUBLIC_ABI`
@@ -147,24 +173,28 @@ overwrite), extended with a `t7` phase.
 **C1.1 Precompute the shape, kill the per-call probes.** Two new flag bits in
 the free `uint16_t` space:
 
-- `JS_FUNC_FLAG_HAS_HOME_CLASS` (1024): set at the single writer
+- `JS_FUNC_FLAG_HAS_HOME_CLASS` (2048): set at the single writer
   (`js_runtime.cpp:611` funnel; audit for any second writer by grepping
   `JS_HOME_CLASS_KEY` — currently none). Row 10's per-call hash lookup
   becomes a flag test; the lookup runs only when the flag is set.
-- `JS_FUNC_FLAG_PLAIN_CALL` (2048): derived at every `JsFunction`
+- `JS_FUNC_FLAG_PLAIN_CALL` (4096): derived at every `JsFunction`
   construction/mutation choke point (`js_new_function`, `js_new_closure`,
   `js_new_method_function`, bound-function creation, the home-class writer,
   `with`-capture wrapper creation, vm-source stamping). Definition —
   ALL of: `builtin_id == 0`, no
   generator/async/async-gen/derived-ctor/bound flags, `with_env_depth == 0`,
-  `home_global.item == 0`, `!HAS_HOME_CLASS`, no vm-stack source,
+  `!(flags & JS_FUNC_FLAG_USES_WITH)`, `home_global.item == 0`,
+  `!HAS_HOME_CLASS`, no vm-stack source,
   `!eval_initializer_context`. **The predicate lives in one function**
   (`js_function_call_shape_recompute(fn)`) called by every stamping site, so
-  the condition list is auditable and single-sourced.
+  the condition list is auditable and single-sourced. (Bit values follow the
+  post-merge flag inventory: 1024 is taken by `USES_WITH`.)
 
 **C1.2 The lane.** In `js_call_function_impl`, after the callee resolves to a
 `JsFunction*`: if `PLAIN_CALL` **and** the global `with` stack is empty
-(`js_with_stack_depth == 0` — caller-side state, cannot be precomputed):
+(`js_with_stack_depth == 0` — caller-side state, cannot be precomputed; the
+lane reads the depth directly, which also removes row 11's residual
+unconditional `js_with_save_stack` C call on the plain path):
 
 ```
 save this/new.target (2 locals) → OrdinaryCallBindThis (shared helper, not a
@@ -201,10 +231,13 @@ measurable; zero-regression gates; C1.4 harness clean.
 
 ## 4. Phase C2 — argument rooting dedup on the merged stack (1–2 days)
 
-Premise (assumption 1): a JIT-edge caller's args frame already lives in the
-side-root region and its mark outlives the call. The `RootFrame` arg-copy loop
-(`:13318–13323`) is then a second, redundant rooting of the same values. C
-helpers passing `LAMBDA_ALLOCA` arrays still need it.
+Premise (assumption 1, strengthened by the Merge A final form): a JIT-edge
+`args` pointer is a stable address inside the **caller's own frame argument
+suffix** — within `[side_root_base, side_root_top)` and live for the whole
+call by the frame's own lifetime, with slots cleared by the caller's scope
+epilogue. The `RootFrame` arg-copy loop (`:13318–13323`) is then a second,
+redundant rooting of the same values. C helpers passing `LAMBDA_ALLOCA`
+arrays still need it.
 
 - **C2.1 Range-check discriminator.** Add
   `lambda_side_root_contains(Context*, void*)` to `side_stack.h` (bound base ≤
@@ -226,11 +259,10 @@ helpers passing `LAMBDA_ALLOCA` arrays still need it.
   (`em_root_note_candidate` coverage) before selecting the import. MT7
   budgets change (new import) — deliberate lift. Land only if T0.2 shows the
   2-slot frame is material after C2.1.
-- **C2.4 Merge-A Phase-4 adoption (conditional).** If Merge A deferred its
-  inline save/restore of the two `js_args_*` C calls, implement it here
-  exactly per that plan's Phase 4 text (mark = MIR load of `side_root_top`;
-  restore keeps the validity/order check — a plain store is forbidden). Same
-  MT7 discipline. Skip if already landed.
+
+(The former C2.4 — adopting Merge A's deferred inline-save/restore phase —
+was deleted 2026-07-25: the final Merge A form removed the `js_args_*` ABI
+entirely, so there is nothing left to inline.)
 
 **Gates.** T0.1's args-in-extent rate confirms coverage (expect ~100% of
 JIT-edge calls); T0.2 arg-carrying ns/call drops; cd/havlak measurable;
@@ -246,7 +278,7 @@ collection-phase analysis bit `body_observes_this`: true if the body (or any
 default-param expression) references `this`, `new.target`, or contains a
 **direct `eval`** (runtime `this` access is then possible); arrows are true
 iff they *captured* `_js_this` (existing capture machinery already computes
-this). Stamp `JS_FUNC_FLAG_READS_THIS` (4096) at function creation from the
+this). Stamp `JS_FUNC_FLAG_READS_THIS` (8192) at function creation from the
 collected bit. In both dispatcher paths: when clear, skip
 `OrdinaryCallBindThis` and the `js_current_this` install/restore pair
 entirely. **The pending-`new.target` handshake is consumed unconditionally**

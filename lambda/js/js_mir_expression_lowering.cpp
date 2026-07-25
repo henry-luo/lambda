@@ -12376,6 +12376,31 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
     mt->last_closure_has_env = count > 0;
 }
 
+static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
+        JsFuncCollected* fc, bool use_capture_slots) {
+    if (!mt || !fc || env == 0) return;
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
+        if (!var || !var->is_let_const || !var->tdz_active) continue;
+        if (mt->tdz_closure_capture_count >= JS_MIR_TDZ_CLOSURE_CAPTURE_MAX) {
+            log_error("js-mir: TDZ closure capture tracker overflow");
+            return;
+        }
+        JsMirTdzClosureCapture* tracked =
+            &mt->tdz_closure_captures[mt->tdz_closure_capture_count++];
+        tracked->env_reg = env;
+        tracked->slot = use_capture_slots
+            ? jm_capture_env_slot(&fc->captures[ci], ci) : ci;
+        tracked->binding_scope_depth =
+            jm_find_var_scope_depth_for_expr(mt, fc->captures[ci].name);
+        tracked->is_transitive = fc->captures[ci].grandparent_slot >= 0;
+        snprintf(tracked->name, sizeof(tracked->name), "%s", fc->captures[ci].name);
+        // A hoisted function can snapshot a loop lexical's TDZ value before an
+        // earlier initializer creates another closure; one last-closure slot
+        // then loses the callback's binding cell.
+    }
+}
+
 static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         JsFuncCollected* fc, MIR_reg_t env, int env_alloc_size, bool has_remapped) {
     if (!mt || !fc || env == 0 || mt->scope_env_reg == 0) return;
@@ -12628,6 +12653,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // than jm_transpile_func_expr, so without this it would never register
             // and outer writes would never reach the constructor's captured env.
             jm_track_last_closure_env(mt, env, fc, has_remapped);
+            jm_track_tdz_closure_captures(mt, env, fc, has_remapped);
         }
     } else {
         fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,

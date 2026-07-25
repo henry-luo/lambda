@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
+#include "js_permission.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
@@ -908,6 +909,15 @@ extern "C" Item js_dns_lookup(Item rest_args) {
     DnsLookupOptions options;
     if (!normalize_lookup_args(rest_args, false, &options)) return ItemNull;
 
+    if (!js_permission_has_net() && !dns_lookup_is_ip_literal(&options)) {
+        // Permission denial must precede resolver dispatch; otherwise a host
+        // lookup can expose EAI_NONAME instead of Node's access-denied error.
+        Item error = js_permission_make_net_error("lookup", options.hostname);
+        dns_lookup_schedule(options.callback, make_js_undefined(), make_js_undefined(),
+            error, make_js_undefined(), make_js_undefined(), make_js_undefined());
+        return make_js_undefined();
+    }
+
     if (!dns_lookup_start(&options, make_js_undefined(), make_js_undefined(), true)) return ItemNull;
     return make_js_undefined();
 }
@@ -916,6 +926,10 @@ extern "C" Item js_dns_promises_lookup(Item rest_args) {
     DnsLookupOptions options;
     if (!normalize_lookup_args(rest_args, true, &options)) return ItemNull;
     if (options.reject_in_promise) return js_promise_reject(options.promise_rejection);
+
+    if (!js_permission_has_net() && !dns_lookup_is_ip_literal(&options)) {
+        return dns_promise_reject_later(js_permission_make_net_error("lookup", options.hostname));
+    }
 
     if (!dns_lookup_is_ip_literal(&options)) {
         int hook_status = dns_call_cares_getaddrinfo_hook(&options);
@@ -1196,6 +1210,22 @@ static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family)
         return ItemNull;
     }
 
+    if (!js_permission_has_net()) {
+        Item error = js_permission_make_net_error("resolve", options.hostname);
+        if (promise_mode) {
+            Item capability = js_promise_with_resolvers();
+            if (js_check_exception()) return ItemNull;
+            Item promise = js_property_get(capability, make_string_item("promise"));
+            Item reject = js_property_get(capability, make_string_item("reject"));
+            dns_resolve_schedule(make_js_undefined(), make_js_undefined(), reject,
+                error, make_js_undefined());
+            return promise;
+        }
+        dns_resolve_schedule(options.callback, make_js_undefined(), make_js_undefined(),
+            error, make_js_undefined());
+        return make_js_undefined();
+    }
+
     if (promise_mode) {
         Item capability = js_promise_with_resolvers();
         if (js_check_exception()) return ItemNull;
@@ -1447,6 +1477,22 @@ static Item js_dns_lookupService_common(Item rest_args, bool promise_mode) {
     DnsLookupServiceOptions options;
     if (!normalize_lookup_service_args(rest_args, promise_mode, &options)) {
         return ItemNull;
+    }
+
+    if (!js_permission_has_net()) {
+        Item error = js_permission_make_net_error("lookupService", options.address);
+        if (promise_mode) {
+            Item capability = js_promise_with_resolvers();
+            if (js_check_exception()) return ItemNull;
+            Item promise = js_property_get(capability, make_string_item("promise"));
+            Item reject = js_property_get(capability, make_string_item("reject"));
+            dns_lookup_service_schedule(make_js_undefined(), make_js_undefined(), reject,
+                error, make_js_undefined(), make_js_undefined(), make_js_undefined());
+            return promise;
+        }
+        dns_lookup_service_schedule(options.callback, make_js_undefined(), make_js_undefined(),
+            error, make_js_undefined(), make_js_undefined(), make_js_undefined());
+        return make_js_undefined();
     }
 
     int hook_status = 0;

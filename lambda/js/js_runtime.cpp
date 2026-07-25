@@ -34267,7 +34267,7 @@ static Item js_vm_runInThisContext(Item code, Item options) {
     const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
     JsVmEvalOptions eval_options;
     if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
-    return js_builtin_eval_with_options(code, 1, eval_options.filename,
+    return js_builtin_eval_with_options(code, 1 | 16, eval_options.filename,
                                         eval_options.line_offset,
                                         eval_options.column_offset);
 }
@@ -34497,7 +34497,7 @@ static Item js_vm_Script_runInThisContext(Item options) {
         eval_options.line_offset = js_vm_option_to_int64(js_property_get(self, (Item){.item = s2it(heap_create_name("_lineOffset", 11))}));
         eval_options.column_offset = js_vm_option_to_int64(js_property_get(self, (Item){.item = s2it(heap_create_name("_columnOffset", 13))}));
     }
-    return js_builtin_eval_with_options(code, 1, eval_options.filename,
+    return js_builtin_eval_with_options(code, 1 | 16, eval_options.filename,
                                         eval_options.line_offset,
                                         eval_options.column_offset);
 }

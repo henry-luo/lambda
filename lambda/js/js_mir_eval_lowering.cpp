@@ -27,6 +27,7 @@
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
+static const int64_t JS_EVAL_FLAG_VM_GLOBAL_CONTEXT = 16;
 
 // Per-unit module-var management (defined in js_runtime_state.cpp). Used by the
 // vm.runInContext path to give each unit its own module-var slot namespace.
@@ -1436,6 +1437,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
     if (!code_str || code_str->len == 0) return (Item){.item = ITEM_JS_UNDEFINED};
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
+    bool is_vm_global_context = (eval_flags & JS_EVAL_FLAG_VM_GLOBAL_CONTEXT) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
     bool has_eval_filename = get_type_id(filename_item) == LMD_TYPE_STRING;
     const char* eval_filename = has_eval_filename ? it2s(filename_item)->chars : "<eval>";
@@ -1621,6 +1623,11 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
         // v37: Also skip expression form if code contains semicolons (multi-statement)
         // or declarations that need to be compiled as a program for correct scoping.
+        if (is_vm_global_context) {
+            // node:vm global scripts must not inherit the caller's CJS lexical
+            // preamble; otherwise a later local const is observed as TDZ here.
+            skip_expr_form = true;
+        }
         if (!skip_expr_form) {
             for (size_t j = i; j < slen; j++) {
                 char c = s[j];
@@ -1735,8 +1742,9 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
         mt->template_site_salt = ++js_eval_template_site_counter;
 
-        // Inherit outer script's module_consts so eval() can resolve var declarations
-        if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
+        // Direct eval inherits its caller's lexical preamble. A node:vm global
+        // script deliberately does not: it resolves through globalThis instead.
+        if (!is_vm_global_context && g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
             mt->preamble_entries = g_eval_preamble_entries;
             mt->preamble_entry_count = g_eval_preamble_entry_count;
             mt->preamble_var_count = g_eval_preamble_var_count;

@@ -85,31 +85,45 @@ static void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
 
 void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         const char* name, MIR_reg_t val_reg, TypeId type_id) {
-    if (!mt || !name || !mt->last_closure_has_env || mt->last_closure_env_reg == 0) return;
-    int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
-    for (int i = 0; i < capture_count; i++) {
-        if (mt->last_closure_capture_is_nfe[i]) continue;
-        if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
-        int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-        MIR_reg_t target_env = mt->last_closure_env_reg;
-        if (mt->last_closure_capture_is_transitive[i]) {
-            JsMirVarEntry* var = jm_find_var(mt, name);
-            if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) return;
+    if (!mt || !name) return;
+    MIR_reg_t val = jm_is_native_type(type_id) ? jm_box_native(mt, val_reg, type_id) : val_reg;
+    MIR_reg_t last_env = 0;
+    int last_slot = -1;
+    if (mt->last_closure_has_env && mt->last_closure_env_reg != 0) {
+        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
+        for (int i = 0; i < capture_count; i++) {
+            if (mt->last_closure_capture_is_nfe[i]) continue;
+            if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
+            int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
+            MIR_reg_t target_env = mt->last_closure_env_reg;
+            if (mt->last_closure_capture_is_transitive[i]) {
+                JsMirVarEntry* var = jm_find_var(mt, name);
+                if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) continue;
+            }
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
+                    target_env, 0, 1),
+                MIR_new_reg_op(mt->ctx, val)));
+            last_env = target_env;
+            last_slot = slot;
+            break;
         }
-        MIR_reg_t val = val_reg;
-        if (jm_is_native_type(type_id)) {
-            val = jm_box_native(mt, val_reg, type_id);
-        }
-        // closures created before a same-scope let/const initializer copy the
-        // TDZ value. Write the initialized value into that fresh env so the
-        // closure observes JS's by-reference lexical binding semantics. For
-        // transitive captures, write through the outer env backing; writing the
-        // child env slot can overwrite its parent-env link with a JS value.
+    }
+
+    for (int i = 0; i < mt->tdz_closure_capture_count; i++) {
+        JsMirTdzClosureCapture* tracked = &mt->tdz_closure_captures[i];
+        if (tracked->binding_scope_depth != mt->scope_depth ||
+            strcmp(tracked->name, name) != 0) continue;
+        MIR_reg_t target_env = tracked->env_reg;
+        int slot = tracked->slot;
+        // A transitive child resolves through this hoisted parent's copied
+        // slot. Redirecting the TDZ initializer to the source cell leaves
+        // that copied slot at ItemTdz after the lexical declaration runs.
+        if (target_env == last_env && slot == last_slot) continue;
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
                 target_env, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
-        return;
     }
 }
 

@@ -684,6 +684,15 @@ void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_
 
 void jm_pop_scope(JsMirTranspiler* mt) {
     if (mt->scope_depth <= 0) { log_error("js-mir: scope underflow"); return; }
+    int kept_tdz_captures = 0;
+    for (int i = 0; i < mt->tdz_closure_capture_count; i++) {
+        if (mt->tdz_closure_captures[i].binding_scope_depth == mt->scope_depth) continue;
+        if (kept_tdz_captures != i) {
+            mt->tdz_closure_captures[kept_tdz_captures] = mt->tdz_closure_captures[i];
+        }
+        kept_tdz_captures++;
+    }
+    mt->tdz_closure_capture_count = kept_tdz_captures;
     hashmap_free(mt->var_scopes[mt->scope_depth]);
     mt->var_scopes[mt->scope_depth] = NULL;
     mt->scope_depth--;

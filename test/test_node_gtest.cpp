@@ -673,6 +673,17 @@ static std::string extract_supported_node_flags(const std::string& test_path) {
             } else if (tok.find("--network-family-autoselection-attempt-timeout=") == 0) {
                 supported += " ";
                 supported += tok;
+            } else if (tok == "--permission" || tok == "--allow-net" ||
+                       tok == "--allow-child-process") {
+                // Node permission tests must reach Lambda with their declared
+                // mode; dropping the flag lets DNS resolve before the runtime
+                // can enforce the expected ERR_ACCESS_DENIED boundary.
+                supported += " ";
+                supported += tok;
+            } else if (tok.find("--allow-fs-read=") == 0 ||
+                       tok.find("--allow-fs-write=") == 0) {
+                supported += " ";
+                supported += tok;
             }
         }
         return supported;

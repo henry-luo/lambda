@@ -933,12 +933,28 @@ static void spawn_emit_or_queue_cluster_online(Item obj) {
     spawn_emit_event(obj, "online", NULL, 0);
 }
 
+static Item spawn_emit_cluster_online_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (env) spawn_emit_event(env[0], "online", NULL, 0);
+    return make_js_undefined();
+}
+
+static void spawn_schedule_cluster_online(Item obj) {
+    Item* env = js_alloc_env(1);
+    env[0] = obj;
+    Item callback = js_new_closure((void*)spawn_emit_cluster_online_later, 0, env, 1);
+    js_next_tick_enqueue(callback);
+}
+
 static void spawn_flush_cluster_online(Item obj) {
     Item pending = js_property_get(obj, spawn_pending_cluster_online_key());
     if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
     if (!spawn_has_event_listener(obj, "online")) return;
     js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_FALSE});
-    spawn_emit_event(obj, "online", NULL, 0);
+    // `fork().on('online', cb)` registers while the fork expression is still
+    // evaluating; delivering the queued event synchronously exposes a const
+    // initializer's TDZ to cb instead of Node's next-turn ordering.
+    spawn_schedule_cluster_online(obj);
 }
 
 extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj) {

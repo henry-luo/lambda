@@ -1750,7 +1750,8 @@ extern "C" Item js_cjs_complete(Item module) {
 
 extern "C" Item js_cjs_leave(Item module) {
     if (js_cjs_module_stack_count > 0) {
-        if (js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
+        if (module.item == ItemNull.item ||
+            js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
             js_item_stack_pop(&js_cjs_module_stack_state);
         } else {
             for (int i = js_cjs_module_stack_count - 1; i >= 0; i--) {
@@ -1836,13 +1837,10 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
         "var module = __cjs_module__;\n"
         "var __filename = \"%s\";\n"
         "var __dirname = \"%.*s\";\n"
-        "__lambda_cjs_enter(__cjs_module__, __filename);\n"
-        "try {\n";
+        "__lambda_cjs_enter(__cjs_module__, __filename);\n";
     const char* suffix =
         "\n__lambda_cjs_complete(__cjs_module__);\n"
-        "} finally {\n"
         "__lambda_cjs_leave(__cjs_module__);\n"
-        "}\n"
         "export default __cjs_module__.exports;\n";
 
     size_t src_len = strlen(source);
@@ -1944,6 +1942,12 @@ extern "C" Item js_require(Item specifier) {
         mem_free(source);
         jm_track_active_js_transpile(NULL, NULL, wrapped);
         ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        if (js_check_exception()) {
+            // A synthetic JS try block changes a CJS file's top-level lexical
+            // bindings into block bindings; close metadata here on abrupt exit
+            // so the original source retains its Node/CommonJS lexical scope.
+            js_cjs_leave(ItemNull);
+        }
         jm_clear_active_js_transpile(NULL, NULL, wrapped);
         mem_free(wrapped);
     } else {
