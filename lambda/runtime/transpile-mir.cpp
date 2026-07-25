@@ -2488,10 +2488,11 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node);
-// P4-3.2. `safe_elem` selects the question asked: LMD_TYPE_ANY reports any
-// index-assign to `var_name`; a concrete element TypeId reports only assigns
-// that provably change the array's element representation.
-static bool has_index_mutation(const char* var_name, AstNode* node,
+// P4-3.2. `safe_elem` selects the question asked of element stores:
+// LMD_TYPE_ANY reports any index-assign to `var_name`; a concrete element
+// TypeId reports only assigns that provably change the array's element
+// representation. Whole-variable reassignment always reports, either way.
+static bool has_elem_type_invalidation(const char* var_name, AstNode* node,
         TypeId safe_elem = LMD_TYPE_ANY);
 
 // ============================================================================
@@ -3176,7 +3177,16 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 char oname[128];
                 snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
                 MirVarEntry* ov = find_var(mt, oname);
-                if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
+                // The narrowing only describes the load transpile_index will
+                // actually emit while the variable is still tracked as a
+                // container. Once it is widened to ANY (a COW var binding
+                // rebinds through cow_bind_var), the index lowering falls to
+                // the boxed fast path, and promising a native element type
+                // here makes the consumer box an already-boxed Item.
+                if (ov && ov->elem_type != LMD_TYPE_ANY &&
+                    (ov->type_id == LMD_TYPE_ARRAY_NUM || ov->type_id == LMD_TYPE_ARRAY)) {
+                    return ov->elem_type;
+                }
             }
         }
     }
@@ -5786,7 +5796,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 
                 // P4-3.1: Set element type for container variables (from fill() narrowing)
                 // Only set when var_tid is still ARRAY (not overridden by typed array coercion)
-                if (fill_elem_type != LMD_TYPE_ANY && (var_tid == LMD_TYPE_ARRAY || var_tid == LMD_TYPE_ARRAY_NUM)) {
+                // and nothing later rebinds the name: this narrowing is unguarded,
+                // so the inline index loads read raw elements with no runtime
+                // check, and a reassigned container would be read at the wrong
+                // element representation.
+                if (fill_elem_type != LMD_TYPE_ANY && (var_tid == LMD_TYPE_ARRAY || var_tid == LMD_TYPE_ARRAY_NUM) &&
+                    !(mt->func_body && has_elem_type_invalidation(name_buf, mt->func_body, fill_elem_type))) {
                     MirVarEntry* v = find_var(mt, name_buf);
                     if (v) v->elem_type = fill_elem_type;
                 }
@@ -5807,7 +5822,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             (arr_type->nested->type_id == LMD_TYPE_INT ||
                              arr_type->nested->type_id == LMD_TYPE_BOOL)) {
                             // Check mutation: scan current scope for arr[i] = val
-                            if (mt->func_body && !has_index_mutation(name_buf, mt->func_body)) {
+                            if (mt->func_body && !has_elem_type_invalidation(name_buf, mt->func_body)) {
                                 MirVarEntry* v = find_var(mt, name_buf);
                                 if (v && v->elem_type == LMD_TYPE_ANY) {
                                     v->elem_type = arr_type->nested->type_id;
@@ -13632,7 +13647,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // there would silently coerce them, so leave such params untyped.
             if (var_type == LMD_TYPE_ARRAY_NUM && param_elem_tid != LMD_TYPE_ANY &&
                     !(fn_node->body &&
-                      has_index_mutation(pname, fn_node->body, param_elem_tid))) {
+                      has_elem_type_invalidation(pname, fn_node->body, param_elem_tid))) {
                 MirVarEntry* v = find_var(mt, pname);
                 if (v) {
                     v->elem_type = param_elem_tid;
@@ -13883,10 +13898,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 }
 
 // ============================================================================
-// P4-3.2: Mutation analysis — check if a variable is ever index-assigned
-// in a given AST subtree. Used to determine if elem_type can be safely set.
-// Returns true if arr[i] = val is found where arr matches var_name.
-// Does NOT recurse into nested function/procedure definitions (separate scope).
+// P4-3.2: Mutation analysis — check whether anything in a subtree can leave
+// var_name holding elements of a different type than a declaration-site
+// narrowing claims. Used to decide if elem_type can be safely set.
+// Returns true for an element store `arr[i] = val` that converts the array,
+// and for a whole-variable reassignment `arr = val` (which rebinds the
+// variable to an entirely different container).
 // ============================================================================
 // Would storing `value` into an ArrayNum of element type `elem` make
 // fn_array_set call convert_specialized_to_generic — after which the array is
@@ -13920,8 +13937,23 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
     }
 }
 
-static bool has_index_mutation(const char* var_name, AstNode* node, TypeId safe_elem) {
+static bool has_elem_type_invalidation(const char* var_name, AstNode* node, TypeId safe_elem) {
     while (node) {
+        // A whole-variable reassignment rebinds the name to a different
+        // container, so no declaration-site element narrowing survives it.
+        // Unlike an element store, an unresolved RHS cannot be admitted here:
+        // emission order is not execution order, so a read lowered before the
+        // assignment (a loop body) still runs against the reassigned value.
+        if (node->node_type == AST_NODE_ASSIGN_STAM) {
+            AstAssignStamNode* as = (AstAssignStamNode*)node;
+            String* target = as->target;
+            if (target && target->len > 0 &&
+                strncmp(var_name, target->chars, target->len) == 0 &&
+                var_name[target->len] == '\0') {
+                return true;
+            }
+        }
+
         // Check if this node is an index-assignment targeting our variable
         if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
             AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
@@ -13945,26 +13977,26 @@ static bool has_index_mutation(const char* var_name, AstNode* node, TypeId safe_
         switch (node->node_type) {
         case AST_NODE_IF_EXPR: {
             AstIfNode* if_node = (AstIfNode*)node;
-            if (if_node->then && has_index_mutation(var_name, if_node->then, safe_elem)) return true;
-            if (if_node->otherwise && has_index_mutation(var_name, if_node->otherwise, safe_elem)) return true;
+            if (if_node->then && has_elem_type_invalidation(var_name, if_node->then, safe_elem)) return true;
+            if (if_node->otherwise && has_elem_type_invalidation(var_name, if_node->otherwise, safe_elem)) return true;
             break;
         }
         case AST_NODE_WHILE_STAM: {
             AstWhileNode* wh = (AstWhileNode*)node;
-            if (wh->body && has_index_mutation(var_name, wh->body, safe_elem)) return true;
+            if (wh->body && has_elem_type_invalidation(var_name, wh->body, safe_elem)) return true;
             break;
         }
         case AST_NODE_FOR_EXPR:
         case AST_NODE_FOR_STAM: {
             AstForNode* for_node = (AstForNode*)node;
-            if (for_node->then && has_index_mutation(var_name, for_node->then, safe_elem)) return true;
+            if (for_node->then && has_elem_type_invalidation(var_name, for_node->then, safe_elem)) return true;
             break;
         }
         case AST_NODE_MATCH_EXPR: {
             AstMatchNode* match = (AstMatchNode*)node;
             AstMatchArm* arm = match->first_arm;
             while (arm) {
-                if (arm->body && has_index_mutation(var_name, arm->body, safe_elem)) return true;
+                if (arm->body && has_elem_type_invalidation(var_name, arm->body, safe_elem)) return true;
                 arm = (AstMatchArm*)arm->next;
             }
             break;
@@ -13972,15 +14004,15 @@ static bool has_index_mutation(const char* var_name, AstNode* node, TypeId safe_
         case AST_NODE_CONTENT:
         case AST_NODE_LIST: {
             AstListNode* list = (AstListNode*)node;
-            if (list->declare && has_index_mutation(var_name, list->declare, safe_elem)) return true;
-            if (list->item && has_index_mutation(var_name, list->item, safe_elem)) return true;
+            if (list->declare && has_elem_type_invalidation(var_name, list->declare, safe_elem)) return true;
+            if (list->item && has_elem_type_invalidation(var_name, list->item, safe_elem)) return true;
             break;
         }
         case AST_NODE_LET_STAM:
         case AST_NODE_PUB_STAM:
         case AST_NODE_VAR_STAM: {
             AstLetNode* let_node = (AstLetNode*)node;
-            if (let_node->declare && has_index_mutation(var_name, let_node->declare, safe_elem)) return true;
+            if (let_node->declare && has_elem_type_invalidation(var_name, let_node->declare, safe_elem)) return true;
             break;
         }
         // Recurse into function bodies (module-level vars can be mutated from within)
@@ -13988,7 +14020,7 @@ static bool has_index_mutation(const char* var_name, AstNode* node, TypeId safe_
         case AST_NODE_PROC:
         case AST_NODE_FUNC_EXPR: {
             AstFuncNode* fn = (AstFuncNode*)node;
-            if (fn->body && has_index_mutation(var_name, fn->body, safe_elem)) return true;
+            if (fn->body && has_elem_type_invalidation(var_name, fn->body, safe_elem)) return true;
             break;
         }
         default:
