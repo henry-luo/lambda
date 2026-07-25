@@ -841,5 +841,7 @@ pn main() {
     if (ok == 0) {
         print("Havlak: FAIL\n")
     }
-    return 0
+    // return the loops*100000+nodes figure verify_result checks, so the
+    // echoed main result is a real assertion in the golden, not a constant 0
+    return result
 }

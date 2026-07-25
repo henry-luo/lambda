@@ -1082,5 +1082,7 @@ pn main() {
     if (ok == 0) {
         print("CD: FAIL\n")
     }
-    return 0
+    // return the computed collision count so the echoed main result is a
+    // real assertion in the golden, not a constant 0
+    return collisions
 }

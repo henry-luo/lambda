@@ -1111,5 +1111,7 @@ pn main() {
         print("CD: FAIL\n")
     }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
-    return 0
+    // return the computed collision count so the echoed main result is a
+    // real assertion in the golden, not a constant 0
+    return collisions
 }

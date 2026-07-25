@@ -844,5 +844,7 @@ pn main() {
         print("Havlak: FAIL\n")
     }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
-    return 0
+    // return the loops*100000+nodes figure verify_result checks, so the
+    // echoed main result is a real assertion in the golden, not a constant 0
+    return result
 }
