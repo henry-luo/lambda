@@ -173,12 +173,22 @@ void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint) {
 }
 
 uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) {
-    if (!runtime_context ||
-            !lambda_side_stack_ensure(runtime_context, slot_count, 0)) {
-        return NULL;
-    }
+    if (!runtime_context) return NULL;
 
     uint64_t* slots = runtime_context->side_root_top;
+    uintptr_t base = (uintptr_t)runtime_context->side_root_base;
+    uintptr_t top = (uintptr_t)slots;
+    uintptr_t committed = (uintptr_t)runtime_context->side_root_commit_limit;
+    // The stack merge regressed call-heavy JS by resolving TLS-backed region
+    // metadata for every argument frame. Stay entirely on Context while the
+    // requested slots fit; the slow path remains the sole bind/commit owner.
+    bool fits_committed = base && top >= base && committed >= top &&
+        slot_count <= (committed - top) / sizeof(uint64_t);
+    if (!fits_committed) {
+        if (!lambda_side_stack_ensure(runtime_context, slot_count, 0)) return NULL;
+        slots = runtime_context->side_root_top;
+    }
+
     // Zero before publishing the new watermark so a forced collection can
     // never interpret stale words from a previous activation as live roots.
     for (size_t i = 0; i < slot_count; i++) slots[i] = 0;

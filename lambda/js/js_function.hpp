@@ -61,4 +61,5 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 #define JS_FUNC_FLAG_ASYNC     128
 #define JS_FUNC_FLAG_DERIVED_CTOR 256
 #define JS_FUNC_FLAG_MIR_PUBLIC_ABI 512
+#define JS_FUNC_FLAG_USES_WITH 1024
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD

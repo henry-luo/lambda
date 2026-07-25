@@ -174,6 +174,8 @@ void jm_exc_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
 MIR_reg_t jm_emit_exception_test(JsMirTranspiler* mt);
 void jm_emit_exception_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
 void jm_emit_exception_guard(JsMirTranspiler* mt, MIR_label_t target);
+MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt);
+void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);

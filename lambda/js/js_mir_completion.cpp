@@ -207,13 +207,49 @@ static MIR_reg_t jm_emit_exception_const(JsMirTranspiler* mt, int64_t value,
     return result;
 }
 
-static MIR_reg_t jm_oldest_arg_stack_mark(JsMirTranspiler* mt) {
-    MIR_reg_t unwind_mark = 0;
+MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
+    if (!mt || !mt->em.frame.active || !mt->em.frame.root_base) {
+        log_error("js-mir arg-frame invariant: base without active root frame");
+        abort();
+    }
+    if (mt->arg_frame_base) return mt->arg_frame_base;
+    mt->arg_frame_base = jm_new_reg(mt, "js_arg_frame", MIR_T_I64);
+    mt->arg_frame_base_add = MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, mt->arg_frame_base),
+        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
+        MIR_new_int_op(mt->ctx, 0));
+    // The semantic-root count is known only after liveness coloring. Keep one
+    // entry add and patch its displacement when the complete frame is fixed.
+    MIR_insert_insn_after(mt->ctx, mt->em.func_item,
+        mt->em.frame.anchor, mt->arg_frame_base_add);
+    return mt->arg_frame_base;
+}
+
+void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope) {
+    if (!mt || !scope || scope->base_slot < 0 || scope->slot_count <= 0) return;
+    MIR_reg_t base = jm_arg_frame_base(mt);
+    for (int i = 0; i < scope->slot_count; i++) {
+        int slot = scope->base_slot + i;
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                slot * (int)sizeof(uint64_t), base, 0, 1),
+            MIR_new_int_op(mt->ctx, 0)));
+    }
+}
+
+static bool jm_has_active_arg_frame(JsMirTranspiler* mt) {
     for (JsMirArgStackScope* scope = mt ? mt->arg_stack_scope : NULL;
             scope; scope = scope->parent) {
-        if (scope->mark) unwind_mark = scope->mark;
+        if (scope->base_slot >= 0 && scope->slot_count > 0) return true;
     }
-    return unwind_mark;
+    return false;
+}
+
+static void jm_clear_active_arg_frames(JsMirTranspiler* mt) {
+    for (JsMirArgStackScope* scope = mt ? mt->arg_stack_scope : NULL;
+            scope; scope = scope->parent) {
+        jm_emit_arg_frame_clear(mt, scope);
+    }
 }
 
 MIR_reg_t jm_emit_exception_test(JsMirTranspiler* mt) {
@@ -245,11 +281,7 @@ void jm_emit_exception_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         return;
     case JS_EXC_SET: {
         jm_emit_debug_assert_exception_set(mt);
-        MIR_reg_t unwind_mark = jm_oldest_arg_stack_mark(mt);
-        if (unwind_mark) {
-            jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, unwind_mark));
-        }
+        jm_clear_active_arg_frames(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, target)));
         return;
@@ -259,18 +291,14 @@ void jm_emit_exception_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         break;
     }
     MIR_reg_t exception = jm_emit_exception_test(mt);
-    if (mt->arg_stack_scope && mt->arg_stack_scope->mark) {
+    if (jm_has_active_arg_frame(mt)) {
         MIR_label_t clean_path = jm_new_label(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, clean_path),
             MIR_new_reg_op(mt->ctx, exception)));
-        MIR_reg_t unwind_mark = jm_oldest_arg_stack_mark(mt);
-        if (unwind_mark) {
-            // Argument-stack scopes can be half-built when a callee throws, so
-            // the exceptional edge must reset the oldest watermark before exit.
-            jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, unwind_mark));
-        }
+        // Fixed argument slots stay inside the function frame, but their
+        // call-expression lifetime still ends on a caught exceptional edge.
+        jm_clear_active_arg_frames(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, target)));
         jm_emit_label_with_state(mt, clean_path, JS_EXC_CLEAN);

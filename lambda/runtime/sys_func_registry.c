@@ -1836,17 +1836,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
-    {"js_args_push", FPTR(js_args_push)},
     {"js_throw_range_error", FPTR(js_throw_range_error)},
-    // Argument-watermark operations only move the precise side-root top and
-    // cannot enter the collector.
-    {"js_args_save", FPTR(js_args_save),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
-    {"js_args_restore", FPTR(js_args_restore),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_call_function", FPTR(js_call_function),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -3108,7 +3098,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "owned_item_slot_store",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
-        "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
+        "js_is_truthy", "js_is_nullish",
         // Only the flag read is an audited NO_GC helper. Debug assertions can
         // log on failure and exception extraction can allocate a number home.
         "js_check_exception",

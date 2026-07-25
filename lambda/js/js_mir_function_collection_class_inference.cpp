@@ -3144,31 +3144,31 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
-    // Args occupy canonical side-root slots and are popped by the enclosing
-    // call/new watermark. This avoids permanent root-range registration while
-    // keeping partially evaluated nested arguments visible to precise GC.
+    // Args occupy fixed slots in the generated function's canonical root
+    // frame. Nested call expressions use disjoint higher slots, while sibling
+    // calls reuse the same bounded extent.
     if (!mt->arg_stack_scope) {
-        // Every transient buffer must be bounded by its owning call/new
-        // expression; an unscoped push would leak stack roots across calls.
-        log_error("js-mir arg-stack invariant: push without call/new scope");
+        log_error("js-mir arg-frame invariant: args without call/new scope");
         abort();
     }
-    if (!mt->arg_stack_scope->mark) {
-        mt->arg_stack_scope->mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
+    JsMirArgStackScope* scope = mt->arg_stack_scope;
+    if (scope->base_slot < 0) {
+        scope->base_slot = mt->arg_frame_depth;
+        scope->slot_count = arg_count;
+        mt->arg_frame_depth += arg_count;
+        if (mt->arg_frame_depth > mt->arg_frame_slot_count) {
+            mt->arg_frame_slot_count = mt->arg_frame_depth;
+        }
+    } else if (scope->slot_count != arg_count) {
+        log_error("js-mir arg-frame invariant: scope arity changed");
+        abort();
     }
-    MIR_reg_t args_ptr = jm_call_1(mt, "js_args_push", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-    MIR_label_t args_ready = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, args_ready),
-        MIR_new_reg_op(mt->ctx, args_ptr)));
-    // js_args_push has already recorded the native allocation failure. Raise
-    // a JS RangeError and route it before any store can dereference NULL.
-    jm_call_1(mt, "js_throw_range_error", MIR_T_I64,
-        MIR_T_P, MIR_new_int_op(mt->ctx,
-            (int64_t)(uintptr_t)"Maximum call argument stack size exceeded"));
-    jm_emit_exc_propagate_check(mt);
-    jm_emit_label(mt, args_ready);
+    MIR_reg_t args_ptr = jm_new_reg(mt, "js_args_ptr", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, args_ptr),
+        MIR_new_reg_op(mt->ctx, jm_arg_frame_base(mt)),
+        MIR_new_int_op(mt->ctx,
+            (int64_t)scope->base_slot * (int64_t)sizeof(uint64_t))));
 
     // Evaluate and store each argument
     JsAstNode* arg = first_arg;

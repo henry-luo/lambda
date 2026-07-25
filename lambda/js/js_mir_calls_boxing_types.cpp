@@ -652,6 +652,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     }
     if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
     if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
+    if (fc->uses_with) flags |= JS_FUNC_INIT_USES_WITH;
     // Every compiled public wrapper takes the trailing ABI pointer. Only
     // scalar-returning wrappers consume it, but one canonical call shape
     // prevents callback dispatch from guessing a function's return type.

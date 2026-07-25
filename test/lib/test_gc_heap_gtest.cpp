@@ -210,6 +210,24 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
     gc_collect_with_root_region(gc, NULL, 0, runtime.side_root_base,
         (int64_t)(runtime.side_root_top - runtime.side_root_base));
     EXPECT_EQ(gc->object_count, 0u);
+
+    // Reusing a committed extent must clear stale words before publishing the
+    // fast-path watermark; precise GC scans every slot below the new top.
+    uint64_t* reused = lambda_side_root_alloc_n(&runtime, 3);
+    ASSERT_EQ(reused, roots);
+    EXPECT_EQ(reused[0], 0u);
+    EXPECT_EQ(reused[1], 0u);
+    EXPECT_EQ(reused[2], 0u);
+    lambda_side_stack_restore(&runtime, checkpoint);
+
+    // A commit-boundary miss must retain the generic ensure path rather than
+    // advancing beyond the Context's currently accessible region.
+    runtime.side_root_commit_limit = runtime.side_root_top;
+    uint64_t* after_ensure = lambda_side_root_alloc_n(&runtime, 1);
+    ASSERT_NE(after_ensure, nullptr);
+    EXPECT_EQ(after_ensure, checkpoint.root_top);
+    EXPECT_GT(runtime.side_root_commit_limit, checkpoint.root_top);
+    lambda_side_stack_restore(&runtime, checkpoint);
     lambda_side_stack_reset(&runtime);
 }
 

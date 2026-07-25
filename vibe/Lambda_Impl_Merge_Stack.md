@@ -1,7 +1,8 @@
 # Implementation Plan: JS Runtime Stack Merges
 
-**Status:** implemented (2026-07-24). Merge A, Merge B, and the required
-Merge C slices are complete. C3 was deliberately skipped: the env,
+**Status:** implemented and performance-repaired (2026-07-25). Merge A, Merge B, and the required
+Merge C slices are complete. The post-merge argument-frame implementation is
+allocation-free on ordinary calls and preserves precise GC lifetime. C3 was deliberately skipped: the env,
 global-lexical, and private bridges retain different conditional lifetimes and
 writeback ordering, so one bridge token would not reduce state safely.
 
@@ -16,10 +17,11 @@ transpiler never used `js_args_*`. C2MIR is frozen and out of scope.
 
 This plan covers three independent merges, ordered by decision date:
 
-- **Merge A — call-argument stack → side-root region.** `js_args_stack` is a
-  hand-rolled duplicate of the side-root stack; its frames move onto the
-  thread-local side-root region surfaced through the active `Context`. A
-  *lifetime* merge.
+- **Merge A — call-argument stack → generated side-root-frame suffix.** The
+  private `js_args_stack` and its temporary runtime protocol are removed.
+  Every compiled function reserves the maximum lexically overlapping argument
+  slots as a fixed suffix of its canonical side-root frame. A *lifetime*
+  merge with no per-call stack-management ABI.
 - **Merge B — shared rooted-range mechanism.** The runtime hand-rolls
   epoch-guarded GC registration and batch clearing for several fixed global
   `Item` ranges. A base `JsRootRange` makes registration non-optional; an
@@ -44,9 +46,11 @@ continue independently. The standalone `js_with_stack` rooting fix
 ## Completed implementation record (2026-07-24)
 
 - **Merge A:** `lambda_side_root_alloc_n()` now reserves and zeroes exact
-  side-root slots before publishing the watermark. `js_args_*` uses that
-  region, checks allocation failure before its first generated store, and the
-  private buffer plus both lifecycle hooks are gone.
+  side-root slots before publishing the watermark, with a committed-range fast
+  path. The temporary `js_args_*` protocol, its private buffer, and its
+  lifecycle hooks are gone. Generated calls instead use a fixed argument-slot
+  suffix in the function's canonical root frame; normal and exceptional exits
+  clear completed slots so weak/finalized values are not retained to return.
 - **Merge B:** `JsRootRange` owns per-epoch exact-range registration and the
   batch reset registry; `JsItemStack` owns only ordinary LIFO slots. The with,
   domain, CommonJS-module, and super-this stacks use it; cache and table roots
@@ -59,9 +63,69 @@ continue independently. The standalone `js_with_stack` rooting fix
   exception assertions, and `lambda_async_frame_set_word` are MAY_GC because
   their error/re-materialization paths can allocate or log. Their new
   safepoints and root stores are recorded in `test/mir/mir_budgets.json`.
-- **Verification:** `make test-lambda-baseline` passed **3,607 / 3,607**;
+- **Verification:** `make test-lambda-baseline` passed **3,609 / 3,609**;
   `make test-gc-rooting-core` passed with all forced-GC gates and the static
-  effect/root-hazard audits; `test_mir_ratchet_gtest.exe` passed **15 / 15**.
+  effect/root-hazard audits; `test_mir_ratchet_gtest.exe` passed **15 / 15**;
+  `make test262-baseline` passed **40,261 / 40,261** with **0 regressions**.
+  The Node official result is documented below as a pre-Result12 compatibility
+  debt finding, not a stack-merge regression.
+
+### Post-implementation performance repair (2026-07-25)
+
+The first complete Merge A implementation used the temporary
+`js_args_save/push/restore` runtime protocol over `lambda_side_root_alloc_n`.
+It was correct for exact GC rooting, but it added runtime calls, watermark
+updates, and stores to every ordinary call expression. On the recursive
+benchmarks this was a major regression: `fib` / `fibfp` moved from Result12's
+38.585 / 38.422 to 55.180 / 55.305, and `cpstak` moved from 6.493 to 8.917.
+
+All performance repairs are complete:
+
+1. Measured the transitional protocol separately and rejected the
+   save/restore-wrapper experiment because it recovered too little while
+   increasing MIR size.
+2. Replaced the runtime argument-frame ABI with a per-function fixed suffix
+   in the generated canonical root frame. Lexically overlapping calls receive
+   disjoint stable slots; no allocation, root-watermark update, or C runtime
+   call remains on an ordinary argument-lowering path.
+3. Kept exact lifetime semantics: each completed call scope clears its slots,
+   exceptional routing clears all active scopes, and generator/async argument
+   lists continue to use the existing suspension-safe environment spill path.
+4. Restored the empty-`with` fast-path only when the function does not use
+   `with`, preserving the correct scope lookup behavior without adding call
+   overhead to ordinary functions.
+
+The retained fixed-frame implementation measured 34.730 / 34.667 / 5.831 on
+`fib` / `fibfp` / `cpstak`: about 37% faster than the initial stack merge,
+14–15% faster than the pre-stack binary, and 10–15% faster than Result12.
+The non-call-heavy `sum` benchmark remained effectively flat (11.820 versus
+Result12's 11.847). The table in Merge A Phase 4 is the authoritative raw
+measurement record.
+
+### Node official baseline finding: 1,473 pre-Result12 failures (2026-07-25)
+
+The current `make node-baseline` reports **1,473 failures**. This is not a
+Merge A/B/C regression and must not be hidden by restoring Result12 behavior.
+The preserved Result12 binary exits 0 even for an explicit top-level
+`throw new Error(...)`; its lifecycle path cleared a pre-existing script
+exception while processing `process.beforeExit`. Commit `1d1623987`, after
+Result12, fixed that reporting bug by preserving a script exception that was
+already pending before `beforeExit` runs.
+
+Consequently, the current failures are pre-Result12 Node-compatibility defects
+that Result12 falsely reported as passing. The focused
+`test-abortcontroller.js` proof is representative: Result12 exits 0, while
+the corrected runtime exposes the real `AbortSignal.timeout()` assertion
+failure. The failure population is broad rather than one stack-lifetime bug:
+the largest groups are missing function behavior, equality mismatches, missing
+expected exceptions, and TDZ/initialization errors.
+
+This lifecycle correction executes once during top-level script teardown, not
+in generated call or argument-lowering hot paths. It therefore does not
+explain, or trade off against, the Merge A performance measurements above.
+The honest Node gate remains red until those compatibility defects are fixed
+by behavior cluster; reverting the exception-preservation fix would merely
+turn real failing tests back into silent exit-0 results.
 
 ---
 
@@ -90,44 +154,35 @@ regardless of test results.
 
 ## 1. Current state
 
-### 1.1 Replaced private argument stack
+### 1.1 Replaced private argument stack and runtime protocol
 
-The former 256 K-slot, process-global `js_args_stack` was removed completely:
+The former process-global `js_args_stack` was removed completely, including
 its full-capacity root registration, `js_alloc_env` overflow fallback,
-pop-time clearing invariant, batch reset, process cleanup, declarations, and
-all call sites are absent. The surviving ABI entry points in
-`lambda/js/js_runtime_function.cpp` now use the active `Context`:
+pop-time clearing invariant, batch reset, process cleanup, declarations,
+JIT imports, and all call sites. The first post-merge implementation briefly
+used `js_args_save/push/restore` over `lambda_side_root_alloc_n`; measurement
+showed those runtime calls were still too expensive and they were removed too.
 
-- `js_args_push(count)` reserves zeroed slots via `lambda_side_root_alloc_n`.
-  A NULL result is surfaced to generated MIR before any argument store.
-- `js_args_save()` returns the current `side_root_top` watermark as an
-  integer-sized token without allocating.
-- `js_args_restore(mark)` validates integer bounds/alignment and only rewinds
-  the root watermark; the collector never scans words above that top.
+Call arguments now occupy a statically sized suffix of the ordinary generated
+function root frame. The collector therefore scans only the active frame's
+exact root prefix. No separate argument allocation, watermark, registration,
+or call ABI remains on the ordinary path.
 
-This changes the collector from scanning a permanent private capacity to
-scanning only the live side-root prefix.
+### 1.2 Current JIT argument-frame protocol
 
-### 1.2 Current JIT watermark protocol
-
-- `JsMirArgStackScope` (`lambda/js/js_mir_context.hpp:327`; active pointer at
-  `:459`, reset at function start in
-  `lambda/js/js_mir_hashmap_scope_utils.cpp:366`).
-- Every `CALL_EXPRESSION` / `NEW_EXPRESSION` opens/closes a scope
-  (`lambda/js/js_mir_expression_lowering.cpp:13259–13271`, call case at
-  `:13285`, new case at `:13334`). `jm_end_arg_stack_scope` emits
-  `js_args_restore(mark)` when the scope has a mark.
-- The mark is emitted **lazily at first push**:
-  `lambda/js/js_mir_function_collection_class_inference.cpp:3162` emits
-  `js_args_save`, then `:3164` emits `js_args_push`. Zero-argument and
-  spill-path calls carry no argument-stack protocol at all.
-- Exceptional edges restore to the **oldest** enclosing mark
-  (`jm_oldest_arg_stack_mark`, `lambda/js/js_mir_completion.cpp:210`;
-  restore emission at `:248–252` and `:262–275`) because nested argument
-  frames can be half-built when a callee throws.
-- Generator/async args containing a suspend point bypass this stack entirely
-  and spill to env slots + `js_alloc_env`
-  (`js_mir_function_collection_class_inference.cpp:3099–3146`).
+- `JsMirArgStackScope` records lexical `saved_depth`, `base_slot`, and
+  `slot_count`. Every `CALL_EXPRESSION` / `NEW_EXPRESSION` opens and closes a
+  scope; lexical overlap determines the maximum fixed suffix size.
+- `jm_arg_frame_base()` inserts one frame-relative MIR `ADD`. After semantic
+  root liveness coloring, finalization patches that add to start directly
+  after the semantic roots and extends the root-frame slot count by the
+  argument suffix size.
+- Argument pointers are frame-relative adds. Nested calls use disjoint fixed
+  slots; when a scope ends its slots are cleared and the lexical depth rewinds.
+  Exceptional routing clears all active scopes before entering a handler or
+  returning, preserving precise lifetime even for partially evaluated lists.
+- Generator/async argument lists containing a suspension point retain their
+  existing environment-spill path, because that path must survive suspension.
 
 ### 1.3 The side-root region (merge target)
 
@@ -168,10 +223,10 @@ scanning only the live side-root prefix.
 
 ## 2. Target design
 
-One new runtime primitive plus a reimplementation of the three surviving
-`js_args_*` entry points on top of it. The JIT-facing names and C-call ABI are
-preserved through Phase 3. Phase 2 adds one required NULL check after
-`js_args_push`; Phase 4 may optionally inline save/restore after measurement.
+The implementation sequence began with one runtime primitive and a temporary
+`js_args_*` adaptation layer. That layer was useful for proving rooting and
+overflow behavior, but it is not the final design: Phase 4 replaces it with
+fixed generated-frame slots and deletes the ABI completely.
 
 ```c
 // side_stack.h — root-side twin of lambda_side_number_alloc().
@@ -244,9 +299,10 @@ Gate: `make build-test` + new unit tests green.
 
 ### Phase 2 — reimplement `js_args_*` and make allocation failure explicit
 
-**Status: implemented.** The generated failure branch and its intentional MIR
-delta are present; the checked-in side-stack regression exercises the path
-under forced collection.
+**Status: implemented as a transitional rooting proof, then removed by Phase
+4.** The generated failure branch and its forced-GC regression established the
+side-root allocation invariant before the final fixed-frame lowering deleted
+the per-call ABI.
 
 `lambda/js/js_runtime_function.cpp`:
 
@@ -313,35 +369,44 @@ Gate: baseline green; run the batch/multi-test harness specifically (heap
 teardown + recreation across tests is what `js_args_stack_reset` existed
 for).
 
-### Phase 4 (optional, measured and deferred by default) — inline save/restore
+### Phase 4 — eliminate the argument-stack ABI with fixed frame slots
 
-**Status: skipped — not measured.** The C ABI wrappers remain because this
-implementation is a lifetime/rooting change, not an unverified call-path
-micro-optimization.
+**Status: implemented and measured (2026-07-25).** The save/restore wrapper
+experiment was not retained: it recovered little performance while increasing
+MIR size. The final implementation eliminates allocation, watermark, and C
+ABI calls from ordinary argument lowering.
 
-Marks are now just `side_root_top` values, so the two C calls per
-argument-carrying call expression can become direct `Context` field ops using
-the frame's runtime register (`mt->em.frame.runtime`, same pattern as
-`em_store_frame_top` with `offsetof(Context, side_root_top)`):
+Each generated function computes its maximum lexically overlapping argument
+arity. Frame finalization appends that many exact root slots after the colored
+semantic roots. A call scope receives a stable offset into that suffix, stores
+its evaluated arguments there, then clears the slots on normal completion.
+Exceptional routing clears every active scope before handing control to a
+handler or exit. Thus the slots are rooted for exactly the evaluation/call
+extent without keeping weak/finalized values alive to function return.
 
-- save (`js_mir_function_collection_class_inference.cpp:3162`) → MIR load of
-  `context->side_root_top` into the mark reg;
-- restore (`js_mir_expression_lowering.cpp:13267`,
-  `js_mir_completion.cpp:250` and `:271`) → load the current top and emit the
-  same release-build validity/order check as `js_args_restore` before storing
-  the mark. A plain unconditional store is forbidden: an older exceptional
-  restore may already have rewound below a nested mark, and storing that mark
-  would move the top upward and resurrect popped roots.
-- `js_args_push` stays a C call (it needs ensure/commit growth + zeroing).
+Calls whose argument evaluation can suspend remain on the existing heap-env
+spill path; its lifetime crosses suspension and cannot use a synchronous
+frame suffix.
 
-Costs to plan for:
+The remaining major regression came from Merge B, not argument storage:
+ordinary calls installed and restored an empty `with` stack, invoking the new
+root-range registration path twice per call. That shortcut is now conditional
+on real caller/captured `with` state, or on a compiler-provided `uses_with`
+flag. The flag is required because an early `return` from a `with` body
+bypasses its generated pop and must still be restored by call dispatch.
 
-- **MT7 emission budgets**: instruction/call counts change in
-  `test/mir/mir_budgets.json` fixtures — manual budget lifts required, with
-  the delta recorded in the commit message.
-- Build with `make release` and bench before/after on call-heavy Result-suite
-  scripts to confirm the win justifies the budget churn; if not measurable,
-  skip this phase entirely.
+Release A/B median, 12 rotated runs per engine; all output checks passed:
+
+| Engine | `fib` | `fibfp` | `cpstak` | `sum` |
+|---|---:|---:|---:|---:|
+| Fixed | 34.730 | 34.667 | 5.831 | 11.820 |
+| Stack merge before repair | 55.180 | 55.305 | 8.917 | 11.752 |
+| Pre-stack | 40.674 | 40.632 | 6.729 | 11.746 |
+| Result12 | 38.585 | 38.422 | 6.493 | 11.847 |
+
+The final path is about 37% faster than the regressed stack merge on the
+recursive cases, 14–15% faster than pre-stack, and 10–15% faster than
+Result12; the non-call-heavy `sum` result is effectively flat.
 
 ### Phase 5 — clean removal audit and records
 
@@ -374,10 +439,9 @@ grep -rn "JS_ARGS_STACK_CAP\|js_args_stack\b\|js_args_len\|js_args_registered" l
 grep -rn "js_args_stack_reset\|js_args_stack_cleanup" lambda/
 ```
 
-Only `js_args_push` / `js_args_save` / `js_args_restore` survive — as thin
-wrappers over the side-root primitives (or fewer, if Phase 4 inlined
-save/restore, in which case delete the orphaned C entry points and their
-JIT import registrations too).
+No `js_args_*` entry point survives. The argument-frame suffix is emitted
+directly by the MIR lowering and uses the canonical generated-frame prologue
+and epilogue.
 
 Records:
 
@@ -391,10 +455,10 @@ Records:
 
 ### 4.1 Invariants preserved
 
-- **LIFO watermark nesting** with generated frames (§1.4). Functions with
-  `root_slot_count == 0` (zero-root numeric functions) never touch
-  `side_root_top`, so they neither help nor harm the discipline — explicit
-  scope restores still run.
+- **Frame-suffix nesting** with generated frames (§1.4). Functions with
+  argument slots reserve them in their canonical root frame; nested call
+  scopes use lexically disjoint suffix slots and clear them before rewinding
+  lexical depth.
 - **Push-before-fill rooting**: slots are zeroed and published before the JIT
   stores evaluated args one by one; a GC triggered while evaluating arg *i+1*
   sees args `0..i` live and the rest as null. Identical to today.
@@ -402,18 +466,16 @@ Records:
   helper frames; argument frames pushed and popped by generated code between
   a native frame's begin/end are invisible to it (top returns to the same
   value).
-- **Exception edges** keep restoring to the *oldest* mark
-  (`jm_oldest_arg_stack_mark`) — the restore protocol is unchanged through
-  Phase 3.
+- **Exception edges** clear every active argument scope before entering a
+  handler or exit. This prevents stale argument roots without trying to move a
+  frame watermark upward during unwind.
 
 ### 4.2 Hazards
 
-- **Restore-guard semantics.** The old guard (`mark >= len` → no-op) silently
-  tolerated a stale mark. The new integer-address guard must tolerate an
-  enclosing restore that already rewound below the mark; storing such a mark
-  would move the top *up* and resurrect roots. Validate base, top, and slot
-  alignment before restoring. The optional Phase 4 must preserve this check in
-  release MIR.
+- **Lifetime clearing.** Fixed suffix slots stay inside the generated frame
+  until return, so both normal and exceptional paths must explicitly clear
+  completed/active scopes. Rewinding lexical depth alone would retain stale
+  objects and delay weak/finalizer observation.
 - **Capacity coupling.** Argument frames now share the 16 MB root region with
   per-frame root slots. Worst-case simultaneous demand ≈ old 2 MB args cap +
   existing frame usage — comfortably inside 2 M slots, and reservation is
@@ -460,9 +522,9 @@ without a NULL write or a leaked watermark.
    unchanged.
 2. Phase 3 additionally: multi-test batch harness green (heap
    teardown/recreation across tests).
-3. Phase 4 (if taken): `make release` used, budgets lifted deliberately, and
-   bench delta recorded; otherwise explicitly record "Phase 4 skipped — not
-   measurable".
+3. Phase 4: `make release` and rotated A/B medians are required; update MIR
+   budgets deliberately and retain the fixed-frame lowering only when the
+   measured result justifies its code-generation cost.
 4. **Clean removal verified**: the Phase 5 deletion checklist is empty — the
    buffer, cap macro, length/registration statics, root-range registration,
    pop-time memset, both lifecycle functions, their declarations, their call

@@ -133,3 +133,23 @@ try {
     gc();
     console.log(value === Number.MIN_VALUE);
 }
+
+function throwDuringArgument() {
+    gc();
+    throw new Error("argument unwind");
+}
+
+function addArgumentValues(first, second) {
+    gc();
+    return first.value + second;
+}
+
+let argumentUnwindCaught = false;
+try {
+    addArgumentValues({value: 40}, throwDuringArgument());
+} catch (error) {
+    argumentUnwindCaught = error.message === "argument unwind";
+}
+gc();
+console.log(argumentUnwindCaught &&
+    addArgumentValues({value: 40}, 2) === 42);

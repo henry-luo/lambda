@@ -13676,7 +13676,11 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         Item saved_with_stack[16];
         int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
         JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
-        if (fn->func_ptr || fn->with_env_depth > 0) {
+        // A return from a compiled `with` body bypasses its generated pop, so
+        // its caller must restore even when both entry stacks were empty.
+        bool switched_with_stack = saved_with_depth > 0 || fn->with_env_depth > 0 ||
+            (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0;
+        if (switched_with_stack) {
             js_with_set_stack(fn->with_env, fn->with_env_depth);
         }
         // For generator functions: set up callee proto
@@ -13705,7 +13709,9 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         js_current_private_home_class_index = prev_private_home_class_index;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
-        js_with_set_stack(saved_with_stack, saved_with_depth);
+        if (switched_with_stack) {
+            js_with_set_stack(saved_with_stack, saved_with_depth);
+        }
         if (switched_global) js_vm_swap_global_this(prev_global);
         js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
@@ -13755,7 +13761,12 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
     JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
-    if (fn->func_ptr || fn->with_env_depth > 0) {
+    // Ordinary calls usually have no caller or callee with-scope. A compiled
+    // with body is the exception: an early return bypasses its generated pop,
+    // so its empty entry stack still needs restoration after the call.
+    bool switched_with_stack = saved_with_depth > 0 || fn->with_env_depth > 0 ||
+        (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0;
+    if (switched_with_stack) {
         js_with_set_stack(fn->with_env, fn->with_env_depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
@@ -13785,7 +13796,9 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
-    js_with_set_stack(saved_with_stack, saved_with_depth);
+    if (switched_with_stack) {
+        js_with_set_stack(saved_with_stack, saved_with_depth);
+    }
     if (switched_global) js_vm_swap_global_this(prev_global);
     js_active_module_vars = prev_modvars;
     js_current_this = prev_this;

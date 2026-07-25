@@ -13272,15 +13272,17 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
 
 static void jm_begin_arg_stack_scope(JsMirTranspiler* mt, JsMirArgStackScope* scope) {
     scope->parent = mt->arg_stack_scope;
-    scope->mark = 0;
+    scope->saved_depth = mt->arg_frame_depth;
+    scope->base_slot = -1;
+    scope->slot_count = 0;
     mt->arg_stack_scope = scope;
 }
 
 static void jm_end_arg_stack_scope(JsMirTranspiler* mt, JsMirArgStackScope* scope) {
-    if (scope->mark) {
-        jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-            MIR_new_reg_op(mt->ctx, scope->mark));
-    }
+    // Release completed-call roots at the original expression boundary so
+    // weak/finalized objects are not retained until the caller returns.
+    jm_emit_arg_frame_clear(mt, scope);
+    mt->arg_frame_depth = scope->saved_depth;
     mt->arg_stack_scope = scope->parent;
 }
 

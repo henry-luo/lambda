@@ -122,55 +122,6 @@ extern "C" void js_func_cache_suppress_pop(void) {
     if (js_func_cache_suppress_depth > 0) js_func_cache_suppress_depth--;
 }
 
-// =============================================================================
-// Transient JIT call-argument roots
-// =============================================================================
-//
-// Every JS call with >=1 argument needs a contiguous Item[] buffer for its
-// arguments. The active Context side-root region is the only canonical live
-// range: nested argument evaluation may allocate, but its slots stay stable
-// and are scanned precisely below side_root_top.
-extern "C" Item* js_args_push(int count) {
-    if (count <= 0) return NULL;
-    if (!context || !context->side_root_top) {
-        // The JIT frame protocol must bind side roots before its first mark;
-        // binding here after js_args_save would make the saved null mark stale.
-        lambda_stack_overflow_error("js-args-side-stack-unbound");
-        return NULL;
-    }
-    uint64_t* slots = lambda_side_root_alloc_n((Context*)context,
-        (size_t)count);
-    if (!slots) {
-        // A NULL argument buffer must be handled by emitted control flow; a
-        // fallback env has no owning closure while later arguments may GC.
-        lambda_stack_overflow_error("js-args-side-stack");
-        return NULL;
-    }
-    return (Item*)slots;
-}
-
-// Current bump top — saved before a call expression is lowered.
-extern "C" int64_t js_args_save(void) {
-    AutoAssertNoGC no_gc((Context*)context);
-    return context ? (int64_t)(uintptr_t)context->side_root_top : 0;
-}
-
-// Pop back to a saved side-root watermark. Slots above the top are not scanned.
-extern "C" void js_args_restore(int64_t mark) {
-    AutoAssertNoGC no_gc((Context*)context);
-    Context* runtime_context = (Context*)context;
-    if (!runtime_context || !runtime_context->side_root_base ||
-        !runtime_context->side_root_top) return;
-    uintptr_t base = (uintptr_t)runtime_context->side_root_base;
-    uintptr_t top = (uintptr_t)runtime_context->side_root_top;
-    uintptr_t saved = (uintptr_t)mark;
-    if (saved < base || saved >= top ||
-        (saved - base) % sizeof(uint64_t) != 0) {
-        return;
-    }
-    runtime_context->side_root_top = (uint64_t*)saved;
-}
-
 extern "C" int64_t js_with_depth_active(void);
 extern "C" Item* js_with_capture_stack(int* out_depth);
 extern "C" Item js_get_global_this(void);
@@ -427,6 +378,7 @@ extern "C" void js_finalize_function(Item fn_item, Item name_item,
     if (init_flags & JS_FUNC_INIT_ARROW) fn->flags |= JS_FUNC_FLAG_ARROW;
     if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
     if (init_flags & JS_FUNC_INIT_MIR_PUBLIC_ABI) fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI;
+    if (init_flags & JS_FUNC_INIT_USES_WITH) fn->flags |= JS_FUNC_FLAG_USES_WITH;
     if (js_private_field_initializing || js_eval_initializer_context) {
         fn->eval_initializer_context = true;
     }

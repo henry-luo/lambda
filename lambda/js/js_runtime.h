@@ -228,10 +228,6 @@ void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
 void js_env_rehome_scalars(Item* env);
-// transient JIT call-argument roots (see js_runtime_function.cpp)
-Item* js_args_push(int count);
-int64_t js_args_save(void);
-void js_args_restore(int64_t mark);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 enum {
@@ -243,6 +239,10 @@ enum {
     // Compiled wrappers take a trailing scalar-result home. Native builtins
     // retain their published signatures and do not set this marker.
     JS_FUNC_INIT_MIR_PUBLIC_ABI = 1u << 5,
+    // The compiled body can leave a dynamic with scope on an early return.
+    // Call dispatch must restore the caller's stack even when both endpoints
+    // were empty on entry.
+    JS_FUNC_INIT_USES_WITH = 1u << 6,
 };
 void js_finalize_function(Item fn_item, Item name_item, Item source_item,
                           int formal_length, int init_flags);

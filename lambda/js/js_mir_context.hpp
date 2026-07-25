@@ -322,11 +322,14 @@ struct JsTryContext {
     MIR_reg_t saved_exc_val_reg;  // generator finally: pending-exception value saved before finalizer
 };
 
-// A call/new expression owns one transient argument-stack extent. The mark is
-// emitted lazily only if a lowering path actually pushes an argument buffer.
+// A call/new expression owns one fixed argument-root extent inside its
+// generated function frame. Nested calls use higher slots while sibling calls
+// reuse the same slots after their lexical extent ends.
 struct JsMirArgStackScope {
     JsMirArgStackScope* parent;
-    MIR_reg_t mark;
+    int saved_depth;
+    int base_slot;
+    int slot_count;
 };
 
 struct JsMirTranspiler {
@@ -457,6 +460,10 @@ struct JsMirTranspiler {
     JsExcTrack exc_track;
 
     JsMirArgStackScope* arg_stack_scope; // active call/new argument extent, if any
+    MIR_reg_t arg_frame_base;
+    MIR_insn_t arg_frame_base_add;
+    int arg_frame_depth;
+    int arg_frame_slot_count;
 
     // v20: arguments aliasing state
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)

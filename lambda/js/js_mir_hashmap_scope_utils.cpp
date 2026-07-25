@@ -364,6 +364,10 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     // pending exception already set, matching the legacy dirty-entry proof.
     mt->exc_track = JS_EXC_UNKNOWN;
     mt->arg_stack_scope = NULL;
+    mt->arg_frame_base = 0;
+    mt->arg_frame_base_add = NULL;
+    mt->arg_frame_depth = 0;
+    mt->arg_frame_slot_count = 0;
     em_frame_dispose(&mt->em);
     mt->em.frame.return_type = return_type;
     mt->em.frame.item_return = item_return;
@@ -450,7 +454,7 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
     }
-    if (mt->em.frame.root_slot_count > 0) {
+    if (mt->em.frame.root_slot_count > 0 || mt->arg_frame_slot_count > 0) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_root_top), mt->em.frame.root_base);
     }
@@ -458,6 +462,20 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->em);
+    if (mt->arg_frame_slot_count > 0) {
+        if (!mt->arg_frame_base_add ||
+                mt->arg_frame_base_add->nops < 3 ||
+                mt->arg_frame_base_add->ops[2].mode != MIR_OP_INT) {
+            log_error("js-mir arg-frame invariant: missing base fixup");
+            abort();
+        }
+        // Semantic roots are colored first; argument roots form one fixed
+        // suffix so every call site can use a stable frame-relative address.
+        mt->arg_frame_base_add->ops[2].u.i =
+            (int64_t)mt->em.frame.root_slot_count *
+            (int64_t)sizeof(uint64_t);
+        mt->em.frame.root_slot_count += mt->arg_frame_slot_count;
+    }
     // Scratch coloring fixes the physical frame size only after the complete
     // function, including cleanup calls, has been analyzed.
     int64_t root_frame_bytes =

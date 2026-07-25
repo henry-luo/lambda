@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Dynamic JS calls address fixed argument-root slots in the generated function frame and do not pay a per-call save, push, or restore protocol.",
+  "checks": [
+    {
+      "in_func": "_js_callDynamic_#_body",
+      "expect": [
+        "add\tjs_arg_frame_",
+        "add\tjs_args_ptr_"
+      ],
+      "forbid": [
+        "js_args_save",
+        "js_args_push",
+        "js_args_restore"
+      ]
+    }
+  ]
+}
