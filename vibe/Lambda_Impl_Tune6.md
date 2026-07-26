@@ -1,8 +1,9 @@
 # Lambda Impl Plan: Tune 6 — Result12 Tail Elimination (LJS shape lookups + Lambda untyped maps + native math)
 
-**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** T0 done, L1 done and landed,
-J2 implemented + measured + reverted, L2/L3/J1/J3 not started. **The T0 census
-overturned this plan's central premise — read §0.1 before doing any more work
+**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** T0 done; L1 landed (1.15–1.54x);
+L3 landed (~1.5% on nbody, gate missed); J2 implemented + measured + reverted;
+L2/J1/J3 not started. **The T0 census overturned this plan's central premise,
+and both L3 gates in §4.3 were wrong — read §0.1 before doing any more work
 from it.**
 
 ---
@@ -94,8 +95,14 @@ duplicate-key/unnamed-entry hazard never arises.
 stale and reports ~1178 spurious `REGRESS` rows on master too), `make lint` no
 new findings.
 
-**Suggested order from here:** shared-root transition shapes (new, §0.1) →
-L3 (native math, self-contained) → J3 → L2. J1 only if a later census justifies it.
+**Suggested order from here:** shared-root transition shapes (new, §0.1) → J3 →
+L2. J1 only if a later census justifies it. L3 is done.
+
+**Measurement protocol note, learned the hard way in L3:** build both binaries
+first, then interleave the runs benchmark-by-benchmark. Sequential
+build-A/measure-A/build-B/measure-B drifted ~10% across all rows on this host
+and manufactured a 1.05x that was really 1.017x. Guard rows that the change
+cannot touch (matmul, ray) are the tell — if they move, the run is invalid.
 
 ---
 
@@ -414,7 +421,60 @@ pre-Tune4); MT7 lifts deliberate; forced-GC stress on the IC cells (shapes are
 pool/heap-owned — confirm TypeMap lifetime spans the module, not one
 collection).
 
-### 4.3 Phase L3 — native math lowering in MIR-Direct (1-2 days)
+### 4.3 Phase L3 — native math lowering in MIR-Direct — **DONE 2026-07-26 (gate missed)**
+
+Landed in `transpile-mir.cpp`'s sys-func emitter: `math.*` transcendentals with
+statically-numeric scalar arguments now call the libm symbol through a `d→d`
+prototype (`sqrt_p: proto d, d:a`) instead of the boxed `fn_math_*` wrapper.
+The imports were already registered (`mir.c` maps `native_c_name →
+native_func_ptr`), so this was pure emission, as the plan said.
+
+**Correctness is exact, not approximate.** The boxed wrappers' scalar branch is
+literally `push_d(fn(item_to_double(v)))`, so the native call is bit-identical.
+Verified by diffing a 22-line edge fixture (`test/lambda/math_native_lowering_edges.ls`)
+against the pre-L3 binary: NaN/±inf/signed-zero/domain-error results all match
+exactly, and vector arguments still go element-wise
+(`math.sqrt([1.0,4.0,9.0])` → `[1, 2, 3]`).
+
+**Two gate corrections found by measurement, both now pinned by tests:**
+- §4.3's L3.2 proposal to include `abs`/`min`/`max` is **wrong** and was
+  reverted mid-phase. Those are *type preserving*: `abs(-5)` is int `5`, and
+  routing them through `fabs` turned it into float `5.0`. The lowering is now
+  gated by an explicit **allow-list**, `mir_native_math_always_float()`, holding
+  only the 23 transcendentals whose boxed impl is unconditionally `push_d`.
+  Allow-list not deny-list on purpose: a missing entry costs an optimisation, a
+  wrong entry is a semantic bug.
+- Gating on `call_expr_tid == LMD_TYPE_FLOAT` alone disables the phase entirely
+  — `math.sqrt(x)` call nodes carry static type ANY, not FLOAT.
+
+**Measured (release, 5-run medians, base and L3 binaries built first then
+interleaved run-by-run — non-interleaved runs drifted ~10% and produced a
+spurious 1.05x):**
+
+| benchmark | base | L3 | ratio |
+|---|---|---|---|
+| awfy/nbody2.ls | 81.97 ms | 80.64 ms | 1.017x |
+| jetstream/nbody.ls | 82.13 ms | 81.01 ms | 1.014x |
+| beng/spectralnorm.ls | 47.52 ms | 47.69 ms | 0.996x |
+| r7rs/fibfp2.ls | 5.29 ms | 5.27 ms | 1.003x |
+| kostya/matmul.ls (guard) | 42.28 ms | 42.16 ms | 1.003x |
+| larceny/ray.ls (guard) | 11.54 ms | 11.48 ms | 1.005x |
+
+**The gate ("nbody2 ≥1.5x, spectralnorm ≥1.3x") is missed by a wide margin —
+the real win is ~1.5% on nbody and nothing elsewhere.** The gate was
+mis-targeted: spectralnorm contains exactly one `math.sqrt`, on line 95, outside
+the hot loop, so it was never going to move. nbody has two in hot loops, but
+removing ~10ns of boxing from a ~600ns iteration is ~1.5%, not 50%.
+
+Kept anyway — unlike J2 it is never negative, it is provably semantics-preserving,
+and it closes a documented C2MIR/MIR-Direct parity gap. But do not expect
+further float-benchmark movement from native math; the boxing was not the cost.
+`test/mir/lambda/sys_func_specialization.mir-check` was updated deliberately
+(it was authored to fail exactly when this landed): `import fn_math_sin/sqrt` →
+`import sin/sqrt`, with `fn_abs` still expected boxed.
+
+Original plan text follows.
+
 
 The imports are already registered (`mir.c:76-91`); this is pure emission:
 

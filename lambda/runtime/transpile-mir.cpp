@@ -3023,6 +3023,51 @@ static bool mir_binary_numeric_decision(
 // Get effective runtime type for a node. If the node is an identifier whose
 // variable is stored as boxed (ANY) — e.g. optional params — return ANY instead
 // of the AST-declared type. This prevents native op dispatch on boxed values.
+// Tune6 L3: sys funcs whose scalar result is a double for *every* numeric
+// argument type, so lowering them to a native double call cannot change the
+// result type. Verified against the boxed implementations in lambda-vector.cpp:
+// each of these takes `is_scalar_numeric` → `push_d(fn(item_to_double(v)))`.
+//
+// This is an allow-list on purpose. The rest of the registry's native rows —
+// abs, round, floor, ceil, trunc, min, max — are *type preserving*: their boxed
+// wrappers return an int for int arguments, so routing them through fabs/round/
+// fn_min2_u would silently turn `abs(-5)` from int 5 into float 5.0. Omitting a
+// function here only costs an optimisation; including a type-preserving one
+// would be a semantic bug, so new entries need the push_d check above.
+static inline bool mir_native_math_always_float(SysFunc fn) {
+    switch (fn) {
+    case SYSFUNC_SQRT: case SYSFUNC_CBRT: case SYSFUNC_HYPOT:
+    case SYSFUNC_LOG: case SYSFUNC_LOG10: case SYSFUNC_LOG2: case SYSFUNC_LOG1P:
+    case SYSFUNC_EXP: case SYSFUNC_EXP2: case SYSFUNC_EXPM1:
+    case SYSFUNC_SIN: case SYSFUNC_COS: case SYSFUNC_TAN:
+    case SYSFUNC_ASIN: case SYSFUNC_ACOS: case SYSFUNC_ATAN: case SYSFUNC_ATAN2:
+    case SYSFUNC_SINH: case SYSFUNC_COSH: case SYSFUNC_TANH:
+    case SYSFUNC_ASINH: case SYSFUNC_ACOSH: case SYSFUNC_ATANH:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Tune6 L3: argument types eligible for native math lowering. Deliberately
+// narrower than is_numeric_type_id — DECIMAL and NUM_SIZED are excluded because
+// collapsing them to a double would change precision, and ANY is excluded
+// because fn_math_* is element-wise over vectors.
+static inline bool mir_native_math_arg_type(TypeId tid) {
+    return tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64;
+}
+
+// Widen an already-transpiled native scalar to a double register. FLOAT values
+// are already MIR_T_D; integers need an explicit conversion, matching the
+// (double) cast C2MIR emits.
+static inline MIR_reg_t mir_emit_as_double(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
+    if (tid == LMD_TYPE_FLOAT) return reg;
+    MIR_reg_t out = new_reg(mt, "nmathd", MIR_T_D);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, out), MIR_new_reg_op(mt->ctx, reg)));
+    return out;
+}
+
 static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     if (!node) return LMD_TYPE_ANY;
     // Unwrap PRIMARY nodes (parenthesized expressions)
@@ -8901,6 +8946,47 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                  is_text_type_id(call_expr_tid))) { \
                 result = emit_unbox(mt, result, call_expr_tid); \
             }
+
+        // Tune6 L3: native math lowering. The boxed fn_math_* wrappers are
+        // element-wise over vectors, but their scalar branch is literally
+        // push_d(sqrt(item_to_double(v))) — so for a statically-numeric scalar
+        // argument the native call is bit-identical while skipping the boxed
+        // call, its type dispatch and its result boxing. C2MIR has lowered
+        // these since can_use_native_math (transpile-call.cpp); MIR-Direct
+        // never did. ANY-typed args are excluded so vector semantics keep the
+        // boxed path — that exclusion is the whole safety argument here.
+        if (info->native_c_name && info->native_func_ptr &&
+                info->native_returns_float && !mt->emitting_async_call &&
+                mir_native_math_always_float(info->fn) &&
+                arg_count == info->native_arg_count &&
+                (arg_count == 1 || arg_count == 2)) {
+            AstNode* n1 = call_node->argument;
+            AstNode* n2 = (arg_count == 2 && n1) ? n1->next : NULL;
+            TypeId t1 = n1 ? get_effective_type(mt, n1) : LMD_TYPE_ANY;
+            TypeId t2 = n2 ? get_effective_type(mt, n2) : LMD_TYPE_ANY;
+            if (n1 && (arg_count == 1 || n2) &&
+                    mir_native_math_arg_type(t1) &&
+                    (arg_count == 1 || mir_native_math_arg_type(t2))) {
+                MIR_reg_t d1 = mir_emit_as_double(mt, transpile_expr(mt, n1), t1);
+                MIR_reg_t nresult;
+                if (arg_count == 1) {
+                    nresult = emit_call_1(mt, info->native_c_name, MIR_T_D,
+                        MIR_T_D, MIR_new_reg_op(mt->ctx, d1));
+                } else {
+                    MIR_reg_t d2 = mir_emit_as_double(mt, transpile_expr(mt, n2), t2);
+                    nresult = emit_call_2(mt, info->native_c_name, MIR_T_D,
+                        MIR_T_D, MIR_new_reg_op(mt->ctx, d1),
+                        MIR_T_D, MIR_new_reg_op(mt->ctx, d2));
+                }
+                // Match the boxed path's contract: these rows are
+                // c_ret_tid==ANY, so POST_PROCESS_UNBOX hands the caller a
+                // native double when the call's static type is FLOAT and a
+                // boxed Item otherwise. The value is always a double either
+                // way — only the representation differs.
+                if (call_expr_tid == LMD_TYPE_FLOAT) return nresult;
+                return emit_box(mt, nresult, LMD_TYPE_FLOAT);
+            }
+        }
 
         // For 0-arg functions like datetime(), date() etc
         if (arg_count == 0) {

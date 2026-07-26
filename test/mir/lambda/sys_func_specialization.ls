@@ -2,15 +2,19 @@
 // and sys_func_native_math.transpile.
 //
 // Those fixtures asserted that typed arguments select unboxed system-function
-// variants (fn_pow_u, fn_abs_i, ...) and native C math (sin(, sqrt(). Both
-// optimizations exist in the C transpiler only: lambda/transpile-mir.cpp never
-// emits an unboxed variant or a native math call, so MIR-Direct routes these
-// through the boxed runtime entry points.
+// variants (fn_pow_u, fn_abs_i, ...) and native C math (sin(, sqrt().
 //
-// This fixture therefore records what MIR-Direct actually emits today. It is a
-// documented gap, not an endorsement: if the specializations are ported to
-// MIR-Direct, this fixture fails and must be updated deliberately, which is
-// exactly the notification we want.
+// Tune6 L3 ported the *native math* half to MIR-Direct: math.* transcendentals
+// with statically-numeric scalar arguments now call the libm symbol directly
+// through a d->d prototype, so sin_float/sqrt_float below import `sin`/`sqrt`
+// rather than `fn_math_sin`/`fn_math_sqrt`. abs_int deliberately still routes
+// through boxed fn_abs — abs is type preserving (abs(-5) is int 5) and a
+// double-returning native call would change that. The unboxed fn_*_u variants
+// remain a C-transpiler-only gap.
+//
+// This fixture records what MIR-Direct actually emits today; if the remaining
+// specializations are ported, it fails and must be updated deliberately, which
+// is exactly the notification we want.
 // Checked by sys_func_specialization.mir-check.
 
 fn pow_float(x: float, y: float) { x ** y }

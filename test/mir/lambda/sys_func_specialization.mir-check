@@ -1,16 +1,18 @@
 {
   "schema_version": 1,
-  "description": "Typed system-function calls under MIR-Direct: boxed runtime entry points are imported, and the C-transpiler-only unboxed and native-math specializations are absent. The forbid list is the gap being tracked -- when a specialization lands in MIR-Direct this fixture fails on purpose.",
+  "description": "Typed system-function calls under MIR-Direct. Tune6 L3 landed native math lowering: math.* transcendentals with statically-numeric scalar arguments now import the libm symbol (sin, sqrt) and call it with a d->d prototype instead of the boxed fn_math_* wrapper. Deliberate update -- before L3 this fixture expected 'import fn_math_sin' / 'import fn_math_sqrt'. The unboxed fn_*_u / fn_abs_i specializations remain C-transpiler-only and stay forbidden. fn_abs stays boxed on purpose: abs/round/floor/ceil/trunc/min/max are type preserving (abs(-5) is int 5), so lowering them to a double-returning native call would change the result type. fn_pow here is the ** operator, not math.pow.",
   "checks": [
     {
       "in_func": "*",
       "expect": [
         "import\tfn_pow",
         "import\tfn_abs",
-        "import\tfn_math_sin",
-        "import\tfn_math_sqrt"
+        "import\tsin",
+        "import\tsqrt"
       ],
       "forbid": [
+        "import\tfn_math_sin",
+        "import\tfn_math_sqrt",
         "import\tfn_pow_u",
         "import\tfn_abs_i",
         "import\tfn_min2_u",
