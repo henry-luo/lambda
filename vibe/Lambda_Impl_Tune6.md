@@ -1,12 +1,46 @@
 # Lambda Impl Plan: Tune 6 — Result12 Tail Elimination (LJS shape lookups + Lambda untyped maps + native math)
 
-**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** Track L is **complete**: L1
-landed (1.15–1.54x), L2 landed (1.12–1.19x, richards 1.75x with L1), L3 landed
-(~1.5% on nbody, gate missed). Track J: T0 done, J2 implemented + measured +
-reverted, J1 deprioritised by the census, J3 scoped but not started.
-**The T0 census overturned this plan's central premise, both L3 gates in §4.3
-were wrong, and L2 exposed a silent-wrong-value hazard for any baked-in cache
-cell — read §0.1 before doing any more work from it.**
+**Status: FULLY IMPLEMENTED — 2026-07-26.** Every phase has reached a terminal
+state; this plan is closed. Remaining ideas were handed back to
+`Lambda_Tuning_Proposal.md`.
+
+| Phase | Outcome |
+|---|---|
+| **T0** — census + probes | **Done.** Overturned the plan's central premise (see §0.1) |
+| **L1** — O(1) untyped map reads | **Landed.** 1.15–1.54x |
+| **L2** — Lambda member IC | **Landed.** 1.12–1.19x (richards 1.75x with L1) |
+| **L3** — native math lowering | **Landed.** ~1.5% on nbody; gate was mis-targeted |
+| **J2** — literal shape sharing | **Implemented, measured, reverted** — net negative (−4%/−7%). → proposal R3, closed |
+| **J1** — method/prototype PIC | **Dropped**, premise disproven by the census (0.01% miss). → proposal R2, KIV |
+| **J3** — inline the monomorphic IC hit | **Dropped** by decision 2026-07-26. → proposal R2, KIV |
+
+**Net result: Track L delivered, Track J did not.** The honest summary is that
+this plan's thesis — "the remaining tail is property/shape lookup on both
+engines" — held for Lambda and failed for LambdaJS. Three of five attempted
+phases missed their gates, and in each case the gate had been set from an
+assumed bottleneck rather than a measured one.
+
+**Exit measured: Result13 run 2026-07-26 — all five targets missed** (§5).
+MIR/Node geo 3.01x → **2.94x** (target ≤2.2x), LJS/Node **15.1x → 15.4x**
+(target ≤8x, flat as predicted), worst LJS row 1138x → **1121x** (target ≤150x).
+Per-row the Lambda wins are real and corroborated — richards **1.60–2.52x**
+control-adjusted, havlak 1.66x, cd 1.32x. Run twice (normal load, then a
+quiesced machine): the two runs agree to **within 0.4%**, so Result13 is a solid
+floor, but both sit ~6% off Result12 on the untouched QuickJS/Node control — a
+*systematic* cross-date offset, not noise, which is why the geo means cannot
+resolve gains of this size. Read §5 before quoting any headline number.
+
+**Two findings outlived the plan and are the real handover:**
+1. **R2b** (new, in the proposal): LJS megamorphism is shape *identity*, not
+   shape content — plain objects never enter any sharing scheme, so structurally
+   identical instances get pointer-distinct TypeMaps. This is what `hashmap`
+   (worst LJS row) is actually waiting on.
+2. Further IC-based tuning is not where the remaining factor lives; the next
+   substantial gain is expected in the dynamic-call flow (`Lambda_Impl_Tune7.md`,
+   proposal R4/R5).
+
+**Read §0.1 before reusing anything here** — it also records a
+silent-wrong-value hazard that applies to *any* baked-in cache cell.
 
 ---
 
@@ -24,11 +58,14 @@ cell — read §0.1 before doing any more work from it.**
 **J1's premise is disproven.** The plan assumed prototype-chain misses dominate.
 richards misses on **0.01%** of probes and deltablue on 0.8% — the PIC has almost
 nothing to win there. What richards/deltablue actually pay is the per-hit C-call
-tax on a ~100%-hit IC, which is **J3**, not J1. J1 is deprioritised: do not build
-it until J3 lands and a fresh census shows proto misses actually dominating. Its
-companion fix (re-key shaped ctor/devirt fast paths by TypeMap identity instead
-of class-name strings, JS_07 §7.7) is independently worthwhile and can be
-salvaged on its own.
+tax on a ~100%-hit IC, which was J3's target, not J1's.
+
+**Both J1 and J3 were subsequently dropped from this plan** (2026-07-26) and
+returned to `Lambda_Tuning_Proposal.md` R2 as KIV: with J2 reverted and L3
+returning ~1.5%, further IC-based tuning does not look like the remaining
+factor. J1's companion fix (re-key shaped ctor/devirt fast paths by TypeMap
+identity instead of class-name strings, JS_07 §7.7) is independently worthwhile
+and can be salvaged on its own.
 
 **hashmap is megamorphic-dominated, but not for the reason §3.2 assumed.**
 Root cause, traced with temporary instrumentation on the IC install and the
@@ -91,14 +128,18 @@ captured the win with zero semantic risk, so the ordered scan, last-writer-wins
 and nested/spread recursion are all preserved by construction and the plan's
 duplicate-key/unnamed-entry hazard never arises.
 
-**Gates green at this checkpoint:** `test-lambda-baseline` 3617/3617,
-`test262-baseline` 40261/40261 zero regressions, `make node-baseline` 2039/3550
-— identical to clean master, verified by stashing (the stored node baseline is
-stale and reports ~1178 spurious `REGRESS` rows on master too), `make lint` no
-new findings.
+**Final gates, all green with everything landed:** `test-lambda-baseline`
+**3619/3619**, `test262-baseline` **40261/40261** zero regressions, `make lint`
+no new findings. `make node-baseline` 2039/3550 — identical to clean master,
+verified by stashing; note the **stored node baseline is stale** and reports
+~1178 spurious `REGRESS` rows on clean master too, so compare the raw
+`[ PASSED ]` count, not the regression list.
 
-**Suggested order from here:** shared-root transition shapes (new, §0.1) → J3 →
-L2. J1 only if a later census justifies it. L3 is done.
+**Where the work went from here:** all of L1/L2/L3 landed and Track J was
+dropped, so this plan is closed. The shared-root transition-shape finding became
+**proposal R2b** — the highest-value LJS item on current evidence — and the
+dynamic-call flow (`Lambda_Impl_Tune7.md`, proposal R4/R5) is the next place to
+look for a substantial factor.
 
 **Measurement protocol note, learned the hard way in L3:** build both binaries
 first, then interleave the runs benchmark-by-benchmark. Sequential
@@ -148,8 +189,8 @@ cache.
 
 | Cluster | Result12 rows (ratio vs Node) | Root cause (verified in source) | Phase |
 |---|---|---|---|
-| LJS method/prototype dispatch | hashmap **1138x**, crypto_sha1 72x, deltablue 51x, richards 33x; feeds havlak 579x, cd 254x | Named load/store IC caches **own properties on plain maps only** (`js_load_ic_build_entry`, `js_runtime.cpp:7558`); every method call (`map.get(...)`, `this.foo()`) misses the IC, falls to `js_property_access`, and walks the prototype chain with `js_map_get_fast`/`js_find_shape_entry` per level, per call | **J1 (PIC)** |
-| LJS IC C-call overhead on hits | every OO row, ~constant tax | Even a monomorphic IC hit crosses `js_property_access_named_ic` (`:7643`) — key match, receiver classify, state dispatch, profile counters — as a full C call per access | **J3** |
+| LJS method/prototype dispatch | hashmap **1138x**, crypto_sha1 72x, deltablue 51x, richards 33x; feeds havlak 579x, cd 254x | Named load/store IC caches **own properties on plain maps only** (`js_load_ic_build_entry`, `js_runtime.cpp:7558`); every method call (`map.get(...)`, `this.foo()`) misses the IC, falls to `js_property_access`, and walks the prototype chain with `js_map_get_fast`/`js_find_shape_entry` per level, per call | ~~J1~~ **dropped → proposal R2 KIV** |
+| LJS IC C-call overhead on hits | every OO row, ~constant tax | Even a monomorphic IC hit crosses `js_property_access_named_ic` (`:7643`) — key match, receiver classify, state dispatch, profile counters — as a full C call per access | ~~J3~~ **dropped → proposal R2 KIV** |
 | LJS literal shape churn | havlak, cd, json (object-literal-heavy) | `jm_transpile_object` (`js_mir_expression_lowering.cpp:11644`) calls `js_new_object_with_shape` with **no cache cell** — a fresh `TypeMap`/`ShapeEntry` graph per evaluation; receivers stay polymorphic, defeating the IC; T3 landed "per-instance, not shared" | **J2** |
 | MIR untyped map reads | richards.ls **66x**, splay.ls 43x, crypto_sha1.ls 31x, navier.ls 26x | `fn_member` → `map_get` → `map_get_for_owner` (`lambda-data-runtime.cpp:2192`): **linear scan of every ShapeEntry with `strlen(key)` re-computed per field compared**, plus recursion into nested maps; the `typemap_hash_lookup` O(1) table exists (`lambda-data.hpp:506`) but the read path never uses it | **L1** |
 | MIR untyped map access C-call + hashing | same rows | Every `.field` read/write is a boxed C call (`transpile_member`, `transpile-mir.cpp:7399`); `fn_map_set` re-hashes the key per call (`hashmap_sip` in the richards profile); a direct-field emission path exists but is **disabled** (`if (false && ...)` at `transpile-mir.cpp:7438`) | **L2** |
@@ -227,7 +268,21 @@ timestamped-JSON, never-overwrite protocol).
 
 ## 3. Track J — LambdaJS shape lookups (R2/R3 + OI-6)
 
-### 3.1 Phase J1 — data-driven method/prototype PIC (4-6 days; the centerpiece)
+### 3.1 Phase J1 — data-driven method/prototype PIC — **DROPPED from Tune6 (2026-07-26)**
+
+**Moved back to `Lambda_Tuning_Proposal.md` R2 as KIV. Tune6 no longer owns it.**
+The T0.1 census disproved its premise outright: richards misses the load IC on
+**0.01%** of probes (109 of 1,116,046), deltablue on 0.8%, so prototype-chain
+misses are not the cost this phase was designed to remove. The megamorphism it
+was ultimately aimed at is caused by shape *identity* on unshaped plain objects
+— see **proposal R2b**, which supersedes this phase.
+
+Salvageable independently: the companion fix below (re-key shaped ctor/devirt
+fast paths by TypeMap identity instead of class-name strings, JS_07 §7.7).
+
+The original design text is kept below because R2/R2b reference it.
+
+#### Original J1 design (as written 2026-07-24)
 
 **Design (settles the OI-6 open decision).** Per-call-site side-table cache for
 property loads that resolve **on the prototype chain** (methods above all),
@@ -310,61 +365,25 @@ Mirror the constructor-shape cache onto the literal path:
 allocation counts drop (TypeMap/ShapeEntry allocations per literal evaluation
 → 0 after warmup); same zero-regression gates.
 
-### 3.3 Phase J3 — inline the monomorphic IC hit in MIR — **NOT STARTED (scoped 2026-07-26)**
+### 3.3 Phase J3 — inline the monomorphic IC hit in MIR — **DROPPED from Tune6 (2026-07-26)**
 
-The census still supports J3 as the right lever for richards/deltablue (~100%
-IC hit rate, so what is left is purely the per-hit C-call tax). It was scoped but
-deliberately not implemented, because it is emission-level JIT work whose failure
-mode is a silent wrong value — the exact class of bug L2 produced and that took
-real effort to catch. Landing it unverified would be worse than not landing it.
+**Moved back to `Lambda_Tuning_Proposal.md` R2 as KIV. Tune6 no longer owns it.**
 
-What the scoping found, so the next attempt starts further along:
+Rationale for dropping rather than deferring: the T0.1 census removed the
+premise for the whole IC track. J1's prototype misses turned out to be 0.01% of
+probes, J2 measured net-negative and was reverted, and L3 returned ~1.5%. The
+remaining prize here was only the per-hit C-call tax on an IC that already hits
+~100% of the time — and the Lambda-side equivalent (L2) bought 1.12-1.19x in
+total, with its own stage-2 inline emission judged not worth the risk on top.
+Inlining the guard is a fraction of a change that was itself under 1.2x, so
+further IC-based tuning is not where the remaining factor lives.
 
-- **`inline_kind` cannot be an emission-time constant.** The IC cell fills at
-  runtime, so the emitted code must *load* `ic->entries[0].inline_kind` and
-  branch on it. §3.3's phrasing ("immediate at emission? No — load from the
-  cell") is right, but the consequence was understated: `_map_read_field`
-  (`lambda-data-runtime.cpp:2105`) has ~12 repr cases, so an inline path
-  covering raw-Item/BOOL/INT/FLOAT is a 4-way runtime branch plus the shape
-  guard, not one compare-and-load.
-- **Restricting to raw-Item only (one compare, one load) would rarely fire.**
-  `js_set_shaped_slot` retags entries to the concrete value type, so live JS
-  fields are INT/FLOAT/STRING/MAP — `LMD_TYPE_NULL` (the raw-Item case) is only
-  the unwritten state. INT is the case that actually pays on richards.
-- **Cheapest useful first cut:** guard + INT + raw-Item, everything else falling
-  through to the existing helper, then measure before adding FLOAT/BOOL.
-- MT7 JS budgets change materially; per §3.3/Tune4 M1.6 that is a deliberate
-  lift with the dump diff quoted.
-- Verification bar: `js_exec_profile` branch counters must be identical
-  before/after across the fixture set (the hit *semantics* must not move, only
-  who executes them).
+The scoping detail (why `inline_kind` cannot be an emission-time constant, why a
+raw-Item-only cut would rarely fire, and the cheapest useful cut if it is ever
+revived) is preserved in `Lambda_Tuning_Proposal.md` R2.
 
-Original plan text follows.
-
-
-Only after J1+J2, and only the **mono** state — the C helper remains the
-canonical path for everything else:
-
-- **J3.1** Extend the IC install to compute an `inline_kind` per entry: eligible
-  when receiver is plain MAP, entry has `flags == 0`, no ctor-reserved overlap
-  (checked once at install — the per-hit `map_ctor_offset_is_reserved` re-check
-  is then redundant for that entry), and the field repr is raw-Item, BOOL, or
-  INT (`_map_read_field` cases that are pure bit ops, `lambda-data-runtime.cpp:2105`).
-  FLOAT fields use the existing inline self-tagged-double emission helper from
-  transpile-mir (Tune4 M1 machinery); anything else keeps the C call.
-- **J3.2** Emission (`js_mir_expression_lowering.cpp:11436` site): load
-  `ic->state`; if MONO and `object` tag == MAP: load `map->type`, compare with
-  `ic->entries[0].shape` (immediate at emission? No — the cell fills at
-  runtime, so load from the cell), on match load `map->data + byte_offset` and
-  box per `inline_kind`; else call the existing helper. The store site
-  (`:1096`) gets the symmetric treatment for same-type in-place writes only.
-- **J3.3** MT7: JS budgets change materially — deliberate lift with dump diff
-  quoted, per Tune4 M1.6 discipline.
-
-**Gates.** richards/deltablue post-J1 residual shrinks measurably (target ≥1.5x
-on each); `js_exec_profile` shows helper-call counts collapse while hit
-semantics stay identical (branch counters equal before/after on the fixture
-set); zero-regression gates.
+The next substantial factor is expected in the dynamic-call flow —
+`Lambda_Impl_Tune7.md`, proposal R4/R5.
 
 ---
 
@@ -597,37 +616,148 @@ across the edge inputs).
 
 ## 5. Sequencing, exit, and Result13
 
+**What actually ran** (planned order was `T0 → J1 → J2 → J3` and
+`T0 → L1 → L2 → L3`):
+
 ```
-T0 → J1 → J2 → J3        (Track J, serial: each re-baselines the next)
-T0 → L1 → L2 → L3        (Track L, independent of Track J, may interleave)
+T0 → J2 (reverted) → [J1, J3 dropped → proposal R2 KIV]
+T0 → L1 → L3 → L2                                  (all landed)
 ```
 
-J1 before J2 because the PIC census (T0.1) may reveal literal polymorphism as
-the *cause* of megamorphic sites — if so, swap J1/J2 (the plan survives either
-order; the census decides). L1 first in Track L because it is smallest-risk and
-re-baselines richards/splay under L2. Each phase lands independently green.
+The census swapped J1/J2 exactly as §5 anticipated it might, then went further
+and removed the premise for the J track altogether. Track L ran L3 before L2
+only because L3 touched a disjoint file while the spawned null-fix task held the
+shape machinery. Each landed phase was green independently.
 
-**Exit = Result13** (same protocol: clean release build, four-engine matrix,
-3-run medians, 180s, fresh, raw JSON preserved, QuickJS as host-consistency
-control). Success thresholds — set against Result12, honest about what shape
-lookups alone can buy:
+### Exit status — Result13 RUN 2026-07-26. **All five targets missed.**
 
-| Metric | Result12 | Target |
+`test/benchmark/benchmark_results_v13.json` + `Overall_Result13.md`, commit
+`22eefe3f1`. Protocol identical to Result12 and verified from `_metadata`:
+`mir,lambdajs,quickjs,nodejs`, 3 runs, 180s, `--fresh`, clean release build,
+`profile_check: passed`, same host (Darwin arm64), same node v22.13.0 and
+QuickJS 2025-09-13.
+
+| Metric | Result12 | Result13 | Target | Verdict |
+|---|---|---|---|---|
+| MIR/Node geo (dedup) | 3.01x | **2.94x** | ≤ 2.2x | missed |
+| Worst MIR row | 66x (richards) | **47x** (splay; richards 44x) | ≤ 20x | missed |
+| LambdaJS/Node geo (dedup) | 15.1x | **15.4x** | ≤ 8x | missed, flat as predicted |
+| Worst LJS row | 1138x (hashmap) | **1121x** (hashmap) | ≤ 150x | missed, needs R2b |
+| LJS rows > 100x | 5 | **5** | ≤ 1 | missed |
+| *QuickJS/Node geo (control)* | *7.00x* | *7.45x* | *n/a* | *+6%, and reproducible — see below* |
+
+#### The cross-snapshot gap is systematic, not noise
+
+Result13 was run **twice**: once on 2026-07-26 under normal load
+(`benchmark_results_v13_run1_noisy.json`, kept for audit) and once after the
+machine was deliberately quiesced (the file above). The second run was expected
+to shrink the gap to Result12. **It did not — and that is the useful result.**
+
+| | run 1 → run 2 (same day) | Result12 → run 2 (cross-snapshot) |
 |---|---|---|
-| LambdaJS/Node geo (dedup) | 15.1x | ≤ 8x |
-| Worst LJS row | 1138x (hashmap) | ≤ 150x |
-| LJS rows > 100x | 5 | ≤ 1 |
-| MIR/Node geo (dedup) | 3.01x | ≤ 2.2x |
-| Worst MIR row | 66x (richards) | ≤ 20x |
+| QuickJS (control) | median **0.998**, p10–p90 0.97–1.01 | median 0.912, p10–p90 0.60–0.98 |
+| Node | median **0.997**, p10–p90 0.96–1.02 | median 0.885, p10–p90 0.49–0.98 |
+| MIR | median **1.000**, p10–p90 0.98–1.02 | median 0.851, p10–p90 0.46–0.98 |
+| LambdaJS | median **0.998**, p10–p90 0.97–1.01 | median 0.877, p10–p90 0.55–0.98 |
 
-After Result13, the expected residuals are R7 (GC frequency × live set — its
-entry evidence is already recorded), R4/R5 (call overhead + exception polls,
-partly landed by the online-exception plan), and the OI-9 unboxed-slot design
-for whatever boxing tax remains.
+Headline movement between the two same-day runs: MIR/Node 2.92x → 2.94x,
+LJS/Node 15.3x → 15.4x, control 7.42x → 7.45x — all within 0.4%.
+
+So **same-day run-to-run reproducibility is excellent (±2–3% at p10–p90, medians
+within 0.3%)**, and there was no same-day noise for the cleanup to remove. The
+~10% whole-machine speedup and the +6% control shift versus Result12 are a
+**stable, reproducible difference between the two snapshot dates**, not random
+variance. Two consequences:
+
+1. **Result13's own numbers are trustworthy** as the current floor — they
+   replicate to a fraction of a percent.
+2. **Result12→Result13 absolute and geo-mean comparisons carry an
+   unattributable systematic offset.** MIR/Node's −2% sits inside a control that
+   moved +6% the other way. Do not read the geo means as evidence for or against
+   Tune6; the per-phase interleaved A/B in §4.1/§4.2/§4.3 and the per-row
+   control-adjusted table below are the real evidence.
+
+**Per-row, control-adjusted (MIR speedup ÷ same-row QuickJS drift), the matrix
+does corroborate the per-phase measurements:**
+
+| row | MIR v12 | MIR v13 | adjusted |
+|---|---|---|---|
+| awfy/richards | 515.8 ms | 183.7 ms | **2.52x** |
+| awfy/havlak | 95.8 ms | 47.9 ms | **1.66x** |
+| jetstream/richards | 356.7 ms | 203.6 ms | **1.60x** |
+| awfy/cd | 568.9 ms | 372.0 ms | **1.32x** |
+| beng/nbody | 97.5 ms | 79.9 ms | 1.20x |
+| jetstream/splay | 201.8 ms | 157.2 ms | 1.15x |
+| kostya/matmul (guard) | 45.5 ms | 41.5 ms | 1.07x |
+| jetstream/crypto_sha1 | 218.5 ms | 204.7 ms | 1.06x |
+| jetstream/navier_stokes | 1086.4 ms | 944.0 ms | 1.06x |
+| jetstream/nbody | 91.3 ms | 80.3 ms | 1.05x |
+| beng/spectralnorm | 47.3 ms | 47.0 ms | 0.98x |
+
+These land within ~0.05x of the same table computed from run 1, which is a
+further check that the per-row conclusions are stable even though the
+cross-snapshot baseline is not.
+
+**Two apparent regressions in the raw ratio table are denominator artifacts, not
+regressions** (both reproduced identically in run 1 and run 2):
+- `awfy/nbody` MIR/Node looks ~2.9x worse purely because **Node** went 25.92 →
+  ~5.4 ms on that row. Node's v12 figure was the outlier — the other two nbody
+  rows put Node at 6.0 and 7.6 ms, and v13's matches jetstream/nbody's 5.5 ms.
+  MIR itself improved 134.6 → 80.0 ms there.
+- `jetstream/splay` MIR/Node looks flat-to-worse while MIR actually improved
+  201.8 → 157.2 ms (1.28x raw, 1.15x adjusted); Node improved slightly more.
+  Note splay is now the **worst MIR row (47x)**, overtaking richards.
+
+**Honest conclusion.** Tune6 moved the Lambda/MIR rows it targeted — richards is
+the clearest, 1.6–2.5x depending on variant — but nowhere near enough to reach a
+2.2x geo mean, and it moved the LambdaJS column not at all. The worst LJS row is
+*worse* than Result12 (1154x vs 1138x, within drift). **The LJS column is
+untouched and waiting on R2b.** MIR's worst row is now splay rather than
+richards, which is the natural next Lambda target if that track is resumed.
+
+Expected residuals are unchanged from the original text: R7 (GC frequency × live
+set), R4/R5 (call overhead + exception polls), OI-9 for the boxing tax — plus
+the new **R2b**, which is now the leading LJS item.
 
 ---
 
-## 6. Risks
+## 6. Risks — retrospective (2026-07-26)
+
+How the anticipated risks actually played out, and the two that were missed:
+
+- **J1/J2/J3 risks: moot.** J2 was reverted for performance, not correctness
+  (its aliasing risk was handled — the isolation fixtures passed); J1 and J3
+  were dropped before implementation.
+- **L1 last-writer-wins: avoided entirely.** The hash-first path was never
+  taken, so hash-vs-scan disagreement could not arise.
+- **L2 shape-identity assumption: held, but for a subtler reason than stated.**
+  The audit found the in-place writers do exist (`fn_map_set`/
+  `js_set_shaped_slot` retags) — they are safe only because the hit path
+  re-reads `entry->type`/`byte_offset` rather than caching a materialised
+  offset. Caching the resolved offset+type, as "stale offsets" implies, would
+  have been the bug.
+- **L3 vector semantics: held.** Vectors stayed element-wise.
+- **Machine-state variance: materialised, and worse than described.** Same-day
+  before/after was *not* sufficient — sequential build-and-measure drifted ~10%
+  and manufactured a false 1.05x on L3. Both binaries must be built first, then
+  runs interleaved.
+
+**Two risks that were not on the list and should have been:**
+
+- **Baked-in mutable cells vs. the MIR module cache.** L2's first run produced
+  134 baseline failures, all passing standalone: cached compiled code replays
+  across runs while TypeMaps come from a per-run arena that is recycled, so a
+  cell saw a *different* TypeMap at the same address and reported a false hit.
+  Silent wrong values, not a crash. Fixed with a monotonic epoch. Any future
+  per-call-site cell needs the same guard — **and the JS ICs deserve a check**,
+  since their cells live in `ast_pool` while their shapes are realm-owned.
+- **Gates set from assumed rather than measured bottlenecks.** Three of five
+  attempted phases missed their gates. L3's target row contained one call to the
+  function being optimised, outside its hot loop; J2's target rows were
+  megamorphic for a reason unrelated to literals. Verify the mechanism on the
+  specific row before committing a phase.
+
+### Original risk list (as written 2026-07-24)
 
 - **J1 invalidation completeness is the correctness cliff.** A missed
   shape-mutation choke point leaves a stale PIC entry serving a shadowed or

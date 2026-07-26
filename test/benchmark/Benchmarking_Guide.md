@@ -2,7 +2,14 @@
 
 This document describes how to prepare, run, and report Lambda benchmarks across 6 suites and 6 engines.
 
-**Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py` from the project root. It rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON.
+**Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py` from the project root. It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
+
+> **Reading results across snapshots:** absolute timings drift systematically
+> between dates — ~10% on every engine between Result12 and Result13, including
+> untouched QuickJS and Node — and quiescing the machine does not remove it.
+> Adjust each row by that row's QuickJS control, or better, A/B the two archived
+> binaries on one machine at one moment. See `vibe/Lambda_Tuning_Proposal.md`
+> §1.3.
 
 ---
 
@@ -201,18 +208,60 @@ For checked-in result reports, use the standard workflow script instead of manua
 python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --report-title "Lambda Benchmark Results: Round 9"
 ```
 
-Default behavior:
+Default behavior, in order:
 
+- **Aborts if the machine is on battery power.** Checked first, before the
+  build, because it is the cheapest gate and failing it invalidates everything
+  after it. Both macOS and Linux throttle CPU frequency and disable turbo on
+  battery, which moves results by far more than any tuning change this suite is
+  used to measure. Detection is `pmset -g batt` on macOS and
+  `/sys/class/power_supply/*/online` (type `Mains`) on Linux; on a platform
+  where neither works the runner prints a warning and continues rather than
+  blocking. Override with `--skip-power-check`.
 - Runs `make release` first. Never benchmark a debug build.
+- **Aborts if `lambda.exe` is a debug build**, detected by the
+  `Running DEBUG build` banner string that `lambda/main.cpp` compiles in only
+  for debug configurations. This runs *even with* `--skip-build`, where a stale
+  debug binary left over from a test cycle is exactly the likely mistake.
 - Checks `lambda.exe` with `strings` and rejects binaries containing profiling markers such as `JS_EXEC_PROFILE`.
 - Clears `JS_EXEC_PROFILE` and `JS_EXEC_PROFILE_OUT` from the benchmark environment.
 - Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`.
 - Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
 - Starts snapshot runs from an empty result file by default. Use `--merge` only when intentionally refreshing part of an existing JSON.
-- Writes run logs under `temp/benchmark_vN/`: `build_release.log`, `profile_check.log`, `benchmark.log`, and `report.log`.
+- Writes run logs under `temp/benchmark_vN/`: `power_check.log`, `build_release.log`, `release_check.log`, `profile_check.log`, `benchmark.log`, and `report.log`.
 - If `--report-output` is provided, generates the report from the JSON via `test/benchmark/gen_overall_result.py`.
 
 Use `--skip-build` only for a quick local recheck when you already know `lambda.exe` is a fresh release binary. Use `run_benchmarks.py` directly only for exploratory filters or one-off diagnosis.
+
+### Archiving the binary (`test/benchmark/exe/`)
+
+**After a checked-in snapshot run, keep the binary.**
+
+```bash
+cp -p lambda.exe test/benchmark/exe/lambda-vN-<commit>.exe
+shasum -a 256 test/benchmark/exe/lambda-vN-<commit>.exe   # record in MANIFEST.md
+```
+
+`test/benchmark/exe/` is **git-ignored** (~20 MB per binary) and carries a
+`MANIFEST.md` recording each file's Result number, commit, size, checksum, and
+whether its size matches that run's `_metadata.lambda_exe_size_bytes`.
+
+Why this matters more than "avoiding a rebuild": **absolute timings are not
+comparable across dates.** Measured between Result12 and Result13, every engine
+— including untouched QuickJS and Node — shifted ~10%, and the QuickJS/Node
+control moved 6%, which does not go away on a quiesced machine. Keeping the old
+binary lets you A/B two snapshots *on one machine at one moment*, where that
+offset cancels entirely.
+
+That is not theoretical. Re-running `jetstream/richards.ls` against both
+archived binaries back to back gave 303.4 ms (v12) vs 187.5 ms (v13) =
+**1.62x**, matching the 1.60x control-adjusted figure derived from the matrix —
+while neither absolute matched its own recorded value (356.7 / 203.6 ms).
+
+Binaries embed no version or commit string, and Result12's recorded size
+collides with five leftover `temp/lambda_*.exe` scratch builds, so a binary that
+was not archived at run time is effectively unidentifiable afterwards. Archive
+at run time or lose it.
 
 To verify the exact command sequence and output pairing without running benchmarks:
 

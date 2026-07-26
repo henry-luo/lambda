@@ -51,7 +51,7 @@ modules/
 | JN5 | Absent module ⇒ the Node-shaped `Cannot find module 'x'` error (`code: 'MODULE_NOT_FOUND'`) plus a host `log_*` diagnostic naming the missing Jube module. Never a link failure. A host with no Node modules at all must still run non-Node JS. |
 | JN6 | The host keeps: the libuv loop and JS event-loop layer, microtask/nextTick queues, global timers, console core, the process-object core, the JS module cache, the npm resolver (initially), and `node:vm` (initially). `node-core` owns: process extensions, `internalBinding`, the stub namespaces, `timers/promises`, and the Node error-code helpers. |
 | JN7 | The host API grows **one additive `JubeHostNodeAPI` parent** composing four versioned service tables — async request/resource operations, binary (Buffer/typed arrays), promise, and Node-error services — the Node analog of Python's compiler API (`JubeGuestExecutionAPI`), with v1 extracted empirically from what `fs`/`net`/`child_process` actually use (§9). JS value mechanics stay on the existing script/value/data tables (the `js_native_api.h` vs `node_api.h` split, §3.1). |
-| JN8 | **Modules are shielded from the async substrate entirely**: no libuv type, symbol, or loop pointer crosses the module boundary (`uv_*` is on the module checker's banned-symbol list). Modules submit requests to host-owned async services and hold opaque integer resource ids; completions arrive on the JS thread with host-owned drain ordering. libuv remains a host implementation detail, swappable without touching any module. *(Revised 2026-07-26 in review, from an earlier shared-libuv-substrate proposal.)* |
+| JN8 | **Modules are shielded from the async substrate entirely**: no libuv type, symbol, or loop pointer crosses the module boundary (`uv_*` is on the module checker's banned-symbol list). Modules submit requests to host-owned async services and hold opaque integer resource ids; completions arrive on the JS thread with host-owned drain ordering. libuv remains a host implementation detail, swappable without touching any module. *(Revised 2026-07-26 from an earlier shared-libuv-substrate proposal; minimized 2026-07-26b to a two-tier surface — a ~15-entry micro-kernel (scheduling, thread-safe completion post, blocking work pool, resource table, shutdown) plus dedicated ops only for sockets/process/signals. fs, dns, zlib, and crypto ride the generic work op with plain syscalls, which is how libuv implements them internally anyway.)* |
 | JN9 | GC across the boundary uses `JubeHostGcAPI` root frames/roots and persistent roots **only**. Direct `heap_register_gc_root*` externs, `RootFrame`/`Rooted`, `js_heap_epoch`, and `Context` field access are banned by the module architecture checker. The conversion is also the fix vehicle for the known unrooted-native-`Item`-locals class. |
 | JN10 | The core→builtin **backward calls invert into init-time hooks** with absent-module defaults: console formatter, shutdown participants, the IPC socket-handoff, and globals installation (including the `Buffer` global). Active-handle enumeration needs no hook — it reads the §9.1 resource table. |
 | JN11 | Lifecycle: namespace objects stay cached in the existing JS module cache per runtime epoch; modules implement the already-present `runtime_reset` (batch-mode global recreation) and `heap_cleanup` (per-heap teardown) descriptor hooks. |
@@ -160,6 +160,19 @@ promise; `close(rid)` drops the resource and cancels its pending ops. Deno
 also learned to keep generic serialization off the boundary (the serde_v8 cost
 drove op2's direct value access) — for us: keep Item-native signatures, never
 add a marshaling layer.
+
+Two structural facts about Deno matter when borrowing its shape. First,
+`deno_core` itself ships almost no I/O: each extension (`deno_fs`,
+`deno_net`, …) implements its own ops directly on tokio/std, and the runtime
+standardizes only the generic stream verbs (`op_read`/`op_write`/`op_close`/
+`op_shutdown` over the `Resource` trait) — creation ops are per-extension.
+Second, that "extensions just use tokio" freedom exists because Deno has **no
+stable native-module ABI at all**: extensions compile into the binary in one
+Rust build (FFI is a user-code mechanism, not how builtins are made), so
+nothing crosses a versioned boundary. Across our C-ABI dylib boundary, the
+translation of Deno's shape is: a tiny uniform bridge (scheduling +
+thread-safe completion + work pool + resource table) plus uniform stream
+verbs — which is what §9.1 specifies.
 
 Lessons adopted in this design: (1) the value-API vs runtime-services split
 (JN7); (2) opaque handles + status codes + pending exceptions — already house
@@ -526,53 +539,55 @@ call sites in fs/net/child_process/dns (P5). House rules throughout:
 `api_version` + `struct_size` first, status-code returns, pending exceptions,
 borrowed Items rooted before allocating operations.
 
-### 9.1 Async services: the request/resource model (JN8)
+### 9.1 Async services: micro-kernel + socket tier (JN8)
 
 Modules are fully shielded from the async substrate. No libuv type, symbol,
 or loop pointer crosses the module boundary; `uv_*` joins the checker's
-banned-symbol list. The model follows Deno's ops + ResourceTable and
-Node-API's async-work discipline (§3.1), deliberately not Node core's direct
-uv coupling:
+banned-symbol list. Revised again in review (2026-07-26b) toward minimality:
+the uniform surface is a **micro-kernel of five concepts**, and dedicated I/O
+ops exist **only where the host must own the machinery**. Everything else
+rides the generic blocking-work op — which is exactly how libuv itself
+implements those areas internally.
 
-- **Resources are integer ids.** Every long-lived kernel object a module
-  needs (open file, socket, listener, child process, fs watcher, signal
-  subscription) is created and owned by the host, lives in a host-side
-  resource table, and is exposed as an opaque `JubeRid` (uint32).
-  `close(rid)` is table removal; libuv's asynchronous `uv_close` dance,
-  handle memory ownership, and loop teardown are host business and cannot be
-  a module bug class. The table also gives the host central shutdown,
-  `process._getActiveHandles` enumeration (deleting that §10 hook), leak
-  accounting at `heap_cleanup`, and a single audit chokepoint for the
-  permission model.
-- **Operations are requests.** Each async op takes arguments, a C completion
-  callback, and a user-data pointer. **Completions are delivered only on the
-  JS thread, in event-loop order**, and the host drains nextTick/microtasks
-  after each completion batch exactly as it does for its own callbacks today
-  (the `lambda_uv_set_microtask_drain` machinery). Modules never pump, poll,
-  or drain anything, and thread discipline is host-enforced rather than
-  contractual.
-- **Completion payloads are op-specific C structs** (`uv_fs_t`-result style),
-  valid only for the duration of the callback; byte payloads are borrowed for
-  the callback. The module turns them into Items (fs.Stats shapes, Buffers)
-  via the value/binary tables — Node semantics stay module-side, the host
-  stays semantics-free.
-- **Blocking work is a generic op** — `work_submit(fn, complete, user_data)` /
-  `work_cancel`, the `napi_create_async_work` pattern — for crypto/zlib CPU
-  work. The pool is host policy; no threading primitive is module-visible.
+**Tier 1 — the micro-kernel bridge (~15 entries, 5 concepts).** Sufficient on
+its own for most modules:
 
-Op families, v1 derived from the §4.3 uv-call inventory:
-
-| Family | Ops (sketch) | Replaces today |
+| Concept | Entries | Precedent |
 |---|---|---|
-| scheduling | `next_tick`, `enqueue_microtask`, `timer_start`/`timer_clear`, `ref`/`unref(rid)`, `register_shutdown` | `js_next_tick_enqueue`/`js_setTimeout` externs; uv ref counting |
-| fs | open/close/read/write/stat/lstat/fstat/readdir/mkdir/unlink/rename/copy/realpath/chmod/utimes/fsync/truncate…; `fs_watch` → rid | `uv_fs_*` (`js_fs.cpp:717–750`), `uv_fs_event` |
-| stream (tcp + pipe unified) | connect / listen / accept → rid; read_start / read_stop; write; shutdown; socket opts (nodelay, keepalive); fd adoption; IPC handle send / receive → rid | `uv_tcp_*` / `uv_pipe_*` (`js_net.cpp`, `js_http.cpp:3357`), the `js_globals.cpp:138` handoff |
-| process | spawn (argv/env/cwd/stdio spec referencing rids + ipc) → rid; kill; exit completion | `uv_spawn` / `uv_process_kill` (`js_child_process.cpp:542/:436`) |
-| dns | getaddrinfo / getnameinfo | the uv getaddrinfo shim (`js_runtime.cpp:38320`), `uv_timer` timeouts (`js_dns.cpp:405`) |
-| signal / tty | signal_start / signal_stop → rid; tty mode query / raw toggle | `uv_signal_*`, `uv_tty_*` (readline) |
-| work | submit / cancel | ad-hoc CPU work in crypto/zlib paths |
+| scheduling | `next_tick`, `enqueue_microtask`, `timer_start`, `timer_clear` | Node `MakeCallback` drain discipline; existing host queues |
+| thread-safe completion post | `post_completion(cb, user_data)` — deliver a callback onto the JS thread from any thread, in loop order, with the host draining nextTick/microtasks after each batch | `napi_threadsafe_function` |
+| blocking work | `work_submit(fn, complete, user_data)`, `work_cancel` — run `fn` on the host pool, `complete` on the JS thread | `napi_create_async_work`; libuv's own threadpool |
+| resource table | `rid_add(ptr, close_fn)`, `rid_get`, `rid_close`, `rid_ref`, `rid_unref` — opaque uint32 ids for host-tracked long-lived objects | Deno `ResourceTable`; the fd model |
+| lifecycle | `register_shutdown` | napi cleanup hooks |
 
-v1 contracts (deliberate simplifications, each with a marked extension point):
+**Modules that need no other ops at all**: `node-fs` (minus watch), `node-dns`
+side of node-net, `node-zlib`, `node-crypto` — a blocking syscall or CPU job
+on `work_submit` with completion on the JS thread **is** libuv's own internal
+strategy for these (`uv_fs_*` and `uv_getaddrinfo` are threadpool + blocking
+call, nothing more). Wrapping each verb as a host op would add ABI without
+adding capability. tty raw mode is a synchronous `termios`/ioctl call the
+module makes directly — no async ABI involved. `fs.watch` is the one fs edge
+that genuinely needs platform event machinery (kqueue/FSEvents/inotify/
+ReadDirectoryChangesW): host-implemented behind two ops, or deferred if
+node-baseline shows it cold.
+
+**Tier 2 — dedicated ops only where the host must own the machinery
+(~15–18 entries):**
+
+| Family | Ops (sketch) | Why it cannot ride the work pool |
+|---|---|---|
+| stream (tcp + pipe unified) | connect / listen / accept → rid; read_start / read_stop; write; shutdown; opts (nodelay, keepalive); fd adoption; IPC handle send / receive → rid | readiness (kqueue/epoll) vs completion (IOCP) portability is the reason libuv exists; per-connection blocking reads would starve the pool |
+| process | spawn (argv/env/cwd/stdio spec referencing rids + ipc) → rid; kill; exit completion | child reaping needs exactly one SIGCHLD owner in the process — the host |
+| signal | signal_start / signal_stop → rid | same single-owner argument (host already owns handlers) |
+
+This is also precisely Deno's split: `deno_core` standardizes only the
+generic stream verbs (`op_read`/`op_write`/`op_close`/`op_shutdown`
+dispatching through the `Resource` trait), while resource *creation*
+(open/connect/listen) lives in each extension. Creation stays per-domain,
+verbs stay uniform, and nothing else is runtime API.
+
+v1 contracts (deliberate simplifications, each with a marked extension
+point):
 
 - **Write payloads are copied at submit.** No cross-ABI buffer pinning or
   lifetime contract in v1; a pinned zero-copy variant is a later additive
@@ -582,16 +597,24 @@ v1 contracts (deliberate simplifications, each with a marked extension point):
 - `close(rid)` implicitly cancels that resource's in-flight requests —
   completions fire with a canceled status (Deno's close semantics);
   request-level cancel exists where the substrate supports it.
+- Completion payloads are op-specific C structs valid only during the
+  callback; the module builds Items from them (fs.Stats, Buffers) via the
+  value/binary tables — Node semantics stay module-side.
 
-What this buys over the withdrawn direct-libuv alternative: modules are
-decoupled from the async implementation entirely — the host can change
-substrate (libuv today; direct kqueue/io_uring, a different scheduler, or a
-worker topology later) without touching any module; the uv handle-lifecycle
-bug class cannot exist in modules; Windows needs no uv symbol-export story;
-and the JS-thread rule is enforced by construction. The cost is a larger host
-surface (~50 entries across the families above) — bounded, extracted from
-real usage rather than speculation, and precedented in-tree by the ~70-entry
-`JubeHostDomAPI`.
+**Rejected further step — the pure micro-kernel** (Tier 1 only, ~15 entries,
+the Node-API addon model where modules run their own socket poller threads
+and post back via `post_completion`): rejected because it relocates
+poller/threading/handle-lifecycle complexity into `node-net`/`node-http` —
+the exact bug classes this migration evicts — duplicates a poller per
+module, makes Windows IOCP a module problem, and splits SIGCHLD ownership.
+The micro-kernel remains sufficient for every module that isn't
+socket/process-shaped, which is most of them.
+
+Total: ≈30 entries built from five concepts — down from the earlier ~50-op
+draft, half the size of the in-tree `JubeHostDomAPI`, and the module-facing
+conceptual load matches Deno's bridge (ops + rids + scheduling). The
+decoupling claim is unchanged: the host can swap libuv for direct
+kqueue/io_uring or another scheduler without touching any module.
 
 ### 9.2 Binary data
 
@@ -789,14 +812,18 @@ node module.
    same open as the native-module design's risk 4. The JN8 revision helps:
    with libuv fully host-side, modules import only the Jube API surface, so
    the Windows export set stays small and auditable.
-8. **Request-API coverage and cost (JN8)**: the edges where a shielded async
-   API most often falls short are `fs.watch` (`uv_fs_event`), tty raw mode
-   (readline), IPC descriptor passing, and `uv_tcp_open`-style fd adoption
-   (cluster/stdio) — N2 must inventory them before freezing v1 so no module
-   ever needs an escape hatch (the `napi_get_uv_event_loop` mistake, §3.1).
-   Separately, v1's copy-on-submit write contract is a deliberate
-   simplification: profile http/fs throughput against the N0 baselines before
-   deciding whether the pinned zero-copy variant is warranted.
+8. **Request-API coverage and cost (JN8)**: with the two-tier split the
+   coverage risk concentrates in Tier 2 — `fs.watch` (`uv_fs_event`), IPC
+   descriptor passing, and `uv_tcp_open`-style fd adoption (cluster/stdio)
+   are the edges N2 must inventory before freezing v1 so no module ever
+   needs an escape hatch (the `napi_get_uv_event_loop` mistake, §3.1).
+   Tier 1 adds a new sizing concern: fs/dns/zlib/crypto all ride the shared
+   work pool, so pool starvation under mixed load needs a host sizing policy
+   and a long-op hygiene rule (libuv's fixed-4-thread default is the
+   cautionary precedent). And v1's copy-on-submit write contract is a
+   deliberate simplification: profile http/fs throughput against the N0
+   baselines before deciding whether the pinned zero-copy variant is
+   warranted.
 9. **Worker threads/cluster futures**: if real `worker_threads` support
    arrives (per `vibe/Lambda_Js_Thread.md`), per-worker module instances and
    the "modules are process-lifetime singletons" rule will need

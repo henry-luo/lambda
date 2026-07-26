@@ -161,3 +161,8 @@ analysis-results*/
 
 lambda/tree-sitter-latex/src/parser.c
 lambda/tree-sitter-latex/src/parser.c
+
+# Archived benchmark release binaries (~20MB each, local artifacts).
+# Kept so a past Result_N can be re-measured without rebuilding; see
+# test/benchmark/exe/MANIFEST.md.
+test/benchmark/exe/

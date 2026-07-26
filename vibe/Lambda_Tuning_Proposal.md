@@ -61,6 +61,42 @@ output-correctness checking before a timing enters an aggregate. MIR size or
 instruction-count reduction is supporting evidence, not proof of a runtime
 win.
 
+**Current floor: Result13** (`test/benchmark/benchmark_results_v13.json`,
+2026-07-26, commit `22eefe3f1`) — MIR/Node dedup geo **2.94x**, LambdaJS/Node
+**15.4x**, QuickJS/Node **7.45x**.
+
+**Three calibration facts, measured by running Result13 twice — once under
+normal load and once on a deliberately quiesced machine** (run 1 kept as
+`benchmark_results_v13_run1_noisy.json`):
+
+1. **Same-day reproducibility is excellent.** Between the two runs, every
+   engine's median wall time moved ≤0.3% (QuickJS 0.998, Node 0.997, MIR 1.000,
+   LambdaJS 0.998; p10–p90 within 0.96–1.02), and the headline geo means moved
+   ≤0.4%. A single 3-run snapshot is a reliable floor.
+2. **Cross-date differences are systematic, not noise, and quiescing does not
+   remove them.** Both runs sit ~10% faster than Result12 in absolute terms
+   (median v13/v12: QuickJS 0.912, Node 0.885) and ~6% worse on the untouched
+   QuickJS/Node control (7.00x → 7.45x). The cleanup was expected to close that
+   gap and did not, which is what proves it is a stable property of the two
+   snapshot dates rather than variance.
+3. **Therefore the geo means cannot resolve movement below ~6%** across
+   snapshots. Result13's MIR/Node −2% sits inside a control that moved +6% the
+   other way, even though per-row Lambda wins of 1.3–2.5x are real and
+   independently confirmed.
+
+Practical consequences:
+
+- **Do not use the matrix to validate a phase.** Use per-phase interleaved A/B
+  (build both binaries first, then alternate runs row by row) and reserve the
+  matrix for recording the floor after a track lands.
+- **When comparing two snapshots, adjust per row by the QuickJS control** for
+  that same row — that is what recovered the true Lambda speedups from
+  Result13.
+- **Check the Node denominator before believing a row-level regression.** Two
+  apparent Result13 regressions (`awfy/nbody`, `jetstream/splay`) were Node
+  getting faster, not Lambda getting slower; `awfy/nbody`'s Result12 Node time
+  (25.9 ms) was itself an outlier against 6.0/7.6 ms on sibling rows.
+
 ---
 
 ## 2. Remaining proposals
@@ -110,32 +146,97 @@ Tune-6 contains no native-INT arithmetic track. Its design questions and
 per-track correctness/performance gates are maintained in the implementation
 plan rather than duplicated here.
 
-### R2 — Inline named-property IC hits, then design the method/prototype PIC
+### R2 — Inline named-property IC hits, then design the method/prototype PIC — **KIV (2026-07-26)**
 
-The named load/store IC data structures exist, but each hit still enters
-`js_property_access_named_ic` or `js_property_set_named_ic` through a C call.
-Emit the monomorphic hit guard and slot access directly in MIR, retaining the
-current helper for misses, polymorphic cases that are not yet inlined, and all
-semantic fallbacks.
+**Parked. Both halves were carried into Tune6 as J3 (inline the hit) and J1
+(method/prototype PIC), and both were dropped there without implementation
+because the Tune6 T0.1 census removed their premise.** Moved back here per
+that decision; `Lambda_Impl_Tune6.md` no longer owns them.
 
-Method/prototype dispatch remains a separate design step. The single-tier JIT
-has no code patching or deoptimization, so the PIC must be data-driven and
-realm-correct. Settle cache ownership and invalidation granularity in
-`Lambda_Issues_Outstanding.md` OI-6 before implementation.
+Census evidence (release-profile build, raw data `temp/t6_census_*.tsv`):
 
-### R3 — Share object-literal shapes per call site
+| bench | load_ic probes | miss | megamorphic |
+|---|---|---|---|
+| richards | 1,116,046 | **109 (0.01%)** | 0 |
+| deltablue | 1,421,395 | 11,715 (0.8%) | 0 |
+| hashmap | 47,010,886 | 1,440,158 | 18,547,462 |
 
-Static data-key object literals are pre-shaped, but each evaluation still
-constructs a separate `TypeMap`/`ShapeEntry` graph. Add a per-call-site shape
-cache to the literal path, following the existing constructor-shape-cache
-lifetime model.
+- **The PIC half (J1) has almost nothing to win.** It was premised on
+  prototype-chain misses dominating; richards misses on 0.01% of probes. Do not
+  build it until a fresh census shows proto misses actually dominating.
+- **The inline half (J3) is real but small, and costlier than it reads.**
+  richards/deltablue hit ~100%, so the only prize is the per-hit C-call tax.
+  Scoping found `inline_kind` cannot be an emission-time constant (the cell
+  fills at runtime), and `_map_read_field` has ~12 repr cases, so covering
+  raw-Item/BOOL/INT/FLOAT is a 4-way runtime branch plus the shape guard — not
+  one compare-and-load. A raw-Item-only cut would rarely fire, because
+  `js_set_shaped_slot` retags entries to concrete types.
+- Corroborating evidence from the Lambda side: the equivalent helper-level IC
+  (Tune6 L2, `fn_member_ic`) bought **1.12–1.19x**, and its stage-2 inline
+  emission was judged not worth the emission risk on top of that. Inlining the
+  guard is a fraction of a change that was itself under 1.2x.
 
-Requirements:
+**Conclusion: further IC-based tuning is not where the remaining factor lives.**
+Revisit only if a post-R4 profile shows property access back on top. If J3 is
+ever picked up, the cheapest useful cut is guard + INT + raw-Item with
+everything else falling through to the existing helper, measured before adding
+FLOAT/BOOL; the verification bar is `js_exec_profile` branch counters identical
+before and after across the fixture set. OI-6 remains the record for PIC
+ownership and invalidation granularity.
 
-- one stable cache cell per compiled literal site;
-- no sharing between realms or incompatible literal layouts;
-- no change to computed keys, spread, accessors, or property order;
-- make literal receivers monomorphic enough to benefit from R2.
+### R2b — Realm-owned shared root shape for plain objects — **OPEN, highest-value LJS item**
+
+Extracted from the Tune6 census; this, not R2/R3, is what the worst LJS rows are
+waiting on.
+
+**Result13 confirms the LJS column is entirely untouched** and still owns every
+bad row: geo **15.4x**, and the five rows over 100x are unchanged — hashmap
+**1121x**, havlak ~730x, cd ~260x, navier_stokes ~148x, spectralnorm ~105x.
+Tune6 landed nothing on this engine, so these numbers are the standing target.
+hashmap alone is a ~1.5x outlier over the next-worst row and ~9x over the third,
+and is the single clearest opportunity in the whole benchmark set.
+
+`hashmap`'s 18.5M megamorphic probes are **shape identity, not shape content**:
+structurally identical instances (`Object.keys()` equal) carry pointer-distinct
+TypeMaps, one per `run()`. The IC compares shape pointers and never re-warms
+once `JS_LOAD_IC_MEGAMORPHIC` is set, so 5+ shapes means permanently
+megamorphic. Verified: detach fires **zero** times, and the shapes carry
+`is_shared_constructor_shape=0`, `is_transition_shared_shape=0`,
+`is_private_clone=0` — they never entered any sharing scheme.
+
+Cause: `map_put` (`lambda/input/input.cpp:474`) only consults the shared
+transition table when the shape is *already* shared, so an object born unshaped
+from `js_new_object()` grows a private TypeMap chain field by field.
+
+Fix: give plain objects a shared empty root so field-by-field growth flows
+through the existing (already correct, already shared) transition table and
+structurally identical objects converge on one TypeMap. **Hang the root off
+`Input` so it dies with the realm's pool — not off the process-global
+`EmptyMap`**, per the realm-ownership constraint that the reverted global
+prototype cache established.
+
+### R3 — Share object-literal shapes per call site — **CLOSED: tried, measured, reverted (2026-07-26)**
+
+Implemented in full as Tune6 J2 (`js_new_object_with_shape_cached` plus a
+per-site cell in `jm_transpile_object`) and reverted. The mechanism works — a
+literal receiver site went 199,996/200,000 megamorphic to 199,999/200,000
+monomorphic — but it does not pay, because the megamorphism on these rows comes
+from constructed objects (see R2b), not literals.
+
+Isolated A/B on release (dedicated `LAMBDA_JS_SHARED_LITERAL_SHAPE` gate, ctor
+sharing on in both arms, 3-run medians): havlak2 **−4%**, jetstream/hashmap
+**−7%**, splay +6%, navier +1%, richards/deltablue/crypto_sha1 flat. Against a
+gate of "havlak ≥2x". Reverted; a comment at the emission site records the
+measurement so it is not retried blindly.
+
+Two artefacts were kept: `test/js/object_literal_instance_isolation.js`, a
+12-case instance-isolation net pinning what any future sharing scheme must
+preserve; and a correctness fix in `js_set_shaped_slot` for null writes losing
+their type tag on shared shapes.
+
+**Do not re-attempt before R2b.** If constructed-object shapes are ever shared,
+literal sharing becomes worth re-measuring — but on current evidence it is a
+regression.
 
 ### R4 — Reduce dynamic-call overhead
 
@@ -169,9 +270,30 @@ dynamic cases.
 The frozen C2MIR path still has two specializations absent from MIR-Direct:
 
 - typed unboxed system-function variants such as `fn_pow_u` and `fn_abs_i`;
-- direct native-math lowering for calls such as `math.sin` and `math.sqrt`.
+- ~~direct native-math lowering for calls such as `math.sin` and `math.sqrt`~~
+  — **DONE as Tune6 L3 (2026-07-26)**, and its gate was mis-targeted. `math.*`
+  transcendentals with statically-numeric scalar args now call libm through a
+  `d→d` prototype. Correctness is exact (the boxed scalar branch is literally
+  `push_d(fn(item_to_double(v)))`) and vectors stay element-wise. But the win is
+  **1.017x on nbody2 and flat everywhere else**, not the 1.5x expected:
+  spectralnorm holds exactly one `math.sqrt`, outside its hot loop, and removing
+  ~10ns of boxing from a ~600ns nbody iteration is ~1.5%. **The boxing was not
+  the cost — do not expect further float-benchmark movement here.**
+  Trap for the remaining unboxed-variant work: `abs`/`min`/`max`/`round`/
+  `floor`/`ceil`/`trunc` are **type preserving** (`abs(-5)` is int `5`), so
+  lowering them to a double-returning native call silently changes the result
+  type. L3 is gated by an explicit allow-list of the 23 always-`push_d`
+  transcendentals — allow-list, not deny-list, because a missing entry only
+  costs an optimisation while a wrong entry is a semantic bug.
 
-Port the useful shapes to `transpile-mir.cpp` and update
+Also landed under Tune6 against this item: **L1** (hoist `strlen` out of the
+map-field loop, compare via `typemap_shape_name_equals_id`) worth 1.15–1.54x,
+and **L2** (`fn_member_ic` per-call-site member IC) worth 1.12–1.19x. Together
+richards.ls went 372.3 → 212.7 ms (**1.75x**). L2's stage-2 inline emission was
+deliberately not enabled — see R2 for why inlining an IC guard is not the
+remaining factor.
+
+Port any further shapes to `transpile-mir.cpp` and update
 `test/mir/lambda/sys_func_specialization.mir-check` deliberately when the
 current boxed-emission expectation changes.
 
@@ -257,13 +379,32 @@ Recommended order:
 1. COW Stage 1 and Result11.
 2. R0 LambdaJS regression diagnosis and queue re-ranking.
 3. R1 Tune-6 in its own order: C3, C1, B, profiled C2, A, C4.
-4. R3, then R2.
-5. R4 and R5 as separately measured call-path slices.
-6. R6 in parallel with JS-only work.
-7. R7 only on post-Result11 evidence.
-8. R8 when interop work requires the boundary contract.
+4. ~~R3, then R2~~ — **superseded 2026-07-26.** R3 was implemented and reverted
+   (net negative); R2 is KIV. **R2b replaces both** as the LJS shape item.
+5. **R2b (shared root shape for plain objects)** — the highest-value LJS item on
+   current evidence, and a prerequisite for ever re-measuring R3.
+6. R4 and R5 as separately measured call-path slices. **Now the leading
+   candidate for the next substantial factor**: Tune6 exhausted the
+   property-lookup tail (R6's L1+L2+L3 all landed; the largest was 1.54x and the
+   combined richards figure 1.75x), so what remains on those rows is call
+   overhead and boxing rather than lookup. `Lambda_Impl_Tune7.md` owns the
+   dynamic-call flow.
+7. ~~R6 in parallel with JS-only work~~ — **largely done** (L1, L2, L3 landed
+   under Tune6). Residue: typed unboxed sys-func variants, and boxed element
+   loads feeding `any` arithmetic.
+8. R7 only on post-Result11 evidence.
+9. R8 when interop work requires the boundary contract.
 
-R9 and R10 remain parked.
+R9 and R10 remain parked. R2 is KIV.
+
+**Standing lesson from Tune6, worth applying to R4/R5.** Three of its five
+phases missed their gates, and in every case the gate was set from an assumed
+bottleneck rather than a measured one — the census killed J1 outright, J2 went
+net-negative, and L3's target benchmark contained one call to the function being
+optimised, outside its hot loop. Measure the specific mechanism on the specific
+row *before* committing a phase, and build both binaries first then interleave
+runs: sequential build-A/measure-A/build-B/measure-B drifted ~10% on the Tune6
+host and manufactured a false 1.05x. Guard rows moving is the tell.
 
 Acceptance gates throughout:
 
