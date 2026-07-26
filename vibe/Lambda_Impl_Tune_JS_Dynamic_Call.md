@@ -65,13 +65,218 @@ load instead of a cross-module call on every call; `special_ctor_kind` /
 classification against the name pointer, which self-corrects on rename and
 needed no audit of the 57 name writers.
 
+## 0.1 Result15 (2026-07-27) — matrix outcome and the numeric-row diagnosis
+
+`test/benchmark/benchmark_results_v15.json` / `Overall_Result15.md`, captured
+with the identical Result14 protocol on the same machine and engine stack
+(Node v22.13.0, QuickJS 2025-09-13, 3 runs, 180 s, `--fresh`), so unlike
+Result13→14 this *is* an apples-to-apples comparison.
+
+| Headline (dedup geo vs Node) | Result14 | Result15 |
+|---|---:|---:|
+| LambdaJS/Node | 14.9x | **14.4x** |
+| MIR/Node | 2.90x | 2.91x |
+| QuickJS/Node (untouched control) | 7.28x | 7.36x |
+
+The control moved +1.1% the wrong way, so the LambdaJS gain is real but
+modest at the geo level; the value is in the per-row split, which is bimodal.
+
+**Call-dominated rows improved by 1.5–1.7x** — every one of them a recursive
+call benchmark, confirmed by interleaved A/B against the pre-change binary:
+r7rs/fib 34.3 → 20.6 ms (1.67x), fibfp 34.25 → 20.5 (1.67x), cpstak
+5.65 → 3.62 (1.56x), tak 2.82 → 1.82 (1.55x), larceny/divrec 1.56x,
+r7rs/ack 1.50x. This is the dynamic-call work showing up exactly where the
+design predicted.
+
+**Four numeric rows regressed** — also reproducible under A/B:
+beng/mandelbrot 71.6 → 86.5 ms (1.21x), r7rs/sum 12.05 → 14.15 (1.17x),
+sumfp 1.20 → 1.41 (1.18x), larceny/diviter 10.48 → 11.27 s (1.08x).
+
+### The regression is code placement, not this work's semantics
+
+Established by elimination, in this order:
+
+1. **Not the four unrelated MIR-lowering files** that share commit
+   `7703c784c` (an in-flight TDZ fix, `js_get_this` →
+   `js_get_lexical_this_binding`). The P2 binary built *before* those edits
+   existed is already slow (85.2 ms), and the affected emission paths are
+   class-field init and `new` expressions, which neither regressed benchmark
+   contains.
+2. **Not entry selection.** `JS_CALL_FORCE_GENERIC=1` — every function back on
+   the generic dispatcher — measures the same 85 ms. `beng/mandelbrot` has no
+   JS calls at all in its hot loop.
+3. **Not emission.** `LAMBDA_MIR_DUMP_PATH` dumps from both binaries are the
+   same size (68,688 B) and the same instruction sequence; the only textual
+   differences are baked-in absolute addresses of helpers and string literals.
+4. **Not the helpers themselves.** `lambda_mir_double_bits` (16% of samples,
+   a 2-instruction leaf — so nearly pure call overhead), `js_check_tdz` (101
+   instrs) and `js_check_exception` (3 instrs) are instruction-for-instruction
+   identical across the two binaries. They only *moved*.
+5. **The profile agrees**: no new symbol appears; time shifts *into* JIT code
+   (61.0% → 66.4%) while the helper shares fall proportionally — the signature
+   of costlier JIT→helper edges, not new work.
+
+What remains is placement. The P1/P2 code pushed every downstream symbol
+forward by **63 KB** (`js_check_exception`, `js_check_tdz`) to **74 KB**
+(`lambda_mir_double_bits`, further along the link order).
+
+The specific microarchitectural cause is **not** isolated, and the per-function
+alignment story does not hold up. This machine's line size is 128 B
+(`hw.cachelinesize`), and the within-line offsets across the four builds do not
+track the timing:
+
+| symbol | base (71 ms) | P0 (71–74 ms) | P2 (85 ms) | HEAD (86 ms) |
+|---|---|---|---|---|
+| `lambda_mir_double_bits` | off 0 | off 80 | off 88 | off 108 |
+| `js_check_tdz` | off 104 | off 24 | off 8 | off 28 |
+| `js_check_exception` | off 16 | off 64 | off 48 | off 68 |
+
+None of these functions straddles a line in any build (the largest is 101
+instructions; `lambda_mir_double_bits` is 8 bytes). So this is not a simple
+"lost its alignment" regression — it is an aggregate placement effect across
+the set of helper edges, most plausibly I-cache set conflicts and branch-target
+aliasing. That last clause is an inference, not a measurement.
+
+What *is* proven is the elimination: the executed code is byte-for-byte the
+same on both sides — identical JIT output, identical helper bodies — and the
+profile attributes ~99% of samples to exactly those components. Placement is
+the only variable left.
+
+**Consequence for reading any benchmark row.** Neither 71 ms nor 86 ms is a
+property of the dynamic-call work; both are layout luck that reshuffles on
+every code change. This is the same trap the Tune6 calibration recorded
+("guard rows the change cannot affect moving is the tell"). The durable fix is
+to stop making the innermost loop pay a call for a bit-reinterpretation at
+all: **emit `lambda_mir_double_bits` / `lambda_mir_bits_double` inline in MIR**
+(one `fmov`) instead of a helper call. That removes the layout sensitivity by
+removing the edge, and is worth more than the alignment it would replace.
+Deliberate cache-line alignment of the remaining hot JIT-called leaves is the
+fallback. Both are new work, tracked as follow-ups rather than smuggled into
+this landing.
+
 **Provenance.** All `file:line` refs verified 2026-07-26 against master
-`e222487ee` (the Result14 rerun commit). New measurements in §2 were taken on
+`e222487ee` (Result14 itself was captured at `de30aae96`). New measurements in §2 were taken on
 this machine, release binary of that commit, macOS `sample` at 1 ms, with the
 nm-bisection recipe from the Result13 profiling session. Microbench sources:
 `temp/tune8_call_bench.js`, `temp/tune8_prof_plain2.js`,
 `temp/tune8_prof_method2.js` (P0 moves them under `test/benchmark/exe/` or
 re-creates them; temp/ is not durable).
+
+### 0.1.1 Second-pass verification and full v14→v15 regression triage (2026-07-27)
+
+An independent pass re-derived the regression set from the raw JSONs and
+interleaved-A/B'd every mover (`temp/ab_regress_check.py`: 7–11 alternating
+`base`/`HEAD` pairs per row, `temp/lambda_base.exe` vs the `7703c784c`
+release build, medians of `__TIMING__`).
+
+**Real regressions (reproducible under interleaved A/B):** the four
+documented rows, plus one addition — awfy/mandelbrot at **1.054x**
+(375.1 → 395.4 ms, spreads barely overlapping), the same numeric-loop family
+as beng/mandelbrot. Anchor row r7rs/sum reproduced at 1.180x with tight
+spreads (11.86–12.20 vs 14.00–14.49 ms).
+
+**Noise, not regressions:** every other mover in the snapshot dissolves under
+interleaved A/B — awfy/sieve 1.023x (snapshot said 1.128x), awfy/queens
+0.999x, larceny/paraffins LJS 0.984x, beng/pidigits 0.974x, and the sole MIR
+mover larceny/paraffins MIR 1.003x (MIR is genuinely untouched by this work).
+The snapshot's 3-run non-interleaved medians on sub-5 ms rows sit inside this
+machine's noise floor: the *unchanged* Node.js control drifted +6.0–8.5% on
+fasta/havlak/fannkuch in the same capture, so LJS snapshot movers below ~8%
+cannot be called real without interleaved A/B.
+
+**Elimination extended to r7rs/sum** (previously verified only on
+beng/mandelbrot): `LAMBDA_MIR_DUMP_PATH` dumps are 36,522 B from both
+binaries and instruction-identical after normalizing baked-in pointers;
+`JS_CALL_FORCE_GENERIC=1` measures 14.19–14.28 ms, indistinguishable from
+normal HEAD. **diviter tied to the same mechanism by profile** (5 s `sample`
+of both binaries): identical symbol set, no new symbol; helper top-of-stack
+counts *fall* on HEAD (js_subtract 731→646, lambda_mir_double_bits 458→397,
+it2d 362→321) while JIT-region samples *rise* — the costlier-edge signature.
+
+**Refinement: "placement" includes data, not just code.** Offset-preserving
+disassembly diffs show `js_check_exception` is fully identical — its
+`js_runtime_state` access resolves to the *same absolute page+offset* in both
+binaries (that global did not move; only the PC-relative encoding differs
+because the code moved). `js_check_tdz` differs only in moved *targets*: same
+callee symbols, but its string literals and one hot unexported global page
+shifted ~32 KB. So D-side set conflicts on migrated data are as much a
+candidate mechanism as I-side conflicts on migrated code; the executed
+instruction sequences remain identical either way, and the durable fix
+(inline `fmov` for `double_bits`/`bits_double`) is unaffected.
+
+### 0.1.2 Durable fix LANDED (2026-07-27): inline double↔bits, helper edge removed
+
+Implemented in `mir_emitter_shared.hpp` as `em_emit_double_bits` /
+`em_emit_bits_double`, shared by both transpilers (`emit_double_bits` in
+`transpile-mir.cpp` and `jm_emit_double_bits` in
+`js_mir_calls_boxing_types.cpp` now delegate). MIR has no reg↔reg bitcast
+insn, so the inline form is a typed store + differently-typed load at one
+address. Default mem ops carry alias 0 = may-alias, so mir-gen cannot
+reorder or elide the pair; the cell is dead between store and load, so one
+cell serves every site in the function. Beyond removing the edge, this stops
+the RA treating caller-saved registers as clobbered at every box/unbox.
+
+**Scratch base (`em_bitcast_scratch_base`): the Context cell
+`Context::mir_bitcast_scratch`**, addressed off the `frame.runtime` register
+every framed function already holds — no per-function setup at all. Chosen
+over the two alternatives considered: **TLS is unusable from JIT'd code**
+(MIR IR cannot address TLS; a helper returning the address reinstates the
+very call edge being removed, and baking a resolved address is thread-unsafe
+under the multi-isolate direction), and a **per-function `alloca` slot** works
+but costs one extra insn plus an SP bump per invocation. Guarded on
+`frame.active && frame.runtime` — both are zeroed by frame suspend/dispose,
+so a stale register cannot cross into a nested function — with the
+head-prepended `alloca fbits_slot, 8` retained as the unframed-emission
+fallback (per-use ALLOCA inside loops was the original SIGBUS trap that
+motivated the helpers; prepending keeps it ahead of TCO loop-backs and
+generator resume dispatch). Across the 14-probe corpus the fallback never
+fires. Never a side-root slot on either path: raw double bits in a
+GC-scanned slot would be misread as a tagged Item. Thread-safety is
+inherited — a Context whose side-stack pointers are already mutated
+non-atomically by every frame is single-thread-owned by construction.
+
+Verification: emitted MIR for beng/mandelbrot has 0 references to the
+helpers (was 181); MT7 ratchet 15/15 after same-commit re-baseline;
+`make test-lambda-baseline` 3621/3621 including the forced-GC stress sweep;
+program outputs byte-identical to the calls binary on all six A/B rows.
+
+**Emission size fell below pre-change master** on the call-heavy probes,
+because removing a call removes its frame bookkeeping as well as the call
+insn: `js_corpus_array_methods` 2827 → **2777** (-50), `generator_basic`
+4312 → **4306**, `side_stack_frame_gc` back to exactly 4525. Probes
+dominated by bitcast sites rather than call bookkeeping still net out
+slightly up (`typed_array_guard` 500 → 505, `callsite_inference` 492 → 494,
+the two scalar-home probes +1 each) — one insn per site is the store/load
+pair replacing one call insn.
+
+Interleaved 4-way A/B (11/15/7/3 reps, medians of `__TIMING__`, release,
+this machine): `base` = pre-dynamic-call `temp/lambda_base.exe`, `calls` =
+`7703c784c` release, `alloca` / `ctx` = the two scratch-base variants, built
+from sources differing *only* in that condition so their delta isolates the
+base choice.
+
+| row | base | calls | alloca | ctx | ctx/base | ctx/alloca |
+|---|---:|---:|---:|---:|---:|---:|
+| beng/mandelbrot | 71.47 | 84.97 | 51.23 | **50.29** | 0.704 | 0.982 |
+| r7rs/sum | 11.99 | 14.14 | 10.40 | **10.33** | 0.862 | 0.994 |
+| r7rs/sumfp | 1.190 | 1.411 | 1.027 | **1.028** | 0.864 | 1.001 |
+| awfy/mandelbrot | 374.3 | 395.9 | 297.1 | **299.3** | 0.799 | 1.007 |
+| r7rs/fib (guard) | 34.34 | 20.41 | 20.50 | **19.33** | 0.563 | 0.943 |
+| larceny/diviter | 11043.9 | 11407.7 | 7481.6 | **7707.8** | 0.698 | 1.030 |
+
+Every Result15-regressed numeric row is not merely recovered but 14–30%
+*faster than the pre-regression base* — the helper edge was a standing cost,
+not just a placement liability — and the call-dominated guard row kept its
+1.67x dynamic-call win. The placement mechanism is gone with the edge; the
+deliberate-alignment fallback from §0.1 is unnecessary.
+
+**ctx vs alloca is a wash in time** (0.94–1.03, spreads overlapping on every
+row; this capture also ran noisier than the 3-way one — an outlier stretched
+the `calls` mandelbrot spread to 126 ms, which the median absorbs). The
+Context slot is preferred for emission size and simplicity, not speed: one
+fewer insn and one fewer SP bump per function, one fewer long-lived address
+register, and no per-function emitter state on the hot path. Harnesses:
+`temp/ab_inline_bitcast.py` (3-way), `temp/ab_ctxslot.py` (4-way).
 
 ---
 
@@ -115,7 +320,7 @@ figures from the debug census; T0.1b per-workload tables still owed).
 
 ## 2. Continued analysis — measured evidence (new, 2026-07-26)
 
-### 2.1 Microbench (release `e222487ee`, this machine)
+### 2.1 Microbench (pre-change release build, this machine)
 
 `temp/tune8_call_bench.js`, callees fetched from arrays so the MIR lowering
 cannot devirtualize; verified below that the calls take the dynamic path.

@@ -417,6 +417,11 @@ struct MirEmitter {
     MirFrameState frame;           // canonical physical activation state
     MirFunctionMetadata last_function;
     MirFunctionArgumentState argument_registers;
+    // Per-function 8-byte native-stack scratch for inline double<->bits
+    // reinterpretation. Keyed by func_item, not by frame lifecycle, so a
+    // stale register can never leak into a different function's body.
+    MIR_item_t bitcast_slot_func;
+    MIR_reg_t bitcast_slot_addr;
 };
 
 static inline void em_function_arguments_clear(MirEmitter* em) {
@@ -786,6 +791,71 @@ static inline void em_store_frame_slot_typed(MirEmitter* em,
             frame_base, 0, 1),
         MIR_new_reg_op(em->ctx, value)));
 }
+// Result15: routing double<->bits reinterpretation through the 2-insn
+// lambda_mir_double_bits/lambda_mir_bits_double leaf helpers made hot numeric
+// loops layout-sensitive — up to 20% swings from placement of the JIT->helper
+// edge alone, with executed code proven identical — and forced the register
+// allocator to treat caller-saved registers as clobbered at every box/unbox.
+// MIR has no reg<->reg bitcast insn, so reinterpret inline through memory: a
+// typed store + differently-typed load at one address (default mem ops carry
+// alias 0 = may-alias, which keeps mir-gen from reordering or eliding the
+// pair). The scratch is dead between the two, so one cell serves every site.
+//
+// Preferred base is the Context register the frame already holds, which needs
+// no per-function setup at all. Functions emitted without a live frame runtime
+// fall back to a native-stack slot allocated ONCE at the function head — a
+// per-use ALLOCA inside loops grows the stack until SIGBUS, which is why the
+// helper calls existed — and prepending keeps it ahead of every entry path
+// (TCO loop-backs, generator resume dispatch). Neither base may be a side-root
+// slot: raw double bits in a GC-scanned slot would be misread as a tagged Item.
+static inline MIR_reg_t em_bitcast_scratch_base(MirEmitter* em,
+        MIR_disp_t* disp_out) {
+    // frame.runtime is only meaningful while the frame is active; suspend and
+    // dispose both zero it, so a stale register can never cross into a nested
+    // function's body.
+    if (em->frame.active && em->frame.runtime) {
+        *disp_out = (MIR_disp_t)offsetof(Context, mir_bitcast_scratch);
+        return em->frame.runtime;
+    }
+    *disp_out = 0;
+    if (em->bitcast_slot_addr && em->bitcast_slot_func == em->func_item) {
+        return em->bitcast_slot_addr;
+    }
+    MIR_reg_t addr = em_new_reg(em, "fbits_slot", MIR_T_I64);
+    MIR_prepend_insn(em->ctx, em->func_item,
+        MIR_new_insn(em->ctx, MIR_ALLOCA, MIR_new_reg_op(em->ctx, addr),
+            MIR_new_int_op(em->ctx, (int64_t)sizeof(uint64_t))));
+    em->bitcast_slot_func = em->func_item;
+    em->bitcast_slot_addr = addr;
+    return addr;
+}
+
+static inline MIR_reg_t em_emit_double_bits(MirEmitter* em, MIR_reg_t d_reg) {
+    MIR_disp_t disp = 0;
+    MIR_reg_t base = em_bitcast_scratch_base(em, &disp);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_mem_op(em->ctx, MIR_T_D, disp, base, 0, 1),
+        MIR_new_reg_op(em->ctx, d_reg)));
+    MIR_reg_t bits = em_new_reg(em, "dbits", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, bits),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, disp, base, 0, 1)));
+    return bits;
+}
+
+static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) {
+    MIR_disp_t disp = 0;
+    MIR_reg_t base = em_bitcast_scratch_base(em, &disp);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_I64, disp, base, 0, 1),
+        MIR_new_reg_op(em->ctx, bits_reg)));
+    MIR_reg_t dval = em_new_reg(em, "bitsd", MIR_T_D);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_reg_op(em->ctx, dval),
+        MIR_new_mem_op(em->ctx, MIR_T_D, disp, base, 0, 1)));
+    return dval;
+}
+
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MirScalarReturnMode mode,
                                                    MIR_reg_t item,

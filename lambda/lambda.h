@@ -1567,6 +1567,13 @@ struct Context {
     uint64_t* side_number_commit_limit;
     uint64_t* side_number_limit;
     uint64_t mir_return_lane;
+    // Scratch cell for JIT double<->bits reinterpretation. MIR has no reg<->reg
+    // bitcast, so the pair is a typed store + differently-typed load; routing it
+    // through the Context the frame already holds costs no per-function stack
+    // setup. Never GC-scanned — raw double bits in a scanned slot would be read
+    // as a tagged Item. Single-thread-owned by the same invariant as the
+    // side-stack pointers above, and dead between the store and its load.
+    uint64_t mir_bitcast_scratch;
 };
 
 #ifndef LAMBDA_STATIC
