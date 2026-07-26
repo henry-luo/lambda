@@ -83,6 +83,38 @@ path (`js_call_function_impl`, `js_runtime.cpp:13294`):
 Owned elsewhere / not this plan: builtin dispatch internals (`js_dispatch_builtin`),
 GC frequency × live set (R7), unboxed slot storage (OI-9), interpreter link mode.
 
+### 0.1 Metadata ledger — which cached fact skips which per-call cost
+
+Every conditional step in the dispatcher is a per-call *question*; this ledger
+records the cached *answer* that lets the runtime skip it, where that answer
+is stamped, and its status. The phases below implement the "planned" rows;
+the table is the single place to check bit assignments against
+`js_function.hpp` before adding one.
+
+| Per-call question (§0 row) | Cached answer (metadata) | Stamped at | Status |
+|---|---|---|---|
+| builtin callee? | `builtin_id > 0` | creation | exists |
+| bound function? | `JS_FUNC_FLAG_HAS_BOUND_THIS` / `bound_args` | `bind()` | exists |
+| `this` coercion + binding needed? | `STRICT`/`ARROW` (exist) narrow the coercion; **`READS_THIS` (8192)** skips install/restore entirely | transpiler body walk + `_js_this` capture info; direct-`eval` bodies keep it set | **C3.0** |
+| private home class installed? (row 10) | **`HAS_HOME_CLASS` (2048)** | single `__home_class__` writer funnel (`js_runtime.cpp:611`) | **C1.1** |
+| `with` machinery needed? (row 11) | **`USES_WITH` (1024)** + caller `js_with_stack_depth` read inline | transpiler | **landed** (Merge A repair); residual save call folded into the C1.2 lane |
+| realm swap? | `home_global` field test | creation | exists (cheap) |
+| generator callee proto? | `GENERATOR` flag | creation | exists, gated |
+| derived-ctor `this` TDZ? | `DERIVED_CTOR` flag | creation | exists, gated |
+| vm-source frame push? | `vm_stack_filename/source` field test | creation | exists, gated |
+| `arguments`-callee stash needed? | `USES_ARGUMENTS` (new bit; `fc->uses_arguments` exists at compile time but is not stamped on `JsFunction`) | transpiler | optional, minor (saves one store) |
+| argument adaptation kind? (row 13) | `param_count` sign encodes rest today; adapt-kind byte EXACT/PAD/REST + optional per-arity thunk | creation | **C4.2 / C4.3**, measure-first |
+| args already GC-rooted? (row 5) | **provenance, not function metadata**: a JIT-edge `args` pointer is a caller-frame suffix address → in-region range check, or a `prerooted` entry point selected at emission | call-site emission | **C2** |
+| all of the above at once | **`PLAIN_CALL` (4096)** — precomputed conjunction; one mask test selects the fast lane, skipping steps 2–4 and their step-8 mirrors wholesale | recomputed at every creation/mutation choke point via `js_function_call_shape_recompute` | **C1** (centerpiece) |
+
+Two facts stay dynamic by nature and are *not* in this ledger: the callee
+type check itself, and the module-vars switch (a caller/callee *pair*
+property — kept as a two-field compare in the lane). Discipline for every
+row: a stale bit is wrongness, not slowness — writers funnel through the one
+recompute predicate (C1.4 harness enforces), and any fact that is dynamic at
+heart (direct `eval`, future debug hooks) defaults its flag to the
+conservative value so the cost of doubt is only the slow path.
+
 ---
 
 ## 1. Evidence appendix (verified code facts)
