@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-11 (rev 7 — §12 AST-interpreter question resolved: no execution interpreter, const-folder yes, reference interpreter KIV)
 **Status:** Design settled — ledger U1–U26 in §9; U4, U11, U13–U26 user-confirmed
-**Related:** `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Desing_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
+**Related:** `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
 
 ---
 

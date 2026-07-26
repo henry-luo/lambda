@@ -126,7 +126,7 @@ Standard rung inventory for v1 (each a PL6 transducer):
 
 ## 6. Layer 0: raw-byte process spawn (PL8) — the real CLI-pipeline enabler
 
-Today `start process("child.ls", args)` speaks **Mark over the pipe** (K5/K29c) — Lambda-child⇄Lambda-parent messaging. A CLI-kind pipeline means piping through `grep`, `sort`, `ffmpeg` — arbitrary external commands that speak bytes.
+Today `start worker("child.ls", args, isolation: 'process')` — spelled `start process("child.ls", args)` in its sugar form (K31) — speaks **Mark over the pipe** (K5/K29c) — Lambda-child⇄Lambda-parent messaging. A CLI-kind pipeline means piping through `grep`, `sort`, `ffmpeg` — arbitrary external commands that speak bytes.
 
 **PL8 — A second spawn mode: the raw-byte process.** Same `start` keyword, same handle model, different pipe discipline:
 

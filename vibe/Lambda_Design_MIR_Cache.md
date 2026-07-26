@@ -2,7 +2,7 @@
 
 **Status:** Level 1 **decided**; Level 2 **approved experiment**; Level 3 **direction decided — Route B (code-image)**, long-term
 **Date:** 2026-07-12
-**Context:** Reduces script startup cost across the Lambda runtime (Lambda, JS, and other Jube guests). Companion to `vibe/Lambda_Desing_Native_Module.md` §7.4 ("Local compiled-code cache"), which already established the governing principle **P14: native compiled artifacts are derived local caches, never distribution formats**. This doc turns that principle into a staged plan. Detailed backend design lives in `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` (MIR Direct) and `LR_06_C_Transpiler.md` (legacy C2MIR).
+**Context:** Reduces script startup cost across the Lambda runtime (Lambda, JS, and other Jube guests). Companion to `vibe/Lambda_Design_Native_Module.md` §7.4 ("Local compiled-code cache"), which already established the governing principle **P14: native compiled artifacts are derived local caches, never distribution formats**. This doc turns that principle into a staged plan. Detailed backend design lives in `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` (MIR Direct) and `LR_06_C_Transpiler.md` (legacy C2MIR).
 
 ---
 
@@ -14,7 +14,7 @@ Two distinct costs, two distinct use cases:
 
 2. **Cold start (production).** A fresh process pays the full pipeline for the main script and every import.
 
-Profiling (both `LAMBDA_PROFILE=1` phase data and the analysis in `Lambda_Desing_Native_Module.md`) shows the dominant cost is **not** lowering to MIR — it is `MIR_gen`, the MIR→machine-code step. This kills the naive "serialize MIR bitcode to disk" idea: `MIR_write`/`MIR_read` exist in the vendored library, are compiled in, and are fully name-based/position-independent (`mac-deps/mir/mir.c:4929+`, `5158`, `5834`) — but a bitcode cache would skip only parse+AST+transpile and still re-run `MIR_gen` on every load. It caches the wrong phase. (The capability remains available as a cheap add-on if the front-end ever dominates for some workload; see §7.)
+Profiling (both `LAMBDA_PROFILE=1` phase data and the analysis in `Lambda_Design_Native_Module.md`) shows the dominant cost is **not** lowering to MIR — it is `MIR_gen`, the MIR→machine-code step. This kills the naive "serialize MIR bitcode to disk" idea: `MIR_write`/`MIR_read` exist in the vendored library, are compiled in, and are fully name-based/position-independent (`mac-deps/mir/mir.c:4929+`, `5158`, `5834`) — but a bitcode cache would skip only parse+AST+transpile and still re-run `MIR_gen` on every load. It caches the wrong phase. (The capability remains available as a cheap add-on if the front-end ever dominates for some workload; see §7.)
 
 Hence the three levels below: **Level 1** kills the batch recompilation, **Level 2** shrinks `MIR_gen` itself, **Level 3** caches its output.
 
@@ -134,7 +134,7 @@ Run `LAMBDA_PROFILE=1` on a representative batch (dump at `temp/phase_profile.tx
 
 ## 5. Level 3 — Native code cache on disk (LONG-TERM; Route B decided)
 
-**Goal:** production cold-start pays neither transpile nor `MIR_gen` for unchanged code. Per P14 (`Lambda_Desing_Native_Module.md` §7.4 and Appendix A): this is a **local, regenerable, build-ID-keyed cache — never a distribution format**. Scripts still ship as source.
+**Goal:** production cold-start pays neither transpile nor `MIR_gen` for unchanged code. Per P14 (`Lambda_Design_Native_Module.md` §7.4 and Appendix A): this is a **local, regenerable, build-ID-keyed cache — never a distribution format**. Scripts still ship as source.
 
 ### 5.1 Prerequisite: de-pointering refactor (required for any cross-process cache)
 
@@ -152,7 +152,7 @@ After this, generated code contains only names, indices, and values. This refact
 
 **Sidecar serialization** is the second shared prerequisite: a cache entry must carry, besides code, the compile-time tables the runtime consumes — `const_list` values (strings, decimals, datetimes), the `type_list`/`TypeMap`/`ShapeEntry` graphs, pub-function signature info (importers need it for inference and `register_module_pub_fns`), optionally `func_name_map`/debug info. This serializer is where much of the Level 3 effort goes, and it is identical for either route.
 
-**Cache key** (either route): `hash(runtime build ID, module source, transitive imports' pub-interface summaries, compile flags/opt level, cache format version)` — as already specified in `Lambda_Desing_Native_Module.md` §7.4. Content-hash keying makes dev-env staleness a non-issue: a changed exe or script *misses*; it can never produce a wrong hit.
+**Cache key** (either route): `hash(runtime build ID, module source, transitive imports' pub-interface summaries, compile flags/opt level, cache format version)` — as already specified in `Lambda_Design_Native_Module.md` §7.4. Content-hash keying makes dev-env staleness a non-issue: a changed exe or script *misses*; it can never produce a wrong hit.
 
 ### 5.2 Route A — dylib via C source + system compiler (documented; REJECTED)
 
@@ -169,7 +169,7 @@ After this, generated code contains only names, indices, and values. This refact
 
 ### 5.3 Route B — code-image cache (DECIDED)
 
-*The end-state already recommended by `Lambda_Desing_Native_Module.md` §7.4; precedents: V8 code cache, tree-sitter's `~/.tree-sitter` compiled-grammar cache.*
+*The end-state already recommended by `Lambda_Design_Native_Module.md` §7.4; precedents: V8 code cache, tree-sitter's `~/.tree-sitter` compiled-grammar cache.*
 
 > **Detailed design (2026-07-24):** `vibe/Lambda_Design_MIR_Cache_L3.md` — decides de-pointer vs image-patching (opt 1 wins, L3-1), the regenerate-front-end load model (no const/type sidecar in v1, L3-2), the relocation-journal kinds/hooks, the differential write verifier, and cache key/location (resolves OQ3/OQ5). The sketch below is superseded at the detail level.
 
@@ -206,7 +206,7 @@ Post-§5.1 there are **no other address classes** in the code — that is precis
 | MC4 | De-pointering refactor of `transpile-mir.cpp` (P1–P5) | **Prerequisite for Level 3**, worthwhile independently |
 | MC5 | Level 3 Route A (C source → system compiler → dylib) | **Rejected** — no new C toolchain in production; legacy-backend double-maintenance trap |
 | MC6 | Level 3 Route B (code-image + relocation journal) | **Decided direction**, long-term; eager-at-opt-2 for cache-writing compiles |
-| MC7 | All native cache artifacts are local derived caches keyed by build ID + content hash; never distributed | Inherited from **P14**, `Lambda_Desing_Native_Module.md` |
+| MC7 | All native cache artifacts are local derived caches keyed by build ID + content hash; never distributed | Inherited from **P14**, `Lambda_Design_Native_Module.md` |
 | MC8 | JS cross-process caching | **Out of scope** until JS codegen de-pointering; JS participates in Level 1 only |
 
 ## 7. Sequencing

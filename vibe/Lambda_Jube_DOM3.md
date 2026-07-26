@@ -19,7 +19,7 @@
 > `radiant_dom_mutate`, procedural `radiant_dom_set`, `make test-lambda-baseline`
 > (3299/3299), UI automation (233 passed, 2 native-webview skips), `make release`,
 > and release wrap-sweep benchmark (`query_ms=9/7/8`, `walk_ms=901/773/807`).
-> **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
+> **Parent design**: [Lambda_Design_Native_Module.md](./Lambda_Design_Native_Module.md) — Jube modules, signatures in Lambda type syntax, VMap projections.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1: carrier switch to branded VMaps),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol, real host API,
 > descriptor-driven registration, Lambda projections).

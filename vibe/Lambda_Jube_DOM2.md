@@ -1,7 +1,7 @@
 # Lambda Jube DOM — Stage 2 (DOM2): Review and Proposal
 
 > **Status**: DOM2 implementation in progress; latest checkpoint 2026-07-10.
-> **Parent design**: [Lambda_Desing_Native_Module.md](./Lambda_Desing_Native_Module.md) (Jube modules, VMap projections, host API).
+> **Parent design**: [Lambda_Design_Native_Module.md](./Lambda_Design_Native_Module.md) (Jube modules, VMap projections, host API).
 > **Predecessor**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1 = POC 1A/1B implementation record).
 > **Downstream consumer**: [Lambda_Design_DOM_Pkg.md](./Lambda_Design_DOM_Pkg.md) — the Lambda `dom` package assumes the
 > generic host-object protocol proposed here (its L4 adapter and ST2 stress goals).

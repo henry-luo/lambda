@@ -12,7 +12,7 @@
 > **Design authority:** `vibe/Lambda_Design_Jube_Lang_Hosting.md`
 >
 > **Related plans:** `vibe/Lambda_Impl_Stack_Frame_Py.md`,
-> `vibe/Lambda_Desing_Native_Module.md`, and
+> `vibe/Lambda_Design_Native_Module.md`, and
 > `doc/Lambda_Jube_Runtime.md`
 
 ## Implementation progress snapshot — 2026-07-24
