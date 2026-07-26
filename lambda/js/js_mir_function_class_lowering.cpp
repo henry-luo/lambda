@@ -2650,9 +2650,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
-        // Store 'this' into env[this_slot] so the state machine can access it
+        // Store 'this' into env[this_slot] so the state machine can access it.
+        // Must not use js_get_this here: a generator whose body never reads
+        // `this` has observes_this == false, so js_call_function skips
+        // install_this and js_current_this still holds the caller's binding.
+        // Inside a derived constructor before super() that binding is the TDZ
+        // sentinel, and js_get_this throws a ReferenceError for it — clobbering
+        // any pending exception and firing even when nothing reads `this`.
+        // js_get_lexical_this_binding stores the sentinel instead; the state
+        // machine's own reads go through js_resolve_lexical_this, which throws
+        // at actual use.
         if (gen_this_slot >= 0) {
-            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, gen_this_slot * (int)sizeof(uint64_t), gen_env, 0, 1),
                 MIR_new_reg_op(mt->ctx, this_val)));
@@ -2772,9 +2781,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
-        // Store 'this' into env[this_slot] so the async state machine can access it
+        // Store 'this' into env[this_slot] so the async state machine can access it.
+        // Same TDZ-sentinel rule as the generator env capture above.
         if (gen_this_slot >= 0) {
-            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, gen_this_slot * (int)sizeof(uint64_t), async_env, 0, 1),
                 MIR_new_reg_op(mt->ctx, this_val)));
@@ -2800,7 +2810,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
-        MIR_reg_t async_this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+        // js_async_drive re-installs this into js_current_this around each
+        // resumption, so it must carry the TDZ sentinel through unthrown too.
+        MIR_reg_t async_this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
         MIR_reg_t ctx_idx = jm_call_4(mt, "js_async_context_create", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, async_env),

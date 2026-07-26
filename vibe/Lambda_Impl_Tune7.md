@@ -652,6 +652,14 @@ optimization whose measured gain is already small.
 
 ### 8.4 Recommended follow-up
 
+> **2026-07-26 update:** items 2/3/5 are now designed in
+> `vibe/Lambda_Impl_Tune_JS_Dynamic_Call.md` (per-callee entry specialization,
+> DC1–DC7), backed by fresh `sample` attribution: on a plain 2-arg dynamic
+> call the two-layer dispatcher+invoke protocol measures ≈57% of loop time,
+> smeared across unconditional work — the evidence that resolves the
+> narrow-vs-broad lane trade-off in favor of finalization-time entry
+> stamping.
+
 1. **Repair attribution first.** Build the Tune6 and Tune7 release binaries
    before measurement, interleave A/B/A/B/A/B per row, preserve the raw order,
    and publish per-workload call-shape census for the T0.3 rows, test262, and

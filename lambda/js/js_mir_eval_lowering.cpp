@@ -1669,8 +1669,12 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-        extern Item js_get_this();
-        Item eval_this = js_get_this();
+        // Direct eval inherits the caller's this-binding, including the
+        // uninitialized (TDZ) one inside a derived constructor before super().
+        // Resolving it here would make even `eval("1+1")` throw; the binding is
+        // passed through instead so only a `this` read inside the eval throws.
+        extern Item js_get_lexical_this_binding();
+        Item eval_this = js_get_lexical_this_binding();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
         if (js_check_exception()) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
         return result;

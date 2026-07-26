@@ -6,6 +6,16 @@
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
 
+struct JsFunction;
+
+// Per-callee call entry. Choosing the calling protocol once, at function
+// finalization, lets each entry contain only the steps its callee's shape
+// actually needs instead of re-deciding inside one shared dispatcher body on
+// every call. The generic dispatcher is itself an entry, so every function has
+// one and there is no "miss" path.
+typedef Item (*JsCallEntry)(Item fn_item, Item this_val, Item* args, int argc,
+                            uint64_t* result_home, bool args_prerooted);
+
 struct JsFunction {
     TypeId type_id;
     uint32_t layout_magic;
@@ -22,7 +32,10 @@ struct JsFunction {
     Item properties_map;
     uint16_t flags;
     uint8_t call_lane_kind;
+    uint8_t special_ctor_kind;
     int16_t formal_length;
+    String* special_ctor_name;
+    JsCallEntry invoke;
     Item* module_vars;
     Item home_global;
     Item home_class;
@@ -74,3 +87,56 @@ enum JsFunctionCallLaneKind : uint8_t {
     JS_CALL_LANE_ORDINARY = 1,
     JS_CALL_LANE_METHOD_HOME = 2,
 };
+
+// Call dispatch used to re-derive "is this one of the name-identified special
+// constructors?" with a strncmp chain on every call, which every 4- or
+// 8-character function name paid for. The answer depends only on fn->name, so
+// it is cached against the name pointer it was computed from: any later rename
+// simply misses the key and reclassifies, with no writer audit to keep in sync.
+enum JsSpecialCtorKind : uint8_t {
+    JS_SPECIAL_CTOR_UNCHECKED = 0,
+    JS_SPECIAL_CTOR_NONE = 1,
+    JS_SPECIAL_CTOR_DATE = 2,
+    JS_SPECIAL_CTOR_FUNCTION = 3,
+    JS_SPECIAL_CTOR_GENERATOR_FUNCTION = 4,
+    JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION = 5,
+    JS_SPECIAL_CTOR_ASYNC_FUNCTION = 6,
+};
+
+// Classify against the current name and remember the key. Cheap enough to run
+// inline on the rare miss; never changes which callees the dispatcher treats
+// as special — the sufficient conditions stay at the use sites.
+static inline uint8_t js_function_special_ctor_kind(JsFunction* fn) {
+    if (fn->special_ctor_kind != JS_SPECIAL_CTOR_UNCHECKED &&
+        fn->special_ctor_name == fn->name) {
+        return fn->special_ctor_kind;
+    }
+    uint8_t kind = JS_SPECIAL_CTOR_NONE;
+    String* name = fn->name;
+    if (name) {
+        switch (name->len) {
+        case 4:
+            if (memcmp(name->chars, "Date", 4) == 0) kind = JS_SPECIAL_CTOR_DATE;
+            break;
+        case 8:
+            if (memcmp(name->chars, "Function", 8) == 0) kind = JS_SPECIAL_CTOR_FUNCTION;
+            break;
+        case 13:
+            if (memcmp(name->chars, "AsyncFunction", 13) == 0)
+                kind = JS_SPECIAL_CTOR_ASYNC_FUNCTION;
+            break;
+        case 17:
+            if (memcmp(name->chars, "GeneratorFunction", 17) == 0)
+                kind = JS_SPECIAL_CTOR_GENERATOR_FUNCTION;
+            break;
+        case 22:
+            if (memcmp(name->chars, "AsyncGeneratorFunction", 22) == 0)
+                kind = JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION;
+            break;
+        default: break;
+        }
+    }
+    fn->special_ctor_name = name;
+    fn->special_ctor_kind = kind;
+    return kind;
+}

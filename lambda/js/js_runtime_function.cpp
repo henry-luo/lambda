@@ -32,6 +32,10 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
 void js_function_call_lane_recompute(JsFunction* fn) {
     if (!fn) return;
     fn->call_lane_kind = JS_CALL_LANE_GENERIC;
+    // This is the single writer of the executable classification. Everything
+    // that mutates the metadata an entry relies on funnels back here, so a
+    // stamped entry can never outlive the facts it was chosen from.
+    fn->invoke = js_call_entry_generic;
     // A stale fast classification is wrongness, not merely slowness. New or
     // dynamically-created wrappers stay generic until finalization supplies
     // every fact the ordinary lane relies on.
@@ -46,6 +50,7 @@ void js_function_call_lane_recompute(JsFunction* fn) {
     }
     fn->call_lane_kind = fn->home_class.item != 0
         ? JS_CALL_LANE_METHOD_HOME : JS_CALL_LANE_ORDINARY;
+    fn->invoke = js_function_select_call_entry(fn);
 }
 
 extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
@@ -228,6 +233,9 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
+    // A fresh wrapper has no analysis yet, so this stamps the generic entry;
+    // finalization reclassifies once the compiler's facts are applied.
+    js_function_call_lane_recompute(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
 }
@@ -256,6 +264,7 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
+    js_function_call_lane_recompute(fn);
     return (Item){.function = (Function*)fn};
 }
 
@@ -284,6 +293,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->home_global = js_get_global_this();
     js_env_rehome_scalars(fn->env);
     js_function_capture_with_env(fn);
+    js_function_call_lane_recompute(fn);
     return (Item){.function = (Function*)fn};
 }
 
