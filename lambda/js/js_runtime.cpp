@@ -285,10 +285,26 @@ static inline int64_t js_array_dense_capacity(const Array* arr) {
     return container_dense_capacity(arr);
 }
 
-// J0.1: release-safe array-store counters. Always compiled (the increments sit
-// on already-out-of-line paths); dumped at exit when LAMBDA_JS_ARRAY_STATS is
-// set. These validated the J1 diagnosis (scanned-slots ~= capacity x stores)
-// in-tree and confirm the collapse to zero scans afterward.
+// J0.1: array-store counters, dumped at exit. These validated the J1 diagnosis
+// (scanned-slots ~= capacity x stores) in-tree and confirm the collapse to zero
+// scans afterward.
+//
+// Compile-time gated, not env-gated: the enable check sits on the hot array
+// store path, and an unset env var never latches, so the old getenv() probe
+// took the libc environ lock on every store (__findenv_locked was ~5% of busy
+// samples on the LJS navier_stokes profile). Flip to 1 (here or with -D) in a
+// debug build when the counters are needed.
+#ifndef LAMBDA_JS_ARRAY_STATS
+#define LAMBDA_JS_ARRAY_STATS 0
+#endif
+#ifdef NDEBUG
+// release carries no instrumentation: these increments are unsynchronized and
+// sit inside the store fast path.
+#undef LAMBDA_JS_ARRAY_STATS
+#define LAMBDA_JS_ARRAY_STATS 0
+#endif
+
+#if LAMBDA_JS_ARRAY_STATS
 static struct {
     uint64_t dense_required_calls;   // js_array_dense_required invocations
     uint64_t dense_required_scans;   // of those, ones that ran a backward scan
@@ -296,13 +312,15 @@ static struct {
     uint64_t store_fast_bypass;      // js_array_store_owned direct-array_set hits
     uint64_t store_scan_path;        // js_array_store_owned grow-check stores
 } g_js_array_stats;
-static bool g_js_array_stats_registered = false;
+
+static bool g_js_array_stats_reported = false;
 
 static void js_array_stats_report(void) {
+    if (g_js_array_stats_reported) return;
+    g_js_array_stats_reported = true;
     const auto& s = g_js_array_stats;
-    fprintf(stderr,
-        "js-array-stats: dense_required=%llu scans=%llu scanned_slots=%llu "
-        "(%.1f slots/scan) | store_fast=%llu store_growcheck=%llu\n",
+    log_info("js-array-stats: dense_required=%llu scans=%llu scanned_slots=%llu "
+        "(%.1f slots/scan) | store_fast=%llu store_growcheck=%llu",
         (unsigned long long)s.dense_required_calls,
         (unsigned long long)s.dense_required_scans,
         (unsigned long long)s.dense_required_slots,
@@ -312,10 +330,29 @@ static void js_array_stats_report(void) {
 }
 
 static inline void js_array_stats_touch(void) {
-    if (!g_js_array_stats_registered && getenv("LAMBDA_JS_ARRAY_STATS")) {
+    static bool registered = false;
+    if (!registered) {
+        // fallback for hosts that never reach lambda_main_finish() (test
+        // binaries); there nothing has closed the log yet at exit time.
         atexit(js_array_stats_report);
-        g_js_array_stats_registered = true;
+        registered = true;
     }
+}
+// every counted path arms the dump: most stores are counted without ever
+// reaching js_array_dense_required, so arming from there alone lost the whole
+// report on runs whose stores all took the fast bypass.
+#define JS_ARRAY_STATS_INC(counter) (js_array_stats_touch(), g_js_array_stats.counter++)
+#else
+#define JS_ARRAY_STATS_INC(counter) ((void)0)
+#endif
+
+// lambda_main_finish() calls this before log_finish() closes log.txt — the
+// atexit dump runs after that point, where log_info output is discarded.
+// Compiled either way so the call site needs no #if.
+extern "C" void js_array_stats_dump(void) {
+#if LAMBDA_JS_ARRAY_STATS
+    js_array_stats_report();
+#endif
 }
 
 // J1: the growth-sizing value for js_array_store_owned (its only caller).
@@ -331,8 +368,7 @@ static inline void js_array_stats_touch(void) {
 // case lets the index+1 clamp size growth — O(1), and it can never balloon on
 // a spec length because it never reads arr->length as a physical bound.
 static int64_t js_array_dense_required(const Array* arr) {
-    js_array_stats_touch();
-    g_js_array_stats.dense_required_calls++;
+    JS_ARRAY_STATS_INC(dense_required_calls);
     int64_t dense_capacity = js_array_dense_capacity(arr);
     if (!arr || !arr->items || dense_capacity <= 0) return 0;
     if (arr->length <= dense_capacity) return arr->length;
@@ -344,11 +380,11 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (arr->items && arr->extra == 0 && index < js_array_dense_capacity(arr)) {
         // Only arrays without a scalar tail can bypass the required scan: wide
         // scalar writes consume capacity from that tail and must retain it.
-        g_js_array_stats.store_fast_bypass++;
+        JS_ARRAY_STATS_INC(store_fast_bypass);
         array_set(arr, index, value);
         return;
     }
-    g_js_array_stats.store_scan_path++;
+    JS_ARRAY_STATS_INC(store_scan_path);
     int64_t dense_required = js_array_dense_required(arr);
     if (dense_required < index + 1) dense_required = index + 1;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {

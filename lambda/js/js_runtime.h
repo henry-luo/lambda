@@ -269,6 +269,7 @@ Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
                                           Item* args, int arg_count,
                                           uint64_t* result_home);
 void js_call_stats_dump(void);
+void js_array_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_function_into(Item func_item, Item this_val, Item args_array,

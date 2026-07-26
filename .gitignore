@@ -132,6 +132,17 @@ Cargo.lock
 # Tree-sitter generated parser files
 **/tree-sitter-*/src/parser.c
 
+# tree-sitter-python is regenerated on every build (see generate-tree-sitter-
+# python-parser) by the pinned 0.24.7 CLI, which emits ABI 14. The upstream
+# vendor drop is v0.25.0, whose committed artifacts came from a 0.25 CLI, so
+# tracking these made every build dirty the tree and leaked churn into unrelated
+# commits. Only what the CLI writes is ignored: `tree-sitter generate` consumes
+# src/grammar.json and emits parser.c, node-types.json and src/tree_sitter/*.h.
+# grammar.json is the generator's input (the sub-Makefile has no rule to rebuild
+# it from grammar.js) and scanner.c is hand-written, so both stay tracked.
+lambda/tree-sitter-python/src/node-types.json
+lambda/tree-sitter-python/src/tree_sitter/
+
 # Test outputs and artifacts
 *.test
 test/*.dSYM

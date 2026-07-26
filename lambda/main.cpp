@@ -485,6 +485,8 @@ static int lambda_main_finish(int ret_code) {
     }
     // JS_CALL_STATS uses log_info; emit it before log_finish closes log.txt.
     js_call_stats_dump();
+    // same for the LAMBDA_JS_ARRAY_STATS census (no-op unless compiled in).
+    js_array_stats_dump();
     lambda_main_pre_memtrack_cleanup_once();
     log_finish();
     MemtrackStats mem_stats = {};
