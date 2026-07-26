@@ -1953,14 +1953,17 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         jm_collect_body_refs_impl(fn->body, refs,
             ts_node_start_byte(fn->body->node), ts_node_end_byte(fn->body->node));
     }
+    // Also collect refs from default parameter expressions (e.g., function f(x, t=F) — F is a ref)
+    jm_collect_param_default_refs(fn->params, refs);
+
+    // Default initializers execute in the function environment and can read
+    // this/new.target before the body; classify them before stamping call ABI
+    // facts so a binding-oblivious lane cannot hide either value.
     fc->observes_this = jm_name_set_has(refs, "_js_this") || fc->has_direct_eval;
     fc->observes_new_target = jm_name_set_has(refs, "_js_new.target") ||
         fc->has_direct_eval;
     fc->uses_with = fc->has_direct_eval || (fn->body &&
         jm_analysis_ts_has_with(fn->body->node, true));
-
-    // Also collect refs from default parameter expressions (e.g., function f(x, t=F) — F is a ref)
-    jm_collect_param_default_refs(fn->params, refs);
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus

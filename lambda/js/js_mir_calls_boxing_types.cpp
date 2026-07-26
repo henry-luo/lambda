@@ -56,7 +56,16 @@ MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count) {
     JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "dynamic-call");
     if (!home.reg) return 0;
-    MIR_reg_t result = jm_call_5(mt, "js_call_function_into", MIR_T_I64,
+    bool prerooted_args = mt && !mt->in_generator && mt->arg_stack_scope &&
+        mt->arg_stack_scope->base_slot >= 0 &&
+        args.mode == MIR_OP_REG && arg_count.mode == MIR_OP_INT &&
+        args.u.reg == mt->arg_stack_scope->args_reg &&
+        arg_count.u.i == mt->arg_stack_scope->slot_count &&
+        mt->arg_stack_scope->slot_count > 0;
+    // The active scope is the emitter's provenance proof: its frame-relative
+    // extent owns exactly this argument span until expression completion.
+    MIR_reg_t result = jm_call_5(mt, prerooted_args
+            ? "js_call_function_prerooted_args_into" : "js_call_function_into", MIR_T_I64,
         MIR_T_I64, func,
         MIR_T_I64, this_value,
         MIR_T_I64, args,
@@ -653,6 +662,9 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
     if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
     if (fc->uses_with) flags |= JS_FUNC_INIT_USES_WITH;
+    flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
+    if (fc->observes_this) flags |= JS_FUNC_INIT_READS_THIS;
+    if (fc->observes_new_target) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
     // Every compiled public wrapper takes the trailing ABI pointer. Only
     // scalar-returning wrappers consume it, but one canonical call shape
     // prevents callback dispatch from guessing a function's return type.

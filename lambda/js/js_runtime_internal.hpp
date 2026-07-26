@@ -70,6 +70,7 @@ static inline void* memmem(const void* haystack, size_t hlen, const void* needle
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);
+void js_function_call_lane_recompute(JsFunction* fn);
 
 // v22 / P8 + Js58.2: Maximum index/capacity gap considered for dense array
 // expansion before forcing sparse companion-map storage. Js58.2 restores the

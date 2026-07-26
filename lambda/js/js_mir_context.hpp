@@ -44,6 +44,17 @@ struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 
 typedef MirRootBinding JsMirRootBinding;
 typedef MirEnvBinding JsMirEnvBinding;
+
+// Native bodies state their ABI result independently of the JS-inferred
+// return type. BOXED/VOID remain unavailable until their complete lowering and
+// direct-call contracts exist; treating either as an integer changes JS.
+enum NativeReturnKind : uint8_t {
+    NATIVE_RETURN_NONE = 0,
+    NATIVE_RETURN_INT,
+    NATIVE_RETURN_FLOAT,
+    NATIVE_RETURN_BOXED,
+    NATIVE_RETURN_VOID,
+};
 // ============================================================================
 
 // Module-scope constants: variables, functions, classes declared at top level.
@@ -184,6 +195,7 @@ struct JsFuncCollected {
     int formal_length;              // ES spec .length: params before first default/rest (-1 = same as param_count)
     MIR_item_t native_func_item;    // native version (NULL if not generated)
     bool has_native_version;        // whether native version was generated
+    NativeReturnKind native_return_kind; // ABI result for the native entry
     // TCO:
     bool is_tco_eligible;           // has tail-recursive calls → loop transform
     bool is_iife_body;              // true if this function is a top-level IIFE body
@@ -339,6 +351,7 @@ struct JsMirArgStackScope {
     int saved_depth;
     int base_slot;
     int slot_count;
+    MIR_reg_t args_reg;
 };
 
 struct JsMirTranspiler {

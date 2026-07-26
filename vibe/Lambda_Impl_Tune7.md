@@ -227,6 +227,26 @@ four-engine matrix is an exit record, not evidence for an individual slice.
   coverage separately so a high-frequency microbench or one long test cannot
   make a narrow lane look universal. Freeze C1's initial lane kinds only
   after this table exists.
+
+**Recorded T0 PLAIN_CALL coverage (2026-07-26).** `JS_CALL_STATS=1` on
+`temp/tune7_call_bench.js` counted 36,120,001 non-builtin dynamic entries.
+The strict `PLAIN_CALL` / ORDINARY classification hit 30,100,000 entries:
+**83.33%**. The separate METHOD_HOME classification hit 3,010,001 entries;
+the two semantically compatible common-flow classifications together covered
+33,110,001 entries: **91.67%**. This is shape-mix coverage only, collected
+from the debug census build and not a performance measurement. In particular,
+it must not be presented as aggregate workload coverage until T0.1b records
+the per-benchmark, test262, and Node tables. The adversarial
+`test/js/tune7_call_lanes.js` fixture intentionally measures much lower:
+1/4 (**25%**) strict ORDINARY and 2/4 (**50%**) when METHOD_HOME is included.
+
+The current release decision is deliberately narrower than the classification
+coverage: release A/B measurements found the ordinary lane slower than the
+generic semantic dispatcher, so ordinary PLAIN_CALLs remain on that dispatcher.
+Only METHOD_HOME selects the common lane. Thus these percentages describe
+validated eligibility and future optimization headroom, not the fraction of
+calls currently taking a new fast path.
+
 - **T0.2 Per-call microbench.** `temp/tune7_call_bench.js` (+ `.ls` control):
   tight loops over — plain 0-arg call, plain 2-arg, closure (env) call,
   method call via the warmed existing IC, same-realm call, forced

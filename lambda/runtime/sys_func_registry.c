@@ -77,6 +77,10 @@ extern Item js_get_lexical_this_binding(void);
 extern Item js_resolve_lexical_this(Item this_val);
 extern void js_set_internal_class_name(Item obj, Item class_name);
 extern void js_mark_derived_constructor_func(Item fn_item);
+extern void js_set_function_home_class(Item fn_item, Item home_class);
+extern Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
+                                                  Item* args, int arg_count,
+                                                  uint64_t* result_home);
 extern Item js_setImmediate_with_args(Item callback, Item args_array);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
@@ -2059,6 +2063,8 @@ JitImport jit_runtime_imports[] = {
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
       JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
+    {"js_set_function_home_class", FPTR(js_set_function_home_class)},
+    {"js_call_function_prerooted_args_into", FPTR(js_call_function_prerooted_args_into)},
     {"js_finalize_function", FPTR(js_finalize_function),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |

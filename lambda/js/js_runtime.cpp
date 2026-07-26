@@ -510,15 +510,6 @@ static bool js_reflect_target_is_object(Item target) {
            type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT;
 }
 
-static Item js_function_home_class(Item func_item) {
-    if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
-    JsFunction* fn = (JsFunction*)func_item.function;
-    if (!fn || fn->properties_map.item == 0 || get_type_id(fn->properties_map) != LMD_TYPE_MAP) return ItemNull;
-    bool found = false;
-    Item home = js_map_get_fast_ext(fn->properties_map.map, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN, &found);
-    return found ? home : ItemNull;
-}
-
 static int js_private_key_class_index(String* private_key) {
     if (!private_key || private_key->len <= 10 ||
         strncmp(private_key->chars, "__private_", 10) != 0) return -1;
@@ -608,8 +599,11 @@ extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
         }
     }
     if (home.item == ItemNull.item || home.item == 0) return;
+    // Keep the legacy visible backing property coherent while dispatch reads
+    // the dedicated field, avoiding a per-call properties-map hash probe.
+    js_set_function_home_class(fn_item, home);
     Item home_key = (Item){.item = s2it(heap_create_name(JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN))};
-    js_property_set(fn_item, home_key, home);
+    js_func_init_property(fn_item, home_key, home);
 }
 
 static bool js_is_function_prototype_map(Item item) {
@@ -6895,6 +6889,12 @@ static Item js_property_set_function(Item object, Item key, Item value) {
         }
         js_property_set(fn->properties_map, key, value);
     }
+    if (str_key && str_key->len == JS_HOME_CLASS_KEY_LEN &&
+        memcmp(str_key->chars, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN) == 0) {
+        // __home_class__ was historically a writable backing-map field; keep
+        // its dedicated dispatch cache coherent for ordinary property writes.
+        js_set_function_home_class(object, value);
+    }
     return value;
 }
 
@@ -7135,6 +7135,13 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
     }
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
         js_property_set(fn->properties_map, key, value);
+    }
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len == JS_HOME_CLASS_KEY_LEN &&
+            memcmp(str_key->chars, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN) == 0) {
+            js_set_function_home_class(fn_item, value);
+        }
     }
 }
 
@@ -13147,6 +13154,8 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
 
 static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home);
+static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted);
 
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" void heap_unregister_gc_root_range(uint64_t* base);
@@ -13303,6 +13312,195 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
 
 static int js_call_stack_limit = 4096;
 
+enum JsCallStatsRequirement : uint32_t {
+    JS_CALL_STAT_NON_CALLABLE = 1u << 0,
+    JS_CALL_STAT_SPECIAL_CONSTRUCTOR = 1u << 1,
+    JS_CALL_STAT_BUILTIN = 1u << 2,
+    JS_CALL_STAT_BOUND = 1u << 3,
+    JS_CALL_STAT_GENERATOR = 1u << 4,
+    JS_CALL_STAT_ASYNC = 1u << 5,
+    JS_CALL_STAT_DERIVED_CTOR = 1u << 6,
+    JS_CALL_STAT_CALLER_WITH = 1u << 7,
+    JS_CALL_STAT_CALLEE_WITH = 1u << 8,
+    JS_CALL_STAT_FOREIGN_REALM = 1u << 9,
+    JS_CALL_STAT_HOME_CLASS = 1u << 10,
+    JS_CALL_STAT_VM_SOURCE = 1u << 11,
+    JS_CALL_STAT_EVAL_INITIALIZER = 1u << 12,
+    JS_CALL_STAT_CLOSURE_ENV = 1u << 13,
+    JS_CALL_STAT_ARRAY_DISPATCH = 1u << 14,
+    JS_CALL_STAT_MODULE_SWITCH = 1u << 15,
+    JS_CALL_STAT_GENERATED_ARGS = 1u << 16,
+};
+
+#define JS_CALL_STATS_COMBINATION_COUNT (1u << 17)
+#define JS_CALL_STATS_ARG_BUCKETS 18
+
+static struct {
+    uint64_t total;
+    uint64_t nonbuiltin_dynamic;
+    uint64_t ordinary_fit;
+    uint64_t method_home_fit;
+    uint64_t with_fit;
+    uint64_t combinations[JS_CALL_STATS_COMBINATION_COUNT];
+    uint64_t argc[JS_CALL_STATS_ARG_BUCKETS];
+} g_js_call_stats;
+static int g_js_call_stats_enabled = -1;
+static bool g_js_call_stats_registered = false;
+static bool g_js_call_stats_reported = false;
+
+extern "C" int64_t js_with_depth_active(void);
+
+static void js_call_stats_report(void) {
+    if (g_js_call_stats_reported) return;
+    g_js_call_stats_reported = true;
+    uint64_t total = g_js_call_stats.total;
+    log_info("js-call-stats: total=%llu nonbuiltin_dynamic=%llu ordinary_fit=%llu method_home_fit=%llu with_fit=%llu",
+        (unsigned long long)total,
+        (unsigned long long)g_js_call_stats.nonbuiltin_dynamic,
+        (unsigned long long)g_js_call_stats.ordinary_fit,
+        (unsigned long long)g_js_call_stats.method_home_fit,
+        (unsigned long long)g_js_call_stats.with_fit);
+    for (int bucket = 0; bucket < JS_CALL_STATS_ARG_BUCKETS; bucket++) {
+        if (!g_js_call_stats.argc[bucket]) continue;
+        if (bucket < JS_CALL_STATS_ARG_BUCKETS - 1) {
+            log_info("js-call-stats: argc=%d calls=%llu", bucket,
+                (unsigned long long)g_js_call_stats.argc[bucket]);
+        } else {
+            log_info("js-call-stats: argc=17+ calls=%llu",
+                (unsigned long long)g_js_call_stats.argc[bucket]);
+        }
+    }
+    uint32_t selected[16] = {0};
+    uint64_t cumulative = 0;
+    for (int rank = 0; rank < 16; rank++) {
+        uint64_t best = 0;
+        uint32_t best_mask = 0;
+        for (uint32_t mask = 0; mask < JS_CALL_STATS_COMBINATION_COUNT; mask++) {
+            uint64_t count = g_js_call_stats.combinations[mask];
+            if (count <= best) continue;
+            bool already_selected = false;
+            for (int prior = 0; prior < rank; prior++) {
+                if (selected[prior] == mask) {
+                    already_selected = true;
+                    break;
+                }
+            }
+            if (!already_selected) {
+                best = count;
+                best_mask = mask;
+            }
+        }
+        if (!best) break;
+        selected[rank] = best_mask;
+        cumulative += best;
+        log_info("js-call-stats: combination[%d]=0x%05x calls=%llu cumulative=%.2f%%",
+            rank, best_mask, (unsigned long long)best,
+            total ? 100.0 * (double)cumulative / (double)total : 0.0);
+    }
+    // Release logging compiles out, but the optional atexit census must still
+    // compile so JS_CALL_STATS can be enabled on an optimized measurement run.
+    (void)cumulative;
+}
+
+extern "C" void js_call_stats_dump(void) {
+    if (g_js_call_stats_enabled > 0) js_call_stats_report();
+}
+
+static void js_call_stats_configure(void) {
+    if (g_js_call_stats_enabled < 0) {
+        const char* env = getenv("JS_CALL_STATS");
+        g_js_call_stats_enabled = env && env[0] && strcmp(env, "0") != 0;
+        if (g_js_call_stats_enabled && !g_js_call_stats_registered) {
+            atexit(js_call_stats_report);
+            g_js_call_stats_registered = true;
+        }
+    }
+}
+
+static bool js_call_force_generic_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* env = getenv("JS_CALL_FORCE_GENERIC");
+        enabled = env && env[0] && strcmp(env, "0") != 0;
+    }
+    return enabled != 0;
+}
+
+static bool js_call_lane_check_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* env = getenv("JS_CALL_LANE_CHECK");
+        enabled = env && env[0] && strcmp(env, "0") != 0;
+    }
+    return enabled != 0;
+}
+
+static bool js_call_use_common_lane(JsFunction* fn) {
+    if (!fn || js_call_force_generic_enabled() ||
+        fn->call_lane_kind != JS_CALL_LANE_METHOD_HOME) {
+        return false;
+    }
+    // Release measurements showed the generic ordinary flow is already
+    // cheaper than this shortcut; only the home-class install still wins.
+    // Recheck caller-dynamic facts at the edge: classifier metadata never
+    // authorizes skipping caller with-scope isolation or array-mode reset.
+    return js_with_depth_active() == 0 && fn->with_env_depth == 0 &&
+        !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !fn->eval_initializer_context &&
+        !js_function_has_vm_stack_source(fn);
+}
+
+static void js_call_stats_note(Item func_item, int arg_count, bool generated_args) {
+    uint32_t mask = generated_args ? JS_CALL_STAT_GENERATED_ARGS : 0;
+    JsFunction* fn = NULL;
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        mask |= JS_CALL_STAT_NON_CALLABLE;
+    } else {
+        fn = (JsFunction*)func_item.function;
+    }
+    bool caller_with = js_with_depth_active() > 0;
+    if (caller_with) mask |= JS_CALL_STAT_CALLER_WITH;
+    if (js_dispatch_as_array_method) mask |= JS_CALL_STAT_ARRAY_DISPATCH;
+    if (fn) {
+        if (fn->name && ((fn->name->len == 4 &&
+                memcmp(fn->name->chars, "Date", 4) == 0) ||
+                (fn->name->len == 8 && memcmp(fn->name->chars, "Function", 8) == 0))) {
+            mask |= JS_CALL_STAT_SPECIAL_CONSTRUCTOR;
+        }
+        if (fn->builtin_id > 0) mask |= JS_CALL_STAT_BUILTIN;
+        if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) mask |= JS_CALL_STAT_BOUND;
+        if (fn->flags & JS_FUNC_FLAG_GENERATOR) mask |= JS_CALL_STAT_GENERATOR;
+        if (fn->flags & (JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_ASYNC_GEN)) mask |= JS_CALL_STAT_ASYNC;
+        if (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) mask |= JS_CALL_STAT_DERIVED_CTOR;
+        if (fn->with_env_depth > 0 || (fn->flags & JS_FUNC_FLAG_USES_WITH)) mask |= JS_CALL_STAT_CALLEE_WITH;
+        if (fn->home_class.item != 0) mask |= JS_CALL_STAT_HOME_CLASS;
+        if (js_function_has_vm_stack_source(fn)) mask |= JS_CALL_STAT_VM_SOURCE;
+        if (fn->eval_initializer_context) mask |= JS_CALL_STAT_EVAL_INITIALIZER;
+        if (fn->env && fn->env_size > 0) mask |= JS_CALL_STAT_CLOSURE_ENV;
+        if (fn->module_vars && fn->module_vars != js_active_module_vars) mask |= JS_CALL_STAT_MODULE_SWITCH;
+        Item current_global = js_get_global_this();
+        if (fn->home_global.item != 0 && fn->home_global.item != current_global.item) {
+            mask |= JS_CALL_STAT_FOREIGN_REALM;
+        }
+        if (fn->builtin_id == 0) {
+            g_js_call_stats.nonbuiltin_dynamic++;
+            bool plain_flow = !(mask & (JS_CALL_STAT_BOUND | JS_CALL_STAT_GENERATOR |
+                JS_CALL_STAT_DERIVED_CTOR | JS_CALL_STAT_CALLEE_WITH |
+                JS_CALL_STAT_CALLER_WITH | JS_CALL_STAT_VM_SOURCE |
+                JS_CALL_STAT_EVAL_INITIALIZER));
+            if (plain_flow) {
+                if (mask & JS_CALL_STAT_HOME_CLASS) g_js_call_stats.method_home_fit++;
+                else g_js_call_stats.ordinary_fit++;
+            }
+            if (!caller_with && !(mask & JS_CALL_STAT_CALLEE_WITH)) g_js_call_stats.with_fit++;
+        }
+    }
+    g_js_call_stats.total++;
+    g_js_call_stats.combinations[mask]++;
+    int bucket = arg_count < 0 ? 0 : arg_count;
+    if (bucket >= JS_CALL_STATS_ARG_BUCKETS - 1) bucket = JS_CALL_STATS_ARG_BUCKETS - 1;
+    g_js_call_stats.argc[bucket]++;
+}
+
 extern "C" void js_set_call_stack_limit(int64_t limit) {
     if (limit <= 0) {
         js_call_stack_limit = 4096;
@@ -13320,9 +13518,28 @@ static Item js_finish_borrowed_scalar_result(Item result, bool uses_local_home) 
     return ItemError;
 }
 
-static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home) {
+extern "C" bool lambda_side_root_contains_span(Context* runtime, const void* span,
+        size_t item_count) {
+    if (!runtime || item_count == 0) return item_count == 0;
+    if (!span || !runtime->side_root_base || !runtime->side_root_top) return false;
+    uintptr_t begin = (uintptr_t)span;
+    uintptr_t base = (uintptr_t)runtime->side_root_base;
+    uintptr_t top = (uintptr_t)runtime->side_root_top;
+    if (begin % alignof(uint64_t) != 0 || top < base || begin < base) return false;
+    if (item_count > SIZE_MAX / sizeof(Item)) return false;
+    size_t bytes = item_count * sizeof(Item);
+    if (begin > UINTPTR_MAX - bytes) return false;
+    uintptr_t end = begin + bytes;
+    return end <= top;
+}
+
+static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
+    if (g_js_call_stats_enabled < 0) js_call_stats_configure();
+    if (g_js_call_stats_enabled > 0) {
+        js_call_stats_note(func_item, arg_count, args_prerooted);
+    }
     static int js_call_depth = 0;
     static thread_local const char* js_call_name_stack[64];
     static thread_local int js_call_name_length_stack[64];
@@ -13340,7 +13557,14 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         js_throw_range_error("Maximum call stack size exceeded");
         return ItemNull;
     }
-    int rooted_argc = args && arg_count > 0 ? arg_count : 0;
+    int rooted_argc = !args_prerooted && args && arg_count > 0 ? arg_count : 0;
+    if (args_prerooted && arg_count > 0 &&
+        !lambda_side_root_contains_span((Context*)context, args, (size_t)arg_count)) {
+        // Only the MIR frame-scope import may select this path; containment is
+        // a diagnostic backstop that catches a broken scope lifetime early.
+        log_error("js-call-prerooted: argument span is outside the live side-root range");
+        return ItemError;
+    }
     RootFrame call_roots((Context*)context, (size_t)(2 + rooted_argc));
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
@@ -13429,12 +13653,13 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         invoke_result_home = &local_result_home;
         uses_local_result_home = true;
     }
+    bool runtime_trace_enabled = js_runtime_trace_enabled();
     struct JsCallNameGuard {
         int* depth;
         bool pushed;
         JsCallNameGuard(int* depth_ptr, const char** names, int* lengths,
-                        const char* name, int name_length)
-            : depth(depth_ptr), pushed(*depth_ptr < 64) {
+                        const char* name, int name_length, bool enabled)
+            : depth(depth_ptr), pushed(enabled && *depth_ptr < 64) {
             if (pushed) {
                 names[*depth] = name;
                 lengths[*depth] = name_length;
@@ -13445,10 +13670,13 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     } call_name_guard(&js_call_name_depth, js_call_name_stack,
                       js_call_name_length_stack,
                       fn && fn->name ? fn->name->chars : "(anon)",
-                      fn && fn->name ? (int)fn->name->len : 6);
-    if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
-    else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
-    _trace_total_calls++;
+                      fn && fn->name ? (int)fn->name->len : 6,
+                      runtime_trace_enabled);
+    if (runtime_trace_enabled) {
+        if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
+        else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
+        _trace_total_calls++;
+    }
 
     if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
         extern Item js_date_now_string(void);
@@ -13640,27 +13868,18 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
 
     // v11: handle bound functions — use bound this and prepend bound args
     if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
-        // ES spec: when called via 'new', bound_this is ignored — use the new object (this_val)
-        Item effective_this;
-        if (js_has_pending_new_target) {
-            effective_this = this_val; // 'new' call: use newly created object
-        } else {
-            effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
-                ? js_function_get_bound_this(fn) : this_val;
-        }
-        // OrdinaryCallBindThis: coerce undefined/null this → globalThis for non-strict target
-        if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
-            if (effective_this.item == ITEM_JS_UNDEFINED || effective_this.item == ITEM_NULL || effective_this.item == 0) {
-                extern Item js_get_global_this();
-                effective_this = js_get_global_this();
-            } else {
-                TypeId this_type = get_type_id(effective_this);
-                if (this_type != LMD_TYPE_MAP && this_type != LMD_TYPE_ARRAY &&
-                    this_type != LMD_TYPE_ELEMENT && this_type != LMD_TYPE_FUNC &&
-                    this_type != LMD_TYPE_OBJECT && this_type != LMD_TYPE_VMAP) {
-                    effective_this = js_to_object(effective_this);
-                }
+        bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
+        bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
+            (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR);
+        bool install_new_target = !analysis_known ||
+            (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET);
+        // ES spec: when called via 'new', bound_this is ignored — use the new object.
+        Item effective_this = this_val;
+        if (install_this) {
+            if (!js_has_pending_new_target && (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
+                effective_this = js_function_get_bound_this(fn);
             }
+            effective_this = js_compute_callback_this(fn, effective_this);
         }
         int total_argc = fn->bound_argc + arg_count;
         Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
@@ -13674,11 +13893,11 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         Item prev_nt = js_new_target;
         bool prev_eval_initializer_context = js_eval_initializer_context;
         js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
-        js_current_this = effective_this;
+        if (install_this) js_current_this = effective_this;
         // v29: store callee for arguments.callee (used by js_build_arguments_object)
         js_pending_args_callee = func_item;
         // Check for pending new.target (set by 'new' expression before this call)
-        if (js_has_pending_new_target) {
+        if (install_new_target && js_has_pending_new_target) {
             Item current = func_item;
             js_new_target = js_pending_new_target;
             int depth = 0;
@@ -13690,15 +13909,21 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
                 depth++;
             }
             js_has_pending_new_target = false;
-        } else {
+        } else if (install_new_target) {
             js_new_target = make_js_undefined(); // regular call: new.target is undefined
+        } else if (js_has_pending_new_target) {
+            // A receiver-oblivious callee still consumes the one-shot
+            // construct handshake so it cannot leak into a following call.
+            js_has_pending_new_target = false;
         }
         Item* prev_modvars = js_active_module_vars;
         if (fn->module_vars && fn->module_vars != js_active_module_vars)
             js_active_module_vars = fn->module_vars;
         Item prev_global = ItemNull;
+        Item caller_global = js_get_global_this();
         bool switched_global = fn->home_global.item != 0 &&
-            get_type_id(fn->home_global) == LMD_TYPE_MAP;
+            get_type_id(fn->home_global) == LMD_TYPE_MAP &&
+            fn->home_global.item != caller_global.item;
         if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
         // Enter the callee's lexical with-environment, then restore caller state.
         Item saved_with_stack[16];
@@ -13724,7 +13949,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         }
         Item prev_private_home_class = js_current_private_home_class;
         int prev_private_home_class_index = js_current_private_home_class_index;
-        Item method_home_class = js_function_home_class(func_item);
+        Item method_home_class = fn->home_class;
         if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
             get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
             js_current_private_home_class = method_home_class;
@@ -13742,82 +13967,90 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         }
         if (switched_global) js_vm_swap_global_this(prev_global);
         js_active_module_vars = prev_modvars;
-        js_current_this = prev_this;
-        js_new_target = prev_nt;
+        if (install_this) js_current_this = prev_this;
+        if (install_new_target) js_new_target = prev_nt;
         js_eval_initializer_context = prev_eval_initializer_context;
         return js_finish_borrowed_scalar_result(result, uses_local_result_home);
     }
+
+    // The common lane only removes setup proven irrelevant to this specific
+    // flow; this shared body remains the semantic authority for every
+    // ordinary call and force-generic keeps it directly differential-testable.
+    bool common_lane = js_call_use_common_lane(fn);
+    Item lane_entry_global = common_lane ? js_get_global_this() : ItemNull;
+    bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
+    bool derived_ctor_requested = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
+    bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
+        derived_ctor_requested;
+    bool install_new_target = !analysis_known ||
+        (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET);
 
     // Bind 'this' for the duration of this call
     Item prev_this = js_current_this;
     Item prev_nt = js_new_target;
     bool prev_eval_initializer_context = js_eval_initializer_context;
     js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
-    // OrdinaryCallBindThis: coerce undefined/null this → globalThis for non-strict functions
-    if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
-        if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL || this_val.item == 0) {
-            extern Item js_get_global_this();
-            this_val = js_get_global_this();
-        } else {
-            TypeId this_type = get_type_id(this_val);
-            if (this_type != LMD_TYPE_MAP && this_type != LMD_TYPE_ARRAY &&
-                this_type != LMD_TYPE_ELEMENT && this_type != LMD_TYPE_FUNC &&
-                this_type != LMD_TYPE_OBJECT && this_type != LMD_TYPE_VMAP) {
-                this_val = js_to_object(this_val);
-            }
-        }
+    if (install_this) {
+        this_val = js_compute_callback_this(fn, this_val);
+        js_current_this = this_val;
     }
-    js_current_this = this_val;
     // v29: store callee for arguments.callee (used by js_build_arguments_object)
     js_pending_args_callee = func_item;
     // Check for pending new.target (set by 'new' expression before this call)
-    if (js_has_pending_new_target) {
+    if (install_new_target && js_has_pending_new_target) {
         js_new_target = js_pending_new_target;
         js_has_pending_new_target = false;
-    } else {
+    } else if (install_new_target) {
         js_new_target = make_js_undefined(); // regular call: new.target is undefined
+    } else if (js_has_pending_new_target) {
+        // Clearing this here protects the next dynamic call when analysis
+        // proves this callee cannot observe new.target.
+        js_has_pending_new_target = false;
     }
     // Switch to callee's module vars if it belongs to a different module
     Item* prev_modvars = js_active_module_vars;
     if (fn->module_vars && fn->module_vars != js_active_module_vars)
         js_active_module_vars = fn->module_vars;
     Item prev_global = ItemNull;
+    Item caller_global = js_get_global_this();
     bool switched_global = fn->home_global.item != 0 &&
-        get_type_id(fn->home_global) == LMD_TYPE_MAP;
+        get_type_id(fn->home_global) == LMD_TYPE_MAP &&
+        fn->home_global.item != caller_global.item;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
     // Enter the callee's lexical with-environment, then restore caller state.
     Item saved_with_stack[16];
-    int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    int saved_with_depth = 0;
+    if (!common_lane) saved_with_depth = js_with_save_stack(saved_with_stack, 16);
     JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
     // Ordinary calls usually have no caller or callee with-scope. A compiled
     // with body is the exception: an early return bypasses its generated pop,
     // so its empty entry stack still needs restoration after the call.
-    bool switched_with_stack = saved_with_depth > 0 || fn->with_env_depth > 0 ||
-        (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0;
+    bool switched_with_stack = !common_lane && (saved_with_depth > 0 || fn->with_env_depth > 0 ||
+        (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0);
     if (switched_with_stack) {
         js_with_set_stack(fn->with_env, fn->with_env_depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
     Item saved_gen_callee_proto = js_generator_callee_proto;
-    if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
+    if (!common_lane && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         js_generator_callee_proto = js_property_get(func_item, proto_key);
     }
-    bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
+    bool derived_ctor_call = !common_lane && derived_ctor_requested;
     if (derived_ctor_call) {
         js_super_this_binding_push(this_val);
         js_current_this = (Item){.item = ITEM_JS_TDZ};
     }
     Item prev_private_home_class = js_current_private_home_class;
     int prev_private_home_class_index = js_current_private_home_class_index;
-    Item method_home_class = js_function_home_class(func_item);
+    Item method_home_class = fn->home_class;
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
-    bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
+    bool pushed_vm_stack_source = !common_lane && js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
@@ -13829,10 +14062,22 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
     js_active_module_vars = prev_modvars;
-    js_current_this = prev_this;
-    js_new_target = prev_nt;
+    if (install_this) js_current_this = prev_this;
+    if (install_new_target) js_new_target = prev_nt;
     js_eval_initializer_context = prev_eval_initializer_context;
+    if (common_lane && js_call_lane_check_enabled() &&
+        (js_current_this.item != prev_this.item || js_new_target.item != prev_nt.item ||
+         js_active_module_vars != prev_modvars || js_get_global_this().item != lane_entry_global.item)) {
+        log_error("js-call-lane: ordinary lane leaked dispatcher state");
+        abort();
+    }
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
+}
+
+static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+        result_home, false);
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
@@ -13848,6 +14093,16 @@ extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
         return ItemError;
     }
     return js_call_function_impl(func_item, this_val, args, arg_count, result_home);
+}
+
+extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
+        Item* args, int arg_count, uint64_t* result_home) {
+    if (!result_home) {
+        log_error("js-call-prerooted: missing caller result home");
+        return ItemError;
+    }
+    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+        result_home, true);
 }
 
 // Function.prototype.apply(thisArg, argsArray)

@@ -5821,6 +5821,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
         fc->has_native_version = eligible;
+        fc->native_return_kind = !eligible ? NATIVE_RETURN_NONE :
+            fc->return_type == LMD_TYPE_FLOAT ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
         if (eligible) {
             log_debug("js-mir P1/P4: %s eligible for native version (params: %d, ret: %s)",
                 fc->name, fc->param_count,
@@ -5915,10 +5917,13 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 if (eligible && !fc->has_native_version) {
                     fc->has_native_version = true;
+                    fc->native_return_kind = fc->return_type == LMD_TYPE_FLOAT
+                        ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
                     log_info("P6 enabled native version for %s (return_type=%d)", fc->name, fc->return_type);
                 } else if (!eligible) {
                     fc->has_native_version = false;
                     fc->native_func_item = 0;
+                    fc->native_return_kind = NATIVE_RETURN_NONE;
                 }
                 // P6 can make recursive accumulator functions native-eligible;
                 // recompute TCO after narrowing so deep tail calls stay loops.
@@ -6050,7 +6055,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             native->entry = {FN_ENTRY_NATIVE_BODY, true, false, false, false};
             native->effects = body->effects;
             native->result.normal = {fc->return_type,
-                fc->return_type == LMD_TYPE_FLOAT
+                fc->native_return_kind == NATIVE_RETURN_FLOAT
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE, false};
             native->param_count = fc->param_count;

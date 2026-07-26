@@ -309,13 +309,13 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, with conservative exception-extraction safepoints.",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function.",
       "budgets": {
         "darwin-debug": {
-        "module_insns": 7422,
+        "module_insns": 7551,
           "functions": {
             "js_main": {
-            "insns": 3552
+            "insns": 3681
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 17
@@ -328,15 +328,15 @@
             "root_stores": 846,
               "scalar_homes": 6,
               "number_scratch": 0,
-            "safepoints": 1619
+            "safepoints": 1748
             }
           ]
         },
         "default": {
-        "module_insns": 7400,
+        "module_insns": 7529,
           "functions": {
             "js_main": {
-            "insns": 3530
+            "insns": 3659
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 17
@@ -349,7 +349,7 @@
               "root_stores": 841,
               "scalar_homes": 6,
               "number_scratch": 0,
-            "safepoints": 1602
+            "safepoints": 1731
             }
           ]
         }

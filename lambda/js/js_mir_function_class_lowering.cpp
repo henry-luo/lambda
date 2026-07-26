@@ -55,6 +55,11 @@ void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsC
 void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item,
         MIR_reg_t cls_obj) {
     if (!mt || !fn_item || !cls_obj) return;
+    jm_call_void_2(mt, "js_set_function_home_class",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+    // Preserve the legacy user-visible backing property while the dispatcher
+    // reads the dedicated field installed above.
     MIR_reg_t home_key = jm_box_string_literal(mt, "__home_class__", 14);
     jm_call_3(mt, "js_property_set", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
@@ -679,7 +684,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         !(fn->is_arrow && fn->body &&
           fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
         param_count > 0 && param_count <= 16 &&
-        (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
+        (fc->native_return_kind == NATIVE_RETURN_INT ||
+         fc->native_return_kind == NATIVE_RETURN_FLOAT)) {
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
             if (fc->param_types[i] != LMD_TYPE_INT && fc->param_types[i] != LMD_TYPE_FLOAT) {
@@ -706,7 +712,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             param_node = param_node ? param_node->next : NULL;
         }
 
-        MIR_type_t native_ret_type = (fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+        MIR_type_t native_ret_type = fc->native_return_kind == NATIVE_RETURN_FLOAT
+            ? MIR_T_D : MIR_T_I64;
         MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name, 1, &native_ret_type, param_count, n_params);
         MIR_func_t native_func = MIR_get_item_func(mt->ctx, native_item);
 

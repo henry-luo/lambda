@@ -3169,6 +3169,9 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         MIR_new_reg_op(mt->ctx, jm_arg_frame_base(mt)),
         MIR_new_int_op(mt->ctx,
             (int64_t)scope->base_slot * (int64_t)sizeof(uint64_t))));
+    // The prerooted ABI is valid only for this exact frame-relative register;
+    // another same-arity buffer may have unrelated lifetime ownership.
+    scope->args_reg = args_ptr;
 
     // Evaluate and store each argument
     JsAstNode* arg = first_arg;

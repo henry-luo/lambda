@@ -14192,6 +14192,11 @@ static Item js_delete_function_property(Item obj, Item key) {
         if (sk && sk->len > 0) {
             js_shape_mark_deleted_own(fn->properties_map, sk->chars, (int)sk->len,
                                        /*create_if_missing=*/true);
+            if (sk->len == 14 && memcmp(sk->chars, "__home_class__", 14) == 0) {
+                // The dispatch cache mirrors the legacy property, so deletion
+                // must remove the private-home binding seen by later calls.
+                js_set_function_home_class(obj, ItemNull);
+            }
         }
     }
     return (Item){.item = b2it(true)};

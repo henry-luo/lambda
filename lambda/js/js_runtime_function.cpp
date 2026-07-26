@@ -29,6 +29,34 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
     heap_register_gc_root(&slot->item);
 }
 
+void js_function_call_lane_recompute(JsFunction* fn) {
+    if (!fn) return;
+    fn->call_lane_kind = JS_CALL_LANE_GENERIC;
+    // A stale fast classification is wrongness, not merely slowness. New or
+    // dynamically-created wrappers stay generic until finalization supplies
+    // every fact the ordinary lane relies on.
+    if (!(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->builtin_id != 0 ||
+        (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
+            JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
+        fn->with_env_depth > 0 || (fn->flags & JS_FUNC_FLAG_USES_WITH) ||
+        fn->eval_initializer_context || fn->vm_stack_filename ||
+        fn->vm_stack_source) {
+        return;
+    }
+    fn->call_lane_kind = fn->home_class.item != 0
+        ? JS_CALL_LANE_METHOD_HOME : JS_CALL_LANE_ORDINARY;
+}
+
+extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (!fn) return;
+    fn->home_class = home_class;
+    js_function_root_item_if_needed(fn, &fn->home_class);
+    js_function_call_lane_recompute(fn);
+}
+
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
@@ -57,6 +85,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     gc_mark_object_ptr(gc, fn->name);
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
+    gc_mark_item(gc, fn->home_class.item);
     gc_mark_object_ptr(gc, fn->source_text);
     if (fn->with_env) {
         gc_mark_object_ptr(gc, fn->with_env);
@@ -312,6 +341,7 @@ extern "C" void js_mark_generator_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_GENERATOR;
+    js_function_call_lane_recompute(fn);
 }
 
 // Mark a function as an async generator function (sets both GENERATOR and ASYNC_GEN flags)
@@ -319,6 +349,7 @@ extern "C" void js_mark_async_generator_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
+    js_function_call_lane_recompute(fn);
 }
 
 // Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
@@ -326,12 +357,14 @@ extern "C" void js_mark_async_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_ASYNC;
+    js_function_call_lane_recompute(fn);
 }
 
 extern "C" void js_mark_derived_constructor_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_DERIVED_CTOR;
+    js_function_call_lane_recompute(fn);
 }
 
 // Mark a function as an arrow function (non-constructable)
@@ -339,12 +372,14 @@ extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_ARROW;
+    js_function_call_lane_recompute(fn);
 }
 
 extern "C" void js_mark_method_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_METHOD;
+    js_function_call_lane_recompute(fn);
 }
 
 extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
@@ -352,6 +387,7 @@ extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->eval_initializer_context = true;
+    js_function_call_lane_recompute(fn);
 }
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
@@ -359,6 +395,7 @@ extern "C" void js_mark_strict_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_STRICT;
+    js_function_call_lane_recompute(fn);
 }
 
 extern "C" void js_finalize_function(Item fn_item, Item name_item,
@@ -379,9 +416,13 @@ extern "C" void js_finalize_function(Item fn_item, Item name_item,
     if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
     if (init_flags & JS_FUNC_INIT_MIR_PUBLIC_ABI) fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI;
     if (init_flags & JS_FUNC_INIT_USES_WITH) fn->flags |= JS_FUNC_FLAG_USES_WITH;
+    if (init_flags & JS_FUNC_INIT_ANALYSIS_KNOWN) fn->flags |= JS_FUNC_FLAG_ANALYSIS_KNOWN;
+    if (init_flags & JS_FUNC_INIT_READS_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;
+    if (init_flags & JS_FUNC_INIT_READS_NEW_TARGET) fn->flags |= JS_FUNC_FLAG_READS_NEW_TARGET;
     if (js_private_field_initializing || js_eval_initializer_context) {
         fn->eval_initializer_context = true;
     }
+    js_function_call_lane_recompute(fn);
 }
 
 extern "C" void js_set_class_name(Item cls_item, Item name_item);

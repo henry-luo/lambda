@@ -7651,6 +7651,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t fn_item = jm_create_func_or_closure(mt, found->fc);
                     MIR_reg_t home_cls = jm_emit_class_object_for_entry(mt, found_owner ? found_owner : ce);
                     if (home_cls) {
+                        jm_call_void_2(mt, "js_set_function_home_class",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, home_cls));
                         MIR_reg_t home_key = jm_box_string_literal(mt, "__home_class__", 14);
                         jm_call_3(mt, "js_property_set", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
@@ -13306,6 +13309,7 @@ static void jm_begin_arg_stack_scope(JsMirTranspiler* mt, JsMirArgStackScope* sc
     scope->saved_depth = mt->arg_frame_depth;
     scope->base_slot = -1;
     scope->slot_count = 0;
+    scope->args_reg = 0;
     mt->arg_stack_scope = scope;
 }
 

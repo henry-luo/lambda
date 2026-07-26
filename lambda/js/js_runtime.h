@@ -243,9 +243,16 @@ enum {
     // Call dispatch must restore the caller's stack even when both endpoints
     // were empty on entry.
     JS_FUNC_INIT_USES_WITH = 1u << 6,
+    // These facts are valid only when compiler analysis completed. Runtime and
+    // dynamically-created wrappers deliberately omit ANALYSIS_KNOWN so the
+    // dispatcher retains the conservative binding path.
+    JS_FUNC_INIT_ANALYSIS_KNOWN = 1u << 7,
+    JS_FUNC_INIT_READS_THIS = 1u << 8,
+    JS_FUNC_INIT_READS_NEW_TARGET = 1u << 9,
 };
 void js_finalize_function(Item fn_item, Item name_item, Item source_item,
                           int formal_length, int init_flags);
+void js_set_function_home_class(Item fn_item, Item home_class);
 void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names,
                                          const int* prop_lens, int count);
 void js_mark_generator_func(Item fn_item);
@@ -258,6 +265,10 @@ Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
+Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
+                                          Item* args, int arg_count,
+                                          uint64_t* result_home);
+void js_call_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_function_into(Item func_item, Item this_val, Item args_array,

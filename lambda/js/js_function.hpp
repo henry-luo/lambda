@@ -21,9 +21,11 @@ struct JsFunction {
     int builtin_id;
     Item properties_map;
     uint16_t flags;
+    uint8_t call_lane_kind;
     int16_t formal_length;
     Item* module_vars;
     Item home_global;
+    Item home_class;
     String* source_text;
     bool eval_initializer_context;
     Item* with_env;
@@ -62,4 +64,13 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 #define JS_FUNC_FLAG_DERIVED_CTOR 256
 #define JS_FUNC_FLAG_MIR_PUBLIC_ABI 512
 #define JS_FUNC_FLAG_USES_WITH 1024
+#define JS_FUNC_FLAG_READS_THIS 2048
+#define JS_FUNC_FLAG_READS_NEW_TARGET 4096
+#define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
+
+enum JsFunctionCallLaneKind : uint8_t {
+    JS_CALL_LANE_GENERIC = 0,
+    JS_CALL_LANE_ORDINARY = 1,
+    JS_CALL_LANE_METHOD_HOME = 2,
+};
