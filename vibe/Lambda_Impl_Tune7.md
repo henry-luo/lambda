@@ -1,6 +1,7 @@
 # Lambda Impl Plan: Tune 7 — Dynamic-Call Path Slimming (R4)
 
-**Status: PLANNED — revised 2026-07-26 after Tune6 closed.**
+**Status: RESULT14 COMPLETE; PERFORMANCE IMPLEMENTATION PARTIAL — audited
+2026-07-26.**
 **Successor of:** `vibe/Lambda_Impl_Tune6.md`. Tune6's Track J did **not**
 land: its census found that richards missed the existing load IC on only
 0.01% of probes, so J1/J3 were dropped. Tune7 therefore does not assume a new
@@ -528,7 +529,173 @@ deferred.
 
 ---
 
-## 8. Risks
+## 8. Post-Result14 effectiveness audit
+
+Tune7 is correctness-complete as a safe partial landing, but it is **not a
+fully optimized implementation of this plan**. Result14 was produced and the
+correctness gates are green; several performance phases were nevertheless
+disabled, deferred, or landed as audit scaffolding only. “Tune7 complete”
+therefore means that the measured safe subset landed, not that the planned
+factor-level reduction in dynamic-call cost was achieved.
+
+### 8.1 Observed result
+
+Comparing absolute LambdaJS timings for the 62 matched Result13/Result14 rows:
+
+- 50 rows improved and 12 regressed;
+- the raw matched-row geometric mean improved **5.08%**;
+- the arithmetic mean improved **4.82%**.
+
+The targeted call-dense rows moved only modestly:
+
+| Benchmark | Result14 vs Result13 LambdaJS |
+|---|---:|
+| AWFY richards | −5.55% |
+| JetStream richards | −2.85% |
+| AWFY deltablue | −2.23% |
+| JetStream deltablue | −2.31% |
+| JetStream hashmap | −1.88% |
+| JetStream crypto_sha1 | −1.13% |
+| AWFY cd | −0.43% |
+| AWFY havlak | **+2.71% regression** |
+
+The isolated release call probe also missed the phase targets:
+
+| Probe | Tune6 floor | Tune7 | Change | Planned target |
+|---|---:|---:|---:|---:|
+| plain 2-arg | 152.53 ns/call | 134.87 ns/call | 11.6% faster (1.13x) | ≥2x |
+| method | 336.69 ns/call | 316.68 ns/call | 6.0% faster (1.06x) | ≥1.5x |
+
+These are observed snapshot deltas, not clean per-phase attribution. Result14
+also changed Node from v22.13.0 to v24.7.0 and changed QuickJS, so the headline
+LambdaJS/Node ratio moving from 15.4x to 19.9x does not mean LambdaJS itself
+regressed. Conversely, Result13→Result14 was not the required already-built,
+row-interleaved phase A/B experiment, so the 5.08% absolute LambdaJS movement
+must not be assigned wholly to Tune7.
+
+### 8.2 Why the gain is limited
+
+**1. PLAIN_CALL eligibility is not active fast-path coverage.** The T0
+microbenchmark classified 30,100,000 of 36,120,001 non-builtin dynamic calls
+as ORDINARY/PLAIN_CALL (**83.33%**) and 3,010,001 as METHOD_HOME (**8.33%**).
+The final `js_call_use_common_lane()` deliberately accepts only METHOD_HOME
+because the ORDINARY common lane measured slower than the generic semantic
+dispatcher. Thus the 83.33% population receives no new lane; active coverage
+on that shape mix is at most about 8.33%, before caller-dynamic exclusions.
+The microbenchmark also invokes a harness callback around each target call,
+so its classification mix is not a real-workload target-site hit rate.
+
+**2. The attempted common lane does not bypass the dispatcher.** It computes
+`common_lane` and conditionally threads through the same large
+`js_call_function_impl_mode()` body. The generic path's mostly-false branches
+are predictable, while the lane adds classification and validation work.
+For ORDINARY, that overhead outweighed skipping the generic no-op setup.
+METHOD_HOME retains a benefit from the dedicated `home_class` slot and from
+skipping a few known-irrelevant operations, but it is a narrow population.
+
+**3. C2 removes only the argument-copy loop.** The pre-rooted-args entry still
+constructs a two-slot `RootFrame` for callee and receiver. It also executes
+`lambda_side_root_contains_span()` on every pre-rooted call, performing
+alignment, overflow, and range checks even though the emission-time scope is
+the production provenance proof. With the common 0–2 argument shapes, the
+removed copy loop is small relative to the remaining frame and dispatcher
+cost. The planned C2.3 fully pre-rooted entry was not implemented.
+
+**4. C3.0 skips stores, not the receiver protocol.** The stamped
+`READS_THIS`/`READS_NEW_TARGET` facts avoid some coercion and install/restore
+pairs, but ordinary calls still load and save receiver globals, handle the
+pending-new-target handshake, store `js_pending_args_callee`, and execute the
+surrounding branches. C3.1's hidden receiver ABI, which could remove the
+global round-trips for eligible functions, remained deferred.
+
+**5. C4 does not widen native-call coverage.** `NativeReturnKind` landed as
+the required ABI audit, but native eligibility still requires an INT/FLOAT
+return. BOXED and VOID lowering was not implemented, so numeric-parameter
+functions with boxed or discarded results still enter the dynamic
+dispatcher. C4.2 exact-arity specialization and C4.3 per-arity thunks also
+remain unimplemented.
+
+**6. The residual trampoline is still large.** An ordinary dynamic call still
+pays the depth guard, func/receiver rooting, callable and special-function
+checks, result-home handling, trace-enabled check, receiver/new-target
+protocol, module and realm comparisons, generic `with` save, private-home
+save/restore, argument adaptation, environment/ABI selection, and one of the
+large 0–15 argument switches in `js_invoke_fn_raw()`. Tune7 trims pieces
+around that trampoline; it does not eliminate it for the common call
+population.
+
+**7. Several worst rows are dominated elsewhere.** `hashmap` still suffers
+from pointer-distinct constructed-object shapes and megamorphic property
+access. `havlak` remains dominated by object churn and GC. Numeric rows retain
+boxed storage and runtime numeric operations. Reducing one part of call entry
+by roughly 10% cannot materially move workloads dominated by shapes,
+allocation, GC frequency × live set, or boxed slots.
+
+### 8.3 Implementation completeness
+
+| Phase | Landed state | Performance consequence |
+|---|---|---|
+| T0.1/T0.1b | microbenchmark and adversarial-fixture census only | no published benchmark/test262/Node lane coverage |
+| C1.1 | dedicated home-class slot and stable classifier landed | removes the per-method backing-map lookup |
+| C1.2 ORDINARY | implemented, measured slower, disabled | 83.33% classified PLAIN_CALL population remains generic |
+| C1.2 METHOD_HOME | enabled | useful but narrow active lane |
+| C1.3 | trace stack/counters gated | removes TLS writes; retains a cached runtime trace check |
+| C2.1 | pre-rooted argument entry landed | skips argument copies only |
+| C2.3 | deferred | two-slot call-local root frame remains |
+| C3.0 | receiver-analysis flags landed | skips selected global stores/coercion |
+| C3.1 | deferred | no hidden receiver ABI |
+| C4.1 | return-kind audit landed; BOXED/VOID unavailable | no newly native functions |
+| C4.2/C4.3 | not implemented | adaptation branches and arity switches remain |
+
+Two smaller hot-path details also warrant measurement before another large
+design:
+
+- `js_call_use_common_lane()` checks the cached `JS_CALL_FORCE_GENERIC` gate
+  before rejecting non-METHOD_HOME functions, so every ordinary call pays a
+  check for a lane it cannot enter;
+- the C2 containment helper is always executed for non-empty pre-rooted
+  argument spans instead of being behind a diagnostic mode.
+
+Neither detail alone explains the missing factor, but both work against an
+optimization whose measured gain is already small.
+
+### 8.4 Recommended follow-up
+
+1. **Repair attribution first.** Build the Tune6 and Tune7 release binaries
+   before measurement, interleave A/B/A/B/A/B per row, preserve the raw order,
+   and publish per-workload call-shape census for the T0.3 rows, test262, and
+   Node. Record active lane hits separately from classifier eligibility.
+2. **Measure a genuinely thin ORDINARY entry.** Select it directly from
+   verified MIR emission sites and bypass the generic preamble rather than
+   carrying a Boolean through the shared dispatcher. Keep the generic entry
+   as semantic authority and force-generic differential oracle.
+3. **Finish C2 only on evidence.** Gate the span validator as a diagnostic,
+   remeasure C2.1, then implement C2.3 only if the remaining two-slot
+   `RootFrame` is material and callee/receiver safepoint publication is
+   proven. Keep precise rooting; never restore stack scanning.
+4. **Complete C4.1 BOXED/VOID lowering.** Widen native versions for measured
+   numeric-parameter/boxed-return or discarded-result callees while retaining
+   semantic wrappers at uncertain sites. Removing the dispatcher is a larger
+   opportunity than trimming more branches inside it.
+5. **Specialize exact-arity hot edges before general thunks.** Measure the
+   adaptation block and emit a narrow exact-arity edge for proven sites.
+   Consider C4.3 only if the residual arity switch remains visible.
+6. **Re-profile before C3.1.** Adopt the hidden receiver ABI only if remaining
+   `this` traffic is material after the thinner call entry exists.
+7. **Pursue non-call bottlenecks independently.** Shared plain-object root
+   shapes target `hashmap`; R7 GC work targets `havlak`/allocation rows; OI-9
+   unboxed slot storage targets numeric/object-field workloads. Do not expect
+   further dispatcher trimming alone to close those gaps.
+
+The central Result14 conclusion is therefore: Tune7 made the existing
+dispatcher somewhat cheaper, but it did not remove that dispatcher for the
+83.33% classified PLAIN_CALL population. That is consistent with an observed
+single-digit aggregate improvement and inconsistent with calling the
+performance implementation fully optimized.
+
+---
+
+## 9. Risks
 
 - **Lane-classification drift is the correctness cliff.** Any future state
   added to the full dispatcher body can silently break a lane. Mitigation is
