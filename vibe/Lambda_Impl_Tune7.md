@@ -1,12 +1,16 @@
 # Lambda Impl Plan: Tune 7 — Dynamic-Call Path Slimming (R4)
 
-**Status: PLANNED — 2026-07-24.**
-**Successor of:** `vibe/Lambda_Impl_Tune6.md` (Track J kills the *lookup* half of
-`obj.m()`; this plan owns the *invoke* half that remains). Implements
+**Status: PLANNED — revised 2026-07-26 after Tune6 closed.**
+**Successor of:** `vibe/Lambda_Impl_Tune6.md`. Tune6's Track J did **not**
+land: its census found that richards missed the existing load IC on only
+0.01% of probes, so J1/J3 were dropped. Tune7 therefore does not assume a new
+method PIC; it measures the invocation share that remains after the current
+IC behavior. Implements
 `Lambda_Tuning_Proposal.md` **R4** ("Reduce dynamic-call overhead", slices
 R4.1–R4.4) as a phased plan.
 
-**Baseline assumptions (verified 2026-07-25 against the landed merges):**
+**Baseline assumptions (verified 2026-07-26 against the landed merges and
+Tune6 execution record):**
 
 1. **`vibe/Lambda_Impl_Merge_Stack.md` Merges A/B/C are COMPLETE and
    performance-repaired.** Merge A's final form has **no per-call argument
@@ -25,21 +29,31 @@ R4.1–R4.4) as a phased plan.
 2. **`vibe/Lambda_Impl_Online_Exception (done).md` is landed** — the per-call
    exception-poll tax (R5's emission side) is owned there and is **out of
    scope** here; only residual poll counts appear in the exit measurement.
-3. **Tune6 has landed and Result13 exists.** Post-J1, a method call resolves
-   its `JsFunction` via the PIC; what is left of `obj.m(a,b)` is exactly the
-   dispatcher/trampoline sequence this plan slims. All Tune7 gates are ratios
-   against a same-day Result13-state baseline; absolute thresholds are set
-   when Result13's numbers are in hand (§7). Note the post-merge fib/fibfp/
-   cpstak numbers already beat Result12 by 10–15%; Result13 re-baselines all
-   call rows before this plan's phases are measured.
+3. **Tune6 is closed and Result13 is the current floor.** Result13 is
+   `test/benchmark/benchmark_results_v13.json` at commit `22eefe3f1`:
+   MIR/Node dedup geo 2.94x, LambdaJS/Node 15.4x, QuickJS/Node control 7.45x.
+   Tune6's same-day rerun was stable within 0.4%, but its retrospective also
+   proved that sequential build-then-measure can manufacture a false small
+   win. Every Tune7 phase therefore builds both release binaries first and
+   interleaves A/B runs row by row; the Result14 matrix records the new floor
+   but is not the phase attribution instrument.
+4. **The call lane is census-designed, not premise-designed.** T0 records
+   orthogonal call requirements and their combinations before C1 chooses a
+   lane shape. `PLAIN_CALL` means "eligible for the common dispatcher
+   template", not "every optional field is zero". If one lane is too narrow,
+   C1 groups the smallest number of semantically coherent common flows
+   (ordinary, method-home, caller/callee-with, realm-switch) needed for useful
+   coverage; it does not weaken guards merely to hit a target.
 
 **Diagnosis provenance:** source verification of `js_call_function_impl` /
 `js_invoke_fn` / call-site emission, 2026-07-24. `file:line` refs verified same
 day; they drift — confirm against symbol names before editing.
 
-**Governing invariant.** Every phase is a pure performance change: no
-observable semantic change to JS programs (timing, memory, GC counts
-excepted). Two hard rules inherited from R4 and CLAUDE rule 15:
+**Governing invariant.** Every Tune7 optimization phase is a pure performance
+change: no observable semantic change to JS programs (timing, memory, GC
+counts excepted). C3.0a is explicitly separated because it repairs an
+analysis-order correctness gap before the optimization consumes that fact.
+Two hard rules inherited from R4 and CLAUDE rule 15:
 
 - **The generic `js_call_function` path remains the semantic authority.**
   Every slice is a *guarded shortcut in front of it*; unsupported shapes fall
@@ -60,20 +74,20 @@ count), MT7 emission budgets lifted only deliberately with dump diffs quoted.
 
 ## 0. What one dynamic call pays today, and who owns it
 
-Verified sequence for `f(a, b)` / post-J1 `obj.m(a, b)` reaching the dynamic
+Verified sequence for `f(a, b)` / `obj.m(a, b)` reaching the dynamic
 path (`js_call_function_impl`, `js_runtime.cpp:13294`):
 
 | # | Cost item | Mechanism (verified) | Owner |
 |---|---|---|---|
 | 1 | Exception poll after the call | inlined / elided by online-exception tracker | **Done (R5)** |
-| 2 | Method/property lookup | PIC (Tune6 J1) or IC hit | **Tune6** |
+| 2 | Method/property lookup | existing load IC hit/miss behavior; Tune6 J1 was dropped after the miss census | **out of scope; T0 records attribution** |
 | 3 | Args save/restore marks | eliminated — fixed frame-suffix slots, zero per-call ABI (Merge A repair, 2026-07-25) | **Done (Merge A)** |
 | 4 | Depth guard + debug name stack | thread-local 64-deep name push/pop **maintained in release** (`:13298–13307`) | **C1.3** |
 | 5 | `RootFrame(2 + argc)` + per-arg copy loop | every arg re-copied into fresh root slots (`:13314–13323`) even though a JIT-edge `args` pointer is now always a caller-frame suffix address in the side-root region | **C2** |
 | 6 | Non-callable / proxy / `.call`-polyfill checks | 3 branches + map probes on the miss paths (`:13328–13353`) | stays (cold) |
 | 7 | Scalar-home borrow logic | `LAMBDA_SCALAR_HOME` + ABI flag test (`:13393–13402`) | stays (cheap) |
 | 8 | Bound-function branch, `OrdinaryCallBindThis` coercion (duplicated in bound + plain blocks, `:13623`/`:13723`) | branchy, mostly-false tests | **C1** (folded into shape test) |
-| 9 | ~10 save/install/restore pairs: `this`, `new.target` + pending handshake, module vars, realm swap check, eval-initializer flag, generator proto (`js_property_get`!), derived-ctor TDZ, private-home class, vm-stack source | the bulk of the function | **C1** |
+| 9 | ~10 save/install/restore pairs: `this`, `new.target` + pending handshake, module vars, realm swap check, array-dispatch mode, eval-initializer flag, generator proto (`js_property_get`!), derived-ctor TDZ, private-home class, vm-stack source | the bulk of the function | **C1** |
 | 10 | `js_function_home_class` per call | **hash lookup** on `fn->properties_map` (`js_runtime.cpp:513`); early-out only when the map is empty | **C1.1** |
 | 11 | `with`-stack save + set per call | **install/restore now gated** by `saved_with_depth > 0 \|\| with_env_depth > 0 \|\| JS_FUNC_FLAG_USES_WITH` (Merge A repair); residual per call = the unconditional `js_with_save_stack` C call + no-op `JsSavedWithScopeRoots` RAII | **mostly done; C1 folds the residual save into the lane's depth test** |
 | 12 | `this`/`new.target` global round-trips | 4+ global loads/stores even for callees that never observe them | **C3** |
@@ -95,25 +109,28 @@ the table is the single place to check bit assignments against
 |---|---|---|---|
 | builtin callee? | `builtin_id > 0` | creation | exists |
 | bound function? | `JS_FUNC_FLAG_HAS_BOUND_THIS` / `bound_args` | `bind()` | exists |
-| `this` coercion + binding needed? | `STRICT`/`ARROW` (exist) narrow the coercion; **`READS_THIS` (8192)** skips install/restore entirely | transpiler body walk + `_js_this` capture info; direct-`eval` bodies keep it set | **C3.0** |
-| private home class installed? (row 10) | **`HAS_HOME_CLASS` (2048)** | single `__home_class__` writer funnel (`js_runtime.cpp:611`) | **C1.1** |
+| `this` coercion + binding needed? | `STRICT`/`ARROW` (exist) narrow coercion; existing `fc->observes_this` is stamped as **`READS_THIS`** | existing body/lexical-arrow analysis, repaired to include default params; direct eval defaults set | **C3.0** |
+| `new.target` install needed? | existing `fc->observes_new_target` is stamped separately as **`READS_NEW_TARGET`**; the pending handshake is still consumed on every ordinary call | same analysis | **C3.0** |
+| private home class installed? (row 10) | dedicated `JsFunction::home_class` slot; zero means absent and removes the backing-map hash probe | internal method-home stamping; one helper traces GC-owned functions or roots pool-owned slots | **C1.1** |
 | `with` machinery needed? (row 11) | **`USES_WITH` (1024)** + caller `js_with_stack_depth` read inline | transpiler | **landed** (Merge A repair); residual save call folded into the C1.2 lane |
-| realm swap? | `home_global` field test | creation | exists (cheap) |
+| realm swap? | `home_global` compared with the current global at the call edge | creation + dynamic pair check | exists; common lane keeps it |
+| array-dispatch mode reset? | caller-dynamic state; no function bit can precompute it | common lane saves/clears/restores exactly like the generic path | mandatory in **C1.2** |
 | generator callee proto? | `GENERATOR` flag | creation | exists, gated |
 | derived-ctor `this` TDZ? | `DERIVED_CTOR` flag | creation | exists, gated |
 | vm-source frame push? | `vm_stack_filename/source` field test | creation | exists, gated |
-| `arguments`-callee stash needed? | `USES_ARGUMENTS` (new bit; `fc->uses_arguments` exists at compile time but is not stamped on `JsFunction`) | transpiler | optional, minor (saves one store) |
-| argument adaptation kind? (row 13) | `param_count` sign encodes rest today; adapt-kind byte EXACT/PAD/REST + optional per-arity thunk | creation | **C4.2 / C4.3**, measure-first |
-| args already GC-rooted? (row 5) | **provenance, not function metadata**: a JIT-edge `args` pointer is a caller-frame suffix address → in-region range check, or a `prerooted` entry point selected at emission | call-site emission | **C2** |
-| all of the above at once | **`PLAIN_CALL` (4096)** — precomputed conjunction; one mask test selects the fast lane, skipping steps 2–4 and their step-8 mirrors wholesale | recomputed at every creation/mutation choke point via `js_function_call_shape_recompute` | **C1** (centerpiece) |
+| `arguments`-callee stash needed? | `fc->uses_arguments` exists at compile time but is not stamped on `JsFunction` | transpiler | keep the one store unconditional in Tune7 unless T0 proves it material |
+| argument adaptation kind? (row 13) | `param_count` and its sign already encode declared arity/rest; exact vs pad/clamp remains call-dynamic | exists | **C4.2 / C4.3**, measure-first |
+| args already GC-rooted? (row 5) | **provenance, not function metadata**: an explicit prerooted-args entry is selected only at verified JIT emission sites | call-site emission | **C2** |
+| common call-flow requirements | census-derived `uint8_t call_lane_kind` (ORDINARY / METHOD_HOME / optional measured variants / GENERIC); `PLAIN_CALL` is the ORDINARY eligibility concept, not a conjunction requiring null `home_global` | finalized after function metadata is stamped; mutation funnels update it | **C1** (centerpiece) |
 
-Two facts stay dynamic by nature and are *not* in this ledger: the callee
-type check itself, and the module-vars switch (a caller/callee *pair*
-property — kept as a two-field compare in the lane). Discipline for every
-row: a stale bit is wrongness, not slowness — writers funnel through the one
-recompute predicate (C1.4 harness enforces), and any fact that is dynamic at
-heart (direct `eval`, future debug hooks) defaults its flag to the
-conservative value so the cost of doubt is only the slow path.
+Three facts stay dynamic by nature and are *not* folded into
+`call_lane_kind`: the callee type check, the module-vars switch, and whether
+`home_global` equals the caller's current global. The common lane retains
+those pair checks. Discipline for every cached row: a stale classification is
+wrongness, not slowness — writers funnel through one recompute helper, and
+any uncertain or dynamically compiled function defaults to GENERIC. The C1.4
+checks detect state leaks; separate forced-generic differential runs validate
+observable behavior.
 
 ---
 
@@ -138,9 +155,13 @@ conservative value so the cost of doubt is only the slow path.
   active scopes (`jm_clear_active_arg_frames`). The
   `test/mir/js/arg_frame_roots.mir-check` fixture forbids any per-call
   save/push/restore symbol from reappearing.
-- **Home-class single writer:** the only writer funnels through
-  `js_property_set(fn_item, home_key=__home_class__, home)`
-  (`js_runtime.cpp:611`) — one choke point for a `HAS_HOME_CLASS` flag.
+- **Home-class storage is not safely flaggable from a constant grep.** The
+  internal writer currently funnels through
+  `js_property_set(fn_item, "__home_class__", home)`, but arbitrary function
+  properties and `Object.defineProperty` also write `properties_map` through
+  dynamic keys. C1.1 moves the internal home object to a dedicated,
+  ownership-correct `JsFunction` slot instead of maintaining a flag derived
+  from a mutable public backing map.
 - **`with` save/set:** `js_with_save_stack` copies `min(depth,16)` Items and
   returns depth; `js_with_set_stack` re-registers the root range, clears
   deeper entries, and invalidates the with-binding cache. Post-repair, the
@@ -153,15 +174,18 @@ conservative value so the cost of doubt is only the slow path.
   (`js_runtime.cpp:9461–9496`), then dispatches through typed casts `P0..P16H`
   (`:9425–9458`, switch bodies `:9526–9615`). `JS_FUNC_FLAG_MIR_PUBLIC_ABI`
   appends the trailing `uint64_t* scalar_result_home` (SG2 ABI).
-- **No `uses_this` analysis bit exists.** `JsFuncCollected` has
-  `uses_arguments` only (`js_mir_context.hpp:188`); `this` in a non-arrow body
-  lowers to `js_get_this()` calls at each use, and arrows capture `_js_this`
-  at closure creation (JS_05 §6). C3.0 must *add* the analysis bit.
-- **Merged args stack (assumption 1):** post-Merge-A, an args frame is a
-  side-root sub-range below `Context.side_root_top`; a caller's mark outlives
-  its call by the watermark discipline, and above-top words are zeroed. Hence
-  "args pointer within the bound side-root extent" ⟹ "args are GC-visible for
-  the duration of the call".
+- **Receiver analysis already exists.** `JsFuncCollected` carries
+  `observes_this` and `observes_new_target`, and direct-call lowering already
+  uses both. The current capture pass computes them before collecting
+  default-parameter references, however. C3.0 first repairs that ordering,
+  then stamps the existing facts on `JsFunction`; it does not invent a
+  parallel analysis.
+- **Merged args stack (assumption 1):** post-Merge-A, a generated args frame
+  is a side-root sub-range below the logical `Context.side_root_top`; a
+  caller's mark outlives its call by the watermark discipline, and above-top
+  words are zeroed. Address containment of only `args[0]` is not sufficient
+  provenance: C2 uses an explicit JIT entry, and any diagnostic containment
+  helper checks the aligned, overflow-safe span `[args, args + argc)`.
 - **Census hook exists:** `JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION)`
   already brackets the dispatcher (`js_runtime.cpp:13296`).
 - **Callsite-widening history:** the reverted fast-path widening
@@ -171,97 +195,150 @@ conservative value so the cost of doubt is only the slow path.
 
 ---
 
-## 2. Phase T0 — call-shape census and probes (½ day)
+## 2. Phase T0 — call-shape census and probes (½–1 day)
 
-Reuse `temp/tune4_probes.sh` protocol (3-run medians, timestamped JSON, never
-overwrite), extended with a `t7` phase.
+Reuse `temp/tune4_probes.sh` for timestamped, never-overwritten raw output,
+but adopt Tune6's corrected attribution protocol: build baseline and candidate
+release binaries first, then alternate them row by row
+`A/B/A/B/A/B`. Three-run medians remain the reported statistic. The
+four-engine matrix is an exit record, not evidence for an individual slice.
 
-- **T0.1 Call-shape census.** Add release-safe counters (`JS_CALL_STATS` env +
-  atexit dump, the Tune6 T0.2 style) classifying every
-  `js_call_function_impl` entry: plain / bound / builtin / with-active /
-  realm-switch / home-class / generator / async / derived-ctor / vm-source /
-  non-callable, plus `argc` histogram and args-pointer-in-side-root-extent
-  hit rate. **This decides C1's coverage claim**: if the plain fraction on the
-  OO probes is below ~85%, find which condition disqualifies before building
-  the lane. Do not skip.
+- **T0.1 Orthogonal call-requirement census.** Add release-safe counters
+  (`JS_CALL_STATS` env + atexit dump, the Tune6 counter style) at
+  `js_call_function_impl`. Do not force calls into one exclusive label.
+  Record a bitmask for each entry: non-callable / special constructor /
+  builtin / bound / generator / async / derived-ctor / caller-with-active /
+  callee-with / same-realm / foreign-realm / home-class / vm-source /
+  eval-initializer / closure-env, plus array-dispatch-mode-active,
+  module-vars-same/different, `argc`, and generated-args provenance. Dump the
+  top requirement combinations and cumulative coverage for each primary
+  probe, not only one global aggregate.
+- **T0.1a Simulated lane coverage.** Before implementing C1, compute coverage
+  for candidate lane shapes from the census:
+  ORDINARY, ORDINARY+realm-switch, METHOD_HOME, and WITH. Start with the
+  smallest semantic shape. If it covers less than ~85% of executable
+  non-builtin dynamic calls in aggregate or less than ~70% on any primary
+  probe, add the next most common coherent flow and re-simulate. A low hit
+  rate changes the design; it is not solved by deleting a required guard.
+- **T0.1b Real-workload validation.** Collect the requirement-combination
+  table on every T0.3 benchmark row, then on one full test262 baseline and one
+  full Node baseline. Test suites contribute shape diversity, not timing
+  claims. Publish benchmark-weighted, test-weighted, and per-workload
+  coverage separately so a high-frequency microbench or one long test cannot
+  make a narrow lane look universal. Freeze C1's initial lane kinds only
+  after this table exists.
 - **T0.2 Per-call microbench.** `temp/tune7_call_bench.js` (+ `.ls` control):
   tight loops over — plain 0-arg call, plain 2-arg, closure (env) call,
-  method call via warmed PIC, bound call, `new` call — reporting ns/call.
+  method call via the warmed existing IC, same-realm call, forced
+  foreign-realm call, class method/home-object call, bound call, and `new`
+  call — reporting ns/call.
   Benchmark rows alone cannot attribute per-slice wins; this harness is the
   primary gate instrument for C1–C4.
 - **T0.3 Probe rows.**
 
 | Phase | Primary probes | Guard probes (no regression >3%) |
 |---|---|---|
-| C1 | LJS richards, deltablue, crypto_sha1, hashmap (post-Tune6 residuals) | LJS json, sieve; all Tune6 J-gates must hold |
+| C1 | LJS richards, deltablue, crypto_sha1, hashmap | LJS json, sieve; current IC behavior must hold |
 | C2 | same + cd, havlak (arg-heavy) | jetstream/splay |
-| C3.0 | richards, deltablue + T0.2 microbench | full test262 `this`-semantics families |
+| C3.0 | richards, deltablue + T0.2 microbench | full test262 `this`/`new.target` semantics families |
 | C4.1 | rows whose hot callees are numeric-param/boxed-return (census-picked) | kostya/matmul, larceny/ray (Tune4 M1 wins hold) |
 
 ---
 
-## 3. Phase C1 — call-shape flag + the plain-call fast lane (R4.2, 2–3 days; the centerpiece)
+## 3. Phase C1 — census-derived common call lanes (R4.2, 2–4 days; the centerpiece)
 
-**C1.1 Precompute the shape, kill the per-call probes.** Two new flag bits in
-the free `uint16_t` space:
+**C1.1 Store stable function-local facts.**
 
-- `JS_FUNC_FLAG_HAS_HOME_CLASS` (2048): set at the single writer
-  (`js_runtime.cpp:611` funnel; audit for any second writer by grepping
-  `JS_HOME_CLASS_KEY` — currently none). Row 10's per-call hash lookup
-  becomes a flag test; the lookup runs only when the flag is set.
-- `JS_FUNC_FLAG_PLAIN_CALL` (4096): derived at every `JsFunction`
-  construction/mutation choke point (`js_new_function`, `js_new_closure`,
-  `js_new_method_function`, bound-function creation, the home-class writer,
-  `with`-capture wrapper creation, vm-source stamping). Definition —
-  ALL of: `builtin_id == 0`, no
-  generator/async/async-gen/derived-ctor/bound flags, `with_env_depth == 0`,
-  `!(flags & JS_FUNC_FLAG_USES_WITH)`, `home_global.item == 0`,
-  `!HAS_HOME_CLASS`, no vm-stack source,
-  `!eval_initializer_context`. **The predicate lives in one function**
-  (`js_function_call_shape_recompute(fn)`) called by every stamping site, so
-  the condition list is auditable and single-sourced. (Bit values follow the
-  post-merge flag inventory: 1024 is taken by `USES_WITH`.)
+- Replace the per-call `__home_class__` backing-map lookup with a dedicated
+  `JsFunction::home_class` Item. The internal method-home stamping helper
+  stores it through one ownership helper: GC-owned functions trace the edge,
+  while pool-owned functions register the slot exactly as other function
+  Item fields do. First pin whether ordinary JS property operations on
+  `"__home_class__"` have observable compatibility behavior; if they do,
+  their mutation/delete/defineProperty funnels must keep the dedicated slot
+  coherent. The optimization may not silently change that behavior.
+- Add `uint8_t call_lane_kind`, finalized after function flags and metadata
+  are stamped. Initial kinds are `GENERIC`, `ORDINARY`, and `METHOD_HOME`.
+  Add `WITH` or another variant only when T0.1a shows it materially raises
+  coverage. `js_function_call_lane_recompute(fn)` is the one classifier and
+  is called by every later metadata mutation site.
+- `ORDINARY` deliberately permits closures, normal async functions,
+  non-null `home_global`, and module ownership. Closure env handling already
+  belongs to `js_invoke_fn`; realm and module identity are caller/callee pair
+  facts handled cheaply inside the lane. Builtins, bound functions, special
+  constructors, generators/async-generators, derived constructors,
+  vm-source functions, eval-initializer functions, and uncertain dynamic
+  wrappers default to `GENERIC`.
 
-**C1.2 The lane.** In `js_call_function_impl`, after the callee resolves to a
-`JsFunction*`: if `PLAIN_CALL` **and** the global `with` stack is empty
-(`js_with_stack_depth == 0` — caller-side state, cannot be precomputed; the
-lane reads the depth directly, which also removes row 11's residual
-unconditional `js_with_save_stack` C call on the plain path):
+This is the plan's answer to an overly narrow `PLAIN_CALL`: the common lane
+models the common *flow*, not an all-zero object. The exact kinds are frozen
+only after the per-probe census table is attached to the phase record.
+
+**C1.2 Common core and grouped variants.** Insert the lane only after
+non-callable/proxy/Function-prototype handling, Date/Function/dynamic-function
+special cases, invalid-wrapper checks, and builtin dispatch. It sits
+immediately before the currently duplicated bound/plain state blocks.
+
+The ORDINARY core is:
 
 ```
-save this/new.target (2 locals) → OrdinaryCallBindThis (shared helper, not a
-third copy — CLAUDE rule 13: extract the existing duplicated block first) →
-install this; consume-or-clear pending new.target; set js_pending_args_callee
-→ module-vars switch (2-field compare, stays) → js_invoke_fn → restore the two
-globals → js_finish_borrowed_scalar_result
+save/reset array-dispatch mode
+→ save this/new.target
+→ OrdinaryCallBindThis via one extracted helper
+→ install this; consume-or-clear pending new.target; set pending callee
+→ conditionally switch module vars
+→ compare home_global with current global; swap only when different
+→ invoke
+→ restore realm/module/this/new.target/array-dispatch mode
+→ finish borrowed scalar result
 ```
 
-Everything else — with save/set, realm swap, generator proto, TDZ push,
-private-home install, vm-source push, eval-initializer flag — is *provably
-dead* under the predicate and is skipped, not conditionally executed. The
-existing full body remains untouched below the lane as the fallback and
-semantic authority.
+The array-dispatch save/reset/restore is mandatory caller-dynamic semantics,
+not optional debugging state. `home_global.item == 0` is **not** an
+eligibility condition: ordinary functions currently capture a non-null
+global at creation. Same-realm calls avoid the swap; foreign-realm calls
+either use the same common core's conditional swap or a grouped realm
+variant, whichever T0 measures faster.
 
-**C1.3 Debug bookkeeping out of the hot path.** The thread-local call-name
-stack (`:13298–13307`) moves behind `js_runtime_trace_enabled()` (checked
-once, cached). Accepted cost: release-build "not a function" diagnostics lose
-the name backtrace unless the trace env is set — the error itself, callee
+For `METHOD_HOME`, add only the dedicated private-home install/restore around
+the same core. For a measured `WITH` variant, add the existing save/set/restore
+protocol; otherwise caller-with-active or callee-with calls fall back to
+GENERIC. No variant duplicates `OrdinaryCallBindThis` or the common restore
+epilogue.
+
+**C1.3 Debug bookkeeping out of the hot path.** Measure and then move the
+thread-local call-name stack plus `_trace_last_fn` / `_trace_total_calls`
+maintenance behind `js_runtime_trace_enabled()` (checked once, cached).
+Accepted cost: release-build diagnostics lose the name backtrace/last-call
+counter unless the trace env is set — the error itself, caller
 `FuncDebugInfo`, and arg dump remain. The depth guard (stack-limit RangeError)
-**stays unconditionally** — it is semantics, not diagnostics.
+**stays unconditionally** — it is semantics, not diagnostics. Land C1.3
+separately so a zero delta drops it without coupling it to the lane.
 
-**C1.4 Consistency harness (the risk mitigation, mandatory).** A debug-build
-mode (`JS_CALL_LANE_CHECK=1`) runs the fast lane *and* shadows the skipped
-saves: before the lane returns it asserts the skipped state (with depth,
-realm, private-home, generator proto, eval flags) is bit-identical to entry.
-Runs on the full test262 + node baselines once per phase landing.
+**C1.4 Validation modes (mandatory).**
 
-**Gates.** T0.1: ≥85% of dynamic calls on OO probes take the lane. T0.2:
-plain 2-arg ns/call **≥1.5x** down. richards/deltablue/crypto_sha1
-measurable; zero-regression gates; C1.4 harness clean.
+- `JS_CALL_LANE_CHECK=1` asserts state that the selected lane promises not to
+  touch and checks that all saved state is restored at exit. This is a
+  state-leak detector, not semantic equivalence proof.
+- `JS_CALL_FORCE_GENERIC=1` disables all lanes. Run full test262 and Node
+  baselines once forced-generic and once lane-enabled in separate processes,
+  comparing per-test status and outputs. Do not execute both paths for one
+  call: arbitrary callees have side effects.
+- Add focused fixtures for array builtin → user callback dispatch mode,
+  same/foreign realm, method-home/private access, caller and callee `with`,
+  Date/Function constructors, closures, async functions, and every lane-kind
+  transition writer.
+
+**Gates.** The implemented lane set must meet the T0.1a per-probe coverage
+rule; report coverage by kind so one benchmark cannot hide another. T0.2
+plain 2-arg ns/call targets **≥1.5x** down. At least one call-dense primary
+row must improve beyond the interleaved-run noise floor and no guard row may
+regress >3%; otherwise simplify or drop the lane regardless of microbench
+success. All C1.4 modes must be clean.
 
 ---
 
-## 4. Phase C2 — argument rooting dedup on the merged stack (1–2 days)
+## 4. Phase C2 — argument rooting dedup with explicit provenance (1–2 days)
 
 Premise (assumption 1, strengthened by the Merge A final form): a JIT-edge
 `args` pointer is a stable address inside the **caller's own frame argument
@@ -271,22 +348,26 @@ epilogue. The `RootFrame` arg-copy loop (`:13318–13323`) is then a second,
 redundant rooting of the same values. C helpers passing `LAMBDA_ALLOCA`
 arrays still need it.
 
-- **C2.1 Range-check discriminator.** Add
-  `lambda_side_root_contains(Context*, void*)` to `side_stack.h` (bound base ≤
-  p < committed top; O(1)). In `js_call_function_impl`: when
-  `arg_count > 0 && lambda_side_root_contains(context, args)`, skip the
-  per-arg slot loop. **Keep the 2-slot func/this `RootFrame` in this stage** —
-  callee and receiver arrive in C parameters and are not covered by the
-  caller's arg frame.
-- **C2.2 No caller audit needed by construction.** C-helper arrays fail the
-  range check and keep the copy path; helper code that *forwards* a rooted
-  args frame (e.g. trap/dispatch re-entries) legitimately passes the check —
-  the frame is live for the outer call's duration, which encloses the inner
-  one. Document this invariant at the check site.
-- **C2.3 (stage 2, measured) Pre-rooted JIT entry.** Emit
-  `js_call_function_prerooted` at generic call sites: skips even the
-  func/this frame because the call-site safepoint write-back already
-  published every live value — *verify* by asserting at emission that the
+- **C2.1 Pre-rooted-args JIT entry.** Add
+  `js_call_function_prerooted_args` with the same semantics as the generic
+  entry, except it skips the per-argument copy loop. Select it only at generic
+  MIR call sites whose `JsMirArgStackScope` owns the complete argument span.
+  The emitter assertion proves the base slot, count, and active-scope
+  lifetime. **Keep the 2-slot func/this `RootFrame` in this stage** — the
+  callee and receiver arrive in C parameters and are not proven by the args
+  frame alone. C helpers and re-entry helpers continue to call the generic
+  copying entry.
+- **C2.2 Diagnostic span check, not authority.** If a containment helper is
+  useful for assertions/census, name it
+  `lambda_side_root_contains_span(Context*, const void*, size_t)`. It must
+  reject unaligned pointers and overflow, and prove the complete half-open
+  span is within the current context's logical live range
+  `[side_root_base, side_root_top)`. `side_root_commit_limit` is not a live
+  watermark and must never authorize skipping roots. Do not use address
+  coincidence as the production provenance contract.
+- **C2.3 (stage 2, measured) Fully pre-rooted JIT entry.** A later
+  `js_call_function_prerooted` may skip even the func/this frame when
+  safepoint write-back has published both values. Assert at emission that the
   callee/this temporaries are registered GC candidates
   (`em_root_note_candidate` coverage) before selecting the import. MT7
   budgets change (new import) — deliberate lift. Land only if T0.2 shows the
@@ -296,27 +377,46 @@ arrays still need it.
 was deleted 2026-07-25: the final Merge A form removed the `js_args_*` ABI
 entirely, so there is nothing left to inline.)
 
-**Gates.** T0.1's args-in-extent rate confirms coverage (expect ~100% of
-JIT-edge calls); T0.2 arg-carrying ns/call drops; cd/havlak measurable;
-**forced-GC stress green with the arg-copy loop disabled** — this is the
-phase's correctness cliff and its real gate.
+**Gates.** T0.1 reports eligible-emission coverage rather than trusting an
+address hit rate (expect near 100% of ordinary generated edges). T0.2
+arg-carrying ns/call drops; cd/havlak measurable; **forced-GC stress green
+with the arg-copy loop disabled only on the explicit entry** — this is the
+phase's correctness cliff and its real gate. Add adversarial generic-entry
+fixtures for stack/alloca args, partial side-root spans, forwarded rooted
+spans, zero args, and an overflowing diagnostic span size.
 
 ---
 
 ## 5. Phase C3 — receiver binding without global round-trips (R4.3, staged)
 
-**C3.0 `this`-oblivious callees (2 days, flag-only, no ABI change).** Add a
-collection-phase analysis bit `body_observes_this`: true if the body (or any
-default-param expression) references `this`, `new.target`, or contains a
-**direct `eval`** (runtime `this` access is then possible); arrows are true
-iff they *captured* `_js_this` (existing capture machinery already computes
-this). Stamp `JS_FUNC_FLAG_READS_THIS` (8192) at function creation from the
-collected bit. In both dispatcher paths: when clear, skip
-`OrdinaryCallBindThis` and the `js_current_this` install/restore pair
-entirely. **The pending-`new.target` handshake is consumed unconditionally**
-— a pending bit must never survive into the next call (leak = wrongness, see
-Risks). Accessors invoked via `js_call_function` are safe by construction:
-a getter/setter body that uses `this` has the flag set.
+**C3.0 Reuse and stamp receiver analysis (2 days, flag-only, no ABI
+change).**
+
+1. **Correctness prerequisite, landed and re-baselined separately:** move
+   `jm_collect_param_default_refs` before the assignments to
+   `fc->observes_this` / `fc->observes_new_target`. The existing analysis
+   already propagates lexical-arrow references and treats direct eval
+   conservatively; default expressions are currently collected too late for
+   those two booleans. Add default-param `this`, `new.target`, direct-eval,
+   and nested-arrow fixtures before using the facts more widely.
+2. Stamp separate `JS_FUNC_FLAG_READS_THIS` and
+   `JS_FUNC_FLAG_READS_NEW_TARGET` bits during function finalization. All
+   generic/C-created wrappers default both bits **set**; compiler finalization
+   may clear them only when the repaired analysis is available. Carry an
+   explicit `ANALYSIS_KNOWN` init marker plus the two observed-value bits, so
+   absence of a bit from an older/dynamic creator can never mean
+   "unobserved". Bit numbers are assigned only after re-auditing
+   `js_function.hpp`; do not create a second collection analysis.
+3. In both dispatcher paths, when `READS_THIS` is clear, skip
+   `OrdinaryCallBindThis` and the `js_current_this` install/restore pair.
+   When `READS_NEW_TARGET` is clear, skip the `js_new_target`
+   install/restore, but **always consume or clear the pending-new-target
+   handshake** so it can never leak into the next call.
+
+Accessors invoked via `js_call_function` are safe only through the same
+stamped analysis; dynamically created or uncertain wrappers default both
+flags to set. Keeping the two facts separate avoids making a
+`new.target`-only function pay the receiver round-trip.
 
 **C3.1 Receiver as hidden ABI argument (3–5 days, DEFERRED BY DEFAULT).** The
 full R4.3: pass `this` like `env` (ordering `env, this, args…, home`) for
@@ -329,64 +429,78 @@ material on the probe set. This is the plan's only ABI-touching slice: MT7
 major lifts, mir_dump fixture review, and the JS_05 §6 doc update travel with
 it.
 
-**Gates (C3.0).** T0.2 plain-call ns drops further; test262 `this`-binding
-families (sloppy-mode coercion, arrows, accessors, `eval`) zero regressions;
-fixture set: direct-`eval`-reads-`this`, arrow capturing `this` called
-dynamically, bound wrapper over an oblivious callee, pending-new.target
-consumed when calling an oblivious constructor via `Reflect.construct`.
+**Gates (C3.0).** T0.2 plain-call ns drops further; test262 `this`-binding and
+`new.target` families (sloppy-mode coercion, arrows, accessors, default
+params, `eval`) zero regressions; fixture set:
+direct-`eval`-reads-`this`, default-param reads of both bindings, arrow
+capturing `this` called dynamically, bound wrapper over an oblivious callee,
+and pending-new-target consumed when calling an oblivious constructor via
+`Reflect.construct`.
 
 ---
 
-## 6. Phase C4 — fewer dynamic calls, thinner trampoline (R4.1 + R4.4, 1–2 days + measured tail)
+## 6. Phase C4 — fewer dynamic calls, thinner trampoline (R4.1 + R4.4, 2–4 days + measured tail)
 
-- **C4.1 (R4.1) Widen native eligibility to boxed/void returns.** At the
-  phase-1.75 eligibility computation (`js_mir_module_batch_lowering.cpp:5823`):
-  allow numeric-param functions whose return is boxed or unused; the native
-  body computes unboxed and **boxes at the return boundary inside `<fname>_n`**
-  (or a thin `_nb` wrapper), so direct call sites escape the dispatcher
-  entirely. The callsite-widening history (`:9621` note) is the guardrail:
-  widen which functions get a native *version*; never widen which *call
-  sites* may skip semantic checks. Callsite-propagation (phase 1.76) applies
-  to the new shape unchanged.
-- **C4.2 Adaptation precompute (measure-first).** Stamp an adapt-kind byte
-  (EXACT / PAD / REST) + effective count on `JsFunction` at creation;
-  `js_invoke_fn_raw` switches on it instead of re-deriving. Land only if
-  T0.2 attributes measurable cost to adaptation — may be noise.
+- **C4.1 (R4.1) Audited mixed native ABI for boxed/void returns.** Treat this
+  as a new native-return class, not a one-line eligibility widening.
+  `has_native_version` currently implies numeric params **and** numeric return
+  in eligibility, function definition, call lowering, TCO, and return
+  lowering. First add an explicit `NativeReturnKind` (INT / FLOAT / BOXED /
+  VOID) and grep-audit every `has_native_version`, `return_type`, and
+  `native_func_item` consumer. Only then allow numeric-param functions with a
+  boxed or discarded result to get a mixed-ABI native body or thin wrapper.
+  Phase 1.76 parameter validation is reused only after that audit proves its
+  assumptions remain valid. Widen which functions get a version; never widen
+  which call sites may bypass semantic checks.
+- **C4.2 Adaptation branch slimming (measure-first).** Do not stamp
+  EXACT/PAD/REST as a per-function answer: exact versus pad/clamp depends on
+  the dynamic `arg_count`, while `param_count` and its sign already encode
+  declared arity and rest. Profile the adaptation block separately. If it is
+  material, specialize the exact-arity hot edge at emission or fold it into
+  the per-arity thunk; otherwise drop C4.2.
 - **C4.3 Per-arity MIR invoke thunks (R4.4, DEFERRED BY DEFAULT).** Replace
   the 16-case switch with a per-function thunk pointer generated at JIT time.
   Only if C1–C3 leave the switch visible in profiles; otherwise skip — the
   branch predictor likely already owns it.
 
-**Gates.** C4.1: census-picked rows improve; direct-call sites to widened
-functions verified in mir_dump (budget lift deliberate); numeric-edge golden
-(NaN/±0/overflow) identical boxed-vs-native. C4.2/C4.3: T0.2 delta or drop.
+**Gates.** C4.1: a census names the concrete hot functions before
+implementation; direct-call sites to widened functions are verified in
+mir_dump (budget lift deliberate); numeric-edge golden
+(NaN/±0/overflow), arbitrary boxed values, exceptions, and discarded returns
+are identical boxed-vs-native. C4.2/C4.3: attributable interleaved T0.2 delta
+or drop.
 
 ---
 
 ## 7. Sequencing, exit, and Result14
 
 ```
-T0 → C1 → C2 → C3.0 → [C3.1?]     (dispatcher track, serial)
-T0 → C4.1                          (emitter track, independent, may interleave)
+T0 → C1 → C2 → C3.0a fix/rebaseline → C3.0b → [C3.1?]
+T0 → C4.1 ABI audit → [C4.1 implementation?]
 C4.2 / C4.3 / C2.3                 (tail: only where T0.2 shows residual)
 ```
 
 Prerequisites: Tune6 landed (Result13), Merge Stack complete, online-exception
-landed. C1 first — it re-baselines every later ns/call measurement and its
-census instrumentation is what gates the rest. Each phase lands independently
-green.
+landed. T0 freezes the minimum useful lane set before C1 code begins. C1 then
+re-baselines every later ns/call measurement. The C3.0a analysis-order repair
+is a correctness change and lands/re-baselines separately from the Tune7
+performance slice. Each remaining phase lands independently green.
 
 **Exit = Result14** (same protocol as Result12/13: clean release build,
 four-engine matrix, 3-run medians, 180s, raw JSON preserved, QuickJS control).
-Thresholds are finalized against Result13 when it exists; the *shape* of the
-targets, honest about what a per-call constant tax can buy:
+Per-phase attribution comes from already-built, row-interleaved release
+binaries. Result13 exists and supplies the matrix baselines below. Microbench
+targets are ambitions for the combined track; landing decisions use measured
+per-phase deltas and the >3% guard threshold rather than assuming every
+call-dense row must move by the same factor:
 
 | Metric | Baseline | Target |
 |---|---|---|
 | T0.2 plain 2-arg dynamic call (ns/call) | measured at T0 | ≥ 2x reduction (C1+C2+C3.0 combined) |
-| T0.2 method call via PIC (ns/call) | measured at T0 | ≥ 1.5x reduction |
-| LJS call-dense rows (richards, deltablue, crypto_sha1) | Result13 | additional ≥ 1.3x each |
-| LJS/Node geo (dedup) | Result13 (≤8x targeted) | measurable improvement; no row regresses |
+| T0.2 method call via warmed existing IC (ns/call) | measured at T0 | ≥ 1.5x reduction |
+| LJS call-dense rows (richards, deltablue, crypto_sha1) | Result13 | ≥1 row improves beyond noise; report all, no assumed uniform 1.3x |
+| LJS/Node geo (dedup) | 15.4x | measurable improvement recorded in Result14; phase claims come from A/B |
+| MIR/Node geo + QuickJS/Node control | 2.94x / 7.45x | guard and calibration columns, not Tune7 attribution |
 
 After Result14 the expected residuals are R7 (GC frequency × live set), OI-9
 (unboxed slot storage), and whatever C3.1/C4.3 evidence says was rightly
@@ -396,39 +510,48 @@ deferred.
 
 ## 8. Risks
 
-- **Fast-lane predicate drift is the correctness cliff.** Any *future* state
-  added to the full dispatcher body (a new realm mechanism, a new per-call
-  binding) silently breaks the lane if the predicate isn't updated. Mitigation
-  is structural: one `js_function_call_shape_recompute` predicate, one lane,
-  a comment contract at the full body's save block ("adding a save here
-  requires a predicate review"), and the C1.4 dual-run harness on both
-  baselines at every phase landing.
+- **Lane-classification drift is the correctness cliff.** Any future state
+  added to the full dispatcher body can silently break a lane. Mitigation is
+  structural: one `js_function_call_lane_recompute` classifier, one shared
+  common core, a comment contract at the generic save block ("adding a save
+  here requires a lane review"), uncertain functions default GENERIC, and
+  both C1.4 modes run at every phase landing. Caller-dynamic state such as
+  array-dispatch mode, realm identity, and module identity stays in the lane;
+  it is never hidden behind function-only metadata.
+- **Home-class cache compatibility.** The current implementation stores the
+  internal home object under a string key in the function property map, so
+  arbitrary property APIs can collide with that representation. Before
+  moving it to a dedicated slot, pin current observable behavior for direct
+  assignment, `defineProperty`, delete, and private method access. If any
+  compatibility behavior must remain, route the relevant mutation funnels to
+  the slot; never let the map and slot disagree.
 - **Pending-`new.target` leak (C3.0).** Skipping receiver binding must never
   skip handshake consumption; the `Reflect.construct`-on-oblivious-callee
   fixture pins it. Same for `js_pending_args_callee` when the callee uses
   `arguments` (`uses_arguments` functions are never `this`-oblivious *for the
   callee-stash*: keep the stash unconditional — it is one store).
-- **C2 rooting soundness.** The range check must test the *bound* extent of
-  the current context's side-root region only; a foreign pointer that happens
-  to fall in-range would be silently trusted. The region is a single
-  reserve-committed block per context (Merge A), so containment is exact, but
-  the predicate must use the context's own base/top — never a cached global.
-  Forced-GC stress with the copy loop disabled is the gate, plus one
-  adversarial fixture: C helper calling back into JS with stack args across a
-  collection.
-- **C3.0 dynamic `this` escape hatches.** Direct `eval`, `arguments.callee`
-  re-entry, and accessors are the known routes to observing `this` at
-  runtime; the analysis bit's definition enumerates them, and any new dynamic
-  facility (e.g. a future debugger hook) must default the flag to set.
-  When in doubt, `READS_THIS` stays set — over-conservatism costs two global
-  stores, never wrongness.
-- **C4.1 semantic cliff.** Native versions must keep exact JS numeric
-  semantics at the boxing boundary (−0, NaN payloads irrelevant but sign
-  bits are not); the boxed-vs-native golden across the numeric edge table is
-  the gate, mirroring Tune6 L3's discipline.
+- **C2 rooting soundness.** Only the explicit generated entry authorizes
+  skipping the copy. A pointer merely landing inside a reserved or committed
+  region is not provenance. Diagnostic checks use the current context's
+  aligned complete span and logical `side_root_top`; generic C/re-entry calls
+  retain their copies. Forced-GC stress with the explicit entry's copy loop
+  disabled is the gate.
+- **C3.0 dynamic receiver escape hatches.** Direct `eval`, lexical arrows,
+  default parameters, accessors, and future debugger hooks can observe
+  `this`/`new.target`. The existing analysis enumerates them; uncertain
+  dynamic functions default both flags set. When in doubt the cost is only
+  two global round-trips.
+- **C4.1 semantic and ABI cliff.** `has_native_version` currently carries
+  numeric-return assumptions across several files. The explicit return-kind
+  audit is mandatory before BOXED/VOID exists. Native versions must keep
+  exact JS numeric semantics at the boxing boundary (−0, NaN payloads
+  irrelevant but sign bits are not), arbitrary boxed values, exceptions, and
+  discard semantics.
 - **Diagnostics regression (C1.3).** Losing the release-build call-name
   backtrace is accepted and documented; `JS_RUNTIME_TRACE=1` restores it.
   If node-baseline triage proves to need it, demote C1.3 to debug-only
   gating of the *push* (keep depth), not a revert.
-- **Machine-state variance.** All phase gates are same-day before/after
-  ratios on one host; Result14 absolutes carry the QuickJS control column.
+- **Machine-state variance.** Same-day sequential runs were insufficient in
+  Tune6. Build both release binaries first and interleave A/B row by row;
+  preserve raw order and timestamps. Result14 absolutes carry the QuickJS
+  control column, but do not replace the interleaved phase evidence.
