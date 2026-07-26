@@ -1,0 +1,19 @@
+false,null,false
+7,null,7
+sv0,sv1,null,sv3
+null,1.5,2.5,3.5
+5,undef,5
+0,null,2,3
+y0,y1,null,y3
+true,true,true,null
+0-1-2,1-2-3,null,3-4-5,4-5-6
+2000,churn1999
+0,null,6,null
+0,back,6,null
+null,42,str,null
+only-first,none,none
+0,null,2
+0,null,2
+w0,w1,w2
+false,true
+x|y|z / x|y|z

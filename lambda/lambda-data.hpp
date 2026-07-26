@@ -314,6 +314,23 @@ typedef struct TypeMapTransition {
     struct TypeMapTransition* next;
 } TypeMapTransition;
 
+// A shape flagged shared is reachable from more than one instance, so per-instance
+// structural or tag mutation must clone it first.
+static inline bool typemap_is_shared_shape(const TypeMap* tm) {
+    return tm && (tm->is_shared_constructor_shape || tm->is_transition_shared_shape);
+}
+
+// Retag safety for in-place shaped-slot writes. Upgrading a slot's tag is always
+// required so GC traces the pointer that was just stored, and leaving a stale tag
+// on a T->NULL write makes the null word read back as a zero-valued T (`false`,
+// `0`). The downgrade is only safe once the writing instance owns the shape: on a
+// shape still flagged shared, retagging to NULL would make GC skip tracing live
+// container pointers held by sibling instances.
+static inline bool shape_entry_retag_is_safe(const TypeMap* tm, TypeId value_type) {
+    if (value_type != LMD_TYPE_NULL) return true;
+    return tm && !typemap_is_shared_shape(tm);
+}
+
 static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
     return (uint8_t*)map_data + field->byte_offset;
 }

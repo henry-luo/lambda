@@ -3232,7 +3232,7 @@ static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t
 
 static bool js_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
-    if (!tm || (!tm->is_shared_constructor_shape && !tm->is_transition_shared_shape)) return false;
+    if (!tm || !typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
     // NULL→T is blueprint establishment (slots are born NULL and the first real
     // write tags them), so it must not detach. T→NULL is a genuine per-instance
@@ -6041,8 +6041,8 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     return true;
 }
 
-static bool js_array_companion_write_same_size_slot(ShapeEntry* entry, void* data,
-        Item value) {
+static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
+        void* data, Item value) {
     if (!entry || !entry->type || !data) return false;
     TypeId field_type = entry->type->type_id;
     TypeId value_type = get_type_id(value);
@@ -6106,7 +6106,9 @@ static bool js_array_companion_write_same_size_slot(ShapeEntry* entry, void* dat
     default:
         return false;
     }
-    if (value_type != LMD_TYPE_NULL) {
+    // Retag on T->NULL too, else the stored null word is read back through the
+    // stale tag as a zero-valued T (`arr.tag = 7; arr.tag = null` read `0`).
+    if (shape_entry_retag_is_safe(tm, value_type)) {
         entry->type = type_info[value_type].type;
     }
     return true;
@@ -6134,7 +6136,8 @@ static bool js_array_companion_try_write_existing_data(Item object, const char* 
             entry->byte_offset + value_size > (int64_t)pm->data_cap) {
         return false;
     }
-    return js_array_companion_write_same_size_slot(entry, pm->data, value);
+    return js_array_companion_write_same_size_slot((TypeMap*)pm->type, entry,
+        pm->data, value);
 }
 
 static Item js_property_set_array(Item object, Item key, Item value) {

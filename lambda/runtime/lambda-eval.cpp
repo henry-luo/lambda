@@ -6761,9 +6761,14 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
 // and shape rebuild for type changes (e.g. int→string, null→container).
 static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
-    if (!tm || (!tm->is_shared_constructor_shape && !tm->is_transition_shared_shape)) return false;
+    if (!typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
-    if (field_type == LMD_TYPE_NULL || value_type == LMD_TYPE_NULL) return false;
+    // NULL→T is blueprint establishment (slots are born NULL and the first real
+    // write tags them), so it must not detach. T→NULL is a genuine per-instance
+    // divergence: the in-place store writes a null word while a shared entry
+    // keeps claiming T, so a sibling instance would read this null back as a
+    // zero-valued T (e.g. `false` / 0).
+    if (field_type == LMD_TYPE_NULL) return false;
     return true;
 }
 
@@ -6966,12 +6971,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
                         map_field_decrement_ref(field_ptr, field_type);
                         map_field_store(field_ptr, value, value_type);
                         // Update the ShapeEntry type so GC can properly trace
-                        // container pointers stored in formerly-NULL fields.
-                        // IMPORTANT: Don't downgrade to NULL when field was a container,
-                        // because the ShapeEntry is SHARED across all instances of the class.
-                        // If we set it to NULL, GC would skip tracing container pointers
-                        // in other instances that still hold live arrays/maps/etc.
-                        if (value_type != LMD_TYPE_NULL) {
+                        // container pointers stored in formerly-NULL fields, and
+                        // so a stored null is not read back as a zero-valued T.
+                        // The T→NULL downgrade is gated on this instance owning
+                        // the shape — see shape_entry_retag_is_safe.
+                        if (shape_entry_retag_is_safe(map_type, value_type)) {
                             entry->type = type_info[value_type].type;
                         }
                         return;
@@ -6986,7 +6990,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
             if (map_entry_uses_fixed_slot(map_type, entry)) {
                 map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
-                if (value_type != LMD_TYPE_NULL) {
+                if (shape_entry_retag_is_safe(map_type, value_type)) {
                     entry->type = type_info[value_type].type;
                 }
                 return;

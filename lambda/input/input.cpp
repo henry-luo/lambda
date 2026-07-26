@@ -60,11 +60,6 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return shape_entry;
 }
 
-static bool map_type_is_shared_js_shape(TypeMap* map_type) {
-    return map_type &&
-        (map_type->is_shared_constructor_shape || map_type->is_transition_shared_shape);
-}
-
 static bool js_shape_transitions_enabled() {
     static int enabled = -1;
     if (enabled < 0) {
@@ -470,7 +465,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         int byte_cap = 64;
         mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
         if (!mp->data) return;
-    } else if (map_type_is_shared_js_shape(map_type)) {
+    } else if (typemap_is_shared_shape(map_type)) {
         if (key && mp->map_kind == MAP_KIND_PLAIN && js_shape_transitions_enabled()) {
             ShapeEntry* transition_entry = NULL;
             TypeMap* transition_type = map_transition_target_for_add(map_type, key,
@@ -545,7 +540,7 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
         map_type->type_index = input->type_list->length - 1;
     }
     if (!map_type) return false;
-    if (map_type_is_shared_js_shape(map_type)) {
+    if (typemap_is_shared_shape(map_type)) {
         // bulk appends still mutate the shape chain, so they need the same
         // detach behavior as single-property map_put.
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);

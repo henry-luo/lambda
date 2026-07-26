@@ -628,7 +628,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
         return false;
     }
 
-    if (value_type != LMD_TYPE_NULL) {
+    if (shape_entry_retag_is_safe((TypeMap*)target.map->type, value_type)) {
         entry->type = type_info[value_type].type;
     }
     return true;
