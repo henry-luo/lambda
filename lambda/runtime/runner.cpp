@@ -1434,6 +1434,10 @@ void runner_setup_context(Runner* runner) {
     runner->context.last_error = NULL;
 
     input_context = context = &runner->context;
+    // Tune6 L2: this run gets a fresh type arena, so every per-call-site member
+    // IC cell baked into cached MIR from an earlier run must stop matching —
+    // its TypeMap pointers belong to memory this run may recycle.
+    lambda_shape_epoch_bump();
 
     // Phase 5: propagate ui_mode and result_arena from Runtime to context
     Runtime* ui_rt = runner->runtime;

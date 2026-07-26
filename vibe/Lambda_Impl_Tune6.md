@@ -1,10 +1,12 @@
 # Lambda Impl Plan: Tune 6 — Result12 Tail Elimination (LJS shape lookups + Lambda untyped maps + native math)
 
-**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** T0 done; L1 landed (1.15–1.54x);
-L3 landed (~1.5% on nbody, gate missed); J2 implemented + measured + reverted;
-L2/J1/J3 not started. **The T0 census overturned this plan's central premise,
-and both L3 gates in §4.3 were wrong — read §0.1 before doing any more work
-from it.**
+**Status: PARTIALLY IMPLEMENTED — 2026-07-26.** Track L is **complete**: L1
+landed (1.15–1.54x), L2 landed (1.12–1.19x, richards 1.75x with L1), L3 landed
+(~1.5% on nbody, gate missed). Track J: T0 done, J2 implemented + measured +
+reverted, J1 deprioritised by the census, J3 scoped but not started.
+**The T0 census overturned this plan's central premise, both L3 gates in §4.3
+were wrong, and L2 exposed a silent-wrong-value hazard for any baked-in cache
+cell — read §0.1 before doing any more work from it.**
 
 ---
 
@@ -308,7 +310,37 @@ Mirror the constructor-shape cache onto the literal path:
 allocation counts drop (TypeMap/ShapeEntry allocations per literal evaluation
 → 0 after warmup); same zero-regression gates.
 
-### 3.3 Phase J3 — inline the monomorphic IC hit in MIR (R2 stage 2, 2-3 days)
+### 3.3 Phase J3 — inline the monomorphic IC hit in MIR — **NOT STARTED (scoped 2026-07-26)**
+
+The census still supports J3 as the right lever for richards/deltablue (~100%
+IC hit rate, so what is left is purely the per-hit C-call tax). It was scoped but
+deliberately not implemented, because it is emission-level JIT work whose failure
+mode is a silent wrong value — the exact class of bug L2 produced and that took
+real effort to catch. Landing it unverified would be worse than not landing it.
+
+What the scoping found, so the next attempt starts further along:
+
+- **`inline_kind` cannot be an emission-time constant.** The IC cell fills at
+  runtime, so the emitted code must *load* `ic->entries[0].inline_kind` and
+  branch on it. §3.3's phrasing ("immediate at emission? No — load from the
+  cell") is right, but the consequence was understated: `_map_read_field`
+  (`lambda-data-runtime.cpp:2105`) has ~12 repr cases, so an inline path
+  covering raw-Item/BOOL/INT/FLOAT is a 4-way runtime branch plus the shape
+  guard, not one compare-and-load.
+- **Restricting to raw-Item only (one compare, one load) would rarely fire.**
+  `js_set_shaped_slot` retags entries to the concrete value type, so live JS
+  fields are INT/FLOAT/STRING/MAP — `LMD_TYPE_NULL` (the raw-Item case) is only
+  the unwritten state. INT is the case that actually pays on richards.
+- **Cheapest useful first cut:** guard + INT + raw-Item, everything else falling
+  through to the existing helper, then measure before adding FLOAT/BOOL.
+- MT7 JS budgets change materially; per §3.3/Tune4 M1.6 that is a deliberate
+  lift with the dump diff quoted.
+- Verification bar: `js_exec_profile` branch counters must be identical
+  before/after across the fixture set (the hit *semantics* must not move, only
+  who executes them).
+
+Original plan text follows.
+
 
 Only after J1+J2, and only the **mono** state — the C helper remains the
 canonical path for everything else:
@@ -388,7 +420,67 @@ richards.ls ≥2x, splay.ls/crypto_sha1.ls measurable; full lambda baseline
 (maps are everywhere — this is the highest-blast-radius change in the plan;
 the map/element golden tests are the real gate).
 
-### 4.2 Phase L2 — per-call-site member IC for Lambda (2-3 days)
+### 4.2 Phase L2 — per-call-site member IC for Lambda — **DONE 2026-07-26 (stage 1 only)**
+
+`fn_member_ic(item, key, LambdaMemberIC*)` lives in `lambda-data-runtime.cpp`
+beside `map_read_field_for_owner` (nothing copied — CLAUDE rule 13); the per-site
+cell is `pool_calloc`'d from `mt->script_pool` at static-name member sites in
+`transpile_member`. **L2.3 (the disabled direct-field inline) was deliberately
+not enabled** — the helper IC already took the win and inline emission is where
+this phase's risk lives.
+
+**L2.1 audit result — the shape-pointer compare IS sufficient, for a reason
+worth writing down.** Every Lambda writer that *repacks or replaces* a shape
+(`map_rebuild_for_type_change`) allocates and installs a **new** TypeMap, so
+identity changes and the cache self-invalidates. The writers that mutate
+in place (`fn_map_set`/`js_set_shaped_slot` retags, `map_put`'s chain append)
+only retag an existing entry or append a new one — and because the hit path
+re-reads `entry->type`/`entry->byte_offset` through the shared helper rather
+than caching a materialised offset+type, a retag is *observed*, not cached over.
+
+**Scope: plain `LMD_TYPE_MAP` only.** `LMD_TYPE_OBJECT` reads through `_map_get`
+(which uses `_map_read_field`, **not** the owner-aware variant) and falls back to
+a method table on miss; `LMD_TYPE_ELEMENT` goes through `elmt_get`. Caching
+either would mean reproducing a second read path, so they keep the `fn_member`
+route. Install is also refused for any shape containing an unnamed (spread/
+nested) entry, so last-writer-wins can never disagree with the slow path.
+
+**A silent-wrong-value bug this phase produced and had to fix — read this before
+adding any other per-call-site cell.** First run: **134 baseline failures, every
+one passing standalone.** Root cause: the **L1 MIR module cache replays compiled
+code across script runs**, while TypeMaps come from a per-run arena that is freed
+and recycled — so a cell baked in run N saw a *different* TypeMap allocated at
+the same address in run N+1 and reported a **false hit**, reading the wrong
+field. Confirmed by `LAMBDA_DISABLE_MIR_CACHE=1` turning 30 failures into 0.
+Fixed with a monotonic `lambda_shape_epoch()` bumped in `runner.cpp` where each
+run activates its context; the cell records its install epoch and must match.
+Immeasurable cost. **Any future baked-in mutable cell needs the same guard**, and
+it is worth checking whether the JS load/store ICs are exposed to the same
+hazard — their cells live in `ast_pool` (retained with the MIR context), but
+their cached *shapes* are realm-owned, which is the same split that broke here.
+
+**Measured (release, 5-run medians, both binaries built first then interleaved):**
+
+| benchmark | pre-L2 | L2 | ratio |
+|---|---|---|---|
+| jetstream/richards.ls | 253.0 ms | 212.7 ms | **1.190x** |
+| awfy/cd2.ls | 439.1 ms | 374.7 ms | **1.172x** |
+| awfy/havlak2.ls | 55.9 ms | 49.2 ms | **1.136x** |
+| jetstream/splay.ls | 176.8 ms | 157.5 ms | **1.123x** |
+| jetstream/crypto_sha1.ls | — | — | 1.006x (flat) |
+
+Combined with L1, richards.ls is **372.3 → 212.7 ms = 1.75x**. The plan's
+"L1+L2 ≥4x" gate is **not** met — but 4x was never reachable by removing lookup
+cost alone; what remains is call overhead and boxing (R4/OI-9 territory).
+
+Gates: `test-lambda-baseline` 3619/3619, `test262-baseline` 40261/40261 zero
+regressions, `make lint` no new findings.
+`test/test_item_repr_gtest.cpp`'s `MirMemberAccessKeepsContainerItemUnmodified`
+updated deliberately to accept `fn_member_ic` as well as `fn_member` (it is a
+dump-pattern assertion, and static-name sites now lower to the IC form).
+
+Original plan text follows.
+
 
 Port the JS named-IC pattern (stage 1: helper-based, no emission risk):
 

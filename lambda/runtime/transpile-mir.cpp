@@ -7532,9 +7532,27 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     int field_root = create_gc_root_slot(mt, boxed_field);
     boxed_obj = load_gc_root_slot(mt, obj_root, "member_obj");
     boxed_field = load_gc_root_slot(mt, field_root, "member_key");
-    MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
+    // Tune6 L2: static-name member sites get a per-site inline cache cell, so a
+    // repeat read on the same shape skips fn_member's type dispatch and the
+    // shape-chain scan. Computed keys keep the plain call — one cell can only
+    // stand for one key.
+    // The cell is script_pool-owned but its address is baked into MIR that the
+    // module cache replays in *later* runs, against a type arena this run's
+    // TypeMaps do not belong to. That is why the cell carries an epoch and
+    // fn_member_ic refuses to hit on a stale one — without it a recycled
+    // TypeMap at the same address reads back as a false hit.
+    LambdaMemberIC* member_ic = NULL;
+    if (field->node_type == AST_NODE_IDENT && mt->script_pool) {
+        member_ic = (LambdaMemberIC*)pool_calloc(mt->script_pool, sizeof(LambdaMemberIC));
+    }
+    MIR_reg_t result = member_ic
+        ? emit_call_3(mt, "fn_member_ic", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field),
+            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)member_ic))
+        : emit_call_2(mt, "fn_member", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
     int result_root = create_gc_root_slot(mt, result);
     result = load_gc_root_slot(mt, result_root, "member_res");
 

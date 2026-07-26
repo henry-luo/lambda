@@ -1,6 +1,7 @@
 # Jube Hosted Node Architecture
 
-> **Status:** design proposal (2026-07-25)
+> **Status:** design proposal (2026-07-25; §3.1 + §9/JN7/JN8 revised in
+> review 2026-07-26 — modules fully shielded from the async substrate)
 >
 > **What:** migrate the built-in Node.js compatibility layer (`lambda/js/js_fs.cpp`,
 > `js_http.cpp`, `js_crypto.cpp`, …) out of the monolithic host into Jube native
@@ -49,10 +50,10 @@ modules/
 | JN4 | Resolution: a registry **specifier index** replaces `js_module_get_builtin`'s memcmp chain and all four duplicated builtin-name lists. `require`/`import` fall back to the registry, which dlopen-loads the owning module lazily on first touch. `node:`-prefix and `.js`-suffix aliasing is normalized once in the loader. |
 | JN5 | Absent module ⇒ the Node-shaped `Cannot find module 'x'` error (`code: 'MODULE_NOT_FOUND'`) plus a host `log_*` diagnostic naming the missing Jube module. Never a link failure. A host with no Node modules at all must still run non-Node JS. |
 | JN6 | The host keeps: the libuv loop and JS event-loop layer, microtask/nextTick queues, global timers, console core, the process-object core, the JS module cache, the npm resolver (initially), and `node:vm` (initially). `node-core` owns: process extensions, `internalBinding`, the stub namespaces, `timers/promises`, and the Node error-code helpers. |
-| JN7 | The host API grows versioned **JS runtime service tables** — async/event-loop, binary (Buffer/typed arrays), promise, and Node-error services — the Node analog of Python's compiler API (`JubeGuestExecutionAPI`), extracted empirically from what `fs`/`net`/`child_process` actually use. |
-| JN8 | **libuv is a declared shared substrate**: modules call `uv_*` directly against the host's loop instance (symbols resolved from the host via `-undefined,dynamic_lookup`, same as `lang-python`). JS-level queues (`nextTick`, microtasks, timers) are reached only through the async service table, never by direct `js_*` symbol reach. |
+| JN7 | The host API grows **one additive `JubeHostNodeAPI` parent** composing four versioned service tables — async request/resource operations, binary (Buffer/typed arrays), promise, and Node-error services — the Node analog of Python's compiler API (`JubeGuestExecutionAPI`), with v1 extracted empirically from what `fs`/`net`/`child_process` actually use (§9). JS value mechanics stay on the existing script/value/data tables (the `js_native_api.h` vs `node_api.h` split, §3.1). |
+| JN8 | **Modules are shielded from the async substrate entirely**: no libuv type, symbol, or loop pointer crosses the module boundary (`uv_*` is on the module checker's banned-symbol list). Modules submit requests to host-owned async services and hold opaque integer resource ids; completions arrive on the JS thread with host-owned drain ordering. libuv remains a host implementation detail, swappable without touching any module. *(Revised 2026-07-26 in review, from an earlier shared-libuv-substrate proposal.)* |
 | JN9 | GC across the boundary uses `JubeHostGcAPI` root frames/roots and persistent roots **only**. Direct `heap_register_gc_root*` externs, `RootFrame`/`Rooted`, `js_heap_epoch`, and `Context` field access are banned by the module architecture checker. The conversion is also the fix vehicle for the known unrooted-native-`Item`-locals class. |
-| JN10 | The core→builtin **backward calls invert into init-time hooks** with absent-module defaults: console formatter, active-handle providers, shutdown participants, the IPC socket-handoff, and globals installation (including the `Buffer` global). |
+| JN10 | The core→builtin **backward calls invert into init-time hooks** with absent-module defaults: console formatter, shutdown participants, the IPC socket-handoff, and globals installation (including the `Buffer` global). Active-handle enumeration needs no hook — it reads the §9.1 resource table. |
 | JN11 | Lifecycle: namespace objects stay cached in the existing JS module cache per runtime epoch; modules implement the already-present `runtime_reset` (batch-mode global recreation) and `heap_cleanup` (per-heap teardown) descriptor hooks. |
 | JN12 | Distribution: the **standard bundle ships `node-core`** (observable JS behavior is unchanged) with the heavy leaves optional; the full bundle ships all node modules; an embedded/minimal profile ships none. All bundles carry the byte-identical host binary, extending the existing `release-standard`/`release-jube` identity rule. |
 | JN13 | Migration proceeds through stages N0–N7 (§11); `make node-baseline` (1492/3517 today) is an every-stage no-regress gate, and MIR emission for non-Node scripts must stay within existing `test/mir` budgets. |
@@ -111,6 +112,64 @@ facility; (2) promote/generalize it into the unified runtime; (3) expose it
 through a versioned extension API; (4) keep an adapter inside the module;
 (5) reject the reuse. No `node`-specific branch may be added ad hoc to core
 files.
+
+### 3.1 Prior art: how Node and Deno couple engine, runtime, and loop
+
+**V8 embedding (both engines).** V8 hands the embedder an Isolate (one heap +
+GC), Contexts (realms), stack-scoped `Local<>` handles inside `HandleScope`s,
+rooted `Global`/`Persistent` handles, a pending-exception `TryCatch` model, and
+a `v8::Platform` interface the embedder implements to supply task runners. The
+**embedder owns the event loop** and decides when microtasks drain; Node runs
+one `uv_loop` per `Environment` and drains nextTick + microtasks after each
+C++→JS callback batch (`InternalCallbackScope`/`MakeCallback`). That
+"completion, then drain" chokepoint is exactly what our host already implements
+(`js_event_loop.cpp` + the `lambda_uv_set_microtask_drain` hooks) —
+independent validation, nothing to change.
+
+**Node core is the cautionary tale, not the model.** Node's own builtins (fs,
+net, http, …) are C++ files bound *directly* to V8 and libuv, registered
+through an `internalBinding` registry, with a JS layer (`lib/*.js` over
+"primordials") on top; libuv handle lifetime is managed by `HandleWrap`/
+`ReqWrap` wrapper classes woven into the GC. Structurally that is the same
+monolith we are migrating away from — and its consequence is well documented:
+native addons that coupled to those internals broke on every major release
+(the NAN recompile era) until Node introduced a deliberate boundary.
+
+**Node-API is the boundary Node learned to build.** The supported addon ABI
+(N-API) is: opaque `napi_env`/`napi_value` handles, status-code returns with a
+pending-exception model (`napi_throw` / `napi_is_exception_pending` — no
+unwinding), handle scopes, `napi_ref` for persistence, versioned additive-only
+evolution — and, critically, its supported async story **hides libuv**:
+`napi_create_async_work`/`napi_queue_async_work` run blocking work on the
+runtime's pool and complete on the JS thread, and `napi_threadsafe_function`
+posts calls onto the JS thread from anywhere. A raw `napi_get_uv_event_loop`
+escape hatch exists and is the acknowledged wart — addons that reach for it
+are the ones that break in workers and embedded hosts. The header split is
+equally instructive: `js_native_api.h` (pure engine/value API, engine-portable)
+vs `node_api.h` (runtime services). Our existing script/value/data tables are
+already the first half; JN7 adds the second half without reproducing the
+escape hatch.
+
+**Deno never exposed the loop at all.** `deno_core` reaches V8 from Rust and
+gives extension code exactly one bridge: **ops** (`#[op2]`-generated glue;
+eligible sync ops ride V8's Fast API calls) plus a **ResourceTable** — kernel
+objects (files, sockets, child processes) live host-side keyed by opaque
+`u32` resource ids; JS and extension code hold only rids; async ops are Rust
+futures the runtime schedules on tokio, and completion resolves the op's
+promise; `close(rid)` drops the resource and cancels its pending ops. Deno
+also learned to keep generic serialization off the boundary (the serde_v8 cost
+drove op2's direct value access) — for us: keep Item-native signatures, never
+add a marshaling layer.
+
+Lessons adopted in this design: (1) the value-API vs runtime-services split
+(JN7); (2) opaque handles + status codes + pending exceptions — already house
+rules, here independently validated; (3) **resource-id tables instead of
+handle pointers** (JN8), which also yields central shutdown, active-handle
+enumeration, leak accounting, and a permission-audit chokepoint for free;
+(4) completions delivered on the JS thread with host-owned drain ordering;
+(5) a generic blocking-work op instead of any module-visible threading
+primitive; (6) no loop escape hatch — `napi_get_uv_event_loop` is the
+anti-pattern this design deliberately omits.
 
 ## 4. Verified starting point (2026-07-25)
 
@@ -252,7 +311,10 @@ once migration completes.
 
 ### P3. Modules see only `jube.h`
 No `js_runtime.h`, `js_runtime_state.hpp`, `lambda-data.hpp` internals, GC
-internals, or `Context` layout. The single deliberate widening is JN8 (libuv).
+internals, or `Context` layout — and no libuv either. After the JN8 revision
+there is no deliberate widening at all: the async substrate is reached only
+through the §9.1 request API, and `uv_*` symbols sit on the module checker's
+banned list alongside the engine internals.
 
 ### P4. No cost when absent, no behavior change when present
 A bundle without a node module pays nothing for it and fails cleanly (JN5).
@@ -441,42 +503,95 @@ members are unchanged (plain function Items). Class-shaped members dispatch
 through the compiled interface records (`jube_member_call`), the mechanism
 already carrying DOM at cost parity.
 
-## 9. The JS runtime service tables (JN7)
+## 9. The JS runtime service surface (JN7, JN8)
 
-New versioned tables, additive on `JubeHostAPI` (size-gated like `data`).
-Sketches below are directional; v1 signatures are extracted in N2 from the
-actual call sites in fs/net/child_process (P5). All follow the house rules:
-`api_version` + `struct_size` first, borrowed Items must be rooted before
-allocating operations, status-code returns, pending exceptions.
-
-### 9.1 Async / event loop (JN8)
+One additive pointer on `JubeHostAPI` — a composed `JubeHostNodeAPI` parent —
+carries everything a node module needs beyond the existing value/script/data
+tables, mirroring how `hosted_language` composes its service tables:
 
 ```c
-struct JubeHostAsyncAPI {
-    uint32_t api_version; uint32_t struct_size;
-    void* (*uv_loop)(void);                       // the host uv_loop_t* (JN8)
-    int   (*next_tick)(Item cb, Item* args, int argc);
-    int   (*enqueue_microtask)(Item cb);
-    int64_t (*timer_start)(Item cb, double delay_ms, double repeat_ms,
-                           Item* args, int argc);  // JS-visible timer table
-    int   (*timer_clear)(int64_t id);
-    void  (*handle_ref)(void); void (*handle_unref)(void);  // keep-alive
-                          // accounting for module-owned uv handles the host
-                          // drain logic cannot see
-    int   (*register_shutdown)(void (*fn)(void));           // §10
-    int   (*register_active_handles_provider)(Item (*fn)(void));
+struct JubeHostNodeAPI {
+    uint32_t api_version; uint32_t struct_size; uint64_t capabilities;
+    const JubeHostAsyncAPI*     async_ops;  // §9.1 — requests, resources, scheduling
+    const JubeHostBinaryAPI*    binary;     // §9.2
+    const JubeHostPromiseAPI*   promise;    // §9.3
+    const JubeHostNodeErrorAPI* error;      // §9.4
 };
 ```
 
-The libuv decision (JN8): modules call `uv_*` directly on the loop from
-`uv_loop()`. libuv is itself a stable C ABI, the host already exports its
-symbols to modules through `-undefined,dynamic_lookup` (proven by
-`lang-python`'s linking model), and wrapping the entire uv surface would be a
-second libuv — pure volume with no isolation gain for trusted modules. The
-constraints that make this sound are contractual, checker-enforced where
-possible: loop access only from the JS thread; JS-level queue effects only via
-this table (no `js_setTimeout`/`js_next_tick_enqueue` symbol reach); every
-module-owned handle closed by `heap_cleanup`/shutdown participation.
+This is the `js_native_api.h` vs `node_api.h` split (§3.1) applied to our ABI:
+JS value mechanics stay on the existing tables; runtime services live here.
+Sketches are directional; v1 signatures are extracted in N2 from the actual
+call sites in fs/net/child_process/dns (P5). House rules throughout:
+`api_version` + `struct_size` first, status-code returns, pending exceptions,
+borrowed Items rooted before allocating operations.
+
+### 9.1 Async services: the request/resource model (JN8)
+
+Modules are fully shielded from the async substrate. No libuv type, symbol,
+or loop pointer crosses the module boundary; `uv_*` joins the checker's
+banned-symbol list. The model follows Deno's ops + ResourceTable and
+Node-API's async-work discipline (§3.1), deliberately not Node core's direct
+uv coupling:
+
+- **Resources are integer ids.** Every long-lived kernel object a module
+  needs (open file, socket, listener, child process, fs watcher, signal
+  subscription) is created and owned by the host, lives in a host-side
+  resource table, and is exposed as an opaque `JubeRid` (uint32).
+  `close(rid)` is table removal; libuv's asynchronous `uv_close` dance,
+  handle memory ownership, and loop teardown are host business and cannot be
+  a module bug class. The table also gives the host central shutdown,
+  `process._getActiveHandles` enumeration (deleting that §10 hook), leak
+  accounting at `heap_cleanup`, and a single audit chokepoint for the
+  permission model.
+- **Operations are requests.** Each async op takes arguments, a C completion
+  callback, and a user-data pointer. **Completions are delivered only on the
+  JS thread, in event-loop order**, and the host drains nextTick/microtasks
+  after each completion batch exactly as it does for its own callbacks today
+  (the `lambda_uv_set_microtask_drain` machinery). Modules never pump, poll,
+  or drain anything, and thread discipline is host-enforced rather than
+  contractual.
+- **Completion payloads are op-specific C structs** (`uv_fs_t`-result style),
+  valid only for the duration of the callback; byte payloads are borrowed for
+  the callback. The module turns them into Items (fs.Stats shapes, Buffers)
+  via the value/binary tables — Node semantics stay module-side, the host
+  stays semantics-free.
+- **Blocking work is a generic op** — `work_submit(fn, complete, user_data)` /
+  `work_cancel`, the `napi_create_async_work` pattern — for crypto/zlib CPU
+  work. The pool is host policy; no threading primitive is module-visible.
+
+Op families, v1 derived from the §4.3 uv-call inventory:
+
+| Family | Ops (sketch) | Replaces today |
+|---|---|---|
+| scheduling | `next_tick`, `enqueue_microtask`, `timer_start`/`timer_clear`, `ref`/`unref(rid)`, `register_shutdown` | `js_next_tick_enqueue`/`js_setTimeout` externs; uv ref counting |
+| fs | open/close/read/write/stat/lstat/fstat/readdir/mkdir/unlink/rename/copy/realpath/chmod/utimes/fsync/truncate…; `fs_watch` → rid | `uv_fs_*` (`js_fs.cpp:717–750`), `uv_fs_event` |
+| stream (tcp + pipe unified) | connect / listen / accept → rid; read_start / read_stop; write; shutdown; socket opts (nodelay, keepalive); fd adoption; IPC handle send / receive → rid | `uv_tcp_*` / `uv_pipe_*` (`js_net.cpp`, `js_http.cpp:3357`), the `js_globals.cpp:138` handoff |
+| process | spawn (argv/env/cwd/stdio spec referencing rids + ipc) → rid; kill; exit completion | `uv_spawn` / `uv_process_kill` (`js_child_process.cpp:542/:436`) |
+| dns | getaddrinfo / getnameinfo | the uv getaddrinfo shim (`js_runtime.cpp:38320`), `uv_timer` timeouts (`js_dns.cpp:405`) |
+| signal / tty | signal_start / signal_stop → rid; tty mode query / raw toggle | `uv_signal_*`, `uv_tty_*` (readline) |
+| work | submit / cancel | ad-hoc CPU work in crypto/zlib paths |
+
+v1 contracts (deliberate simplifications, each with a marked extension point):
+
+- **Write payloads are copied at submit.** No cross-ABI buffer pinning or
+  lifetime contract in v1; a pinned zero-copy variant is a later additive
+  entry, adopted only if profiles demand it (§13 risk 8).
+- Completion callbacks may submit new requests but must not block or nest a
+  drain.
+- `close(rid)` implicitly cancels that resource's in-flight requests —
+  completions fire with a canceled status (Deno's close semantics);
+  request-level cancel exists where the substrate supports it.
+
+What this buys over the withdrawn direct-libuv alternative: modules are
+decoupled from the async implementation entirely — the host can change
+substrate (libuv today; direct kqueue/io_uring, a different scheduler, or a
+worker topology later) without touching any module; the uv handle-lifecycle
+bug class cannot exist in modules; Windows needs no uv symbol-export story;
+and the JS-thread rule is enforced by construction. The cost is a larger host
+surface (~50 entries across the families above) — bounded, extracted from
+real usage rather than speculation, and precedented in-tree by the ~70-entry
+`JubeHostDomAPI`.
 
 ### 9.2 Binary data
 
@@ -495,7 +610,9 @@ struct JubeHostBinaryAPI {
 Replaces the backward `js_buffer_from_bytes` externs in core once `Buffer`
 itself lives in `node-core`: core code that needs byte objects (e.g. fetch)
 uses engine-native ArrayBuffer paths; Node-shaped `Buffer` construction is
-module-side over this table.
+module-side over this table. A zero-copy `buffer_adopt` (host adopts
+module-provided bytes with a free callback) is the marked extension point if
+read-path copies show up in N5/N6 profiles.
 
 ### 9.3 Promises
 
@@ -550,10 +667,10 @@ absent default:
 | Today (core calls…) | Becomes | Absent-module default |
 |---|---|---|
 | `js_util_format` for `console.log` (`js_globals.cpp:5990`) | console formatter hook | engine-native minimal formatter (JSON-ish, no colors/depth options) |
-| `js_net_get_active_handles` / `_getActiveHandles` (`js_globals.cpp:3714`) | `register_active_handles_provider` (per module) | empty array |
+| `js_net_get_active_handles` / `_getActiveHandles` (`js_globals.cpp:3714`) | host-side enumeration of the §9.1 resource table — no hook needed | empty array (empty table) |
 | `js_net_close_all_active_servers` at shutdown (`js_runtime.cpp:35790`) | `register_shutdown` participants | no-op |
 | `js_child_process_emit_or_queue_cluster_online` (`js_runtime.cpp:62`) | owned entirely by `node-child-process` via its IPC channel hooks | n/a |
-| `uv_pipe_t*` IPC accept handoff (`js_globals.cpp:138`) | an IPC-accept hook registered by `node-net`/`node-child-process` | reject with `MODULE_NOT_FOUND`-shaped error |
+| `uv_pipe_t*` IPC accept handoff (`js_globals.cpp:138`) | the host accepts the handle into the §9.1 resource table and delivers a rid through the IPC hook registered by `node-net`/`node-child-process` | reject with `MODULE_NOT_FOUND`-shaped error |
 | unconditional `process`/`Buffer`/`os`/`vm` global install (`js_globals.cpp:16009–16096`) | host installs its own core globals; module namespaces/globals install via the existing `JubeNamespaceDef` globals path (`js_globals.cpp:78–88`) extended with non-eager (lazy accessor) installation | globals simply absent (`typeof Buffer === 'undefined'`) |
 
 The `Buffer` global is the observable crux: with `node-core` bundled in the
@@ -581,9 +698,12 @@ standard host byte-identical across bundle packaging, and lands static-first
   `JubeModuleDef` with a namespace table and delete its chain entries + list
   rows. *Gate:* node-baseline unchanged; `path` served via registry; the four
   lists still consistent for everything else; MIR budgets unchanged.
-- **N2 — Service tables.** Introduce `JubeHostAsyncAPI`/`Binary`/`Promise`/
-  `NodeErrorAPI` v1, signatures extracted from fs/net/child_process call
-  sites; land the checker in CI for converted files; write the rooting
+- **N2 — Service tables.** Introduce `JubeHostNodeAPI` v1 (async
+  request/resource ops + binary/promise/error), the op set extracted from the
+  §4.3 `uv_*` call inventory across fs/net/child_process/dns (P5) — including
+  the §13-risk-8 edge inventory (fs.watch, tty raw mode, IPC descriptor
+  passing, fd adoption) so v1 needs no later escape hatch; land the checker
+  in CI for converted files with `uv_*` on the banned list; write the rooting
   conversion guide (JN9 patterns). *Gate:* tables exercised by at least one
   real conversion (fs picked next); negative descriptor tests (undersized/
   missing tables) extend the existing POSIX matrix.
@@ -602,8 +722,9 @@ standard host byte-identical across bundle packaging, and lands static-first
   macOS + Linux; identical behavior static vs dynamic (P7 diffing).
 - **N5 — libuv leaves.** `node-fs`, then `node-net` (net+dns), then
   `node-child-process`, static→dynamic each, converting rooting per JN9 and
-  event-loop access per JN8. *Gate per module:* node-baseline; forced-GC
-  sweep; checker; absent-module negatives.
+  every direct `uv_*`/JS-queue call to the §9.1 request API (JN8). *Gate per
+  module:* node-baseline; forced-GC sweep; checker (zero `uv_*` references);
+  absent-module negatives.
 - **N6 — Protocol leaves.** `node-http` (http+https), `node-tls`; then the
   JN14 crypto split (WebCrypto stays host) and `node-crypto`. mbedTLS drops
   out of the minimal host link if nothing else needs it (audit — mbedtls is
@@ -665,11 +786,17 @@ node module.
    "all Node surface is module-provided".
 7. **Windows**: `LoadLibrary` parity and the `-undefined,dynamic_lookup`
    equivalent (host import library / delay-bound imports) need CI from N4 —
-   same open as the native-module design's risk 4, now made concrete by libuv
-   symbol sharing (JN8).
-8. **Thread discipline for JN8** is contractual, not enforceable by the
-   loader: a module could touch the loop off-thread. Mitigation: debug-build
-   thread asserts in the async table's host implementations.
+   same open as the native-module design's risk 4. The JN8 revision helps:
+   with libuv fully host-side, modules import only the Jube API surface, so
+   the Windows export set stays small and auditable.
+8. **Request-API coverage and cost (JN8)**: the edges where a shielded async
+   API most often falls short are `fs.watch` (`uv_fs_event`), tty raw mode
+   (readline), IPC descriptor passing, and `uv_tcp_open`-style fd adoption
+   (cluster/stdio) — N2 must inventory them before freezing v1 so no module
+   ever needs an escape hatch (the `napi_get_uv_event_loop` mistake, §3.1).
+   Separately, v1's copy-on-submit write contract is a deliberate
+   simplification: profile http/fs throughput against the N0 baselines before
+   deciding whether the pinned zero-copy variant is warranted.
 9. **Worker threads/cluster futures**: if real `worker_threads` support
    arrives (per `vibe/Lambda_Js_Thread.md`), per-worker module instances and
    the "modules are process-lifetime singletons" rule will need
@@ -691,3 +818,4 @@ node module.
 | Static-modules layering SM10/SM12 (`vibe/Lambda_Design_Static_Modules.md`) | Moving Node IO out of `lambda-rt` is consistent with the lambda-io charter; `lib/uv_loop.c`'s eventual home is decided there, not here. |
 | C2MIR frozen (CLAUDE.md rule 14) | No node-module work touches the legacy transpiler; MIR-emission neutrality is a stated gate (JN13). |
 | node-baseline ledger (`make node-baseline`, 1492/3517) | The continuous no-regress gate for every stage (JN13). |
+| Review 2026-07-26 (user) | JN8 inverted: modules shielded behind a host request/resource API (rid table) instead of calling libuv directly; JN7 consolidated into one composed `JubeHostNodeAPI`; prior-art survey added (§3.1). |

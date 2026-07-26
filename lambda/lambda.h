@@ -1706,6 +1706,29 @@ extern "C" {
     Item fn_index(Item item, Item index);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
+    // Tune6 L2: per-call-site inline cache for `obj.field` on maps/objects/
+    // elements. Caches the receiver's TypeMap identity and the resolved
+    // ShapeEntry; the guard is the shape-pointer compare alone, because every
+    // Lambda writer that repacks or replaces a shape installs a *new* TypeMap
+    // (map_rebuild_for_type_change) while the in-place writers only retag an
+    // existing entry — and the hit path re-reads entry->type/byte_offset, so a
+    // retag is picked up rather than cached stale. Zero-initialised = empty.
+    //
+    // The epoch is load-bearing. Compiled MIR is cached and replayed across
+    // script runs (L1 module cache), while TypeMaps come from a per-run arena
+    // that is freed and recycled. Without it a cell installed in one run can
+    // see a *different* TypeMap allocated at the same address in a later run
+    // and report a false hit, silently reading the wrong field.
+    typedef struct LambdaMemberIC {
+        void* shape;      // TypeMap* the entry belongs to (NULL = empty)
+        void* entry;      // ShapeEntry* for the cached key
+        uint64_t epoch;   // lambda_shape_epoch() when installed
+    } LambdaMemberIC;
+    Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic);
+    // Monotonic counter bumped whenever a run activates its context (and hence
+    // its type arena). Never reused, so a stale cell can never alias a live one.
+    uint64_t lambda_shape_epoch(void);
+    void lambda_shape_epoch_bump(void);
     // length function
     int64_t fn_len(Item item);
     Item fn_int(Item a);

@@ -1588,6 +1588,13 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
+    // Tune6 L2: arg 2 is the per-site LambdaMemberIC cell (script_pool-owned,
+    // not GC). Same effects as fn_member — a miss tail-calls straight into it.
+    {"fn_member_ic", FPTR(fn_member_ic),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER)}},
 
     // ========================================================================
     // Path functions
