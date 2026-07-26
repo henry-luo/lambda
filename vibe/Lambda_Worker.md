@@ -1,5 +1,7 @@
 # Lambda Worker Proposal
 
+> **SUPERSEDED (2026-02-11 draft; marked 2026-07-26).** The live design is `Lambda_Design_Concurrency.md` v3.1 — tier 1 colorless `pn` tasks (implemented) plus tier 2 workers via `start worker(spec, isolation: 'thread' | 'process')` (K31). This draft predates the `start`/`wait` surface, the mailbox decision (K20), scoping/cancellation (K30), and the `T^E` failure model, so **its syntax and API are not current**. Two of its instincts did survive and are worth the read: workers run modules with a `pn main()` entry point, and CLI/pipe integration. Its headline "threads remain internal to the runtime" is **reversed by K31** — thread isolation is now a user-selectable option on the one worker API.
+
 ## Executive Summary
 
 This proposal introduces **Workers** to the Lambda runtime to enable concurrent processing. Currently, Lambda assumes single-threaded execution, which limits its ability to leverage modern multi-core processors and handle I/O-bound workloads efficiently. By adding worker support, Lambda can execute computationally expensive tasks in parallel and maintain responsiveness for interactive applications.

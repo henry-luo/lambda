@@ -1,16 +1,16 @@
 # Lambda Concurrency Design — Colorless Concurrency: the Evolution to v3 (One Keyword, Two Tiers)
 
-**Status:** **v3 adopted** (§10) — v1 and v2 preserved below as design history
-**Date:** v1 2026-07-06 (fibers) · v2 2026-07-08 (declared-`async` + K2-R state machines) · **v3 2026-07-08 (current): one keyword `start`, two tiers, threads on the roadmap**
+**Status:** **v3 adopted** (§10), amended as **v3.1** (K31, K32) — v1 and v2 preserved below as design history
+**Date:** v1 2026-07-06 (fibers) · v2 2026-07-08 (declared-`async` + K2-R state machines) · v3 2026-07-08: one keyword `start`, two tiers · **v3.1 2026-07-26 (current): tier 2 = workers, thread *or* process, user's pick, thread by default (K31); share-nothing as semantics with read-only sharing underneath (K32)**
 **Context:** realizes decision **J4** (BEAM-style concurrency, stated explicitly) from the Jube runtime ledger — Part 1 of `Lambda_Semantics_Features.md`. Addresses the #1 structural gap from the six-language feature comparison (Part 3 of the same doc).
 
-**Reading guide:** §1–§9 document v1 and v2 as they were designed — kept intact because the reasoning is the asset (why fibers, why state machines, what Go/Loom/Zig/BEAM each teach). Neither is the final design. **The adopted design is v3, §10**, which supersedes the four-level model with a two-tier one and records the disposition of every earlier decision in §10.9.
+**Reading guide:** §1–§9 document v1 and v2 as they were designed — kept intact because the reasoning is the asset (why fibers, why state machines, what Go/Loom/Zig/BEAM each teach). Neither is the final design. **The adopted design is v3, §10**, which supersedes the four-level model with a two-tier one and records the disposition of every earlier decision in §10.9. **v3.1 (K31, §10.3.1) collapses old levels 2 and 3 back into one tier with an `isolation:` option** — so §5's isolate design is live again, minus its `spawn`/`await` spelling.
 
 ---
 
 ## 1. The model at a glance
 
-*[v1/v2 — superseded by the two-tier model of v3, §10.3. Kept for reference.]*
+*[v1/v2 — superseded by the two-tier model of v3, §10.3. Kept for reference. Note that under v3.1/K31 levels **2 and 3 became one user tier** (workers) distinguished by an `isolation:` option, so rows 2 and 3 below now read as two modes of one thing rather than two levels.]*
 
 Lambda concurrency is layered in four levels. Levels 1–3 are the core design; level 0 is a free win enabled by `fn` purity and included for completeness.
 
@@ -223,7 +223,7 @@ Two supporting obligations (open items):
 
 ## 5. Levels 2 & 3 — the unified isolate API
 
-*[v1/v2 — superseded by v3 §10.3: the worker-thread tier (level 2) is dropped as a user-visible concept; processes become simple OS child processes launched by the same `start` keyword. What survives into v3: the uniform-handle idea (awaitable → `T^E`, message target), the memory model (§5.2 — copy messages, share flat immutables, Mark as process wire format), the failure-as-values model (§5.3), bounded delivery (§5.4), and `select`. The mailbox-vs-channel question was reopened in v3 and resolved as mailbox (K20, §10.8).]*
+*[v1/v2 — **largely reinstated** by K31 (2026-07-26, §10.3.1) after a brief v3 interval in which the worker-thread tier was dropped as a user-visible concept. What is live today: levels 2 and 3 are **one tier** (`start worker(spec, isolation:)`) launched by the v3 `start` keyword; §5.1's isolation-as-an-option invariant (K4) is the governing rule again; §5.2's dual memory model, §5.3's failure-as-values, §5.4's bounded delivery, §5.5's topology, and `select` all stand. Superseded spellings only: `spawn(...)` → `start worker(...)`, `await` → `wait`. The mailbox-vs-channel question was reopened in v3 and resolved as mailbox (K20, §10.8); the operational thread-vs-process differences K31 makes normative are tabulated in §10.3.2.]*
 
 ### 5.1 One primitive set, isolation as an option (K4)
 
@@ -242,10 +242,15 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 ### 5.2 Memory model
 
-- **Messages are deep-copied by default.** Items cross by value — the C4-honest semantics. Same-address-space (level 2) may optimize to COW behind the same semantics; that is an implementation detail, never observable.
-- **Read-only sharing is restricted to flat, pointer-free values**: typed arrays (`ArrayNum`), strings, binaries, image buffers. This is BEAM's refcounted-binaries move, generalized. Level 2 shares by pointer + refcount; level 3 maps the buffer via shm/mmap. A shared flat is deeply immutable — the Ractor rule.
-- **General graph-shaped Items are never shared.** A position-independent frozen-arena format (offset-based Items) would be required and is **deferred indefinitely** — BEAM refused this for 25 years and never regretted it. Copy is the answer; flats are the escape hatch for the data that actually gets big (images, matrices, corpora).
-- **Level-3 wire format = Mark.** Messages across the process boundary serialize as Mark — Lambda already owns what BEAM had to invent (ETF). This also makes level-3 messages naturally debuggable/loggable.
+*[Revised 2026-07-26 by **K32** — the third bullet is superseded: under thread isolation, pointer-ful read-only Items **are** shared. See §10.3.3 for the mechanism and its bill.]*
+
+- **Share-nothing is the semantic model, not the implementation strategy.** Programs are written, and reason, as if every message were a copy: no shared mutable state, ever, at any tier. **Read-only sharing is a representation optimization underneath that guarantee** — unobservable precisely because everything shared is deeply immutable, so no program can tell a shared subgraph from a copied one. This split is what lets thread and process isolation share *different amounts* without being two languages.
+- **Messages are deep-copied by default.** Items cross by value — the C4-honest semantics. Same-address-space isolation may serve the copy by sharing instead; that is an implementation detail, never observable.
+- **What may actually be shared differs by isolation mode — this is the one real representational difference between them (K32):**
+  - **`isolation: 'thread'` — any deeply-immutable Item, by pointer, including pointer-ful graph shapes**: maps, elements, nested arrays, parsed documents, config trees. Pointers are meaningful in the shared address space, so no transformation is needed.
+  - **`isolation: 'process'` — pointerless data only**: flat buffers (`ArrayNum`, string bytes, binaries, image buffers), mapped by shm/mmap. This is BEAM's refcounted-binaries move, generalized. A pointer is meaningless in the peer's address space, so graph shapes cross by Mark copy instead.
+- **The position-independent frozen-arena format (offset-based Items) stays deferred indefinitely** — it is what process-mode graph sharing would need, and BEAM refused it for 25 years without regret. Under K32 this stops being a gap and becomes the *definition* of the process tier: pointers don't cross process boundaries; that is what a process boundary is.
+- **Process wire format = Mark.** Messages across the process boundary serialize as Mark — Lambda already owns what BEAM had to invent (ETF). This also makes cross-process messages naturally debuggable/loggable.
 - Note under J5: JS `SharedArrayBuffer` + `Atomics` (shared *mutable* memory) are **excluded by design** — recorded as a deliberate dialect gap, not an omission.
 
 ### 5.3 Failure model — failures are values (extends J3)
@@ -287,7 +292,7 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 
 ## 7. Guest languages on the concurrency substrate
 
-- **JS/TS:** Promises/`async-await` run unchanged — colored, on their existing state machines, over the shared libuv loop (K10, §4.6). Calls into may-await `pn`s auto-promote to Promise at the membrane (§4.6). `Worker` maps to `spawn {isolation:'thread'}` with structured clone = Item copy. `SharedArrayBuffer` excluded (§5.2).
+- **JS/TS:** Promises/`async-await` run unchanged — colored, on their existing state machines, over the shared libuv loop (K10, §4.6). Calls into may-await `pn`s auto-promote to Promise at the membrane (§4.6). `Worker` maps to `start worker(..., isolation: 'thread')` and `child_process` to `isolation: 'process'`, structured clone = Item copy — the two Node APIs land on one Lambda tier (K31). `SharedArrayBuffer` excluded (§5.2). Implementation notes for the JS side of a thread isolate (per-isolate globals, heap sizing, watchdog): `Lambda_Js_Thread.md` JT1–JT7.
 - **Python/Ruby/Bash (Jube):** guest threading APIs (`threading`, `Thread`, subshells) map — under the J5 dialect banner — onto isolates or are documented-unsupported. `asyncio`/Fiber interop is a per-guest mapping table, same family as the G3 error-mapping tables. No GIL emulation: guests get real isolates or nothing.
 - Native modules: §4.4 clause (declare blocking/await-safety) + G2 (rooting across the ABI) are the two JubeHostAPI v1 obligations this design adds.
 
@@ -354,14 +359,15 @@ let result = await receive(w)        // or: await w — isolate's final result, 
 pn main() {
     let h1 = start fetch(a)                      // pn call → concurrent task
     let h2 = start fetch(b)                      // both in flight
-    let p  = start process("worker.ls", args)    // process spec → OS child process, same keyword
+    let w  = start worker("worker.ls", args)     // worker spec → isolate on a thread (default)
+    let p  = start worker("worker.ls", args, isolation: 'process')   // …or an OS child process
     let r  = wait(h1)^                           // builtin — T^E surfaces here
     send(p, job)                                 // handles are the message target
     let x  = select(h2, p, timeout: 5000)        // first of several (syntax TBD, O4)
 }
 ```
 
-**`start` is the only concurrency keyword in the grammar.** Everything else is a builtin `pn`: `wait(h)`, `send(h, msg)`, `receive()`, `select(...)`, `process(...)`. A **direct call stays a plain call** — `fetch(url)` synchronously (colorlessly) yields the value; it is `wait(start fetch(url))` minus the handle ceremony. Concurrency enters a program through exactly one word.
+**`start` is the only concurrency keyword in the grammar.** Everything else is a builtin `pn`: `wait(h)`, `send(h, msg)`, `receive()`, `select(...)`, `worker(...)` (with `process(...)` as sugar for `worker(..., isolation: 'process')`). A **direct call stays a plain call** — `fetch(url)` synchronously (colorlessly) yields the value; it is `wait(start fetch(url))` minus the handle ceremony. Concurrency enters a program through exactly one word.
 
 **Keyword selection (deliberation record):**
 
@@ -386,18 +392,75 @@ Result: colorless is *total*. Plain calls suspend invisibly; `start` is the only
 
 ### 10.3 The model: two user tiers + one invisible tier
 
+*(Tier 2 amended 2026-07-26 by **K31** — see §10.3.1. The tier is **workers**, and the user picks thread or process isolation; the earlier v3 text made tier 2 processes-only and is superseded.)*
+
 | Tier | Unit | Created by | Parallel? | Isolation | Failure surface |
 |---|---|---|---|---|---|
 | **Tasks** | concurrent `pn` | `start f(x)` | phase 1: no (one thread/context); Stage B: yes | shared context heap — all immutable values shared free | handle → `T^E` |
-| **Processes** | OS child process | `start process(spec)` | yes | OS-grade | handle → `T^E` on exit |
+| **Workers** | isolate — a context of its own | `start worker(spec, isolation: 'thread' \| 'process')` | yes | share-nothing: own heap, own scheduler, own loop. `'thread'` = same address space; `'process'` = OS-grade | handle → `T^E` on exit |
 | *(internal)* | parallel `fn` | runtime's discretion | yes (Stage A) | invisible by purity | n/a — deterministic |
 
-- **Processes are simple child processes** — deliberately *not* BEAM green processes: no supervision trees, no links, no distribution, no thousand-process swarms. The handle resolving to `T^E` on exit is the **entire v1 failure story** (it replaces the monitoring layer — a dead child is an error value in the parent, composing with `^`). Recorded caveat: this is *less* BEAM-like, not more — BEAM's "processes" are isolated-heap green processes in **one address space** (level-2-shaped); Lambda chooses OS simplicity first and keeps BEAM-style M:N isolates as the documented escape hatch (§10.6).
-- **The worker-thread tier is gone as a user concept.** Compute parallelism comes from internal parallel-`fn` (Stage A) and processes now, and from tasks-on-threads later (Stage B) — never from a user-visible "thread" object.
-- **Handles are uniform across tiers**: awaitable (`wait` → `T^E`), message targets (`send`), selectable. Moving work between tiers is changing the operand of `start`, not the verbs around it (the K4 idea, carried forward).
-- Communication: **messages + read-only flat immutables** (K5 unchanged: typed arrays/strings/binaries by refcount in-address-space, shm across processes; Mark is the process wire format). Whether messaging is mailbox-shaped or channel-shaped is open (O-A).
+- **A worker is an isolate**: its own Lambda context — own heap, own task scheduler, own event loop — i.e. the tier-1 substrate replicated (§5.1, unchanged since v1). Tier 2 is share-nothing in both isolation modes **as a semantic guarantee**; underneath it the runtime shares read-only data, and how much it can share is the one real difference between the modes (K32, §10.3.3). The isolation option chooses **what the OS enforces** and **what a pointer means**, never what the program means.
+- **Workers are deliberately *not* BEAM green processes**: no supervision trees, no links, no distribution, no thousand-worker swarms. The handle resolving to `T^E` on exit is the **entire v1 failure story** (it replaces the monitoring layer — a dead child is an error value in the parent, composing with `^`), with one honest asymmetry recorded in §10.3.2.
+- **Handles are uniform across tiers and across isolation modes**: awaitable (`wait` → `T^E`), message targets (`send`), selectable. Moving work between tiers is changing the operand of `start`; moving a worker between thread and process is changing **one option** — never the verbs around it. This is K4's original invariant, now reinstated verbatim.
+- **User-visible threads stop at the worker boundary.** There is still no thread *object*, no shared mutable memory, no locks, no atomics: `isolation: 'thread'` selects where an isolate runs, and buys nothing else. Tasks-on-threads *inside* one context remains an invisible runtime upgrade (Stage B, §10.6).
+- Communication: **messages + read-only immutables** (K5 as extended by K32: in a thread isolate any deeply-immutable Item may be shared by pointer, graph shapes included; across processes only pointerless data is shared, via shm, and graph shapes copy as Mark). Messaging is mailbox-shaped (K20).
 
-### 10.4 The soundness rule: thread-agnostic task semantics (the capture rule)
+#### 10.3.1 K31 — why the worker-thread tier came back, and why it costs almost nothing at the surface
+
+v3 originally deleted the worker-thread tier on the reasoning that compute parallelism could come from internal parallel-`fn` (Stage A) plus processes, so a user-visible thread concept was surface for no gain. Two things make that wrong:
+
+1. **Processes cannot cover the workload processes are bad at.** Cross-process messaging serializes through Mark and pays 10–50 ms of spawn; the natural fan-out shape for Lambda's actual domain (image tiles, corpora, layout of many pages) wants **zero-copy flat sharing** — `ArrayNum`/string/binary by refcount in one address space, which §5.2 already specifies and only threads can deliver. Stage A does not cover it either: fork-join parallel `fn` is bounded, pure, and internal; a worker is long-lived, `pn`-shaped, and owns state.
+2. **The cost is one option, because the design never actually removed the machinery.** §5.1's `{isolation: 'thread' | 'process'}` sketch, §5.2's dual memory model (refcount in-process / shm across), §5.5's one-thread-per-isolate topology, and §5.3's failure-as-values model all survived v3 intact. K31 spends the option K4 already designed.
+
+**Surface delta, in full:** one builtin (`worker`), one option value. `wait`/`send`/`receive`/`select`/`cancel`/`self` are untouched. The capture rule (K13) is untouched. K7 is untouched — a worker is a context on one thread with no task migration, which is a *different* question from Stage B's M:N within a context. `start process(spec)` is retained as documented sugar for `worker(spec, isolation: 'process')`: it reads well next to POSIX `wait(2)`, and §10.2's examples keep working.
+
+**Default isolation: `'thread'` — DECIDED (user, 2026-07-26; closes O-C.)** The cheap, zero-copy, common case, matching JS `Worker` being the ordinary tool and `child_process` the deliberate one; K32 widens the margin further, since thread mode is also the only mode that can share graph-shaped data. Recorded counter-argument, deliberately accepted: process isolation is the only mode where the `T^E` failure story is total (§10.3.2), so the default cannot contain a hard fault — `'process'` is the documented answer for anything that must survive its worker, and for anything untrusted.
+
+#### 10.3.2 The honest asymmetry: what the isolation option actually buys
+
+Semantics are identical in both modes. Three *operational* properties are not, and they are the entire basis on which a user should choose — so they are spec, not footnotes:
+
+| Property | `isolation: 'thread'` | `isolation: 'process'` |
+|---|---|---|
+| Read-only sharing (K32, §10.3.3) | **any deeply-immutable Item, by pointer** — flats *and* pointer-ful graph shapes | **pointerless data only** — flats via shm/mmap; graph Items copied as Mark |
+| Message transport | Item deep copy in-heap | Mark over pipe (K29) |
+| Spawn cost | ~µs | ~10–50 ms |
+| **Hard-fault containment** | **none** — a segfault / `abort` / OOM in the worker kills the whole process | full — the handle yields `T^E`, parent lives |
+| **Unresponsive worker** | cooperative `cancel` only (K30c park points); a CPU-bound loop can't be stopped | `cancel` escalates to SIGKILL |
+| Native-module (DSO) state | **shared** with every other thread isolate — see the ABI clause below | private per process |
+| Untrusted code | never (Jube JA10: a native DSO cannot be contained in-process) | the supported answer |
+
+Consequences that must be written into the specs, not discovered later:
+
+- **The `T^E` failure surface is total only under process isolation.** Under thread isolation, `wait(h)` yields `T^E` for Lambda-level errors, raised values, and cancellation — but a hard fault is a process-wide fatal, not a value. K18/K6 are hereby scoped: *failures are values; faults are not, and only a process boundary converts one into the other.*
+- **New JubeHostAPI clause — thread-isolation safety, and it is unretrofittable.** A native module loaded into a thread isolate shares its DSO globals with every other thread isolate in the process. Modules must declare thread-isolation safety in the FFI contract (same slot as the §4.4 blocking/await-safety marker and the K16 async marker); an undeclared module is **process-isolation-only**, and `start worker(..., isolation: 'thread')` on it is a load-time error. This joins §4.4 and G2 as a clause that must ship in JubeHostAPI v1 — before modules proliferate. It composes exactly with the Jube trust tiers (`Lambda_Design_Jube_Architecture.md` JA10): untrusted code never runs in-process, so untrusted ⇒ `'process'`.
+- **Radiant's rule stands unchanged** (§5.5): the main context owns Radiant/UI; workers run compute or a guest backend. Thread workers are what make `Radiant_Design_Concurrency.md`'s pages-as-isolates affordable — see RC1–RC8.
+
+#### 10.3.3 K32 — share-nothing is the model; read-only sharing is the representation
+
+**The rule.** Share-nothing is a **semantic guarantee**: no shared mutable state at any tier, messages mean copies, and no program can observe otherwise. Underneath it, the runtime shares read-only data — and *how much* it can share is the one genuine representational difference between the two isolation modes:
+
+| | `isolation: 'thread'` | `isolation: 'process'` |
+|---|---|---|
+| Flat, pointerless values (`ArrayNum`, strings, binaries, bitmaps) | shared by pointer + refcount | shared via shm/mmap |
+| **Pointer-ful graph Items** (maps, elements, nested arrays, parsed docs) | **shared by pointer** | copied as Mark |
+| Mutable anything | never | never |
+
+This is a bigger advantage for thread mode than "zero-copy buffers" suggested: the data Lambda actually handles is graph-shaped — a parsed document, a CSS cascade, a config tree, a schema. Thread isolates can hold one copy of it and read it from every worker; process isolates re-materialize it each time.
+
+**Why sharing pointer-ful data is affordable here — one architectural fact does most of the work.** The collector is **non-moving for objects and moving only for their data buffers** ([LR_08](../doc/dev/lambda/LR_08_Memory_and_GC.md) §1: tagged `Item` pointers must stay stable, so the fixed-size structs never move; `gc_compact_data` copies the variable-size buffers nursery→tenured and rewrites the owning object's pointer). So a foreign isolate holding an `Item` into another isolate's heap holds a **permanently valid address** — the hardest part of cross-isolate pointer sharing is already true. Three things remain, and they are the whole bill:
+
+1. **Data buffers must stop moving for shared objects.** A shared `Array`'s `items[]` or `Map`'s `data` would be relocated by the owner's next compaction while a peer reads it. The mechanism already exists: `is_pinned`, which today defends mutable views against exactly this ([LR_05](../doc/dev/lambda/LR_05_Strings_and_Vectors.md) §7). Sharing pins, or pre-tenures into a non-compacting shared data zone.
+2. **Lifetime must cross heaps.** The owner's sweep must not reclaim an object a peer still holds. Three candidate answers, in cost order — **decide before the thread mode is built (O-D)**:
+   - **(A) Promote-on-share into a shared, non-moving, refcounted space.** One copy at share time; thereafter every isolate reads by pointer with no foreign roots in anyone's heap. Predictable, and the copy amortizes because shared data is shared repeatedly. *Recommended.*
+   - **(B) Pin in place + cross-heap refcounting.** Zero copy, but every isolate's collector must honor foreign roots and the owner's heap cannot drain — the coordination K31 was specifically chosen to avoid.
+   - **(C) Share only from an immortal region** — data loaded by the parent before spawning, never collected. Trivially correct, covers the dominant real case (load a corpus, fan out readers), and is the natural subset of (A).
+3. **Refcounts on shared objects must be atomic — and only those.** C4's 1-bit `is_shared` (CW3) is already the discriminator, so this is biased/split refcounting: unshared objects keep plain non-atomic ops and single-threaded code pays nothing. This is the one place where K31's "no atomic tax" claim (§10.6) is qualified: the tax exists, scoped to objects that were explicitly shared.
+
+**Invariant to verify before building (not assumed):** C4's share-and-mark is **O(1) at the root**, not a deep walk (`Lambda_Design_COW.md` CW3). That is sound only if *every* write path to a nested child passes through a shared root and therefore COWs at the first step. The known aliasing paths (`Lambda_Design_COW.md` C4.1 catalog) are exactly the cases where it might not — a stale interior alias obtained before sharing would write into a subgraph another isolate is reading. **In-isolate that is a correctness bug; cross-isolate it is a data race.** Closing the C4.1 catalog is therefore a prerequisite of thread-mode graph sharing, not an unrelated cleanup.
+
+**Two audit answers this changes (§10.6).** Shared graph Items carry symbols and shapes, so the **namepool** and the **shape registry** cannot simply become per-isolate — a shared map's `ShapeEntry` chain and its symbols must be resolvable from every isolate that can read it. Those two become **process-wide, append-only, and locked** (or lock-free append), not per-isolate. The rest of the audit list is unaffected.: thread-agnostic task semantics (the capture rule)
 
 > **A `start` closure must not capture `var`s by reference.** Compile error (or explicit snapshot). Tasks communicate through messages and immutable flats — never through captured mutable state.
 
@@ -415,9 +478,21 @@ v3 keeps v2's compilation strategy (may-await closure → resumable state machin
 - M:N over **fibers** is the road only Go and Loom ever completed: live native stacks migrating across threads (TLS discipline, cross-thread stack scanning, pointer pinning). Fibers are the *less* thread-portable mechanism, contrary to first intuition — their own-stack property buys unmodified-caller suspension, not thread mobility.
 - The fiber design (§4.2.4) remains the documented fallback, revivable only if the transform underdelivers — but note it would reinstate both the G1 gate and the harder Stage-B road.
 
-### 10.6 The multicore roadmap: Stage A (fn, fork-join) then Stage B (pn tasks, M:N)
+### 10.6 The multicore roadmap: worker isolates, Stage A (fn, fork-join), then Stage B (pn tasks, M:N)
 
 **Committed goal (user): real multi-core utilization, including for pure `fn`s — internal, never user-visible.**
+
+**Amended 2026-07-26 (K31): there are now three roads to multicore, and the user-visible one comes first.**
+
+| Road | Unit scheduled | User-visible? | The bill |
+|---|---|---|---|
+| **Worker isolates** (K31, tier 2) | a whole context, one per thread/process | yes — one option on `start worker` | per-isolate runtime state (below); no concurrent GC, no thread-safe allocator, no atomic refcounts |
+| **Stage A** — parallel `fn` | a bounded fork-join region | no | private scratch arenas + GC blackout + globals audit |
+| **Stage B** — `pn` tasks M:N | a parked state machine, resumed on any pool thread | no | the full Go bill: thread-safe allocator, concurrent/STW-multi GC, atomic COW refcounts (taxes single-threaded code too) |
+
+The important consequence: **worker isolates deliver real multicore without Stage B's bill.** Each isolate has its own heap and its own GC, at most one thread ever runs a given isolate (§5.5, K7), and nothing is shared but deeply-immutable data (K32) — so the allocator and collector stay single-threaded *per isolate*, and atomic refcounts are confined to objects explicitly marked `is_shared` (K32 §10.3.3) — single-threaded code and unshared data pay nothing. This is precisely the BEAM road §10.6 previously recorded as "the alternative if Stage B stalls"; K31 promotes it from escape hatch to **the primary multicore story**, and Stage B demotes to an optimization for one context's internal task pool — worth doing when demand proves it, no longer load-bearing.
+
+**What K31 costs instead: the per-isolate runtime-state audit.** Every process-global in the runtime must become per-isolate (or locked, or immutable-and-shared). This is the *same* inventory Stage A needs, under a stricter regime: Stage A's workers are bounded, pure and GC-blacked-out, whereas thread isolates are long-lived and concurrently allocating. Known members, from the code: string **interning**, the allocator/GC heap, `g_dry_run` (`lambda-proc.cpp:23`), and `g_template_registry` (`template_registry.cpp:13` — [LR_01](../doc/dev/lambda/LR_01_Compilation_Pipeline.md) note 14 already records that concurrent runtimes would collide here). Plus the LambdaJS globals ledger (`Lambda_Js_Thread.md` §6.5). **Two members go the other way under K32**: the **namepool** and the **shape registry** must stay *process-wide* (append-only + locked or lock-free), because a shared graph Item's symbols and `ShapeEntry` chains have to resolve from every isolate that can read it — see §10.3.3. This audit is K31's real work item and it gates thread isolation — process isolation needs none of it, which is a reason to build the process mode first even if thread is the default.
 
 **Stage A — parallel `fn`, fork-join (the cheap 80%).** `fn` is pure and can never suspend (K1), so it fits the Cilk-style fork-join model without touching the GC architecture:
 - Worker threads allocate in **private scratch arenas**; results copied/promoted into the main heap at the join.
@@ -427,7 +502,7 @@ v3 keeps v2's compilation strategy (may-await closure → resumable state machin
 - One semantic caution — **open item O-B**: parallel *map* is always deterministic; parallel *reduction over floats* is not (chunked association ≠ sequential left-fold, and the MathLive corpus work proved float-accumulation order is observable). Policy needed: fixed tree order (deterministic run-to-run, documented ≠ sequential) vs. exact-types-only auto-parallelization (int/decimal parallel, float reductions stay sequential by default).
 
 **Stage B — `pn` tasks M:N over a thread pool (the expensive 20%).** The full bill Go paid: thread-safe allocator (per-thread nurseries), concurrent or stop-the-world-multi GC, atomic COW refcounts (a tax that lands on single-threaded code too — the nogil lesson). Semantics are **already ready** thanks to the capture rule; state-machine frames resume on any thread by construction. No user-visible change when it lands — that's the entire point of §10.4.
-- **Recorded alternative if Stage B stalls:** BEAM's road — many cheap *isolated-heap* units scheduled M:N over scheduler threads (at most one scheduler runs a given isolate at a time; even V8 permits thread migration under that rule). Compatible with C4's economics; requires making contexts cheap rather than making the heap concurrent.
+- **Recorded alternative if Stage B stalls — now partly shipped as K31:** BEAM's road — many cheap *isolated-heap* units scheduled M:N over scheduler threads (at most one scheduler runs a given isolate at a time; even V8 permits thread migration under that rule). Compatible with C4's economics; requires making contexts cheap rather than making the heap concurrent. K31's worker tier takes the first half of this (isolated-heap units on threads, 1:1); the remaining half — scheduling *many* isolates M:N over fewer scheduler threads — stays the recorded escape hatch, and needs only cheap contexts, not a concurrent heap.
 
 ### 10.7 Unifying with JS async at the implementation level (K17)
 
@@ -481,23 +556,29 @@ Notes that make the split principled: Lambda has *more* split points (suspension
   - **K30e — Authority & idempotency.** Any handle holder may `cancel(h)` (capability model, consistent with handle-as-address); idempotent; no-op on completed tasks.
   - **K30f — `wait(h, timeout:)`** times out the *waiter* with a `T^E` timeout error — it does **not** cancel the task (observing ≠ owning); cancel-on-timeout composes explicitly (`cancel(h)` after a timed-out wait, or a library wrapper).
   - `cancel` becomes the **seventh builtin** — still zero new keywords. Claim recorded: among Trio/Kotlin/Swift/Loom/.NET/Go, this is the only design where **neither scoping nor cancellation added a language construct** — scoping reuses R2/R3, cancellation reuses `T^E`.
-- Carried forward: O4 (`select` syntax), O6 (handle typing vs C4 — handles are identities, the ref-cell family; also covers `self()` and handle-in-message semantics per K20a), O7 (grammar: `start` as contextual keyword), O10 (loop ordering spec). O9 becomes pure inference spec (seeds = builtins + module declarations; no user `async`). O1/O2 **resolved by K30** (above) — K26's streams prerequisite is satisfied at the design level. O3 **resolved by K20d** (bounded + `send → ok^E`). O5 (supervision) is **closed for v1** by K18 — handle-`T^E` is the failure surface; supervision is userland. **With K19, K20, and K30, the v3 design has no undecided design questions — only the carried spec-detail items above.**
+- **O-C — default isolation for `start worker`: DECIDED (user, 2026-07-26) — `'thread'`.** Rationale and the accepted counter-argument are in §10.3.1.
+- **O-D — cross-isolate lifetime for shared graph Items (opened 2026-07-26 by K32).** How a shared subgraph outlives its owner's collector: (A) promote-on-share into a shared non-moving refcounted space *(recommended)*, (B) pin in place + cross-heap refcounting, (C) share only from an immortal parent-owned region (the natural subset of A). Full comparison in §10.3.3. Decide before thread mode is built — it determines whether "sharing" costs one copy or none, and whether any collector has to honor foreign roots. Its prerequisite is independent and already known: closing the C4.1 aliasing catalog.
+- Carried forward: O4 (`select` syntax), O6 (handle typing vs C4 — handles are identities, the ref-cell family; also covers `self()` and handle-in-message semantics per K20a), O7 (grammar: `start` as contextual keyword), O10 (loop ordering spec). O9 becomes pure inference spec (seeds = builtins + module declarations; no user `async`). O1/O2 **resolved by K30** (above) — K26's streams prerequisite is satisfied at the design level. O3 **resolved by K20d** (bounded + `send → ok^E`). O5 (supervision) is **closed for v1** by K18 — handle-`T^E` is the failure surface; supervision is userland. **With K19, K20, and K30, the v3 design had no undecided design questions — only the carried spec-detail items above. v3.1 adds exactly one: O-C, the default isolation.**
 
 ### 10.9 v3 decision ledger + disposition of K1–K10
 
 **New decisions (v3):**
 
-- **K11** — Two-tier model: concurrent `pn` tasks + simple OS child processes; the worker-thread tier is dropped as a user concept; internal parallel-`fn` is the invisible third tier. *(user)*
+- **K11** — Two-tier model: concurrent `pn` tasks + a second, isolated tier; internal parallel-`fn` is the invisible third tier. *(user)* — **amended by K31**: the second tier is **workers**, thread or process, not processes only.
 - **K12** — Surface: `start` is the **only** concurrency keyword (contextual, `pn`-only); `wait`/`send`/`receive`/`select`/`process` are builtins; **no `async`, no `await` keyword**; direct calls stay synchronous/colorless. Naming rationale recorded in §10.2. *(user: `start` over run/fire/spawn/go; `wait` over `await`)*
 - **K13** — **The capture rule**: `start` closures must not capture `var`s by reference (compile error); communication only via messages + read-only flats. Makes task semantics thread-agnostic — ships with `start` in v1, unretrofittable. *(proposed in discussion, unchallenged — treat as adopted; needs grammar/analyzer spec)*
 - **K14** — Mechanism: K2-R state machines confirmed for phase 1 *because of* thread-portability (Kotlin/C#/tokio M:N precedent); fibers (§4.2.4) remain the documented fallback. *(user: "fine with state machines if it goes well with threading")*
 - **K15** — Multicore is committed: **Stage A** fork-join parallel-`fn` (arenas + GC blackout + runtime-globals audit; internal, invisible) → **Stage B** M:N `pn` tasks (thread-safe runtime); BEAM-style M:N isolates recorded as the Stage-B alternative. *(user: "run pn on thread is 100% what I want"; fn too, internal)*
 - **K16** — `async` removed from user grammar; async-ness declared only in native-module signatures; **JS membrane: all exposed `pn`s uniformly Promise-returning** (opt-in `sync` annotation possible later). *(user)*
 - **K17** — JS implementation unification per §10.7: share layers 1/2/5, keep 3/4 per-language; Lambda transform built first, common core extracted after two working clients. *(user)*
-- **K18** — Processes are simple OS child processes: no supervision trees, links, green processes, or distribution in v1; handle-as-`T^E` is the entire failure surface. BEAM-likeness caveat recorded. *(user: "simple child process, not BEAM's kind")*
+- **K18** — Tier-2 units are simple: no supervision trees, links, green processes, or distribution in v1; handle-as-`T^E` is the entire failure surface. BEAM-likeness caveat recorded. *(user: "simple child process, not BEAM's kind")* — **scoped by K31**: the `T^E` surface is *total* only under process isolation; under thread isolation a hard fault is a process-wide fatal, not a value (§10.3.2).
 - **K19** — **Pairwise-by-spec numeric reductions** (closes O-B): builtin reductions defined as a fixed n-only tree order, identical across scalar/SIMD/parallel backends → bit-identical everywhere; user folds stay sequential; Kahan-style accuracy modes deferred to explicit opt-in. Full rationale + prior art (NumPy/Julia/MKL CNR/CUB/IEEE 754-2019) in §10.8. *(user: "Option 2 should definitely be the policy")*
 - **K20** — **Mailbox messaging, actor-model** (closes O-A): handle = address, no channel type (K20a); N:1 by design, pools via explicit dispatcher (K20b); heterogeneous messages with **FIFO-head receive — no in-queue selective receive**, making BEAM's scan trap unrepresentable (K20c); **async bounded send returning `ok^E`** — backpressure as an error value, blocking variants (`wait(send(...))` / `sync:` option) deferred to explicit opt-in (K20d); **signal-ordering guarantee** — sent messages outlive the sender, termination observable only after all prior sends, end-of-stream = handle completion (K20e). Full reasoning + actor-vs-CSP comparison in §10.8. *(user decision + two accepted refinements)*
 - **K30** — **Task scoping & cancellation** (closes O1/O2): handles are **scoped resources whose release is cancel-and-join** (R2 block scope, R3 escape-by-typed-return — no nursery construct, no `GlobalScope`); normal exit **joins**, error exit **cancels-then-joins** (Trio/Loom semantics from the R-ledger asymmetry); cancellation delivered as a **`T^E` `'cancelled'` error at park points** via `cancel(h)` (the seventh builtin — no exception type, no token plumbing); cleanup runs cancellation-masked; any holder may cancel, idempotently; `wait` timeouts don't cancel. Details + sub-decisions K30a–f in §10.8. *(user-confirmed)*
+
+- **K31** *(2026-07-26)* — **Tier 2 is workers, with isolation as a user option**: `start worker(spec, isolation: 'thread' | 'process')`, `process(spec)` retained as sugar. Same handles, same `send`/`receive`/`wait`/`select`/`cancel`, same share-nothing semantics in both modes; the option chooses only what the OS enforces. Reinstates K4's isolation-as-an-option invariant, which v3 had briefly dropped. Consequences that are spec, not footnotes: the operational asymmetry table (§10.3.2), K18 scoped to process-only totality of `T^E`, a **new unretrofittable JubeHostAPI clause** (native modules declare thread-isolation safety; undeclared ⇒ process-only), and the **per-isolate runtime-state audit** as the gating work item for thread mode (§10.6). Default isolation = `'thread'`, flagged as **O-C** for confirmation. *(user: "tier 2 should support worker threads or processes, same API, user picks")*
+
+- **K32** *(2026-07-26)* — **Share-nothing is the semantic model; read-only sharing is the representation.** No shared mutable state at any tier and messages always *mean* copies, but underneath the runtime shares immutable data — and the two isolation modes share different amounts: a **thread** isolate shares **any deeply-immutable Item by pointer, graph shapes included** (parsed docs, config trees, cascades); a **process** isolate shares **pointerless data only** (flats via shm), with graph Items copied as Mark. Extends K5. Enabled by the collector being non-moving for objects; the remaining bill is buffer pinning, cross-isolate lifetime (**O-D**), and atomic refcounts scoped to `is_shared` objects only. Makes the namepool and shape registry process-wide-and-locked rather than per-isolate, and makes closing the C4.1 aliasing catalog a prerequisite. Details in §10.3.3. *(user: "actual design should allow read-only data to be shared — thread allows data containing direct pointers, process only pointerless data")*
 
 **Disposition of the v1/v2 ledger:**
 
@@ -507,10 +588,10 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 | K2 (fibers) | superseded (was already superseded by K2-R); reference design §4.2.4 |
 | K2-R (state machines) | **kept as mechanism** (K14); its `async`-declaration surface removed by K16 |
 | K3 (one loop per context, shared with JS) | **kept** |
-| K4 (unified isolate API, isolation as option) | revised → K11: two tiers, `start` operand picks the tier; uniform handles survive |
-| K5 (copy messages; share flat immutables; Mark wire) | **kept** |
+| K4 (unified isolate API, isolation as option) | **reinstated by K31** — `start` operand picks the tier, the `isolation:` option picks thread vs process; uniform handles throughout (the v3 interval that dropped the option is superseded) |
+| K5 (copy messages; share flat immutables; Mark wire) | **kept, extended by K32** — sharing is no longer limited to flats: a thread isolate shares pointer-ful immutable Items too; process isolation keeps the pointerless-only rule and the Mark wire |
 | K6 (failures are values; handles → `T^E`) | **kept** — now the *entire* failure model (K18) |
-| K7 (no migration; 1 thread/isolate) | revised: phase-1 true; "never" dropped — Stage B schedules tasks M:N (K15); semantics made migration-safe by K13 |
+| K7 (no migration; 1 thread/isolate) | revised: phase-1 true; "never" dropped — Stage B schedules tasks M:N (K15); semantics made migration-safe by K13. **K31 does not touch this**: a worker is one isolate on one thread, no migration — a different question from Stage B's M:N *within* a context |
 | K8 (channels excluded; mailbox + select) | **REOPENED** → O-A; `select` and boundedness survive regardless |
 | K9 (level 0 par-map) | revised → internal parallel-`fn`, Stage A of K15; determinism principle kept, float caveat added (O-B) |
 | K10 (libuv shared reactor; JS async untouched; membrane rule) | **kept**; extended by K17 (shared transform layers) and K16 (uniform-Promise membrane) |
@@ -519,8 +600,8 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 
 1. **G1 does not gate tasks** (state machines — heap objects). G1 remains the top runtime-honesty item independently; Stage A needs only the GC-blackout discipline, Stage B is where GC work returns at full scale.
 2. **Ships together or never:** `start` + the capture rule (K13) + bounded delivery + **K30 scoping** (block-exit join/cancel is observable behavior of `start` — adding it later changes program meaning). The unretrofittable set.
-3. **JubeHostAPI v1 clauses unchanged** (§4.4 blocking/await-safety declaration + G2 rooting) — plus the async-ness marker in module signatures (K16).
-4. Build order: **tasks** (compiler track: may-await inference + shared-pattern state-machine lowering in `transpile-mir`; runtime track: scheduler + uv integration + handles/`wait`) → **processes** (`process()` spec, Mark-over-pipe, shm flats — mostly OS plumbing) → **Stage A** parallel-`fn` (arena workers + globals audit; unlocks the typed-array/image workloads) → **Stage B** when demand proves it (semantics already ready).
+3. **JubeHostAPI v1 clauses** (§4.4 blocking/await-safety declaration + G2 rooting) — plus the async-ness marker in module signatures (K16) and, from K31, the **thread-isolation-safety marker** (§10.3.2). All four are unretrofittable and must land before modules proliferate.
+4. Build order: **tasks** *(done 2026-07-15)* → **worker/process isolation** (`worker()` spec, Mark-over-pipe, shm flats — mostly OS plumbing, and it needs **no** per-isolate globals audit) → **worker/thread isolation** (gated by the per-isolate runtime-state audit of §10.6, plus K32's three items — buffer pinning, O-D lifetime, `is_shared` atomics — and the C4.1 aliasing catalog; delivers µs spawn and pointer-sharing of immutable graph data) → **Stage A** parallel-`fn` (arena workers, reuses much of the same audit; unlocks the typed-array/image workloads) → **Stage B** when demand proves it (semantics already ready, and K31 makes it optional rather than load-bearing).
 5. O-A is decided (K20 — mailbox): the `send`/`receive`/`select` builtins can freeze against K20a–e. O-B is decided (K19); its spec entry + scalar/SIMD pairwise implementation can proceed **independently of and before any concurrency work** — it collects the deferred SIMD float-reduction win today and pre-stabilizes goldens for Stage A.
 6. **Radiant is the first embedder of this design**: pages as isolates, events as mailbox messages, display lists as flat/K29 payloads, same-thread script+layout — see `radiant/Radiant_Design_Concurrency.md` (ledger RC1–RC8).
 7. **Implementation plan**: `Lambda_Concurrency_Impl_Plan.md` — phase-gated plan for the v1 scope (colorless `pn` + `start`/messaging + JS interop); processes, threading, streams, and cancellation are queued follow-ons there.

@@ -11,7 +11,7 @@
 > module), `node-fs`
 >
 > **Related designs:**
-> - `vibe/Lambda_Desing_Native_Module.md` — the approved native-module design;
+> - `vibe/Lambda_Design_Native_Module.md` — the approved native-module design;
 >   its **POC 2** ("node-* — Node compat as modules") is the direct ancestor of
 >   this document
 > - `vibe/Lambda_Design_Jube_Lang_Hosting.md` — the hosted-language architecture
@@ -57,7 +57,7 @@ modules/
 | JN11 | Lifecycle: namespace objects stay cached in the existing JS module cache per runtime epoch; modules implement the already-present `runtime_reset` (batch-mode global recreation) and `heap_cleanup` (per-heap teardown) descriptor hooks. |
 | JN12 | Distribution: the **standard bundle ships `node-core`** (observable JS behavior is unchanged) with the heavy leaves optional; the full bundle ships all node modules; an embedded/minimal profile ships none. All bundles carry the byte-identical host binary, extending the existing `release-standard`/`release-jube` identity rule. |
 | JN13 | Migration proceeds through stages N0–N7 (§11); `make node-baseline` (1492/3517 today) is an every-stage no-regress gate, and MIR emission for non-Node scripts must stay within existing `test/mir` budgets. |
-| JN14 | `js_crypto.cpp` splits first: WebCrypto (`globalThis.crypto`) stays host-side with the browser surface; `node:crypto` migrates to `node-crypto`. Both link mbedTLS. |
+| JN14 | `js_crypto.cpp` splits first. *(Superseded in part 2026-07-26 by `Lambda_Design_Jube_Architecture.md` JA1/JA3: WebCrypto no longer stays host-side — it becomes its own `web-crypto` Jube module. The split is therefore three-way: `node-crypto` module, `web-crypto` module, and a shared mbedTLS primitive layer both link.)* |
 
 ## 2. Goals and non-goals
 
@@ -363,7 +363,7 @@ falls on the heavy edges:
 
 | Module | Contents (today's files) | ≈Lines | External deps | Depends on |
 |---|---|---|---|---|
-| `node-core` | events, stream (+web/promises/consumers/iter), buffer, util (+types/inspect), path (+posix/win32), url, querystring, string_decoder, os, assert (+node:test), readline, permission glue; process extensions, `internalBinding` + constant tables, stub namespaces (cluster/worker_threads/v8/tty/…), `timers/promises`, Node error-code helpers | ≈30k | — | host APIs only |
+| `node-core` | events, stream (+promises/consumers/iter; `stream/web` re-exports the `web-streams` module per `Lambda_Design_Jube_Architecture.md` JA1), buffer, util (+types/inspect), path (+posix/win32), url, querystring, string_decoder, os, assert (+node:test), readline, permission glue; process extensions, `internalBinding` + constant tables, stub namespaces (cluster/worker_threads/v8/tty/…), `timers/promises`, Node error-code helpers | ≈30k | — | host APIs only; `web-streams` module |
 | `node-zlib` | zlib | 1.4k | zlib | node-core |
 | `node-fs` | fs, fs/promises, FileHandle | 3.9k | libuv | node-core |
 | `node-net` | net, dns (+cares_wrap shim) | 7.9k | libuv | node-core |
@@ -462,7 +462,10 @@ the module and reason. Registration remains transactional (existing rollback).
 - **`node:vm`** — implemented against engine internals
   (`js_runtime.cpp:33777+`); moving it requires compiler-service exposure that
   nothing else needs. Stays host, revisit last.
-- **WebCrypto** (`globalThis.crypto`) — browser surface (JN14).
+- **WebCrypto** (`globalThis.crypto`) — *(superseded)* originally retained
+  host-side; per `Lambda_Design_Jube_Architecture.md` JA1/JA3 it becomes the
+  `web-crypto` Jube module (WPT-gated), and `node:crypto`'s webcrypto surface
+  re-exports it (JN14).
 
 ## 7. Architecture layers
 
@@ -749,7 +752,9 @@ standard host byte-identical across bundle packaging, and lands static-first
   module:* node-baseline; forced-GC sweep; checker (zero `uv_*` references);
   absent-module negatives.
 - **N6 — Protocol leaves.** `node-http` (http+https), `node-tls`; then the
-  JN14 crypto split (WebCrypto stays host) and `node-crypto`. mbedTLS drops
+  JN14 three-way crypto split (`web-crypto` module + `node-crypto` module +
+  shared mbedTLS primitives, per the architecture ADRs) and `node-crypto`.
+  mbedTLS drops
   out of the minimal host link if nothing else needs it (audit — mbedtls is
   also linked via `lambda-lib`). *Gate:* as N5, plus `crypto` optional at
   runtime (the native-module doc's exit criterion).
@@ -838,7 +843,7 @@ node module.
 
 | Prior decision | Effect here |
 |---|---|
-| Native-module design POC 2 (`vibe/Lambda_Desing_Native_Module.md` §8) | This document is its detailed successor; the sketch's `JubeNamespaceDef` capability is now the landed `jube.h:277` struct, and the suggested order (path first, crypto last) survives with zlib inserted as the dynamic pipe-cleaner. |
+| Native-module design POC 2 (`vibe/Lambda_Design_Native_Module.md` §8) | This document is its detailed successor; the sketch's `JubeNamespaceDef` capability is now the landed `jube.h:277` struct, and the suggested order (path first, crypto last) survives with zlib inserted as the dynamic pipe-cleaner. |
 | Hosted-language architecture P1–P10 (`vibe/Lambda_Design_Jube_Lang_Hosting.md`) | P1/P3/P5/P7/P9/P10 carried over directly (§5); the compiler-API layers are replaced by JS runtime service tables (§9). |
 | Errors-as-return-values across the C ABI (Jube ledger, `vibe/Lambda_Semantics_Features.md`) | §5 P6, §9 contract. |
 | Precise rooting only, no conservative scanning (CLAUDE.md rule 15) | JN9; forced-GC sweep gates each conversion. |
@@ -846,3 +851,4 @@ node module.
 | C2MIR frozen (CLAUDE.md rule 14) | No node-module work touches the legacy transpiler; MIR-emission neutrality is a stated gate (JN13). |
 | node-baseline ledger (`make node-baseline`, 1492/3517) | The continuous no-regress gate for every stage (JN13). |
 | Review 2026-07-26 (user) | JN8 inverted: modules shielded behind a host request/resource API (rid table) instead of calling libuv directly; JN7 consolidated into one composed `JubeHostNodeAPI`; prior-art survey added (§3.1). |
+| `Lambda_Design_Jube_Architecture.md` (2026-07-26) | Top-level architecture ADRs JA1–JA13 now govern; supersedes JN14's WebCrypto placement (→ `web-crypto` module) and moves `stream/web` out of `node-core` (→ `web-streams` module re-export). |

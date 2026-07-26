@@ -168,6 +168,20 @@ Two asymmetries frame the choice:
   Keep it simple first: no decrement protocol, no header growth, monotonic
   semantics that are trivially auditable. Accepted cost: post-sharing copies
   that (a)/(b)/(d) would avoid.
+- **CW3-C (noted 2026-07-26, from concurrency K32):** the same `is_shared`
+  bit becomes the **cross-isolate** discriminator. Tier-2 thread workers
+  share deeply-immutable Items *by pointer* across isolates
+  (`Lambda_Design_Concurrency.md` §10.3.3), and the rule there is that
+  refcount/COW operations are atomic **only** for objects carrying this bit —
+  biased refcounting, so single-threaded code and unshared data pay nothing.
+  Two consequences land back on this design: (1) the bit's monotonic,
+  never-cleared semantics are now a *feature* (a shared-across-threads object
+  can never be un-shared behind a peer's back); (2) **closing the C4.1
+  aliasing catalog becomes a prerequisite for thread-mode sharing** — an
+  interior alias captured before sharing writes into a subgraph another
+  isolate is reading, which is a correctness bug in one isolate and a data
+  race across two. The O(1)-share-at-the-root optimization is sound only
+  while every write path reaches a child through a shared root.
 - **CW4 (DECIDED, designer, 2026-07-23): the switch to a small saturating
   count (b) — and the (d) GC-refresh — are deferred** pending deep
   benchmarking on a corpus of live/production Lambda scripts, not synthetic

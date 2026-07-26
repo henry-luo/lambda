@@ -5,7 +5,7 @@
 > Jube native module, giving Radiant an Obscura-class headless-browser API surface now and a
 > browser-grade DOM surface long-term.
 > **Companion docs**: `vibe/radiant/Radiant_vs_Obscura.md` (API gap analysis),
-> `vibe/Lambda_Desing_Native_Module.md` (Jube modules, `radiant-dom` POC, VMap projections).
+> `vibe/Lambda_Design_Native_Module.md` (Jube modules, `radiant-dom` POC, VMap projections).
 
 ---
 
@@ -61,7 +61,7 @@ semantic mismatch gets recorded (in this doc's §9 ledger) rather than silently 
 
 | Design | Relationship |
 |---|---|
-| `Lambda_Desing_Native_Module.md` | **Hard prerequisite.** The `dom` package sits on the `radiant-dom` Jube module (POC 1). It consumes the module's Lambda-facing API (`dom_node` VMap projections, tree/selector/mutation primitives) and extends the JS-facing surface. Do not start the package against the current `js_dom.cpp` monolith. |
+| `Lambda_Design_Native_Module.md` | **Hard prerequisite.** The `dom` package sits on the `radiant-dom` Jube module (POC 1). It consumes the module's Lambda-facing API (`dom_node` VMap projections, tree/selector/mutation primitives) and extends the JS-facing surface. Do not start the package against the current `js_dom.cpp` monolith. |
 | `vibe/radiant/Radiant_vs_Obscura.md` | Provides the API inventory and priority order (observers → custom elements → adopted stylesheets → traversal/parser → storage/facades). |
 | `vibe/radiant/Radiant_Design_Concurrency.md` (RC1–RC8) | Pages are Lambda isolates with same-thread script+layout. The `dom` package instantiates per page isolate; its state lives inside the isolate. |
 | `vibe/radiant/Radiant_Design_State_Management.md` (RS1–RS16) | The state store is already Lambda-shaped; it is a Phase-3 migration target into (or alongside) this package. |
@@ -533,7 +533,7 @@ not zero).
 ## 7. Phasing
 
 **Phase 0 — prerequisite (already planned elsewhere): `radiant-dom` module POC.**
-Per `Lambda_Desing_Native_Module.md` §8: DOM bridge carved into a Jube module, JS unified onto
+Per `Lambda_Design_Native_Module.md` §8: DOM bridge carved into a Jube module, JS unified onto
 the VMap path, L4 semantic adapter designed (the eight deferred semantic items specified).
 Adds from this proposal: the rooting invariant document, `schedule_microtask` host API,
 mutation-ring subscription host API.
@@ -605,7 +605,7 @@ Friction-log entries from ST1–ST3 get appended here as F-numbered rows once wo
 | File | Relevance |
 |---|---|
 | `vibe/radiant/Radiant_vs_Obscura.md` | API gap inventory and priorities this package implements |
-| `vibe/Lambda_Desing_Native_Module.md` | Jube module system; `radiant-dom` POC (§8); VMap projections (§6.3); host API |
+| `vibe/Lambda_Design_Native_Module.md` | Jube module system; `radiant-dom` POC (§8); VMap projections (§6.3); host API |
 | `vibe/Lambda_GC_Root_Issue.md` | open JIT GC-rooting issue the rooting invariant must respect |
 | `lambda/js/js_dom.cpp`, `js_dom_events.cpp`, `js_dom_selection.cpp`, `js_cssom.cpp` | current C+ DOM bridge (~18k lines) — Phase-0 carve-out source |
 | `radiant/script_runner.cpp` | browser-global preamble whose no-op shims Phase 1 deletes |

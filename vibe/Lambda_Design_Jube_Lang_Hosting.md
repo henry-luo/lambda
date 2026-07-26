@@ -7,7 +7,7 @@
 > **Scope:** hosting Python, Ruby, Bash, and future languages on the unified
 > Lambda runtime through Jube native modules
 >
-> **Related design:** `vibe/Lambda_Desing_Native_Module.md`
+> **Related design:** `vibe/Lambda_Design_Native_Module.md`
 
 ## 1. Decision summary
 
