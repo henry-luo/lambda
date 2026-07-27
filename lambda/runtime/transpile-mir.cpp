@@ -6793,6 +6793,17 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             // gc_reg is loaded at function entry: context->heap->gc
             // ================================================================
             if (alloc_class >= 0 && mt->gc_reg != 0) {
+                // WARNING: these literal offsets are stale — gc_large_set_t sits
+                // between all_objects and bump_cursor, so the real offsets are
+                // 40/48, and 16/24 read large_objects.{slots,capacity}. A live
+                // `slots` pointer always exceeds a `capacity` count (and capacity
+                // is 0 whenever slots is NULL), so the UBGT below always takes
+                // the slow path: this fast path is currently unreachable.
+                // Before repairing the offsets, note that any inline bump
+                // allocation must ALSO set the owning block's alloc_bits bit
+                // (see gc_heap_bump_alloc) — gc_bump_block_owns_exact treats a
+                // clear bit as "not a GC object", so an unrecorded slot would be
+                // swept while live.
                 // gc_heap_t offsets: bump_cursor=16, bump_end=24, all_objects=8
                 MIR_reg_t cursor = new_reg(mt, "bcur", MIR_T_I64);
                 MIR_reg_t new_cursor = new_reg(mt, "bnew", MIR_T_I64);

@@ -17,5 +17,5 @@
   "library_linux": "lang-python.so",
   "library_windows": "lang-python.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "212b5c66e91e3cb4f6df0649d8240946353b484ed3ba49ce90d3a3a1cd0dfe43"
+  "sha256_macos": "58bd4c08052aaaa12c3fd0067517b8af20c5ed7e2ee41ceb45265a36fba41ab4"
 }

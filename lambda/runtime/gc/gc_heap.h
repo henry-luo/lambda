@@ -184,7 +184,19 @@ typedef struct gc_bump_block {
     uint8_t* base;                  // block memory start
     size_t size;                    // block size in bytes
     struct gc_bump_block* next;     // next (older) block in chain
+    // Allocation-start bitmap: one bit per GC_BUMP_GRANULE bytes, set when a
+    // slot header is placed. Without it the exact-slot test has to replay the
+    // block's allocation sequence from its base, making every mark visit
+    // O(slots-before-it) and each collection O(n^2) in live bump objects.
+    // NULL only if its allocation failed; callers then fall back to the scan.
+    uint8_t* alloc_bits;
 } gc_bump_block_t;
+
+// Every bump slot is a 16-byte gc_header_t plus an object-zone size class, and
+// all size classes are multiples of 16, so slot headers always start on a
+// 16-byte granule measured from the block base.
+#define GC_BUMP_GRANULE             16u
+#define GC_BUMP_BITMAP_BYTES(bytes) ((((bytes) / GC_BUMP_GRANULE) + 7u) / 8u)
 
 // Initial and growth sizes for bump-pointer regions
 #define GC_BUMP_BLOCK_INITIAL_SIZE  (4 * 1024 * 1024)   // 4 MB
@@ -269,6 +281,8 @@ typedef struct gc_heap {
 
     // Bump-pointer block chain (for cleanup and ownership registration)
     gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions
+    uint8_t* bump_min_addr;         // bounds over all bump blocks: O(1) rejection
+    uint8_t* bump_max_addr;         // for the (common) non-bump pointer
 
     void* mem_node;                 // MemContext registration node (NULL if untracked)
 
