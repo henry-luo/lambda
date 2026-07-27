@@ -374,6 +374,21 @@ pn test_fill_negative_float() {
     print("\n")
 }
 
+// ============================================================
+// Test 23: bool narrowing must stop before a mixed write
+// ============================================================
+pn test_fill_bool_mixed_write() {
+    var arr = fill(3, true)
+    arr[1] = false
+    arr[2] = "mixed"
+    print(arr[0])
+    print(" ")
+    print(arr[1])
+    print(" ")
+    print(arr[2])
+    print("\n")
+}
+
 pn main() {
     test_fill_int_untyped()
     test_fill_float_untyped()
@@ -397,4 +412,5 @@ pn main() {
     test_fill_loop_mutation()
     test_fill_negative_int()
     test_fill_negative_float()
+    test_fill_bool_mixed_write()
 }

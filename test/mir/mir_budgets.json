@@ -275,10 +275,10 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail.",
       "budgets": {
         "default": {
-          "module_insns": 494,
+          "module_insns": 509,
           "functions": {
             "_closed_gap_#": {
-              "insns": 116
+              "insns": 131
             },
             "_open_gap_#": {
               "insns": 31

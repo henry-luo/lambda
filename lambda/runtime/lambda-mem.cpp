@@ -31,6 +31,125 @@ extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
 
+struct LambdaRegionBlock {
+    LambdaRegionBlock* next;
+    size_t capacity;
+    size_t used;
+    uint8_t data[];
+};
+
+struct LambdaRegion {
+    LambdaRegion* next_free;
+    LambdaRegionBlock* blocks;
+};
+
+static const size_t LAMBDA_REGION_BLOCK_BYTES = 64 * 1024;
+
+static size_t lambda_region_align_up(size_t value) {
+    return (value + 15u) & ~(size_t)15u;
+}
+
+static LambdaRegionBlock* lambda_region_take_block(Heap* heap, size_t required) {
+    if (!heap) return NULL;
+    LambdaRegionBlock** link = &heap->region_free_blocks;
+    while (*link) {
+        LambdaRegionBlock* block = *link;
+        if (block->capacity >= required) {
+            *link = block->next;
+            block->next = NULL;
+            block->used = 0;
+            return block;
+        }
+        link = &block->next;
+    }
+    size_t capacity = LAMBDA_REGION_BLOCK_BYTES;
+    if (capacity < required) capacity = lambda_region_align_up(required);
+    LambdaRegionBlock* block = (LambdaRegionBlock*)mem_alloc(
+        sizeof(LambdaRegionBlock) + capacity, MEM_CAT_EVAL);
+    if (!block) return NULL;
+    block->next = NULL;
+    block->capacity = capacity;
+    block->used = 0;
+    return block;
+}
+
+extern "C" LambdaRegion* lambda_region_begin(void) {
+    if (!context || !context->heap) return NULL;
+    Heap* heap = context->heap;
+    LambdaRegion* region = heap->region_free;
+    if (region) {
+        heap->region_free = region->next_free;
+    } else {
+        region = (LambdaRegion*)mem_alloc(sizeof(LambdaRegion), MEM_CAT_EVAL);
+        if (!region) return NULL;
+    }
+    region->next_free = NULL;
+    region->blocks = NULL;
+    return region;
+}
+
+extern "C" void* lambda_region_calloc(LambdaRegion* region, size_t size,
+        TypeId type_id) {
+    if (!region || !context || !context->heap || size > UINT32_MAX) return NULL;
+    // Keep forced-GC stress meaningful for temporary graphs: region pointers
+    // are intentionally absent from all_objects, and this summary guarantees
+    // they have no outgoing ordinary-GC edge to trace.
+    gc_heap_maybe_force_collect(context->heap->gc, "lambda_region_calloc");
+    size_t slot_size = lambda_region_align_up(sizeof(gc_header_t) + size);
+    LambdaRegionBlock* block = region->blocks;
+    if (!block || block->capacity - block->used < slot_size) {
+        block = lambda_region_take_block(context->heap, slot_size);
+        if (!block) return NULL;
+        block->next = region->blocks;
+        region->blocks = block;
+    }
+    uint8_t* slot = block->data + block->used;
+    block->used += slot_size;
+    // Region slots keep the ordinary adjacent header layout, but are not linked
+    // into all_objects: this first region summary permits no outgoing GC edge.
+    memset(slot, 0, slot_size);
+    gc_header_t* header = (gc_header_t*)slot;
+    header->type_tag = (uint16_t)type_id;
+    header->alloc_size = (uint32_t)size;
+    void* result = (void*)(header + 1);
+    assert_raw_item_pointer(result);
+    return result;
+}
+
+extern "C" void lambda_region_end(LambdaRegion* region) {
+    if (!region || !context || !context->heap) return;
+    Heap* heap = context->heap;
+    LambdaRegionBlock* block = region->blocks;
+    while (block) {
+        LambdaRegionBlock* next = block->next;
+#ifndef NDEBUG
+        // A region value must not survive its proven post-dominating end.
+        memset(block->data, 0xA5, block->used);
+#endif
+        block->used = 0;
+        block->next = heap->region_free_blocks;
+        heap->region_free_blocks = block;
+        block = next;
+    }
+    region->blocks = NULL;
+    region->next_free = heap->region_free;
+    heap->region_free = region;
+}
+
+static void lambda_region_destroy_caches(Heap* heap) {
+    if (!heap) return;
+    while (heap->region_free) {
+        LambdaRegion* next = heap->region_free->next_free;
+        mem_free(heap->region_free);
+        heap->region_free = next;
+    }
+    while (heap->region_free_blocks) {
+        LambdaRegionBlock* next = heap->region_free_blocks->next;
+        mem_free(heap->region_free_blocks);
+        heap->region_free_blocks = next;
+    }
+}
+
 static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
     if (type_tag == LMD_TYPE_BINARY) {
@@ -281,6 +400,7 @@ static void init_ascii_char_table() {
     for (int i = 0; i < 128; i++) {
         String* s = (String*)(ascii_char_storage + i * ASCII_CHAR_ENTRY_SIZE);
         s->len = 1;
+        s->flags = 0;
         s->is_ascii = 1;
         s->chars[0] = (char)i;
         s->chars[1] = '\0';
@@ -582,6 +702,7 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination
     str->len = len;
+    str->flags = 0;
     str->is_ascii = str_is_ascii(str->chars, len) ? 1 : 0;
     return str;
 }
@@ -834,6 +955,7 @@ void heap_destroy() {
             heap_finalize_gc_objects(context->heap->gc);
             gc_heap_destroy(context->heap->gc);  // pool_destroy frees all pool memory
         }
+        lambda_region_destroy_caches(context->heap);
         context->heap->pool = NULL;
         mem_free(context->heap);
     }

@@ -115,6 +115,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
 
         // Initialize String structure
         new_str->len = 0;
+        new_str->flags = 0;
         new_str->is_ascii = 0;
         new_str->chars[0] = '\0';
     } else {

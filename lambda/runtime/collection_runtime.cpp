@@ -297,6 +297,7 @@ void list_push(List* list, Item item) {
                     memcpy(merged->chars + previous->len, next->chars, next->len);
                     merged->chars[new_length] = '\0';
                     merged->len = new_length;
+                    merged->flags = 0;
                     list->items[list->length - 1] = {.item = s2it(merged)};
                     return;
                 }

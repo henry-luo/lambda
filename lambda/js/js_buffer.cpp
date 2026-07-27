@@ -55,6 +55,7 @@ static Item make_buffer_content_string_item(const char* str, int len,
     if (len > 0) memcpy(s->chars, str, (size_t)len);
     s->chars[len] = '\0';
     s->len = (uint32_t)len;
+    s->flags = 0;
     s->is_ascii = ascii_known ? (is_ascii ? 1 : 0)
                               : (str_is_ascii(str, (size_t)len) ? 1 : 0);
     return (Item){.item = s2it(s)};

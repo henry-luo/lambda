@@ -1201,6 +1201,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     if (percent_hex.item != ItemNull.item) return percent_hex;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     result->len = left_len + right_len;
+    result->flags = 0;
     result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
     memcpy(result->chars + left_len, right->chars, right_len);

@@ -262,6 +262,7 @@ static Item make_empty_string(YamlParser* p) {
     Arena* arena = p->ctx->builder.arena();
     String* s = (String*)arena_alloc(arena, sizeof(String) + 1);
     s->len = 0;
+    s->flags = 0;
     s->chars[0] = '\0';
     return (Item){.item = s2it(s)};
 }
@@ -278,6 +279,7 @@ static void put_key_value(YamlParser* p, MapBuilder& map, Item key_item, Item va
             Arena* arena = p->ctx->builder.arena();
             String* name = (String*)arena_alloc(arena, sizeof(String) + 1);
             name->len = 0;
+            name->flags = 0;
             name->chars[0] = '\0';
             map.put(name, value_item);
         }

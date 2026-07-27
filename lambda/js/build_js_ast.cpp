@@ -353,6 +353,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                 // allocate a String on the AST pool (heap_create_name may not be available yet)
                 String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + j + 1);
                 s->len = j;
+                s->flags = 0;
                 memcpy(s->chars, temp_str, j);
                 s->chars[j] = '\0';
                 literal->bigint_str = s;
@@ -3760,6 +3761,7 @@ static const char* ts_node_text_util(JsTranspiler* tp, TSNode node, int* out_len
 static String* ts_pool_string_util(JsTranspiler* tp, const char* src, int len) {
     String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + len + 1);
     s->len = len;
+    s->flags = 0;
     s->is_ascii = 1;
     memcpy(s->chars, src, len);
     s->chars[len] = '\0';

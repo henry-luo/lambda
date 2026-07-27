@@ -3,6 +3,9 @@
 
 // Include standard integer types from system
 #include <stdint.h>
+#if !defined(LAMBDA_C2MIR_RUNTIME)
+#include <stddef.h>
+#endif
 
 // Define size_t only when compiled by MIR C compiler (not standard C/C++ compiler)
 // MIR doesn't include stddef.h so size_t won't be defined
@@ -612,10 +615,18 @@ typedef struct Item Item;
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
     uint32_t len;       // byte length of the string
-    uint8_t is_ascii;   // 1 if all bytes < 0x80, 0 otherwise (enables O(1) indexing)
+    union {
+        uint8_t flags;
+        struct {
+            uint8_t is_ascii:1;   // enables O(1) indexing when every byte is ASCII
+            uint8_t is_buffer:1;  // exclusively owned GC string-builder storage
+        };
+    };
     char chars[];       // UTF-8 string data (null-terminated)
 } String;
 #define STRING_STRUCT_DEFINED
+LAMBDA_STATIC_ASSERT(sizeof(String) == 8, "String header ABI must remain 8 bytes");
+LAMBDA_STATIC_ASSERT(offsetof(String, chars) == 5, "String chars ABI must remain byte 5");
 #endif
 
 typedef struct Target Target;  // forward declaration for Symbol.ns
@@ -1026,6 +1037,10 @@ void* heap_calloc(size_t size, TypeId type_id);
 // valid after their creating invocation's number frame is reclaimed.
 void* heap_calloc_closure_env(size_t size);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
+typedef struct LambdaRegion LambdaRegion;
+LambdaRegion* lambda_region_begin(void);
+void lambda_region_end(LambdaRegion* region);
+void* lambda_region_calloc(LambdaRegion* region, size_t size, TypeId type_id);
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);
 bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
@@ -1619,6 +1634,8 @@ extern "C" {
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
+    Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
+        void* type_list_ptr);
     Element* elmt(int64_t type_index);
     Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object(int64_t type_index);
@@ -2024,6 +2041,7 @@ extern "C" {
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
+    String *fn_string_freeze(String *str);
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC
     Item fn_substring(Item str, Item start, Item end);

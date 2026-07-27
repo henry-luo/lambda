@@ -369,6 +369,11 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
                           uint16_t type_tag, int cls);
 
+// Apply the configured deterministic/random forced-GC schedule at a custom
+// allocator boundary.  Region allocation uses this so stress mode exercises
+// active region roots without making region objects ordinary heap members.
+int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site);
+
 // Migration instrumentation for the no-scalar-cell invariant.  Counts every
 // scalar-tag allocation observed at the GC object-allocation choke points.
 uint64_t gc_scalar_tag_allocation_count(uint16_t type_tag);

@@ -402,6 +402,7 @@ void html5_switch_tokenizer_state(Html5Parser* parser, Html5TokenizerState new_s
 static String* html5_create_string_from_temp_buffer(Html5Parser* parser) {
     String* str = (String*)arena_alloc(parser->arena, sizeof(String) + parser->temp_buffer_len + 1);
     str->len = parser->temp_buffer_len;
+    str->flags = 0;
     memcpy(str->chars, parser->temp_buffer, parser->temp_buffer_len);
     str->chars[parser->temp_buffer_len] = '\0';
     return str;
@@ -411,6 +412,7 @@ static String* html5_create_string_from_temp_buffer(Html5Parser* parser) {
 static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parser) {
     String* str = (String*)arena_alloc(parser->arena, sizeof(String) + parser->temp_buffer_len + 1);
     str->len = parser->temp_buffer_len;
+    str->flags = 0;
     for (size_t i = 0; i < parser->temp_buffer_len; i++) {
         char c = parser->temp_buffer[i];
         if (c >= 'A' && c <= 'Z') c += 0x20;
