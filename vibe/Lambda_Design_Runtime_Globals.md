@@ -219,6 +219,40 @@ Why now:
   batch runner still reports its pre-existing retained JS-runtime allocations
   at process shutdown; neither is introduced by this migration.
 
+### Post-migration implementation invariants (2026-07-27)
+
+- **Branch-safe module-state materialization.** A generated function may first
+  reference its module state in either arm of a branch. The cached
+  `LambdaModuleState*` is therefore inserted at that function's entry label,
+  not emitted lazily at its first textual use. Both branch arms then see one
+  defined owner-local pointer, without a repeated readiness test or a
+  per-operation reload of the variable slab.
+- **Member IC bases are deliberately reacquired at each probe.** “Reload” here
+  means ordinary loads from the current function's hidden `Context*` to its
+  already-instantiated, owner-thread module slab; it is not an atomic load,
+  lock, TLS lookup, helper call, or shared-cache validation. This keeps an IC
+  probe from retaining a virtual register across a runtime call/control-flow
+  edge while ensuring that the entry it mutates is never shared with another
+  context. Module setup/root registration remains the only cold-path work.
+- **Bootstrap-owned async handles must be attached before they are observed.**
+  A forked child's inherited IPC descriptor can arrive while `process` is
+  being built, before ordinary JS script entry initializes libuv. The process
+  bootstrap establishes the event-loop instance before opening that descriptor
+  and stores the canonical `EvalContext` in `uv_handle_t::data`; every libuv
+  callback re-enters that owner with `EvalContextScope`. This is a one-time
+  bootstrap edge, not a per-message synchronization mechanism.
+- **Function ABI and realm ownership are explicit boundary contracts.** Only
+  compiled MIR method wrappers carry the hidden `Context*` ABI. Jube trampolines
+  and native/DOM callbacks retain the ordinary ABI and receive fresh wrapper
+  identities where JS observability requires it. Similarly, a stack-worker or
+  document execution realm receives its borrowed UI context before script
+  execution; transferring it after callbacks have been installed is invalid.
+  These are allocation/bootstrap boundaries, so callback invocation and DOM/IC
+  hot paths remain direct owner-local accesses.
+- **Verification.** `make test-lambda-baseline` completed with 1,480/1,480
+  passing tests after this implementation checkpoint, including JS IPC,
+  hosted `BoundSocket`, forced-GC MIR, and emission-ratchet coverage.
+
 ---
 
 ## 2. Classification taxonomy
@@ -779,9 +813,9 @@ context-dependent is reached through `rt` (the `Context*` each function holds af
   `Script->index` would go stale in cached modules): the Runtime module registry assigns it once
   while the module is private, initializes the module's `_mod_id` cell, seals the module, and
   publishes it. Executing contexts only read the frozen cell. A generated function that uses
-  module variables or ICs resolves and hoists its `ContextModuleState*` once; functions that use
-  neither pay no module-state load. Variable operations then use baked offsets and ordinary
-  loads/stores. Cross-module `pub` access uses the exporter's frozen `_mod_id` and
+  module variables materializes its cached `ContextModuleState*` at the entry label; functions
+  that use neither module variables nor ICs pay no module-state load. Variable operations then
+  use baked offsets and ordinary loads/stores. Cross-module `pub` access uses the exporter's frozen `_mod_id` and
   baked slot. Slabs are context-owned, registered as root ranges against their own heap →
   `walk_bss_gc_roots` and the reset dance are deleted. `JsFunction::module_vars` and
   saved-module records remain fast direct pointers because those function objects/records are
@@ -797,10 +831,10 @@ context-dependent is reached through `rt` (the `Context*` each function holds af
 - **All mutable IC cells are per-context.** During compilation, each member/store/call IC site
   receives a dense module-local `site_id`; the sealed module records `ic_site_count` and the
   entry layout. Context module instantiation allocates one fixed `IcEntry[ic_site_count]` slab
-  beside the module-variable slab. The generated function prologue already hoists
-  `ContextModuleState*`; each IC probe/update addresses `module_state->ic_entries[site_id]`
-  using a baked offset and ordinary loads/stores. There is no lock, atomic, TLS lookup, helper
-  call, shared epoch, or publication check in the IC path.
+  beside the module-variable slab. Each IC probe/update reacquires that context's slab base from
+  its hidden `Context*`, then addresses `module_state->ic_entries[site_id]` using a baked offset
+  and ordinary loads/stores. There is no lock, atomic, TLS lookup, helper call, shared epoch, or
+  publication check in the IC path.
 
   Because the slab belongs to one context/heap generation, it may safely cache that context's
   `TypeMap*`, shape entries, offsets, and other non-Item pointers whose lifetime is bounded by
@@ -808,8 +842,8 @@ context-dependent is reached through `rt` (the `Context*` each function holds af
   execution, eliminating cross-run shared epoch checks. Shape/version guards required by IC
   semantics remain ordinary owner-thread comparisons; they are not synchronization. Facts that
   are truly immutable compile metadata are baked/read directly and do not use a mutable IC.
-  Measure the extra per-context memory and module-state prologue load; recover the load by
-  sharing the already-hoisted module-state pointer with module-variable access.
+  Measure the extra per-context memory and module-variable entry load; do not recover it by
+  caching an IC base across calls or control-flow edges.
 - **Codegen never mutates a *shared* `MIR_context`.** Shared module contexts are sealed after
   the eager pipeline: `MIR_link(…, MIR_set_gen_interface, …)` + `MIR_gen()` then
   `MIR_gen_finish` ([mir.c:403–475](../lambda/runtime/mir.c)) — all machine code exists before
