@@ -3,6 +3,8 @@
 // result nodes, enabling targeted re-transformation when state/model changes.
 #include "../lambda-data.hpp"
 #include "render_map.h"
+#include "runtime-state.h"
+#include "heap_api.h"
 #include "template_registry.h"
 #include "transpiler.hpp"
 #include "../../lib/log.h"
@@ -12,16 +14,57 @@
 #include <stdio.h>
 
 // ============================================================================
-// Global render map
+// Context-owned render reconciliation state
 // ============================================================================
 
-static HashMap* s_render_map = NULL;
-static bool s_owns_map = false;
-static Item s_doc_root = {0};  // top-level element tree for parent fixup
+typedef struct RenderMapState {
+    HashMap* render_map;
+    bool owns_map;
+    Item doc_root;          // top-level element tree for parent fixup
+    Item source_doc_root;   // source-document path tracking
+    render_map_path_recorder_fn path_recorder;
+    void* path_recorder_state; // recorder-private, context-owned side state
+    render_map_path_recorder_state_cleanup_fn path_recorder_state_cleanup;
+    HashMap* reverse_map;
+    bool roots_registered;
+} RenderMapState;
 
-// R7 step 3c — source-document path tracking
-static Item s_source_doc_root = {0};
-static render_map_path_recorder_fn s_path_recorder = NULL;
+static RenderMapState* render_map_state(void) {
+    if (!context) {
+        log_error("render-map: no bound canonical EvalContext");
+        abort();
+    }
+    RenderMapState* state = (RenderMapState*)context->render_map_state;
+    if (state) return state;
+    state = (RenderMapState*)mem_calloc(1, sizeof(RenderMapState), MEM_CAT_EVAL);
+    if (!state) {
+        log_error("render-map: failed to create context state");
+        abort();
+    }
+    context->render_map_state = state;
+    return state;
+}
+
+static void render_map_register_roots(RenderMapState* state) {
+    if (!state || state->roots_registered) return;
+    if (!context || !context->heap ||
+            !heap_register_gc_root_range_for((Context*)context,
+                &state->doc_root.item, 1) ||
+            !heap_register_gc_root_range_for((Context*)context,
+                &state->source_doc_root.item, 1)) {
+        log_error("render-map: failed to publish context root slots");
+        abort();
+    }
+    state->roots_registered = true;
+}
+
+#define s_render_map (render_map_state()->render_map)
+#define s_owns_map (render_map_state()->owns_map)
+#define s_doc_root (render_map_state()->doc_root)
+#define s_source_doc_root (render_map_state()->source_doc_root)
+#define s_path_recorder (render_map_state()->path_recorder)
+#define s_path_recorder_state (render_map_state()->path_recorder_state)
+#define s_reverse_map (render_map_state()->reverse_map)
 
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
@@ -64,8 +107,6 @@ typedef struct ReverseMapEntry {
     uint64_t result_item_bits;   // Item.item value of the result node (key)
     RenderMapKey key;            // source_item + template_ref
 } ReverseMapEntry;
-
-static HashMap* s_reverse_map = NULL;
 
 HASHMAP_DEFINE_INTKEY(reverse_map, ReverseMapEntry, result_item_bits)
 
@@ -114,17 +155,24 @@ void render_map_init(void) {
 }
 
 void render_map_destroy(void) {
-    if (s_render_map && s_owns_map) {
-        hashmap_free(s_render_map);
+    if (!context || !context->render_map_state) return;
+    RenderMapState* state = (RenderMapState*)context->render_map_state;
+    if (state->render_map && state->owns_map) {
+        hashmap_free(state->render_map);
     }
-    s_render_map = NULL;
-    s_owns_map = false;
-    if (s_reverse_map) {
-        hashmap_free(s_reverse_map);
-        s_reverse_map = NULL;
+    if (state->reverse_map) {
+        hashmap_free(state->reverse_map);
     }
-    // R7 step 3c — drop dangling source-doc-root before next runtime.
-    s_source_doc_root = (Item){0};
+    if (state->roots_registered) {
+        heap_unregister_gc_root_range_for((Context*)context, &state->doc_root.item);
+        heap_unregister_gc_root_range_for((Context*)context, &state->source_doc_root.item);
+    }
+    if (state->path_recorder_state && state->path_recorder_state_cleanup) {
+        state->path_recorder_state_cleanup(state->path_recorder_state);
+        state->path_recorder_state = NULL;
+    }
+    context->render_map_state = NULL;
+    mem_free(state);
 }
 
 void render_map_record(Item source_item, const char* template_ref,
@@ -254,9 +302,14 @@ int render_map_retransform(void) {
         // re-execute template body with the source item
         // NOTE: fn() may call apply() which modifies this hashmap — after this
         // call, 'entry' may be dangling. Use 'saved' for old values.
-        typedef Item (*template_body_fn)(Item);
+        typedef Item (*template_body_fn)(Context*, Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
-        Item new_result = fn(saved.key.source_item);
+        if (!context) {
+            log_error("render_map_retransform: no bound EvalContext");
+            entry->dirty = false;
+            continue;
+        }
+        Item new_result = fn((Context*)context, saved.key.source_item);
 
         // update reverse map
         if (s_reverse_map) {
@@ -359,9 +412,14 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         // re-execute template body with the source item
         // NOTE: fn() may call apply() which modifies this hashmap — after this
         // call, 'entry' may be dangling. Use 'saved' for old values.
-        typedef Item (*template_body_fn)(Item);
+        typedef Item (*template_body_fn)(Context*, Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
-        Item new_result = fn(saved.key.source_item);
+        if (!context) {
+            log_error("render_map_retransform_with_results: no bound EvalContext");
+            entry->dirty = false;
+            continue;
+        }
+        Item new_result = fn((Context*)context, saved.key.source_item);
 
         // record result before updating entry
         if (out_results && count < max_results) {
@@ -457,9 +515,7 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
 }
 
 void render_map_set_doc_root(Item root) {
-    // A later execution can install a fresh heap registry while this static
-    // slot survives; registration is idempotent within the active heap.
-    heap_register_gc_root(&s_doc_root.item);
+    render_map_register_roots(render_map_state());
     s_doc_root = root;
 }
 
@@ -504,8 +560,7 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
 // ============================================================================
 
 void render_map_set_source_doc_root(Item root) {
-    // Keep the persistent source slot registered after runtime/heap reuse.
-    heap_register_gc_root(&s_source_doc_root.item);
+    render_map_register_roots(render_map_state());
     s_source_doc_root = root;
 }
 
@@ -549,6 +604,23 @@ bool render_map_maybe_set_source_doc_root(Item target) {
 
 void render_map_set_path_recorder(render_map_path_recorder_fn fn) {
     s_path_recorder = fn;
+}
+
+void* render_map_get_path_recorder_state(void) {
+    // Teardown may run after a document has intentionally detached TLS. A
+    // lookup must not recreate or abort; the owning runtime destroys the
+    // payload through render_map_destroy while its context is still bound.
+    if (!context || !context->render_map_state) return NULL;
+    return ((RenderMapState*)context->render_map_state)->path_recorder_state;
+}
+
+void render_map_set_path_recorder_state(void* state) {
+    s_path_recorder_state = state;
+}
+
+void render_map_set_path_recorder_state_cleanup(
+        render_map_path_recorder_state_cleanup_fn cleanup) {
+    render_map_state()->path_recorder_state_cleanup = cleanup;
 }
 
 extern "C" bool render_map_has_path_recorder(void) {
@@ -616,3 +688,4 @@ void render_map_record_source_path(Item target, const char* template_ref) {
     }
     s_path_recorder(target, template_ref, indices, depth);
 }
+#include "runtime-state.h"

@@ -8,14 +8,48 @@
  * which maps event names to arrays of listener functions.
  */
 #include "node_events.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_events_host = NULL;
-static void* node_events_session = NULL;
-static bool node_events_rooted = false;
+
+struct NodeEventsSessionState {
+    void* session;
+    bool rooted;
+    Item cached_events_key;
+    Item cached_once_key;
+    Item cached_max_listeners_key;
+    Item cached_new_listener_key;
+    Item cached_remove_listener_key;
+    Item cached_listener_fn_key;
+    Item cached_listener_context_key;
+    Item cached_warned_key;
+    Item cached_events_namespace;
+    bool cached_keys_initialized;
+    Item cached_ee_prototype;
+};
+
+static NodeEventsSessionState* node_events_state(void) {
+    return (NodeEventsSessionState*)jube_node_current_module_state(
+        JUBE_NODE_MODULE_STATE_EVENTS);
+}
+
+#define node_events_session (node_events_state()->session)
+#define node_events_rooted (node_events_state()->rooted)
+#define events_key (node_events_state()->cached_events_key)
+#define once_key (node_events_state()->cached_once_key)
+#define max_listeners_key (node_events_state()->cached_max_listeners_key)
+#define new_listener_key (node_events_state()->cached_new_listener_key)
+#define remove_listener_key (node_events_state()->cached_remove_listener_key)
+#define listener_fn_key (node_events_state()->cached_listener_fn_key)
+#define listener_context_key (node_events_state()->cached_listener_context_key)
+#define warned_key (node_events_state()->cached_warned_key)
+#define events_namespace (node_events_state()->cached_events_namespace)
+#define keys_initialized (node_events_state()->cached_keys_initialized)
+#define ee_prototype (node_events_state()->cached_ee_prototype)
 
 static Item node_events_string(const char* text) {
     return node_events_host && node_events_host->value &&
@@ -110,17 +144,6 @@ static void node_events_set_named_property(Item object, const char* name, Item v
 #define js_class_stamp(OBJECT, CLASS) node_events_host->script->class_stamp(OBJECT, CLASS)
 #define js_new_closure(FUNCTION, COUNT, ENV, ENV_COUNT) node_events_host->script->new_closure(FUNCTION, COUNT, ENV, ENV_COUNT)
 #define js_alloc_env(COUNT) node_events_host->script->closure_env_new(COUNT)
-
-static Item events_key;       // "__events__"
-static Item once_key;         // "__once__"
-static Item max_listeners_key; // "__maxListeners__"
-static Item new_listener_key; // "newListener"
-static Item remove_listener_key; // "removeListener"
-static Item listener_fn_key; // "__listener_fn__"
-static Item listener_context_key; // "__listener_als_context__"
-static Item warned_key;       // "__max_listener_warned__"
-static Item events_namespace = {0};
-static bool keys_initialized = false;
 
 static void ensure_keys() {
     if (keys_initialized) return;
@@ -864,8 +887,6 @@ static Item js_ee_inst_prependOnceListener(Item event_name, Item listener) {
 }
 
 // ─── new EventEmitter() constructor ─────────────────────────────────────────
-static Item ee_prototype = {0};
-
 extern "C" Item js_ee_constructor(void) {
     ensure_keys();
     JubeRootFrame frame = {};
@@ -1125,17 +1146,19 @@ Item node_events_namespace(void) {
 }
 
 static void node_events_cache_reset(void) {
-    events_key = (Item){0};
-    once_key = (Item){0};
-    max_listeners_key = (Item){0};
-    new_listener_key = (Item){0};
-    remove_listener_key = (Item){0};
-    listener_fn_key = (Item){0};
-    listener_context_key = (Item){0};
-    warned_key = (Item){0};
-    events_namespace = (Item){0};
-    ee_prototype = (Item){0};
-    keys_initialized = false;
+    NodeEventsSessionState* state = node_events_state();
+    if (!state) return;
+    state->cached_events_key = (Item){0};
+    state->cached_once_key = (Item){0};
+    state->cached_max_listeners_key = (Item){0};
+    state->cached_new_listener_key = (Item){0};
+    state->cached_remove_listener_key = (Item){0};
+    state->cached_listener_fn_key = (Item){0};
+    state->cached_listener_context_key = (Item){0};
+    state->cached_warned_key = (Item){0};
+    state->cached_events_namespace = (Item){0};
+    state->cached_ee_prototype = (Item){0};
+    state->cached_keys_initialized = false;
 }
 
 int node_events_init(const JubeHostAPI* host) {
@@ -1166,8 +1189,11 @@ int node_events_init(const JubeHostAPI* host) {
 
 void node_events_shutdown(void) {
     node_events_cache_reset();
-    node_events_rooted = false;
-    node_events_session = NULL;
+    NodeEventsSessionState* state = node_events_state();
+    if (state) {
+        state->rooted = false;
+        state->session = NULL;
+    }
     node_events_host = NULL;
 }
 
@@ -1175,10 +1201,16 @@ void node_events_runtime_attach(void* session) {
     if (!node_events_host || !node_events_host->node || !node_events_host->node->runtime ||
             !node_events_host->node->runtime->session_is_live ||
             !node_events_host->node->runtime->session_is_live(session)) return;
+    NodeEventsSessionState* state = (NodeEventsSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_EVENTS,
+            sizeof(NodeEventsSessionState));
+    if (!state) return;
     uint64_t* roots[] = {
-        &events_key.item, &once_key.item, &max_listeners_key.item, &new_listener_key.item,
-        &remove_listener_key.item, &listener_fn_key.item, &listener_context_key.item,
-        &warned_key.item, &events_namespace.item, &ee_prototype.item,
+        &state->cached_events_key.item, &state->cached_once_key.item,
+        &state->cached_max_listeners_key.item, &state->cached_new_listener_key.item,
+        &state->cached_remove_listener_key.item, &state->cached_listener_fn_key.item,
+        &state->cached_listener_context_key.item, &state->cached_warned_key.item,
+        &state->cached_events_namespace.item, &state->cached_ee_prototype.item,
     };
     int registered = 0;
     for (; registered < (int)(sizeof(roots) / sizeof(roots[0])); registered++) {
@@ -1191,27 +1223,31 @@ void node_events_runtime_attach(void* session) {
             return;
         }
     }
-    node_events_session = session;
-    node_events_rooted = true;
+    state->session = session;
+    state->rooted = true;
 }
 
 void node_events_runtime_reset(void* session) {
-    if (session == node_events_session) node_events_cache_reset();
+    NodeEventsSessionState* state = node_events_state();
+    if (state && session == state->session) node_events_cache_reset();
 }
 
 void node_events_runtime_detach(void* session) {
-    if (!node_events_host || session != node_events_session) return;
-    if (node_events_rooted) {
+    NodeEventsSessionState* state = node_events_state();
+    if (!node_events_host || !state || session != state->session) return;
+    if (state->rooted) {
         uint64_t* roots[] = {
-            &events_key.item, &once_key.item, &max_listeners_key.item, &new_listener_key.item,
-            &remove_listener_key.item, &listener_fn_key.item, &listener_context_key.item,
-            &warned_key.item, &events_namespace.item, &ee_prototype.item,
+            &state->cached_events_key.item, &state->cached_once_key.item,
+            &state->cached_max_listeners_key.item, &state->cached_new_listener_key.item,
+            &state->cached_remove_listener_key.item, &state->cached_listener_fn_key.item,
+            &state->cached_listener_context_key.item, &state->cached_warned_key.item,
+            &state->cached_events_namespace.item, &state->cached_ee_prototype.item,
         };
         for (int i = 0; i < (int)(sizeof(roots) / sizeof(roots[0])); i++) {
             node_events_host->node->roots->persistent_root_unregister(session, roots[i]);
         }
-        node_events_rooted = false;
+        state->rooted = false;
     }
     node_events_cache_reset();
-    node_events_session = NULL;
+    state->session = NULL;
 }

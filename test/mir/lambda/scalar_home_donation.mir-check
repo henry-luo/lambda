@@ -5,7 +5,7 @@
     {
       "in_func": "_twice_#",
       "expect": [
-        ":\tfunc\ti64, i64:_a, p:_scalar_home"
+        ":\tfunc\ti64, p:runtime, i64:_a, p:_scalar_home"
       ]
     },
     {

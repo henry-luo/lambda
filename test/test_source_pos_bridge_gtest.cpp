@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
@@ -43,12 +44,34 @@ extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
     return nullptr;
 }
 
-// render_map.cpp pulls in g_template_registry (defined in template_registry.cpp)
-// and lambda-mem.cpp's GC root registration. Stub them out for unit tests.
+// render_map.cpp pulls in context-owned template state and lambda-mem.cpp's
+// GC root registration. Stub them out for this non-collecting unit target.
 struct TemplateRegistry;
-extern "C" TemplateRegistry* g_template_registry = nullptr;
+static TemplateRegistry* test_template_registry = nullptr;
+extern "C" TemplateRegistry** template_registry_current_slot(void) {
+    return &test_template_registry;
+}
+__thread EvalContext* context = nullptr;
+static Heap source_pos_test_heap = {};
+static EvalContext source_pos_test_context = {};
+
+struct SourcePosTestContextBinding {
+    SourcePosTestContextBinding() {
+        source_pos_test_context.heap = &source_pos_test_heap;
+        context = &source_pos_test_context;
+    }
+
+    ~SourcePosTestContextBinding() {
+        context = nullptr;
+    }
+};
+
+static SourcePosTestContextBinding source_pos_test_context_binding;
+
 extern "C" void heap_register_gc_root(uint64_t*) {}
 extern "C" void heap_register_gc_root_range(uint64_t*, int) {}
+extern "C" bool heap_register_gc_root_range_for(Context*, uint64_t*, int) { return true; }
+extern "C" void heap_unregister_gc_root_range_for(Context*, uint64_t*) {}
 
 TEST(SourcePosBridgeC, PathInitFreeIsSafe) {
     SourcePathC p;

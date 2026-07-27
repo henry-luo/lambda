@@ -129,38 +129,40 @@ extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
 }
 
 // Cache: func_ptr → JsFunction*  (ensures same MIR function → same wrapper → same .prototype)
-static const int JS_FUNC_CACHE_SIZE = 512;
-static void* js_func_cache_keys[512];
-static JsFunction* js_func_cache_vals[512];
-static int js_func_cache_count = 0;
-static int js_func_cache_suppress_depth = 0;
+// It is context-owned because both the wrapper identity and its GC lifetime are
+// semantic state.  No cache operation synchronizes: one context has one owner
+// thread, and the arrays have a fixed address for the capsule lifetime.
 
 static JsFunction* js_func_cache_lookup(void* func_ptr) {
-    for (int i = 0; i < js_func_cache_count; i++) {
-        if (js_func_cache_keys[i] == func_ptr) return js_func_cache_vals[i];
+    for (int i = 0; i < js_runtime_state.function_cache_count; i++) {
+        if (js_runtime_state.function_cache_keys[i] == func_ptr) {
+            return js_runtime_state.function_cache_values[i];
+        }
     }
     return NULL;
 }
 
 static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
-    if (js_func_cache_count < JS_FUNC_CACHE_SIZE) {
-        js_func_cache_keys[js_func_cache_count] = func_ptr;
-        js_func_cache_vals[js_func_cache_count] = fn;
-        js_func_cache_count++;
+    if (js_runtime_state.function_cache_count < JS_FUNCTION_CACHE_CAPACITY) {
+        int slot = js_runtime_state.function_cache_count++;
+        js_runtime_state.function_cache_keys[slot] = func_ptr;
+        js_runtime_state.function_cache_values[slot] = fn;
     }
 }
 
 void js_func_cache_reset() {
-    js_func_cache_count = 0;
-    js_func_cache_suppress_depth = 0;
+    js_runtime_state.function_cache_count = 0;
+    js_runtime_state.function_cache_suppress_depth = 0;
 }
 
 extern "C" void js_func_cache_suppress_push(void) {
-    js_func_cache_suppress_depth++;
+    js_runtime_state.function_cache_suppress_depth++;
 }
 
 extern "C" void js_func_cache_suppress_pop(void) {
-    if (js_func_cache_suppress_depth > 0) js_func_cache_suppress_depth--;
+    if (js_runtime_state.function_cache_suppress_depth > 0) {
+        js_runtime_state.function_cache_suppress_depth--;
+    }
 }
 
 extern "C" int64_t js_with_depth_active(void);
@@ -208,7 +210,8 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
     js_function_root_item_if_needed(jsfn, &jsfn->prototype);
 }
 
-extern "C" Item js_new_function(void* func_ptr, int param_count) {
+static Item js_new_function_with_context(Context* runtime, void* func_ptr,
+        int param_count) {
     if (!func_ptr) {
         log_error("js_new_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
@@ -216,7 +219,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     // Return cached wrapper if the same MIR function was already wrapped.
     // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
     bool has_with_env = js_with_depth_active() != 0;
-    bool suppress_cache = js_func_cache_suppress_depth > 0;
+    bool suppress_cache = js_runtime_state.function_cache_suppress_depth > 0;
     JsFunction* cached = (has_with_env || suppress_cache) ? NULL : js_func_cache_lookup(func_ptr);
     if (cached) return (Item){.function = (Function*)cached};
 
@@ -231,6 +234,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn_root.set((Item){.function = (Function*)fn});
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
+    fn->runtime_context = runtime;
     fn->param_count = param_count;
     fn->formal_length = -1; // -1 = use param_count for .length
     fn->env = NULL;
@@ -247,7 +251,21 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     return (Item){.function = (Function*)fn};
 }
 
-extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
+extern "C" Item js_new_function(void* func_ptr, int param_count) {
+    return js_new_function_with_context(NULL, func_ptr, param_count);
+}
+
+extern "C" Item js_new_function_context(Context* runtime, void* func_ptr,
+        int param_count) {
+    if (!runtime) {
+        log_error("js-new-function: compiled wrapper missing context owner");
+        return ItemError;
+    }
+    return js_new_function_with_context(runtime, func_ptr, param_count);
+}
+
+static Item js_new_method_function_with_context(Context* runtime, void* func_ptr,
+        int param_count) {
     if (!func_ptr) {
         log_error("js_new_method_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
@@ -262,6 +280,10 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     // global/with capture helpers may allocate.
     fn_root.set((Item){.function = (Function*)fn});
     fn->func_ptr = func_ptr;
+    fn->runtime_context = runtime;
+    // Compiled method wrappers always require their owner Context*. Mark this
+    // once at construction so dynamic calls need no hot-path ABI inference.
+    fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI | JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     fn->param_count = param_count;
     fn->formal_length = -1;
     fn->env = NULL;
@@ -275,8 +297,22 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     return (Item){.function = (Function*)fn};
 }
 
+extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
+    return js_new_method_function_with_context(NULL, func_ptr, param_count);
+}
+
+extern "C" Item js_new_method_function_context(Context* runtime, void* func_ptr,
+        int param_count) {
+    if (!runtime) {
+        log_error("js-new-method: compiled wrapper missing context owner");
+        return ItemError;
+    }
+    return js_new_method_function_with_context(runtime, func_ptr, param_count);
+}
+
 // Create a closure (function with captured environment)
-extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
+static Item js_new_closure_with_context(Context* runtime, void* func_ptr,
+        int param_count, Item* env, int env_size) {
     RootFrame roots((Context*)context, 1);
     JsFunction* fn = NULL;
     {
@@ -287,6 +323,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
         fn = js_alloc_gc_function_object();
         if (!fn) return ItemError;
         fn->func_ptr = func_ptr;
+        fn->runtime_context = runtime;
         fn->param_count = param_count;
         fn->formal_length = -1; // -1 = use param_count for .length
         fn->env = env;
@@ -302,6 +339,20 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     js_function_capture_with_env(fn);
     js_function_call_lane_recompute(fn);
     return (Item){.function = (Function*)fn};
+}
+
+extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env,
+        int env_size) {
+    return js_new_closure_with_context(NULL, func_ptr, param_count, env, env_size);
+}
+
+extern "C" Item js_new_closure_context(Context* runtime, void* func_ptr,
+        int param_count, Item* env, int env_size) {
+    if (!runtime) {
+        log_error("js-new-closure: compiled wrapper missing context owner");
+        return ItemError;
+    }
+    return js_new_closure_with_context(runtime, func_ptr, param_count, env, env_size);
 }
 
 // Set the ES spec formal .length for a function (params before first default, excl rest)
@@ -436,6 +487,7 @@ extern "C" void js_finalize_function(Item fn_item, Item name_item,
     if (init_flags & JS_FUNC_INIT_ANALYSIS_KNOWN) fn->flags |= JS_FUNC_FLAG_ANALYSIS_KNOWN;
     if (init_flags & JS_FUNC_INIT_READS_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;
     if (init_flags & JS_FUNC_INIT_READS_NEW_TARGET) fn->flags |= JS_FUNC_FLAG_READS_NEW_TARGET;
+    if (init_flags & JS_FUNC_INIT_MIR_CONTEXT_ABI) fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     if (js_private_field_initializing || js_eval_initializer_context) {
         fn->eval_initializer_context = true;
     }

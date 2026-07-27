@@ -1,12 +1,15 @@
 // node_v8.cpp — bounded node:v8 compatibility stubs through Jube.
 #include "node_v8.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_v8_host = NULL;
-static void* node_v8_session = NULL;
-static bool node_v8_rooted = false;
-static Item node_v8_cached_namespace = {0};
+struct NodeV8SessionState { void* session; bool rooted; Item cached_namespace; };
+static NodeV8SessionState* node_v8_state(void) { return (NodeV8SessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_V8); }
+#define node_v8_session (node_v8_state()->session)
+#define node_v8_rooted (node_v8_state()->rooted)
+#define node_v8_cached_namespace (node_v8_state()->cached_namespace)
 
 static Item node_v8_undefined(Item value) {
     (void)value;
@@ -110,14 +113,13 @@ int node_v8_init(const JubeHostAPI* host) {
 }
 
 void node_v8_shutdown(void) {
-    node_v8_cached_namespace = (Item){0};
-    node_v8_rooted = false;
-    node_v8_session = NULL;
     node_v8_host = NULL;
 }
 
 void node_v8_runtime_attach(void* session) {
     if (!node_v8_host || !node_v8_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_V8,
+            sizeof(NodeV8SessionState))) return;
     node_v8_session = session;
     if (node_v8_host->node->roots->persistent_root_register(
             session, &node_v8_cached_namespace.item) == 0) {

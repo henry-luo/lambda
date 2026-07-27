@@ -12,6 +12,7 @@
 #include "js_dom.h"
 #include "js_dom_selection.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
@@ -395,16 +396,11 @@ struct NodeListenerEntry {
     NodeListeners listeners;
 };
 
-static NodeListenerEntry* _entries = nullptr;
-static int _entry_count = 0;
-static int _entry_capacity = 0;
-
 struct EventTargetIndexEntry {
     void* key;
     int slot;
 };
 HASHMAP_DEFINE_PTRKEY(event_target_index, EventTargetIndexEntry, key)
-static struct hashmap* _entry_index = nullptr;
 
 // HTML event-handler attributes are listener-list entries even though their
 // callable value lives in the target property. Keep their stable slot order
@@ -416,11 +412,6 @@ struct EventHandlerSlot {
     uint64_t order;
     bool active;
 };
-
-static EventHandlerSlot* _handler_slots = nullptr;
-static int _handler_slot_count = 0;
-static int _handler_slot_capacity = 0;
-static uint64_t _event_registration_order = 0;
 
 struct EventHandlerIndexEntry {
     void* key;
@@ -444,11 +435,61 @@ static int event_handler_index_compare(const void* a, const void* b, void* udata
     return strcmp(left->type, right->type);
 }
 
-static struct hashmap* _handler_index = nullptr;
+// DOM listener registration is semantic realm state. The state capsule is
+// entered once at a JS/host boundary; all dispatch and lookup code below then
+// uses ordinary owner-thread loads/stores, never a lock or atomic operation.
+struct JsDomEventRuntimeState {
+    NodeListenerEntry* entries = nullptr;
+    int entry_count = 0;
+    int entry_capacity = 0;
+    struct hashmap* entry_index = nullptr;
+    EventHandlerSlot* handler_slots = nullptr;
+    int handler_slot_count = 0;
+    int handler_slot_capacity = 0;
+    uint64_t registration_order = 0;
+    struct hashmap* handler_index = nullptr;
+    bool stop_propagation = false;
+    bool stop_immediate = false;
+    bool default_prevented = false;
+};
+
+static JsDomEventRuntimeState* js_dom_event_runtime_state_get() {
+    if (!js_active_runtime_state) return nullptr;
+    return (JsDomEventRuntimeState*)js_runtime_state.dom_event_state;
+}
+
+static bool js_dom_event_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_dom_event_runtime_state_get()) return true;
+    JsDomEventRuntimeState* state = (JsDomEventRuntimeState*)mem_calloc(1,
+        sizeof(JsDomEventRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) {
+        log_error("js-dom-events: failed to allocate context state");
+        return false;
+    }
+    js_runtime_state.dom_event_state = state;
+    return true;
+}
+
+// These aliases retain the compact legacy implementation while each expands
+// to a direct field of the already-bound context-local capsule.
+#define js_dom_event_state ((JsDomEventRuntimeState*)js_runtime_state.dom_event_state)
+#define _entries (js_dom_event_state->entries)
+#define _entry_count (js_dom_event_state->entry_count)
+#define _entry_capacity (js_dom_event_state->entry_capacity)
+#define _entry_index (js_dom_event_state->entry_index)
+#define _handler_slots (js_dom_event_state->handler_slots)
+#define _handler_slot_count (js_dom_event_state->handler_slot_count)
+#define _handler_slot_capacity (js_dom_event_state->handler_slot_capacity)
+#define _event_registration_order (js_dom_event_state->registration_order)
+#define _handler_index (js_dom_event_state->handler_index)
+#define _stop_propagation (js_dom_event_state->stop_propagation)
+#define _stop_immediate (js_dom_event_state->stop_immediate)
+#define _default_prevented (js_dom_event_state->default_prevented)
 
 // sentinel pointers for non-element targets
-static int _window_sentinel = 0;
-static int _document_sentinel = 0;
+static const int _window_sentinel = 0;
+static const int _document_sentinel = 0;
 
 static Item event_listener_root_item(uint64_t* root) {
     return root ? (Item){.item = *root} : ItemNull;
@@ -734,6 +775,7 @@ extern "C" void js_dom_event_handler_property_set(Item target,
                                                     const char* property_name,
                                                     int property_name_len,
                                                     Item value) {
+    if (!js_dom_event_runtime_state_ensure()) return;
     if (!event_handler_target_supported(target)) return;
     void* key = get_event_target_key(target);
     DomNodeRef no_node = {nullptr, 0};
@@ -748,6 +790,7 @@ extern "C" void js_dom_event_handler_property_set(Item target,
 
 extern "C" void js_dom_event_handler_property_set_for_node(
         void* dom_node, const char* property_name, int property_name_len, Item value) {
+    if (!js_dom_event_runtime_state_ensure()) return;
     event_handler_property_set_for_key(dom_node, property_name,
                                        property_name_len, value);
 }
@@ -859,7 +902,9 @@ static bool signal_is_aborted(Item signal_item) {
 // addEventListener / removeEventListener
 // ============================================================================
 
-void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {    const char* type = fn_to_cstr(type_item);
+void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
+    if (!js_dom_event_runtime_state_ensure()) return;
+    const char* type = fn_to_cstr(type_item);
     if (!type) {
         log_debug("js_dom_add_event_listener: invalid type");
         return;
@@ -986,6 +1031,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
 }
 
 void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
+    if (!js_dom_event_runtime_state_get()) return;
     const char* type = fn_to_cstr(type_item);
     if (!type) return;
 
@@ -1090,12 +1136,8 @@ static bool event_flag_get(Item event, const char* key) {
 
 // Per-event state lives on the event object itself in __stop_prop /
 // __stop_imm / __default_prevented / __dispatch_flag / __passive slots so
-// that nested dispatch is safe. The thread-local mirrors below remain only
-// as a transitional fallback for the dispatch loop checks until Phase 2
-// fully wires per-event propagation through the loop.
-static __thread bool _stop_propagation = false;
-static __thread bool _stop_immediate = false;
-static __thread bool _default_prevented = false;
+// nested dispatches are independent. These context-local mirrors serve only
+// legacy dispatch checks and are never shared across realms or threads.
 
 extern "C" Item js_event_prevent_default() {
     Item ev = js_get_this();
@@ -2376,6 +2418,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 }
 
 Item js_dom_dispatch_event(Item elem_item, Item event_item) {
+    if (!js_dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
     // Per spec: dispatchEvent(null) / dispatchEvent(non-Event) throws TypeError.
     TypeId evt_tid = get_type_id(event_item);
     if (event_item.item == 0 || evt_tid == LMD_TYPE_NULL ||
@@ -2690,6 +2733,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 // ============================================================================
 
 void js_dom_events_reset(void) {
+    if (!js_dom_event_runtime_state_get()) return;
     for (int i = 0; i < _entry_count; i++) {
         NodeListeners* nl = &_entries[i].listeners;
         for (int j = 0; j < nl->count; j++) {
@@ -2734,4 +2778,31 @@ void js_dom_events_reset(void) {
     _stop_propagation = false;
     _stop_immediate = false;
     _default_prevented = false;
+}
+
+#undef js_dom_event_state
+#undef _entries
+#undef _entry_count
+#undef _entry_capacity
+#undef _entry_index
+#undef _handler_slots
+#undef _handler_slot_count
+#undef _handler_slot_capacity
+#undef _event_registration_order
+#undef _handler_index
+#undef _stop_propagation
+#undef _stop_immediate
+#undef _default_prevented
+
+extern "C" void js_dom_events_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->dom_event_state) return;
+    JsDomEventRuntimeState* state =
+        (JsDomEventRuntimeState*)runtime_state->dom_event_state;
+    // js_runtime_state_release_heap_resources() resets listener roots before
+    // heap destruction; only the empty context-local capsule remains here.
+    if (state->entries || state->entry_index || state->handler_slots || state->handler_index) {
+        log_error("js-dom-events: context destroyed before listener roots were released");
+    }
+    mem_free(state);
+    runtime_state->dom_event_state = nullptr;
 }

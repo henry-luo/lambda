@@ -41,6 +41,32 @@ static char* try_join_absolute_resource(const char* root, const char* abs_path) 
     return nullptr;
 }
 
+static char* try_join_resource_suffix(const char* root, const char* suffix) {
+    if (!root || !suffix || suffix[0] == '\0') return nullptr;
+    size_t root_len = strlen(root);
+    size_t suffix_len = strlen(suffix);
+    char* candidate = (char*)mem_alloc(root_len + 1 + suffix_len + 1, MEM_CAT_RENDER);
+    if (!candidate) return nullptr;
+    memcpy(candidate, root, root_len);
+    candidate[root_len] = '/';
+    memcpy(candidate + root_len + 1, suffix, suffix_len + 1);
+    if (file_exists(candidate)) return candidate;
+    mem_free(candidate);
+    return nullptr;
+}
+
+static const char* wpt_support_resource_suffix(const char* abs_path) {
+    static const char css_support_prefix[] = "/css/support/";
+    if (abs_path && strncmp(abs_path, css_support_prefix,
+                            sizeof(css_support_prefix) - 1) == 0) {
+        // Local WPT fixtures flatten /css/support beneath data/support; keeping
+        // the URL prefix here would look for support/css/support and turn a
+        // present fixture into a broken 16px image fallback during layout.
+        return abs_path + sizeof(css_support_prefix) - 1;
+    }
+    return abs_path;
+}
+
 static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_url) {
     if (!uicon || !uicon->document || !uicon->document->url ||
         !img_url || img_url[0] != '/' || img_url[1] == '/') {
@@ -73,6 +99,12 @@ static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_u
                 memcpy(root, doc_path, root_len);
                 memcpy(root + root_len, "/support", strlen("/support") + 1);
                 char* resolved = try_join_absolute_resource(root, img_url);
+                if (!resolved) {
+                    const char* support_suffix = wpt_support_resource_suffix(img_url);
+                    if (support_suffix != img_url) {
+                        resolved = try_join_resource_suffix(root, support_suffix);
+                    }
+                }
                 mem_free(root);
                 if (resolved) {
                     mem_free(doc_path);

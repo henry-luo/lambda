@@ -5,13 +5,23 @@
  * LambdaJS typed-array, object, or receiver storage.
  */
 #include "node_string_decoder.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_string_decoder_host = NULL;
-static void* node_string_decoder_session = NULL;
-static bool node_string_decoder_rooted = false;
-static Item node_string_decoder_namespace_cache = {0};
+struct NodeStringDecoderSessionState {
+    void* session;
+    bool rooted;
+    Item namespace_cache;
+};
+static NodeStringDecoderSessionState* node_string_decoder_state(void) {
+    return (NodeStringDecoderSessionState*)jube_node_current_module_state(
+        JUBE_NODE_MODULE_STATE_STRING_DECODER);
+}
+#define node_string_decoder_session (node_string_decoder_state()->session)
+#define node_string_decoder_rooted (node_string_decoder_state()->rooted)
+#define node_string_decoder_namespace_cache (node_string_decoder_state()->namespace_cache)
 
 extern "C" Item node_string_decoder_write(Item buffer);
 extern "C" Item node_string_decoder_end(Item buffer);
@@ -216,9 +226,6 @@ int node_string_decoder_init(const JubeHostAPI* host) {
 }
 
 void node_string_decoder_shutdown(void) {
-    node_string_decoder_cache_reset();
-    node_string_decoder_rooted = false;
-    node_string_decoder_session = NULL;
     node_string_decoder_host = NULL;
 }
 
@@ -227,6 +234,8 @@ void node_string_decoder_runtime_attach(void* session) {
             !node_string_decoder_host->node->runtime || !node_string_decoder_host->node->roots ||
             !node_string_decoder_host->node->runtime->session_is_live ||
             !node_string_decoder_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_STRING_DECODER,
+            sizeof(NodeStringDecoderSessionState))) return;
     node_string_decoder_session = session;
     if (node_string_decoder_host->node->roots->persistent_root_register(session,
             &node_string_decoder_namespace_cache.item) == 0) {

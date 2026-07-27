@@ -84,10 +84,9 @@ typedef enum DomReconcileMode {
 struct DomJsRuntime {
     void* mir_ctx;
     void* preamble_state;
-    void* runtime_heap;
-    void* runtime_name_pool;
-    void* runtime_type_list;
-    void* runtime_pool;
+    // The document owns a complete Runtime, not a copied heap fragment.
+    // Timers, DOM callbacks, and JIT entries all borrow its one EvalContext.
+    Runtime* runtime;
     void* doc_node;
     int mutation_count;
     uint32_t mutation_sequence;
@@ -97,8 +96,7 @@ struct DomJsRuntime {
     DomJsMutationRecord mutation_records[DOM_JS_MUTATION_RECORD_CAP];
     const char* ready_state;
 
-    DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime_heap(nullptr),
-        runtime_name_pool(nullptr), runtime_type_list(nullptr), runtime_pool(nullptr),
+    DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
         mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
         ready_state("complete") {}

@@ -23,12 +23,14 @@ static bool editing_log_redact(const EditingSurface* surface) {
     return surface && surface->mode == EDIT_MODE_PASSWORD_TEXT;
 }
 
-static uint64_t g_editing_transaction_next_id = 1;
-
-static uint64_t editing_dispatch_next_transaction_id() {
-    uint64_t id = g_editing_transaction_next_id++;
-    if (g_editing_transaction_next_id == 0) {
-        g_editing_transaction_next_id = 1;
+static uint64_t editing_dispatch_next_transaction_id(DocState* state) {
+    if (!state) return 0;
+    if (state->editing_transaction_next_id == 0) {
+        state->editing_transaction_next_id = 1;
+    }
+    uint64_t id = state->editing_transaction_next_id++;
+    if (state->editing_transaction_next_id == 0) {
+        state->editing_transaction_next_id = 1;
     }
     return id;
 }
@@ -814,7 +816,7 @@ bool editing_run_transaction(EventContext* evcon,
                                              current_tx.intent);
     EditingSelectionSnapshot selection_before =
         editing_dispatch_selection_snapshot(state);
-    uint64_t transaction_id = editing_dispatch_next_transaction_id();
+    uint64_t transaction_id = editing_dispatch_next_transaction_id(state);
     editing_log_transaction(evcon, &current_tx, transaction_id, &target_ranges,
                             &selection_before, nullptr, "begin",
                             false, false, false, false);

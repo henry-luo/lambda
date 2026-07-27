@@ -5,6 +5,7 @@
  * Registered by node-core through its Jube namespace descriptor.
  */
 #include "node_os.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../../lib/shell.h"
 
 #include <cstring>
@@ -13,11 +14,13 @@
 #include <ctime>
 
 static const JubeHostAPI* node_os_host = NULL;
-static void* node_os_session = NULL;
-static bool node_os_rooted = false;
-static Item os_namespace = {0};
-static bool node_os_priority_override_set = false;
-static int node_os_priority_override = 0;
+struct NodeOsSessionState { void* session; bool rooted; Item namespace_cache; bool priority_override_set; int priority_override; };
+static NodeOsSessionState* node_os_state(void) { return (NodeOsSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_OS); }
+#define node_os_session (node_os_state()->session)
+#define node_os_rooted (node_os_state()->rooted)
+#define os_namespace (node_os_state()->namespace_cache)
+#define node_os_priority_override_set (node_os_state()->priority_override_set)
+#define node_os_priority_override (node_os_state()->priority_override)
 
 static Item node_os_string(const char* text, int length) {
     if (!node_os_host || !node_os_host->value ||
@@ -218,19 +221,17 @@ extern "C" Item js_os_type(void) {
 
 // os.hostname()
 extern "C" Item js_os_hostname(void) {
-    static char hostname[256] = {0};
-    if (hostname[0] == 0) {
+    char hostname[256] = {};
 #ifdef _WIN32
-        DWORD size = sizeof(hostname);
-        if (!GetComputerNameA(hostname, &size)) {
-            return make_string_item("unknown");
-        }
-#else
-        if (gethostname(hostname, sizeof(hostname)) != 0) {
-            return make_string_item("unknown");
-        }
-#endif
+    DWORD size = sizeof(hostname);
+    if (!GetComputerNameA(hostname, &size)) {
+        return make_string_item("unknown");
     }
+#else
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+        return make_string_item("unknown");
+    }
+#endif
     return make_string_item(hostname);
 }
 
@@ -253,11 +254,11 @@ extern "C" Item js_os_homedir(void) {
 extern "C" Item js_os_tmpdir(void) {
 #ifdef _WIN32
     // Windows: check TEMP, then TMP, then system GetTempPath
+    char wbuf[MAX_PATH] = {};
     const char* temp = getenv("TEMP");
     if (!temp || !temp[0]) temp = getenv("TMP");
     if (!temp || !temp[0]) {
-        static char wbuf[MAX_PATH] = {0};
-        if (wbuf[0] == 0) GetTempPathA(sizeof(wbuf), wbuf);
+        GetTempPathA(sizeof(wbuf), wbuf);
         temp = wbuf;
     }
     // strip trailing slashes (but not if root like "C:\")
@@ -339,11 +340,9 @@ extern "C" Item js_os_cpus(void) {
     size_t size = sizeof(num_cpus);
     sysctlbyname("hw.logicalcpu", &num_cpus, &size, NULL, 0);
 
-    static char brand[256] = {0};
-    if (brand[0] == 0) {
-        size = sizeof(brand);
-        sysctlbyname("machdep.cpu.brand_string", brand, &size, NULL, 0);
-    }
+    char brand[256] = {};
+    size = sizeof(brand);
+    sysctlbyname("machdep.cpu.brand_string", brand, &size, NULL, 0);
     if (brand[0] != 0) cpu_model = brand;
 
     // CPU frequency in Hz → MHz
@@ -428,29 +427,27 @@ extern "C" Item js_os_cpus(void) {
     if (num_cpus < 1) num_cpus = 1;
 
     // read CPU model from /proc/cpuinfo
-    static char model_buf[256] = {0};
-    if (model_buf[0] == 0) {
-        FILE* f = fopen("/proc/cpuinfo", "r");
-        if (f) {
-            char line[512];
-            while (fgets(line, sizeof(line), f)) {
-                if (strncmp(line, "model name", 10) == 0) {
-                    char* colon = strchr(line, ':');
-                    if (colon) {
-                        colon++;
-                        while (*colon == ' ') colon++;
-                        char* nl = strchr(colon, '\n');
-                        if (nl) *nl = '\0';
-                        int mlen = (int)strlen(colon);
-                        if (mlen >= (int)sizeof(model_buf)) mlen = (int)sizeof(model_buf) - 1;
-                        memcpy(model_buf, colon, mlen);
-                        model_buf[mlen] = '\0';
-                    }
-                    break;
+    char model_buf[256] = {};
+    FILE* model_file = fopen("/proc/cpuinfo", "r");
+    if (model_file) {
+        char line[512];
+        while (fgets(line, sizeof(line), model_file)) {
+            if (strncmp(line, "model name", 10) == 0) {
+                char* colon = strchr(line, ':');
+                if (colon) {
+                    colon++;
+                    while (*colon == ' ') colon++;
+                    char* nl = strchr(colon, '\n');
+                    if (nl) *nl = '\0';
+                    int mlen = (int)strlen(colon);
+                    if (mlen >= (int)sizeof(model_buf)) mlen = (int)sizeof(model_buf) - 1;
+                    memcpy(model_buf, colon, mlen);
+                    model_buf[mlen] = '\0';
                 }
+                break;
             }
-            fclose(f);
         }
+        fclose(model_file);
     }
     if (model_buf[0] != 0) cpu_model = model_buf;
 
@@ -529,48 +526,36 @@ extern "C" Item js_os_endianness(void) {
 // os.release()
 extern "C" Item js_os_release(void) {
 #ifdef __APPLE__
-    static char version[128] = {0};
-    if (version[0] == 0) {
-        size_t size = sizeof(version);
-        if (sysctlbyname("kern.osrelease", version, &size, NULL, 0) != 0) {
-            return make_string_item("Unknown");
-        }
+    char version[128] = {};
+    size_t size = sizeof(version);
+    if (sysctlbyname("kern.osrelease", version, &size, NULL, 0) != 0) {
+        return make_string_item("Unknown");
     }
     return make_string_item(version);
 #elif defined(_WIN32)
     return make_string_item("Unknown");
 #else
-    static struct utsname info;
-    static bool initialized = false;
-    if (!initialized) {
-        if (uname(&info) == 0) initialized = true;
-    }
-    return make_string_item(initialized ? info.release : "Unknown");
+    struct utsname info = {};
+    return make_string_item(uname(&info) == 0 ? info.release : "Unknown");
 #endif
 }
 
 // os.version()
 extern "C" Item js_os_version(void) {
 #ifdef __APPLE__
-    static char kernel[256] = {0};
-    if (kernel[0] == 0) {
-        size_t size = sizeof(kernel);
-        if (sysctlbyname("kern.version", kernel, &size, NULL, 0) != 0) {
-            return make_string_item("Unknown");
-        }
-        char* nl = strchr(kernel, '\n');
-        if (nl) *nl = '\0';
+    char kernel[256] = {};
+    size_t size = sizeof(kernel);
+    if (sysctlbyname("kern.version", kernel, &size, NULL, 0) != 0) {
+        return make_string_item("Unknown");
     }
+    char* nl = strchr(kernel, '\n');
+    if (nl) *nl = '\0';
     return make_string_item(kernel);
 #elif defined(_WIN32)
     return make_string_item("Unknown");
 #else
-    static struct utsname info;
-    static bool initialized = false;
-    if (!initialized) {
-        if (uname(&info) == 0) initialized = true;
-    }
-    return make_string_item(initialized ? info.version : "Unknown");
+    struct utsname info = {};
+    return make_string_item(uname(&info) == 0 ? info.version : "Unknown");
 #endif
 }
 
@@ -1000,10 +985,6 @@ int node_os_init(const JubeHostAPI* host) {
 }
 
 void node_os_shutdown(void) {
-    node_os_cache_reset();
-    node_os_rooted = false;
-    node_os_session = NULL;
-    node_os_priority_override_set = false;
     node_os_host = NULL;
 }
 
@@ -1011,6 +992,8 @@ void node_os_runtime_attach(void* session) {
     if (!node_os_host || !node_os_host->node || !node_os_host->node->runtime ||
             !node_os_host->node->runtime->session_is_live ||
             !node_os_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_OS,
+            sizeof(NodeOsSessionState))) return;
     node_os_session = session;
     if (node_os_host->node->roots->persistent_root_register(session,
             &os_namespace.item) == 0) {

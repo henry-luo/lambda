@@ -2835,7 +2835,18 @@ typedef struct UiContext {
 
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     DomDocument* document;  // current document
+    // Nested iframe layout belongs to this UI/document tree, not to the host
+    // thread.  Recursive layout may construct short-lived LayoutContexts.
+    int iframe_depth;
     MouseState mouse_state; // current mouse state
+    // Native click-series tracking is window/UI state. Keeping it here avoids
+    // sharing double/triple-click semantics across independent UI contexts.
+    double last_click_time;
+    double last_click_x;
+    double last_click_y;
+    int last_click_button;
+    uint8_t click_count;
+    uint8_t active_click_count;
     struct BrowsingSession* browsing_session;  // web browsing session with history
     struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
     struct EventStateLog* event_log;  // view-mode per-document event/state log owner

@@ -244,8 +244,6 @@ DomBoundaryOrder dom_boundary_compare(const DomBoundary* a, const DomBoundary* b
 // Range allocation and lifetime
 // ============================================================================
 
-static uint32_t s_range_id_counter = 1;  // global; only used for debug ids
-
 DomRange* dom_range_create(DocState* state) {
     if (!state) {
         log_error("dom_range_create: NULL state");
@@ -273,7 +271,10 @@ DomRange* dom_range_create(DocState* state) {
     memset(r, 0, sizeof(*r));
     r->state = state;
     r->is_live = true;
-    r->id = s_range_id_counter++;
+    // Range identity is diagnostic-only but must not cross documents or race
+    // concurrent document lifecycles.
+    if (state->next_range_id == 0) state->next_range_id = 1;
+    r->id = state->next_range_id++;
     r->ref_count = 1;
     // A fresh Range starts at (document, 0); leaving null boundaries made
     // detach() appear to destroy the Range even though detach is a legacy no-op.

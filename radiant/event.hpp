@@ -1616,8 +1616,8 @@ void te_history_push(DomElement* elem);
 // Set an ambient inputType label for history pushes performed inside a
 // unified editing transaction. Returns the previous label so callers can
 // restore it after the mutation.
-const char* te_history_input_type_set(const char* input_type);
-void te_history_input_type_restore(const char* previous);
+const char* te_history_input_type_set(DocState* state, const char* input_type);
+void te_history_input_type_restore(DocState* state, const char* previous);
 
 // Move cursor backward/forward through the ring; restores value + selection.
 // Returns false if no further undo/redo is available.
@@ -2243,6 +2243,8 @@ typedef struct DocState {
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
     HashMap* view_state_map;       // map from (ViewId, ViewStateKind) -> ViewStateEntry
+    const char* interned_state_names[64]; // stable key identities owned by this document
+    uint8_t interned_state_name_count;
     RetainedDisplayListCache* retained_dl_cache; // cross-frame display-list fragments
     
     // Template reactive state (unified with Lambda template state store)
@@ -2267,6 +2269,10 @@ typedef struct DocState {
     StateDumpLog* state_dump_log;
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
+    uint64_t editing_transaction_next_id; // per-document editing event identity
+    uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
+    uint32_t text_control_history_guard; // undo/redo recursion guard for this document
+    const char* text_edit_history_input_type; // ambient inputType for document history pushes
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition
     SmTransitionScope* sm_active_transition; // debug schema action/effect recorder
     

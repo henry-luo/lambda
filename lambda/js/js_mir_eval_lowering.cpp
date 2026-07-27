@@ -42,8 +42,6 @@ extern "C" void js_eval_preamble_cache_reset(void) {
     g_eval_preamble_var_count = 0;
 }
 
-static uint64_t js_eval_template_site_counter = 0;
-
 #define JS_DYNFUNC_STATS_CAP 512
 #define JS_DYNFUNC_CACHE_CAP 256
 
@@ -83,6 +81,33 @@ struct JsDynFuncCacheEntry {
     int hits;
 };
 
+struct JsDynFuncCacheState {
+    JsDynFuncCacheEntry entries[JS_DYNFUNC_CACHE_CAP];
+    int count;
+    int overflow;
+};
+
+static JsDynFuncCacheState* js_dynfunc_cache_state_ensure(void) {
+    if (!js_active_runtime_state) return NULL;
+    if (!js_runtime_state.dynamic_function_cache_state) {
+        // Dynamic Function construction is a cold compilation boundary. The
+        // resulting cache remains entirely context-local and lock-free.
+        js_runtime_state.dynamic_function_cache_state = mem_calloc(1,
+            sizeof(JsDynFuncCacheState), MEM_CAT_JS_RUNTIME);
+    }
+    return (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state;
+}
+
+static JsDynFuncCacheState* js_dynfunc_cache_state_current(void) {
+    return js_active_runtime_state ?
+        (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state : NULL;
+}
+
+#define js_dynfunc_cache_state (*js_dynfunc_cache_state_current())
+#define js_dynfunc_cache (js_dynfunc_cache_state.entries)
+#define js_dynfunc_cache_count (js_dynfunc_cache_state.count)
+#define js_dynfunc_cache_overflow (js_dynfunc_cache_state.overflow)
+
 static bool js_dynfunc_stats_checked = false;
 static bool js_dynfunc_stats_enabled = false;
 static bool js_dynfunc_stats_registered = false;
@@ -98,10 +123,6 @@ static int js_dynfunc_stats_preamble_dependent = 0;
 static int js_dynfunc_stats_cacheable = 0;
 static int js_dynfunc_stats_cache_hits = 0;
 static int js_dynfunc_stats_cache_inserts = 0;
-
-static JsDynFuncCacheEntry js_dynfunc_cache[JS_DYNFUNC_CACHE_CAP];
-static int js_dynfunc_cache_count = 0;
-static int js_dynfunc_cache_overflow = 0;
 
 static bool js_dynfunc_stats_is_enabled(void);
 static void js_dynfunc_stats_record(const char* parse_prefix, const char* source, size_t source_len,
@@ -417,8 +438,7 @@ static void js_dynfunc_stats_report(void) {
         js_dynfunc_stats_overflow, js_dynfunc_stats_return_body_total,
         js_dynfunc_stats_with_preamble, js_dynfunc_stats_preamble_independent,
         js_dynfunc_stats_preamble_dependent, js_dynfunc_stats_cacheable,
-        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts,
-        js_dynfunc_cache_count, js_dynfunc_cache_overflow);
+        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts, 0, 0);
     js_dynfunc_stats_write_line(fd, line);
     js_dynfunc_stats_write_line(fd,
         "rank\tcount\tkind\targc\tsource_len\tpreamble_entries\tpreamble_vars\tpreamble_hash\treturn_count\tpreamble_refs\tescaped_refs\tcacheable\tcache_hits\thash\tsample\n");
@@ -427,8 +447,7 @@ static void js_dynfunc_stats_report(void) {
         js_dynfunc_stats_overflow, js_dynfunc_stats_return_body_total,
         js_dynfunc_stats_with_preamble, js_dynfunc_stats_preamble_independent,
         js_dynfunc_stats_preamble_dependent, js_dynfunc_stats_cacheable,
-        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts,
-        js_dynfunc_cache_count, js_dynfunc_cache_overflow);
+        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts, 0, 0);
     bool used[JS_DYNFUNC_STATS_CAP];
     memset(used, 0, sizeof(used));
     int max_lines = js_dynfunc_stats_count;
@@ -510,6 +529,8 @@ static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_l
 }
 
 extern "C" void js_dynfunc_cache_reset(void) {
+    JsDynFuncCacheState* state = js_dynfunc_cache_state_ensure();
+    if (!state) return;
     memset(js_dynfunc_cache, 0, sizeof(js_dynfunc_cache));
     js_dynfunc_cache_count = 0;
     js_dynfunc_cache_overflow = 0;
@@ -563,10 +584,12 @@ static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int
 // ============================================================================
 static Item js_new_function_from_string_kind(Item* args, int argc, const char* parse_prefix,
         const char* source_prefix) {
-    if (!js_source_runtime) {
+    if (!js_current_runtime()) {
         log_error("js-new-function: no runtime context for dynamic function compilation");
         return ItemNull;
     }
+    JsDynFuncCacheState* state = js_dynfunc_cache_state_ensure();
+    if (!state) return ItemNull;
 
     // Build the JS source for the function expression.
     // new Function("param1", "param2", "body") or new Function("body")
@@ -662,7 +685,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // Compile the function expression as a mini JS module.
     // Since the source is a top-level expression statement "(function(...) { ... })",
     // js_main() will evaluate it and return the function Item.
-    JsTranspiler* tp = js_transpiler_create(js_source_runtime);
+    JsTranspiler* tp = js_transpiler_create(js_current_runtime());
     if (!tp) {
         log_error("js-new-function: failed to create transpiler");
         mem_free(source);
@@ -795,6 +818,17 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     js_dynfunc_apply_function_metadata(fn_item, args, argc, source_prefix);
 
     return fn_item;
+}
+
+#undef js_dynfunc_cache_overflow
+#undef js_dynfunc_cache_count
+#undef js_dynfunc_cache
+#undef js_dynfunc_cache_state
+
+extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->dynamic_function_cache_state) return;
+    mem_free(runtime_state->dynamic_function_cache_state);
+    runtime_state->dynamic_function_cache_state = NULL;
 }
 
 extern "C" Item js_new_function_from_string(Item* args, int argc) {
@@ -1392,13 +1426,10 @@ static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_val
 extern "C" int64_t js_eval_source_push(Item filename, Item source,
                                         int64_t line_offset, int64_t column_offset);
 extern "C" void js_eval_source_pop(void);
-extern "C" int js_parse_error_get(int64_t* out_row, int64_t* out_col,
-                                  char* out_message, int64_t out_message_size);
-
-static Item js_eval_parse_error_message(void) {
+static Item js_eval_parse_error_message(const JsTranspiler* tp) {
     char message[128];
     message[0] = '\0';
-    if (!js_parse_error_get(NULL, NULL, message, sizeof(message)) ||
+    if (!js_transpiler_parse_error_get(tp, NULL, NULL, message, sizeof(message)) ||
         message[0] == '\0') {
         return (Item){.item = s2it(heap_create_name("Invalid eval source", 19))};
     }
@@ -1425,7 +1456,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                                          Item filename_item,
                                          int64_t line_offset,
                                          int64_t column_offset) {
-    if (!js_source_runtime) {
+    if (!js_current_runtime()) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         return ItemNull;
     }
@@ -1688,7 +1719,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         const char* source = code_str->chars;
         size_t source_len = code_str->len;
 
-        JsTranspiler* tp = js_transpiler_create(js_source_runtime);
+        JsTranspiler* tp = js_transpiler_create(js_current_runtime());
         if (!tp) {
             log_error("js-eval: failed to create transpiler for direct script");
             return ItemNull;
@@ -1697,11 +1728,12 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
+            Item syntax_message = js_eval_parse_error_message(tp);
             js_transpiler_destroy(tp);
             js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
             // Dynamic eval surfaces parser diagnostics through SyntaxError;
             // the REPL uses the same location to render the source caret.
-            js_throw_syntax_error(js_eval_parse_error_message());
+            js_throw_syntax_error(syntax_message);
             return ItemNull;
         }
 
@@ -1744,7 +1776,10 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemNull;
         }
         mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
-        mt->template_site_salt = ++js_eval_template_site_counter;
+        // Tagged-template identity is realm-observable. Use the bound
+        // context's monotonic counter so concurrent evals never share a
+        // process-global site sequence.
+        mt->template_site_salt = ++js_runtime_state.dynamic_func_counter;
 
         // Direct eval inherits its caller's lexical preamble. A node:vm global
         // script deliberately does not: it resolves through globalThis instead.
@@ -1844,7 +1879,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                               int64_t column_offset) {
     // Preserve eval's non-string and empty-source fast paths before claiming a
     // source slot; the execute body then has one owner and no return-site pops.
-    bool source_pushed = js_source_runtime && get_type_id(code_item) == LMD_TYPE_STRING &&
+    bool source_pushed = js_current_runtime() && get_type_id(code_item) == LMD_TYPE_STRING &&
         it2s(code_item) && it2s(code_item)->len > 0 &&
         get_type_id(filename_item) == LMD_TYPE_STRING &&
         js_eval_source_push(filename_item, code_item, line_offset, column_offset) != 0;

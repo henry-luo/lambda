@@ -238,10 +238,16 @@ void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.5): suppress recursive history push
-// when undo/redo restore is itself calling tc_set_value.
-static thread_local int g_tc_history_guard = 0;
-extern "C" void tc_history_guard_enter() { g_tc_history_guard++; }
-extern "C" void tc_history_guard_exit () { if (g_tc_history_guard > 0) g_tc_history_guard--; }
+// when undo/redo restore is itself calling tc_set_value. This belongs to the
+// document that owns the control so simultaneous documents cannot interfere.
+extern "C" void tc_history_guard_enter(DocState* state) {
+    if (state) state->text_control_history_guard++;
+}
+extern "C" void tc_history_guard_exit(DocState* state) {
+    if (state && state->text_control_history_guard > 0) {
+        state->text_control_history_guard--;
+    }
+}
 
 void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     if (!tc_is_text_control(elem)) return;
@@ -306,7 +312,7 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
 
     // F4: snapshot the post-mutation state into the undo ring (skipped
     // during initial init and while undo/redo is restoring).
-    if (was_initialized && g_tc_history_guard == 0) {
+    if (was_initialized && (!state || state->text_control_history_guard == 0)) {
         te_history_push(elem);
     }
 

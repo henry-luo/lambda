@@ -1,4 +1,5 @@
 #include "node_process.hpp"
+#include "../../jube/jube_registry.h"
 
 #include "../../../lib/file.h"
 #include "../../../lib/log.h"
@@ -26,9 +27,23 @@
 #endif
 
 static const JubeHostAPI* node_process_host = NULL;
-static void* node_process_session = NULL;
-static uint64_t node_process_uncaught_callback = ItemNull.item;
-static bool node_process_uncaught_callback_rooted = false;
+struct NodeProcessSessionState {
+    void* session;
+    uint64_t uncaught_callback;
+    bool uncaught_callback_rooted;
+    int umask_value;
+    double uptime_start_time;
+    uint32_t mach_timebase_numer;
+    uint32_t mach_timebase_denom;
+};
+static NodeProcessSessionState* node_process_state(void) {
+    return (NodeProcessSessionState*)jube_node_current_module_state(
+        JUBE_NODE_MODULE_STATE_PROCESS);
+}
+#define node_process_session (node_process_state()->session)
+#define node_process_uncaught_callback (node_process_state()->uncaught_callback)
+#define node_process_uncaught_callback_rooted (node_process_state()->uncaught_callback_rooted)
+#define node_process_umask_value (node_process_state()->umask_value)
 
 static bool node_process_root_frame(JubeRootFrame* frame, size_t count) {
     return node_process_host && node_process_host->node && node_process_host->node->roots &&
@@ -165,20 +180,26 @@ static Item node_process_available_memory(void) {
 }
 
 static Item node_process_uptime(void) {
-    static double start_time = 0.0;
     struct timespec timestamp;
     clock_gettime(CLOCK_MONOTONIC, &timestamp);
     double now = (double)timestamp.tv_sec + (double)timestamp.tv_nsec / 1e9;
-    if (start_time == 0.0) start_time = now;
-    return node_process_host->script->make_number(now - start_time);
+    if (node_process_state()->uptime_start_time == 0.0) {
+        node_process_state()->uptime_start_time = now;
+    }
+    return node_process_host->script->make_number(now - node_process_state()->uptime_start_time);
 }
 
 static uint64_t node_process_monotonic_nanoseconds(void) {
 #ifdef __APPLE__
-    static mach_timebase_info_data_t timebase = {0, 0};
-    if (timebase.denom == 0) mach_timebase_info(&timebase);
+    NodeProcessSessionState* state = node_process_state();
+    if (state->mach_timebase_denom == 0) {
+        mach_timebase_info_data_t timebase = {};
+        mach_timebase_info(&timebase);
+        state->mach_timebase_numer = timebase.numer;
+        state->mach_timebase_denom = timebase.denom;
+    }
     uint64_t ticks = mach_absolute_time();
-    return ticks * timebase.numer / timebase.denom;
+    return ticks * state->mach_timebase_numer / state->mach_timebase_denom;
 #else
     struct timespec timestamp;
     clock_gettime(CLOCK_MONOTONIC, &timestamp);
@@ -278,8 +299,6 @@ static Item node_process_throw_range_error(const char* code, const char* message
             !node_process_host->node->error->throw_range_error_code) return ItemNull;
     return node_process_host->node->error->throw_range_error_code(node_process_session, code, message);
 }
-
-static int node_process_umask_value = 0022;
 
 static Item node_process_umask(Item mask_item) {
 #ifdef _WIN32
@@ -582,7 +601,6 @@ int node_process_init(const JubeHostAPI* host) {
 }
 
 void node_process_shutdown(void) {
-    node_process_session = NULL;
     node_process_host = NULL;
 }
 
@@ -590,6 +608,11 @@ void node_process_runtime_attach(void* session) {
     if (!node_process_host || !node_process_host->node || !node_process_host->node->runtime ||
             !node_process_host->node->runtime->session_is_live ||
             !node_process_host->node->runtime->session_is_live(session)) return;
+    NodeProcessSessionState* state = (NodeProcessSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PROCESS,
+            sizeof(NodeProcessSessionState));
+    if (!state) return;
+    if (state->umask_value == 0) state->umask_value = 0022;
     Item process = node_process_host->node->runtime->session_process(session);
     if (process.item == ItemNull.item) return;
     node_process_session = session;

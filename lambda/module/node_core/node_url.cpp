@@ -5,6 +5,7 @@
  * Registered by node-core through its Jube namespace descriptor.
  */
 #include "node_url.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../../lib/url.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/hex.h"
@@ -15,8 +16,25 @@
 #include <math.h>
 
 static const JubeHostAPI* node_url_host = NULL;
-static void* node_url_session = NULL;
-static bool node_url_namespace_rooted = false;
+
+#define JS_BLOB_URL_MAX 1024
+struct NodeUrlSessionState {
+    void* session;
+    bool namespace_rooted;
+    Item blob_url_values[JS_BLOB_URL_MAX];
+    char blob_url_ids[JS_BLOB_URL_MAX][64];
+    int64_t blob_url_next_id;
+    Item module_namespace;
+};
+static NodeUrlSessionState* node_url_state(void) {
+    return (NodeUrlSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_URL);
+}
+#define node_url_session (node_url_state()->session)
+#define node_url_namespace_rooted (node_url_state()->namespace_rooted)
+#define js_blob_url_values (node_url_state()->blob_url_values)
+#define js_blob_url_ids (node_url_state()->blob_url_ids)
+#define js_blob_url_next_id (node_url_state()->blob_url_next_id)
+#define url_module_namespace (node_url_state()->module_namespace)
 
 // Helper: make JS undefined value
 // Helper: extract C string from Item
@@ -159,11 +177,6 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
 #define js_is_truthy(VALUE) node_url_host->script->is_truthy(VALUE)
 
 // Helper: create string Item
-#define JS_BLOB_URL_MAX 1024
-static Item js_blob_url_values[JS_BLOB_URL_MAX];
-static char js_blob_url_ids[JS_BLOB_URL_MAX][64];
-static int64_t js_blob_url_next_id = 1;
-
 extern "C" Item js_blob_url_resolve(Item id_item) {
     if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
     char id[64] = {};
@@ -224,16 +237,20 @@ static Item url_to_js_object(Url* url) {
 
     Item obj = js_new_object();
     JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 1)) return obj;
+    if (!node_url_roots_begin(&frame, 3)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    if (!object_root) {
+    uint64_t* params_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    if (!object_root || !params_root || !key_root) {
         node_url_host->node->roots->root_frame_end(&frame);
         return obj;
     }
     *object_root = obj.item;
+    *params_root = ItemNull.item;
+    *key_root = ItemNull.item;
 
     // T5b: legacy `__class_name__` string write retired.
-    node_url_host->script->class_stamp(obj, JUBE_SCRIPT_CLASS_URL);
+    node_url_host->script->class_stamp(node_url_root_value(object_root), JUBE_SCRIPT_CLASS_URL);
 
     const char* href = url_get_href(url);
     const char* origin_str = url_get_origin(url);
@@ -247,21 +264,21 @@ static Item url_to_js_object(Url* url) {
     const char* search = url_get_search(url);
     const char* hash = url_get_hash(url);
 
-    node_url_set_string_property(obj, "href", href);
-    node_url_set_string_property(obj, "origin", origin_str);
-    node_url_set_string_property(obj, "protocol", protocol);
-    node_url_set_string_property(obj, "username", username);
-    node_url_set_string_property(obj, "password", password);
-    node_url_set_string_property(obj, "host", host);
-    node_url_set_string_property(obj, "hostname", hostname);
-    node_url_set_string_property(obj, "port", port);
-    node_url_set_string_property(obj, "pathname", pathname);
-    node_url_set_string_property(obj, "search", search);
-    node_url_set_string_property(obj, "hash", hash);
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "href", href).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "origin", origin_str).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "protocol", protocol).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "username", username).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "password", password).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "host", host).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "hostname", hostname).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "port", port).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "pathname", pathname).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "search", search).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "hash", hash).item;
 
     // searchParams — basic object (not full URLSearchParams)
     if (search && search[0] == '?' && search[1] != '\0') {
-        Item params = js_new_object();
+        *params_root = js_new_object().item;
         // parse query string into key-value pairs
         char query_buf[4096];
         int qlen = (int)strlen(search + 1);
@@ -274,27 +291,35 @@ static Item url_to_js_object(Url* url) {
             char* eq = strchr(pair, '=');
             if (eq) {
                 *eq = '\0';
-                js_property_set(params, make_string_item(pair), make_string_item(eq + 1));
+                *params_root = node_url_set_string_property(node_url_root_value(params_root),
+                    pair, eq + 1).item;
             } else {
-                js_property_set(params, make_string_item(pair), make_string_item(""));
+                *params_root = node_url_set_string_property(node_url_root_value(params_root),
+                    pair, "").item;
             }
             pair = strtok(NULL, "&");
         }
-        Item search_params_key = make_string_item("searchParams");
-        js_property_set(obj, search_params_key, params);
+        *key_root = make_string_item("searchParams").item;
+        node_url_host->value->property_set(node_url_root_value(object_root),
+            node_url_root_value(key_root), node_url_root_value(params_root));
         // searchParams is a per-instance wrapper; if enumerable, deep equality
         // compares wrapper identity instead of the URL's canonical href.
-        js_mark_non_enumerable(obj, search_params_key);
+        js_mark_non_enumerable(node_url_root_value(object_root), node_url_root_value(key_root));
     } else {
-        Item search_params_key = make_string_item("searchParams");
-        js_property_set(obj, search_params_key, js_new_object());
+        *params_root = js_new_object().item;
+        *key_root = make_string_item("searchParams").item;
+        // The outer roots stay authoritative after each property allocation;
+        // reusing the original local Item here lost URL fields under forced GC.
+        node_url_host->value->property_set(node_url_root_value(object_root),
+            node_url_root_value(key_root), node_url_root_value(params_root));
         // searchParams is a per-instance wrapper; if enumerable, deep equality
         // compares wrapper identity instead of the URL's canonical href.
-        js_mark_non_enumerable(obj, search_params_key);
+        js_mark_non_enumerable(node_url_root_value(object_root), node_url_root_value(key_root));
     }
 
+    Item result = node_url_root_value(object_root);
     node_url_host->node->roots->root_frame_end(&frame);
-    return obj;
+    return result;
 }
 
 static Item node_url_legacy_new(void);
@@ -1332,8 +1357,6 @@ extern "C" Item js_url_search_params_new(Item init) {
 // url Module Namespace Object
 // =============================================================================
 
-static Item url_module_namespace = {0};
-
 static Item js_url_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return ItemNull;
@@ -1424,9 +1447,6 @@ int node_url_init(const JubeHostAPI* host) {
 }
 
 void node_url_shutdown(void) {
-    node_url_cache_reset();
-    node_url_namespace_rooted = false;
-    node_url_session = NULL;
     node_url_host = NULL;
 }
 
@@ -1434,6 +1454,12 @@ void node_url_runtime_attach(void* session) {
     if (!node_url_host || !node_url_host->node || !node_url_host->node->runtime ||
             !node_url_host->node->runtime->session_is_live ||
             !node_url_host->node->runtime->session_is_live(session)) return;
+    NodeUrlSessionState* state = (NodeUrlSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_URL, sizeof(NodeUrlSessionState));
+    if (!state) return;
+    // A zeroed session starts blob identifiers at one without sharing a
+    // counter between contexts.
+    if (state->blob_url_next_id == 0) state->blob_url_next_id = 1;
     node_url_session = session;
     if (node_url_host->node->roots->persistent_root_register(session,
             &url_module_namespace.item) != 0) return;

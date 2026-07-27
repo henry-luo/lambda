@@ -20,6 +20,10 @@ typedef enum JubeSpecifierResolveStatus {
 } JubeSpecifierResolveStatus;
 
 typedef bool (*JubeSpecifierNameCallback)(const char* name, void* user);
+// Host transport/process services attach a close hook to the same
+// generation-checked slot that roots the Node-visible handle. The hook is
+// host-only: dynamic modules use the JubeHostNodeAPI service table instead.
+typedef void (*JubeNodeResourceCloseCallback)(void* user);
 
 bool jube_specifier_catalog_contains(const char* name);
 bool jube_specifier_is_builtin(const char* name);
@@ -50,6 +54,12 @@ void jube_node_resource_clear(void);
 bool jube_node_resource_contains(uint32_t resource_id);
 Item jube_node_resource_active_handles(void);
 Item jube_node_resource_active_resources_info(void);
+uint32_t jube_node_resource_add_with_close(void* session, Item value, const char* kind,
+                                           JubeNodeResourceCloseCallback close_callback,
+                                           void* close_user);
+void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
+void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
+void* jube_node_runtime_current_session(void);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
@@ -68,6 +78,30 @@ void jube_modules_runtime_reset(void);
 // is live. The opaque session becomes invalid immediately after detach.
 void jube_modules_runtime_attach(void);
 void jube_modules_runtime_detach(void);
+
+typedef enum JubeNodeModuleStateSlot {
+    JUBE_NODE_MODULE_STATE_EVENTS = 0,
+    JUBE_NODE_MODULE_STATE_STRING_DECODER,
+    JUBE_NODE_MODULE_STATE_URL,
+    JUBE_NODE_MODULE_STATE_TTY,
+    JUBE_NODE_MODULE_STATE_PROCESS,
+    JUBE_NODE_MODULE_STATE_CONSTANTS,
+    JUBE_NODE_MODULE_STATE_TIMERS,
+    JUBE_NODE_MODULE_STATE_PUNYCODE,
+    JUBE_NODE_MODULE_STATE_WORKERS,
+    JUBE_NODE_MODULE_STATE_QUERYSTRING,
+    JUBE_NODE_MODULE_STATE_V8,
+    JUBE_NODE_MODULE_STATE_OS,
+    JUBE_NODE_MODULE_STATE_PERF_HOOKS,
+    JUBE_NODE_MODULE_STATE_PATH,
+    JUBE_NODE_MODULE_STATE_CORE,
+} JubeNodeModuleStateSlot;
+
+// Node compatibility modules keep private native records in fixed slots on
+// the current EvalContext-owned Jube session. Slot acquisition is a cold
+// runtime_attach operation; normal module calls only load the chosen slot.
+void* jube_node_session_module_state_get(void* session, uint32_t slot, size_t size);
+void* jube_node_current_module_state(uint32_t slot);
 
 // Internal host bridge for import-time language dispatch.  The returned
 // wrapper is opaque to the language module and is always released by the

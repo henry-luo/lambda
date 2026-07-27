@@ -86,6 +86,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.lookup_import_metadata = jm_lookup_import_metadata;
     mt->is_module = is_module;
     mt->filename = filename;
+    mt->cascade_debug_site_counter = 100;
     mt->em.import_cache = em_import_cache_new(import_capacity);
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
@@ -126,18 +127,6 @@ MIR_label_t jm_new_label(JsMirTranspiler* mt) {
 
 static void jm_emit_raw(JsMirTranspiler* mt, MIR_insn_t insn) {
     em_emit_insn(&mt->em, insn);
-}
-
-static MIR_reg_t jm_load_side_stack_runtime(JsMirTranspiler* mt) {
-    JsMirImportEntry* rt = jm_ensure_import(mt, "_lambda_rt", MIR_T_I64, 0, NULL, 0);
-    MIR_reg_t address = jm_new_reg(mt, "side_rt_addr", MIR_T_I64);
-    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, address), MIR_new_ref_op(mt->ctx, rt->import)));
-    MIR_reg_t runtime = jm_new_reg(mt, "side_rt", MIR_T_I64);
-    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, runtime),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1)));
-    return runtime;
 }
 
 static void jm_ensure_index_map(int** map, int* capacity, int key) {
@@ -258,7 +247,10 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
 
 void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt) {
     if (!mt || !mt->em.frame.active || !mt->em.frame.root_base) return;
-    MIR_reg_t runtime = jm_load_side_stack_runtime(mt);
+    // The enclosing generated entry already owns this register.  A loop
+    // backedge is hot, so reloading a process-global runtime pointer here
+    // would both violate context ownership and add avoidable work per loop.
+    MIR_reg_t runtime = mt->em.frame.runtime;
     MIR_reg_t top = jm_new_reg(mt, "js_root_top_backedge", MIR_T_I64);
     jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, top),
@@ -372,7 +364,13 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->em.frame.return_type = return_type;
     mt->em.frame.item_return = item_return;
     mt->em.frame.scalar_return_mode = scalar_return_mode;
-    mt->em.frame.runtime = runtime_reg ? runtime_reg : jm_load_side_stack_runtime(mt);
+    if (!runtime_reg) {
+        // Every compiled entry has an explicit context parameter. Falling back
+        // to `_lambda_rt` would make the generated hot path process-global.
+        log_error("js-mir-frame: missing explicit runtime register");
+        abort();
+    }
+    mt->em.frame.runtime = runtime_reg;
     mt->em.frame.root_base = jm_new_reg(mt, "js_root_frame", MIR_T_I64);
     mt->em.frame.number_base = jm_new_reg(mt, "js_number_frame", MIR_T_I64);
     mt->em.frame.anchor = jm_new_label(mt);

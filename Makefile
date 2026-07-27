@@ -935,20 +935,10 @@ verify-node-profile-packages: package-node-reduced package-minimal
 	@cd release-node-reduced && ./lambda js -e "try { require('net') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
 	@cd release-minimal && ./lambda js -e "try { require('zlib') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
 
-# The loader must reject bytes that no longer match the manifest digest before
-# dlopen can execute module initializers. Work only on a disposable copied bundle.
+# The negative-fixture suite supplies an explicit digest and verifies that the
+# loader rejects tampered bytes before dlopen can execute module initializers.
 test-jube-module-integrity: build build-lang-python
-	@mkdir -p temp/jube-integrity/lang-python
-	@cp modules/lang-python/module.json temp/jube-integrity/lang-python/module.json
-	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll temp/jube-integrity/lang-python/ 2>/dev/null || true
-	@$(PYTHON) utils/update_jube_manifest_integrity.py --force temp/jube-integrity/lang-python
-	@library_path=$$(find temp/jube-integrity/lang-python -maxdepth 1 -type f \( -name 'lang-python.dylib' -o -name 'lang-python.so' -o -name 'lang-python.dll' \) | head -n 1); \
-	if [ -z "$$library_path" ]; then echo "missing copied lang-python library"; exit 1; fi; \
-	printf x | dd of="$$library_path" bs=1 seek=0 conv=notrunc status=none
-	@if JUBE_MODULE_PATH=./temp/jube-integrity ./lambda.exe py test/py/test_py_basic.py --no-log > temp/jube-integrity/stdout 2> temp/jube-integrity/stderr; then \
-		echo "tampered lang-python library was accepted"; exit 1; \
-	fi
-	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/jube-integrity/stderr
+	@$(PYTHON) utils/test_jube_module_loader_negative.py
 
 # Loader rejection matrix for the external Python module.  It uses copied
 # bundles so no test case can alter the active development module.

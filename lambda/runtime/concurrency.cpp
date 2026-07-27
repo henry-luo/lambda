@@ -1260,19 +1260,25 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     return lambda_task_handle(task);
 }
 
-extern "C" Item lambda_task_run_root_raw(
+extern "C" Item lambda_task_run_root_raw(Context* runtime,
     void* function_ptr, void* env, int env_count, List* args) {
-    if (!function_ptr || !context || !context->scheduler) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!function_ptr || !owner || !owner->scheduler) {
         return task_error(ERR_INVALID_STATE, "task root requires a scheduler");
     }
     int arity = args ? (int)args->length : 0;
     Function* function = lambda_concurrency_to_closure((fn_ptr)function_ptr, arity, env);
     if (!function) return task_error(ERR_OUT_OF_MEMORY, "task root function allocation failed");
+    // Async root lowering publishes the generated `_b` wrapper. Mark its
+    // explicit owner so scheduler resumption never reinterprets a user Item as
+    // the generated entry's Context argument.
+    lambda_function_mark_mir_public_abi(function);
+    lambda_function_mark_mir_context_abi(function, runtime);
     function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;
     Item handle = lambda_task_start_function((Item){.function = function}, args);
     LambdaTask* task = lambda_task_from_handle(handle);
     if (!task) return handle;
-    if (lambda_scheduler_drain(context->scheduler) < 0) {
+    if (lambda_scheduler_drain(owner->scheduler) < 0) {
         return task_error(ERR_INVALID_STATE, "task root drain did not complete");
     }
     return lambda_task_result(task);

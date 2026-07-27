@@ -1,6 +1,7 @@
 #include "js_dom_observers.h"
 #include "js_dom.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
@@ -56,10 +57,33 @@ typedef struct JsObserverState {
     int target_count;
 } JsObserverState;
 
-static JsObserverState observers[JS_OBSERVER_CAP] = {};
-static int observer_count = 0;
-static bool observer_delivery_scheduled = false;
-static uint64_t observer_roots_epoch = 0;
+struct JsObserverRuntimeState {
+    JsObserverState observers[JS_OBSERVER_CAP] = {};
+    int observer_count = 0;
+    bool delivery_scheduled = false;
+    uint64_t roots_epoch = 0;
+};
+
+static JsObserverRuntimeState* js_observer_runtime_state() {
+    if (!js_active_runtime_state) return nullptr;
+    JsObserverRuntimeState* state =
+        (JsObserverRuntimeState*)js_runtime_state.dom_observer_state;
+    if (!state) {
+        state = (JsObserverRuntimeState*)mem_calloc(1,
+            sizeof(JsObserverRuntimeState), MEM_CAT_JS_RUNTIME);
+        if (!state) {
+            log_error("dom-observer: failed to allocate context state");
+            return nullptr;
+        }
+        js_runtime_state.dom_observer_state = state;
+    }
+    return state;
+}
+
+#define observers (js_observer_runtime_state()->observers)
+#define observer_count (js_observer_runtime_state()->observer_count)
+#define observer_delivery_scheduled (js_observer_runtime_state()->delivery_scheduled)
+#define observer_roots_epoch (js_observer_runtime_state()->roots_epoch)
 extern __thread EvalContext* context;
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -733,6 +757,7 @@ static Item js_geometry_observer_initial_sample(void) {
 }
 
 extern "C" void js_dom_observers_reset(void) {
+    if (!js_active_runtime_state) return;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = &observers[i];
         for (int j = 0; j < observer->target_count; j++) {
@@ -746,4 +771,27 @@ extern "C" void js_dom_observers_reset(void) {
     memset(observers, 0, sizeof(observers));
     observer_count = 0;
     observer_delivery_scheduled = false;
+}
+
+#undef observers
+#undef observer_count
+#undef observer_delivery_scheduled
+#undef observer_roots_epoch
+
+extern "C" void js_dom_observers_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->dom_observer_state) return;
+    JsObserverRuntimeState* state =
+        (JsObserverRuntimeState*)runtime_state->dom_observer_state;
+    for (int i = 0; i < state->observer_count; i++) {
+        JsObserverState* observer = &state->observers[i];
+        for (int j = 0; j < observer->target_count; j++) {
+            observer_release_target(&observer->targets[j]);
+        }
+        if (observer->root && observer->root_ref.address) {
+            dom_node_unpin(observer->root->doc, observer->root_ref,
+                           DOM_NODE_PIN_OBSERVER);
+        }
+    }
+    mem_free(state);
+    runtime_state->dom_observer_state = NULL;
 }

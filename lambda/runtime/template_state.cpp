@@ -3,6 +3,7 @@
 #include "../lambda-data.hpp"
 #include "template_state.h"
 #include "render_map.h"
+#include "runtime-state.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
@@ -10,11 +11,32 @@
 #include <stdio.h>
 
 // ============================================================================
-// Global state map
+// Context-owned state map
 // ============================================================================
 
-static HashMap* s_template_state_map = NULL;
-static bool s_owns_map = false;  // true if we created the map
+typedef struct TemplateStateStore {
+    HashMap* map;
+    bool owns_map;
+} TemplateStateStore;
+
+static TemplateStateStore* tmpl_state_store(void) {
+    if (!context) {
+        log_error("template-state: no bound canonical EvalContext");
+        abort();
+    }
+    TemplateStateStore* store = (TemplateStateStore*)context->template_state_store;
+    if (store) return store;
+    store = (TemplateStateStore*)mem_calloc(1, sizeof(TemplateStateStore), MEM_CAT_EVAL);
+    if (!store) {
+        log_error("template-state: failed to allocate context store");
+        abort();
+    }
+    context->template_state_store = store;
+    return store;
+}
+
+#define s_template_state_map (tmpl_state_store()->map)
+#define s_owns_map (tmpl_state_store()->owns_map)
 
 HASHMAP_DEFINE_FIELD3_KEY(tmpl_state, TemplateStateEntry,
                           key.model_item.item, key.template_ref, key.state_name)
@@ -46,11 +68,13 @@ void tmpl_state_init(void) {
 }
 
 void tmpl_state_destroy(void) {
-    if (s_template_state_map && s_owns_map) {
-        hashmap_free(s_template_state_map);
+    if (!context || !context->template_state_store) return;
+    TemplateStateStore* store = (TemplateStateStore*)context->template_state_store;
+    if (store->map && store->owns_map) {
+        hashmap_free(store->map);
     }
-    s_template_state_map = NULL;
-    s_owns_map = false;
+    context->template_state_store = NULL;
+    mem_free(store);
 }
 
 Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name) {

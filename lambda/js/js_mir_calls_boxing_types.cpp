@@ -42,8 +42,10 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         types[i] = MIR_T_I64;
         ops[i] = MIR_new_reg_op(mt->ctx, arg_regs[i]);
     }
+    // A direct compiled call receives the caller's context register.  This is
+    // immutable activation input, not a load from a shared runtime cell.
     MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-        discard_result ? 0u : FN_RETURN_HOME_NORMAL, false};
+        discard_result ? 0u : FN_RETURN_HOME_NORMAL, false, true};
     FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_BOXED_BODY);
     MIR_reg_t result = em_call_direct(&mt->em, callee->body_name,
@@ -140,8 +142,10 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     }
     FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_NATIVE_BODY);
+    MirCallOptions options = {{MIR_FRAME_REF_NONE, 0}, 0u, false, true};
     MIR_reg_t result = em_call_direct(&mt->em, callee->name,
-        callee->native_func_item, native, arg_count, types, ops).normal.reg;
+        callee->native_func_item, native, arg_count, types, ops,
+        &options).normal.reg;
     return result;
 }
 
@@ -665,6 +669,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     // scalar-returning wrappers consume it, but one canonical call shape
     // prevents callback dispatch from guessing a function's return type.
     flags |= JS_FUNC_INIT_MIR_PUBLIC_ABI;
+    flags |= JS_FUNC_INIT_MIR_CONTEXT_ABI;
     jm_call_void_5(mt, "js_finalize_function",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, name),

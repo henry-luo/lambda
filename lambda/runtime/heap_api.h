@@ -24,6 +24,8 @@ void heap_register_gc_weak(uint64_t* slot,
 void heap_unregister_gc_weak(uint64_t* slot);
 bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
 void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
+bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count);
+void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base);
 void heap_no_gc_scope_begin(Context* runtime);
 void heap_no_gc_scope_end(Context* runtime);
 

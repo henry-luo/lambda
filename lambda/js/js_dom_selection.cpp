@@ -81,9 +81,8 @@ static inline Item make_str(const char* s) {
 static inline Item make_key(const char* s) { return make_str(s); }
 
 struct JsDocRuntimeScope {
-    EvalContext runtime_ctx;
+    EvalContext* runtime_ctx;
     EvalContext* saved_context;
-    ArrayList* type_list;
     bool active;
 };
 
@@ -91,19 +90,20 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
     if (!scope) return false;
     memset(scope, 0, sizeof(JsDocRuntimeScope));
     if (!doc) return false;
-    if (context) {
+    if (!doc->js.runtime) {
+        if (!context) return false;
         js_dom_set_document(doc);
         return true;
     }
-    if (!doc->js.runtime_heap || !doc->js.runtime_name_pool) return false;
-    scope->runtime_ctx.heap = (Heap*)doc->js.runtime_heap;
-    scope->runtime_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
-    scope->runtime_ctx.pool = doc->js.runtime_pool ?
-        (Pool*)doc->js.runtime_pool : scope->runtime_ctx.heap->pool;
-    scope->type_list = arraylist_new(16);
-    scope->runtime_ctx.type_list = scope->type_list;
-    scope->saved_context = context;
-    context = &scope->runtime_ctx;
+    Runtime* runtime = doc->js.runtime;
+    scope->runtime_ctx = runtime_get_eval_context(runtime);
+    if (!scope->runtime_ctx || !runtime->heap || !runtime->name_pool) return false;
+    scope->runtime_ctx->heap = runtime->heap;
+    scope->runtime_ctx->name_pool = runtime->name_pool;
+    scope->runtime_ctx->type_list = runtime->type_list;
+    scope->runtime_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    scope->saved_context = eval_context_bind(scope->runtime_ctx);
+    if (scope->runtime_ctx->js_state) js_runtime_state_bind_context(scope->runtime_ctx);
     js_dom_set_document(doc);
     scope->active = true;
     return true;
@@ -111,11 +111,8 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
 
 static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
     if (!scope || !scope->active) return;
-    context = scope->saved_context;
-    if (scope->type_list) {
-        arraylist_free(scope->type_list);
-        scope->type_list = nullptr;
-    }
+    eval_context_restore(scope->saved_context);
+    js_runtime_state_bind_context(scope->saved_context);
     scope->active = false;
 }
 

@@ -9,66 +9,7 @@
 
 extern __thread EvalContext* context;
 
-// The isolated scheduler suite must satisfy the current result-home call ABI;
-// otherwise the linker pulls the full evaluator into this white-box target.
-extern "C" Item lambda_concurrency_fn_call_into(Function* fn, List* args,
-    uint64_t* result_home) {
-    (void)fn;
-    (void)args;
-    (void)result_home;
-    return ItemError;
-}
-
-extern "C" Function* lambda_concurrency_to_closure(
-    fn_ptr ptr, int arity, void* env) {
-    (void)ptr;
-    (void)arity;
-    (void)env;
-    return NULL;
-}
-
-// Async file I/O is exercised through the Lambda integration suite; these
-// host helpers only satisfy the isolated scheduler target's link boundary.
-extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
-    (void)item;
-    return NULL;
-}
-
-extern "C" String* heap_strcpy(const char* src, int64_t len) {
-    (void)src;
-    (void)len;
-    return NULL;
-}
-
 static gc_heap_t* concurrency_test_gc;
-
-extern "C" void* heap_calloc(size_t size, TypeId type_id) {
-    return concurrency_test_gc
-        ? gc_heap_calloc(concurrency_test_gc, size, (uint16_t)type_id) : NULL;
-}
-
-void* heap_alloc(int size, TypeId type_id) {
-    return concurrency_test_gc
-        ? gc_heap_alloc(concurrency_test_gc, (size_t)size, (uint16_t)type_id) : NULL;
-}
-
-extern "C" void heap_register_gc_root(uint64_t* slot) {
-    if (concurrency_test_gc && slot) gc_register_root(concurrency_test_gc, slot);
-}
-
-extern "C" void heap_unregister_gc_root(uint64_t* slot) {
-    if (concurrency_test_gc && slot) gc_unregister_root(concurrency_test_gc, slot);
-}
-
-extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
-    if (concurrency_test_gc && base && count > 0) {
-        gc_register_root_range(concurrency_test_gc, base, count);
-    }
-}
-
-extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
-    if (concurrency_test_gc && base) gc_unregister_root_range(concurrency_test_gc, base);
-}
 
 typedef struct RecordFrame {
     int id;

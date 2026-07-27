@@ -5,6 +5,7 @@
  * Registered by node-core through its Jube namespace descriptor.
  */
 #include "node_path.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../../lib/file.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/path_str.h"
@@ -13,8 +14,11 @@
 #include <cstdio>
 
 static const JubeHostAPI* node_path_host = NULL;
-static void* node_path_session = NULL;
-static bool node_path_rooted = false;
+struct NodePathSessionState { void* session; bool rooted; Item namespace_cache; };
+static NodePathSessionState* node_path_state(void) { return (NodePathSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_PATH); }
+#define node_path_session (node_path_state()->session)
+#define node_path_rooted (node_path_state()->rooted)
+#define path_namespace (node_path_state()->namespace_cache)
 
 static const char* js_type_name_for_error(Item value);
 
@@ -936,8 +940,6 @@ static Item js_path_win32_matches_glob(Item path_item, Item pattern_item) {
 // path Module Namespace Object
 // =============================================================================
 
-static Item path_namespace = {0};
-
 static void js_path_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
@@ -1015,9 +1017,6 @@ int node_path_init(const JubeHostAPI* host) {
 }
 
 void node_path_shutdown(void) {
-    node_path_cache_reset();
-    node_path_rooted = false;
-    node_path_session = NULL;
     node_path_host = NULL;
 }
 
@@ -1025,6 +1024,8 @@ void node_path_runtime_attach(void* session) {
     if (!node_path_host || !node_path_host->node || !node_path_host->node->runtime ||
             !node_path_host->node->runtime->session_is_live ||
             !node_path_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PATH,
+            sizeof(NodePathSessionState))) return;
     node_path_session = session;
     if (node_path_host->node->roots->persistent_root_register(session,
             &path_namespace.item) == 0) {

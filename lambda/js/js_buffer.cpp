@@ -2461,8 +2461,13 @@ extern "C" Item js_buffer_swap64(Item buf) {
 
 // ─── Helpers & statics ──────────────────────────────────────────────────────
 
-static Item buffer_namespace = {0};
-static Item buffer_prototype = {0};
+#define buffer_namespace (js_runtime_state.buffer.namespace_object)
+#define buffer_prototype (js_runtime_state.buffer.prototype)
+
+static bool buffer_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.buffer.roots);
+}
 
 static void buf_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -2917,6 +2922,7 @@ extern "C" Item js_buf_inst_swap64() { return js_buffer_swap64(THIS); }
 // ─── Buffer Prototype ───────────────────────────────────────────────────────
 
 extern "C" Item js_get_buffer_prototype(void) {
+    if (!buffer_ensure_roots()) return ItemError;
     if (buffer_prototype.item != 0) return buffer_prototype;
 
     buffer_prototype = js_new_object();
@@ -3006,6 +3012,7 @@ extern "C" Item js_get_buffer_prototype(void) {
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
 extern "C" Item js_get_buffer_namespace(void) {
+    if (!buffer_ensure_roots()) return ItemError;
     if (buffer_namespace.item != 0) return buffer_namespace;
 
     // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
@@ -3148,6 +3155,7 @@ extern "C" Item js_get_buffer_namespace(void) {
 }
 
 extern "C" void js_reset_buffer_module(void) {
+    if (!js_active_runtime_state) return;
     buffer_namespace = (Item){0};
     buffer_prototype = (Item){0};
 }

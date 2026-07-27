@@ -234,8 +234,11 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     Rooted<Item> function_root(export_roots,
                         (Item){.function = fn});
                     if (uses_public_wrapper) {
-                        // Published MIR wrappers require the explicit dynamic-call home.
+                        // Published MIR wrappers require both the dynamic-call home
+                        // and the defining context; otherwise a namespace callback
+                        // shifts its first Item into the generated Context slot.
                         lambda_function_mark_mir_public_abi(fn);
+                        lambda_function_mark_mir_context_abi(fn, (Context*)context);
                     }
                     // Lambda procedures cross into JavaScript through one
                     // uniform Promise membrane, even when a particular call

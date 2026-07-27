@@ -629,6 +629,15 @@ void lambda_function_mark_mir_public_abi(Function* fn) {
     fn->flags |= FN_FLAG_MIR_PUBLIC_ABI;
 }
 
+void lambda_function_mark_mir_context_abi(Function* fn, Context* runtime) {
+    if (!fn) return;
+    // A generated Function may outlive the caller that created it. Retain the
+    // owner selected at creation so dynamic dispatch forwards an explicit
+    // context instead of reading process-global execution state.
+    fn->flags |= FN_FLAG_MIR_CONTEXT_ABI;
+    fn->runtime_context = runtime;
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -792,6 +801,46 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     if (!fn->ptr || (fn->flags & FN_FLAG_SYS_REF)) {
         return fn_call(fn, args);
     }
+    if (fn->flags & FN_FLAG_MIR_CONTEXT_ABI) {
+        Context* runtime = fn->runtime_context;
+        if (!runtime) {
+            set_runtime_error(ERR_INVALID_CALL,
+                "fn_call_into: generated function has no owner context");
+            return ItemError;
+        }
+        void* env = fn->closure_env;
+        // The context is the first physical ABI argument for every generated
+        // entry. It is a direct Function-owned pointer, not a TLS lookup.
+        if (env) {
+            switch (arg_count) {
+            case 0: return ((Item(*)(Context*, void*, uint64_t*))fn->ptr)(runtime, env, result_home);
+            case 1: return ((Item(*)(Context*, void*, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], result_home);
+            case 2: return ((Item(*)(Context*, void*, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], result_home);
+            case 3: return ((Item(*)(Context*, void*, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], result_home);
+            case 4: return ((Item(*)(Context*, void*, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], result_home);
+            case 5: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
+            case 6: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
+            case 7: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
+            default: break;
+            }
+        } else {
+            switch (arg_count) {
+            case 0: return ((Item(*)(Context*, uint64_t*))fn->ptr)(runtime, result_home);
+            case 1: return ((Item(*)(Context*, Item, uint64_t*))fn->ptr)(runtime, args->items[0], result_home);
+            case 2: return ((Item(*)(Context*, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], result_home);
+            case 3: return ((Item(*)(Context*, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], result_home);
+            case 4: return ((Item(*)(Context*, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], result_home);
+            case 5: return ((Item(*)(Context*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
+            case 6: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
+            case 7: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
+            case 8: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7], result_home);
+            default: break;
+            }
+        }
+        set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
+            "fn_call_into: unsupported generated argument count %d", arg_count);
+        return ItemError;
+    }
     void* env = fn->closure_env;
     // The exact caller home must cross this forwarding boundary unchanged.
     if (env) {
@@ -891,16 +940,16 @@ Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, I
     return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h);
 }
 
-Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
-    return ((Item(*)(uint64_t*))fp)(result_home);
+Item fn_call_boxed_0_into(Context* runtime, void* fp, uint64_t* result_home) {
+    return ((Item(*)(Context*, uint64_t*))fp)(runtime, result_home);
 }
 
 #define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
 #define DEFINE_BOXED_CALL_INTO(count, params, args) \
-    Item fn_call_boxed_##count##_into(void* fp, \
+    Item fn_call_boxed_##count##_into(Context* runtime, void* fp, \
             EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
-        return ((Item(*)(EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
-            EXPAND_BOXED_CALL_PARAMS args, result_home); \
+        return ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
+            runtime, EXPAND_BOXED_CALL_PARAMS args, result_home); \
     }
 
 DEFINE_BOXED_CALL_INTO(1, (Item a), (a))
@@ -3499,6 +3548,12 @@ Item fn_member(Item item, Item key) {
                         method->arity,
                         (void*)(uintptr_t)item.item,  // boxed self as closure_env
                         method->compiled_name);
+                    // Object method tables retain ABI wrappers rather than GC
+                    // Function values.  Restore the wrapper's context ABI on
+                    // each bound function so dynamic dispatch supplies the
+                    // runtime before its boxed self argument.
+                    lambda_function_mark_mir_public_abi(bound);
+                    lambda_function_mark_mir_context_abi(bound, (Context*)context);
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -3514,6 +3569,11 @@ Item fn_member(Item item, Item key) {
                             bmethod->arity,
                             (void*)(uintptr_t)item.item,
                             bmethod->compiled_name);
+                        // Inherited methods use the same raw ABI wrapper
+                        // storage as direct methods and need the same context
+                        // binding before fn_call dispatches them.
+                        lambda_function_mark_mir_public_abi(bound);
+                        lambda_function_mark_mir_context_abi(bound, (Context*)context);
                         return {.item = (uint64_t)(uintptr_t)bound};
                     }
                     bmethod = bmethod->next;
@@ -5521,25 +5581,22 @@ DateTime fn_justnow() {
     return dt;
 }
 
-// Thread-local storage for current variadic arguments list
-// Set by variadic function calls, accessed by fn_varg functions
-__thread List* current_vargs = NULL;
-
 // Set current variadic arguments (called before variadic function body)
 // Returns the previous vargs pointer so it can be restored after the call
 List* set_vargs(List* vargs) {
-    List* prev = current_vargs;
-    current_vargs = vargs;
+    List* prev = context ? context->current_vargs : NULL;
+    if (context) context->current_vargs = vargs;
     return prev;
 }
 
 // Restore previous variadic arguments after a variadic function completes
 void restore_vargs(List* prev) {
-    current_vargs = prev;
+    if (context) context->current_vargs = prev;
 }
 
 // varg() - returns all variadic arguments as a list
 Item fn_varg0() {
+    List* current_vargs = context ? context->current_vargs : NULL;
     if (current_vargs == NULL) {
         log_debug("fn_varg0: no variadic args, returning empty list");
         // return an empty list - allocate directly without frame context
@@ -5560,6 +5617,7 @@ Item fn_varg1(Item index_item) {
         log_debug("fn_varg1: index must be an integer-valued number");
         return ItemNull;
     }
+    List* current_vargs = context ? context->current_vargs : NULL;
     if (current_vargs == NULL) {
         log_debug("fn_varg1: no variadic args available");
         return ItemNull;

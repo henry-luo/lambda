@@ -11,6 +11,7 @@
 #include "js_event_loop.h"
 #include "js_dom.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
@@ -48,51 +49,53 @@ extern "C" Item js_domain_capture_stack(void);
 extern "C" Item js_domain_capture_async_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
-extern "C" Context* _lambda_rt;
-extern Runtime* js_source_runtime;
 extern Item js_make_number(double value);
 
 // =============================================================================
 // Task Queues
 // =============================================================================
 
-#define MICROTASK_CAPACITY 1024
-#define RAF_CAPACITY 1024
+#define MICROTASK_CAPACITY JS_EVENT_MICROTASK_CAPACITY
+#define RAF_CAPACITY JS_EVENT_RAF_CAPACITY
 #define TASK_FLUSH_SAFETY_LIMIT (MICROTASK_CAPACITY * 8)
 
-static Item next_tick_ring[MICROTASK_CAPACITY];
-static Item next_tick_resource_ring[MICROTASK_CAPACITY];
-static Item next_tick_als_ring[MICROTASK_CAPACITY];
-static Item next_tick_domain_ring[MICROTASK_CAPACITY];
-static int  next_tick_head = 0;
-static int  next_tick_tail = 0;
-static int  next_tick_count = 0;
-static Item microtask_ring[MICROTASK_CAPACITY];
-static Item microtask_resource_ring[MICROTASK_CAPACITY];
-static Item microtask_als_ring[MICROTASK_CAPACITY];
-static Item microtask_domain_ring[MICROTASK_CAPACITY];
-static int  microtask_head = 0;   // read index
-static int  microtask_tail = 0;   // write index
-static int  microtask_count = 0;
-
-static Item raf_callback_ring[RAF_CAPACITY];
-static int64_t raf_id_ring[RAF_CAPACITY];
-static int raf_head = 0;
-static int raf_tail = 0;
-static int raf_count = 0;
-static int64_t next_raf_id = 1;
-static bool auto_close_mode = false;
-static bool event_loop_shutting_down = false;
+#define next_tick_ring (js_runtime_state.event_loop.next_tick)
+#define next_tick_resource_ring (js_runtime_state.event_loop.next_tick_resource)
+#define next_tick_als_ring (js_runtime_state.event_loop.next_tick_als)
+#define next_tick_domain_ring (js_runtime_state.event_loop.next_tick_domain)
+#define next_tick_head (js_runtime_state.event_loop.next_tick_head)
+#define next_tick_tail (js_runtime_state.event_loop.next_tick_tail)
+#define next_tick_count (js_runtime_state.event_loop.next_tick_count)
+#define microtask_ring (js_runtime_state.event_loop.microtask)
+#define microtask_resource_ring (js_runtime_state.event_loop.microtask_resource)
+#define microtask_als_ring (js_runtime_state.event_loop.microtask_als)
+#define microtask_domain_ring (js_runtime_state.event_loop.microtask_domain)
+#define microtask_head (js_runtime_state.event_loop.microtask_head)
+#define microtask_tail (js_runtime_state.event_loop.microtask_tail)
+#define microtask_count (js_runtime_state.event_loop.microtask_count)
+#define raf_callback_ring (js_runtime_state.event_loop.raf_callback)
+#define raf_id_ring (js_runtime_state.event_loop.raf_id)
+#define raf_head (js_runtime_state.event_loop.raf_head)
+#define raf_tail (js_runtime_state.event_loop.raf_tail)
+#define raf_count (js_runtime_state.event_loop.raf_count)
+#define next_raf_id (js_runtime_state.event_loop.next_raf_id)
+#define auto_close_mode (js_runtime_state.event_loop.auto_close_mode)
+#define event_loop_shutting_down (js_runtime_state.event_loop.shutting_down)
 
 extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
+    // Layout config is applied before a document Runtime exists.  There is no
+    // semantic event-loop state to mutate until that Runtime binds a capsule.
+    if (!js_active_runtime_state) return;
     auto_close_mode = enabled;
 }
 
 extern "C" bool js_event_loop_auto_close_mode(void) {
+    if (!js_active_runtime_state) return false;
     return auto_close_mode;
 }
 
 extern "C" bool js_event_loop_is_shutting_down(void) {
+    if (!js_active_runtime_state) return false;
     return event_loop_shutting_down;
 }
 
@@ -353,6 +356,7 @@ typedef struct JsTimerHandle {
     Item       extra_args[8];   // extra args to pass to callback
     int        extra_count;     // number of extra args
     Heap*      runtime_heap;
+    EvalContext* runtime_context;
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
@@ -364,44 +368,30 @@ typedef struct JsTimerHandle {
     bool       virtual_refed;
 } JsTimerHandle;
 
-#define MAX_TIMER_HANDLES 1024
-static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
-static int timer_handle_count = 0;
-static int64_t next_timer_id = 1;
-static uint64_t timer_progress_generation = 0;
-static bool timer_force_shutdown = false;
-static bool timer_nan_warning_emitted = false;
-static bool timer_negative_warning_emitted = false;
-static bool virtual_clock_enabled = false;
-static double virtual_clock_ms = 0.0;
-
-#define MAX_MOCK_SCHEDULER_WAITS 128
-typedef struct JsMockSchedulerWait {
-    Item    promise;
-    Item    resolve;
-    Item    reject;
-    Item    signal;
-    int64_t due_ms;
-    bool    active;
-} JsMockSchedulerWait;
-
-static bool mock_scheduler_enabled = false;
-static int64_t mock_scheduler_now_ms = 0;
-static JsMockSchedulerWait mock_scheduler_waits[MAX_MOCK_SCHEDULER_WAITS];
+#define MAX_TIMER_HANDLES JS_EVENT_TIMER_CAPACITY
+#define MAX_MOCK_SCHEDULER_WAITS JS_EVENT_MOCK_WAIT_CAPACITY
+#define timer_handles ((JsTimerHandle**)js_runtime_state.timers.handles)
+#define timer_handle_count (js_runtime_state.timers.handle_count)
+#define next_timer_id (js_runtime_state.timers.next_id)
+#define timer_progress_generation (js_runtime_state.timers.progress_generation)
+#define timer_force_shutdown (js_runtime_state.timers.force_shutdown)
+#define timer_nan_warning_emitted (js_runtime_state.timers.nan_warning_emitted)
+#define timer_negative_warning_emitted (js_runtime_state.timers.negative_warning_emitted)
+#define virtual_clock_enabled (js_runtime_state.timers.virtual_clock_enabled)
+#define virtual_clock_ms (js_runtime_state.timers.virtual_clock_ms)
+#define mock_scheduler_enabled (js_runtime_state.timers.mock_scheduler_enabled)
+#define mock_scheduler_now_ms (js_runtime_state.timers.mock_scheduler_now_ms)
+#define mock_scheduler_waits (js_runtime_state.timers.mock_waits)
+#define mock_scheduler_roots_epoch (js_runtime_state.timers.mock_roots_epoch)
 extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t mock_scheduler_roots_epoch = 0;
 
 static void close_all_timer_handles(void);
 static void timer_register_gc_roots(JsTimerHandle* th);
 
 typedef struct JsTimerRuntimeScope {
-    EvalContext runtime_ctx;
     EvalContext* saved_context;
-    Context* saved_lambda_rt;
-    ArrayList* type_list;
     void* saved_doc;
     bool active;
-    bool rt_active;
     bool doc_active;
 } JsTimerRuntimeScope;
 
@@ -435,6 +425,7 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
     }
     if (context) {
         th->runtime_heap = context->heap;
+        th->runtime_context = context;
         th->runtime_name_pool = context->name_pool;
         th->runtime_pool = context->pool;
     }
@@ -447,25 +438,15 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
     scope->saved_doc = js_dom_get_document();
     bool needs_runtime_scope =
-        !context || (th->runtime_heap && context->heap != th->runtime_heap);
+        !context || context != th->runtime_context;
     if (needs_runtime_scope) {
-        if (!th->runtime_heap || !th->runtime_name_pool) {
+        if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool) {
             return false;
         }
-        scope->runtime_ctx.heap = th->runtime_heap;
-        scope->runtime_ctx.name_pool = th->runtime_name_pool;
-        scope->runtime_ctx.pool = th->runtime_pool ?
-            th->runtime_pool : th->runtime_heap->pool;
-        scope->type_list = arraylist_new(16);
-        scope->runtime_ctx.type_list = scope->type_list;
         scope->saved_context = context;
-        context = &scope->runtime_ctx;
+        context = th->runtime_context;
+        js_runtime_state_bind_context(context);
         scope->active = true;
-    }
-    scope->saved_lambda_rt = _lambda_rt;
-    if (context) {
-        _lambda_rt = (Context*)context;
-        scope->rt_active = true;
     }
     if (th->runtime_doc) {
         js_dom_set_document(th->runtime_doc);
@@ -487,15 +468,17 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     }
     if (scope->active) {
         context = scope->saved_context;
-        if (scope->type_list) {
-            arraylist_free(scope->type_list);
-            scope->type_list = nullptr;
-        }
+        js_runtime_state_bind_context(context);
         scope->active = false;
     }
-    if (scope->rt_active) {
-        _lambda_rt = scope->saved_lambda_rt;
-        scope->rt_active = false;
+}
+
+extern "C" void js_event_loop_adopt_context(void* heap, Context* owner_context) {
+    EvalContext* owner = (EvalContext*)owner_context;
+    if (!heap || !owner) return;
+    for (int i = 0; i < timer_handle_count; i++) {
+        JsTimerHandle* timer = timer_handles[i];
+        if (timer && timer->runtime_heap == heap) timer->runtime_context = owner;
     }
 }
 
@@ -1636,16 +1619,16 @@ extern "C" void js_event_loop_abandon_all_timers(void) {
 
 extern "C" void js_event_loop_init(void) {
     lambda_concurrency_js_init();
-    if (context && !context->scheduler && js_source_runtime &&
-            js_source_runtime->js_runtime_used) {
+    Runtime* runtime = context ? context->runtime : NULL;
+    if (context && !context->scheduler && runtime && runtime->js_runtime_used) {
         // Pure-JS contexts must retain their existing loop footprint. Attach a
         // Lambda scheduler only after a cross-language module activates the
         // membrane, so exported procedures can progress on this libuv loop.
-        context->scheduler = js_source_runtime && js_source_runtime->scheduler
-            ? js_source_runtime->scheduler
+        context->scheduler = runtime->scheduler
+            ? runtime->scheduler
             : lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
-        if (!js_source_runtime->scheduler) {
-            js_source_runtime->scheduler = context->scheduler;
+        if (!runtime->scheduler) {
+            runtime->scheduler = context->scheduler;
         }
     }
     if (timer_handle_count > 0) {
@@ -1693,9 +1676,8 @@ extern "C" void js_event_loop_init(void) {
     timer_negative_warning_emitted = false;
 
     // register task ring buffers as exact roots because static storage is not on the side stack
-    static struct gc_heap* statics_rooted_gc = NULL;
     struct gc_heap* active_gc = context && context->heap ? context->heap->gc : NULL;
-    if (active_gc && statics_rooted_gc != active_gc) {
+    if (active_gc && js_runtime_state.event_loop_rooted_gc != active_gc) {
         // Batch heap replacement creates a new root registry; static JS queues
         // must be registered with that heap even though their addresses persist.
         heap_register_gc_root_range((uint64_t*)next_tick_ring, MICROTASK_CAPACITY);
@@ -1710,7 +1692,7 @@ extern "C" void js_event_loop_init(void) {
         // Mock scheduler waits are static, so queued promise resolvers must be
         // rooted individually rather than via the whole struct with non-Item fields.
         mock_scheduler_register_gc_roots();
-        statics_rooted_gc = active_gc;
+        js_runtime_state.event_loop_rooted_gc = active_gc;
     }
 
     // initialize libuv loop
@@ -1721,6 +1703,10 @@ extern "C" void js_event_loop_init(void) {
 }
 
 extern "C" void js_event_loop_shutdown(void) {
+    // Hosts may finish a plain document after its transient JS Runtime has
+    // already been released.  With no active capsule there are no queues or
+    // timer roots owned by this call.
+    if (!js_active_runtime_state) return;
     uv_loop_t* loop = lambda_uv_loop();
 
     event_loop_shutting_down = true;

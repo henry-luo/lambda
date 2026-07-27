@@ -53,6 +53,10 @@ typedef struct JsTranspiler {
     // Error handling
     bool has_errors;                // Error flag
     StrBuf* error_buf;              // Error messages
+    bool parse_error_valid;
+    int64_t parse_error_row;
+    int64_t parse_error_col;
+    char parse_error_message[128];
     
     // Tree-sitter integration
     TSParser* parser;               // Tree-sitter parser
@@ -121,6 +125,9 @@ void print_js_ast_node(JsAstNode* node, int indent);
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
+int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
+                                  int64_t* out_col, char* out_message,
+                                  int64_t out_message_size);
 #ifdef __cplusplus
 }
 #endif

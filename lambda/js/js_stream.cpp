@@ -15,6 +15,7 @@
  * - pipeline(src, ...transforms, dst, cb) — pipe chain with error handling
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "js_property_attrs.h"
 #include "js_function.hpp"
@@ -74,7 +75,6 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
-extern Item js_current_this;
 extern "C" Item js_get_this(void);
 extern "C" Item js_writable_stream_new(Item underlying_sink);
 extern "C" Item js_get_global_property(Item key);
@@ -85,51 +85,56 @@ extern "C" Item js_noop(void) {
 }
 
 // cached key items
-static Item key_on;
-static Item key_emit;
-static Item key_push;
-static Item key_write;
-static Item key_end;
-static Item key_pipe;
-static Item key_read;
-static Item key_destroy;
-static Item key_readable;
-static Item key_writable;
-static Item key_flowing;
-static Item key_ended;
-static Item key_finished;
-static Item key_destroyed;
-static Item key_listeners;
-static Item key_buffer;
-static Item key_readable_state;
-static Item key_writable_state;
-static Item key_end_pending;
-static Item key_end_emitted;
-static Item key_reading;
-static Item key_reading_sync;
-static Item key_paused;
-static Item key_finish_emitted;
-static Item key_close_emitted;
-static Item key_closed;
-static Item key_capture_rejections;
-static Item key_auto_destroy;
-static Item key_readable_side_enabled;
-static Item key_writable_side_enabled;
-static Item key_destroy_pending;
-static Item key_listener_fn;
-static Item key_listener_context;
-static bool keys_init = false;
-static Item stream_readable_prototype = {0};
-static Item stream_writable_prototype = {0};
-static Item stream_duplex_prototype = {0};
-static Item stream_transform_prototype = {0};
-static Item stream_passthrough_prototype = {0};
-static Item internal_stream_state_namespace = {0};
-static Item internal_stream_end_of_stream_namespace = {0};
-static Item stream_iter_namespace = {0};
-static Item stream_web_namespace = {0};
-static int64_t js_stream_default_byte_hwm = 16 * 1024;
-static int64_t js_stream_default_object_hwm = 16;
+#define key_on (js_runtime_state.stream.key_on)
+#define key_emit (js_runtime_state.stream.key_emit)
+#define key_push (js_runtime_state.stream.key_push)
+#define key_write (js_runtime_state.stream.key_write)
+#define key_end (js_runtime_state.stream.key_end)
+#define key_pipe (js_runtime_state.stream.key_pipe)
+#define key_read (js_runtime_state.stream.key_read)
+#define key_destroy (js_runtime_state.stream.key_destroy)
+#define key_readable (js_runtime_state.stream.key_readable)
+#define key_writable (js_runtime_state.stream.key_writable)
+#define key_flowing (js_runtime_state.stream.key_flowing)
+#define key_ended (js_runtime_state.stream.key_ended)
+#define key_finished (js_runtime_state.stream.key_finished)
+#define key_destroyed (js_runtime_state.stream.key_destroyed)
+#define key_listeners (js_runtime_state.stream.key_listeners)
+#define key_buffer (js_runtime_state.stream.key_buffer)
+#define key_readable_state (js_runtime_state.stream.key_readable_state)
+#define key_writable_state (js_runtime_state.stream.key_writable_state)
+#define key_end_pending (js_runtime_state.stream.key_end_pending)
+#define key_end_emitted (js_runtime_state.stream.key_end_emitted)
+#define key_reading (js_runtime_state.stream.key_reading)
+#define key_reading_sync (js_runtime_state.stream.key_reading_sync)
+#define key_paused (js_runtime_state.stream.key_paused)
+#define key_finish_emitted (js_runtime_state.stream.key_finish_emitted)
+#define key_close_emitted (js_runtime_state.stream.key_close_emitted)
+#define key_closed (js_runtime_state.stream.key_closed)
+#define key_capture_rejections (js_runtime_state.stream.key_capture_rejections)
+#define key_auto_destroy (js_runtime_state.stream.key_auto_destroy)
+#define key_readable_side_enabled (js_runtime_state.stream.key_readable_side_enabled)
+#define key_writable_side_enabled (js_runtime_state.stream.key_writable_side_enabled)
+#define key_destroy_pending (js_runtime_state.stream.key_destroy_pending)
+#define key_listener_fn (js_runtime_state.stream.key_listener_fn)
+#define key_listener_context (js_runtime_state.stream.key_listener_context)
+#define keys_init (js_runtime_state.stream.keys_initialized)
+#define stream_readable_prototype (js_runtime_state.stream.readable_prototype)
+#define stream_writable_prototype (js_runtime_state.stream.writable_prototype)
+#define stream_duplex_prototype (js_runtime_state.stream.duplex_prototype)
+#define stream_transform_prototype (js_runtime_state.stream.transform_prototype)
+#define stream_passthrough_prototype (js_runtime_state.stream.passthrough_prototype)
+#define internal_stream_state_namespace (js_runtime_state.stream.internal_state_namespace)
+#define internal_stream_end_of_stream_namespace (js_runtime_state.stream.internal_end_of_stream_namespace)
+#define stream_iter_namespace (js_runtime_state.stream.iterator_namespace)
+#define stream_web_namespace (js_runtime_state.stream.web_namespace)
+#define js_stream_default_byte_hwm (js_runtime_state.stream.default_byte_hwm)
+#define js_stream_default_object_hwm (js_runtime_state.stream.default_object_hwm)
+
+static bool stream_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.stream.roots);
+}
 
 static Item js_stream_make_error_with_code(const char* code, const char* message);
 static Item js_stream_make_type_error_with_code(const char* code, const char* message);
@@ -189,6 +194,7 @@ static bool js_stream_source_keeps_pipe_on_backpressure(Item self) {
 }
 
 static void ensure_keys() {
+    if (!stream_ensure_roots()) return;
     if (keys_init) return;
     key_on       = make_string_item("on");
     key_emit     = make_string_item("emit");
@@ -9464,8 +9470,8 @@ static void js_stream_install_state_accessors(Item readable_ctor, Item writable_
 // stream Module Namespace
 // =============================================================================
 
-static Item stream_namespace = {0};
-static Item stream_promises_namespace = {0};
+#define stream_namespace (js_runtime_state.stream.namespace_object)
+#define stream_promises_namespace (js_runtime_state.stream.promises_namespace)
 
 static Item stream_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -9716,13 +9722,11 @@ static Item js_stream_promises_finished(Item rest_args) {
 }
 
 extern "C" Item js_get_stream_promises_namespace(void) {
+    if (!stream_ensure_roots()) return ItemError;
     if (stream_promises_namespace.item != 0) return stream_promises_namespace;
     ensure_keys();
 
     stream_promises_namespace = js_new_object();
-    // The sibling stream namespace can allocate before it publishes promises;
-    // retain this process cache across forced collection between requires.
-    heap_register_gc_root(&stream_promises_namespace.item);
     Item pipeline = stream_set_method(stream_promises_namespace, "pipeline",
                                       (void*)js_stream_promises_pipeline, -1);
     Item finished = stream_set_method(stream_promises_namespace, "finished",
@@ -9942,13 +9946,11 @@ static Item js_stream_destroy_export(Item stream, Item err) {
 }
 
 extern "C" Item js_get_stream_namespace(void) {
+    if (!stream_ensure_roots()) return ItemError;
     if (stream_namespace.item != 0) return stream_namespace;
     ensure_keys();
 
     stream_namespace = js_new_object();
-    // A host-backed node-core descriptor may request sibling stream surfaces
-    // during setup, so the shared namespace cannot rely on a later global root.
-    heap_register_gc_root(&stream_namespace.item);
 
     Item readable_constructor =
         stream_set_method(stream_namespace, "Readable",    (void*)js_readable_new, 1);
@@ -10079,10 +10081,10 @@ extern "C" Item js_get_stream_namespace(void) {
 }
 
 extern "C" Item js_get_stream_iter_namespace(void) {
+    if (!stream_ensure_roots()) return ItemError;
     if (stream_iter_namespace.item != 0) return stream_iter_namespace;
     ensure_keys();
     stream_iter_namespace = js_new_object();
-    heap_register_gc_root(&stream_iter_namespace.item);
     stream_set_method(stream_iter_namespace, "from", (void*)js_stream_iter_from, 1);
     stream_set_method(stream_iter_namespace, "fromSync", (void*)js_stream_iter_fromSync, 1);
     stream_set_method(stream_iter_namespace, "pipeTo", (void*)js_stream_iter_pipeTo, 4);
@@ -10105,10 +10107,10 @@ extern "C" Item js_get_stream_iter_namespace(void) {
 }
 
 extern "C" Item js_get_stream_web_namespace(void) {
+    if (!stream_ensure_roots()) return ItemError;
     if (stream_web_namespace.item != 0) return stream_web_namespace;
     ensure_keys();
     stream_web_namespace = js_new_object();
-    heap_register_gc_root(&stream_web_namespace.item);
 
     Item readable_ctor = js_new_function((void*)js_readable_stream_new, 1);
     Item writable_ctor = js_new_function((void*)js_writable_stream_new, 1);
@@ -10169,6 +10171,7 @@ extern "C" Item js_get_internal_stream_end_of_stream_namespace(void) {
 }
 
 extern "C" void js_stream_reset(void) {
+    if (!js_active_runtime_state) return;
     stream_namespace = (Item){0};
     stream_promises_namespace = (Item){0};
     stream_web_namespace = (Item){0};

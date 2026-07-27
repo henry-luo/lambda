@@ -20,6 +20,7 @@
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_dom_events.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -1589,12 +1590,15 @@ static const char* script_task_filename(JsScriptTask* task, char* scratch, size_
     return scratch;
 }
 
-static void script_eval_context_init(Runtime* runtime, EvalContext* eval_context) {
+static EvalContext* script_eval_context_prepare(Runtime* runtime) {
+    EvalContext* eval_context = runtime_get_eval_context(runtime);
+    if (!eval_context) return nullptr;
     eval_context->heap = runtime->heap;
     eval_context->name_pool = runtime->name_pool;
     if (!runtime->type_list) runtime->type_list = arraylist_new(64);
     eval_context->type_list = runtime->type_list;
     eval_context->pool = runtime->heap ? runtime->heap->pool : nullptr;
+    return eval_context;
 }
 
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
@@ -1607,14 +1611,15 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
         source_len = 0;
     }
 
-    EvalContext task_context = {};
-    script_eval_context_init(runtime, &task_context);
+    EvalContext* task_context = script_eval_context_prepare(runtime);
+    if (!task_context) return ItemError;
 
-    EvalContext* saved_context = context;
-    context = &task_context;
+    EvalContext* saved_context = eval_context_bind(task_context);
+    if (task_context->js_state) js_runtime_state_bind_context(task_context);
     Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename,
                                                         preamble, result_home);
-    context = saved_context;
+    eval_context_restore(saved_context);
+    js_runtime_state_bind_context(saved_context);
     js_mir_accumulate_last_phase_timing(false);
 
     if (refresh_snapshot && get_type_id(result) != LMD_TYPE_ERROR) {
@@ -1632,13 +1637,14 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
     }
     (void)source_len;
 
-    EvalContext task_context = {};
-    script_eval_context_init(runtime, &task_context);
+    EvalContext* task_context = script_eval_context_prepare(runtime);
+    if (!task_context) return ItemError;
 
-    EvalContext* saved_context = context;
-    context = &task_context;
+    EvalContext* saved_context = eval_context_bind(task_context);
+    if (task_context->js_state) js_runtime_state_bind_context(task_context);
     Item result = transpile_js_module_to_mir(runtime, source, filename);
-    context = saved_context;
+    eval_context_restore(saved_context);
+    js_runtime_state_bind_context(saved_context);
     js_mir_accumulate_last_phase_timing(false);
 
     if (result.item == 0 || get_type_id(result) == LMD_TYPE_NULL) {
@@ -2264,16 +2270,37 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #endif
 
     phase_start_us = timing ? time_now_us() : 0;
-    // set up Runtime for JS transpiler
-    Runtime runtime = {};
-    runtime.dom_doc = (void*)dom_doc;
+    // The document retains this owner when handlers are enabled.  Do not put
+    // a semantic runtime on this stack: later timer/event turns must enter the
+    // same canonical EvalContext that compiled the document.
+    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+    if (!runtime) {
+        log_error("execute_document_scripts: failed to allocate document runtime");
+        script_task_collection_free(&script_tasks);
+        script_runner_cleanup_source_cache();
+        return;
+    }
+    runtime->dom_doc = (void*)dom_doc;
     // create fresh tracked mmap pool for this JS execution
-    runtime.reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
-                                              MEM_ROLE_RUNTIME_HEAP,
-                                              "script.js.reuse");
+    runtime->reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
+                                               MEM_ROLE_RUNTIME_HEAP,
+                                               "script.js.reuse");
     EvalContext* saved_js_context = context;
     Context* saved_input_context = input_context;
     void* saved_js_document = js_dom_get_document();
+    EvalContext* document_context = runtime_get_eval_context(runtime);
+    if (!document_context) {
+        if (runtime->reuse_pool) pool_destroy(runtime->reuse_pool);
+        mem_free(runtime);
+        script_task_collection_free(&script_tasks);
+        script_runner_cleanup_source_cache();
+        return;
+    }
+    // The event loop publishes its per-runtime queue during initialization;
+    // bind its permanent owner before that publication, not a later compiler
+    // frame reconstructed from the same heap.
+    eval_context_bind(document_context);
+    js_runtime_state_bind_context(document_context);
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
@@ -2320,7 +2347,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_mem_stage("js: before transpile/exec");
         if (timing) timing->runtime_setup_us += time_now_us() - phase_start_us;
         phase_start_us = timing ? time_now_us() : 0;
-        result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble, timing);
+        result = execute_document_script_tasks_postdom(runtime, &script_tasks, preamble, timing);
         if (timing) timing->postdom_total_us += time_now_us() - phase_start_us;
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
@@ -2378,13 +2405,15 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #endif
 
     phase_start_us = timing ? time_now_us() : 0;
-    context = saved_js_context;
-    input_context = saved_input_context;
-    if (saved_js_context && saved_js_context->heap && saved_js_context->name_pool) {
-        js_dom_set_document(saved_js_document);
-    } else {
-        js_dom_set_document(NULL);
-    }
+    // Keep the document's canonical context bound through its initial task
+    // drain.  Promise and timer callbacks allocate and must never observe the
+    // caller's restored (or null) context.
+    // The transpiler restores its caller binding after execution. Re-enter the
+    // document owner before publishing DOM wrappers so this document never
+    // writes context-local DOM state through an ambient host thread binding.
+    eval_context_bind(document_context);
+    js_runtime_state_bind_context(document_context);
+    js_dom_set_document(dom_doc);
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {
@@ -2419,15 +2448,12 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
     if (preamble && preamble->mir_ctx) {
-        // MIR setup consumes runtime.reuse_pool into the fresh heap. Restore the
+        // MIR setup consumes runtime->reuse_pool into the fresh heap. Restore the
         // owner pointer so document cleanup can release that per-document pool.
-        if (!runtime.reuse_pool && runtime.heap) runtime.reuse_pool = runtime.heap->pool;
+        if (!runtime->reuse_pool && runtime->heap) runtime->reuse_pool = runtime->heap->pool;
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;
-        dom_doc->js.runtime_heap = runtime.heap;
-        dom_doc->js.runtime_name_pool = runtime.name_pool;
-        dom_doc->js.runtime_type_list = runtime.type_list;
-        dom_doc->js.runtime_pool = runtime.reuse_pool;
+        dom_doc->js.runtime = runtime;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
             // Do NOT destroy heap/pool — they're retained on the document
@@ -2441,39 +2467,28 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         }
     } else {
         // Fallback: no valid preamble — destroy as before
-        if (preamble) { mem_free(preamble); }
-        if (!s_retain_js_state || script_runner_js_batch_cleanup_unsafe()) {
-            // Transient document scripts still populate global/module state with
-            // heap-bound functions and DOM wrappers. Clear them before tearing
-            // down the per-document heap so the next batch file starts clean.
-            // Timers also hold heap-root slots, so close the loop before heap free.
-            if (script_runner_js_batch_cleanup_unsafe()) {
-                // A signal longjmp can invalidate the retained preamble before
-                // normal JS-state retention runs; force DOM wrapper/global reset.
-                js_event_loop_abandon_all_timers();
-            } else {
-                js_event_loop_shutdown();
-            }
-            js_batch_reset();
+        if (preamble) {
+            preamble_state_destroy(preamble);
+            mem_free(preamble);
         }
-        if (runtime.heap && runtime.heap->gc) {
-            Pool* reuse_pool = runtime.heap->gc->pool;
-            heap_finalize_gc_objects(runtime.heap->gc);
-            runtime.heap->gc->pool = NULL;
-            gc_heap_destroy(runtime.heap->gc);
-            mem_free(runtime.heap);
-            if (s_retain_js_state) {
-                s_js_reuse_pool = reuse_pool;
-            } else if (reuse_pool) {
-                mem_pool_destroy(reuse_pool);
-            }
-        } else if (runtime.heap) {
-            mem_free(runtime.heap);
+        // A failed preamble never becomes document state.  Tear down the
+        // complete owner so no context fragment survives the failed batch.
+        dom_doc->js.runtime = runtime;
+        if (script_runner_js_batch_cleanup_unsafe()) {
+            js_event_loop_abandon_all_timers();
+        } else {
+            js_event_loop_shutdown();
         }
-        if (runtime.type_list) {
-            arraylist_free(runtime.type_list);
-            runtime.type_list = nullptr;
-        }
+        js_batch_reset();
+        script_runner_cleanup_js_state(dom_doc);
+    }
+    eval_context_restore(saved_js_context);
+    input_context = saved_input_context;
+    js_runtime_state_bind_context(saved_js_context);
+    if (saved_js_context && saved_js_context->heap && saved_js_context->name_pool) {
+        js_dom_set_document(saved_js_document);
+    } else {
+        js_dom_set_document(NULL);
     }
     if (timing) timing->runtime_cleanup_us += time_now_us() - phase_start_us;
 
@@ -2663,7 +2678,7 @@ static void collect_handlers_recursive(DomElement* elem,
 }
 
 extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
-    if (!dom_doc || !dom_doc->root || !dom_doc->js.mir_ctx) {
+    if (!dom_doc || !dom_doc->root || !dom_doc->js.mir_ctx || !dom_doc->js.runtime) {
         return;
     }
 
@@ -2695,30 +2710,28 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 
     // Compile handler wrapper functions using the retained MIR preamble context.
     // The with_preamble call creates a new MIR context that can see preamble-defined
-    // functions (clicked(), toggle(), etc.). We need the thread-local EvalContext
-    // set up with the retained heap so the transpiler reuses it (reusing_context=true),
-    // which causes the new MIR context to be deferred rather than destroyed.
+    // functions (clicked(), toggle(), etc.).  Bind the document's retained
+    // canonical EvalContext so reuse is an owner property, never a stack
+    // snapshot reconstructed from its heap fields.
     JsPreambleState* preamble = (JsPreambleState*)dom_doc->js.preamble_state;
-    Runtime runtime = {};
-    runtime.dom_doc = dom_doc;
-    runtime.heap = (Heap*)dom_doc->js.runtime_heap;
-    runtime.name_pool = (NamePool*)dom_doc->js.runtime_name_pool;
-    runtime.type_list = (ArrayList*)dom_doc->js.runtime_type_list;
-    runtime.reuse_pool = (Pool*)dom_doc->js.runtime_pool;
-
-    // Set up thread-local eval context so transpiler sees reusing_context=true.
-    // This prevents the new MIR context from being destroyed — it gets deferred instead.
-    EvalContext handler_compile_ctx = {};
-    handler_compile_ctx.heap = runtime.heap;
-    handler_compile_ctx.name_pool = runtime.name_pool;
-    handler_compile_ctx.type_list = runtime.type_list;
-    handler_compile_ctx.pool = runtime.reuse_pool ? runtime.reuse_pool :
-        (runtime.heap ? runtime.heap->pool : nullptr);
-    EvalContext* saved_ctx = context;
-    context = &handler_compile_ctx;
+    Runtime* runtime = dom_doc->js.runtime;
+    EvalContext* handler_compile_ctx = runtime_get_eval_context(runtime);
+    if (!handler_compile_ctx || !runtime->heap || !runtime->name_pool) {
+        log_error("collect_and_compile_event_handlers: document runtime is incomplete");
+        strbuf_free(compile_buf);
+        hashmap_free(handlers->element_map);
+        mem_pool_destroy(handlers_pool);
+        return;
+    }
+    handler_compile_ctx->heap = runtime->heap;
+    handler_compile_ctx->name_pool = runtime->name_pool;
+    handler_compile_ctx->type_list = runtime->type_list;
+    handler_compile_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    EvalContext* saved_ctx = eval_context_bind(handler_compile_ctx);
+    if (handler_compile_ctx->js_state) js_runtime_state_bind_context(handler_compile_ctx);
 
     uint64_t compile_result_home = 0;
-    Item compile_result = transpile_js_to_mir_with_preamble(&runtime, compile_buf->str,
+    Item compile_result = transpile_js_to_mir_with_preamble(runtime, compile_buf->str,
                                                              "<event-handlers>", preamble,
                                                              &compile_result_home);
     strbuf_free(compile_buf);
@@ -2726,7 +2739,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     TypeId result_type = get_type_id(compile_result);
     if (result_type == LMD_TYPE_ERROR) {
         log_error("collect_and_compile_event_handlers: compilation failed");
-        context = saved_ctx;
+        eval_context_restore(saved_ctx);
+        js_runtime_state_bind_context(saved_ctx);
         hashmap_free(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
@@ -2738,7 +2752,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
     if (!handler_mir_ctx) {
         log_error("collect_and_compile_event_handlers: no deferred MIR context found");
-        context = saved_ctx;
+        eval_context_restore(saved_ctx);
+        js_runtime_state_bind_context(saved_ctx);
         hashmap_free(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
@@ -2773,15 +2788,11 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         }
     }
 
-    context = saved_ctx;
+    eval_context_restore(saved_ctx);
+    js_runtime_state_bind_context(saved_ctx);
 
     log_info("collect_and_compile_event_handlers: installed %d/%d handlers into EventTarget path",
              installed, handlers->count);
-
-    // Update retained state after compilation.
-    dom_doc->js.runtime_heap = runtime.heap;
-    dom_doc->js.runtime_name_pool = runtime.name_pool;
-    dom_doc->js.runtime_type_list = runtime.type_list;
 
     hashmap_free(handlers->element_map);
     mem_pool_destroy(handlers_pool);
@@ -2802,9 +2813,28 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         dom_doc->js.preamble_state = nullptr;
         dom_doc->js.mir_ctx = nullptr;
     }
+    Runtime* runtime = dom_doc->js.runtime;
+    if (!runtime) return;
+
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    EvalContext* previous_context = owner ? eval_context_bind(owner) : context;
+    if (owner && owner->js_state) js_runtime_state_bind_context(owner);
+
+    // The document runtime can have queued callback roots even when the
+    // caller did not reach the normal loader teardown path.
+    if (owner && owner->js_state) {
+        js_event_loop_shutdown();
+        js_batch_reset();
+        // Deferred module contexts can retain functions into this heap.  They
+        // must finish while their document capsule is still active, not from
+        // a later context-free layout cleanup.
+        jm_cleanup_deferred_mir();
+    }
+    lambda_module_state_destroy((Context*)owner);
+
     // Destroy retained heap and GC metadata.
-    if (dom_doc->js.runtime_heap) {
-        Heap* heap = (Heap*)dom_doc->js.runtime_heap;
+    if (runtime->heap) {
+        Heap* heap = runtime->heap;
         if (heap->gc) {
             heap_finalize_gc_objects(heap->gc);
             heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
@@ -2812,21 +2842,36 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
             // pool is destroyed separately below
         }
         mem_free(heap);
-        dom_doc->js.runtime_heap = nullptr;
+        runtime->heap = nullptr;
     }
 
-    if (dom_doc->js.runtime_type_list) {
-        arraylist_free((ArrayList*)dom_doc->js.runtime_type_list);
-        dom_doc->js.runtime_type_list = nullptr;
+    if (runtime->type_list) {
+        arraylist_free(runtime->type_list);
+        runtime->type_list = nullptr;
     }
 
     // Destroy retained mmap pool (native code pages, etc.)
-    if (dom_doc->js.runtime_pool) {
-        pool_destroy((Pool*)dom_doc->js.runtime_pool);
-        dom_doc->js.runtime_pool = nullptr;
+    if (runtime->reuse_pool) {
+        pool_destroy(runtime->reuse_pool);
+        runtime->reuse_pool = nullptr;
     }
 
-    dom_doc->js.runtime_name_pool = nullptr;
+    runtime->name_pool = nullptr;
+    if (runtime->eval_context) {
+        // A transient load can still have this owner bound when its cleanup
+        // runs.  Never restore TLS to the capsule we are about to free.
+        if (previous_context == runtime->eval_context) previous_context = nullptr;
+        js_runtime_state_destroy_context(runtime->eval_context);
+        if (context == runtime->eval_context) context = nullptr;
+        mem_free(runtime->eval_context);
+        runtime->eval_context = nullptr;
+    }
+    if (owner) {
+        eval_context_restore(previous_context);
+        js_runtime_state_bind_context(previous_context);
+    }
+    mem_free(runtime);
+    dom_doc->js.runtime = nullptr;
 
     log_debug("script_runner_cleanup_js_state: cleaned up JS state");
 }

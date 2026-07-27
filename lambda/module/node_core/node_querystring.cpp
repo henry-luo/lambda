@@ -5,6 +5,7 @@
  * Registered by node-core through its Jube namespace descriptor.
  */
 #include "node_querystring.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../../lib/url.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/hex.h"
@@ -13,9 +14,11 @@
 #include <math.h>
 
 static const JubeHostAPI* node_querystring_host = NULL;
-static void* node_querystring_session = NULL;
-static bool node_querystring_rooted = false;
-static Item qs_namespace = {0};
+struct NodeQuerystringSessionState { void* session; bool rooted; Item namespace_cache; };
+static NodeQuerystringSessionState* node_querystring_state(void) { return (NodeQuerystringSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_QUERYSTRING); }
+#define node_querystring_session (node_querystring_state()->session)
+#define node_querystring_rooted (node_querystring_state()->rooted)
+#define qs_namespace (node_querystring_state()->namespace_cache)
 
 static int node_querystring_kind(Item value) {
     return node_querystring_host && node_querystring_host->value &&
@@ -963,9 +966,6 @@ int node_querystring_init(const JubeHostAPI* host) {
 }
 
 void node_querystring_shutdown(void) {
-    node_querystring_cache_reset();
-    node_querystring_rooted = false;
-    node_querystring_session = NULL;
     node_querystring_host = NULL;
 }
 
@@ -974,6 +974,8 @@ void node_querystring_runtime_attach(void* session) {
             !node_querystring_host->node->runtime ||
             !node_querystring_host->node->runtime->session_is_live ||
             !node_querystring_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_QUERYSTRING,
+            sizeof(NodeQuerystringSessionState))) return;
     node_querystring_session = session;
     if (node_querystring_host->node->roots->persistent_root_register(session,
             &qs_namespace.item) == 0) {

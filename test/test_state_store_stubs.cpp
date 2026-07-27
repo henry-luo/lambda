@@ -8,13 +8,37 @@
 #include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
-TemplateRegistry* g_template_registry = NULL;
+__thread EvalContext* context = NULL;
+
+static TemplateRegistry* test_template_registry = NULL;
+
+extern "C" TemplateRegistry** template_registry_current_slot(void) {
+    // The standalone state-store target has no EvalContext, so provide the
+    // context-owned registry slot locally instead of defining the retired
+    // process-global g_template_registry symbol.
+    return &test_template_registry;
+}
+
 UiContext ui_context{};
 
 extern "C" void heap_register_gc_root(uint64_t* slot) {
     (void)slot;
     // This pool-backed state-store target omits lambda-rt and never compacts;
     // render_map's process slot therefore needs no GC registration here.
+}
+
+extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count) {
+    (void)runtime;
+    (void)base;
+    (void)count;
+    // This target has no collecting heap; render-map root publication is a
+    // link-time dependency only because the exercised state path has no bound context.
+    return true;
+}
+
+extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
+    (void)runtime;
+    (void)base;
 }
 
 extern "C" bool js_dom_option_is_selected(void* dom_elem) {

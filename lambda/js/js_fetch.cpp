@@ -21,27 +21,25 @@
 #include <sys/stat.h>
 #include "../../lib/mem.h"
 
-// Base directory for resolving relative fetch() URLs to on-disk files.
-// Set by main.cpp when --document is supplied; NULL otherwise. Owned here.
-static char* g_fetch_base_dir = NULL;
+#define MAX_FETCH_RESPONSES 256
+
+// --document is parsed before its EvalContext exists. This is bootstrap input
+// only: the first context copies it into its fetch capsule and clears it.
+static char* js_fetch_bootstrap_base_path = NULL;
+static void js_fetch_set_current_base_path(const char* dir_path);
 
 extern "C" void js_fetch_set_base_path(const char* dir_path) {
-    if (g_fetch_base_dir) {
-        mem_free(g_fetch_base_dir);
-        g_fetch_base_dir = NULL;
+    if (js_active_runtime_state) {
+        js_fetch_set_current_base_path(dir_path);
+        return;
     }
-    if (!dir_path || !*dir_path) return;
-    // Find the directory portion of dir_path; if it's a file, drop the basename.
-    struct stat st;
-    char* dup = mem_strdup(dir_path, MEM_CAT_JS_RUNTIME);
-    if (!dup) return;
-    if (stat(dup, &st) == 0 && S_ISREG(st.st_mode)) {
-        // strip basename
-        char* slash = strrchr(dup, '/');
-        if (slash) *slash = '\0';
-        else { mem_free(dup); dup = mem_strdup(".", MEM_CAT_JS_RUNTIME); }
+    if (js_fetch_bootstrap_base_path) {
+        mem_free(js_fetch_bootstrap_base_path);
+        js_fetch_bootstrap_base_path = NULL;
     }
-    g_fetch_base_dir = dup;
+    if (dir_path && dir_path[0]) {
+        js_fetch_bootstrap_base_path = mem_strdup(dir_path, MEM_CAT_JS_RUNTIME);
+    }
 }
 
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
@@ -81,6 +79,78 @@ typedef struct JsFetchWork {
     Item resolve_fn;
     Item reject_fn;
 } JsFetchWork;
+
+// Response bodies, relative-path policy, and the executor handoff are realm
+// state. Their users run under a bound context and therefore use only direct
+// owner-thread field accesses—no shared table, lock, or atomic probe.
+struct JsFetchRuntimeState {
+    char* base_dir = NULL;
+    char* response_bodies[MAX_FETCH_RESPONSES] = {};
+    int response_body_lens[MAX_FETCH_RESPONSES] = {};
+    char* response_types[MAX_FETCH_RESPONSES] = {};
+    int response_body_count = 0;
+    JsFetchWork* pending_work = NULL;
+};
+
+static char* js_fetch_base_dir_from_path(const char* dir_path) {
+    if (!dir_path || !dir_path[0]) return NULL;
+    struct stat st;
+    char* dup = mem_strdup(dir_path, MEM_CAT_JS_RUNTIME);
+    if (!dup) return NULL;
+    if (stat(dup, &st) == 0 && S_ISREG(st.st_mode)) {
+        char* slash = strrchr(dup, '/');
+        if (slash) *slash = '\0';
+        else {
+            mem_free(dup);
+            dup = mem_strdup(".", MEM_CAT_JS_RUNTIME);
+        }
+    }
+    return dup;
+}
+
+static JsFetchRuntimeState* js_fetch_runtime_state_get() {
+    if (!js_active_runtime_state) return NULL;
+    return (JsFetchRuntimeState*)js_runtime_state.fetch_state;
+}
+
+static bool js_fetch_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_fetch_runtime_state_get()) return true;
+    JsFetchRuntimeState* state = (JsFetchRuntimeState*)mem_calloc(1,
+        sizeof(JsFetchRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) {
+        log_error("js-fetch: failed to allocate context state");
+        return false;
+    }
+    if (js_fetch_bootstrap_base_path) {
+        state->base_dir = js_fetch_base_dir_from_path(js_fetch_bootstrap_base_path);
+        mem_free(js_fetch_bootstrap_base_path);
+        js_fetch_bootstrap_base_path = NULL;
+    }
+    js_runtime_state.fetch_state = state;
+    return true;
+}
+
+static void js_fetch_set_current_base_path(const char* dir_path) {
+    if (!js_fetch_runtime_state_ensure()) return;
+    if (js_runtime_state.fetch_state && js_fetch_runtime_state_get()->base_dir) {
+        mem_free(js_fetch_runtime_state_get()->base_dir);
+        js_fetch_runtime_state_get()->base_dir = NULL;
+    }
+    js_fetch_runtime_state_get()->base_dir = js_fetch_base_dir_from_path(dir_path);
+}
+
+extern "C" void js_fetch_apply_bootstrap_base_path(void) {
+    if (js_fetch_bootstrap_base_path) (void)js_fetch_runtime_state_ensure();
+}
+
+#define js_fetch_state ((JsFetchRuntimeState*)js_runtime_state.fetch_state)
+#define g_fetch_base_dir (js_fetch_state->base_dir)
+#define response_bodies (js_fetch_state->response_bodies)
+#define response_body_lens (js_fetch_state->response_body_lens)
+#define response_body_count (js_fetch_state->response_body_count)
+#define response_types (js_fetch_state->response_types)
+#define pending_fetch_work (js_fetch_state->pending_work)
 
 // =============================================================================
 // curl write callback — accumulates response body
@@ -153,12 +223,7 @@ static void fetch_work_cb(uv_work_t* req) {
 
 // Stored body text for response methods
 // (We use a simple slot array keyed by response index)
-#define MAX_FETCH_RESPONSES 256
-static char* response_bodies[MAX_FETCH_RESPONSES];
-static int   response_body_lens[MAX_FETCH_RESPONSES];
-static int   response_body_count = 0;
 // Per-response inferred Content-Type (used by .blob() to set Blob.type).
-static char* response_types[MAX_FETCH_RESPONSES];
 
 // Infer a Content-Type from a URL path's extension. Returns a static string
 // (not freed). Used for the local-file fast path so `await fetch(x).blob()`
@@ -182,6 +247,7 @@ static const char* mime_from_url(const char* url) {
 }
 
 static Item js_response_text() {
+    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
     Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
@@ -196,6 +262,7 @@ static Item js_response_text() {
 }
 
 static Item js_response_json() {
+    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
     Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
@@ -233,6 +300,7 @@ static Item make_blob_object(const char* bytes, int len, const char* type) {
 }
 
 static Item js_response_blob() {
+    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
     Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
@@ -399,9 +467,8 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 // Executor callback — captures resolve/reject in JsFetchWork
 // =============================================================================
 
-// We need a way to pass the JsFetchWork pointer into the executor.
-// Use a thread-local (single-threaded JS, so safe).
-static JsFetchWork* pending_fetch_work = NULL;
+// Promise construction invokes this synchronously under the same context that
+// started fetch(), so the handoff remains a direct capsule field.
 
 static Item fetch_executor(Item resolve_fn, Item reject_fn) {
     if (pending_fetch_work) {
@@ -416,6 +483,10 @@ static Item fetch_executor(Item resolve_fn, Item reject_fn) {
 // =============================================================================
 
 extern "C" Item js_fetch(Item url_item, Item options_item) {
+    if (!js_fetch_runtime_state_ensure()) {
+        return js_promise_reject(js_new_error(make_string_item(
+            "fetch: no active execution context")));
+    }
     char url_buf[2048];
     const char* url = item_to_cstr(url_item, url_buf, sizeof(url_buf));
     if (!url) {
@@ -562,6 +633,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 // =============================================================================
 
 extern "C" void js_fetch_reset(void) {
+    if (!js_fetch_runtime_state_get()) return;
     if (g_fetch_base_dir) {
         mem_free(g_fetch_base_dir);
         g_fetch_base_dir = NULL;
@@ -578,4 +650,23 @@ extern "C" void js_fetch_reset(void) {
     }
     response_body_count = 0;
     pending_fetch_work = NULL;
+}
+
+#undef js_fetch_state
+#undef g_fetch_base_dir
+#undef response_bodies
+#undef response_body_lens
+#undef response_body_count
+#undef response_types
+#undef pending_fetch_work
+
+extern "C" void js_fetch_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->fetch_state) return;
+    JsFetchRuntimeState* state = (JsFetchRuntimeState*)runtime_state->fetch_state;
+    // Heap reset releases response payloads before this capsule can disappear.
+    if (state->base_dir || state->response_body_count || state->pending_work) {
+        log_error("js-fetch: context destroyed before response state was reset");
+    }
+    mem_free(state);
+    runtime_state->fetch_state = NULL;
 }

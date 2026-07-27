@@ -9,15 +9,14 @@
 #include "../../lib/memtrack.h"
 #include <string.h>
 
-// forward declaration: runtime context (defined in mir.c)
-extern "C" Context* _lambda_rt;
+extern __thread EvalContext* context;
 
-// ============================================================================
-// Global editor instance
-// ============================================================================
-
-static MarkEditor* s_editor = NULL;
-static Input* s_editor_input = NULL;  // owned Input when created from runtime pool
+// The editor owns heap-backed edit state and must follow its EvalContext. A
+// context-local alias preserves direct access for edit operations without
+// publishing a mutable editor to unrelated runtimes.
+#define s_editor (context->edit_editor)
+#define s_editor_input (context->edit_editor_input)
+#define active_runtime ((Context*)context)
 
 typedef struct EditSubscription {
     EditEventKind kind;
@@ -135,16 +134,16 @@ static bool edit_session_commit_selection(EditSession* session, int version_numb
 }
 
 static Input* edit_session_create_input(Item root) {
-    if (!_lambda_rt || !_lambda_rt->pool) {
+    if (!active_runtime || !active_runtime->pool) {
         log_error("edit_session_new: no runtime pool available");
         return NULL;
     }
-    Input* input = Input::create(_lambda_rt->pool);
+    Input* input = Input::create(active_runtime->pool);
     if (!input) {
         log_error("edit_session_new: failed to create Input from runtime pool");
         return NULL;
     }
-    if (_lambda_rt->ui_mode) {
+    if (active_runtime->ui_mode) {
         input->ui_mode = true;
     }
     input->root = root;
@@ -641,18 +640,18 @@ int edit_bridge_init(void* input_ptr) {
     Input* input = (Input*)input_ptr;
     if (!input) {
         // create a lightweight Input from runtime pool
-        if (!_lambda_rt || !_lambda_rt->pool) {
+        if (!active_runtime || !active_runtime->pool) {
             log_error("edit_bridge_init: no input and no runtime pool available");
             return -1;
         }
-        input = Input::create(_lambda_rt->pool);
+        input = Input::create(active_runtime->pool);
         if (!input) {
             log_error("edit_bridge_init: failed to create Input from runtime pool");
             return -1;
         }
         // Propagate ui_mode so MarkEditor knows data buffers are arena-allocated
         // and must NOT be freed via pool_free (they live on the result_arena).
-        if (_lambda_rt->ui_mode) {
+        if (active_runtime->ui_mode) {
             input->ui_mode = true;
         }
         s_editor_input = input;

@@ -50,6 +50,7 @@ struct JsFunction {
     const char** ctor_prop_names;
     int* ctor_prop_lens;
     int ctor_prop_count;
+    Context* runtime_context;
 };
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
@@ -80,6 +81,7 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 #define JS_FUNC_FLAG_READS_THIS 2048
 #define JS_FUNC_FLAG_READS_NEW_TARGET 4096
 #define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
+#define JS_FUNC_FLAG_MIR_CONTEXT_ABI 16384
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 enum JsFunctionCallLaneKind : uint8_t {

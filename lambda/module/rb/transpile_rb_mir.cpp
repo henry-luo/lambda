@@ -32,7 +32,6 @@
 #endif
 
 // External references
-extern "C" Context* _lambda_rt;
 extern "C" {
     void* import_resolver(const char* name);
 }
@@ -4615,24 +4614,26 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
-    // set up evaluation context
-    EvalContext rb_context;
-    memset(&rb_context, 0, sizeof(EvalContext));
+    // Use Runtime's canonical context when this guest owns a fresh activation.
+    // A nested guest borrows its caller's already-bound heap for the duration.
     EvalContext* old_context = context;
     bool reusing_context = false;
 
     if (old_context && old_context->heap) {
-        context = old_context;
         reusing_context = true;
     } else {
-        context = &rb_context;
+        EvalContext* rb_context = runtime_get_eval_context(runtime);
+        if (!rb_context) {
+            log_error("rb-mir: failed to obtain canonical runtime context");
+            rb_transpiler_destroy(tp);
+            return (Item){.item = ITEM_ERROR};
+        }
+        context = rb_context;
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
     }
-
-    _lambda_rt = (Context*)context;
 
     // create Input context for Ruby runtime
     Input* input = Input::create(context->pool);

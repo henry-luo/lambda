@@ -81,6 +81,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
 int UiContext::init(bool next_headless) {
     memset(this, 0, sizeof(UiContext));
+    last_click_time = -1.0;
+    last_click_button = -1;
+    click_count = 1;
+    active_click_count = 1;
     headless = next_headless;
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;

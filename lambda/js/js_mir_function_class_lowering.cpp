@@ -148,7 +148,8 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
 
     MIR_reg_t function_item = method->fc->capture_count > 0
         ? jm_build_closure_for_method(mt, method->fc, method->param_count)
-        : jm_call_2(mt, "js_new_method_function", MIR_T_I64,
+        : jm_call_3(mt, "js_new_method_function_context", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
             MIR_T_I64, MIR_new_ref_op(mt->ctx, method->fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, method->param_count));
     // Class setup invokes several allocating helpers before publishing the
@@ -598,12 +599,16 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     // Every compiled public wrapper shares the same trailing ABI operand.
     // Only scalar lanes consume it, but callback dispatch cannot infer a
     // function's return representation before entering its wrapper.
-    int total_params = call_param_count + 1;
+    int total_params = call_param_count + 2;
     MIR_var_t* params = total_params > 0
         ? LAMBDA_ALLOCA(total_params, MIR_var_t) : NULL;
     char** names = total_params > 0
         ? LAMBDA_ALLOCA(total_params, char*) : NULL;
     int pi = 0;
+    names[pi] = LAMBDA_ALLOCA(128, char);
+    snprintf(names[pi], 128, "%s", "ctx");
+    params[pi] = {MIR_T_P, names[pi], 0};
+    pi++;
     if (has_captures) {
         names[pi] = LAMBDA_ALLOCA(128, char);
         snprintf(names[pi], 128, "%s", "_js.env");
@@ -618,11 +623,11 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
         param = param ? param->next : NULL;
         pi++;
     }
-    int env_offset = has_captures ? 1 : 0;
-    for (int i = env_offset; i < call_param_count; i++) {
+    int js_param_offset = has_captures ? 2 : 1;
+    for (int i = js_param_offset; i <= call_param_count; i++) {
         // The trailing ABI parameter is installed below; do not compare an
         // uninitialized name slot while normalizing duplicate JS formals.
-        for (int j = i + 1; j < call_param_count; j++) {
+        for (int j = i + 1; j <= call_param_count; j++) {
             if (strcmp(names[i], names[j]) != 0) continue;
             char* renamed = LAMBDA_ALLOCA(128, char);
             snprintf(renamed, 128, "%s__dup%d", names[i], i);
@@ -631,9 +636,9 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
             break;
         }
     }
-    names[call_param_count] = LAMBDA_ALLOCA(128, char);
-    snprintf(names[call_param_count], 128, "%s", "_js.public_scalar_home");
-    params[call_param_count] = {MIR_T_P, names[call_param_count], 0};
+    names[call_param_count + 1] = LAMBDA_ALLOCA(128, char);
+    snprintf(names[call_param_count + 1], 128, "%s", "_js.public_scalar_home");
+    params[call_param_count + 1] = {MIR_T_P, names[call_param_count + 1], 0};
     MIR_type_t return_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, fc->name, 1,
         &return_type, total_params, params);
@@ -642,7 +647,8 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     jm_register_local_func(mt, fc->name, wrapper_item);
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
-    jm_begin_function_frame(mt, return_type, true, scalar_return_mode, 0);
+    jm_begin_function_frame(mt, return_type, true, scalar_return_mode,
+        MIR_reg(mt->ctx, "ctx", wrapper_func));
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     if (needs_scalar_home) {
         mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
@@ -654,7 +660,7 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     MIR_reg_t* args = call_param_count > 0
         ? LAMBDA_ALLOCA(call_param_count, MIR_reg_t) : NULL;
     for (int i = 0; i < call_param_count; i++) {
-        args[i] = MIR_reg(mt->ctx, names[i], wrapper_func);
+        args[i] = MIR_reg(mt->ctx, names[i + 1], wrapper_func);
     }
     MIR_reg_t result = jm_call_direct_boxed(mt, fc, call_param_count, args);
     MIR_reg_t persistent = jm_new_reg(mt, "public_result", MIR_T_I64);
@@ -701,20 +707,24 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         char native_name[140];
         snprintf(native_name, sizeof(native_name), "%s_n", fc->name);
 
-        MIR_var_t* n_params = LAMBDA_ALLOCA(param_count, MIR_var_t);
-        char** n_param_names = LAMBDA_ALLOCA(param_count, char*);
+        MIR_var_t* n_params = LAMBDA_ALLOCA(param_count + 1, MIR_var_t);
+        char** n_param_names = LAMBDA_ALLOCA(param_count + 1, char*);
+        n_param_names[0] = LAMBDA_ALLOCA(128, char);
+        snprintf(n_param_names[0], 128, "%s", "ctx");
+        n_params[0] = {MIR_T_P, n_param_names[0], 0};
         JsAstNode* param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
-            n_param_names[i] = LAMBDA_ALLOCA(128, char);
-            jm_get_param_name(param_node, i, n_param_names[i], 128);
+            n_param_names[i + 1] = LAMBDA_ALLOCA(128, char);
+            jm_get_param_name(param_node, i, n_param_names[i + 1], 128);
             MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-            n_params[i] = {mtype, n_param_names[i], 0};
+            n_params[i + 1] = {mtype, n_param_names[i + 1], 0};
             param_node = param_node ? param_node->next : NULL;
         }
 
         MIR_type_t native_ret_type = fc->native_return_kind == NATIVE_RETURN_FLOAT
             ? MIR_T_D : MIR_T_I64;
-        MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name, 1, &native_ret_type, param_count, n_params);
+        MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name, 1, &native_ret_type,
+            param_count + 1, n_params);
         MIR_func_t native_func = MIR_get_item_func(mt->ctx, native_item);
 
         fc->native_func_item = native_item;
@@ -761,7 +771,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->exc_track = JS_EXC_UNKNOWN;
 
         jm_begin_function_frame(mt, native_ret_type, false,
-            MIR_SCALAR_RETURN_NONE, 0);
+            MIR_SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func));
         mt->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
         mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
         jm_push_scope(mt);
@@ -1097,13 +1107,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         char sm_name[160];
         snprintf(sm_name, sizeof(sm_name), "gen_sm_%s_%d", fc->name, mt->em.label_counter++);
 
-        MIR_var_t sm_params[3] = {
+        MIR_var_t sm_params[4] = {
+            {MIR_T_P, "ctx", 0},
             {MIR_T_I64, "gen_env", 0},   // Item* env (passed as i64)
             {MIR_T_I64, "gen_input", 0},  // Item sent_value
             {MIR_T_I64, "gen_state", 0}   // int64_t state
         };
         MIR_type_t sm_ret = MIR_T_I64;
-        gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 3, sm_params);
+        gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 4, sm_params);
         MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
         jm_register_local_func(mt, sm_name, gen_sm_func_item);
 
@@ -1157,7 +1168,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
         jm_begin_function_frame(mt, sm_ret, true,
-            MIR_SCALAR_RETURN_DYNAMIC, 0);
+            MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func));
         mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
         jm_push_scope(mt);
         if (fc->has_direct_eval) {
@@ -1727,13 +1738,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             char sm_name[160];
             snprintf(sm_name, sizeof(sm_name), "async_sm_%s_%d", fc->name, mt->em.label_counter++);
 
-            MIR_var_t sm_params[3] = {
+            MIR_var_t sm_params[4] = {
+                {MIR_T_P, "ctx", 0},
                 {MIR_T_I64, "gen_env", 0},
                 {MIR_T_I64, "gen_input", 0},
                 {MIR_T_I64, "gen_state", 0}
             };
             MIR_type_t sm_ret = MIR_T_I64;
-            gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 3, sm_params);
+            gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 4, sm_params);
             MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
             jm_register_local_func(mt, sm_name, gen_sm_func_item);
 
@@ -1788,7 +1800,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
             jm_begin_function_frame(mt, sm_ret, true,
-                MIR_SCALAR_RETURN_DYNAMIC, 0);
+                MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func));
             mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
             jm_push_scope(mt);
 
@@ -2233,13 +2245,17 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     MirScalarReturnMode body_scalar_mode = em_scalar_return_mode_for_class(
         fc->boxed_return_scalar_class);
     bool body_needs_scalar_home = body_scalar_mode != MIR_SCALAR_RETURN_NONE;
-    int total_params = param_count + (has_captures ? 1 : 0) +
+    int total_params = param_count + (has_captures ? 1 : 0) + 1 +
         (body_needs_scalar_home ? 1 : 0);
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
     char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
     const char* closure_env_param_name = "_js.env";
 
     int pi = 0;
+    param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
+    snprintf(param_names_arr[pi], 128, "%s", "ctx");
+    params[pi] = {MIR_T_P, param_names_arr[pi], 0};
+    pi++;
     if (has_captures) {
         param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
         snprintf(param_names_arr[pi], 128, "%s", closure_env_param_name);
@@ -2265,7 +2281,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // Handle duplicate parameter names (valid in non-strict JS): rename earlier
     // occurrences so MIR gets unique register names. Last parameter wins per spec.
     {
-        int env_offset = has_captures ? 1 : 0;
+        int env_offset = has_captures ? 2 : 1;
         for (int i = env_offset; i < pi; i++) {
             for (int j = i + 1; j < pi; j++) {
                 if (strcmp(param_names_arr[i], param_names_arr[j]) == 0) {
@@ -2342,7 +2358,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_fc = fc;
     mt->func_except_label = 0;  // reset for this function
 
-    jm_begin_function_frame(mt, ret_type, true, body_scalar_mode, 0);
+    jm_begin_function_frame(mt, ret_type, true, body_scalar_mode,
+        MIR_reg(mt->ctx, "ctx", func));
     mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
     if (body_needs_scalar_home) {
@@ -2682,12 +2699,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_new_reg_op(mt->ctx, args_obj)));
         }
 
-        // Call js_generator_create(state_machine_fn_ptr, env, env_size, is_async)
+        // Context travels with the resumable record, so later .next() calls
+        // re-enter the state machine without consulting a runtime global.
         MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "smfn", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
-        MIR_reg_t gen_obj = jm_call_4(mt, "js_generator_create", MIR_T_I64,
+        MIR_reg_t gen_obj = jm_call_5(mt, "js_generator_create_context", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, gen_env),
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),
@@ -2805,7 +2824,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_new_reg_op(mt->ctx, args_obj)));
         }
 
-        // Create async context: js_async_context_create(sm_fn_ptr, env, env_size, this) → ctx_idx
+        // The async record retains this context for every later microtask resume.
         MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "asmfn", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
@@ -2813,7 +2832,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // js_async_drive re-installs this into js_current_this around each
         // resumption, so it must carry the TDZ sentinel through unthrown too.
         MIR_reg_t async_this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-        MIR_reg_t ctx_idx = jm_call_4(mt, "js_async_context_create", MIR_T_I64,
+        MIR_reg_t ctx_idx = jm_call_5(mt, "js_async_context_create_context", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, async_env),
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),

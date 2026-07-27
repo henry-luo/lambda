@@ -15,7 +15,7 @@
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
 extern __thread EvalContext* context;
-extern "C" Context* _lambda_rt;
+#define active_runtime ((Context*)context)
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
@@ -1715,7 +1715,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
     Rooted<Element*> rooted_group(roots, (Element*)NULL);
     rooted_out.set(array_plain());
     if (get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(keys_item) != LMD_TYPE_ARRAY ||
-        !aliases || alias_count <= 0 || !_lambda_rt || !_lambda_rt->pool) {
+        !aliases || alias_count <= 0 || !active_runtime || !active_runtime->pool) {
         log_error("group_by_keys: invalid rows/keys/aliases/runtime");
         return rooted_out.get();
     }
@@ -1775,7 +1775,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         Element* group = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
         group->type_id = LMD_TYPE_ELEMENT;
         rooted_group.set(group);
-        TypeElmt* group_type = (TypeElmt*)alloc_type(_lambda_rt->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        TypeElmt* group_type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
         // The fixed tag belongs to type metadata; a literal avoids a dangling
         // raw chars pointer into an otherwise unowned GC String.
         group_type->name.str = "group";
@@ -1786,12 +1786,12 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         for (int64_t k = 0; k < alias_count; k++) {
             String* attr = heap_create_name(aliases[k]);
             group = rooted_group.get();
-            elmt_put(group, attr, group_key_part(entry_key, k, alias_count), _lambda_rt->pool);
+            elmt_put(group, attr, group_key_part(entry_key, k, alias_count), active_runtime->pool);
         }
         for (int64_t m = 0; members && m < members->length; m++) {
             // Group members are existing Item handles; copying handles preserves source values without re-shaping rows.
             group = rooted_group.get();
-            array_append((Array*)group, members->items[m], _lambda_rt->pool, NULL);
+            array_append((Array*)group, members->items[m], active_runtime->pool, NULL);
         }
         group = rooted_group.get();
         group_type->content_length = group->length;
@@ -1864,9 +1864,9 @@ static String* join_optional_name(Item name_item) {
 }
 
 static Element* join_tuple_new() {
-    if (!_lambda_rt || !_lambda_rt->pool) return NULL;
-    Element* tuple = elmt_pooled(_lambda_rt->pool);
-    TypeElmt* tuple_type = (TypeElmt*)alloc_type(_lambda_rt->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!active_runtime || !active_runtime->pool) return NULL;
+    Element* tuple = elmt_pooled(active_runtime->pool);
+    TypeElmt* tuple_type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     String* tag = heap_create_name("tuple", 5);
     tuple_type->name.str = tag ? tag->chars : "tuple";
     tuple_type->name.length = tag ? tag->len : 5;
@@ -1889,20 +1889,20 @@ static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
             if (!sym) continue;
             Item attr = item_attr(prior_tuple, sym->chars);
             // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
-            elmt_put(out, heap_create_name(sym->chars, sym->len), attr, _lambda_rt->pool);
+            elmt_put(out, heap_create_name(sym->chars, sym->len), attr, active_runtime->pool);
         }
         if (keys) symbol_key_list_free(keys);
     }
-    if (name) elmt_put(out, name, value, _lambda_rt->pool);
+    if (name) elmt_put(out, name, value, active_runtime->pool);
     // Index/key bindings (e.g. the `i` in `for (i, o in ...)`) travel in the tuple alongside values,
     // so joined/cross-product rows keep their position/key binding available in the body.
-    if (idx_name) elmt_put(out, idx_name, idx_value, _lambda_rt->pool);
+    if (idx_name) elmt_put(out, idx_name, idx_value, active_runtime->pool);
     return out;
 }
 
 Array* fn_join_seed_tuples(Item rows_item, Item name_item, Item idx_name_item, Item idx_vals_item) {
     Array* out = array_plain();
-    if (get_type_id(rows_item) != LMD_TYPE_ARRAY || !rows_item.array || !_lambda_rt || !_lambda_rt->pool) {
+    if (get_type_id(rows_item) != LMD_TYPE_ARRAY || !rows_item.array || !active_runtime || !active_runtime->pool) {
         log_error("join_seed_tuples: invalid rows/runtime");
         return out;
     }
@@ -1925,7 +1925,7 @@ Array* fn_cross_join_tuples(Item prior_tuples_item, Item rows_item, Item name_it
         Item idx_name_item, Item idx_vals_item) {
     Array* out = array_plain();
     if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(rows_item) != LMD_TYPE_ARRAY ||
-        !prior_tuples_item.array || !rows_item.array || !_lambda_rt || !_lambda_rt->pool) {
+        !prior_tuples_item.array || !rows_item.array || !active_runtime || !active_runtime->pool) {
         log_error("cross_join_tuples: invalid tuple/rows");
         return out;
     }
@@ -1951,7 +1951,7 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
     if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(prior_keys_item) != LMD_TYPE_ARRAY ||
         get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(row_keys_item) != LMD_TYPE_ARRAY ||
         !prior_tuples_item.array || !prior_keys_item.array || !rows_item.array || !row_keys_item.array ||
-        !_lambda_rt || !_lambda_rt->pool) {
+        !active_runtime || !active_runtime->pool) {
         log_error("hash_join_tuples: invalid tuple/key rows");
         return out;
     }
@@ -2290,13 +2290,6 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                           typemap_name_id(key, key_len), is_found);
 }
 
-// Tune6 L2: see LambdaMemberIC in lambda.h. Starts at 1 so a zero-initialised
-// cell (epoch 0) can never match.
-static uint64_t g_lambda_shape_epoch = 1;
-
-extern "C" uint64_t lambda_shape_epoch(void) { return g_lambda_shape_epoch; }
-extern "C" void lambda_shape_epoch_bump(void) { g_lambda_shape_epoch++; }
-
 // A shape is cacheable only when a plain last-writer-wins scan over its named
 // entries is equivalent to the full map_get_for_owner walk. Any unnamed entry
 // means a spread/nested map that the slow path recurses into and that can
@@ -2319,8 +2312,7 @@ extern "C" Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic) {
         Map* m = item.map;
         if (m && m->type && m->data) {
             TypeMap* shape = (TypeMap*)m->type;
-            if ((void*)shape == ic->shape && ic->entry &&
-                    ic->epoch == g_lambda_shape_epoch) {
+            if ((void*)shape == ic->shape && ic->entry) {
                 // Hit. Read through the same helper the slow path uses so an
                 // in-place retag of this entry is observed, not cached over.
                 return map_read_field_for_owner((Container*)m,
@@ -2337,7 +2329,6 @@ extern "C" Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic) {
                     if (found) {
                         ic->shape = (void*)shape;
                         ic->entry = (void*)found;
-                        ic->epoch = g_lambda_shape_epoch;
                         return map_read_field_for_owner((Container*)m, found, m->data);
                     }
                 }

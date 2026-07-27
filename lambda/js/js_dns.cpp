@@ -1529,13 +1529,13 @@ extern "C" Item js_dns_promises_lookupService(Item rest_args) {
 // Resolver server list state
 // =============================================================================
 
-static Item dns_namespace = {0};
-static Item dns_promises_namespace = {0};
-static Item dns_resolver_prototype = {0};
-static Item dns_promises_resolver_prototype = {0};
-static Item dns_default_servers = {0};
 extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t dns_roots_epoch = 0;
+#define dns_namespace (js_runtime_state.dns.namespace_object)
+#define dns_promises_namespace (js_runtime_state.dns.promises_namespace)
+#define dns_resolver_prototype (js_runtime_state.dns.resolver_prototype)
+#define dns_promises_resolver_prototype (js_runtime_state.dns.promises_resolver_prototype)
+#define dns_default_servers (js_runtime_state.dns.default_servers)
+#define dns_roots_epoch (js_runtime_state.dns.roots_epoch)
 
 static void dns_register_roots_once(void) {
     uint64_t epoch = js_get_heap_epoch();

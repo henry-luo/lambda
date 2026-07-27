@@ -23,7 +23,6 @@
 #include <string.h>
 
 extern __thread EvalContext* context;
-extern "C" Context* _lambda_rt;
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
@@ -513,6 +512,20 @@ extern "C" void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot) {
     gc_unregister_root(owner->heap->gc, slot);
 }
 
+extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base,
+                                                  int count) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || !owner->heap || !owner->heap->gc || !base || count <= 0) return false;
+    gc_register_root_range(owner->heap->gc, base, count);
+    return true;
+}
+
+extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || !owner->heap || !owner->heap->gc || !base) return;
+    gc_unregister_root_range(owner->heap->gc, base);
+}
+
 extern "C" void heap_no_gc_scope_begin(Context* runtime) {
     EvalContext* owner = (EvalContext*)runtime;
     if (owner && owner->heap) gc_no_gc_scope_begin(owner->heap->gc);
@@ -547,14 +560,12 @@ extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
 
 // register a contiguous range of Items as GC roots (e.g., JS closure env arrays)
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
-    if (!context || !context->heap || !context->heap->gc || !base || count <= 0) return;
-    gc_register_root_range(context->heap->gc, base, count);
+    heap_register_gc_root_range_for((Context*)context, base, count);
 }
 
 // unregister a previously-registered root range by base pointer
 extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
-    if (!context || !context->heap || !context->heap->gc || !base) return;
-    gc_unregister_root_range(context->heap->gc, base);
+    heap_unregister_gc_root_range_for((Context*)context, base);
 }
 
 // unregister an external root slot
@@ -978,7 +989,6 @@ void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
         }
     }
     context = old_context;
-    _lambda_rt = (Context*)old_context;
 }
 
 // finalize all GC-managed objects before pool_destroy.

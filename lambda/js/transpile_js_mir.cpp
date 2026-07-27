@@ -7,7 +7,6 @@
 #include "js_mir_internal.hpp"
 
 // External reference to Lambda runtime context pointer (defined in mir.c)
-extern "C" Context* _lambda_rt;
 extern "C" {
     void *import_resolver(const char *name);
 }

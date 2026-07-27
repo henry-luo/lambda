@@ -25,7 +25,29 @@ FORBIDDEN_TOKENS = (
     "js_runtime.h", "js_runtime_state.hpp", "js_globals.cpp",
     '"../../lambda.hpp"', '"../../lambda-data.hpp"',
     "LambdaRootFrame", "Rooted<", "heap_register_gc_root", "js_heap_epoch",
-    "uv_",
+    "uv_", "<zlib.h>", "<mbedtls/", "<openssl/", "<curl/",
+)
+MODULE_FORBIDDEN_TOKENS = {
+    # node-fs consumes only JubeHostFilesystemAPI. Its portable Node constants
+    # may remain module-local, but platform headers and the retired raw-I/O
+    # macro family would recreate a host dependency in the dylib.
+    "node_fs": (
+        "<dirent.h>", "<sys/statvfs.h>", "<unistd.h>", "<io.h>",
+        "<direct.h>", "<windows.h>", "NODE_FS_OPEN(", "NODE_FS_CLOSE(",
+        "NODE_FS_READ(", "NODE_FS_WRITE(", "NODE_FS_STAT(", "NODE_FS_LSTAT(",
+        "NODE_FS_FSTAT(", "NODE_FS_CHMOD(", "NODE_FS_FCHMOD(", "NODE_FS_LINK(",
+        "NODE_FS_MKDIR(", "NODE_FS_RMDIR(", "NODE_FS_UNLINK(",
+    ),
+}
+FORBIDDEN_HOST_DEPENDENCY_NAMES = (
+    "libz", "libuv", "libcurl", "libmbedtls", "libmbedcrypto", "libmbedx509",
+    "libssl", "libcrypto",
+)
+FORBIDDEN_HOST_SYMBOL_FRAGMENTS = (
+    # These primitives back global URL and readline as well as Node namespaces.
+    # node-core must reach them through JubeHostRuntimeAPI, never an undefined
+    # host symbol that only happens to resolve from the executable.
+    "node_events_", "node_url_",
 )
 
 
@@ -37,8 +59,9 @@ def source_files(module_root: Path) -> list[Path]:
 
 def scan_source(path: Path, source: str) -> list[dict]:
     violations = []
+    module_tokens = MODULE_FORBIDDEN_TOKENS.get(path.parent.name, ())
     for line_number, line in enumerate(source.splitlines(), start=1):
-        for token in FORBIDDEN_TOKENS:
+        for token in FORBIDDEN_TOKENS + module_tokens:
             if token in line:
                 violations.append({
                     "path": str(path.relative_to(ROOT)) if path.is_absolute() else str(path),
@@ -68,7 +91,8 @@ def object_violations(symbols: list[str]) -> list[str]:
     # node_path may rely on approved platform/path helpers, but every JS
     # runtime operation must enter through a Jube table stored in the module.
     return sorted(symbol for symbol in symbols
-                  if symbol.startswith("_js_") or symbol.startswith("_heap_"))
+                  if symbol.startswith("_js_") or symbol.startswith("_heap_") or
+                  any(fragment in symbol for fragment in FORBIDDEN_HOST_SYMBOL_FRAGMENTS))
 
 
 def check_node_core_objects() -> None:
@@ -112,6 +136,40 @@ def check_node_module_binaries() -> None:
         if forbidden:
             raise RuntimeError(f"{binary_path.name} imports forbidden host symbols: " +
                                ", ".join(forbidden))
+        check_node_module_dependencies(binary_path)
+
+
+def check_node_module_dependencies(binary_path: Path) -> None:
+    if sys.platform == "darwin":
+        command = ["otool", "-L", str(binary_path)]
+    elif sys.platform.startswith("linux"):
+        command = ["readelf", "-d", str(binary_path)]
+    else:
+        # Windows import-table inspection joins this gate with the Windows
+        # toolchain work; source and link-input checks still cover every build.
+        return
+    result = subprocess.run(command, check=False, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"could not inspect dependencies of {binary_path.relative_to(ROOT)}: "
+                           f"{result.stderr}")
+    dependencies = result.stdout.lower()
+    forbidden = [name for name in FORBIDDEN_HOST_DEPENDENCY_NAMES if name in dependencies]
+    if forbidden:
+        raise RuntimeError(f"{binary_path.name} links host-owned dependencies: " +
+                           ", ".join(forbidden))
+
+
+def check_node_module_link_inputs() -> None:
+    config = json.loads((ROOT / "build_lambda_config.json").read_text(encoding="utf-8"))
+    for module in config.get("node_modules", []):
+        dependencies = module.get("libraries", [])
+        forbidden = [name for name in dependencies
+                     if name.lower() in {"zlib", "uv", "curl", "mbedtls", "mbedcrypto",
+                                         "mbedx509", "openssl", "ssl", "crypto"}]
+        if forbidden:
+            raise RuntimeError(f"node target {module.get('name', '<unnamed>')} links host-owned "
+                               "dependencies: " + ", ".join(forbidden))
 
 
 def main() -> int:
@@ -131,6 +189,11 @@ def main() -> int:
         for violation in report["violations"]:
             print("NODE_MODULE_ARCH: {path}:{line}: forbidden {token}".format(**violation),
                   file=sys.stderr)
+        return 1
+    try:
+        check_node_module_link_inputs()
+    except RuntimeError as error:
+        print(f"NODE_MODULE_ARCH: {error}", file=sys.stderr)
         return 1
     if args.require_node_core_object:
         try:

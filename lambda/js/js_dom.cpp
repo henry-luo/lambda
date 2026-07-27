@@ -57,7 +57,6 @@ extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern void free_document(DomDocument* doc);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
-extern "C" Context* _lambda_rt;
 
 #include <cstring>
 #include <cctype>
@@ -179,20 +178,22 @@ static TypeMap js_inline_style_marker = {};
 // Map::data is unused.
 static TypeMap js_dom_implementation_marker = {};
 
-// Cached singleton for document.implementation.
-static Item js_dom_implementation_item = {.item = ITEM_NULL};
+// Cached JS wrappers are owned by the active EvalContext, not this translation
+// unit. The root range is registered while a context is bound, before any
+// allocation can publish one of these values.
+#define js_dom_implementation_item (js_runtime_state.dom.implementation)
+#define js_document_proxy_item (js_runtime_state.dom.document_proxy)
+#define js_document_default_view (js_runtime_state.dom.default_view)
+#define js_document_title_value (js_runtime_state.dom.title)
+#define js_document_fonts_value (js_runtime_state.dom.fonts)
 
-// Cached singleton document proxy object
-static Item js_document_proxy_item = {.item = ITEM_NULL};
+static bool dom_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.dom.roots);
+}
 
-// Stored document.defaultView value (kept separate to avoid recursive
-// document-proxy property writes)
-static Item js_document_default_view = {.item = ITEM_NULL};
-
-// Stored document.title value (same reason as defaultView)
-static Item js_document_title_value = {.item = ITEM_NULL};
-static bool js_document_design_mode = false;
-static DomElement* js_document_active_element = nullptr;
+#define js_document_design_mode (js_runtime_state.dom.design_mode)
+#define js_document_active_element (js_runtime_state.dom.active_element)
 static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg);
@@ -205,24 +206,22 @@ static void js_dom_viewport_node_position(DomNode* node,
 static DomElement* js_dom_offset_parent_element(DomElement* elem);
 static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis);
 
-// Cached document.fonts object for the FontFaceSet ready shim.
-static Item js_document_fonts_value = {.item = ITEM_NULL};
-
 // ============================================================================
 // Thread-local DOM document context
 // ============================================================================
 
-static __thread DomDocument* _js_current_document = nullptr;
-static __thread UiContext* _js_current_ui_context = nullptr;
+#define _js_current_document (js_runtime_state.dom.current_document)
+#define _js_current_ui_context (js_runtime_state.dom.current_ui_context)
 // True when a long-lived host (the Radiant `view` window / event_sim loop) owns
 // the reflow cycle and pumps the JS event loop across the document's lifetime.
 // In that mode geometry queries must NOT rebuild the view tree from under the
 // live renderer, and load-time setTimeout(0) callbacks are deferred to the
 // host's post-commit pump. The transient `lambda.exe js` document session leaves
 // this false and keeps the self-contained rebuild-on-demand behaviour.
-static __thread bool _js_host_driven_loop = false;
+#define _js_host_driven_loop (js_runtime_state.dom.host_driven_loop)
 
 extern "C" void js_dom_set_host_driven_loop(bool enabled) {
+    if (!js_active_runtime_state) return;
     _js_host_driven_loop = enabled;
 }
 extern "C" bool js_dom_is_host_driven_loop(void) {
@@ -233,7 +232,7 @@ extern "C" bool js_dom_is_host_driven_loop(void) {
 // distinct: they have a null defaultView and getSelection() returns null per
 // HTML spec, even when the foreign-doc dispatcher temporarily swaps them in
 // as _js_current_document.
-static __thread DomDocument* _js_main_document = nullptr;
+#define _js_main_document (js_runtime_state.dom.main_document)
 
 static Item js_font_face_set_ready_then(Item callback) {
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -1057,6 +1056,9 @@ extern "C" void* js_dom_current_active_text_control(void) {
 }
 
 extern "C" void js_dom_batch_reset() {
+    // Transient document teardown releases its EvalContext before generic host
+    // cleanup reaches here; no context-owned DOM cache may be touched then.
+    if (!js_active_runtime_state) return;
     DocState* state = js_dom_current_state();
     js_dom_selection_reset();
     reset_live_dom_collections();
@@ -1080,6 +1082,8 @@ extern "C" void js_dom_batch_reset() {
 }
 
 extern "C" void js_dom_shutdown() {
+    // See js_dom_batch_reset: a detached host has no valid DOM cache owner.
+    if (!js_active_runtime_state) return;
     reset_live_dom_collections();
     reset_pending_iframe_loads();
     expando_reset();
@@ -1130,7 +1134,9 @@ typedef struct AttachedExpandoEntry {
     AttachedExpandoRoot* root;
 } AttachedExpandoEntry;
 
-static HashMap* s_attached_expando_roots = nullptr;
+// Connected-node expando maps carry JS values independently of wrapper reach-
+// ability. The root table belongs to the bound document realm, not the thread.
+#define s_attached_expando_roots (js_runtime_state.dom_attached_expando_roots)
 
 static uint64_t attached_expando_hash(const void* item,
         uint64_t seed0, uint64_t seed1) {
@@ -1145,6 +1151,7 @@ static int attached_expando_compare(const void* left, const void* right, void*) 
 }
 
 static HashMap* attached_expando_table() {
+    if (!js_active_runtime_state) return nullptr;
     if (!s_attached_expando_roots) {
         s_attached_expando_roots = hashmap_new(sizeof(AttachedExpandoEntry),
             64, 0, 0, attached_expando_hash, attached_expando_compare,
@@ -1154,6 +1161,7 @@ static HashMap* attached_expando_table() {
 }
 
 static AttachedExpandoRoot* attached_expando_find(DomNode* node) {
+    if (!js_active_runtime_state) return nullptr;
     if (!s_attached_expando_roots || !node) return nullptr;
     AttachedExpandoEntry probe = {.key = node, .root = nullptr};
     const AttachedExpandoEntry* found = (const AttachedExpandoEntry*)
@@ -1263,6 +1271,7 @@ static Item expando_get_or_create_map(DomNode* node) {
 
 extern "C" void js_dom_expando_attachment_changed(
         DomDocument*, DomNode* root, bool attached) {
+    if (!js_active_runtime_state) return;
     if (!root) return;
     if (attached) {
         Item wrapper = expando_wrapper(root, false);
@@ -1283,6 +1292,7 @@ extern "C" void js_dom_expando_attachment_changed(
 }
 
 static void expando_reset() {
+    if (!js_active_runtime_state) return;
     if (!s_attached_expando_roots) return;
     size_t iter = 0;
     void* item = nullptr;
@@ -1295,6 +1305,8 @@ static void expando_reset() {
     hashmap_free(s_attached_expando_roots);
     s_attached_expando_roots = nullptr;
 }
+
+#undef s_attached_expando_roots
 
 static bool expando_map_has_key(Item exp_map, Item key) {
     if (get_type_id(exp_map) != LMD_TYPE_MAP || !exp_map.map) return false;
@@ -1679,9 +1691,15 @@ static DomDocument* js_document_proxy_doc_from_item(Item item);
 // ============================================================================
 
 extern "C" void js_dom_set_document(void* dom_doc) {
+    // Host teardown may notify after the document Runtime has released its
+    // capsule. There is then no JS realm whose DOM bindings may be changed.
+    if (!js_active_runtime_state) return;
     _js_current_document = (DomDocument*)dom_doc;
     _js_main_document = (DomDocument*)dom_doc;
-    if (js_document_proxy_item.item != ITEM_NULL) {
+    // Host cleanup may clear the active EvalContext before restoring the
+    // document pointer. The pointer update is still valid, but context-owned
+    // JS wrapper storage must not be read without its owner bound.
+    if (js_active_runtime_state && js_document_proxy_item.item != ITEM_NULL) {
         TypeId proxy_type = get_type_id(js_document_proxy_item);
         if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
             (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
@@ -1739,15 +1757,19 @@ extern "C" void js_dom_set_document(void* dom_doc) {
 }
 
 extern "C" void* js_dom_get_document(void) {
-    return (void*)_js_current_document;
+    // Host setup may query before it has bound a document Runtime. There is
+    // no ambient document to borrow in that phase; normal DOM execution binds
+    // the owning EvalContext before accessing this context-local pointer.
+    return js_active_runtime_state ? (void*)_js_current_document : nullptr;
 }
 
 extern "C" void js_dom_set_ui_context(void* ui_context) {
+    if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
 }
 
 extern "C" void* js_dom_get_ui_context(void) {
-    return (void*)_js_current_ui_context;
+    return js_active_runtime_state ? (void*)_js_current_ui_context : nullptr;
 }
 
 // ============================================================================
@@ -1969,36 +1991,73 @@ struct LiveLookupCollectionEntry {
 static const int SELECT_COLLECTION_OPTIONS = 1;
 static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
 static const int SELECT_OPTIONS_OWNER_CACHE_SIZE = 4096;
-static __thread SelectOptionsOwnerEntry s_select_options_owners[SELECT_OPTIONS_OWNER_CACHE_SIZE] = {};
-static __thread int s_select_options_owner_count = 0;
-
 static const int LIVE_CHILD_COLLECTION_CHILDREN = 1;
 static const int LIVE_CHILD_COLLECTION_CHILD_NODES = 2;
 static const int LIVE_CHILD_COLLECTION_CACHE_SIZE = 4096;
-static __thread LiveChildCollectionEntry s_live_child_collections[LIVE_CHILD_COLLECTION_CACHE_SIZE] = {};
-static __thread int s_live_child_collection_count = 0;
-
 static const int LIVE_FORM_COLLECTION_DOCUMENT_FORMS = 1;
 static const int LIVE_FORM_COLLECTION_FORM_ELEMENTS = 2;
 static const int LIVE_FORM_COLLECTION_CACHE_SIZE = 4096;
-static __thread LiveFormCollectionEntry s_live_form_collections[LIVE_FORM_COLLECTION_CACHE_SIZE] = {};
-static __thread int s_live_form_collection_count = 0;
-
 static const int LIVE_LOOKUP_COLLECTION_TAG = 1;
 static const int LIVE_LOOKUP_COLLECTION_CLASS = 2;
 static const int LIVE_LOOKUP_COLLECTION_NAME = 3;
 static const int LIVE_LOOKUP_COLLECTION_CACHE_SIZE = 4096;
-static __thread LiveLookupCollectionEntry s_live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
-static __thread int s_live_lookup_collection_count = 0;
-static __thread int s_dom_collection_refresh_depth = 0;
+// Live collection tables retain weak JS-array homes and native-node pins. They
+// are lazy per-document-realm state, so property reads keep direct local table
+// access and never contend with another context.
+struct JsDomCollectionRuntimeState {
+    SelectOptionsOwnerEntry select_options_owners[SELECT_OPTIONS_OWNER_CACHE_SIZE] = {};
+    int select_options_owner_count = 0;
+    LiveChildCollectionEntry live_child_collections[LIVE_CHILD_COLLECTION_CACHE_SIZE] = {};
+    int live_child_collection_count = 0;
+    LiveFormCollectionEntry live_form_collections[LIVE_FORM_COLLECTION_CACHE_SIZE] = {};
+    int live_form_collection_count = 0;
+    LiveLookupCollectionEntry live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
+    int live_lookup_collection_count = 0;
+    int refresh_depth = 0;
+};
+
+static JsDomCollectionRuntimeState* js_dom_collection_runtime_state_get() {
+    if (!js_active_runtime_state) return nullptr;
+    return (JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state;
+}
+
+static bool js_dom_collection_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_dom_collection_runtime_state_get()) return true;
+    JsDomCollectionRuntimeState* state = (JsDomCollectionRuntimeState*)mem_calloc(1,
+        sizeof(JsDomCollectionRuntimeState), MEM_CAT_DOM);
+    if (!state) {
+        log_error("js-dom-collections: failed to allocate context state");
+        return false;
+    }
+    js_runtime_state.dom_collection_state = state;
+    return true;
+}
+
+#define js_dom_collection_state ((JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state)
+#define s_select_options_owners (js_dom_collection_state->select_options_owners)
+#define s_select_options_owner_count (js_dom_collection_state->select_options_owner_count)
+#define s_live_child_collections (js_dom_collection_state->live_child_collections)
+#define s_live_child_collection_count (js_dom_collection_state->live_child_collection_count)
+#define s_live_form_collections (js_dom_collection_state->live_form_collections)
+#define s_live_form_collection_count (js_dom_collection_state->live_form_collection_count)
+#define s_live_lookup_collections (js_dom_collection_state->live_lookup_collections)
+#define s_live_lookup_collection_count (js_dom_collection_state->live_lookup_collection_count)
+#define s_dom_collection_refresh_depth (js_dom_collection_state->refresh_depth)
 
 extern "C" void heap_register_gc_weak(uint64_t* slot,
     void (*on_clear)(uint64_t*, void*), void* weak_context);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 
 struct DomCollectionRefreshGuard {
-    DomCollectionRefreshGuard() { s_dom_collection_refresh_depth++; }
-    ~DomCollectionRefreshGuard() { s_dom_collection_refresh_depth--; }
+    bool active = false;
+    DomCollectionRefreshGuard() {
+        active = js_dom_collection_runtime_state_get() != nullptr;
+        if (active) s_dom_collection_refresh_depth++;
+    }
+    ~DomCollectionRefreshGuard() {
+        if (active) s_dom_collection_refresh_depth--;
+    }
 };
 
 static bool live_collection_pin(DomDocument* doc, DomElement* owner,
@@ -2016,6 +2075,7 @@ static void live_collection_unpin(DomDocument* doc, DomNodeRef* ref) {
 }
 
 static void reset_live_dom_collections() {
+    if (!js_dom_collection_runtime_state_get()) return;
     // Live collections keep native owner pointers outside the GC graph; release
     // their explicit lifecycle pins before the next document epoch can recycle.
     for (int i = 0; i < s_select_options_owner_count; i++) {
@@ -2051,6 +2111,7 @@ static void reset_live_dom_collections() {
 }
 
 static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
+    if (!js_dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < s_select_options_owner_count; i++) {
         if (s_select_options_owners[i].array == collection.array) {
@@ -2089,6 +2150,7 @@ static void _register_select_options_owner(Item collection, DomElement* owner, i
 }
 
 static DomElement* _select_options_owner(Item collection, int* out_kind) {
+    if (!js_dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < s_select_options_owner_count; i++) {
         if (s_select_options_owners[i].array == collection.array) {
@@ -2100,6 +2162,7 @@ static DomElement* _select_options_owner(Item collection, int* out_kind) {
 }
 
 static void _register_live_child_collection(Item collection, DomElement* owner, int kind) {
+    if (!js_dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < s_live_child_collection_count; i++) {
         if (s_live_child_collections[i].array == collection.array) {
@@ -2136,6 +2199,7 @@ static void _register_live_child_collection(Item collection, DomElement* owner, 
 }
 
 static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
+    if (!js_dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < s_live_child_collection_count; i++) {
         if (s_live_child_collections[i].array == collection.array) {
@@ -2148,6 +2212,7 @@ static DomElement* _live_child_collection_owner(Item collection, int* out_kind) 
 
 static void _register_live_form_collection(Item collection, DomDocument* doc,
                                            DomElement* owner, int kind) {
+    if (!js_dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
     if (!doc && owner) doc = owner->doc;
     if (!doc && !owner) return;
@@ -2190,6 +2255,7 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
 }
 
 static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
+    if (!js_dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < s_live_form_collection_count; i++) {
         if (s_live_form_collections[i].array == collection.array) {
@@ -2202,6 +2268,7 @@ static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
 static void _register_live_lookup_collection(Item collection, DomDocument* doc,
                                              DomElement* root, int kind,
                                              bool include_root, const char* query) {
+    if (!js_dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !query) return;
     if (!doc && root) doc = root->doc;
     if (!doc && !root) return;
@@ -2249,6 +2316,7 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
 }
 
 static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
+    if (!js_dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < s_live_lookup_collection_count; i++) {
         if (s_live_lookup_collections[i].array == collection.array) {
@@ -2522,6 +2590,7 @@ extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem
 
 static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent) {
+    if (!js_dom_collection_runtime_state_get()) return;
     for (int i = 0; i < s_live_child_collection_count; i++) {
         if (!s_live_child_collections[i].array) continue;
         DomElement* owner = s_live_child_collections[i].owner;
@@ -2535,6 +2604,7 @@ static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
 static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
                                                               DomNode* parent,
                                                               DomDocument* doc) {
+    if (!js_dom_collection_runtime_state_get()) return;
     (void)target;
     (void)parent;
     for (int i = 0; i < s_live_form_collection_count; i++) {
@@ -2550,6 +2620,7 @@ static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
 static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
                                                                   DomNode* parent,
                                                                   DomDocument* doc) {
+    if (!js_dom_collection_runtime_state_get()) return;
     (void)target;
     (void)parent;
     for (int i = 0; i < s_select_options_owner_count; i++) {
@@ -2571,6 +2642,7 @@ static void js_dom_refresh_select_option_collections_for_mutation(DomNode* targe
 static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
                                                                 DomNode* parent,
                                                                 DomDocument* doc) {
+    if (!js_dom_collection_runtime_state_get()) return;
     (void)target;
     (void)parent;
     for (int i = 0; i < s_live_lookup_collection_count; i++) {
@@ -2762,6 +2834,7 @@ extern "C" bool js_is_dom_implementation(Item item) {
 }
 
 extern "C" Item js_get_document_object_value() {
+    if (!dom_ensure_roots()) return ItemNull;
     if (js_document_proxy_item.item != ITEM_NULL) {
         TypeId proxy_type = get_type_id(js_document_proxy_item);
         if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
@@ -2779,7 +2852,6 @@ extern "C" Item js_get_document_object_value() {
     // document current without relying on map-kind compatibility shells.
     js_document_proxy_item.vmap->host_type = radiant_dom_document_host_type();
     js_document_proxy_item.vmap->host_data = _js_main_document;
-    heap_register_gc_root(&js_document_proxy_item.item);
     return js_document_proxy_item;
 }
 
@@ -2871,29 +2943,6 @@ struct ForeignDocCacheEntry {
     uint64_t item;
     bool owns_doc;
 };
-static __thread ForeignDocCacheEntry s_foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
-static __thread int s_foreign_doc_cache_count = 0;
-
-// Side table: documents that have a non-null defaultView (browsing context).
-// Main doc and iframe content docs go here. Foreign docs from
-// document.implementation.create*Document do not.
-static const int DOC_WIN_TABLE_SIZE = 32;
-static __thread DomDocument* s_doc_with_window[DOC_WIN_TABLE_SIZE] = {};
-static __thread int s_doc_with_window_count = 0;
-extern "C" bool js_doc_has_browsing_context(void* doc) {
-    if (!doc) return false;
-    for (int i = 0; i < s_doc_with_window_count; i++) {
-        if (s_doc_with_window[i] == (DomDocument*)doc) return true;
-    }
-    return false;
-}
-extern "C" void js_doc_mark_has_browsing_context(void* doc) {
-    if (!doc) return;
-    if (js_doc_has_browsing_context(doc)) return;
-    if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
-        s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
-    }
-}
 
 // iframe element -> foreign DomDocument* (lazy created on first access).
 struct IframeContentEntry {
@@ -2902,9 +2951,76 @@ struct IframeContentEntry {
     bool owns_doc;
 };
 static const int IFRAME_CACHE_SIZE = 32;
-static __thread IframeContentEntry s_iframe_cache[IFRAME_CACHE_SIZE] = {};
-static __thread int s_iframe_cache_count = 0;
+
+// Side table: documents that have a non-null defaultView (browsing context).
+// Main doc and iframe content docs go here. Foreign docs from
+// document.implementation.create*Document do not.
+static const int DOC_WIN_TABLE_SIZE = 32;
+// Wrapper identity and foreign-document ownership are document-realm state.
+// Calls below use this direct capsule after their normal JS/host entry bind.
+struct JsDomForeignDocumentRuntimeState {
+    ForeignDocCacheEntry foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
+    int foreign_doc_cache_count = 0;
+    DomDocument* doc_with_window[DOC_WIN_TABLE_SIZE] = {};
+    int doc_with_window_count = 0;
+    IframeContentEntry iframe_cache[IFRAME_CACHE_SIZE] = {};
+    int iframe_cache_count = 0;
+    DomElement* pending_iframe_loads[16] = {};
+    DomNodeRef pending_iframe_refs[16] = {};
+    DomDocument* pending_iframe_docs[16] = {};
+    int pending_iframe_load_count = 0;
+    bool iframe_load_drain_scheduled = false;
+};
+
+static JsDomForeignDocumentRuntimeState* js_dom_foreign_document_state_get() {
+    if (!js_active_runtime_state) return nullptr;
+    return (JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state;
+}
+
+static bool js_dom_foreign_document_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_dom_foreign_document_state_get()) return true;
+    JsDomForeignDocumentRuntimeState* state =
+        (JsDomForeignDocumentRuntimeState*)mem_calloc(1,
+            sizeof(JsDomForeignDocumentRuntimeState), MEM_CAT_DOM);
+    if (!state) {
+        log_error("js-dom-foreign-document: failed to allocate context state");
+        return false;
+    }
+    js_runtime_state.dom_foreign_document_state = state;
+    return true;
+}
+
+#define js_dom_foreign_document_state ((JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state)
+#define s_foreign_doc_cache (js_dom_foreign_document_state->foreign_doc_cache)
+#define s_foreign_doc_cache_count (js_dom_foreign_document_state->foreign_doc_cache_count)
+#define s_doc_with_window (js_dom_foreign_document_state->doc_with_window)
+#define s_doc_with_window_count (js_dom_foreign_document_state->doc_with_window_count)
+#define s_iframe_cache (js_dom_foreign_document_state->iframe_cache)
+#define s_iframe_cache_count (js_dom_foreign_document_state->iframe_cache_count)
+#define s_pending_iframe_loads (js_dom_foreign_document_state->pending_iframe_loads)
+#define s_pending_iframe_refs (js_dom_foreign_document_state->pending_iframe_refs)
+#define s_pending_iframe_docs (js_dom_foreign_document_state->pending_iframe_docs)
+#define s_pending_iframe_load_count (js_dom_foreign_document_state->pending_iframe_load_count)
+#define s_iframe_load_drain_scheduled (js_dom_foreign_document_state->iframe_load_drain_scheduled)
+
+extern "C" bool js_doc_has_browsing_context(void* doc) {
+    if (!doc || !js_dom_foreign_document_state_get()) return false;
+    for (int i = 0; i < s_doc_with_window_count; i++) {
+        if (s_doc_with_window[i] == (DomDocument*)doc) return true;
+    }
+    return false;
+}
+extern "C" void js_doc_mark_has_browsing_context(void* doc) {
+    if (!doc || !js_dom_foreign_document_state_ensure()) return;
+    if (js_doc_has_browsing_context(doc)) return;
+    if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
+        s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
+    }
+}
+
 static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
+    if (!js_dom_foreign_document_state_get()) return nullptr;
     for (int i = 0; i < s_iframe_cache_count; i++) {
         if (s_iframe_cache[i].iframe == iframe) return &s_iframe_cache[i];
     }
@@ -2931,6 +3047,7 @@ static void destroy_cached_doc_once(DomDocument** docs, int* doc_count, DomDocum
 }
 
 static void reset_foreign_document_cache() {
+    if (!js_dom_foreign_document_state_get()) return;
     DomDocument* destroyed_docs[FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE] = {};
     int destroyed_doc_count = 0;
 
@@ -2969,6 +3086,7 @@ static void js_dom_destroy_adopted_document(void* data) {
 
 static bool js_dom_transfer_document_storage(DomDocument* source,
                                              DomDocument* destination) {
+    if (!js_dom_foreign_document_state_get()) return true;
     if (!source || !destination || source == destination ||
         source == _js_main_document) {
         return true;
@@ -3046,6 +3164,7 @@ static bool js_dom_prepare_cross_document_insertion(DomNode* node,
 }
 
 static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
+    if (!js_dom_foreign_document_state_ensure()) return ItemNull;
     // Look up cache first.
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         if (s_foreign_doc_cache[i].doc == doc) {
@@ -3075,6 +3194,7 @@ static Item wrap_foreign_doc(DomDocument* doc) {
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
+    if (!js_dom_foreign_document_state_get()) return ItemNull;
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         if (s_foreign_doc_cache[i].doc == doc) {
             return (Item){.item = s_foreign_doc_cache[i].item};
@@ -3280,7 +3400,7 @@ static void js_dom_install_dom_parser_global(void) {
 // resolve normally. js_document_get_property maps "document" / "defaultView"
 // back to the same wrapper so identity comparisons hold.
 extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
-    if (!iframe) return ItemNull;
+    if (!iframe || !js_dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     if (!e) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
@@ -3354,23 +3474,25 @@ static void js_dom_install_window_frames_global(void) {
 // js_window_dialog_push_response() (the `set_prompt` event); each prompt() call
 // dequeues one. A NULL response models pressing Cancel → JS null. This lets
 // script editors that gate on window.prompt (link URL, mention name) run
-// end-to-end. FIFO; thread-local (one document per thread).
+// end-to-end. FIFO; context-owned with the document realm.
 // ---------------------------------------------------------------------------
-static __thread char* s_prompt_queue[32];
-static __thread int s_prompt_head = 0;
-static __thread int s_prompt_tail = 0;
+#define s_prompt_queue (js_runtime_state.dom.prompt_queue)
+#define s_prompt_head (js_runtime_state.dom.prompt_head)
+#define s_prompt_tail (js_runtime_state.dom.prompt_tail)
 
 extern "C" void js_window_dialog_push_response(const char* value) {
-    int next = (s_prompt_tail + 1) % 32;
+    if (!js_active_runtime_state) return;
+    int next = (s_prompt_tail + 1) % JS_DOM_PROMPT_QUEUE_CAP;
     if (next == s_prompt_head) return;  // queue full — drop
     s_prompt_queue[s_prompt_tail] = value ? mem_strdup(value, MEM_CAT_JS_RUNTIME) : NULL;
     s_prompt_tail = next;
 }
 
 extern "C" void js_window_dialog_reset(void) {
+    if (!js_active_runtime_state) return;
     while (s_prompt_head != s_prompt_tail) {
         if (s_prompt_queue[s_prompt_head]) mem_free(s_prompt_queue[s_prompt_head]);
-        s_prompt_head = (s_prompt_head + 1) % 32;
+        s_prompt_head = (s_prompt_head + 1) % JS_DOM_PROMPT_QUEUE_CAP;
     }
     s_prompt_head = 0;
     s_prompt_tail = 0;
@@ -3380,14 +3502,19 @@ extern "C" void js_window_dialog_reset(void) {
 // seeded response as a JS string, or null (empty queue / seeded Cancel).
 static Item js_window_prompt(Item message_item, Item default_item) {
     (void)message_item; (void)default_item;
+    if (!js_active_runtime_state) return ItemNull;
     if (s_prompt_head == s_prompt_tail) return ItemNull;
     char* r = s_prompt_queue[s_prompt_head];
-    s_prompt_head = (s_prompt_head + 1) % 32;
+    s_prompt_head = (s_prompt_head + 1) % JS_DOM_PROMPT_QUEUE_CAP;
     if (!r) return ItemNull;  // seeded Cancel
     Item out = (Item){.item = s2it(heap_create_name(r))};
     mem_free(r);
     return out;
 }
+
+#undef s_prompt_queue
+#undef s_prompt_head
+#undef s_prompt_tail
 
 static void js_dom_install_window_dialog_globals(void) {
     Item global = js_get_global_this();
@@ -3406,14 +3533,9 @@ static void js_dom_install_window_dialog_globals(void) {
 // gate their async work on `iframe.onload`. We schedule a setTimeout(0)
 // drain that fires `load` on each pending iframe in insertion order.
 // ----------------------------------------------------------------------------
-static __thread DomElement* s_pending_iframe_loads[16] = {};
-static __thread DomNodeRef s_pending_iframe_refs[16] = {};
-static __thread DomDocument* s_pending_iframe_docs[16] = {};
-static __thread int s_pending_iframe_load_count = 0;
-static __thread bool s_iframe_load_drain_scheduled = false;
-
 static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
+    if (!js_dom_foreign_document_state_get()) return ItemNull;
     int n = s_pending_iframe_load_count;
     s_pending_iframe_load_count = 0;
     s_iframe_load_drain_scheduled = false;
@@ -3444,7 +3566,7 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
 }
 
 static void _schedule_iframe_load(DomElement* iframe) {
-    if (!iframe) return;
+    if (!iframe || !js_dom_foreign_document_state_ensure()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
         if (s_pending_iframe_loads[i] == iframe) return;
     }
@@ -3464,6 +3586,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
 }
 
 static void reset_pending_iframe_loads() {
+    if (!js_dom_foreign_document_state_get()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
         if (s_pending_iframe_docs[i] && s_pending_iframe_refs[i].address) {
             dom_node_unpin(s_pending_iframe_docs[i], s_pending_iframe_refs[i],
@@ -3664,6 +3787,7 @@ static void js_dom_set_implementation_method(Item implementation, const char* na
 }
 
 extern "C" Item js_get_dom_implementation(void) {
+    if (!dom_ensure_roots()) return ItemNull;
     if (js_dom_implementation_item.item != ITEM_NULL) {
         return js_dom_implementation_item;
     }
@@ -3684,7 +3808,6 @@ extern "C" Item js_get_dom_implementation(void) {
         (void*)js_dom_impl_create_document_type_method, 3);
     js_dom_set_implementation_method(js_dom_implementation_item, "hasFeature",
         (void*)js_dom_impl_has_feature_method, 2);
-    heap_register_gc_root(&js_dom_implementation_item.item);
     return js_dom_implementation_item;
 }
 
@@ -6108,6 +6231,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 // ============================================================================
 
 extern "C" Item js_dom_document_fonts_bridge(void) {
+    if (!dom_ensure_roots()) return ItemNull;
     if (js_document_fonts_value.item == ITEM_NULL) {
         js_document_fonts_value = js_create_document_fonts_object();
     }
@@ -7569,6 +7693,7 @@ static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
 
 extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
+    if (!js_dom_collection_runtime_state_get()) return;
     if (s_dom_collection_refresh_depth > 0) return;
     int child_kind = 0;
     DomElement* child_owner = _live_child_collection_owner(object, &child_kind);
@@ -14140,4 +14265,63 @@ extern "C" void js_dom_install_option_constructor(void) {
     js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
     js_property_set(global, (Item){.item = s2it(heap_create_name("Option"))}, ctor);
     log_debug("js_dom_install_option_constructor: installed Option");
+}
+
+extern "C" void js_dom_collections_release_context(void) {
+    reset_live_dom_collections();
+}
+
+#undef js_dom_collection_state
+#undef s_select_options_owners
+#undef s_select_options_owner_count
+#undef s_live_child_collections
+#undef s_live_child_collection_count
+#undef s_live_form_collections
+#undef s_live_form_collection_count
+#undef s_live_lookup_collections
+#undef s_live_lookup_collection_count
+#undef s_dom_collection_refresh_depth
+
+extern "C" void js_dom_collections_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->dom_collection_state) return;
+    JsDomCollectionRuntimeState* state =
+        (JsDomCollectionRuntimeState*)runtime_state->dom_collection_state;
+    // All weak homes and native pins are removed before heap destruction.
+    if (state->select_options_owner_count || state->live_child_collection_count ||
+        state->live_form_collection_count || state->live_lookup_collection_count) {
+        log_error("js-dom-collections: context destroyed before collection pins were released");
+    }
+    mem_free(state);
+    runtime_state->dom_collection_state = nullptr;
+}
+
+extern "C" void js_dom_foreign_documents_release_context(void) {
+    reset_pending_iframe_loads();
+    reset_foreign_document_cache();
+}
+
+#undef js_dom_foreign_document_state
+#undef s_foreign_doc_cache
+#undef s_foreign_doc_cache_count
+#undef s_doc_with_window
+#undef s_doc_with_window_count
+#undef s_iframe_cache
+#undef s_iframe_cache_count
+#undef s_pending_iframe_loads
+#undef s_pending_iframe_refs
+#undef s_pending_iframe_docs
+#undef s_pending_iframe_load_count
+#undef s_iframe_load_drain_scheduled
+
+extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->dom_foreign_document_state) return;
+    JsDomForeignDocumentRuntimeState* state =
+        (JsDomForeignDocumentRuntimeState*)runtime_state->dom_foreign_document_state;
+    // Owned documents and wrapper roots are released before heap destruction.
+    if (state->foreign_doc_cache_count || state->doc_with_window_count ||
+        state->iframe_cache_count || state->pending_iframe_load_count) {
+        log_error("js-dom-foreign-document: context destroyed before wrapper roots were released");
+    }
+    mem_free(state);
+    runtime_state->dom_foreign_document_state = nullptr;
 }

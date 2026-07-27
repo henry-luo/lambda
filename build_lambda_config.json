@@ -37,9 +37,6 @@
     "lambda/js",
     "lambda/module/radiant",
     "lambda/module/hostobj_demo",
-    "lambda/module/node_core",
-    "lambda/module/node_fs",
-    "lambda/module/node_net",
     "lambda/ts",
     "lambda/module/npm",
     "lambda/network",
@@ -47,7 +44,9 @@
   ],
   "source_files": [
     "lib/sqlite/sqlite3.c",
-    "lambda/module/node_zlib/node_zlib_codec.cpp",
+    "lambda/module/node_core/node_events.cpp",
+    "lambda/module/node_core/node_url.cpp",
+    "lambda/js/js_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
@@ -69,9 +68,7 @@
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
-    "LAMBDA_NODE_CORE_STATIC_LINKED=1",
-    "LAMBDA_NODE_FS_STATIC_LINKED=1",
-    "LAMBDA_NODE_NET_STATIC_LINKED=1"
+    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -253,7 +250,19 @@
     {
       "name": "turbojpeg",
       "version": "3.1.2",
-      "lib": "/opt/homebrew/lib/libturbojpeg.a",
+      "lib": "build_temp/jpeg-turbo-nozlib/libturbojpeg.a",
+      "source_lib": "/opt/homebrew/lib/libturbojpeg.a",
+      "exclude_archive_members": [
+        "adler32.c.o",
+        "compress.c.o",
+        "crc32.c.o",
+        "deflate.c.o",
+        "inffast.c.o",
+        "inflate.c.o",
+        "inftrees.c.o",
+        "trees.c.o",
+        "zutil.c.o"
+      ],
       "link": "static"
     },
     {
@@ -330,7 +339,6 @@
       "source_files": [
         "lambda/module/node_core/node_constants.cpp",
         "lambda/module/node_core/node_core_module.cpp",
-        "lambda/module/node_core/node_events.cpp",
         "lambda/module/node_core/node_os.cpp",
         "lambda/module/node_core/node_perf_hooks.cpp",
         "lambda/module/node_core/node_path.cpp",
@@ -340,7 +348,6 @@
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_tty.cpp",
-        "lambda/module/node_core/node_url.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
       ]
@@ -368,11 +375,7 @@
     {
       "name": "node-zlib",
       "description": "External Node zlib Jube module",
-      "libraries": [
-        "zlib"
-      ],
       "source_files": [
-        "lambda/module/node_zlib/node_zlib_codec.cpp",
         "lambda/module/node_zlib/node_zlib_module.cpp"
       ]
     }
@@ -600,7 +603,8 @@
         "lambda/runtime/headless_stubs.cpp"
       ],
       "source_files": [
-        "lambda/module/node_zlib/node_zlib_codec.cpp",
+        "lambda/module/node_core/node_events.cpp",
+        "lambda/module/node_core/node_url.cpp",
         "lambda/runtime/parse.c",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
@@ -754,24 +758,7 @@
       "lang": "c++17",
       "source_files": [
         "lambda/main.cpp",
-        "lambda/main-repl.cpp",
-        "lambda/module/node_core/node_constants.cpp",
-        "lambda/module/node_core/node_core_module.cpp",
-        "lambda/module/node_core/node_events.cpp",
-        "lambda/module/node_core/node_os.cpp",
-        "lambda/module/node_core/node_path.cpp",
-        "lambda/module/node_core/node_perf_hooks.cpp",
-        "lambda/module/node_core/node_process.cpp",
-        "lambda/module/node_core/node_punycode.cpp",
-        "lambda/module/node_core/node_querystring.cpp",
-        "lambda/module/node_core/node_string_decoder.cpp",
-        "lambda/module/node_core/node_timers.cpp",
-        "lambda/module/node_core/node_tty.cpp",
-        "lambda/module/node_core/node_url.cpp",
-        "lambda/module/node_core/node_v8.cpp",
-        "lambda/module/node_core/node_workers.cpp",
-        "lambda/module/node_fs/node_fs_module.cpp",
-        "lambda/module/node_net/node_net_module.cpp"
+        "lambda/main-repl.cpp"
       ],
       "libraries": [
         "radiant",
@@ -4409,7 +4396,8 @@
             "source": "test/test_lambda_concurrency_gtest.cpp",
             "name": "Lambda Concurrency Runtime Tests",
             "dependencies": [
-              "lambda-rt"
+              "lambda-rt",
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -4422,6 +4410,26 @@
               "rpmalloc",
               "libuv"
             ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "icon": "🔀"
           },
           {

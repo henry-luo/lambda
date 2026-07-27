@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_host_hooks.h"
+#include "js_network_service.h"
 #include "../jube/jube_registry.h"
 #include "js_class.h"
 #include "js_permission.h"
@@ -1955,12 +1956,13 @@ static Item js_socket_address(void) {
 
 extern "C" Item js_net_createServer(Item rest_args);
 
-static Item net_socket_prototype = {0};
-static Item net_server_prototype = {0};
-static Item net_socket_connect_fn = {0};
-static bool net_default_auto_select_family = false;
-static int net_auto_select_family_timeout = 500; // Node.js default
-static bool net_cli_options_applied = false;
+#define net_socket_prototype (js_runtime_state.net.socket_prototype)
+#define net_server_prototype (js_runtime_state.net.server_prototype)
+#define net_socket_connect_fn (js_runtime_state.net.socket_connect_function)
+#define internal_js_stream_socket_ctor (js_runtime_state.net.stream_socket_constructor)
+#define net_namespace (js_runtime_state.net.namespace_object)
+
+static bool net_ensure_roots(void);
 
 typedef struct NetBlockListEntry {
     int family;
@@ -1977,13 +1979,38 @@ typedef struct NetBlockList {
     NetBlockListEntry entries[NET_BLOCK_LIST_MAX];
 } NetBlockList;
 
-static NetBlockList net_block_list_instances[NET_BLOCK_LIST_INSTANCE_MAX];
-static int net_block_list_instance_count = 0;
+typedef struct JsNetRuntimeState {
+    bool default_auto_select_family;
+    int auto_select_family_timeout;
+    bool cli_options_applied;
+    NetBlockList* block_list_instances[NET_BLOCK_LIST_INSTANCE_MAX];
+    int block_list_instance_count;
+} JsNetRuntimeState;
+
+static bool net_ensure_roots(void) {
+    if (!js_active_runtime_state) return false;
+    if (!js_runtime_state.net.native_state) {
+        // These defaults used to be process globals. Allocate them once when
+        // the cold net namespace is first entered, never on socket hot paths.
+        js_runtime_state.net.native_state = mem_calloc(1, sizeof(JsNetRuntimeState),
+            MEM_CAT_JS_RUNTIME);
+        if (!js_runtime_state.net.native_state) return false;
+        ((JsNetRuntimeState*)js_runtime_state.net.native_state)->auto_select_family_timeout = 500;
+    }
+    return js_root_range_ensure_registered(&js_runtime_state.net.roots);
+}
+
+#define net_runtime_state (*(JsNetRuntimeState*)js_runtime_state.net.native_state)
+#define net_default_auto_select_family (net_runtime_state.default_auto_select_family)
+#define net_auto_select_family_timeout (net_runtime_state.auto_select_family_timeout)
+#define net_cli_options_applied (net_runtime_state.cli_options_applied)
 
 static NetBlockList* net_block_list_alloc(void) {
-    if (net_block_list_instance_count >= NET_BLOCK_LIST_INSTANCE_MAX) return NULL;
-    NetBlockList* list = &net_block_list_instances[net_block_list_instance_count++];
-    memset(list, 0, sizeof(NetBlockList));
+    if (!net_ensure_roots()) return NULL;
+    if (net_runtime_state.block_list_instance_count >= NET_BLOCK_LIST_INSTANCE_MAX) return NULL;
+    NetBlockList* list = (NetBlockList*)mem_calloc(1, sizeof(NetBlockList), MEM_CAT_JS_RUNTIME);
+    if (!list) return NULL;
+    net_runtime_state.block_list_instances[net_runtime_state.block_list_instance_count++] = list;
     return list;
 }
 
@@ -2509,6 +2536,44 @@ static int bound_socket_dup_fd(JsBoundSocket* bound) {
     }
     return dup_fd;
 #endif
+}
+
+static bool bound_socket_jube_resource_id(Item self, uint32_t* out_resource_id) {
+    if (!net_is_object_like(self)) return false;
+    Item resource_item = js_property_get(self,
+        make_string_item("__jube_bound_socket_resource_id__"));
+    int64_t resource_id = 0;
+    if (!net_item_to_integral_int64(resource_item, &resource_id) || resource_id <= 0 ||
+            resource_id > UINT32_MAX) return false;
+    if (out_resource_id) *out_resource_id = (uint32_t)resource_id;
+    return true;
+}
+
+static bool bound_socket_is_jube_object(Item self) {
+    return net_is_object_like(self) && js_is_truthy(js_property_get(self,
+        make_string_item("__jube_bound_socket__")));
+}
+
+static bool bound_socket_jube_is_adopted(Item self) {
+    return net_is_object_like(self) && js_is_truthy(js_property_get(self,
+        make_string_item("__jube_bound_socket_adopted__")));
+}
+
+static int bound_socket_item_dup_fd(Item self) {
+    JsBoundSocket* bound = bound_socket_from_item(self);
+    if (bound) return bound_socket_dup_fd(bound);
+    uint32_t resource_id = 0;
+    if (!bound_socket_jube_resource_id(self, &resource_id)) return -1;
+    void* session = jube_node_runtime_current_session();
+    int descriptor = -1;
+    if (!session || js_node_stream_tcp_adopt_fd(session, resource_id, &descriptor) != 0) return -1;
+    // The host service consumed this rid while duplicating the descriptor; the
+    // module-visible marker prevents a second listener from adopting it again.
+    js_property_set(self, make_string_item("__jube_bound_socket_resource_id__"),
+        make_undefined_item());
+    js_property_set(self, make_string_item("__jube_bound_socket_adopted__"),
+        (Item){.item = ITEM_TRUE});
+    return descriptor;
 }
 
 static Item js_bound_socket_address(void) {
@@ -4778,11 +4843,13 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     bool listen_signal_aborted = false;
 
     JsBoundSocket* bound_listen = bound_socket_from_item(port_item);
-    if (bound_listen) {
-        if (bound_listen->closed || bound_listen->adopted) {
+    bool jube_bound_listen = bound_socket_is_jube_object(port_item);
+    if (bound_listen || jube_bound_listen) {
+        if ((bound_listen && (bound_listen->closed || bound_listen->adopted)) ||
+                (jube_bound_listen && bound_socket_jube_is_adopted(port_item))) {
             return bound_socket_throw_adopted();
         }
-        int fd = bound_socket_dup_fd(bound_listen);
+        int fd = bound_socket_item_dup_fd(port_item);
         if (fd < 0) {
             Item err = make_uv_error(UV_EBADF, "listen", NULL, -1);
             server_schedule_error(self, err);
@@ -5331,8 +5398,13 @@ extern "C" Item js_net_Socket(Item options) {
         get_type_id(options) == LMD_TYPE_VMAP) {
         bound_handle = js_property_get(options, make_string_item("handle"));
         JsBoundSocket* bound = bound_socket_from_item(bound_handle);
-        if (bound) {
-            int fd = bound_socket_dup_fd(bound);
+        bool jube_bound = bound_socket_is_jube_object(bound_handle);
+        if (bound || jube_bound) {
+            if (jube_bound && bound_socket_jube_is_adopted(bound_handle)) {
+                mem_free(sock);
+                return bound_socket_throw_adopted();
+            }
+            int fd = bound_socket_item_dup_fd(bound_handle);
             if (fd < 0 || uv_tcp_open(&sock->tcp, (uv_os_sock_t)fd) != 0) {
 #ifndef _WIN32
                 if (fd >= 0) close(fd);
@@ -5597,10 +5669,9 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
     return wrap;
 }
 
-static Item internal_js_stream_socket_ctor = {0};
-static uint64_t internal_js_stream_socket_root_epoch = 0;
 
 extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
+    if (!net_ensure_roots()) return ItemError;
     if (internal_js_stream_socket_ctor.item != 0) return internal_js_stream_socket_ctor;
     internal_js_stream_socket_ctor =
         js_new_function((void*)js_internal_js_stream_socket_constructor, 1);
@@ -5608,20 +5679,12 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
                     internal_js_stream_socket_ctor);
     js_property_set(internal_js_stream_socket_ctor, make_string_item("default"),
                     internal_js_stream_socket_ctor);
-    uint64_t epoch = js_get_heap_epoch();
-    if (internal_js_stream_socket_root_epoch != epoch) {
-        heap_register_gc_root(&internal_js_stream_socket_ctor.item);
-        // The constructor slot is static while each batch heap has a new registry.
-        internal_js_stream_socket_root_epoch = epoch;
-    }
     return internal_js_stream_socket_ctor;
 }
 
 // =============================================================================
 // net Module Namespace
 // =============================================================================
-
-static Item net_namespace = {0};
 
 static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     RootFrame roots((Context*)context, 3);
@@ -5655,24 +5718,29 @@ static Item net_constructor_prototype(Item ctor, JsClass cls) {
 }
 
 extern "C" bool js_net_default_auto_select_family_get(void) {
+    if (!net_ensure_roots()) return false;
     return net_default_auto_select_family;
 }
 
 extern "C" void js_net_default_auto_select_family_set(bool enabled) {
+    if (!net_ensure_roots()) return;
     net_default_auto_select_family = enabled;
 }
 
 extern "C" int js_net_default_auto_select_family_timeout_get(void) {
+    if (!net_ensure_roots()) return 500;
     return net_auto_select_family_timeout;
 }
 
 extern "C" bool js_net_default_auto_select_family_timeout_set(int timeout_ms) {
     if (timeout_ms < 1) return false;
+    if (!net_ensure_roots()) return false;
     net_auto_select_family_timeout = timeout_ms;
     return true;
 }
 
 extern "C" Item js_get_net_namespace(void) {
+    if (!net_ensure_roots()) return ItemError;
     if (net_namespace.item != 0) return net_namespace;
 
     net_apply_cli_options();
@@ -5682,7 +5750,6 @@ extern "C" Item js_get_net_namespace(void) {
     net_namespace = js_new_object();
     // The namespace is process-cached; register its root before any exported
     // constructor allocation so forced collection cannot reclaim the cache.
-    heap_register_gc_root(&net_namespace.item);
     RootFrame roots((Context*)context, 7);
     Rooted<Item> namespace_root(roots, net_namespace);
     Rooted<Item> create_server_root(roots, ItemNull);
@@ -5735,6 +5802,7 @@ extern "C" Item js_net_get_socket_prototype(void) {
 }
 
 extern "C" void js_net_reset(void) {
+    if (!js_active_runtime_state) return;
     // Reset invalidates the old JS heap, so its resource roots must leave the
     // session table before any replacement namespace can publish new handles.
     jube_node_resource_clear();
@@ -5745,9 +5813,26 @@ extern "C" void js_net_reset(void) {
     net_socket_prototype = (Item){0};
     net_server_prototype = (Item){0};
     net_socket_connect_fn = (Item){0};
-    net_default_auto_select_family = false;
-    net_auto_select_family_timeout = 500;
-    net_cli_options_applied = false;
-    memset(net_block_list_instances, 0, sizeof(net_block_list_instances));
-    net_block_list_instance_count = 0;
+    JsNetRuntimeState* state = (JsNetRuntimeState*)js_runtime_state.net.native_state;
+    if (!state) return;
+    for (int i = 0; i < state->block_list_instance_count; i++) {
+        mem_free(state->block_list_instances[i]);
+    }
+    memset(state, 0, sizeof(JsNetRuntimeState));
+    state->auto_select_family_timeout = 500;
+}
+
+#undef net_cli_options_applied
+#undef net_auto_select_family_timeout
+#undef net_default_auto_select_family
+#undef net_runtime_state
+
+extern "C" void js_net_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->net.native_state) return;
+    JsNetRuntimeState* state = (JsNetRuntimeState*)runtime_state->net.native_state;
+    for (int i = 0; i < state->block_list_instance_count; i++) {
+        mem_free(state->block_list_instances[i]);
+    }
+    mem_free(state);
+    runtime_state->net.native_state = NULL;
 }
