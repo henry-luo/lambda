@@ -1,0 +1,3 @@
+bound IPv4 true true
+adopted ERR_SOCKET_HANDLE_ADOPTED true
+closed

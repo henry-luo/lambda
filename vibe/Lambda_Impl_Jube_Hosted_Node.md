@@ -179,14 +179,14 @@
 > must stay rooted while property keys and callbacks are allocated before the
 > persistent channel cache publishes them.
 > N4's first dynamic delivery proof is now present as `node-zlib`: its own
-> Jube image, manifest hash, dependency on dynamically activated `node-core`,
+> Jube image, dependency on dynamically activated `node-core`,
 > and isolated normal/forced-GC gzip round-trip gate are all verified. The
 > raw gzip/gunzip, deflate/inflate, raw-deflate/raw-inflate, and auto-detect
-> unzip codecs now share one dispatcher compiled into the static checkpoint and
-> dynamic image; the node-zlib image owns all seven synchronous and callback
-> wrappers through the Jube binary and next-tick callback services. Remaining stream
-> constructors are still host-resident, so this is not the N4 source-migration
-> flip.
+> unzip codecs now remain in the static host as one provider; the node-zlib
+> image owns all seven synchronous and callback wrappers through the Jube
+> binary, codec, and next-tick services. The image links neither zlib nor a
+> raw host symbol. Remaining stream constructors are still host-resident, so
+> this is not the N4 source-migration flip.
 > The Node module build contract is now generated from one JSON template with
 > explicit `node-core` and `node-zlib` instances, avoiding per-module linker
 > flag drift. The shared loader-negative harness also covers `node-zlib`'s
@@ -207,14 +207,15 @@
 > serve TLS handler and the existing JS TLS/crypto and digest paths. N4/N6 may
 > remove those libraries from a Node module's implementation boundary, but
 > cannot claim that either dependency drops from the host binary.
-> `node-zlib` now owns its first observable codec operation: `crc32` is built
-> by the dynamic image, reads strings and binary views only through the Jube
-> value/binary tables, preserves unsigned seed validation through the Node
-> error table, and caches its patched namespace in a session-owned persistent
-> root. The static checkpoint and hosted image share the raw CRC primitive, so
-> there is no divergent duplicate implementation. The seven synchronous
-> compression/decompression operations and callback wrappers are module-owned
-> through the shared raw dispatcher; stream constructors stay in the host pending
+> `node-zlib` now owns its first observable codec operation: `crc32` validates
+> its Node inputs in the dynamic image, then calls the host codec provider
+> through `JubeHostNodeZlibAPI`. It reads strings and binary views only through
+> Jube value/binary tables, preserves unsigned seed validation through the
+> Node error table, and caches its patched namespace in a session-owned
+> persistent root. The static checkpoint and hosted image use the same host
+> primitive, so there is no divergent duplicate implementation. The seven
+> synchronous compression/decompression operations and callback wrappers are
+> module-owned over that provider; stream constructors stay in the host pending
 > their larger stateful service conversion.
 > The `crc32` boundary now also covers DataView under poisoned forced-GC in
 > both the static checkpoint and dynamic image. That probe repaired the shared
@@ -289,11 +290,16 @@
 > general rid table remain open.
 > `node-fs` now owns the public `fs` and `fs/promises` descriptors. Its
 > callback `readFile`/`writeFile`/`appendFile` plus
-> `open`/`close`/`read`/`write`/`readv`/`writev`/`access`/`chmod`/`fchmod`/`lchmod`/`copyFile`/`truncate`/`rm`/`realpath`/`mkdtemp`/`link`/`symlink`/`mkdir`/`readdir`/`rename`/`unlink`/`rmdir`/`watch`/`watchFile`/`unwatchFile`/`utimes`/`statfs`/`readlink`/`chown`/`lchown`/`fchown`/
-> `stat`/`lstat`/`fstat`, their `fs/promises` counterparts, and the text
-> `readFileSync`/write/append/exists/unlink/mkdir/rmdir/rename/readdir plus
-> descriptor open/close/read/write/readv/writev/access/chmod/fchmod/lchmod/copyFile/truncate/rm/realpath/mkdtemp/link/symlink/chown/lchown/fchown plus `utimesSync`/`opendirSync`/`statfsSync`/`readlinkSync`/`_toUnixTimestamp`, `exists` custom promisify behavior, and module-built `fs.constants` perform platform file I/O in
-> module code and uses only Jube permission, domain, precise-root, async-work,
+> `watch`/`watchFile`/`unwatchFile`/`utimes`, their `fs/promises`
+> counterparts, and the text `readFileSync`/write/append/exists/unlink/mkdir/
+> rmdir/rename/readdir plus descriptor `fchown` plus `utimesSync`/`opendirSync`/
+> `_toUnixTimestamp`, `exists` custom promisify behavior, and module-built
+> `fs.constants` retain Node policy and namespace shaping in module code. The
+> migrated file-content, `copyFile`, `statfs`, and simple path-operation routes (`access`,
+> `chmod`, `truncate`, `rm`, `link`, `symlink`, `mkdir`, `rename`, `unlink`, `rmdir`,
+> `realpath`, `mkdtemp`, `readdir`, `readlink`, `chown`, `lchown`, `lchmod`, `open`,
+> `close`, `fchmod`, `fchown`, `read`, `write`, `readv`, `writev`, `stat`, `lstat`, and `fstat`) use the host filesystem provider;
+> the remaining operations use only Jube permission, domain, precise-root, async-work,
 > value, and promise/closure services; the promise entry points adapt that same
 > completion path. Static and isolated dynamic normal/poisoned-GC probes cover
 > both APIs. `fs/promises.open` now returns the module-owned branded
@@ -422,10 +428,16 @@ These are release gates, not preferences:
     activation order only. Inter-module behavior uses the host-mediated
     namespace resolver or a named host operation; never a dylib-to-dylib
     symbol.
-14. **Additive-only ABI evolution** (JA11): new tables/fields append behind
-    `struct_size` gates, following the `JubeHostAPI.data` tail precedent
-    (`jube.h:976`).
-15. House rules apply throughout: `./lib` containers not `std::` (rule 3),
+14. **Static host dependency ownership.** Lambda/Radiant retain their built-in
+   filesystem, zlib, HTTP, TLS, and crypto libraries as static host links. A
+   Node image may not link, embed, or import libz, libuv, curl, mbedTLS,
+   OpenSSL, or another host dependency. It owns Node-facing semantics only and
+   reaches the implementation through a size-gated Jube provider table. The
+   checker and generated-build validation enforce this from N4 onward.
+15. **Additive-only ABI evolution** (JA11): new tables/fields append behind
+   `struct_size` gates, following the `JubeHostAPI.data` tail precedent
+   (`jube.h:976`).
+16. House rules apply throughout: `./lib` containers not `std::` (rule 3),
     `log_*` not printf (rule 4), no `/tmp` (rule 2), root-cause comments at
     fix points (rule 12), no code duplication — the per-module build targets
     and manifests are generated from one template, not copy-edited (rule 13).
@@ -570,7 +582,7 @@ drift corrections against the 2026-07-25 design pass:
 | N1 | manifest catalog/activation split, `kind`/`provides`, specifier index in shadow mode, compile-time consumers index-first | node-baseline + MIR budgets unchanged; no dlopen from catalog queries | medium |
 | N2 | runtime/session + requirement contracts; completed `jube.h` value-boundary inventory; `path` as a true static Jube module; Node async/service tables and fs pilot | `path` has no forbidden imports; pilot green under forced GC; negative descriptor tests | medium–large |
 | N3 | `node-core` static; process split; hook inversions; chain + 4 lists deleted | node-baseline; chains gone; checker green on `lambda/module/node_core` | large (~30k lines move) |
-| N4 | `node-zlib` first dynamic module; delivery chain cloned; absent-module negatives | dynamic load macOS+Linux; static/dynamic parity | small |
+| N4 | `node-zlib` first dynamic module over a host-owned codec provider; delivery chain cloned; absent-module negatives | dynamic load macOS+Linux; static/dynamic parity; no host dependency imports | small |
 | N5 | `node-fs` → `node-net` → `node-child-process`, static→dynamic each | per-module: baseline, forced-GC, zero `uv_*`, negatives | large |
 | N6 | `node-http` → `node-tls` → shared crypto primitives + `node-crypto`; web implementations remain behind transitional host providers | as N5 + crypto/tls/http optional at runtime | large |
 | N7 | Node closure: `node-core` dynamic; four-profile packaging; docs; allowlist burn-down; perf closeout | byte-identical host ×4 bundles; compatibility and minimal profiles green; perf vs N0 | medium |
@@ -989,21 +1001,22 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
 
 ### Goal
 
-Prove the full delivery chain (build target → manifest → hash → lazy dlopen →
-absent negatives) on the smallest external-dep leaf before any big module
-flips.
+Prove the full delivery chain (build target → manifest → lazy dlopen → absent
+negatives) on the smallest dependency-backed leaf without making that
+dependency a DSO. `node-zlib` is the reference inversion: the host owns the
+statically linked codec, while the image owns the Node API and calls a
+versioned host codec provider.
 
 ### Tasks
 
-- [ ] **N4.1** Sources: `lambda/js/js_zlib.cpp` →
-  `lambda/module/node_zlib/js_zlib.cpp` + `node_zlib_module.cpp`
-  (`JubeModuleDef`, specifiers `zlib`/`node:zlib` normalized, buffer coupling
-  through `JubeHostBinaryAPI` only, stream coupling through
-  `runtime->resolve_namespace`). Preserve today's callback scheduling during
-  the migration: if the current implementation computes synchronously and
-  posts nextTick, do not silently change it to work-pool completion. An
-  off-thread semantic improvement is separate work. Static checkpoint first
-  (P7).
+- [x] **N4.1** Add `JubeHostNodeZlibAPI` to the `JubeHostNodeAPI` tail. Its
+  plain-byte input/output contract supplies CRC32 and the seven one-shot codec
+  modes; allocation/free and zlib status stay host-owned. Move the raw codec
+  implementation to a host provider source and replace every direct codec
+  call in `node_zlib_module.cpp` with the table. The module retains input
+  validation, Buffer conversion, error shaping, namespace construction, and
+  callback scheduling. Preserve today's synchronous-plus-nextTick behavior;
+  work-pool conversion is separate. Static checkpoint first (P7).
 - [x] **N4.2** Build target: add a module-target generator step
   by extending `build_lambda_config.json` with one node-module template plus
   instance data consumed by `utils/generate_premake.py` (the JSON remains the
@@ -1013,17 +1026,20 @@ flips.
   `source_files`) — clone of `build_lambda_config.json:305`, not copy-paste
   ×8 (rule 13). Make targets `build-node-zlib` / `release-node-zlib`
   mirroring `Makefile:772/:783` incl. the
-  `update_jube_manifest_integrity.py modules/node-zlib` stamping step.
+  `update_jube_manifest_integrity.py modules/node-zlib` metadata-cleanup step.
+  The node-zlib instance has no `libraries` entry and no codec source: the
+  generated image must have no host-dependency imports.
 - [x] **N4.3** `modules/node-zlib/module.json` per design §6.2 (kind
   `runtime-library`, engine `js`, `provides`, `dependencies: ["node-core"]`,
-  per-OS library + sha256, `entry_symbol: "jube_module"`). Dependency
+  per-OS library, `entry_symbol: "jube_module"`). Build-local hash and host
+  id fields remain absent; negative fixtures may supply a digest explicitly.
+  Dependency
   activation exercises the existing `dependencies` machinery
   (`jube_registry.cpp:3414`) — add a test that requiring `zlib` with
   `node-core` present-but-unloaded activates `node-core` first.
-- [ ] **N4.4** Flip dynamic: remove `node_zlib` sources from the host target;
-  zlib leaves the host link **iff** the N0.5 audit cleared it (otherwise the
-  host keeps its own zlib user and the module still links its own copy —
-  record which). Static/dynamic parity uses two explicit test artifacts:
+- [ ] **N4.4** Flip dynamic: remove the Node zlib namespace implementation
+  from the host target, but keep the host codec provider and zlib static link.
+  Static/dynamic parity uses two explicit test artifacts:
   a disposable static-checkpoint host and a production-shaped host with the
   source absent plus the dylib. `JUBE_MODULE_PATH` isolates the latter's
   bundle; it is not claimed to switch a statically linked module off. Run the
@@ -1039,8 +1055,8 @@ flips.
 ### Exit gate
 
 - Dynamic load green on macOS + Linux; parity diff empty; node-baseline
-  unchanged; negatives green; host byte-identity across packagings
-  maintained.
+  unchanged; negatives green; node-zlib import audit contains neither libz nor
+  host runtime symbols; host byte-identity across packagings maintained.
 
 ## 11. Stage N5 — libuv leaves: fs, net, child_process
 
@@ -1051,29 +1067,65 @@ module-local implementation, namespace resolution, or approved platform
 library → rooting per §16 → static parity → checker/import audit →
 manifest/build target from the N4 generator → dynamic flip → absent negatives.
 
-- [ ] **N5a — `node-fs`** (3.9k lines; fs, fs/promises, FileHandle as
-  `JubeTypeBinding`). The N2.8 pilot already converted the async core;
-  remaining: sync surface (direct syscalls, module-local — allowed),
-  `fs.watch` per the N2.1 decision (Tier-2 `fs_event` ops or an exact
-  preservation of today's stub behavior; baseline-cold status alone never
-  authorizes dropping an observable), promises via the promise table,
-  `js_next_tick_enqueue` extern (`js_fs.cpp:3127`) → scheduling ops,
-  permission checks through the named host service selected by the N0 ledger
-  (manifest dependency activation alone is not callable permission logic).
+- [x] **N5a — `node-fs`** (3.9k lines; fs, fs/promises, FileHandle as
+  `JubeTypeBinding`). Every platform operation now crosses the size-gated
+  `JubeHostFilesystemAPI`: file-content work, path mutation, directory/string
+  results, descriptor open/close/chmod/chown/read/write, normalized
+  stat/lstat/fstat metadata, and `statfs`. The module owns only Node argument
+  validation, permissions, callbacks/promises, branded `FileHandle`/`Stats`,
+  and error shaping. `fs.watch`/`watchFile` preserve the existing observable
+  stub contract; no unimplemented event backend was silently dropped. Static
+  and isolated dynamic normal/poisoned-GC, absence, integrity, and import
+  gates pass with no filesystem syscall or platform-I/O header in the DSO.
 - [ ] **N5b — `node-net`** (7.9k lines; net + dns + cares_wrap shim). First
   real consumer of the Tier-2 stream ops (connect/listen/accept/read/write/
   shutdown/opts/fd-adoption → rids). The transitional host table already
-  replaced net's raw socket/server pools with session-owned,
-  generation-checked rid entries and persistent roots; this stage moves those
-  entries behind the stream service and module boundary. dns rides `work_submit`
-  (getaddrinfo) exactly as libuv does internally; `_getActiveHandles`
-  switches to rid-table enumeration (hook point from N3.4);
-  direct `Context` access (`js_net.cpp:4591`) eliminated.
+  uses session-owned, generation-checked rid entries and persistent roots;
+  this stage moves those entries behind the stream service and module boundary.
+  The existing IP-literal / `dns.lookupSync` provider probe is explicitly
+  **not** this completion: it still delegates `net`, `dns`, and
+  `internal/js_stream_socket` namespaces to the legacy host. Complete N5b in
+  this order:
+
+  1. Extract a host-owned `JubeHostStreamAPI` with opaque, session-owned rids
+     for TCP/pipe create, connect, bind/listen, accept, read, write, shutdown,
+     close, ref/unref, socket options, and fd adoption. Its completion records
+     carry only status, byte counts, peer/address metadata, and new rids; no
+     `uv_*` value or pointer crosses the ABI.
+     The initial host bootstrap now supplies TCP create/bind/address/fd-
+     adoption/close/ref/unref/live rid ownership through the existing
+     generation-checked resource table. `node-net` has a first module-owned
+     `BoundSocket` vertical slice over those rids, while legacy `Server` and
+     `Socket` consume adopted descriptors during the transition. It is
+     deliberately not exposed as a Node namespace and does not yet make
+     `node-net` complete. Add the remaining verbs as real host operations,
+     with completion records, before moving their Node-facing callers.
+  2. Route the *legacy* `js_net.cpp` through that provider first and prove its
+     normal and forced-GC baselines. This isolates transport lifetime and
+     drain ordering without changing Node-visible state at the same time.
+  3. Move the Node state machine (socket/server objects, stream events,
+     auto-select-family policy, IPC handoff, and Node errors) into
+     `node-net`; remove every `resolve_host_namespace("net"|"dns"|
+     "internal/js_stream_socket")` delegation. The module may retain the
+     existing IP/DNS validation helpers, but its namespace must be constructed
+     locally.
+  4. Add host DNS operations: synchronous literal/lookup and asynchronous
+     `getaddrinfo` completion via the host work service. `_getActiveHandles`
+     then reads the host rid table, and direct `Context` access
+     (`js_net.cpp:4591`) is eliminated.
+
+  The final node-net DSO neither links libuv nor performs a direct socket
+  operation, and it cannot fall through to the legacy host namespace.
 - [ ] **N5c — `node-child-process`** (3.8k lines). Tier-2 process ops
   (spawn/kill/exit-completion; single SIGCHLD owner stays host); stdio spec
   references rids; the IPC handoff hook (N3.4) lands for real — the
   `uv_pipe_t*` extern is deleted; cluster-online glue moves in
-  (`js_runtime.cpp:62` edge gone).
+  (`js_runtime.cpp:62` edge gone). Like N5b, do this in two passes: first
+  make the legacy implementation consume a host process provider and prove
+  lifecycle parity; only then move child-process JS policy, stdio objects,
+  IPC framing, and callback/promise settlement into the module. A module that
+  merely returns the legacy `child_process` namespace is not a completed N5c
+  migration.
 
 ### Exit gate (per module, then for the stage)
 
@@ -1085,20 +1137,20 @@ manifest/build target from the N4 generator → dynamic flip → absent negative
 ## 12. Stage N6 — protocol leaves and Node crypto
 
 - [ ] **N6a — `node-http`** (6.9k lines; http + https; depends node-core +
-  node-net). The HTTP/1.1 parser is module-local; raw libuv accept
+  node-net). The HTTP/1.1 parser is module-local; host stream/TLS provider
+  operations replace raw libuv accept
   (`js_http.cpp:3357` region) converts to stream-op accept→rid; the 10-root
   `RootFrame` at `:5955` converts per §16. Profile against N0's throughput
   numbers before/after — this is the copy-on-submit stress case (§21 risk 8);
   if profiles demand it, spec the pinned zero-copy additive entry then, not
   preemptively.
-- [ ] **N6b — `node-tls`** (3.1k lines; mbedTLS + the OpenSSL dlopen
-  soft-dep for PFX stays module-side; depends node-net).
+- [ ] **N6b — `node-tls`** (3.1k lines; host TLS provider including the
+  existing PFX/PKCS12 support; depends node-net). Neither mbedTLS nor the
+  OpenSSL soft dependency may appear in the image import table.
 - [ ] **N6c — prepare the three-way crypto split and extract Node crypto**
   (JN14 as superseded by JA1).
-  Sub-task order: (1) extract a shared mbedTLS primitive layer
-  (`lambda/module/crypto_primitives/`, compiled *into each* consumer —
-  source-level sharing, no cross-module symbols per JA8; it may also serve
-  the host's existing `lib/digest.h` users — audit); (2) `node-crypto`
+  Sub-task order: (1) extract one host-owned, versioned crypto-provider table
+  over the existing static mbedTLS/digest implementation; (2) `node-crypto`
   module (the node:crypto surface, ≈6–7k lines after the split); (3) leave
   WebCrypto host-side behind the transitional namespace provider.
   `node:crypto.webcrypto` resolves that provider through the host runtime
@@ -1130,10 +1182,14 @@ module without its slice.
 
 ### Tasks
 
-- [ ] **N7.1** `node-core` flips dynamic (the largest module; every earlier
+- [x] **N7.1** `node-core` flips dynamic (the largest module; every earlier
   stage's parity machinery exists by now). The static registration path for
-  node modules is then removed entirely (template H10 discipline: static was
-  a checkpoint, not a product form — JA2).
+  node modules is removed entirely (template H10 discipline: static was a
+  checkpoint, not a product form — JA2). `URL`/`URLSearchParams` and
+  `EventEmitter` remain host-owned shared primitives because the global URL
+  surface and readline use the same identities; node-core resolves `url` and
+  `events` through `JubeHostRuntimeAPI`, and the binary gate rejects direct
+  imports of their lifecycle symbols.
 - [ ] **N7.2** Packaging produces four bundles from one host:
   - compatibility/standard: all extracted Node modules, preserving today's
     Node-visible behavior;
@@ -1305,17 +1361,18 @@ stage" philosophy — see its header comment).
    Tier-2-owned (per-module rule rows); cross-module symbol imports; and every
    direct host symbol not classified in the N0 ledger. Namespace builders
    cannot appear in `JubeGlobalDef` unless the global is explicitly intended.
-3. **Allowed:** `jube.h`; libc/platform calls in `moves-with-file` classes
-   (tty ioctl, sync fs syscalls, mbedTLS in tls/crypto, zlib in node_zlib);
-   module-local symbols; and a counted platform-library allowlist seeded from
-   the N0.3 inventory. Engine-symbol exceptions are not transitional module
-   allowances: an unconverted file remains outside the module directory until
-   its rows are burned down.
+3. **Allowed:** `jube.h`, libc, and platform calls that do not duplicate a
+   host-owned dependency. Filesystem, socket/process, zlib, HTTP, TLS, and
+   crypto capability calls are provider-table operations once their module has
+   crossed its static checkpoint. Module-local symbols remain allowed. Engine
+   symbol exceptions are not transitional module allowances: an unconverted
+   file remains outside the module directory until its rows are burned down.
 4. **Binary mode:** dynamic import table ⊆ the module entry point/runtime
-   loader allowance + approved platform libraries. Calls into the host occur
-   through stored Jube table pointers, not undefined engine imports. Run
-   `--require-module-binary` from the first dynamic flip (N4); it is mandatory
-   in CI at N7.4.
+   loader allowance + approved platform libraries, and its linked-library set
+   excludes libz, libuv, curl, mbedTLS, OpenSSL, and every configured static
+   host dependency. Calls into the host occur through stored Jube table
+   pointers, not undefined engine imports. Run `--require-module-binary` from
+   the first dynamic flip (N4); it is mandatory in CI at N7.4.
 5. **Self-test:** injects a `uv_tcp_init` call, a `js_runtime_state.hpp`
    include, a `heap_register_gc_root` extern, and a fresh allowlist entry
    into scratch copies under `./temp/` and must see all four rejected.
@@ -1350,6 +1407,11 @@ git diff --check
   cross-session root/rid rejection; reset/detach idempotence;
   completion-after-detach suppression; no roots/rids/requests surviving heap
   cleanup.
+- A host-ownership audit: generated node-module link inputs contain no
+  configured host dependency, and the resulting image has neither a matching
+  library dependency nor a forbidden dependency symbol. The host executable
+  continues to link its static provider. This applies even when the Node
+  namespace is package-optional.
 - Global-surface snapshots (`Reflect.ownKeys(globalThis)` plus property
   descriptors): compatibility equals the pre-move snapshot; reduced/minimal
   differ only by their documented explicit-global rows; namespace-only

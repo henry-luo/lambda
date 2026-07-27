@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "base_abi_version": 2,
   "hosted_api_version": 1,
-  "host_build_id": "lambda-hosted-lang-20260727-h9b42",
   "kind": "runtime-library",
   "engine": "js",
   "provides": [
@@ -20,6 +19,5 @@
   "library_macos": "node-net.dylib",
   "library_linux": "node-net.so",
   "library_windows": "node-net.dll",
-  "entry_symbol": "jube_module",
-  "sha256_macos": "c68396952e9b996a012f5f46cf5d5e4114feb861860ed966327809fa043765fd"
+  "entry_symbol": "jube_module"
 }
