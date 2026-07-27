@@ -1743,6 +1743,12 @@
       ],
       "libraries": [
         {
+          "name": "zlib",
+          "description": "Use the platform zlib dynamically: jpeg-turbo 3.2's static archive embeds zlib, so force-loading both archives duplicates every zlib symbol.",
+          "lib": "-lz",
+          "link": "dynamic"
+        },
+        {
           "name": "CoreFoundation",
           "include": "",
           "lib": "-framework CoreFoundation",
