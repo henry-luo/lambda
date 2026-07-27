@@ -253,7 +253,19 @@
     {
       "name": "turbojpeg",
       "version": "3.1.2",
-      "lib": "/opt/homebrew/lib/libturbojpeg.a",
+      "lib": "build_temp/jpeg-turbo-nozlib/libturbojpeg.a",
+      "source_lib": "/opt/homebrew/lib/libturbojpeg.a",
+      "exclude_archive_members": [
+        "adler32.c.o",
+        "compress.c.o",
+        "crc32.c.o",
+        "deflate.c.o",
+        "inffast.c.o",
+        "inflate.c.o",
+        "inftrees.c.o",
+        "trees.c.o",
+        "zutil.c.o"
+      ],
       "link": "static"
     },
     {
@@ -1742,12 +1754,6 @@
         "mmacosx-version-min=15.7"
       ],
       "libraries": [
-        {
-          "name": "zlib",
-          "description": "Use the platform zlib dynamically: jpeg-turbo 3.2's static archive embeds zlib, so force-loading both archives duplicates every zlib symbol.",
-          "lib": "-lz",
-          "link": "dynamic"
-        },
         {
           "name": "CoreFoundation",
           "include": "",

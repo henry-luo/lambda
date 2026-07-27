@@ -11,6 +11,8 @@ import sys
 import glob
 import platform
 import copy
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -81,6 +83,9 @@ class PremakeGenerator:
                                       'MINGW' in current_platform or
                                       self.config.get('platform') == 'Windows')
 
+        if self.use_macos_config:
+            self._prepare_macos_archive_without_members()
+
         # Apply variant overlay (e.g., 'cli' for headless build) before parsing libraries
         if self.variant:
             self._apply_variant_overlay(self.variant)
@@ -89,6 +94,44 @@ class PremakeGenerator:
         self._expand_validation_source_targets()
 
         self.external_libraries = self._parse_external_libraries()
+
+    def _prepare_macos_archive_without_members(self) -> None:
+        """Materialize macOS static archives without private bundled providers."""
+        for library in self.config.get('libraries', []):
+            excluded_members = library.get('exclude_archive_members', [])
+            source_library = library.get('source_lib')
+            output_library = library.get('lib')
+            if not excluded_members or not source_library or not output_library:
+                continue
+            source_path = Path(source_library)
+            output_path = Path(output_library)
+            if not source_path.is_file():
+                raise RuntimeError(f"missing source archive: {source_path}")
+            archive_members = []
+            if output_path.is_file():
+                listed = subprocess.run(['ar', '-t', str(output_path)],
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        text=True, check=False)
+                if listed.returncode == 0:
+                    archive_members = listed.stdout.splitlines()
+            needs_refresh = (not output_path.is_file() or
+                             source_path.stat().st_mtime_ns > output_path.stat().st_mtime_ns or
+                             any(member in archive_members for member in excluded_members))
+            if not needs_refresh:
+                continue
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if output_path.exists():
+                output_path.chmod(0o644)
+            shutil.copyfile(source_path, output_path)
+            # jpeg-turbo 3.2 bundles zlib objects; retaining them would collide
+            # with the separately force-loaded zlib archive in the final host.
+            completed = subprocess.run(
+                ['ar', '-d', str(output_path), *excluded_members],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    f"could not remove bundled archive members from {output_path}: "
+                    f"{completed.stderr.strip()}")
 
     def _expand_node_module_targets(self) -> None:
         """Materialize Node Jube module targets from the JSON-owned template.
