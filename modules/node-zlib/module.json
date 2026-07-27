@@ -17,5 +17,5 @@
   "library_linux": "node-zlib.so",
   "library_windows": "node-zlib.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "8d10be552b6146950b5537e71eaa89e9fd49abe56764a57fa7860eeb08f64f21"
+  "sha256_macos": "917657127d96cceca82eb62bc8626fcb99f5594d22c902824c3dbd36cd824f9f"
 }

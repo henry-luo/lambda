@@ -4046,6 +4046,21 @@ extern "C" Item js_get_process_object_value(void) {
                 report);
         }
 
+        // the process object is created before the runtime session attach
+        // boundary; activate node-core here so its attach hook installs the
+        // Node-owned process methods before scripts can call them.
+        const JubeModuleDef* node_core = jube_find_static_module("node-core");
+        if (node_core) {
+            if (!jube_activate_module(node_core)) {
+                log_error("js_process: failed to activate node-core module");
+            }
+        } else if (jube_node_core_module_enabled()) {
+            // dynamic profiles discover node-core through the public process
+            // specifier; resolve it before the session attach hook runs. An
+            // explicit minimal profile must not be widened by catalog discovery.
+            Item process_namespace = ItemNull;
+            (void)jube_specifier_resolve("process", &process_namespace);
+        }
     }
     return js_process_object;
 }
@@ -15634,10 +15649,14 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
+        // install lazy slots before attaching modules: an active module may
+        // already have been activated by process construction, and attaching
+        // it must replace the slot instead of having this pass erase its
+        // session-bound value afterward.
+        js_install_jube_global_namespaces(js_global_this_obj);
         // Jube Node modules may now cache namespace values: globalThis and
         // process are both installed, and teardown will run before this heap.
         jube_modules_runtime_attach();
-        js_install_jube_global_namespaces(js_global_this_obj);
         extern Item js_get_crypto_namespace(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
 
