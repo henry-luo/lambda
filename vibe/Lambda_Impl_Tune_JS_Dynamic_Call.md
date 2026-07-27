@@ -67,12 +67,16 @@ needed no audit of the 57 name writers.
 
 ## 0.1 Result15 (2026-07-27) — matrix outcome and the numeric-row diagnosis
 
-`test/benchmark/benchmark_results_v15.json` / `Overall_Result15.md`, captured
-with the identical Result14 protocol on the same machine and engine stack
-(Node v22.13.0, QuickJS 2025-09-13, 3 runs, 180 s, `--fresh`), so unlike
-Result13→14 this *is* an apples-to-apples comparison.
+`benchmark_results_v15_pre_inline_bitcast.json` /
+`Overall_Result15_pre_inline_bitcast.md` — the capture of commit `7703c784c`
+described in this section. It was taken with the identical Result14 protocol
+on the same machine and engine stack (Node v22.13.0, QuickJS 2025-09-13, 3
+runs, 180 s, `--fresh`), so unlike Result13→14 this *is* an apples-to-apples
+comparison. **`Overall_Result15.md` / `benchmark_results_v15.json` now hold
+the post-fix re-run** (§0.1.3); this section's numbers are the archived
+pre-fix pair.
 
-| Headline (dedup geo vs Node) | Result14 | Result15 |
+| Headline (dedup geo vs Node) | Result14 | Result15 (pre-fix) |
 |---|---:|---:|
 | LambdaJS/Node | 14.9x | **14.4x** |
 | MIR/Node | 2.90x | 2.91x |
@@ -251,9 +255,10 @@ pair replacing one call insn.
 
 Interleaved 4-way A/B (11/15/7/3 reps, medians of `__TIMING__`, release,
 this machine): `base` = pre-dynamic-call `temp/lambda_base.exe`, `calls` =
-`7703c784c` release, `alloca` / `ctx` = the two scratch-base variants, built
-from sources differing *only* in that condition so their delta isolates the
-base choice.
+release build of this tree with the bitcast change reverted (i.e. the helper
+call edge still present; it reproduces §0.1's 85 ms `7703c784c` mandelbrot
+exactly), `alloca` / `ctx` = the two scratch-base variants, built from sources
+differing *only* in that condition so their delta isolates the base choice.
 
 | row | base | calls | alloca | ctx | ctx/base | ctx/alloca |
 |---|---:|---:|---:|---:|---:|---:|
@@ -277,6 +282,46 @@ Context slot is preferred for emission size and simplicity, not speed: one
 fewer insn and one fewer SP bump per function, one fewer long-lived address
 register, and no per-function emitter state on the hot path. Harnesses:
 `temp/ab_inline_bitcast.py` (3-way), `temp/ab_ctxslot.py` (4-way).
+
+### 0.1.3 Result15 re-run (2026-07-27) — full matrix on the fixed binary
+
+The §0.1 capture is archived as `*_pre_inline_bitcast.{json,md}`;
+`Overall_Result15.md` / `benchmark_results_v15.json` now hold a full 62-row
+re-run of the same protocol (`-e mir,lambdajs,quickjs,nodejs -n 3 -t 180
+--fresh`) on the fixed release binary, on the same machine and engine stack.
+
+| Headline (dedup geo vs Node) | Result14 | R15 pre-fix | **R15 re-run** |
+|---|---:|---:|---:|
+| LambdaJS/Node | 14.9x | 14.4x | **13.8x** |
+| MIR/Node | 2.90x | 2.91x | 2.92x |
+| QuickJS/Node (untouched control) | 7.28x | 7.36x | 7.39x |
+
+LambdaJS improves 4.3% against a control that moved +0.4%, so the geo gain is
+real; 13.8x is the best recorded (cf. Result12 15.1x, Result14 14.9x). This
+capture was quiet — contrast §0.1.1, where the unchanged Node control drifted
++6–8.5% and forced interleaved A/B on every sub-8% mover.
+
+**Every regressed row from §0.1 is recovered and beats Result14**, matching
+the interleaved A/B of §0.1.2 within noise (LambdaJS ms): beng/mandelbrot
+71.18 → 85.44 → **49.46**, r7rs/sum 11.91 → 14.19 → **10.09**, sumfp
+1.20 → 1.41 → **0.96**, larceny/diviter 10176.7 → 11277.4 → **7286.7**,
+awfy/mandelbrot 371.0 → 398.3 → **297.0** (Result14 → pre-fix → re-run).
+The call-dominated rows kept and extended their win: fib 34.10 → 20.64 →
+**19.01**, fibfp → **18.24**, cpstak → **2.97**, tak → **1.43**.
+
+**MIR is flat in aggregate but moved where the change applies** — the Lambda
+transpiler shares the same inline emission, and its float-heavy rows gained:
+beng/mandelbrot 134.5 → 118.3 ms (0.88), r7rs/fibfp 5.30 → 4.80 (0.91),
+r7rs/sum 4.04 → 3.73 (0.92). Other MIR rows drift symmetrically within ±6%,
+this capture's short-row noise floor — sub-6% single-row MIR movement is not
+signal.
+
+Provenance: the measured binary is a clean release build of `770eb273a`
+("tune7 round3 impl"), the commit that landed this fix — its only source
+changes are the four files above plus the MT7 re-baseline — and it is
+`cmp`-identical to the §0.1.2 A/B binary. That commit also carries the
+archived pre-fix Result15 files, so they are recoverable from git as well as
+from the `_pre_inline_bitcast` copies.
 
 ---
 

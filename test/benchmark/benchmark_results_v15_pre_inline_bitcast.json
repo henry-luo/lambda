@@ -2,7 +2,7 @@
   "_metadata": {
     "schema_version": 2,
     "mode": "time",
-    "started_at": "2026-07-27T08:00:48",
+    "started_at": "2026-07-27T01:06:57",
     "command": "test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v15.json --fresh",
     "engines": [
       "mir",
@@ -18,19 +18,19 @@
     "bench_filters": [],
     "platform": "Darwin arm64",
     "lambda_exe": "./lambda.exe",
-    "lambda_exe_size_bytes": 20080040,
-    "lambda_commit": "770eb273abecbe57bafc291e62f8af37d582eff8",
+    "lambda_exe_size_bytes": 20080024,
+    "lambda_commit": "7703c784c3dfe1fcbef538f2d3caaba6166761bd",
     "node_version": "v22.13.0",
     "python_version": "Python 3.14.6",
     "quickjs_version": "2025-09-13",
     "profile_check": "not_recorded",
     "log_dir": null,
-    "finished_at": "2026-07-27T08:13:40"
+    "finished_at": "2026-07-27T01:20:47"
   },
   "r7rs": {
     "fib": {
       "category": "recursive",
-      "mir": 6.993,
+      "mir": 6.584,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -59,13 +59,13 @@
           }
         }
       },
-      "lambdajs": 19.010292,
-      "quickjs": 17.665,
-      "nodejs": 1.715958
+      "lambdajs": 20.64075,
+      "quickjs": 19.118,
+      "nodejs": 1.805333
     },
     "fibfp": {
       "category": "recursive",
-      "mir": 4.802,
+      "mir": 5.301,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -94,13 +94,13 @@
           }
         }
       },
-      "lambdajs": 18.241166,
-      "quickjs": 17.562,
-      "nodejs": 1.665916
+      "lambdajs": 20.826792,
+      "quickjs": 19.116,
+      "nodejs": 1.799166
     },
     "tak": {
       "category": "recursive",
-      "mir": 0.492,
+      "mir": 0.512,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -129,13 +129,13 @@
           }
         }
       },
-      "lambdajs": 1.426834,
-      "quickjs": 2.623,
-      "nodejs": 0.727667
+      "lambdajs": 1.807916,
+      "quickjs": 2.823,
+      "nodejs": 0.800375
     },
     "cpstak": {
       "category": "closure",
-      "mir": 0.984,
+      "mir": 1.02,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -164,13 +164,13 @@
           }
         }
       },
-      "lambdajs": 2.966208,
-      "quickjs": 5.286,
-      "nodejs": 0.919958
+      "lambdajs": 3.568708,
+      "quickjs": 5.725,
+      "nodejs": 1.005584
     },
     "sum": {
       "category": "iterative",
-      "mir": 3.732,
+      "mir": 4.039,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -199,13 +199,13 @@
           }
         }
       },
-      "lambdajs": 10.090042,
-      "quickjs": 29.012,
-      "nodejs": 1.120458
+      "lambdajs": 14.194125,
+      "quickjs": 31.986,
+      "nodejs": 1.21575
     },
     "sumfp": {
       "category": "iterative",
-      "mir": 0.062,
+      "mir": 0.067,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -234,13 +234,13 @@
           }
         }
       },
-      "lambdajs": 0.963708,
-      "quickjs": 3.491,
-      "nodejs": 0.845834
+      "lambdajs": 1.406916,
+      "quickjs": 3.714,
+      "nodejs": 0.896
     },
     "nqueens": {
       "category": "backtrack",
-      "mir": 1.299,
+      "mir": 1.431,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -269,9 +269,9 @@
           }
         }
       },
-      "lambdajs": 16.87475,
-      "quickjs": 7.384,
-      "nodejs": 1.734708
+      "lambdajs": 17.201167,
+      "quickjs": 8.151,
+      "nodejs": 1.799291
     },
     "fft": {
       "category": "numeric",
@@ -304,13 +304,13 @@
           }
         }
       },
-      "lambdajs": 10.698208,
-      "quickjs": 2.529,
-      "nodejs": 1.502417
+      "lambdajs": 10.961208,
+      "quickjs": 2.796,
+      "nodejs": 1.661833
     },
     "mbrot": {
       "category": "numeric",
-      "mir": 0.763,
+      "mir": 0.809,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -339,13 +339,13 @@
           }
         }
       },
-      "lambdajs": 8.089584,
-      "quickjs": 16.939,
-      "nodejs": 1.739375
+      "lambdajs": 8.43125,
+      "quickjs": 18.095,
+      "nodejs": 1.866583
     },
     "ack": {
       "category": "recursive",
-      "mir": 21.546,
+      "mir": 22.54,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -374,15 +374,15 @@
           }
         }
       },
-      "lambdajs": 60.8785,
+      "lambdajs": 67.606125,
       "quickjs": null,
-      "nodejs": 12.664666
+      "nodejs": 13.697958
     }
   },
   "awfy": {
     "sieve": {
       "category": "micro",
-      "mir": 0.474,
+      "mir": 0.511,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -411,13 +411,13 @@
           }
         }
       },
-      "lambdajs": 0.434167,
-      "quickjs": 0.584,
-      "nodejs": 0.362583
+      "lambdajs": 0.586333,
+      "quickjs": 0.647,
+      "nodejs": 0.400625
     },
     "permute": {
       "category": "micro",
-      "mir": 0.531,
+      "mir": 0.588,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -446,13 +446,13 @@
           }
         }
       },
-      "lambdajs": 6.7825,
-      "quickjs": 1.547,
-      "nodejs": 0.804208
+      "lambdajs": 7.14025,
+      "quickjs": 1.563,
+      "nodejs": 0.818792
     },
     "queens": {
       "category": "micro",
-      "mir": 0.486,
+      "mir": 0.507,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -481,13 +481,13 @@
           }
         }
       },
-      "lambdajs": 4.097875,
-      "quickjs": 0.988,
-      "nodejs": 0.6225
+      "lambdajs": 4.569291,
+      "quickjs": 1.061,
+      "nodejs": 0.653542
     },
     "towers": {
       "category": "micro",
-      "mir": 0.763,
+      "mir": 0.829,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -516,13 +516,13 @@
           }
         }
       },
-      "lambdajs": 15.820084,
-      "quickjs": 2.134,
-      "nodejs": 1.116792
+      "lambdajs": 16.421916,
+      "quickjs": 2.312,
+      "nodejs": 1.137417
     },
     "bounce": {
       "category": "micro",
-      "mir": 0.806,
+      "mir": 0.828,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -551,9 +551,9 @@
           }
         }
       },
-      "lambdajs": 3.372042,
-      "quickjs": 0.812,
-      "nodejs": 0.502541
+      "lambdajs": 3.537792,
+      "quickjs": 0.884,
+      "nodejs": 0.554791
     },
     "list": {
       "category": "micro",
@@ -582,13 +582,13 @@
           }
         }
       },
-      "lambdajs": 3.258959,
-      "quickjs": 0.857,
-      "nodejs": 0.4635
+      "lambdajs": 3.406875,
+      "quickjs": 0.915,
+      "nodejs": 0.506375
     },
     "storage": {
       "category": "micro",
-      "mir": 0.63,
+      "mir": 0.638,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -617,13 +617,13 @@
           }
         }
       },
-      "lambdajs": 12.957083,
-      "quickjs": 2.153,
-      "nodejs": 0.605958
+      "lambdajs": 13.652958,
+      "quickjs": 2.2,
+      "nodejs": 0.651417
     },
     "mandelbrot": {
       "category": "compute",
-      "mir": 43.892,
+      "mir": 46.561,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -652,13 +652,13 @@
           }
         }
       },
-      "lambdajs": 296.990583,
-      "quickjs": 841.996,
-      "nodejs": 29.659833
+      "lambdajs": 398.324459,
+      "quickjs": 897.113,
+      "nodejs": 32.16475
     },
     "nbody": {
       "category": "compute",
-      "mir": 79.239,
+      "mir": 83.5,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -687,13 +687,13 @@
           }
         }
       },
-      "lambdajs": 269.33925,
-      "quickjs": 158.578,
-      "nodejs": 5.3705
+      "lambdajs": 284.244792,
+      "quickjs": 164.647,
+      "nodejs": 5.410875
     },
     "richards": {
       "category": "macro",
-      "mir": 178.384,
+      "mir": 185.649,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -722,13 +722,13 @@
           }
         }
       },
-      "lambdajs": 1173.571958,
-      "quickjs": 190.926,
-      "nodejs": 47.11625
+      "lambdajs": 1191.28075,
+      "quickjs": 196.872,
+      "nodejs": 48.618666
     },
     "json": {
       "category": "macro",
-      "mir": 5.32,
+      "mir": 5.363,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -757,13 +757,13 @@
           }
         }
       },
-      "lambdajs": 37.282166,
-      "quickjs": 11.108,
-      "nodejs": 2.604041
+      "lambdajs": 38.151375,
+      "quickjs": 11.414,
+      "nodejs": 2.644375
     },
     "deltablue": {
       "category": "macro",
-      "mir": 59.49,
+      "mir": 61.858,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -792,13 +792,13 @@
           }
         }
       },
-      "lambdajs": 803.066042,
-      "quickjs": 100.745,
-      "nodejs": 11.964542
+      "lambdajs": 820.935417,
+      "quickjs": 102.759,
+      "nodejs": 11.811333
     },
     "havlak": {
       "category": "macro",
-      "mir": 48.326,
+      "mir": 49.919,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -827,13 +827,13 @@
           }
         }
       },
-      "lambdajs": 77155.000041,
-      "quickjs": 3340.781,
-      "nodejs": 97.285666
+      "lambdajs": 96926.919459,
+      "quickjs": 3406.428,
+      "nodejs": 104.286416
     },
     "cd": {
       "category": "macro",
-      "mir": 372.441,
+      "mir": 385.629,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -862,15 +862,15 @@
           }
         }
       },
-      "lambdajs": 9498.182125,
-      "quickjs": 971.765,
-      "nodejs": 36.70175
+      "lambdajs": 9766.149792,
+      "quickjs": 989.691,
+      "nodejs": 37.442708
     }
   },
   "beng": {
     "binarytrees": {
       "category": "allocation",
-      "mir": 10.29,
+      "mir": 10.272,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -899,13 +899,13 @@
           }
         }
       },
-      "lambdajs": 32.677625,
-      "quickjs": 23.737,
-      "nodejs": 4.150292
+      "lambdajs": 33.10375,
+      "quickjs": 24.023,
+      "nodejs": 4.100875
     },
     "fannkuch": {
       "category": "permutation",
-      "mir": 0.634,
+      "mir": 0.629,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -934,13 +934,13 @@
           }
         }
       },
-      "lambdajs": 12.556792,
-      "quickjs": 7.272,
-      "nodejs": 4.047875
+      "lambdajs": 12.7555,
+      "quickjs": 7.281,
+      "nodejs": 4.3205
     },
     "fasta": {
       "category": "generation",
-      "mir": 6.967,
+      "mir": 7.072,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -969,13 +969,13 @@
           }
         }
       },
-      "lambdajs": 37.76525,
-      "quickjs": 8.761,
-      "nodejs": 6.076166
+      "lambdajs": 37.889708,
+      "quickjs": 9.055,
+      "nodejs": 6.552541
     },
     "knucleotide": {
       "category": "hashing",
-      "mir": 11.467,
+      "mir": 11.526,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1004,13 +1004,13 @@
           }
         }
       },
-      "lambdajs": 150.584125,
+      "lambdajs": 152.009,
       "quickjs": null,
-      "nodejs": 4.939375
+      "nodejs": 4.98875
     },
     "mandelbrot": {
       "category": "numeric",
-      "mir": 118.345,
+      "mir": 134.465,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1039,13 +1039,13 @@
           }
         }
       },
-      "lambdajs": 49.463375,
-      "quickjs": 679.017,
-      "nodejs": 15.235541
+      "lambdajs": 85.437542,
+      "quickjs": 690.702,
+      "nodejs": 15.666833
     },
     "nbody": {
       "category": "numeric",
-      "mir": 80.135,
+      "mir": 82.451,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1074,9 +1074,9 @@
           }
         }
       },
-      "lambdajs": 370.061083,
-      "quickjs": 149.33,
-      "nodejs": 7.311458
+      "lambdajs": 373.870833,
+      "quickjs": 152.635,
+      "nodejs": 7.627625
     },
     "pidigits": {
       "category": "bignum",
@@ -1109,13 +1109,13 @@
           }
         }
       },
-      "lambdajs": 0.315667,
-      "quickjs": 0.132,
-      "nodejs": 1.991334
+      "lambdajs": 0.333291,
+      "quickjs": 0.135,
+      "nodejs": 2.006667
     },
     "regexredux": {
       "category": "regex",
-      "mir": 1.287,
+      "mir": 1.338,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1144,13 +1144,13 @@
           }
         }
       },
-      "lambdajs": 15.726458,
+      "lambdajs": 15.67875,
       "quickjs": null,
-      "nodejs": 2.493375
+      "nodejs": 2.461375
     },
     "revcomp": {
       "category": "string",
-      "mir": 1.122,
+      "mir": 1.148,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1179,13 +1179,13 @@
           }
         }
       },
-      "lambdajs": 41.157291,
+      "lambdajs": 41.344625,
       "quickjs": null,
-      "nodejs": 3.364708
+      "nodejs": 3.547875
     },
     "spectralnorm": {
       "category": "numeric",
-      "mir": 47.654,
+      "mir": 48.381,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1214,15 +1214,15 @@
           }
         }
       },
-      "lambdajs": 289.947042,
-      "quickjs": 65.217,
-      "nodejs": 2.596708
+      "lambdajs": 292.401583,
+      "quickjs": 65.734,
+      "nodejs": 2.629667
     }
   },
   "kostya": {
     "brainfuck": {
       "category": "interpreter",
-      "mir": 452.105,
+      "mir": 460.15,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1251,13 +1251,13 @@
           }
         }
       },
-      "lambdajs": 975.699542,
-      "quickjs": 892.601,
-      "nodejs": 34.012708
+      "lambdajs": 987.234792,
+      "quickjs": 904.649,
+      "nodejs": 34.871708
     },
     "matmul": {
       "category": "numeric",
-      "mir": 41.72,
+      "mir": 42.188,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1286,13 +1286,13 @@
           }
         }
       },
-      "lambdajs": 837.695667,
-      "quickjs": 545.249,
-      "nodejs": 15.7585
+      "lambdajs": 885.029833,
+      "quickjs": 551.256,
+      "nodejs": 15.970167
     },
     "primes": {
       "category": "numeric",
-      "mir": 60.079,
+      "mir": 60.198,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1321,13 +1321,13 @@
           }
         }
       },
-      "lambdajs": 97.07425,
-      "quickjs": 95.551,
-      "nodejs": 4.732083
+      "lambdajs": 104.6555,
+      "quickjs": 97.189,
+      "nodejs": 4.697417
     },
     "base64": {
       "category": "string",
-      "mir": 297.909,
+      "mir": 304.729,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1356,13 +1356,13 @@
           }
         }
       },
-      "lambdajs": 754.620291,
-      "quickjs": 158.821,
-      "nodejs": 17.514833
+      "lambdajs": 761.102459,
+      "quickjs": 161.351,
+      "nodejs": 17.918583
     },
     "levenshtein": {
       "category": "string",
-      "mir": 45.148,
+      "mir": 45.387,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1391,13 +1391,13 @@
           }
         }
       },
-      "lambdajs": 80.98875,
-      "quickjs": 54.783,
-      "nodejs": 3.947958
+      "lambdajs": 85.658917,
+      "quickjs": 55.667,
+      "nodejs": 4.098084
     },
     "json_gen": {
       "category": "data",
-      "mir": 73.199,
+      "mir": 74.562,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1426,13 +1426,13 @@
           }
         }
       },
-      "lambdajs": 36.223208,
-      "quickjs": 20.064,
-      "nodejs": 6.60725
+      "lambdajs": 36.966709,
+      "quickjs": 20.536,
+      "nodejs": 6.210292
     },
     "collatz": {
       "category": "numeric",
-      "mir": 1708.85,
+      "mir": 1727.48,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1461,15 +1461,15 @@
           }
         }
       },
-      "lambdajs": 1977.305292,
-      "quickjs": 6276.073,
-      "nodejs": 1423.527791
+      "lambdajs": 2375.109666,
+      "quickjs": 6368.468,
+      "nodejs": 1448.558958
     }
   },
   "larceny": {
     "triangl": {
       "category": "search",
-      "mir": 653.059,
+      "mir": 652.532,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1498,13 +1498,13 @@
           }
         }
       },
-      "lambdajs": 3932.680459,
-      "quickjs": 2199.911,
-      "nodejs": 67.272125
+      "lambdajs": 4049.356167,
+      "quickjs": 2230.629,
+      "nodejs": 68.47975
     },
     "array1": {
       "category": "array",
-      "mir": 4.291,
+      "mir": 4.336,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1533,13 +1533,13 @@
           }
         }
       },
-      "lambdajs": 26.586708,
-      "quickjs": 36.318,
-      "nodejs": 1.904
+      "lambdajs": 28.054292,
+      "quickjs": 36.452,
+      "nodejs": 1.957583
     },
     "deriv": {
       "category": "symbolic",
-      "mir": 25.137,
+      "mir": 25.54,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1568,13 +1568,13 @@
           }
         }
       },
-      "lambdajs": 72.278125,
-      "quickjs": 59.242,
-      "nodejs": 4.008458
+      "lambdajs": 73.434,
+      "quickjs": 60.243,
+      "nodejs": 3.6965
     },
     "diviter": {
       "category": "iterative",
-      "mir": 3088.04,
+      "mir": 3126.32,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1603,13 +1603,13 @@
           }
         }
       },
-      "lambdajs": 7286.699583,
-      "quickjs": 29548.224,
-      "nodejs": 484.688417
+      "lambdajs": 11277.397166,
+      "quickjs": 27217.306,
+      "nodejs": 480.478
     },
     "divrec": {
       "category": "recursive",
-      "mir": 20.456,
+      "mir": 20.353,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1638,13 +1638,13 @@
           }
         }
       },
-      "lambdajs": 24.837083,
-      "quickjs": 38.095,
-      "nodejs": 7.688625
+      "lambdajs": 24.846,
+      "quickjs": 36.76,
+      "nodejs": 7.821334
     },
     "gcbench": {
       "category": "allocation",
-      "mir": 397.627,
+      "mir": 396.358,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1673,13 +1673,13 @@
           }
         }
       },
-      "lambdajs": 825.631084,
-      "quickjs": 577.958,
-      "nodejs": 25.449333
+      "lambdajs": 783.114792,
+      "quickjs": 565.304,
+      "nodejs": 24.31
     },
     "paraffins": {
       "category": "combinat",
-      "mir": 2.15,
+      "mir": 2.248,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1708,13 +1708,13 @@
           }
         }
       },
-      "lambdajs": 2.351417,
-      "quickjs": 2.55,
-      "nodejs": 1.036292
+      "lambdajs": 2.554375,
+      "quickjs": 2.538,
+      "nodejs": 1.015042
     },
     "pnpoly": {
       "category": "numeric",
-      "mir": 109.04,
+      "mir": 108.023,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1743,13 +1743,13 @@
           }
         }
       },
-      "lambdajs": 143.498917,
-      "quickjs": 215.87,
-      "nodejs": 5.985583
+      "lambdajs": 145.394834,
+      "quickjs": 205.723,
+      "nodejs": 6.127833
     },
     "primes": {
       "category": "iterative",
-      "mir": 63.535,
+      "mir": 60.035,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1778,13 +1778,13 @@
           }
         }
       },
-      "lambdajs": 99.709042,
-      "quickjs": 98.141,
-      "nodejs": 4.471417
+      "lambdajs": 104.313,
+      "quickjs": 96.861,
+      "nodejs": 4.534166
     },
     "puzzle": {
       "category": "search",
-      "mir": 19.119,
+      "mir": 18.799,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1813,13 +1813,13 @@
           }
         }
       },
-      "lambdajs": 27.183125,
-      "quickjs": 30.394,
-      "nodejs": 3.356458
+      "lambdajs": 27.750333,
+      "quickjs": 29.764,
+      "nodejs": 3.351917
     },
     "quicksort": {
       "category": "sorting",
-      "mir": 13.088,
+      "mir": 12.702,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1848,13 +1848,13 @@
           }
         }
       },
-      "lambdajs": 65.935708,
-      "quickjs": 20.189,
-      "nodejs": 1.699541
+      "lambdajs": 61.803708,
+      "quickjs": 19.6,
+      "nodejs": 1.684125
     },
     "ray": {
       "category": "numeric",
-      "mir": 11.844,
+      "mir": 11.797,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1883,15 +1883,15 @@
           }
         }
       },
-      "lambdajs": 14.311375,
-      "quickjs": 14.356,
-      "nodejs": 3.591458
+      "lambdajs": 14.18175,
+      "quickjs": 14.02,
+      "nodejs": 3.6115
     }
   },
   "jetstream": {
     "nbody": {
       "category": "numeric",
-      "mir": 82.831,
+      "mir": 82.598,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1920,13 +1920,13 @@
           }
         }
       },
-      "lambdajs": 226.342,
-      "quickjs": 137.502,
-      "nodejs": 5.565
+      "lambdajs": 221.929,
+      "quickjs": 134.296,
+      "nodejs": 5.745
     },
     "cube3d": {
       "category": "3d",
-      "mir": 14.425,
+      "mir": 13.492,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1955,13 +1955,13 @@
           }
         }
       },
-      "lambdajs": 814.202,
+      "lambdajs": 787.578,
       "quickjs": null,
-      "nodejs": 18.537
+      "nodejs": 18.434
     },
     "navier_stokes": {
       "category": "numeric",
-      "mir": 971.816,
+      "mir": 957.444,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -1990,13 +1990,13 @@
           }
         }
       },
-      "lambdajs": 5371.659,
-      "quickjs": 819.567,
-      "nodejs": 39.202
+      "lambdajs": 5119.898,
+      "quickjs": 801.348,
+      "nodejs": 38.401
     },
     "richards": {
       "category": "macro",
-      "mir": 208.434,
+      "mir": 205.859,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2025,13 +2025,13 @@
           }
         }
       },
-      "lambdajs": 222.659,
-      "quickjs": 26.974,
-      "nodejs": 5.042
+      "lambdajs": 214.399,
+      "quickjs": 26.231,
+      "nodejs": 5.517
     },
     "splay": {
       "category": "data",
-      "mir": 164.345,
+      "mir": 160.674,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2060,13 +2060,13 @@
           }
         }
       },
-      "lambdajs": 52.008,
-      "quickjs": 25.327,
-      "nodejs": 4.83
+      "lambdajs": 49.614,
+      "quickjs": 24.373,
+      "nodejs": 4.0
     },
     "deltablue": {
       "category": "macro",
-      "mir": 12.773,
+      "mir": 12.16,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2095,13 +2095,13 @@
           }
         }
       },
-      "lambdajs": 369.464,
-      "quickjs": 46.914,
-      "nodejs": 6.533
+      "lambdajs": 355.737,
+      "quickjs": 45.885,
+      "nodejs": 6.616
     },
     "hashmap": {
       "category": "data",
-      "mir": 76.002,
+      "mir": 71.887,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2130,13 +2130,13 @@
           }
         }
       },
-      "lambdajs": 63231.933,
-      "quickjs": 2509.33,
-      "nodejs": 56.234
+      "lambdajs": 64125.315,
+      "quickjs": 2576.52,
+      "nodejs": 56.676
     },
     "crypto_sha1": {
       "category": "crypto",
-      "mir": 205.529,
+      "mir": 209.441,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2165,13 +2165,13 @@
           }
         }
       },
-      "lambdajs": 507.341,
-      "quickjs": 69.961,
-      "nodejs": 6.932
+      "lambdajs": 518.989,
+      "quickjs": 71.305,
+      "nodejs": 7.108
     },
     "raytrace3d": {
       "category": "3d",
-      "mir": 147.846,
+      "mir": 157.039,
       "_status": {
         "mir": "ok",
         "lambdajs": "ok",
@@ -2200,9 +2200,9 @@
           }
         }
       },
-      "lambdajs": 1051.05,
+      "lambdajs": 1070.276,
       "quickjs": null,
-      "nodejs": 18.349
+      "nodejs": 19.159
     }
   }
 }

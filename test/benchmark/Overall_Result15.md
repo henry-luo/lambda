@@ -2,7 +2,7 @@
 
 - **Date:** 2026-07-27
 - **Platform:** Darwin arm64
-- **Lambda commit:** `7703c784c3dfe1fcbef538f2d3caaba6166761bd`
+- **Lambda commit:** `770eb273abecbe57bafc291e62f8af37d582eff8`
 - **Lambda build:** clean release build (`make release`)
 - **Instrumentation check:** not_recorded
 - **Node.js:** v22.13.0
@@ -13,9 +13,33 @@
 
 JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop over the detected benchmark function. They do not use per-file `Benchmark.runIteration()` counts, because those counts drift across JetStream files.
 
-> **Reading this snapshot.** Same machine and engine stack as Result14, so the comparison is apples-to-apples. LambdaJS/Node dedup geo improves 14.9x -> 14.4x while the untouched QuickJS control drifts +1.1% the wrong way. The per-row split is bimodal: recursive-call rows are 1.5-1.7x faster (r7rs/fib 34.3 -> 20.6 ms, fibfp, cpstak, tak, ack, larceny/divrec) from the per-callee call-entry work; five numeric rows regressed (beng/mandelbrot 1.21x, r7rs/sum 1.18x, sumfp 1.17x, larceny/diviter 1.08x, awfy/mandelbrot 1.05x) and were traced to **code/data placement, not semantics** - identical emitted MIR, instruction-identical helpers that merely moved (with their string literals and one hot global page), and no change under `JS_CALL_FORCE_GENERIC=1`. Why placement costs 20% is inferred, not measured; the executed code is provably identical on both sides. All other apparent movers in this snapshot (awfy/sieve, queens, larceny/paraffins, beng/pidigits, and the Node-side drifts) dissolve to ≤2% under interleaved A/B - machine noise; the unchanged Node control drifting +6-8.5% on fasta/havlak/fannkuch bounds this capture's noise floor. Full diagnosis + triage: `vibe/Lambda_Impl_Tune_JS_Dynamic_Call.md` sections 0.1/0.1.1.
+> **This snapshot supersedes an earlier Result15 capture**, archived as `Overall_Result15_pre_inline_bitcast.md` / `benchmark_results_v15_pre_inline_bitcast.json`. That capture measured commit `7703c784c` (per-callee dynamic-call entries) and recorded five regressed numeric rows, diagnosed as code/data **placement** around the `lambda_mir_double_bits` / `lambda_mir_bits_double` helper calls — executed code provably identical on both sides. This re-run measures the durable fix for that diagnosis: the bit reinterpretation is now emitted **inline in MIR** (typed store + differently-typed load through `Context::mir_bitcast_scratch`), removing the JIT→helper edge entirely. Same machine, same engine stack, same protocol, so all three of Result14 / archived-Result15 / this capture are apples-to-apples. Diagnosis and landing record: `vibe/Lambda_Impl_Tune_JS_Dynamic_Call.md` §0.1–§0.1.2.
 >
-> The binary is commit `7703c784c`, which bundles the dynamic-call entry work with an unrelated in-flight TDZ fix across four MIR-lowering files; the latter was ruled out as a cause of the numeric rows but means this commit is not a single-change delta.
+> **Headline (dedup geo vs Node, all from this table's metric):**
+>
+> | | Result14 | Result15 (archived) | **Result15 (this)** |
+> |---|---:|---:|---:|
+> | LambdaJS/Node | 14.9x | 14.4x | **13.8x** |
+> | MIR/Node | 2.90x | 2.91x | 2.92x |
+> | QuickJS/Node (untouched control) | 7.28x | 7.36x | 7.39x |
+>
+> LambdaJS improves 4.3% while the untouched QuickJS control moves +0.4%, so the gain is real rather than capture drift. This was a quiet capture — the previous one had the unchanged Node control drifting +6–8.5% on some rows, which is why its sub-8% movers needed interleaved A/B to rate. 13.8x is the best LambdaJS/Node geo recorded to date (Result12 15.1x → Result14 14.9x → here).
+>
+> **All five regressed rows are recovered and now beat Result14** (LambdaJS ms, median of 3):
+>
+> | row | Result14 | Result15 archived | **this** | vs archived | vs Result14 |
+> |---|---:|---:|---:|---:|---:|
+> | beng/mandelbrot | 71.18 | 85.44 | **49.46** | 0.579 | 0.695 |
+> | r7rs/sum | 11.91 | 14.19 | **10.09** | 0.711 | 0.847 |
+> | r7rs/sumfp | 1.20 | 1.41 | **0.96** | 0.685 | 0.803 |
+> | larceny/diviter | 10176.7 | 11277.4 | **7286.7** | 0.646 | 0.716 |
+> | awfy/mandelbrot | 371.0 | 398.3 | **297.0** | 0.746 | 0.801 |
+>
+> The helper edge was therefore a standing cost, not merely a placement liability: removing it puts every one of these rows 15–30% below the pre-regression Result14 baseline. **The call-dominated rows kept their dynamic-call win** and improved further (r7rs/fib 34.10 → 20.64 → 19.01, fibfp 34.15 → 20.83 → 18.24, cpstak 5.59 → 3.57 → 2.97, tak 2.81 → 1.81 → 1.43).
+>
+> **MIR is flat in aggregate (2.91x → 2.92x) but moved where the change applies** — the same inline emission is shared by the Lambda transpiler, and its float-heavy rows gained: beng/mandelbrot 134.5 → 118.3 ms (0.88), r7rs/fibfp 5.30 → 4.80 (0.91), r7rs/sum 4.04 → 3.73 (0.92). Non-float MIR rows drift symmetrically within ±6%, which is this capture's per-row noise floor for short benchmarks; do not read individual sub-6% MIR movements as signal.
+>
+> **Binary provenance:** commit `770eb273a` ("tune7 round3 impl") is the inline double↔bits landing — its only source changes are the four files of that fix (`lambda.h`, `mir_emitter_shared.hpp`, `transpile-mir.cpp`, `js_mir_calls_boxing_types.cpp`) plus the MT7 budget re-baseline. The measured binary is a clean release build of exactly that commit, `cmp`-identical to the one used for the interleaved A/B in §0.1.2. The archived pre-fix Result15 files are also carried in that same commit, which is why they are recoverable from git as well as from the `_pre_inline_bitcast` copies.
 
 ---
 
@@ -23,14 +47,14 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Suite | Total | Timed MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| R7RS | 10 | 9 | 10 | 9 | 10 | 1.00x | 5.54x | 6.41x |
-| AWFY | 14 | 13 | 14 | 14 | 14 | 1.87x | 21.5x | 5.22x |
-| BENG | 10 | 9 | 10 | 7 | 10 | 1.87x | 8.29x | 4.12x |
-| KOSTYA | 7 | 7 | 7 | 7 | 7 | 7.39x | 16.3x | 11.9x |
-| LARCENY | 12 | 12 | 12 | 12 | 12 | 6.14x | 14.2x | 13.7x |
-| JetStream | 9 | 9 | 9 | 7 | 9 | 8.46x | 66.8x | 12.4x |
-| **Overall dedup** | **56** | **53** | **56** | **50** | **56** | **2.91x** | **14.4x** | **7.36x** |
-| Overall raw | 62 | 59 | 62 | 56 | 62 | 3.20x | 15.6x | 7.95x |
+| R7RS | 10 | 9 | 10 | 9 | 10 | 1.02x | 5.11x | 6.35x |
+| AWFY | 14 | 13 | 14 | 14 | 14 | 1.86x | 20.5x | 5.22x |
+| BENG | 10 | 9 | 10 | 7 | 10 | 1.87x | 7.97x | 4.18x |
+| KOSTYA | 7 | 7 | 7 | 7 | 7 | 7.35x | 15.5x | 11.7x |
+| LARCENY | 12 | 12 | 12 | 12 | 12 | 6.13x | 13.5x | 13.9x |
+| JetStream | 9 | 9 | 9 | 7 | 9 | 8.59x | 68.0x | 12.5x |
+| **Overall dedup** | **56** | **53** | **56** | **50** | **56** | **2.92x** | **13.8x** | **7.39x** |
+| Overall raw | 62 | 59 | 62 | 56 | 62 | 3.22x | 15.0x | 7.98x |
 
 > **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -48,20 +72,20 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Benchmark | LambdaJS | Node.js | Ratio |
 |---|---:|---:|---:|
-| jetstream/hashmap | 64.13s | 56.7 | 1131x |
-| awfy/havlak | 96.93s | 104.3 | 929x |
-| awfy/cd | 9.77s | 37.4 | 261x |
-| jetstream/navier_stokes | 5.12s | 38.4 | 133x |
-| beng/spectralnorm | 292.4 | 2.63 | 111x |
-| jetstream/crypto_sha1 | 519.0 | 7.11 | 73.0x |
-| awfy/deltablue | 820.9 | 11.8 | 69.5x |
-| larceny/triangl | 4.05s | 68.5 | 59.1x |
+| jetstream/hashmap | 63.23s | 56.2 | 1124x |
+| awfy/havlak | 77.16s | 97.3 | 793x |
+| awfy/cd | 9.50s | 36.7 | 259x |
+| jetstream/navier_stokes | 5.37s | 39.2 | 137x |
+| beng/spectralnorm | 289.9 | 2.60 | 112x |
+| jetstream/crypto_sha1 | 507.3 | 6.93 | 73.2x |
+| awfy/deltablue | 803.1 | 12.0 | 67.1x |
+| larceny/triangl | 3.93s | 67.3 | 58.5x |
 
 ### LambdaJS Faster Than Node.js
 
 | Benchmark | LambdaJS | Node.js | Ratio |
 |---|---:|---:|---:|
-| beng/pidigits | 0.333 | 2.01 | 0.17x |
+| beng/pidigits | 0.316 | 1.99 | 0.16x |
 
 ---
 
@@ -69,90 +93,90 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| fib | recursive | 6.58 | 20.6 | 19.1 | 1.81 | 3.65x | 11.4x | 10.6x |
-| fibfp | recursive | 5.30 | 20.8 | 19.1 | 1.80 | 2.95x | 11.6x | 10.6x |
-| tak | recursive | 0.512 | 1.81 | 2.82 | 0.800 | 0.64x | 2.26x | 3.53x |
-| cpstak | closure | 1.02 | 3.57 | 5.72 | 1.01 | 1.01x | 3.55x | 5.69x |
-| sum | iterative | 4.04 | 14.2 | 32.0 | 1.22 | 3.32x | 11.7x | 26.3x |
-| sumfp | iterative | 0.067 | 1.41 | 3.71 | 0.896 | 0.07x | 1.57x | 4.15x |
-| nqueens | backtrack | 1.43 | 17.2 | 8.15 | 1.80 | 0.80x | 9.56x | 4.53x |
-| fft | numeric | --- | 11.0 | 2.80 | 1.66 | --- | 6.60x | 1.68x |
-| mbrot | numeric | 0.809 | 8.43 | 18.1 | 1.87 | 0.43x | 4.52x | 9.69x |
-| ack | recursive | 22.5 | 67.6 | --- | 13.7 | 1.65x | 4.94x | --- |
+| fib | recursive | 6.99 | 19.0 | 17.7 | 1.72 | 4.08x | 11.1x | 10.3x |
+| fibfp | recursive | 4.80 | 18.2 | 17.6 | 1.67 | 2.88x | 10.9x | 10.5x |
+| tak | recursive | 0.492 | 1.43 | 2.62 | 0.728 | 0.68x | 1.96x | 3.60x |
+| cpstak | closure | 0.984 | 2.97 | 5.29 | 0.920 | 1.07x | 3.22x | 5.75x |
+| sum | iterative | 3.73 | 10.1 | 29.0 | 1.12 | 3.33x | 9.01x | 25.9x |
+| sumfp | iterative | 0.062 | 0.964 | 3.49 | 0.846 | 0.07x | 1.14x | 4.13x |
+| nqueens | backtrack | 1.30 | 16.9 | 7.38 | 1.73 | 0.75x | 9.73x | 4.26x |
+| fft | numeric | --- | 10.7 | 2.53 | 1.50 | --- | 7.12x | 1.68x |
+| mbrot | numeric | 0.763 | 8.09 | 16.9 | 1.74 | 0.44x | 4.65x | 9.74x |
+| ack | recursive | 21.5 | 60.9 | --- | 12.7 | 1.70x | 4.81x | --- |
 
 ## AWFY
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| sieve | micro | 0.511 | 0.586 | 0.647 | 0.401 | 1.28x | 1.46x | 1.61x |
-| permute | micro | 0.588 | 7.14 | 1.56 | 0.819 | 0.72x | 8.72x | 1.91x |
-| queens | micro | 0.507 | 4.57 | 1.06 | 0.654 | 0.78x | 6.99x | 1.62x |
-| towers | micro | 0.829 | 16.4 | 2.31 | 1.14 | 0.73x | 14.4x | 2.03x |
-| bounce | micro | 0.828 | 3.54 | 0.884 | 0.555 | 1.49x | 6.38x | 1.59x |
-| list | micro | --- | 3.41 | 0.915 | 0.506 | --- | 6.73x | 1.81x |
-| storage | micro | 0.638 | 13.7 | 2.20 | 0.651 | 0.98x | 21.0x | 3.38x |
-| mandelbrot | compute | 46.6 | 398.3 | 897.1 | 32.2 | 1.45x | 12.4x | 27.9x |
-| nbody | compute | 83.5 | 284.2 | 164.6 | 5.41 | 15.4x | 52.5x | 30.4x |
-| richards | macro | 185.6 | 1.19s | 196.9 | 48.6 | 3.82x | 24.5x | 4.05x |
-| json | macro | 5.36 | 38.2 | 11.4 | 2.64 | 2.03x | 14.4x | 4.32x |
-| deltablue | macro | 61.9 | 820.9 | 102.8 | 11.8 | 5.24x | 69.5x | 8.70x |
-| havlak | macro | 49.9 | 96.93s | 3.41s | 104.3 | 0.48x | 929x | 32.7x |
-| cd | macro | 385.6 | 9.77s | 989.7 | 37.4 | 10.3x | 261x | 26.4x |
+| sieve | micro | 0.474 | 0.434 | 0.584 | 0.363 | 1.31x | 1.20x | 1.61x |
+| permute | micro | 0.531 | 6.78 | 1.55 | 0.804 | 0.66x | 8.43x | 1.92x |
+| queens | micro | 0.486 | 4.10 | 0.988 | 0.623 | 0.78x | 6.58x | 1.59x |
+| towers | micro | 0.763 | 15.8 | 2.13 | 1.12 | 0.68x | 14.2x | 1.91x |
+| bounce | micro | 0.806 | 3.37 | 0.812 | 0.503 | 1.60x | 6.71x | 1.62x |
+| list | micro | --- | 3.26 | 0.857 | 0.464 | --- | 7.03x | 1.85x |
+| storage | micro | 0.630 | 13.0 | 2.15 | 0.606 | 1.04x | 21.4x | 3.55x |
+| mandelbrot | compute | 43.9 | 297.0 | 842.0 | 29.7 | 1.48x | 10.0x | 28.4x |
+| nbody | compute | 79.2 | 269.3 | 158.6 | 5.37 | 14.8x | 50.2x | 29.5x |
+| richards | macro | 178.4 | 1.17s | 190.9 | 47.1 | 3.79x | 24.9x | 4.05x |
+| json | macro | 5.32 | 37.3 | 11.1 | 2.60 | 2.04x | 14.3x | 4.27x |
+| deltablue | macro | 59.5 | 803.1 | 100.7 | 12.0 | 4.97x | 67.1x | 8.42x |
+| havlak | macro | 48.3 | 77.16s | 3.34s | 97.3 | 0.50x | 793x | 34.3x |
+| cd | macro | 372.4 | 9.50s | 971.8 | 36.7 | 10.1x | 259x | 26.5x |
 
 ## BENG
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| binarytrees | allocation | 10.3 | 33.1 | 24.0 | 4.10 | 2.50x | 8.07x | 5.86x |
-| fannkuch | permutation | 0.629 | 12.8 | 7.28 | 4.32 | 0.15x | 2.95x | 1.69x |
-| fasta | generation | 7.07 | 37.9 | 9.05 | 6.55 | 1.08x | 5.78x | 1.38x |
-| knucleotide | hashing | 11.5 | 152.0 | --- | 4.99 | 2.31x | 30.5x | --- |
-| mandelbrot | numeric | 134.5 | 85.4 | 690.7 | 15.7 | 8.58x | 5.45x | 44.1x |
-| nbody | numeric | 82.5 | 373.9 | 152.6 | 7.63 | 10.8x | 49.0x | 20.0x |
-| pidigits | bignum | --- | 0.333 | 0.135 | 2.01 | --- | 0.17x | 0.07x |
-| regexredux | regex | 1.34 | 15.7 | --- | 2.46 | 0.54x | 6.37x | --- |
-| revcomp | string | 1.15 | 41.3 | --- | 3.55 | 0.32x | 11.7x | --- |
-| spectralnorm | numeric | 48.4 | 292.4 | 65.7 | 2.63 | 18.4x | 111x | 25.0x |
+| binarytrees | allocation | 10.3 | 32.7 | 23.7 | 4.15 | 2.48x | 7.87x | 5.72x |
+| fannkuch | permutation | 0.634 | 12.6 | 7.27 | 4.05 | 0.16x | 3.10x | 1.80x |
+| fasta | generation | 6.97 | 37.8 | 8.76 | 6.08 | 1.15x | 6.22x | 1.44x |
+| knucleotide | hashing | 11.5 | 150.6 | --- | 4.94 | 2.32x | 30.5x | --- |
+| mandelbrot | numeric | 118.3 | 49.5 | 679.0 | 15.2 | 7.77x | 3.25x | 44.6x |
+| nbody | numeric | 80.1 | 370.1 | 149.3 | 7.31 | 11.0x | 50.6x | 20.4x |
+| pidigits | bignum | --- | 0.316 | 0.132 | 1.99 | --- | 0.16x | 0.07x |
+| regexredux | regex | 1.29 | 15.7 | --- | 2.49 | 0.52x | 6.31x | --- |
+| revcomp | string | 1.12 | 41.2 | --- | 3.36 | 0.33x | 12.2x | --- |
+| spectralnorm | numeric | 47.7 | 289.9 | 65.2 | 2.60 | 18.4x | 112x | 25.1x |
 
 ## KOSTYA
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| brainfuck | interpreter | 460.1 | 987.2 | 904.6 | 34.9 | 13.2x | 28.3x | 25.9x |
-| matmul | numeric | 42.2 | 885.0 | 551.3 | 16.0 | 2.64x | 55.4x | 34.5x |
-| primes | numeric | 60.2 | 104.7 | 97.2 | 4.70 | 12.8x | 22.3x | 20.7x |
-| base64 | string | 304.7 | 761.1 | 161.4 | 17.9 | 17.0x | 42.5x | 9.00x |
-| levenshtein | string | 45.4 | 85.7 | 55.7 | 4.10 | 11.1x | 20.9x | 13.6x |
-| json_gen | data | 74.6 | 37.0 | 20.5 | 6.21 | 12.0x | 5.95x | 3.31x |
-| collatz | numeric | 1.73s | 2.38s | 6.37s | 1.45s | 1.19x | 1.64x | 4.40x |
+| brainfuck | interpreter | 452.1 | 975.7 | 892.6 | 34.0 | 13.3x | 28.7x | 26.2x |
+| matmul | numeric | 41.7 | 837.7 | 545.2 | 15.8 | 2.65x | 53.2x | 34.6x |
+| primes | numeric | 60.1 | 97.1 | 95.6 | 4.73 | 12.7x | 20.5x | 20.2x |
+| base64 | string | 297.9 | 754.6 | 158.8 | 17.5 | 17.0x | 43.1x | 9.07x |
+| levenshtein | string | 45.1 | 81.0 | 54.8 | 3.95 | 11.4x | 20.5x | 13.9x |
+| json_gen | data | 73.2 | 36.2 | 20.1 | 6.61 | 11.1x | 5.48x | 3.04x |
+| collatz | numeric | 1.71s | 1.98s | 6.28s | 1.42s | 1.20x | 1.39x | 4.41x |
 
 ## LARCENY
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| triangl | search | 652.5 | 4.05s | 2.23s | 68.5 | 9.53x | 59.1x | 32.6x |
-| array1 | array | 4.34 | 28.1 | 36.5 | 1.96 | 2.21x | 14.3x | 18.6x |
-| deriv | symbolic | 25.5 | 73.4 | 60.2 | 3.70 | 6.91x | 19.9x | 16.3x |
-| diviter | iterative | 3.13s | 11.28s | 27.22s | 480.5 | 6.51x | 23.5x | 56.6x |
-| divrec | recursive | 20.4 | 24.8 | 36.8 | 7.82 | 2.60x | 3.18x | 4.70x |
-| gcbench | allocation | 396.4 | 783.1 | 565.3 | 24.3 | 16.3x | 32.2x | 23.3x |
-| paraffins | combinat | 2.25 | 2.55 | 2.54 | 1.02 | 2.21x | 2.52x | 2.50x |
-| pnpoly | numeric | 108.0 | 145.4 | 205.7 | 6.13 | 17.6x | 23.7x | 33.6x |
-| primes | iterative | 60.0 | 104.3 | 96.9 | 4.53 | 13.2x | 23.0x | 21.4x |
-| puzzle | search | 18.8 | 27.8 | 29.8 | 3.35 | 5.61x | 8.28x | 8.88x |
-| quicksort | sorting | 12.7 | 61.8 | 19.6 | 1.68 | 7.54x | 36.7x | 11.6x |
-| ray | numeric | 11.8 | 14.2 | 14.0 | 3.61 | 3.27x | 3.93x | 3.88x |
+| triangl | search | 653.1 | 3.93s | 2.20s | 67.3 | 9.71x | 58.5x | 32.7x |
+| array1 | array | 4.29 | 26.6 | 36.3 | 1.90 | 2.25x | 14.0x | 19.1x |
+| deriv | symbolic | 25.1 | 72.3 | 59.2 | 4.01 | 6.27x | 18.0x | 14.8x |
+| diviter | iterative | 3.09s | 7.29s | 29.55s | 484.7 | 6.37x | 15.0x | 61.0x |
+| divrec | recursive | 20.5 | 24.8 | 38.1 | 7.69 | 2.66x | 3.23x | 4.95x |
+| gcbench | allocation | 397.6 | 825.6 | 578.0 | 25.4 | 15.6x | 32.4x | 22.7x |
+| paraffins | combinat | 2.15 | 2.35 | 2.55 | 1.04 | 2.07x | 2.27x | 2.46x |
+| pnpoly | numeric | 109.0 | 143.5 | 215.9 | 5.99 | 18.2x | 24.0x | 36.1x |
+| primes | iterative | 63.5 | 99.7 | 98.1 | 4.47 | 14.2x | 22.3x | 21.9x |
+| puzzle | search | 19.1 | 27.2 | 30.4 | 3.36 | 5.70x | 8.10x | 9.06x |
+| quicksort | sorting | 13.1 | 65.9 | 20.2 | 1.70 | 7.70x | 38.8x | 11.9x |
+| ray | numeric | 11.8 | 14.3 | 14.4 | 3.59 | 3.30x | 3.98x | 4.00x |
 
 ## JetStream
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| nbody | numeric | 82.6 | 221.9 | 134.3 | 5.75 | 14.4x | 38.6x | 23.4x |
-| cube3d | 3d | 13.5 | 787.6 | --- | 18.4 | 0.73x | 42.7x | --- |
-| navier_stokes | numeric | 957.4 | 5.12s | 801.3 | 38.4 | 24.9x | 133x | 20.9x |
-| richards | macro | 205.9 | 214.4 | 26.2 | 5.52 | 37.3x | 38.9x | 4.75x |
-| splay | data | 160.7 | 49.6 | 24.4 | 4.00 | 40.2x | 12.4x | 6.09x |
-| deltablue | macro | 12.2 | 355.7 | 45.9 | 6.62 | 1.84x | 53.8x | 6.94x |
-| hashmap | data | 71.9 | 64.13s | 2.58s | 56.7 | 1.27x | 1131x | 45.5x |
-| crypto_sha1 | crypto | 209.4 | 519.0 | 71.3 | 7.11 | 29.5x | 73.0x | 10.0x |
-| raytrace3d | 3d | 157.0 | 1.07s | --- | 19.2 | 8.20x | 55.9x | --- |
+| nbody | numeric | 82.8 | 226.3 | 137.5 | 5.57 | 14.9x | 40.7x | 24.7x |
+| cube3d | 3d | 14.4 | 814.2 | --- | 18.5 | 0.78x | 43.9x | --- |
+| navier_stokes | numeric | 971.8 | 5.37s | 819.6 | 39.2 | 24.8x | 137x | 20.9x |
+| richards | macro | 208.4 | 222.7 | 27.0 | 5.04 | 41.3x | 44.2x | 5.35x |
+| splay | data | 164.3 | 52.0 | 25.3 | 4.83 | 34.0x | 10.8x | 5.24x |
+| deltablue | macro | 12.8 | 369.5 | 46.9 | 6.53 | 1.96x | 56.6x | 7.18x |
+| hashmap | data | 76.0 | 63.23s | 2.51s | 56.2 | 1.35x | 1124x | 44.6x |
+| crypto_sha1 | crypto | 205.5 | 507.3 | 70.0 | 6.93 | 29.6x | 73.2x | 10.1x |
+| raytrace3d | 3d | 147.8 | 1.05s | --- | 18.3 | 8.06x | 57.3x | --- |
