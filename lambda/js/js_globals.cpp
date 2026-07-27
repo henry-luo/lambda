@@ -6935,8 +6935,15 @@ extern "C" Item js_get_prototype_of(Item object) {
         js_map_get_fast_ext(object.map, "__instance_proto__", 18, &own_ip);
         if (own_ip) {
             // Class objects inherit from Function.prototype
-            // Check for __proto__ first (set by extends)
-            Item raw = js_get_prototype(object);
+            // Check the class's concrete slot before the cached shape lookup.
+            // Object.setPrototypeOf can add __proto__ after the shared class
+            // shape cached its absence; treating that stale miss as
+            // Function.prototype makes static super references ignore a
+            // later null prototype.
+            bool has_raw = false;
+            Item raw = js_map_get_fast_ext(object.map, "__proto__", 9, &has_raw);
+            if (!has_raw) raw = js_get_prototype(object);
+            if (raw.item == ITEM_JS_UNDEFINED) return ItemNull;
             if (raw.item != ItemNull.item) return raw;
             return js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
         }

@@ -8103,6 +8103,15 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
+    // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
+    // binds the Context-owned JS state. Test262's hot batch path calls this
+    // entrypoint directly; without this bind, TLA state dereferences a null
+    // capsule before the module can be parsed.
+    if (!runtime || !context || !context->heap || !js_runtime_state_bind_context(context)) {
+        log_error("js-mir: module compilation requires a bound runtime context");
+        return ItemError;
+    }
+    context->runtime = runtime;
     extern int js_dynamic_import_suppress_module_drain;
     extern int js_check_exception(void);
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
