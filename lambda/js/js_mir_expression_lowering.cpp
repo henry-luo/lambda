@@ -21,6 +21,20 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
+// The callee probe is purely observational: it logs a non-function target and
+// returns the callee unchanged. Its log_debug compiles out of release, so the
+// emitted call would only add a C-call boundary to every dynamic call site.
+static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
+        int64_t site_id) {
+#ifndef NDEBUG
+    jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, site_id));
+#else
+    (void)mt; (void)callee; (void)site_id;
+#endif
+}
+
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
     TSNode node = call->node;
@@ -798,7 +812,9 @@ static void jm_emit_update_lexical_this_binding(JsMirTranspiler* mt, MIR_reg_t o
 static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_reg_t obj, JsClassEntry* ce) {
     if (!mt || !obj || !ce || !jm_class_has_public_instance_fields(ce)) return;
 
-    MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+    // ambient-binding save: keep the TDZ sentinel unresolved (js_get_this would
+    // throw on it, killing any class construction before super()).
+    MIR_reg_t prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
     jm_call_void_1(mt, "js_set_this",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
     jm_emit_update_lexical_this_binding(mt, obj);
@@ -8892,7 +8908,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // body analysis proves the direct callee can observe them.
                         MIR_reg_t p3_prev_this = 0;
                         if (p3_method->fc->observes_this) {
-                            p3_prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                            // ambient-binding save: keep the TDZ sentinel unresolved.
+                            p3_prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
                             jm_call_void_1(mt, "js_set_this",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
                         }
@@ -9157,9 +9174,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 log_debug("js-mir: CASCADE-FALLBACK[site=%d] method '%.*s' in func '%s'",
                     cs_id, (int)prop->name->len, prop->name->chars,
                     mt->current_fc ? mt->current_fc->name : "__main__");
-                jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)cs_id));
+                jm_emit_debug_check_callee(mt, fn, (int64_t)cs_id);
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 MIR_reg_t r = jm_call_function_into(mt,
                     MIR_new_reg_op(mt->ctx, fn),
@@ -10022,9 +10037,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
         jm_emit_label(mt, l_call);
-        jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+        jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
@@ -10077,9 +10090,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
         jm_emit_label(mt, l_call);
-        jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+        jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
         // v17: pass undefined as this for ordinary plain calls; `with` identifier
         // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
@@ -10111,9 +10122,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     // Debug: emit runtime check with site_id
-    jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
 
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
@@ -14052,7 +14061,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
             }
-            MIR_reg_t prev_static_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            // ambient-binding save: keep the TDZ sentinel unresolved.
+            MIR_reg_t prev_static_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
             MIR_reg_t prev_static_new_target = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));

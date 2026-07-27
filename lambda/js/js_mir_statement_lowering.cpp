@@ -2153,7 +2153,11 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     if (!mt || !ce || !obj) return;
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
-    MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+    // Saving the ambient binding must not resolve it: inside a derived
+    // constructor before super() it is the TDZ sentinel, and js_get_this throws
+    // a ReferenceError for that. Constructing any class there (new Sub(...))
+    // would then die on the enclosing frame's state instead of running.
+    MIR_reg_t prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
     jm_call_void_1(mt, "js_set_this",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
     JsMirLexicalThisRebind this_rebind;
@@ -3215,7 +3219,9 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         {
             // Bind 'this' to the new object for field initializer expressions
             // (e.g. `y = this.x * 10` must see the partially-constructed instance)
-            MIR_reg_t prev_this_fi = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            // ambient-binding save: keep the TDZ sentinel unresolved (see
+            // jm_emit_own_instance_fields_on_object).
+            MIR_reg_t prev_this_fi = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
             JsMirLexicalThisRebind this_rebind;
@@ -3463,7 +3469,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, final_obj));
             }
             if (ce->node && ce->node->superclass && active_ctor != ce->constructor) {
-                MIR_reg_t prev_this_post = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                // ambient-binding save: keep the TDZ sentinel unresolved.
+                MIR_reg_t prev_this_post = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
                 jm_call_void_1(mt, "js_set_this",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, final_obj));
                 jm_emit_own_instance_fields_on_object(mt, ce, final_obj, cls_for_nt, true);
@@ -5414,7 +5421,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
                     }
-                    MIR_reg_t prev_static_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    // ambient-binding save: keep the TDZ sentinel unresolved.
+                    MIR_reg_t prev_static_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
                     MIR_reg_t prev_static_new_target = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                     jm_call_void_1(mt, "js_set_this",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));

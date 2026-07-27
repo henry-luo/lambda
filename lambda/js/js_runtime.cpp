@@ -652,6 +652,11 @@ static bool js_is_function_prototype_map(Item item) {
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
 // For non-strict, non-arrow callbacks: undefined/null → globalThis.
 static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
+    // The uninitialized-this sentinel is not a value: sloppy-mode coercion would
+    // turn it into globalThis or a wrapper object and silently hide the
+    // pre-super() TDZ. It must reach the callee intact so a `this` read there
+    // still throws (direct eval inside a derived constructor relies on this).
+    if (thisArg_item.item == ITEM_JS_TDZ) return thisArg_item;
     if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
         if (thisArg_item.item == ITEM_JS_UNDEFINED || thisArg_item.item == ITEM_NULL || thisArg_item.item == 0) {
             extern Item js_get_global_this();
@@ -13575,6 +13580,11 @@ extern "C" bool lambda_side_root_contains_span(Context* runtime, const void* spa
     return end <= top;
 }
 
+// Shared by the generic dispatcher and every specialized call entry: the
+// stack-overflow RangeError is semantics, so all call paths must advance the
+// same counter or deep recursion could escape the guard by alternating paths.
+static int js_call_depth = 0;
+
 static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
@@ -13582,7 +13592,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     if (g_js_call_stats_enabled > 0) {
         js_call_stats_note(func_item, arg_count, args_prerooted);
     }
-    static int js_call_depth = 0;
     static thread_local const char* js_call_name_stack[64];
     static thread_local int js_call_name_length_stack[64];
     static thread_local int js_call_name_depth = 0;
@@ -13720,49 +13729,57 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         _trace_total_calls++;
     }
 
-    if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
-        extern Item js_date_now_string(void);
-        return js_date_now_string();
-    }
-
-    // Proxy revoke function: builtin_id == -3, env[0] holds JsProxyData*
-    if (fn && fn->builtin_id == -3) {
-        if (fn->env && fn->env_size >= 1) {
-            JsProxyData* pd = (JsProxyData*)(uintptr_t)fn->env[0].item;
-            if (pd) pd->revoked = true;
+    // The name-identified special constructors are resolved from a cached
+    // classification instead of a per-call strncmp chain; the sufficient
+    // conditions below are unchanged.
+    uint8_t special_ctor_kind = js_function_special_ctor_kind(fn);
+    if (special_ctor_kind != JS_SPECIAL_CTOR_NONE || fn->builtin_id == -3) {
+        if (special_ctor_kind == JS_SPECIAL_CTOR_DATE) {
+            extern Item js_date_now_string(void);
+            return js_date_now_string();
         }
-        return make_js_undefined();
-    }
 
-    // v84: Function constructor called as regular function (e.g. Function.apply)
-    // ES spec §20.2.1.1: Function(...) is equivalent to new Function(...)
-    if (fn && fn->name && fn->name->len == 8 && strncmp(fn->name->chars, "Function", 8) == 0
-        && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
-        return js_new_function_from_string(args, arg_count);
-    }
-    // v90: GeneratorFunction / AsyncGeneratorFunction constructor — creates generator-flagged function
-    if (fn && fn->name && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
-        bool is_gen_ctor = (fn->name->len == 17 && strncmp(fn->name->chars, "GeneratorFunction", 17) == 0);
-        bool is_async_gen_ctor = (fn->name->len == 22 && strncmp(fn->name->chars, "AsyncGeneratorFunction", 22) == 0);
-        bool is_async_ctor = (fn->name->len == 13 && strncmp(fn->name->chars, "AsyncFunction", 13) == 0);
-        if (is_async_ctor) {
-            Item result = js_new_async_function_from_string(args, arg_count);
-            if (get_type_id(result) == LMD_TYPE_FUNC) {
-                JsFunction* rfn = (JsFunction*)result.function;
-                rfn->flags |= JS_FUNC_FLAG_ASYNC;
+        // Proxy revoke function: builtin_id == -3, env[0] holds JsProxyData*
+        if (fn->builtin_id == -3) {
+            if (fn->env && fn->env_size >= 1) {
+                JsProxyData* pd = (JsProxyData*)(uintptr_t)fn->env[0].item;
+                if (pd) pd->revoked = true;
             }
-            return result;
+            return make_js_undefined();
         }
-        if (is_gen_ctor || is_async_gen_ctor) {
-            Item result = js_new_generator_function_from_string(args, arg_count, is_async_gen_ctor ? 1 : 0);
-            if (get_type_id(result) == LMD_TYPE_FUNC) {
-                JsFunction* rfn = (JsFunction*)result.function;
-                rfn->flags |= JS_FUNC_FLAG_GENERATOR;
-                if (is_async_gen_ctor) {
-                    rfn->flags |= JS_FUNC_FLAG_ASYNC_GEN;
+
+        if (fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
+            // v84: Function constructor called as regular function (e.g. Function.apply)
+            // ES spec §20.2.1.1: Function(...) is equivalent to new Function(...)
+            if (special_ctor_kind == JS_SPECIAL_CTOR_FUNCTION) {
+                return js_new_function_from_string(args, arg_count);
+            }
+            // v90: GeneratorFunction / AsyncGeneratorFunction constructor — creates generator-flagged function
+            if (special_ctor_kind == JS_SPECIAL_CTOR_ASYNC_FUNCTION) {
+                Item result = js_new_async_function_from_string(args, arg_count);
+                if (get_type_id(result) == LMD_TYPE_FUNC) {
+                    JsFunction* rfn = (JsFunction*)result.function;
+                    rfn->flags |= JS_FUNC_FLAG_ASYNC;
+                    js_function_call_lane_recompute(rfn);
                 }
+                return result;
             }
-            return result;
+            if (special_ctor_kind == JS_SPECIAL_CTOR_GENERATOR_FUNCTION ||
+                special_ctor_kind == JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION) {
+                bool is_async_gen_ctor =
+                    special_ctor_kind == JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION;
+                Item result = js_new_generator_function_from_string(args, arg_count,
+                    is_async_gen_ctor ? 1 : 0);
+                if (get_type_id(result) == LMD_TYPE_FUNC) {
+                    JsFunction* rfn = (JsFunction*)result.function;
+                    rfn->flags |= JS_FUNC_FLAG_GENERATOR;
+                    if (is_async_gen_ctor) {
+                        rfn->flags |= JS_FUNC_FLAG_ASYNC_GEN;
+                    }
+                    js_function_call_lane_recompute(rfn);
+                }
+                return result;
+            }
         }
     }
 
@@ -13913,8 +13930,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
         bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
             (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR);
+        // A derived constructor implicitly observes new.target: SuperCall step 1
+        // is GetNewTarget() and forwards it to the parent's [[Construct]]. Bodies
+        // that never name `new.target` still need it installed, or js_new_target
+        // keeps the caller's stale value here.
         bool install_new_target = !analysis_known ||
-            (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET);
+            (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET) ||
+            (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR);
         // ES spec: when called via 'new', bound_this is ignored — use the new object.
         Item effective_this = this_val;
         if (install_this) {
@@ -14024,8 +14046,16 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     bool derived_ctor_requested = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
     bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
         derived_ctor_requested;
+    // A derived constructor implicitly observes new.target: SuperCall step 1 is
+    // GetNewTarget() and forwards it to the parent's [[Construct]]. Without this
+    // term a ctor whose body never names `new.target` leaves js_new_target at
+    // the caller's stale value, so a builtin parent (class X extends Uint8Array)
+    // fails GetPrototypeFromConstructor and hands back a base-prototype
+    // instance — which then makes TypedArraySpeciesCreate resolve `constructor`
+    // to the base and skip the subclass constructor entirely.
     bool install_new_target = !analysis_known ||
-        (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET);
+        (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET) ||
+        derived_ctor_requested;
 
     // Bind 'this' for the duration of this call
     Item prev_this = js_current_this;
@@ -14116,9 +14146,269 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 
+// The generic dispatcher expressed as a call entry: the semantic authority for
+// every shape, and the entry every function starts with.
+Item js_call_entry_generic(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+        result_home, args_prerooted);
+}
+
+// ===========================================================================
+// Specialized call entries
+//
+// The generic dispatcher above answers every optional question on every call.
+// For a callee whose shape is known at finalization, most of those answers are
+// constant, so the entry selected for it simply does not contain the steps —
+// they are compiled out rather than branched over. Anything a template cannot
+// prove locally (argument-count drift, an active caller `with` scope, a
+// renamed special constructor) routes back to the generic dispatcher for that
+// call, so the entries never fork semantics.
+//
+// The classifier in js_function_select_call_entry() is the only place allowed
+// to pick one of these, and it re-runs from js_function_call_lane_recompute()
+// whenever the metadata behind the choice changes.
+// ===========================================================================
+
+typedef Item (*JsEntryP0)();
+typedef Item (*JsEntryP1)(Item);
+typedef Item (*JsEntryP2)(Item, Item);
+typedef Item (*JsEntryP3)(Item, Item, Item);
+typedef Item (*JsEntryP4)(Item, Item, Item, Item);
+typedef Item (*JsEntryP5)(Item, Item, Item, Item, Item);
+typedef Item (*JsEntryP0H)(uint64_t*);
+typedef Item (*JsEntryP1H)(Item, uint64_t*);
+typedef Item (*JsEntryP2H)(Item, Item, uint64_t*);
+typedef Item (*JsEntryP3H)(Item, Item, Item, uint64_t*);
+typedef Item (*JsEntryP4H)(Item, Item, Item, Item, uint64_t*);
+typedef Item (*JsEntryP5H)(Item, Item, Item, Item, Item, uint64_t*);
+
+// Invoke the compiled body with the exact declared arity. `N` counts JS
+// parameters; the env pointer and the scalar result home are ABI additions the
+// callee's flags fix at finalization, so both are template constants here and
+// the 16-way arity switch of js_invoke_fn_raw() disappears.
+template <int N, bool HasEnv, bool PublicAbi>
+static inline Item js_entry_invoke_body(JsFunction* fn, const Item* a,
+        uint64_t* home) {
+    void* p = fn->func_ptr;
+    if (HasEnv) {
+        Item env = {.item = (uint64_t)fn->env};
+        if (PublicAbi) {
+            if (N == 0) return ((JsEntryP1H)p)(env, home);
+            if (N == 1) return ((JsEntryP2H)p)(env, a[0], home);
+            if (N == 2) return ((JsEntryP3H)p)(env, a[0], a[1], home);
+            if (N == 3) return ((JsEntryP4H)p)(env, a[0], a[1], a[2], home);
+            return ((JsEntryP5H)p)(env, a[0], a[1], a[2], a[3], home);
+        }
+        if (N == 0) return ((JsEntryP1)p)(env);
+        if (N == 1) return ((JsEntryP2)p)(env, a[0]);
+        if (N == 2) return ((JsEntryP3)p)(env, a[0], a[1]);
+        if (N == 3) return ((JsEntryP4)p)(env, a[0], a[1], a[2]);
+        return ((JsEntryP5)p)(env, a[0], a[1], a[2], a[3]);
+    }
+    if (PublicAbi) {
+        if (N == 0) return ((JsEntryP0H)p)(home);
+        if (N == 1) return ((JsEntryP1H)p)(a[0], home);
+        if (N == 2) return ((JsEntryP2H)p)(a[0], a[1], home);
+        if (N == 3) return ((JsEntryP3H)p)(a[0], a[1], a[2], home);
+        return ((JsEntryP4H)p)(a[0], a[1], a[2], a[3], home);
+    }
+    if (N == 0) return ((JsEntryP0)p)();
+    if (N == 1) return ((JsEntryP1)p)(a[0]);
+    if (N == 2) return ((JsEntryP2)p)(a[0], a[1]);
+    if (N == 3) return ((JsEntryP3)p)(a[0], a[1], a[2]);
+    return ((JsEntryP4)p)(a[0], a[1], a[2], a[3]);
+}
+
+// Conditions the classifier cannot settle once and for all: they depend on the
+// caller's dynamic state, or on metadata that can change without funnelling
+// through the classifier. Any of them sends this one call to the generic path.
+// The census is deliberately included: while it is collecting, every call must
+// reach the counters in the generic dispatcher. `!= 0` also covers the
+// not-yet-configured state, which the first generic call resolves.
+static inline bool js_entry_needs_generic(JsFunction* fn, const Item* args,
+        int arg_count, int declared_arity) {
+    return arg_count != declared_arity ||
+        (declared_arity > 0 && !args) ||
+        js_with_stack_depth_now() != 0 ||
+        g_js_call_stats_enabled != 0 ||
+        js_function_special_ctor_kind(fn) != JS_SPECIAL_CTOR_NONE;
+}
+
+template <int N, bool HasEnv, bool PublicAbi>
+static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (js_entry_needs_generic(fn, args, arg_count, N)) {
+        return js_call_function_impl_mode(func_item, this_val, args,
+            arg_count, result_home, args_prerooted);
+    }
+    struct JsEntryDepthGuard {
+        bool ok;
+        JsEntryDepthGuard(int limit) : ok(++js_call_depth <= limit) {}
+        ~JsEntryDepthGuard() { --js_call_depth; }
+    } depth_guard(js_call_stack_limit);
+    if (!depth_guard.ok) {
+        js_throw_range_error("Maximum call stack size exceeded");
+        return ItemNull;
+    }
+
+    // Callee and receiver are native locals across a body that may collect.
+    // Arguments arriving from a generated frame are already rooted there; the
+    // body still receives the caller's own array, exactly as the generic path
+    // does — these slots only keep the values reachable.
+    int rooted_argc = (!args_prerooted && N > 0) ? N : 0;
+    RootFrame call_roots((Context*)context, (size_t)(2 + rooted_argc));
+    Rooted<Item> func_root(call_roots, func_item);
+    Rooted<Item> this_root(call_roots, this_val);
+    for (int i = 0; i < rooted_argc; i++) {
+        uint64_t* slot = call_roots.take_slot();
+        if (slot) *slot = args[i].item;
+    }
+    func_item = func_root.get();
+    this_val = this_root.get();
+
+    LAMBDA_SCALAR_HOME(local_result_home);
+    bool uses_local_result_home = false;
+    uint64_t* invoke_result_home = result_home;
+    if (PublicAbi && !invoke_result_home) {
+        invoke_result_home = &local_result_home;
+        uses_local_result_home = true;
+    }
+
+    // Species dispatch describes only the builtin currently executing; a user
+    // callee is a fresh execution and must not inherit it.
+    struct JsEntryArrayModeGuard {
+        bool saved;
+        JsEntryArrayModeGuard() : saved(js_dispatch_as_array_method) {
+            js_dispatch_as_array_method = false;
+        }
+        ~JsEntryArrayModeGuard() { js_dispatch_as_array_method = saved; }
+    } array_mode_guard;
+
+    uint16_t flags = fn->flags;
+    bool install_this = (flags & JS_FUNC_FLAG_READS_THIS) != 0;
+    bool install_new_target = (flags & JS_FUNC_FLAG_READS_NEW_TARGET) != 0;
+    Item prev_this = js_current_this;
+    Item prev_nt = js_new_target;
+    if (install_this) {
+        this_val = js_compute_callback_this(fn, this_val);
+        js_current_this = this_val;
+    }
+    js_pending_args_callee = func_item;
+    if (install_new_target && js_has_pending_new_target) {
+        js_new_target = js_pending_new_target;
+        js_has_pending_new_target = false;
+    } else if (install_new_target) {
+        js_new_target = make_js_undefined();
+    } else if (js_has_pending_new_target) {
+        // A receiver-oblivious callee still consumes the one-shot construct
+        // handshake so it cannot leak into the following call.
+        js_has_pending_new_target = false;
+    }
+
+    Item* prev_modvars = js_active_module_vars;
+    if (fn->module_vars && fn->module_vars != js_active_module_vars) {
+        js_active_module_vars = fn->module_vars;
+    }
+    Item prev_global = ItemNull;
+    bool switched_global = fn->home_global.item != 0 &&
+        fn->home_global.item != js_get_global_this().item &&
+        get_type_id(fn->home_global) == LMD_TYPE_MAP;
+    if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
+
+    Item prev_private_home_class = js_current_private_home_class;
+    int prev_private_home_class_index = js_current_private_home_class_index;
+    Item method_home_class = fn->home_class;
+    bool installed_home_class = method_home_class.item != ItemNull.item &&
+        method_home_class.item != 0 &&
+        get_type_id(method_home_class) != LMD_TYPE_UNDEFINED;
+    if (installed_home_class) {
+        js_current_private_home_class = method_home_class;
+        js_current_private_home_class_index = js_class_private_index(method_home_class);
+    }
+
+    // js_build_arguments_object() reads these at callee entry, before any
+    // nested call can overwrite them.
+    js_pending_call_args = args;
+    js_pending_call_argc = N;
+    js_invoke_trace_call(fn, N, N);
+    Item result = js_entry_invoke_body<N, HasEnv, PublicAbi>(fn, args,
+        invoke_result_home);
+
+    if (installed_home_class) {
+        js_current_private_home_class = prev_private_home_class;
+        js_current_private_home_class_index = prev_private_home_class_index;
+    }
+    if (switched_global) js_vm_swap_global_this(prev_global);
+    js_active_module_vars = prev_modvars;
+    if (install_this) js_current_this = prev_this;
+    if (install_new_target) js_new_target = prev_nt;
+    return js_finish_borrowed_scalar_result(result, uses_local_result_home);
+}
+
+template <int N, bool HasEnv>
+static inline JsCallEntry js_entry_for_abi(bool public_abi) {
+    return public_abi ? &js_call_entry_ordinary<N, HasEnv, true>
+                      : &js_call_entry_ordinary<N, HasEnv, false>;
+}
+
+template <int N>
+static inline JsCallEntry js_entry_for_env(bool has_env, bool public_abi) {
+    return has_env ? js_entry_for_abi<N, true>(public_abi)
+                   : js_entry_for_abi<N, false>(public_abi);
+}
+
+JsCallEntry js_function_select_call_entry(JsFunction* fn) {
+    // The differential oracle: with this set, every function keeps the generic
+    // dispatcher, so a full suite can be compared entry-enabled vs disabled.
+    if (js_call_force_generic_enabled()) return js_call_entry_generic;
+    // The classifier has already excluded builtins, bound functions,
+    // generators, derived constructors, `with` users, vm-source and
+    // eval-initializer functions. What remains to reject here are shapes whose
+    // *invocation* protocol the ordinary template does not implement.
+    if (!fn->func_ptr) return js_call_entry_generic;
+    if (fn->flags & JS_FUNC_FLAG_ASYNC) {
+        // Async bodies need the promise resource created around the call.
+        return js_call_entry_generic;
+    }
+    if (fn->param_count < 0 || fn->param_count > 4) {
+        // Negative arity is a rest parameter; wider arities keep the generic
+        // adaptation path until a census shows they are worth instantiating.
+        return js_call_entry_generic;
+    }
+    bool has_env = fn->env != NULL;
+    bool public_abi = (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) != 0;
+    switch (fn->param_count) {
+    case 0: return js_entry_for_env<0>(has_env, public_abi);
+    case 1: return js_entry_for_env<1>(has_env, public_abi);
+    case 2: return js_entry_for_env<2>(has_env, public_abi);
+    case 3: return js_entry_for_env<3>(has_env, public_abi);
+    case 4: return js_entry_for_env<4>(has_env, public_abi);
+    default: return js_call_entry_generic;
+    }
+}
+
+// Route a call through the callee's own entry. Non-function targets and
+// functions whose entry was never stamped fall through to the generic
+// dispatcher unchanged.
+static inline Item js_call_via_entry(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    if (get_type_id(func_item) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)func_item.function;
+        if (fn && fn->invoke) {
+            return fn->invoke(func_item, this_val, args, arg_count, result_home,
+                args_prerooted);
+        }
+    }
+    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+        result_home, args_prerooted);
+}
+
 static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home) {
-    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+    return js_call_via_entry(func_item, this_val, args, arg_count,
         result_home, false);
 }
 
@@ -14143,7 +14433,7 @@ extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_v
         log_error("js-call-prerooted: missing caller result home");
         return ItemError;
     }
-    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
+    return js_call_via_entry(func_item, this_val, args, arg_count,
         result_home, true);
 }
 
@@ -14324,6 +14614,9 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
+    // Copied flags plus bound state change every fact the call entry was
+    // chosen from; reclassify before the wrapper can be called.
+    js_function_call_lane_recompute(bound);
     js_function_set_bound_this(bound, (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
         ? js_function_get_bound_this(orig) : this_root.get());
     Item bound_item = bound_root.get();
@@ -31793,6 +32086,7 @@ static void js_promise_mark_anonymous_builtin(Item fn_item) {
     if (!is_bound && fn->name && fn->name->len == 0) return;
     fn->name = heap_create_name("", 0);
     fn->flags |= JS_FUNC_FLAG_ARROW;
+    js_function_call_lane_recompute(fn);
     Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
     Item empty_name = (Item){.item = s2it(heap_create_name("", 0))};
     js_func_init_property(fn_item, name_key, empty_name);
@@ -37751,6 +38045,7 @@ static Item js_ar_make_bound(Item resource, Item fn, Item this_arg) {
     if (bound_fn) {
         bound_fn->formal_length = (int)js_get_length(fn);
         bound_fn->flags |= JS_FUNC_FLAG_STRICT;
+        js_function_call_lane_recompute(bound_fn);
     }
     return bound;
 }

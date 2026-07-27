@@ -191,7 +191,18 @@ uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) 
 
     // Zero before publishing the new watermark so a forced collection can
     // never interpret stale words from a previous activation as live roots.
-    for (size_t i = 0; i < slot_count; i++) slots[i] = 0;
+    // Call frames request 1-4 slots, where the compiler's memset call costs
+    // more than the stores themselves; keep those fully inline.
+    switch (slot_count) {
+    case 4: slots[3] = 0; /* fallthrough */
+    case 3: slots[2] = 0; /* fallthrough */
+    case 2: slots[1] = 0; /* fallthrough */
+    case 1: slots[0] = 0; /* fallthrough */
+    case 0: break;
+    default:
+        for (size_t i = 0; i < slot_count; i++) slots[i] = 0;
+        break;
+    }
     runtime_context->side_root_top += slot_count;
     return slots;
 }

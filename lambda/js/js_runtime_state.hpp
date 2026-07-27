@@ -61,6 +61,13 @@ void js_item_stack_pop(JsItemStack* stack);
 void js_item_stack_clear(JsItemStack* stack);
 void js_item_stack_shrink(JsItemStack* stack, int depth);
 
+// The caller's `with`-scope depth is a per-call dispatch input: an ordinary
+// callee only needs the save/isolate/restore protocol when a scope is actually
+// active. Promoted out of js_globals.cpp so dispatch reads the counter as a
+// load instead of a cross-module call on every call.
+extern JsItemStack js_with_stack_state;
+static inline int js_with_stack_depth_now(void) { return js_with_stack_state.depth; }
+
 #define JS_EVAL_SOURCE_STACK_MAX 16
 
 // Source records span a runtime eval or a VM-originated function call. Their

@@ -2,14 +2,16 @@
 
 - **Date:** 2026-07-26
 - **Platform:** Darwin arm64
-- **Lambda commit:** `f0d36db76aa5f0a42a3011498e845d7a10328571`
+- **Lambda commit:** `de30aae9686a192284755ece08e27c547181429b`
 - **Lambda build:** clean release build (`make release`)
 - **Instrumentation check:** passed
-- **Node.js:** v24.7.0
-- **QuickJS:** 2026-06-04
+- **Node.js:** v22.13.0
+- **QuickJS:** 2025-09-13
 - **Methodology:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 180s per run
 - **Engines in this report:** MIR, LambdaJS, QuickJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v14.json`
+
+> This is a fresh local snapshot on the current Darwin arm64 machine. It supersedes the earlier Result14 capture from a different machine and hardware configuration; Result14-to-Result13 performance deltas are therefore not an Apple-to-Apple comparison.
 
 JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop over the detected benchmark function. They do not use per-file `Benchmark.runIteration()` counts, because those counts drift across JetStream files.
 
@@ -19,14 +21,14 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Suite | Total | Timed MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| R7RS | 10 | 9 | 10 | 9 | 10 | 1.43x | 9.80x | 4.38x |
-| AWFY | 14 | 13 | 14 | 14 | 14 | 2.43x | 29.1x | 3.95x |
-| BENG | 10 | 9 | 10 | 7 | 10 | 2.08x | 9.23x | 2.30x |
-| KOSTYA | 7 | 7 | 7 | 7 | 7 | 8.17x | 18.1x | 6.50x |
-| LARCENY | 12 | 12 | 12 | 12 | 12 | 7.02x | 17.4x | 7.86x |
-| JetStream | 9 | 9 | 9 | 7 | 9 | 12.1x | 106x | 10.4x |
-| **Overall dedup** | **56** | **53** | **56** | **50** | **56** | **3.72x** | **19.9x** | **4.93x** |
-| Overall raw | 62 | 59 | 62 | 56 | 62 | 4.00x | 21.0x | 5.23x |
+| R7RS | 10 | 9 | 10 | 9 | 10 | 1.00x | 6.79x | 6.41x |
+| AWFY | 14 | 13 | 14 | 14 | 14 | 1.85x | 20.7x | 5.17x |
+| BENG | 10 | 9 | 10 | 7 | 10 | 1.91x | 8.08x | 3.99x |
+| KOSTYA | 7 | 7 | 7 | 7 | 7 | 7.38x | 16.2x | 11.8x |
+| LARCENY | 12 | 12 | 12 | 12 | 12 | 6.15x | 14.8x | 13.7x |
+| JetStream | 9 | 9 | 9 | 7 | 9 | 8.28x | 65.8x | 12.0x |
+| **Overall dedup** | **56** | **53** | **56** | **50** | **56** | **2.90x** | **14.9x** | **7.28x** |
+| Overall raw | 62 | 59 | 62 | 56 | 62 | 3.20x | 16.0x | 7.86x |
 
 > **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -44,20 +46,20 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Benchmark | LambdaJS | Node.js | Ratio |
 |---|---:|---:|---:|
-| jetstream/hashmap | 62.47s | 49.5 | 1262x |
-| awfy/havlak | 91.65s | 73.4 | 1249x |
-| awfy/cd | 9.31s | 32.1 | 290x |
-| jetstream/navier_stokes | 5.37s | 29.0 | 185x |
-| beng/spectralnorm | 276.4 | 1.93 | 143x |
-| jetstream/crypto_sha1 | 503.4 | 4.24 | 119x |
-| jetstream/deltablue | 361.4 | 3.83 | 94.4x |
-| awfy/deltablue | 785.8 | 8.41 | 93.4x |
+| jetstream/hashmap | 64.22s | 58.2 | 1104x |
+| awfy/havlak | 90.70s | 97.4 | 932x |
+| awfy/cd | 9.70s | 36.8 | 264x |
+| jetstream/navier_stokes | 5.09s | 38.5 | 132x |
+| beng/spectralnorm | 288.5 | 2.54 | 114x |
+| jetstream/crypto_sha1 | 512.2 | 7.19 | 71.2x |
+| awfy/deltablue | 811.9 | 12.0 | 67.9x |
+| larceny/triangl | 4.02s | 67.6 | 59.4x |
 
 ### LambdaJS Faster Than Node.js
 
 | Benchmark | LambdaJS | Node.js | Ratio |
 |---|---:|---:|---:|
-| beng/pidigits | 0.299 | 1.98 | 0.15x |
+| beng/pidigits | 0.315 | 2.72 | 0.12x |
 
 ---
 
@@ -65,90 +67,90 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| fib | recursive | 6.00 | 29.8 | 9.02 | 1.37 | 4.39x | 21.8x | 6.60x |
-| fibfp | recursive | 4.73 | 32.0 | 9.18 | 1.48 | 3.18x | 21.6x | 6.18x |
-| tak | recursive | 0.529 | 3.02 | 1.66 | 0.328 | 1.61x | 9.22x | 5.06x |
-| cpstak | closure | 0.960 | 5.68 | 3.69 | 0.453 | 2.12x | 12.6x | 8.14x |
-| sum | iterative | 4.36 | 11.9 | 10.5 | 0.972 | 4.49x | 12.2x | 10.8x |
-| sumfp | iterative | 0.077 | 1.28 | 1.13 | 0.950 | 0.08x | 1.35x | 1.19x |
-| nqueens | backtrack | 1.26 | 15.2 | 2.99 | 1.30 | 0.97x | 11.7x | 2.30x |
-| fft | numeric | --- | 10.9 | 1.47 | 1.08 | --- | 10.0x | 1.36x |
-| mbrot | numeric | 0.793 | 8.78 | 7.55 | 0.854 | 0.93x | 10.3x | 8.84x |
-| ack | recursive | 22.4 | 105.8 | --- | 13.9 | 1.61x | 7.59x | --- |
+| fib | recursive | 6.61 | 34.1 | 19.1 | 1.79 | 3.70x | 19.1x | 10.7x |
+| fibfp | recursive | 5.32 | 34.1 | 18.9 | 1.78 | 2.99x | 19.2x | 10.6x |
+| tak | recursive | 0.508 | 2.81 | 2.83 | 0.817 | 0.62x | 3.45x | 3.46x |
+| cpstak | closure | 1.03 | 5.59 | 5.67 | 0.998 | 1.03x | 5.60x | 5.68x |
+| sum | iterative | 4.07 | 11.9 | 31.5 | 1.23 | 3.32x | 9.72x | 25.7x |
+| sumfp | iterative | 0.067 | 1.20 | 3.70 | 0.887 | 0.08x | 1.35x | 4.17x |
+| nqueens | backtrack | 1.39 | 17.0 | 7.98 | 1.74 | 0.80x | 9.77x | 4.58x |
+| fft | numeric | --- | 10.9 | 2.78 | 1.60 | --- | 6.79x | 1.74x |
+| mbrot | numeric | 0.813 | 8.47 | 17.9 | 1.86 | 0.44x | 4.54x | 9.58x |
+| ack | recursive | 22.4 | 100.6 | --- | 13.6 | 1.65x | 7.41x | --- |
 
 ## AWFY
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| sieve | micro | 0.464 | 0.479 | 0.279 | 0.374 | 1.24x | 1.28x | 0.75x |
-| permute | micro | 0.520 | 5.91 | 0.745 | 0.396 | 1.31x | 14.9x | 1.88x |
-| queens | micro | 0.436 | 3.92 | 0.576 | 0.368 | 1.18x | 10.6x | 1.56x |
-| towers | micro | 0.818 | 14.9 | 1.13 | 0.466 | 1.75x | 32.0x | 2.43x |
-| bounce | micro | 0.829 | 3.47 | 0.421 | 0.486 | 1.71x | 7.15x | 0.87x |
-| list | micro | --- | 3.39 | 0.458 | 0.214 | --- | 15.9x | 2.14x |
-| storage | micro | 0.588 | 11.0 | 0.940 | 0.303 | 1.94x | 36.4x | 3.11x |
-| mandelbrot | compute | 34.1 | 353.1 | 444.2 | 24.6 | 1.39x | 14.4x | 18.1x |
-| nbody | compute | 79.2 | 251.3 | 71.3 | 7.41 | 10.7x | 33.9x | 9.63x |
-| richards | macro | 166.5 | 1.13s | 126.0 | 41.3 | 4.03x | 27.4x | 3.05x |
-| json | macro | 5.56 | 37.7 | 7.12 | 1.48 | 3.76x | 25.5x | 4.81x |
-| deltablue | macro | 51.1 | 785.8 | 57.8 | 8.41 | 6.07x | 93.4x | 6.87x |
-| havlak | macro | 46.0 | 91.65s | 1.90s | 73.4 | 0.63x | 1249x | 25.9x |
-| cd | macro | 349.6 | 9.31s | 514.9 | 32.1 | 10.9x | 290x | 16.1x |
+| sieve | micro | 0.507 | 0.520 | 0.617 | 0.402 | 1.26x | 1.29x | 1.53x |
+| permute | micro | 0.564 | 7.02 | 1.57 | 0.825 | 0.68x | 8.51x | 1.91x |
+| queens | micro | 0.500 | 4.33 | 1.05 | 0.656 | 0.76x | 6.60x | 1.61x |
+| towers | micro | 0.845 | 16.1 | 2.27 | 1.11 | 0.76x | 14.4x | 2.04x |
+| bounce | micro | 0.830 | 3.44 | 0.877 | 0.567 | 1.46x | 6.06x | 1.55x |
+| list | micro | --- | 3.31 | 0.927 | 0.509 | --- | 6.51x | 1.82x |
+| storage | micro | 0.640 | 13.4 | 2.21 | 0.640 | 1.00x | 20.9x | 3.44x |
+| mandelbrot | compute | 46.3 | 371.0 | 899.9 | 31.7 | 1.46x | 11.7x | 28.4x |
+| nbody | compute | 82.2 | 279.2 | 161.4 | 5.77 | 14.3x | 48.4x | 28.0x |
+| richards | macro | 185.7 | 1.18s | 193.5 | 47.2 | 3.93x | 24.9x | 4.10x |
+| json | macro | 5.18 | 36.8 | 11.0 | 2.74 | 1.89x | 13.4x | 4.02x |
+| deltablue | macro | 61.1 | 811.9 | 101.0 | 12.0 | 5.11x | 67.9x | 8.45x |
+| havlak | macro | 48.8 | 90.70s | 3.39s | 97.4 | 0.50x | 932x | 34.8x |
+| cd | macro | 379.7 | 9.70s | 989.9 | 36.8 | 10.3x | 264x | 26.9x |
 
 ## BENG
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| binarytrees | allocation | 9.98 | 37.7 | 10.1 | 3.36 | 2.97x | 11.2x | 3.02x |
-| fannkuch | permutation | 0.574 | 11.5 | 3.32 | 2.87 | 0.20x | 3.99x | 1.15x |
-| fasta | generation | 6.21 | 34.6 | 4.12 | 4.99 | 1.24x | 6.93x | 0.83x |
-| knucleotide | hashing | 10.5 | 138.4 | --- | 4.59 | 2.29x | 30.1x | --- |
-| mandelbrot | numeric | 116.0 | 68.5 | 262.3 | 11.4 | 10.2x | 6.00x | 23.0x |
-| nbody | numeric | 81.4 | 350.7 | 72.4 | 6.51 | 12.5x | 53.9x | 11.1x |
-| pidigits | bignum | --- | 0.299 | 0.058 | 1.98 | --- | 0.15x | 0.03x |
-| regexredux | regex | 1.18 | 13.9 | --- | 2.15 | 0.55x | 6.45x | --- |
-| revcomp | string | 1.04 | 37.1 | --- | 3.46 | 0.30x | 10.7x | --- |
-| spectralnorm | numeric | 39.5 | 276.4 | 31.0 | 1.93 | 20.4x | 143x | 16.0x |
+| binarytrees | allocation | 10.3 | 38.1 | 23.6 | 4.15 | 2.48x | 9.18x | 5.68x |
+| fannkuch | permutation | 0.631 | 12.6 | 7.26 | 4.08 | 0.15x | 3.08x | 1.78x |
+| fasta | generation | 7.06 | 37.7 | 8.79 | 6.04 | 1.17x | 6.24x | 1.46x |
+| knucleotide | hashing | 11.6 | 151.4 | --- | 5.01 | 2.31x | 30.2x | --- |
+| mandelbrot | numeric | 134.9 | 71.2 | 689.5 | 15.3 | 8.81x | 4.65x | 45.1x |
+| nbody | numeric | 82.1 | 363.1 | 150.4 | 7.60 | 10.8x | 47.8x | 19.8x |
+| pidigits | bignum | --- | 0.315 | 0.131 | 2.72 | --- | 0.12x | 0.05x |
+| regexredux | regex | 1.30 | 15.4 | --- | 2.43 | 0.54x | 6.35x | --- |
+| revcomp | string | 1.15 | 40.8 | --- | 3.41 | 0.34x | 12.0x | --- |
+| spectralnorm | numeric | 48.1 | 288.5 | 64.7 | 2.54 | 18.9x | 114x | 25.5x |
 
 ## KOSTYA
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| brainfuck | interpreter | 400.9 | 923.1 | 469.3 | 32.5 | 12.3x | 28.4x | 14.4x |
-| matmul | numeric | 40.9 | 852.1 | 202.1 | 13.8 | 2.96x | 61.5x | 14.6x |
-| primes | numeric | 54.8 | 109.9 | 41.8 | 4.60 | 11.9x | 23.9x | 9.08x |
-| base64 | string | 277.7 | 652.3 | 70.6 | 14.8 | 18.7x | 44.0x | 4.76x |
-| levenshtein | string | 43.8 | 86.1 | 28.3 | 2.73 | 16.1x | 31.6x | 10.4x |
-| json_gen | data | 67.3 | 31.2 | 9.93 | 4.52 | 14.9x | 6.92x | 2.20x |
-| collatz | numeric | 1.61s | 2.05s | 3.04s | 1.29s | 1.25x | 1.59x | 2.36x |
+| brainfuck | interpreter | 463.6 | 982.2 | 898.5 | 34.2 | 13.6x | 28.7x | 26.3x |
+| matmul | numeric | 43.2 | 883.4 | 549.2 | 15.7 | 2.75x | 56.2x | 34.9x |
+| primes | numeric | 59.8 | 104.4 | 96.4 | 4.71 | 12.7x | 22.2x | 20.5x |
+| base64 | string | 296.8 | 756.1 | 160.5 | 17.6 | 16.9x | 43.1x | 9.14x |
+| levenshtein | string | 45.8 | 87.7 | 55.1 | 4.04 | 11.3x | 21.7x | 13.6x |
+| json_gen | data | 72.9 | 36.7 | 20.1 | 6.74 | 10.8x | 5.46x | 2.98x |
+| collatz | numeric | 1.74s | 2.30s | 6.37s | 1.44s | 1.21x | 1.60x | 4.43x |
 
 ## LARCENY
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| triangl | search | 609.5 | 3.79s | 1.07s | 70.2 | 8.69x | 54.0x | 15.3x |
-| array1 | array | 4.34 | 29.7 | 14.6 | 1.84 | 2.36x | 16.1x | 7.93x |
-| deriv | symbolic | 22.9 | 70.4 | 22.8 | 2.01 | 11.4x | 35.0x | 11.3x |
-| diviter | iterative | 2.54s | 9.76s | 10.03s | 403.1 | 6.31x | 24.2x | 24.9x |
-| divrec | recursive | 19.6 | 40.7 | 26.5 | 8.33 | 2.35x | 4.88x | 3.18x |
-| gcbench | allocation | 328.5 | 865.3 | 261.7 | 22.9 | 14.4x | 37.8x | 11.4x |
-| paraffins | combinat | 1.93 | 2.16 | 1.17 | 0.628 | 3.08x | 3.44x | 1.86x |
-| pnpoly | numeric | 95.4 | 131.9 | 94.9 | 4.59 | 20.8x | 28.8x | 20.7x |
-| primes | iterative | 59.1 | 107.0 | 37.6 | 4.47 | 13.2x | 24.0x | 8.43x |
-| puzzle | search | 16.5 | 24.5 | 12.7 | 2.63 | 6.26x | 9.29x | 4.83x |
-| quicksort | sorting | 12.1 | 60.1 | 10.4 | 1.54 | 7.83x | 39.0x | 6.75x |
-| ray | numeric | 10.9 | 10.3 | 6.69 | 1.58 | 6.89x | 6.52x | 4.23x |
+| triangl | search | 648.2 | 4.02s | 2.22s | 67.6 | 9.59x | 59.4x | 32.8x |
+| array1 | array | 4.34 | 27.7 | 36.4 | 1.94 | 2.23x | 14.3x | 18.7x |
+| deriv | symbolic | 25.2 | 78.3 | 59.6 | 3.75 | 6.73x | 20.9x | 15.9x |
+| diviter | iterative | 3.12s | 10.18s | 27.14s | 478.7 | 6.52x | 21.3x | 56.7x |
+| divrec | recursive | 21.3 | 38.6 | 36.7 | 7.76 | 2.74x | 4.97x | 4.73x |
+| gcbench | allocation | 379.9 | 901.6 | 561.2 | 24.1 | 15.8x | 37.4x | 23.3x |
+| paraffins | combinat | 2.13 | 2.38 | 2.54 | 1.01 | 2.11x | 2.36x | 2.52x |
+| pnpoly | numeric | 106.8 | 143.8 | 204.3 | 5.90 | 18.1x | 24.4x | 34.6x |
+| primes | iterative | 61.2 | 104.7 | 96.0 | 4.43 | 13.8x | 23.6x | 21.7x |
+| puzzle | search | 18.9 | 27.8 | 29.7 | 3.38 | 5.59x | 8.22x | 8.78x |
+| quicksort | sorting | 12.9 | 60.9 | 19.4 | 1.69 | 7.60x | 36.0x | 11.5x |
+| ray | numeric | 11.7 | 14.2 | 14.0 | 3.62 | 3.23x | 3.93x | 3.87x |
 
 ## JetStream
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| nbody | numeric | 78.4 | 192.3 | 70.3 | 3.91 | 20.1x | 49.2x | 18.0x |
-| cube3d | 3d | 12.8 | 691.0 | --- | 15.1 | 0.85x | 45.7x | --- |
-| navier_stokes | numeric | 866.8 | 5.37s | 288.6 | 29.0 | 29.9x | 185x | 9.96x |
-| richards | macro | 170.6 | 212.5 | 17.7 | 2.38 | 71.6x | 89.3x | 7.44x |
-| splay | data | 146.9 | 48.0 | 8.36 | 1.41 | 104x | 34.0x | 5.93x |
-| deltablue | macro | 10.7 | 361.4 | 30.5 | 3.83 | 2.79x | 94.4x | 7.96x |
-| hashmap | data | 60.3 | 62.47s | 1.30s | 49.5 | 1.22x | 1262x | 26.3x |
-| crypto_sha1 | crypto | 160.4 | 503.4 | 34.5 | 4.24 | 37.8x | 119x | 8.14x |
-| raytrace3d | 3d | 126.4 | 1.03s | --- | 11.4 | 11.1x | 90.4x | --- |
+| nbody | numeric | 82.4 | 217.8 | 133.5 | 5.60 | 14.7x | 38.9x | 23.8x |
+| cube3d | 3d | 13.2 | 782.1 | --- | 18.0 | 0.74x | 43.5x | --- |
+| navier_stokes | numeric | 955.9 | 5.09s | 799.7 | 38.5 | 24.8x | 132x | 20.8x |
+| richards | macro | 202.1 | 218.9 | 26.0 | 5.51 | 36.7x | 39.7x | 4.72x |
+| splay | data | 159.6 | 50.1 | 24.5 | 4.81 | 33.2x | 10.4x | 5.09x |
+| deltablue | macro | 12.2 | 370.8 | 45.8 | 6.54 | 1.86x | 56.7x | 7.01x |
+| hashmap | data | 72.2 | 64.22s | 2.55s | 58.2 | 1.24x | 1104x | 43.9x |
+| crypto_sha1 | crypto | 211.6 | 512.2 | 71.0 | 7.19 | 29.4x | 71.2x | 9.87x |
+| raytrace3d | 3d | 155.1 | 1.05s | --- | 18.9 | 8.21x | 55.6x | --- |

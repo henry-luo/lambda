@@ -71,6 +71,13 @@ static inline void* memmem(const void* haystack, size_t hlen, const void* needle
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);
 void js_function_call_lane_recompute(JsFunction* fn);
+// The generic dispatcher in its call-entry form; the classifier's fallback and
+// the force-generic oracle both stamp this.
+Item js_call_entry_generic(Item fn_item, Item this_val, Item* args, int argc,
+        uint64_t* result_home, bool args_prerooted);
+// Pick the thinnest entry whose protocol still covers this callee's shape.
+// Only the classifier above may call this.
+JsCallEntry js_function_select_call_entry(JsFunction* fn);
 
 // v22 / P8 + Js58.2: Maximum index/capacity gap considered for dense array
 // expansion before forcing sparse companion-map storage. Js58.2 restores the

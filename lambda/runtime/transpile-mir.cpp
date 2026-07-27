@@ -1401,18 +1401,14 @@ static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
 }
 
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
-    // MIR_ALLOCA is dynamic, so using it as a bitcast scratch slot inside hot
-    // loops grows the stack per box/unbox. Keep the Item encoding decisions
-    // inline, but route the raw bit reinterpretation through a leaf helper.
-    return emit_call_1(mt, "lambda_mir_double_bits", MIR_T_I64, MIR_T_D,
-        MIR_new_reg_op(mt->ctx, d_reg));
+    // Result15: the call edge to the 2-insn helper made numeric loops
+    // placement-sensitive; reinterpret inline via the shared per-function
+    // scratch slot (see em_emit_double_bits for the full rationale).
+    return em_emit_double_bits(&mt->em, d_reg);
 }
 
 static MIR_reg_t emit_bits_double(MirTranspiler* mt, MIR_reg_t bits_reg) {
-    // Inline-float Items carry raw double bits; the helper reinterprets them
-    // without per-iteration stack allocation in JIT or interpreter mode.
-    return emit_call_1(mt, "lambda_mir_bits_double", MIR_T_D, MIR_T_I64,
-        MIR_new_reg_op(mt->ctx, bits_reg));
+    return em_emit_bits_double(&mt->em, bits_reg);
 }
 
 // Box float (double) -> Item; the hot in-band arm is inline.

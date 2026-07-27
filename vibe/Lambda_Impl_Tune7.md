@@ -1,7 +1,7 @@
 # Lambda Impl Plan: Tune 7 — Dynamic-Call Path Slimming (R4)
 
-**Status: RESULT14 COMPLETE; PERFORMANCE IMPLEMENTATION PARTIAL — audited
-2026-07-26.**
+**Status: RESULT14 COMPLETE; PERFORMANCE IMPLEMENTATION PARTIAL — refreshed
+locally and audited 2026-07-26.**
 **Successor of:** `vibe/Lambda_Impl_Tune6.md`. Tune6's Track J did **not**
 land: its census found that richards missed the existing load IC on only
 0.01% of probes, so J1/J3 were dropped. Tune7 therefore does not assume a new
@@ -540,24 +540,16 @@ factor-level reduction in dynamic-call cost was achieved.
 
 ### 8.1 Observed result
 
-Comparing absolute LambdaJS timings for the 62 matched Result13/Result14 rows:
-
-- 50 rows improved and 12 regressed;
-- the raw matched-row geometric mean improved **5.08%**;
-- the arithmetic mean improved **4.82%**.
-
-The targeted call-dense rows moved only modestly:
-
-| Benchmark | Result14 vs Result13 LambdaJS |
-|---|---:|
-| AWFY richards | −5.55% |
-| JetStream richards | −2.85% |
-| AWFY deltablue | −2.23% |
-| JetStream deltablue | −2.31% |
-| JetStream hashmap | −1.88% |
-| JetStream crypto_sha1 | −1.13% |
-| AWFY cd | −0.43% |
-| AWFY havlak | **+2.71% regression** |
+The earlier checked-in Result14 capture came from a different machine and
+different hardware/toolchain stack, so its absolute timings and its
+Result13→Result14 deltas were not Apple-to-Apple evidence. It has now been
+replaced by a fresh local snapshot using the current release binary, Node
+v22.13.0, QuickJS 2025-09-13, and the standard 3-run/180-second protocol.
+The regenerated report records **56** deduplicated rows (**53** MIR,
+**56** LambdaJS, **50** QuickJS, **56** Node.js) and **9** missing cells.
+Its local headline ratios are MIR/Node **2.90x**, LambdaJS/Node **14.9x**,
+and QuickJS/Node **7.28x**. These are the current Result14 snapshot values,
+not a claimed cross-result improvement.
 
 The isolated release call probe also missed the phase targets:
 
@@ -566,12 +558,11 @@ The isolated release call probe also missed the phase targets:
 | plain 2-arg | 152.53 ns/call | 134.87 ns/call | 11.6% faster (1.13x) | ≥2x |
 | method | 336.69 ns/call | 316.68 ns/call | 6.0% faster (1.06x) | ≥1.5x |
 
-These are observed snapshot deltas, not clean per-phase attribution. Result14
-also changed Node from v22.13.0 to v24.7.0 and changed QuickJS, so the headline
-LambdaJS/Node ratio moving from 15.4x to 19.9x does not mean LambdaJS itself
-regressed. Conversely, Result13→Result14 was not the required already-built,
-row-interleaved phase A/B experiment, so the 5.08% absolute LambdaJS movement
-must not be assigned wholly to Tune7.
+These probe numbers are historical phase evidence, not measurements from the
+fresh full Result14 matrix. They must not be combined with the current
+Result14 headline ratios to claim a Tune7 phase delta. A valid future
+performance comparison requires the same machine, engine stack, and the
+already-built row-interleaved A/B protocol described in §7.
 
 ### 8.2 Why the gain is limited
 
@@ -661,6 +652,14 @@ optimization whose measured gain is already small.
 
 ### 8.4 Recommended follow-up
 
+> **2026-07-26 update:** items 2/3/5 are now designed in
+> `vibe/Lambda_Impl_Tune_JS_Dynamic_Call.md` (per-callee entry specialization,
+> DC1–DC7), backed by fresh `sample` attribution: on a plain 2-arg dynamic
+> call the two-layer dispatcher+invoke protocol measures ≈57% of loop time,
+> smeared across unconditional work — the evidence that resolves the
+> narrow-vs-broad lane trade-off in favor of finalization-time entry
+> stamping.
+
 1. **Repair attribution first.** Build the Tune6 and Tune7 release binaries
    before measurement, interleave A/B/A/B/A/B per row, preserve the raw order,
    and publish per-workload call-shape census for the T0.3 rows, test262, and
@@ -740,5 +739,7 @@ performance implementation fully optimized.
   gating of the *push* (keep depth), not a revert.
 - **Machine-state variance.** Same-day sequential runs were insufficient in
   Tune6. Build both release binaries first and interleave A/B row by row;
-  preserve raw order and timestamps. Result14 absolutes carry the QuickJS
-  control column, but do not replace the interleaved phase evidence.
+  preserve raw order and timestamps. The superseded Result14 capture used
+  another machine plus Node v24.7.0/QuickJS 2026-06-04; the current Result14
+  uses the local Node v22.13.0/QuickJS 2025-09-13 stack and is a fresh
+  snapshot, not a cross-machine delta.

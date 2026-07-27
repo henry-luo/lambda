@@ -15893,8 +15893,8 @@ extern "C" Item js_get_global_object() {
 // ============================================================================
 #define JS_WITH_STACK_MAX 16
 static Item js_with_stack_slots[JS_WITH_STACK_MAX];
-static JsItemStack js_with_stack_state = {{js_with_stack_slots, JS_WITH_STACK_MAX, 0,
-                                           "with-scope stack"}, 0};
+JsItemStack js_with_stack_state = {{js_with_stack_slots, JS_WITH_STACK_MAX, 0,
+                                    "with-scope stack"}, 0};
 static Item js_last_with_binding_slots[2];
 static JsRootRange js_last_with_binding_roots = {js_last_with_binding_slots, 2, 0,
                                                   "with binding cache"};
