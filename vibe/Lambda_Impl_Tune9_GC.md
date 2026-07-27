@@ -1,7 +1,9 @@
 # Lambda Impl Plan: Tune 9 — High-Impact GC Allocation Throughput
 
-**Status: REVISED 2026-07-27 — post-bitmap profiling complete; implementation
-limited to two measured allocation bottlenecks.**
+**Status: COMPLETE 2026-07-27 — both measured allocation candidates were
+implemented, measured against their declared targets, and deferred because
+neither cleared the mandatory 10% improvement gate. No allocation fast path
+landed. The stale, unsafe dormant MIR inline-bump emitter was removed.**
 
 **Scope rule:** Tune9 is not a general GC cleanup. A phase may land only when it
 improves its declared slow benchmark target by at least **10%** and introduces
@@ -206,9 +208,67 @@ or helper-call reductions alone do not qualify.
   regression.
 - `make test-lambda-baseline` remains green.
 
+## 4. Execution results (2026-07-27)
+
+Tune9 was executed in the prescribed order with a fresh release build and
+interleaved baseline/candidate runs. The target-output lines and exit status
+were unchanged for every completed pair. Neither candidate met the scope
+rule, so neither allocation behavior change is retained.
+
+### Phase A — rejected and reverted
+
+The candidate added a string-only large-object path that initialized the GC
+header but left the payload for `fn_strcat`/copy construction to overwrite. It
+also retained the ordinary zeroed path for objects at or below the 384-byte
+object-zone boundary and used the existing poison mode to detect missed writes.
+
+The first candidate avoided a small-string helper-call overhead before the
+acceptance rerun. Its three `json_gen` A/B pairs were:
+
+| Pair | Baseline | Candidate |
+|---|---:|---:|
+| 1 | 89.227 ms | 96.368 ms |
+| 2 | 104.836 ms | 97.158 ms |
+| 3 | 87.469 ms | 102.316 ms |
+| median | **89.227 ms** | **97.158 ms** |
+
+The candidate median was 8.9% slower, not at least 10% faster. `json_gen` is
+one of Phase A's two required targets, so this is sufficient to reject the
+phase; no `base64` acceptance run or broader correctness suite is meaningful
+for a reverted candidate. The string allocator/helper/test changes were
+removed.
+
+### Phase B1 — rejected and disabled
+
+B1 re-enabled typed-map direct construction only while routing allocation
+through `heap_calloc_class`; a root slot was installed immediately after map
+birth and reloaded after every field expression that could allocate. This
+preserved the C allocator's object tracking, allocation-bit maintenance,
+counter updates, and GC safepoints. The old MIR inline-bump sequence was not
+revived: it used stale field offsets and omitted the bump-block `alloc_bits`
+write required for exact slot ownership, so it was deleted rather than carried
+forward as dead code.
+
+The three `gcbench` A/B pairs were:
+
+| Pair | Baseline | Candidate |
+|---|---:|---:|
+| 1 | 617.730 ms | 655.840 ms |
+| 2 | 656.712 ms | 625.659 ms |
+| 3 | 702.978 ms | 604.785 ms |
+| median | **656.712 ms** | **625.659 ms** |
+
+This is a 4.7% improvement, below the required 10%. B1 therefore remains
+disabled, and B2 was not attempted: its prerequisite is a qualified B1 plus a
+fresh post-B1 attribution. No MIR budget update or broad test gate is claimed
+for the rejected candidate.
+
+The final source contains only the removal of the unsafe dormant inline-bump
+emitter; the runtime keeps its prior allocation behavior.
+
 ---
 
-## 4. Deferred or removed from active Tune9
+## 5. Deferred or removed from active Tune9
 
 ### Allocation debt and trigger pacing
 
@@ -248,7 +308,7 @@ gain. They are micro-tuning unless a future profile establishes a new ceiling.
 
 ---
 
-## 5. Acceptance protocol for every Tune9 phase
+## 6. Acceptance protocol for every Tune9 phase
 
 1. Build baseline and candidate release binaries before timing.
 2. Run the declared target and all guards interleaved A/B/A/B for at least
@@ -264,13 +324,10 @@ gain. They are micro-tuning unless a future profile establishes a new ceiling.
 8. LambdaJS performance is not a Tune9 acceptance claim until the current
    havlak/gcbench execution regression is repaired independently.
 
-## 6. Execution order
+## 7. Execution order
 
-1. **Phase A:** uninitialized large-string payloads — smaller correctness
-   surface, two independently measured >25% ceilings.
-2. **Phase B1:** direct typed-map construction through the existing allocator —
-   high gcbench ceiling, but requires precise-rooting revalidation.
-3. **Phase B2:** optional and only after a fresh B1 profile plus an independent
-   ≥10% measured win.
+1. **Phase A:** executed and deferred: the `json_gen` acceptance median regressed.
+2. **Phase B1:** executed and deferred: the `gcbench` median improved only 4.7%.
+3. **Phase B2:** not attempted because B1 did not qualify.
 4. Stop. Generational collection, trace-table tuning, allocation pacing,
    free-list memset changes, and lazy sweep are not part of the active plan.
