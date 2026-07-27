@@ -350,9 +350,20 @@ static bool fs_validate_offset_length(Item offset_item, Item length_item, int by
     return true;
 }
 
-// Helper: create a string Item from a C string
-static Item internal_fs_binding_namespace = {0};
-static Item internal_fs_default_fstat = {0};
+// fs cache slots are context-owned so independent runtimes never share a
+// namespace, prototype, or user-replaceable internal binding.
+#define internal_fs_binding_namespace (js_runtime_state.fs.internal_binding_namespace)
+#define internal_fs_default_fstat (js_runtime_state.fs.internal_default_fstat)
+#define stats_proto (js_runtime_state.fs.stats_prototype)
+#define fs_namespace (js_runtime_state.fs.namespace_object)
+#define fs_filehandle_ctor (js_runtime_state.fs.filehandle_constructor)
+#define fs_filehandle_proto (js_runtime_state.fs.filehandle_prototype)
+#define fs_internal_promises_namespace (js_runtime_state.fs.internal_promises_namespace)
+
+static bool fs_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.fs.roots);
+}
 
 extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item);
 extern int js_check_exception(void);
@@ -363,11 +374,10 @@ static Item js_internal_fs_fstat(Item fd_item) {
 }
 
 extern "C" Item js_get_internal_fs_binding_namespace(void) {
+    if (!fs_ensure_roots()) return ItemNull;
     if (internal_fs_binding_namespace.item == 0) {
         internal_fs_binding_namespace = js_new_object();
-        heap_register_gc_root(&internal_fs_binding_namespace.item);
         internal_fs_default_fstat = js_new_function((void*)js_internal_fs_fstat, 1);
-        heap_register_gc_root(&internal_fs_default_fstat.item);
         js_property_set(internal_fs_binding_namespace, make_string_item("fstat"), internal_fs_default_fstat);
         js_property_set(internal_fs_binding_namespace, make_string_item("default"), internal_fs_binding_namespace);
     }
@@ -479,9 +489,6 @@ static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
 // =============================================================================
 // Stats prototype — provides isFile(), isDirectory(), etc. methods
 // =============================================================================
-static Item stats_proto = {0};
-static bool stats_proto_rooted = false;
-
 // Stats method: checks mode bits via js_get_this().__mode
 extern "C" Item js_get_this(void);
 extern "C" Item js_date_new_from(Item value);
@@ -501,8 +508,6 @@ extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" Item js_array_is_array(Item value);
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
 extern "C" Item js_fs_closeSync(Item fd_item);
-
-static Item fs_namespace = {0};
 
 static bool fs_is_nullish(Item value) {
     TypeId type = get_type_id(value);
@@ -614,14 +619,8 @@ extern "C" Item js_stats_isSocket() {
 }
 
 static Item get_stats_proto() {
+    if (!fs_ensure_roots()) return ItemNull;
     if (stats_proto.item != 0) return stats_proto;
-    if (!stats_proto_rooted) {
-        // Stats methods are installed through allocating property writes; keep
-        // the cache slot registered before the first write so dynamic fs
-        // activation cannot leave a relocated prototype behind under GC.
-        heap_register_gc_root(&stats_proto.item);
-        stats_proto_rooted = true;
-    }
     stats_proto = js_new_object();
     js_property_set(stats_proto, make_string_item("isFile"), js_new_function((void*)js_stats_isFile, 0));
     js_property_set(stats_proto, make_string_item("isDirectory"), js_new_function((void*)js_stats_isDirectory, 0));
@@ -2020,7 +2019,12 @@ typedef struct JsFsReq {
     struct JsFsReq* next_pending;
 } JsFsReq;
 
-static JsFsReq* fs_pending_read_requests = NULL;
+// The async request list is realm-local. Jube's completion boundary re-enters
+// the owning context, so list operations remain ordinary pointer updates.
+static JsFsReq*& fs_pending_read_requests_ref() {
+    return *(JsFsReq**)&js_runtime_state.fs.pending_requests;
+}
+#define fs_pending_read_requests (fs_pending_read_requests_ref())
 
 static void fs_req_add_pending(JsFsReq* fsreq) {
     if (!fsreq) return;
@@ -2197,6 +2201,7 @@ extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback
 }
 
 extern "C" void js_fs_runtime_detach(void) {
+    if (!js_active_runtime_state) return;
     for (JsFsReq* fsreq = fs_pending_read_requests; fsreq; fsreq = fsreq->next_pending) {
         // A libuv callback may still arrive after teardown, but it must not
         // retain roots into a destroyed heap or invoke user JS in that runtime.
@@ -2581,8 +2586,6 @@ static Item js_fs_filehandle_close(void) {
     return js_promise_resolve(make_js_undefined());
 }
 
-static Item fs_filehandle_ctor = {0};
-static Item fs_filehandle_proto = {0};
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static Item js_fs_filehandle_illegal_constructor(void) {
@@ -2595,11 +2598,9 @@ static Item js_fs_filehandle_fd_getter(void) {
 }
 
 static Item fs_get_filehandle_prototype(void) {
+    if (!fs_ensure_roots()) return ItemNull;
     if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
 
-    // Constructor/prototype caches survive the native construction call and
-    // must own their partially built objects under exact-root collection.
-    heap_register_gc_root(&fs_filehandle_proto.item);
     fs_filehandle_proto = js_new_object();
     Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);
     js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
@@ -2612,10 +2613,10 @@ static Item fs_get_filehandle_prototype(void) {
 }
 
 static Item fs_get_filehandle_constructor(void) {
+    if (!fs_ensure_roots()) return ItemNull;
     if (fs_filehandle_ctor.item != 0) return fs_filehandle_ctor;
 
     Item proto = fs_get_filehandle_prototype();
-    heap_register_gc_root(&fs_filehandle_ctor.item);
     fs_filehandle_ctor = js_new_function((void*)js_fs_filehandle_illegal_constructor, 0);
     js_property_set(fs_filehandle_ctor, make_string_item("prototype"), proto);
     js_property_set(proto, make_string_item("constructor"), fs_filehandle_ctor);
@@ -3185,8 +3186,6 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // =============================================================================
 // fs Module Namespace Object
 // =============================================================================
-
-static Item fs_internal_promises_namespace = {0};
 
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     RootFrame roots((Context*)context, 3);
@@ -3782,11 +3781,9 @@ extern "C" Item js_get_internal_fs_utils_namespace(void) {
 }
 
 extern "C" Item js_get_fs_namespace(void) {
+    if (!fs_ensure_roots()) return ItemNull;
     if (fs_namespace.item != 0) return fs_namespace;
 
-    // The static module cache is the exact owner while the large namespace is
-    // being assembled and after it escapes this native helper.
-    heap_register_gc_root(&fs_namespace.item);
     fs_namespace = js_new_object();
 
     RootFrame roots((Context*)context, 3);
@@ -3996,9 +3993,9 @@ extern "C" Item js_get_fs_promises_namespace(void) {
 }
 
 extern "C" Item js_get_internal_fs_promises_namespace(void) {
+    if (!fs_ensure_roots()) return ItemNull;
     if (fs_internal_promises_namespace.item != 0) return fs_internal_promises_namespace;
 
-    heap_register_gc_root(&fs_internal_promises_namespace.item);
     fs_internal_promises_namespace = js_new_object();
     js_property_set(fs_internal_promises_namespace, make_string_item("FileHandle"),
                     fs_get_filehandle_constructor());
@@ -4009,8 +4006,22 @@ extern "C" Item js_get_internal_fs_promises_namespace(void) {
 
 // Reset fs namespace (for re-initialization between runs)
 extern "C" void js_fs_reset(void) {
+    if (!js_active_runtime_state) return;
     fs_namespace = (Item){0};
     fs_internal_promises_namespace = (Item){0};
     fs_filehandle_ctor = (Item){0};
     fs_filehandle_proto = (Item){0};
+    stats_proto = (Item){0};
+    internal_fs_binding_namespace = (Item){0};
+    internal_fs_default_fstat = (Item){0};
+}
+
+#undef fs_pending_read_requests
+
+extern "C" void js_fs_pending_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->fs.pending_requests) return;
+    // runtime_cleanup detaches/cancels every request while its owning context
+    // is current; completion destroy callbacks own the request allocation.
+    log_error("js-fs: context destroyed with pending async requests");
+    runtime_state->fs.pending_requests = NULL;
 }

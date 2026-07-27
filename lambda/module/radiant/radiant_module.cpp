@@ -49,7 +49,6 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Context* _lambda_rt;
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -829,37 +828,37 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     if (g_radiant_velmt_next_pass_id == 0) g_radiant_velmt_next_pass_id = 1;
     g_radiant_velmt_active_pass_id = pass_id;
 
-    EvalContext callback_context = {};
+    EvalContext* callback_context = nullptr;
     EvalContext* saved_context = ::context;
     Context* saved_input_context = input_context;
-    Context* saved_lambda_rt = _lambda_rt;
     Runtime* runtime = (context->parent && context->parent->doc)
         ? context->parent->doc->lambda_runtime : nullptr;
     if (runtime && runtime->heap) {
-        // Script-document layout runs after its stack-local Runner is gone;
-        // every Velmt and callback allocation must use the retained runtime.
-        callback_context.heap = runtime->heap;
-        callback_context.name_pool = runtime->name_pool;
-        callback_context.pool = runtime->reuse_pool
+        callback_context = runtime_get_eval_context(runtime);
+        if (!callback_context) {
+            g_radiant_velmt_active_pass_id = previous_pass_id;
+            return false;
+        }
+        callback_context->heap = runtime->heap;
+        callback_context->name_pool = runtime->name_pool;
+        callback_context->pool = runtime->reuse_pool
             ? runtime->reuse_pool : runtime->heap->pool;
-        callback_context.type_info = type_info;
-        // Retained layout callbacks outlive Runner's bound context; generated
-        // MIR treats an unbound zeroed side stack as immediate overflow.
-        if (!lambda_side_stack_bind((Context*)&callback_context)) {
+        callback_context->type_info = type_info;
+        // Retained callbacks borrow their Runtime-owned side stack rather
+        // than fabricating an activation-local context.
+        if (!lambda_side_stack_bind((Context*)callback_context)) {
             g_radiant_velmt_active_pass_id = previous_pass_id;
             log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
             return false;
         }
         if (runtime->ui_mode && runtime->result_arena) {
-            callback_context.ui_mode = true;
-            callback_context.arena = runtime->result_arena;
-            input_context = (Context*)&callback_context;
+            callback_context->ui_mode = true;
+            callback_context->arena = runtime->result_arena;
+            input_context = (Context*)callback_context;
         } else {
             input_context = nullptr;
         }
-        ::context = &callback_context;
-        // MIR helpers read _lambda_rt directly; retained callbacks must switch it with context.
-        _lambda_rt = (Context*)&callback_context;
+        ::context = callback_context;
     }
 
     bool ok = false;
@@ -887,14 +886,13 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     }
     // This stack-local context owns runtime diagnostics raised by the callback;
     // dropping it without release leaked both LambdaError and its message.
-    if (callback_context.last_error) {
-        err_free(callback_context.last_error);
-        callback_context.last_error = nullptr;
+    if (callback_context && callback_context->last_error) {
+        err_free(callback_context->last_error);
+        callback_context->last_error = nullptr;
     }
     g_radiant_velmt_active_pass_id = previous_pass_id;
     ::context = saved_context;
     input_context = saved_input_context;
-    _lambda_rt = saved_lambda_rt;
     return ok;
 }
 

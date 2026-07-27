@@ -3,9 +3,9 @@
 // js_mir_internal.hpp - shared declarations for the split JS MIR transpiler.
 
 #include "js_mir_context.hpp"
+#include "js_runtime_state.hpp"
 #include "../runtime/heap_api.h"
 
-extern "C" Context* _lambda_rt;
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
 extern "C" void js_reset_module_vars();
@@ -38,17 +38,45 @@ extern bool g_jm_preamble_mode;
 extern bool g_jm_preamble_compile_only;
 extern JsPreambleState* g_jm_preamble_out;
 extern const JsPreambleState* g_jm_preamble_in;
-extern Runtime* js_source_runtime;
-extern int js_dynamic_func_counter;
-extern MIR_context_t g_active_mir_ctx;
-extern JsTranspiler* g_active_js_transpiler;
-extern JsMirTranspiler* g_active_mir_transpiler;
-extern char* g_active_js_owned_source;
-extern MIR_context_t module_mir_contexts[];
-extern NamePool* module_mir_name_pools[];
-extern Pool* module_mir_ast_pools[];
-extern char* module_mir_source_buffers[];
-extern int module_mir_context_count;
+// Dynamic JS compilation follows the bound EvalContext. This direct TLS read
+// keeps runtime selection context-local without adding a hot-path check.
+static inline Runtime* js_current_runtime(void) {
+    return context ? context->runtime : NULL;
+}
+#define js_dynamic_func_counter (js_runtime_state.dynamic_func_counter)
+
+#define JS_ACTIVE_TRANSPILE_MAX 32
+typedef struct ActiveJsTranspileOwner {
+    JsTranspiler* tp;
+    JsMirTranspiler* mt;
+    char* owned_source;
+} ActiveJsTranspileOwner;
+
+// This is only touched at compilation and signal-recovery boundaries.  It is
+// deliberately outside generated JS dispatch so realm isolation adds no hot
+// path synchronization or readiness probe.
+typedef struct JsMirCompileRecoveryState {
+    MIR_context_t active_mir_ctx;
+    JsTranspiler* active_js_transpiler;
+    JsMirTranspiler* active_mir_transpiler;
+    char* active_js_owned_source;
+    ActiveJsTranspileOwner stack[JS_ACTIVE_TRANSPILE_MAX];
+    int count;
+} JsMirCompileRecoveryState;
+
+JsMirCompileRecoveryState* jm_compile_recovery_state_ensure(void);
+JsMirCompileRecoveryState* jm_compile_recovery_state_current(void);
+void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state);
+
+#define g_active_mir_ctx (jm_compile_recovery_state_ensure()->active_mir_ctx)
+#define g_active_js_transpiler (jm_compile_recovery_state_ensure()->active_js_transpiler)
+#define g_active_mir_transpiler (jm_compile_recovery_state_ensure()->active_mir_transpiler)
+#define g_active_js_owned_source (jm_compile_recovery_state_ensure()->active_js_owned_source)
+#define module_mir_contexts ((MIR_context_t*)js_runtime_state.deferred_mir.contexts)
+#define module_mir_name_pools ((NamePool**)js_runtime_state.deferred_mir.name_pools)
+#define module_mir_ast_pools ((Pool**)js_runtime_state.deferred_mir.ast_pools)
+#define module_mir_source_buffers (js_runtime_state.deferred_mir.source_buffers)
+#define module_mir_context_count (js_runtime_state.deferred_mir.count)
 void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename);
 
 typedef enum JsMirReferenceKind {

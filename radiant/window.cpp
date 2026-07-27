@@ -27,6 +27,7 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_dom_observers.h"
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
@@ -42,7 +43,6 @@ extern "C" void js_dom_set_ui_context(void* ui_context);
 extern "C" void js_dom_set_host_driven_loop(bool enabled);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Context* _lambda_rt;
 extern UiContext ui_context;
 
 typedef enum RadiantJsLoopAction {
@@ -53,7 +53,7 @@ typedef enum RadiantJsLoopAction {
 static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
                                           int wait_ms, double delta_ms, int frame_steps) {
     DomDocument* doc = uicon ? uicon->document : nullptr;
-    if (!doc || !doc->js.runtime_heap || !doc->js.runtime_name_pool) {
+    if (!doc || !doc->js.runtime) {
         if (action == RADIANT_JS_LOOP_ADVANCE) {
             return js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
         }
@@ -62,22 +62,21 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         return true;
     }
 
-    Heap* heap = (Heap*)doc->js.runtime_heap;
-    EvalContext pump_ctx = {};
-    pump_ctx.heap = heap;
-    pump_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
-    pump_ctx.type_list = (ArrayList*)doc->js.runtime_type_list;
-    pump_ctx.pool = doc->js.runtime_pool ? (Pool*)doc->js.runtime_pool : heap->pool;
+    Runtime* runtime = doc->js.runtime;
+    EvalContext* pump_ctx = runtime_get_eval_context(runtime);
+    if (!pump_ctx || !runtime->heap || !runtime->name_pool) return false;
+    pump_ctx->heap = runtime->heap;
+    pump_ctx->name_pool = runtime->name_pool;
+    pump_ctx->type_list = runtime->type_list;
+    pump_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
 
-    EvalContext* saved_ctx = context;
     Context* saved_input_ctx = input_context;
-    Context* saved_lambda_rt = _lambda_rt;
     // Promise and timer callbacks allocate during the host pump just like event
     // listeners do; use the retained document heap instead of the loader's
     // already-restored context, which may be null or belong to another batch.
-    context = &pump_ctx;
+    EvalContext* saved_ctx = eval_context_bind(pump_ctx);
     input_context = nullptr;
-    _lambda_rt = (Context*)&pump_ctx;
+    if (pump_ctx->js_state) js_runtime_state_bind_context(pump_ctx);
     js_dom_set_document(doc);
     // A native handler can enqueue a Promise callback after inserting its DOM
     // (Popper and virtual-list libraries do this). Commit that insertion before
@@ -103,9 +102,9 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         js_event_loop_pump_nowait();
     }
     if (uicon) radiant_reconcile_js_dom_mutations(uicon, doc);
-    context = saved_ctx;
+    eval_context_restore(saved_ctx);
     input_context = saved_input_ctx;
-    _lambda_rt = saved_lambda_rt;
+    js_runtime_state_bind_context(saved_ctx);
     return pumped;
 }
 
@@ -589,30 +588,25 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     event.mouse_button.x = xpos;
     event.mouse_button.y = ypos;
 
-    static double last_click_time = -1.0;
-    static double last_click_x = 0.0;
-    static double last_click_y = 0.0;
-    static int last_click_button = -1;
-    static uint8_t click_count = 1;
-    static uint8_t active_click_count = 1;
+    UiContext* ui = &ui_context;
     if (action == GLFW_PRESS) {
-        double dx = xpos - last_click_x;
-        double dy = ypos - last_click_y;
-        bool same_click_series = last_click_time >= 0.0 &&
-            button == last_click_button &&
-            event.mouse_button.timestamp - last_click_time <= 0.5 &&
+        double dx = xpos - ui->last_click_x;
+        double dy = ypos - ui->last_click_y;
+        bool same_click_series = ui->last_click_time >= 0.0 &&
+            button == ui->last_click_button &&
+            event.mouse_button.timestamp - ui->last_click_time <= 0.5 &&
             dx * dx + dy * dy <= 16.0;
-        click_count = same_click_series ? (uint8_t)(click_count + 1) : 1;
-        if (click_count > 3) click_count = 3;
-        last_click_time = event.mouse_button.timestamp;
-        last_click_x = xpos;
-        last_click_y = ypos;
-        last_click_button = button;
-        active_click_count = click_count;
+        ui->click_count = same_click_series ? (uint8_t)(ui->click_count + 1) : 1;
+        if (ui->click_count > 3) ui->click_count = 3;
+        ui->last_click_time = event.mouse_button.timestamp;
+        ui->last_click_x = xpos;
+        ui->last_click_y = ypos;
+        ui->last_click_button = button;
+        ui->active_click_count = ui->click_count;
     } else {
-        click_count = active_click_count;
+        ui->click_count = ui->active_click_count;
     }
-    event.mouse_button.clicks = click_count;
+    event.mouse_button.clicks = ui->click_count;
 
     // Map GLFW modifiers to RDT modifiers
     event.mouse_button.mods = 0;

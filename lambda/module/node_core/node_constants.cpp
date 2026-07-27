@@ -1,12 +1,22 @@
 // node_constants.cpp — public node:constants namespace through Jube values.
 #include "node_constants.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_constants_host = NULL;
-static void* node_constants_session = NULL;
-static bool node_constants_rooted = false;
-static Item node_constants_cached_namespace = {0};
+struct NodeConstantsSessionState {
+    void* session;
+    bool rooted;
+    Item cached_namespace;
+};
+static NodeConstantsSessionState* node_constants_state(void) {
+    return (NodeConstantsSessionState*)jube_node_current_module_state(
+        JUBE_NODE_MODULE_STATE_CONSTANTS);
+}
+#define node_constants_session (node_constants_state()->session)
+#define node_constants_rooted (node_constants_state()->rooted)
+#define node_constants_cached_namespace (node_constants_state()->cached_namespace)
 
 static const char* const node_constants_fs_names[] = {
     "F_OK", "R_OK", "W_OK", "X_OK", "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT",
@@ -135,14 +145,13 @@ int node_constants_init(const JubeHostAPI* host) {
 }
 
 void node_constants_shutdown(void) {
-    node_constants_cached_namespace = (Item){0};
-    node_constants_rooted = false;
-    node_constants_session = NULL;
     node_constants_host = NULL;
 }
 
 void node_constants_runtime_attach(void* session) {
     if (!node_constants_host || !node_constants_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_CONSTANTS,
+            sizeof(NodeConstantsSessionState))) return;
     node_constants_session = session;
     if (node_constants_host->node->roots->persistent_root_register(session,
             &node_constants_cached_namespace.item) == 0) node_constants_rooted = true;

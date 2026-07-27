@@ -5,6 +5,7 @@
  * Registered as built-in module 'util' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_host_hooks.h"
 #include "js_typed_array.h"
 #include "js_class.h"
@@ -2818,7 +2819,12 @@ static Item js_util_extend(Item target, Item source) {
 // util Module Namespace Object
 // =============================================================================
 
-static Item util_namespace = {0};
+#define util_namespace (js_runtime_state.util.namespace_object)
+
+static bool util_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.util.roots);
+}
 
 static void js_util_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     RootFrame roots((Context*)context, 3);
@@ -2829,6 +2835,7 @@ static void js_util_set_method(Item ns, const char* name, void* func_ptr, int pa
 }
 
 extern "C" Item js_get_util_namespace(void) {
+    if (!util_ensure_roots()) return ItemError;
     // The console hook is valid for the process lifetime and has no Item
     // ownership; node-core activates this namespace at session attach so the
     // Node profile retains util.format before the first console call.
@@ -2837,7 +2844,6 @@ extern "C" Item js_get_util_namespace(void) {
 
     // The namespace escapes this helper and is not published in the module
     // cache until construction completes, so its stable cache slot owns it.
-    heap_register_gc_root(&util_namespace.item);
     util_namespace = js_new_object();
 
     RootFrame roots((Context*)context, 9);
@@ -2957,6 +2963,7 @@ extern "C" Item js_get_util_namespace(void) {
 }
 
 extern "C" void js_util_reset(void) {
+    if (!js_active_runtime_state) return;
     util_namespace = (Item){0};
     js_host_hooks_set_console_format_hook(NULL);
 }

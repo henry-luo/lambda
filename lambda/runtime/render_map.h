@@ -119,8 +119,16 @@ bool render_map_maybe_set_source_doc_root(Item target);
 typedef void (*render_map_path_recorder_fn)(
     Item source_item, const char* template_ref,
     const int* path_indices, int depth);
+typedef void (*render_map_path_recorder_state_cleanup_fn)(void* state);
 
 void render_map_set_path_recorder(render_map_path_recorder_fn fn);
+
+// Opaque extension storage for the registered path recorder. The render map
+// owns the lifetime boundary; the recorder owns the pointed-to payload.
+void* render_map_get_path_recorder_state(void);
+void render_map_set_path_recorder_state(void* state);
+void render_map_set_path_recorder_state_cleanup(
+    render_map_path_recorder_state_cleanup_fn cleanup);
 
 // Returns true once a path recorder has been registered (radiant init).
 // Lambda's apply() uses this to gate auto-bootstrap of the source doc

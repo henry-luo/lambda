@@ -23,10 +23,12 @@
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/runtime/transpiler.hpp"   // Runtime (heap and name_pool)
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_property_set / js_array_new / js_array_push
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_dom_platform.h"
 #include "../lambda/js/js_dom_observers.h"
 
@@ -35,7 +37,6 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
-extern "C" Context* _lambda_rt;
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
                                         void* target, void* parent);
 extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
@@ -701,15 +702,19 @@ static DomDocument* event_context_find_focused_document(DomDocument* doc,
 
 static Item call_template_event_handler(fn_ptr handler_func, Item model_item,
                                         Item event_item) {
-    typedef Item (*TemplateEventHandlerFn)(Item, Item);
+    if (!context) {
+        log_error("template event: no bound EvalContext");
+        return ItemError;
+    }
+    typedef Item (*TemplateEventHandlerFn)(Context*, Item, Item);
     union {
         fn_ptr raw;
         TemplateEventHandlerFn typed;
     } handler;
     // template_registry stores generated handlers as erased fn_ptr; event
-    // handlers are emitted with the stable (Item model, Item event) ABI.
+    // handlers receive the host-bound canonical context explicitly.
     handler.raw = handler_func;
-    return handler.typed(model_item, event_item);
+    return handler.typed((Context*)context, model_item, event_item);
 }
 
 static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
@@ -2059,37 +2064,35 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 using namespace std::chrono;
                                 auto t_start = high_resolution_clock::now();
 
-                                // Set up eval context for heap allocation during handler/retransform.
-                                // After run_script_mir returns, the thread-local context is stale
-                                // (pointed to a stack-local Runner). Restore it from the retained runtime.
-                                EvalContext handler_ctx;
-                                memset(&handler_ctx, 0, sizeof(handler_ctx));
+                                // Retained handlers borrow the document Runtime's canonical
+                                // context; no heap-only stack context may outlive dispatch.
+                                EvalContext* handler_ctx = nullptr;
                                 DomDocument* doc = event_context_target_document(evcon);
                                 Runtime* rt = doc ? doc->lambda_runtime : nullptr;
                                 EvalContext* saved_context = context;
                                 Context* saved_input_context = input_context;
-                                Context* saved_lambda_rt = _lambda_rt;
                                 if (rt && rt->heap) {
-                                    handler_ctx.heap = rt->heap;
-                                    handler_ctx.name_pool = rt->name_pool;
-                                    handler_ctx.pool = rt->reuse_pool ?
+                                    handler_ctx = runtime_get_eval_context(rt);
+                                    if (!handler_ctx) return true;
+                                    handler_ctx->heap = rt->heap;
+                                    handler_ctx->name_pool = rt->name_pool;
+                                    handler_ctx->pool = rt->reuse_pool ?
                                         rt->reuse_pool : rt->heap->pool;
-                                    handler_ctx.type_info = type_info;
+                                    handler_ctx->type_info = type_info;
                                     // Retained handlers outlive Runner's stack context; bind a
-                                    // live side stack before generated code reads `_lambda_rt`.
-                                    if (!lambda_side_stack_bind((Context*)&handler_ctx)) {
+                                    // live side stack before generated code enters its context ABI.
+                                    if (!lambda_side_stack_bind((Context*)handler_ctx)) {
                                         log_error("lambda event handler: failed to bind side stack");
                                         return true;
                                     }
-                                    context = &handler_ctx;
-                                    _lambda_rt = (Context*)&handler_ctx;
+                                    context = handler_ctx;
                                 }
                                 // Phase 5: Set ui_mode + arena so retransformed body functions
                                 // allocate fat DomElements/DomTexts on the result arena.
-                                if (rt && rt->ui_mode && rt->result_arena) {
-                                    handler_ctx.ui_mode = true;
-                                    handler_ctx.arena = rt->result_arena;
-                                    input_context = (Context*)&handler_ctx;
+                                if (handler_ctx && rt && rt->ui_mode && rt->result_arena) {
+                                    handler_ctx->ui_mode = true;
+                                    handler_ctx->arena = rt->result_arena;
+                                    input_context = (Context*)handler_ctx;
                                 } else {
                                     // Clear input_context to prevent stale arena access
                                     // during list expansion in retransformed body functions.
@@ -2174,7 +2177,6 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 // restore previous context
                                 context = saved_context;
                                 input_context = saved_input_context;
-                                _lambda_rt = saved_lambda_rt;
 
                                 return true;
                             }
@@ -2644,10 +2646,10 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
 
     uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
     const char* previous_history_input_type =
-        te_history_input_type_set(input_intent_type_name(input_type));
+        te_history_input_type_set(state, input_intent_type_name(input_type));
     bool ok = te_replace_byte_range_no_events(live_elem, state, live_target, start, end,
                                               repl, repl_len);
-    te_history_input_type_restore(previous_history_input_type);
+    te_history_input_type_restore(state, previous_history_input_type);
     if (ok) {
         FormControlProp* form = live_elem->form;
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
@@ -4704,49 +4706,31 @@ static DomElement* radiant_view_to_dom_element(View* v) {
 // Both factories AND dispatch must run between enter/exit because Item creation
 // allocates from the active JS runtime heap and number-stack base frame.
 typedef struct {
-    EvalContext  handler_ctx;
+    EvalContext* handler_ctx;
     EvalContext* saved_ctx;
     Context*     saved_input_ctx;
-    Context*     saved_lambda_rt;
     DomDocument* doc;
-    ArrayList*   tmp_type_list;
     bool         active;
 } JsCtxScope;
 
-// JIT-compiled JS reads the runtime pool for StringBuf allocation (template
-// literals, etc.) via the global `_lambda_rt` (see js_mir_expression_lowering
-// jm_transpile_template_literal). It is set during the script/module batch and
-// restored afterward, so it is stale when a retained JS event handler fires in
-// a later turn — a template literal in that handler would dereference a
-// dangling `_lambda_rt->pool`. The JS context scope below must point it at the
-// same handler_ctx it installs as `context`.
+// Retained JS handlers enter the document's runtime context before allocating
+// event values or invoking a generated context-ABI function.
 static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
-    s->tmp_type_list = nullptr;
+    s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.mir_ctx || !s->doc->js.runtime_heap) return false;
-    memset(&s->handler_ctx, 0, sizeof(s->handler_ctx));
-    Heap* heap = (Heap*)s->doc->js.runtime_heap;
-    s->handler_ctx.heap = heap;
-    s->handler_ctx.name_pool = (NamePool*)s->doc->js.runtime_name_pool;
-    s->handler_ctx.pool = s->doc->js.runtime_pool ?
-        (Pool*)s->doc->js.runtime_pool : heap->pool;
-    // Allocate a per-dispatch type_list. C-level `js_create_event` callers
-    // need a non-NULL type_list so map_rebuild_for_type_change can append
-    // freshly-created TypeMaps. Compiled JS handlers swap to their own
-    // module type_list via the `_with_tl` wrappers and restore on return,
-    // so the per-dispatch list is only used by our C-side construction.
-    s->tmp_type_list = arraylist_new(16);
-    s->handler_ctx.type_list = s->tmp_type_list;
-    s->saved_ctx = context;
+    if (!s->doc || !s->doc->js.mir_ctx || !s->doc->js.runtime) return false;
+    Runtime* runtime = s->doc->js.runtime;
+    s->handler_ctx = runtime_get_eval_context(runtime);
+    if (!s->handler_ctx || !runtime->heap || !runtime->name_pool) return false;
+    s->handler_ctx->heap = runtime->heap;
+    s->handler_ctx->name_pool = runtime->name_pool;
+    s->handler_ctx->type_list = runtime->type_list;
+    s->handler_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    s->saved_ctx = eval_context_bind(s->handler_ctx);
     s->saved_input_ctx = input_context;
-    s->saved_lambda_rt = _lambda_rt;
-    context = &s->handler_ctx;
+    if (s->handler_ctx->js_state) js_runtime_state_bind_context(s->handler_ctx);
     input_context = nullptr;
-    // JIT'd handler bodies read _lambda_rt->pool for StringBuf allocation;
-    // point it at the live handler context so template literals in a retained
-    // event handler allocate from the valid runtime pool, not a stale one.
-    _lambda_rt = (Context*)&s->handler_ctx;
     js_dom_set_document(s->doc);
     dom_js_mutation_reset_records(s->doc);
     s->active = true;
@@ -4758,13 +4742,9 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
 {
     if (!s->active) return;
     auto t_handler = std::chrono::high_resolution_clock::now();
-    context = s->saved_ctx;
+    eval_context_restore(s->saved_ctx);
     input_context = s->saved_input_ctx;
-    _lambda_rt = s->saved_lambda_rt;
-    if (s->tmp_type_list) {
-        arraylist_free(s->tmp_type_list);
-        s->tmp_type_list = nullptr;
-    }
+    js_runtime_state_bind_context(s->saved_ctx);
     post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
 }
@@ -4847,10 +4827,9 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     // would invalidate its current View pointers; the mutation ledger requests
     // the safe event-loop reflow after this scheduler tick completes.
     if (entered_scope) {
-        context = scope.saved_ctx;
+        eval_context_restore(scope.saved_ctx);
         input_context = scope.saved_input_ctx;
-        _lambda_rt = scope.saved_lambda_rt;
-        if (scope.tmp_type_list) arraylist_free(scope.tmp_type_list);
+        js_runtime_state_bind_context(scope.saved_ctx);
         scope.active = false;
     }
 }

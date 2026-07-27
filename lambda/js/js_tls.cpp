@@ -7,6 +7,7 @@
  * Registered as built-in module 'tls' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_typed_array.h"
@@ -373,23 +374,14 @@ static const char* tls_builtin_root_certificate =
 "lz88C25ucKA=\n"
 "-----END CERTIFICATE-----";
 
-static Item tls_namespace = {0};
-static Item tls_ca_bundled_cache = {0};
-static Item tls_ca_extra_cache = {0};
-static Item tls_ca_system_cache = {0};
-static Item tls_ca_default_cache = {0};
-extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t tls_ca_roots_epoch = 0;
+#define tls_namespace (js_runtime_state.tls.namespace_object)
+#define tls_ca_bundled_cache (js_runtime_state.tls.ca_bundled)
+#define tls_ca_extra_cache (js_runtime_state.tls.ca_extra)
+#define tls_ca_system_cache (js_runtime_state.tls.ca_system)
+#define tls_ca_default_cache (js_runtime_state.tls.ca_default)
 
 static void tls_ca_register_roots(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (tls_ca_roots_epoch == epoch) return;
-    heap_register_gc_root(&tls_namespace.item);
-    heap_register_gc_root(&tls_ca_bundled_cache.item);
-    heap_register_gc_root(&tls_ca_extra_cache.item);
-    heap_register_gc_root(&tls_ca_system_cache.item);
-    heap_register_gc_root(&tls_ca_default_cache.item);
-    tls_ca_roots_epoch = epoch;
+    (void)js_root_range_ensure_registered(&js_runtime_state.tls.roots);
 }
 
 static Item tls_clone_unique_string_array(Item source, bool freeze_result) {
@@ -645,7 +637,11 @@ typedef struct TlsClientTicketState {
     struct TlsClientTicketState* next;
 } TlsClientTicketState;
 
-static TlsClientTicketState* tls_client_ticket_states = NULL;
+// TLS ticket generations are observable per TLS realm, not per process.
+static TlsClientTicketState*& tls_client_ticket_states_ref() {
+    return *(TlsClientTicketState**)&js_runtime_state.tls.client_ticket_states;
+}
+#define tls_client_ticket_states (tls_client_ticket_states_ref())
 
 static TlsClientTicketState* tls_client_ticket_state_for_port(int port) {
     TlsClientTicketState* state = tls_client_ticket_states;
@@ -686,7 +682,10 @@ typedef struct JsTlsSecureContextOwner {
     struct JsTlsSecureContextOwner* next;
 } JsTlsSecureContextOwner;
 
-static JsTlsSecureContextOwner* secure_context_owners = NULL;
+static JsTlsSecureContextOwner*& secure_context_owners_ref() {
+    return *(JsTlsSecureContextOwner**)&js_runtime_state.tls.secure_context_owners;
+}
+#define secure_context_owners (secure_context_owners_ref())
 
 static bool tls_track_secure_context(TlsContext* ctx) {
     if (!ctx) return false;
@@ -3008,6 +3007,8 @@ static Item tls_constructor_prototype(Item ctor, JsClass cls) {
 }
 
 extern "C" Item js_get_tls_namespace(void) {
+    if (!js_active_runtime_state ||
+            !js_root_range_ensure_registered(&js_runtime_state.tls.roots)) return ItemError;
     if (tls_namespace.item != 0) return tls_namespace;
 
     tls_ca_register_roots();
@@ -3066,10 +3067,23 @@ extern "C" Item js_get_tls_namespace(void) {
 }
 
 extern "C" void js_tls_reset(void) {
+    if (!js_active_runtime_state) return;
     tls_destroy_tracked_secure_contexts();
     tls_namespace = (Item){0};
     tls_ca_bundled_cache = (Item){0};
     tls_ca_extra_cache = (Item){0};
     tls_ca_system_cache = (Item){0};
     tls_ca_default_cache = (Item){0};
+}
+
+#undef tls_client_ticket_states
+#undef secure_context_owners
+
+extern "C" void js_tls_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state) return;
+    if (runtime_state->tls.client_ticket_states || runtime_state->tls.secure_context_owners) {
+        log_error("js-tls: context destroyed before native TLS state was reset");
+    }
+    runtime_state->tls.client_ticket_states = NULL;
+    runtime_state->tls.secure_context_owners = NULL;
 }

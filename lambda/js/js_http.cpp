@@ -10,6 +10,7 @@
  * Registered as built-in module 'http' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_typed_array.h"
@@ -48,12 +49,16 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_symbol_for(Item key);
 extern Item js_make_number(double d);
 
-static Item http_server_prototype = {0};
-// release LTO binds these constructor prototypes from helper-created objects;
-// keeping concrete definitions avoids unresolved optimized references.
-Item http_incoming_message_prototype = {0};
-Item http_server_response_prototype = {0};
-static Item http_outgoing_message_prototype = {0};
+#define http_server_prototype (js_runtime_state.http.server_prototype)
+#define http_incoming_message_prototype (js_runtime_state.http.incoming_message_prototype)
+#define http_server_response_prototype (js_runtime_state.http.server_response_prototype)
+#define http_outgoing_message_prototype (js_runtime_state.http.outgoing_message_prototype)
+#define http_namespace (js_runtime_state.http.namespace_object)
+
+static bool http_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.http.roots);
+}
 
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
@@ -6082,8 +6087,6 @@ extern "C" Item js_http_stub_ctor(void) {
 // http Module Namespace
 // =============================================================================
 
-static Item http_namespace = {0};
-
 static void http_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
@@ -6106,6 +6109,7 @@ static Item http_constructor_prototype(Item ctor, JsClass cls) {
 }
 
 extern "C" Item js_get_http_namespace(void) {
+    if (!http_ensure_roots()) return ItemError;
     if (http_namespace.item != 0) return http_namespace;
 
     http_namespace = js_new_object();
@@ -6170,5 +6174,6 @@ extern "C" Item js_get_http_namespace(void) {
 }
 
 extern "C" void js_http_reset(void) {
+    if (!js_active_runtime_state) return;
     http_namespace = (Item){0};
 }

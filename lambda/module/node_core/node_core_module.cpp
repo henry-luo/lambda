@@ -17,7 +17,11 @@
 #include <cstring>
 
 static const JubeHostAPI* node_core_host = NULL;
-static void* node_core_session = NULL;
+struct NodeCoreSessionState { void* session; };
+static NodeCoreSessionState* node_core_state(void) {
+    return (NodeCoreSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_CORE);
+}
+#define node_core_session (node_core_state()->session)
 
 static Item node_core_path_namespace(void) {
     return node_path_namespace();
@@ -650,7 +654,6 @@ static void node_core_shutdown(void) {
     node_querystring_shutdown();
     node_string_decoder_shutdown();
     node_path_shutdown();
-    node_core_session = NULL;
     node_core_host = NULL;
 }
 
@@ -660,6 +663,8 @@ static void node_core_runtime_attach(void* session) {
             !node_core_host->node->runtime->session_is_live(session)) {
         return;
     }
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_CORE,
+            sizeof(NodeCoreSessionState))) return;
     node_core_session = session;
     node_path_runtime_attach(session);
     node_string_decoder_runtime_attach(session);

@@ -10,6 +10,7 @@
 #include "js_xhr.h"
 #include "js_event_loop.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../input/input.hpp"
@@ -63,9 +64,38 @@ struct XhrState {
     Item    js_object;      // back-reference to the JS XHR object
 };
 
-static XhrState _xhr_pool[MAX_XHR];
-static int _xhr_count = 0;
-static char* _xhr_base_url = nullptr;
+// XMLHttpRequest records include request ownership and asynchronous-turn
+// tokens, so they belong to the realm that owns their JS wrappers. Access is
+// direct through the bound context; XHR calls do not synchronize with other
+// contexts or add atomic work to request dispatch.
+struct JsXhrRuntimeState {
+    XhrState pool[MAX_XHR] = {};
+    int count = 0;
+    char* base_url = nullptr;
+};
+
+static JsXhrRuntimeState* js_xhr_runtime_state_get() {
+    if (!js_active_runtime_state) return nullptr;
+    return (JsXhrRuntimeState*)js_runtime_state.xhr_state;
+}
+
+static bool js_xhr_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_xhr_runtime_state_get()) return true;
+    JsXhrRuntimeState* state = (JsXhrRuntimeState*)mem_calloc(1,
+        sizeof(JsXhrRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) {
+        log_error("xhr: failed to allocate context state");
+        return false;
+    }
+    js_runtime_state.xhr_state = state;
+    return true;
+}
+
+#define js_xhr_state ((JsXhrRuntimeState*)js_runtime_state.xhr_state)
+#define _xhr_pool (js_xhr_state->pool)
+#define _xhr_count (js_xhr_state->count)
+#define _xhr_base_url (js_xhr_state->base_url)
 static XhrState* xhr_state_from_this();
 
 static void xhr_clear_response_headers(XhrState* xhr) {
@@ -193,6 +223,7 @@ static void xhr_free_request_header_lines(char** lines, int count) {
 }
 
 extern "C" void js_xhr_set_base_url(const char* base_url) {
+    if (!js_xhr_runtime_state_ensure()) return;
     if (_xhr_base_url) {
         mem_free(_xhr_base_url);
         _xhr_base_url = nullptr;
@@ -321,6 +352,7 @@ static void xhr_complete_response(XhrState* xhr, long status,
 // ============================================================================
 
 extern "C" Item js_xhr_new(void) {
+    if (!js_xhr_runtime_state_ensure()) return ItemNull;
     if (_xhr_count >= MAX_XHR) {
         log_error("xhr: pool exhausted (max %d)", MAX_XHR);
         return ItemNull;
@@ -513,6 +545,7 @@ extern "C" Item js_xhr_override_mime_type(Item mime_arg) {
 }
 
 static Item js_xhr_async_send_task(Item id_arg, Item token_arg) {
+    if (!js_xhr_runtime_state_get()) return make_js_undef();
     if (get_type_id(id_arg) != LMD_TYPE_INT ||
         get_type_id(token_arg) != LMD_TYPE_INT) {
         return make_js_undef();
@@ -781,6 +814,7 @@ extern "C" Item js_xhr_get_all_response_headers(void) {
 // ============================================================================
 
 extern "C" void js_xhr_reset(void) {
+    if (!js_xhr_runtime_state_get()) return;
     for (int i = 0; i < _xhr_count; i++) {
         if (_xhr_pool[i].in_use) {
             xhr_free_state(&_xhr_pool[i]);
@@ -792,4 +826,21 @@ extern "C" void js_xhr_reset(void) {
         _xhr_base_url = nullptr;
     }
     log_debug("xhr: reset");
+}
+
+#undef js_xhr_state
+#undef _xhr_pool
+#undef _xhr_count
+#undef _xhr_base_url
+
+extern "C" void js_xhr_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->xhr_state) return;
+    JsXhrRuntimeState* state = (JsXhrRuntimeState*)runtime_state->xhr_state;
+    // js_runtime_state_release_heap_resources() resets request-owned buffers
+    // before heap teardown; only the empty capsule may remain at this point.
+    if (state->count || state->base_url) {
+        log_error("xhr: context destroyed before request state was reset");
+    }
+    mem_free(state);
+    runtime_state->xhr_state = nullptr;
 }

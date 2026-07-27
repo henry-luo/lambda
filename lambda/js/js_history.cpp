@@ -3,6 +3,7 @@
 #include "js_dom_events.h"
 #include "js_event_loop.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../module/radiant/radiant_history.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../runtime/transpiler.hpp"
@@ -23,8 +24,35 @@ typedef struct JsHistoryEventTask {
     bool rooted;
 } JsHistoryEventTask;
 
-static __thread ArrayList* js_history_event_tasks = nullptr;
-static __thread bool js_history_drain_scheduled = false;
+// Traversal tasks retain JS state across timer turns, so they are owned by the
+// context that owns the document. Timer delivery uses direct context-local
+// fields after the callback boundary has rebound that context.
+struct JsHistoryRuntimeState {
+    ArrayList* event_tasks = nullptr;
+    bool drain_scheduled = false;
+};
+
+static JsHistoryRuntimeState* js_history_runtime_state_get() {
+    if (!js_active_runtime_state) return nullptr;
+    return (JsHistoryRuntimeState*)js_runtime_state.history_state;
+}
+
+static bool js_history_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    if (js_history_runtime_state_get()) return true;
+    JsHistoryRuntimeState* state = (JsHistoryRuntimeState*)mem_calloc(1,
+        sizeof(JsHistoryRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) {
+        log_error("js-history: failed to allocate context state");
+        return false;
+    }
+    js_runtime_state.history_state = state;
+    return true;
+}
+
+#define js_history_state ((JsHistoryRuntimeState*)js_runtime_state.history_state)
+#define js_history_event_tasks (js_history_state->event_tasks)
+#define js_history_drain_scheduled (js_history_state->drain_scheduled)
 
 static DomDocument* js_history_document(void) {
     return (DomDocument*)js_dom_get_document();
@@ -43,6 +71,7 @@ static void js_history_task_destroy(JsHistoryEventTask* task) {
 }
 
 extern "C" void js_history_reset(void) {
+    if (!js_history_runtime_state_get()) return;
     if (js_history_event_tasks) {
         for (int i = 0; i < js_history_event_tasks->length; i++) {
             js_history_task_destroy(
@@ -55,6 +84,7 @@ extern "C" void js_history_reset(void) {
 }
 
 static Item js_history_drain_events(void) {
+    if (!js_history_runtime_state_get()) return make_js_undefined();
     js_history_drain_scheduled = false;
     if (!js_history_event_tasks || js_history_event_tasks->length == 0) {
         return make_js_undefined();
@@ -91,6 +121,7 @@ static Item js_history_drain_events(void) {
 static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
                                     bool popstate) {
     if (!traversal) return false;
+    if (!js_history_runtime_state_ensure()) return false;
     if (!js_history_event_tasks) js_history_event_tasks = arraylist_new(4);
     if (!js_history_event_tasks) return false;
 
@@ -224,4 +255,21 @@ extern "C" void js_history_install_globals(void) {
     js_property_set(global, make_string_item("blur"),
                     js_new_function((void*)js_history_window_noop, 0));
     js_history_refresh_object();
+}
+
+#undef js_history_state
+#undef js_history_event_tasks
+#undef js_history_drain_scheduled
+
+extern "C" void js_history_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->history_state) return;
+    JsHistoryRuntimeState* state =
+        (JsHistoryRuntimeState*)runtime_state->history_state;
+    // The heap-release phase drains rooted traversal tasks before the capsule
+    // itself is freed, so no callback Item can outlive its owner heap.
+    if (state->event_tasks || state->drain_scheduled) {
+        log_error("js-history: context destroyed before traversal tasks were reset");
+    }
+    mem_free(state);
+    runtime_state->history_state = nullptr;
 }

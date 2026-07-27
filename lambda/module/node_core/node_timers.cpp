@@ -1,14 +1,17 @@
 // node_timers.cpp — node:timers/promises facade through Jube timer services.
 #include "node_timers.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_timers_host = NULL;
-static void* node_timers_session = NULL;
-static bool node_timers_rooted = false;
-static bool node_timers_classic_rooted = false;
-static Item node_timers_cached_namespace = {0};
-static Item node_timers_classic_namespace = {0};
+struct NodeTimersSessionState { void* session; bool rooted; bool classic_rooted; Item cached_namespace; Item classic_namespace; };
+static NodeTimersSessionState* node_timers_state(void) { return (NodeTimersSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_TIMERS); }
+#define node_timers_session (node_timers_state()->session)
+#define node_timers_rooted (node_timers_state()->rooted)
+#define node_timers_classic_rooted (node_timers_state()->classic_rooted)
+#define node_timers_cached_namespace (node_timers_state()->cached_namespace)
+#define node_timers_classic_namespace (node_timers_state()->classic_namespace)
 
 static Item node_timers_timeout(Item delay, Item value, Item options) {
     return node_timers_host->node->async_ops->timer_set_timeout_promise(delay, value, options);
@@ -192,17 +195,14 @@ int node_timers_init(const JubeHostAPI* host) {
 }
 
 void node_timers_shutdown(void) {
-    node_timers_cached_namespace = (Item){0};
-    node_timers_classic_namespace = (Item){0};
-    node_timers_rooted = false;
-    node_timers_classic_rooted = false;
-    node_timers_session = NULL;
     node_timers_host = NULL;
 }
 
 void node_timers_runtime_attach(void* session) {
     if (!node_timers_host || !node_timers_host->node->runtime->session_is_live ||
             !node_timers_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_TIMERS,
+            sizeof(NodeTimersSessionState))) return;
     node_timers_session = session;
     if (node_timers_host->node->roots->persistent_root_register(session,
             &node_timers_cached_namespace.item) == 0) node_timers_rooted = true;

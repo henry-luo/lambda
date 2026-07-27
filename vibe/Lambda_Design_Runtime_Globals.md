@@ -1,7 +1,11 @@
 # Lambda Runtime Globals — Audit & Migration to EvalContext
 
 **Date:** 2026-07-27
-**Status:** Design / audit. No implementation started.
+**Status:** Implemented. Core context ownership, Lambda module state, JS
+runtime state, the Direct hidden-context ABI, Jube session ownership, and the
+in-scope Radiant bridge state are context-owned. Release verification is
+recorded in the implementation checkpoint; known unrelated fixture diagnostics
+are explicitly called out rather than being treated as migration regressions.
 **Scope:** `lambda/runtime/`, `lambda/core/`, `lambda/js/`, `lambda/jube/`, guest runtimes (`py/`, `bash/`), `lambda/module/`, and the `lib/` infra they lean on.
 **Relation to prior docs:** expands the global-state ledger in `vibe/Lambda_Js_Thread.md` §6.5 into a full inventory and migration design. The Js_Thread JT decisions (JT1 context-thread rule, JT4 per-thread recovery, JT6 loop affinity) are taken as given; this doc is the state-ownership side of the same program.
 
@@ -50,6 +54,170 @@ Why now:
 - **GC honesty.** Rooted `Item` globals are scattered across ~30 files, each with its own
   `*_roots_epoch` re-registration dance. Centralizing them under the context that owns the heap
   removes an entire class of stale-root bugs (the forced-GC sweep keeps finding these).
+
+### Implementation checkpoint (2026-07-27)
+
+- `Runtime::eval_context` is the canonical long-lived owner. `context` is now
+  only a scoped TLS binding; runner cleanup and JS entrypoints no longer create
+  a stack `EvalContext` for a normal activation.
+- Lambda globals and member ICs are instantiated as fixed per-context module
+  slabs. Their roots are registered once when the module instance is prepared;
+  generated loads/stores and IC probes use ordinary context-owned memory.
+- JS semantic state, queues/timers, CJS/deferred-MIR state, call state,
+  generator/async records, and wrapper identity caches are context-owned.
+- Lambda Direct and JS MIR Direct forward `Context*` as a hidden ABI argument.
+  JS wrappers, fixed-arity dynamic entries, direct calls, closures, native
+  variants, generator resumption, async resumption, and module entrypoints all
+  preserve the pointer without `_lambda_rt` import/TLS reloads in generated
+  code. JS function objects retain their immutable owner context for the one
+  dynamic-dispatch adaptation boundary.
+- Template registries are now `EvalContext` state. Guest activation and Jube
+  frame-runtime plumbing use canonical/execution-owned context pointers rather
+  than publishing `_lambda_rt`.
+- Render reconciliation and template-state maps are context-owned capsules.
+  Their fixed document-root slots are registered once against the owning heap
+  and unregistered during that context's heap reset/teardown.
+- Lambda document loading, custom layout, and retained Lambda event handlers
+  now re-enter the document Runtime's canonical context instead of creating
+  heap-only stack contexts after script execution.
+- The active DOM document, main document, UI context, host-loop mode,
+  `designMode`, and active element are now `JsDomState` fields rather than
+  thread-local state. Document-script reattachment explicitly rebinds the
+  document Runtime before publishing DOM wrappers; post-teardown host hooks
+  are context-free no-ops rather than creating or mutating a replacement
+  realm.
+- DOM platform `localStorage`, `sessionStorage`, and `matchMedia` records are
+  now context-owned. Their object homes are published once to the owning heap;
+  storage reads/writes and media-query evaluation use direct owner-thread
+  storage without synchronization.
+- Pre-runtime document/UI setup no longer writes a thread-global DOM binding:
+  those host notifications are no-ops until a document `EvalContext` exists,
+  and the normal script-entry rebind publishes the document into that owner.
+- Mutation, resize, and intersection observer records (including callback
+  roots and pinned native targets) are lazily allocated per `JsRuntimeState`.
+  The fixed callback/object root homes are registered once per owning heap;
+  observer delivery and mutation notification stay direct context-local work.
+- DOM event listener tables, IDL-handler ordering, and legacy propagation
+  mirrors are now a lazy context-owned capsule. Listener dispatch remains
+  direct owner-thread array/hash lookup; its precise callback roots and DOM
+  pins are released during the cold pre-heap teardown phase.
+- XMLHttpRequest pools, base URLs, and asynchronous request tokens are
+  context-local. History traversal task queues and their rooted state payloads
+  are likewise context-owned; neither path retains a thread-local fallback or
+  introduces synchronization in request/event delivery.
+- Attached-DOM expando roots and all live `children`/form/select/lookup
+  collection registries are now context-owned. Their hot property-read path
+  is a direct capsule lookup; weak array homes and native-node pins are
+  released only in cold document/heap teardown.
+- Foreign-document wrapper identity, iframe-document ownership, browsing
+  context markers, and deferred iframe-load pins are now context-local. This
+  keeps DOMParser/iframe state isolated without process-wide TLS caches.
+- `fetch()` relative-path state, response-body slots, and the synchronous
+  Promise-executor handoff are context-owned. The CLI document path is only a
+  one-shot bootstrap input: it is copied into the first context and cleared,
+  so response delivery has no process-global fallback.
+- FS callback-style pending requests are linked from the owning context's FS
+  state. Their existing precise Jube roots and cancellation path run during
+  that context's teardown, with no shared pending-request list.
+- TLS ticket-generation records and tracked native secure contexts are held
+  by the context's TLS capsule and released with its cold reset, rather than
+  through process-global linked lists.
+- Permission grants and `process.permission.drop()` mutations are now kept in
+  a per-context policy capsule. Command-line flags are frozen bootstrap input
+  copied on demand; permission checks retain only direct local reads after
+  context entry.
+- Net defaults, BlockList records, and Node host callbacks (shutdown/IPC,
+  cluster, console formatting) are context-local. Net allocates its native
+  capsule only when the module is first loaded; BlockList backing records are
+  separately lazy. Socket paths read direct local fields and take no lock or
+  atomic readiness branch.
+- `assert`/`node:test` namespaces, hook stores, event queues, assertion
+  instances, and fixed mock-wrapper slots are context-owned. The generated
+  mock wrappers retain their fixed slot dispatch but select the active
+  context's table, keeping the repeated call path lock-free.
+- Crypto's native HMAC/hash/sign/cipher lifecycle registries, canvas font
+  context/handle pool, Test262 Atomics waiter state, and the dynamic Function
+  MIR cache are lazy per-context capsules. Atomics remains an explicitly
+  shared language operation at the SharedArrayBuffer boundary; the runtime's
+  waiter bookkeeping is no longer shared between unrelated realms.
+- Dynamic-eval parser diagnostics and MIR debug-site counters are compiler
+  instance state. Tagged-template eval salts are context-local, so concurrent
+  compilation cannot overwrite a process-global last-error/counter value.
+- `process.exitCode` is now retained only in the executing context; CLI code
+  rebinds the Runtime-owned context before reading it instead of synchronizing
+  through a process-global scalar.
+- Jube's active Node-service session is now selected from the bound
+  `EvalContext`; module attachment is recorded per session rather than by a
+  single last-attached generation. The registry uses a cold attach/detach lock
+  only to publish those session records. Namespace and runtime calls continue
+  through the already-bound context without a repeated synchronization check.
+- Node-core's session-owned namespace caches, rooted Items, Blob URL table,
+  EventEmitter keys/prototype, process capture callback and umask, and the
+  OS priority override now live in fixed module-state slots on that Jube
+  session. Slot allocation is serialized only during module attach; normal
+  Node calls are a direct active-context slot load. Jube async-work lists and
+  request-id counters are likewise per session, so cancellation and late
+  completion no longer scan a process-global queue.
+- Node process uptime and macOS monotonic-clock conversion are per session;
+  OS information queries use call-local buffers instead of unsynchronized
+  process caches. These APIs remain lock-free and avoid stale context data.
+- Jube module activation now has a cold condition-variable publication gate:
+  concurrent requests wait for one initializer to finish, cyclic re-entry is
+  rejected, and callbacks run outside the lock. Published descriptors are
+  immutable for execution; no module-call or IC path takes this lock.
+- Radiant iframe recursion depth is now owned by `UiContext`, which preserves
+  the depth across nested short-lived layout contexts without coupling two
+  independent UI/document trees through thread-local state.
+- Radiant's editing transaction sequence, state-batch suppression depth,
+  state-key interning, and native click-series tracking are now document/UI
+  owned. This removes shared lazy state from input dispatch and keeps the
+  repeated state-map comparison path as ordinary per-document pointer loads.
+- A `DomDocument` now retains a complete JS `Runtime`, rather than copied
+  heap/name-pool/type-list fragments. Script tasks, inline-handler compilation,
+  event dispatch, the host timer pump, focus simulation, and selection APIs
+  all borrow that Runtime's canonical `EvalContext`. Transient document
+  teardown drains deferred MIR and event-loop roots before releasing the
+  capsule; later host cleanup is context-free and does not recreate state.
+- The broad JS-host namespace/prototype cache sweep is complete. The
+  capsule now owns DNS, builtin, readline, Buffer, HTTPS, util, crypto,
+  child-process, zlib, TLS, stream, HTTP, net, fs, clipboard, the primary DOM
+  singleton wrappers, string-concatenation fast tables, global-object/lexical
+  bindings, constructor identity caches, core namespace objects, Test262-agent
+  queues, Node process state, diagnostics channels, and async hooks. Process
+  IPC now allocates a context-owned libuv pipe and re-enters its owning context
+  from libuv callbacks. Their one-time root registration happens at
+  module/context initialization; repeated calls use direct owner-thread fields
+  with no lock or atomic check. The remaining process globals in those files
+  are classified bootstrap, immutable registry/configuration, signal support,
+  or diagnostics and do not feed realm semantics.
+- The context capsule now also owns Promise/domain records (allocated only on
+  first Promise use), ES-module/TLA registries and dynamic-import slots,
+  tagged-template identity, runtime-owned array-buffer tracking,
+  constructor/prototype reset snapshots, AsyncLocalStorage and cluster state,
+  performance clocks, and both realm-bound RegExp compilation caches. Promise,
+  module, and cache root publication is once per context/heap epoch; Promise,
+  module lookup, RegExp lookup, and async execution use direct context-local
+  fields with no lock, atomic, or repeated readiness test. Heap-backed native
+  regex records are explicitly released before their owning heap is destroyed.
+- The remaining `_lambda_rt` definition is legacy C2MIR compatibility only;
+  the frozen C2MIR path is outside the new Direct-runtime ABI contract.
+- JS MIR timeout-recovery ownership (active MIR context, transpiler, owned
+  source, and nested compilation stack) is a lazy `JsRuntimeState` capsule.
+  The compile entry binds the canonical context before parsing and restores the
+  caller on every early error; this cold path never appears in generated code.
+- The Radiant editor source-path side table is an opaque extension of the
+  context-owned render-map capsule, with a lifecycle cleanup callback. Range
+  ids, text-control undo/redo guard depth, and ambient history `inputType` are
+  direct `DocState` fields, so document editing has no TLS or synchronization
+  dependency.
+- Release validation (`make build-release-compile`) completed with zero build
+  errors. Fresh-realm JS microbenches completed for property, binop, and
+  equality paths; the property benchmark measured direct owner-local accesses
+  (best: set 16.02 ns/op, get 20.46 ns/op). The Jube OS registry batch and the
+  Radiant click-bubbling layout fixture complete successfully. That layout
+  fixture still emits its pre-existing `document.fonts` null errors, and the
+  batch runner still reports its pre-existing retained JS-runtime allocations
+  at process shutdown; neither is introduced by this migration.
 
 ---
 

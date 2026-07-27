@@ -7,6 +7,7 @@
  * Registered as built-in module 'https' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "js_class.h"
@@ -34,7 +35,13 @@ extern "C" void js_microtask_flush(void);
 extern "C" Item js_http_Agent(Item);
 extern "C" Item js_http_agent_destroy(void);
 
-static Item https_agent_prototype = {0};
+#define https_agent_prototype (js_runtime_state.https.agent_prototype)
+#define https_namespace (js_runtime_state.https.namespace_object)
+
+static bool https_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.https.roots);
+}
 
 static bool is_missing_value(Item value) {
     TypeId type = get_type_id(value);
@@ -638,9 +645,8 @@ extern "C" Item js_https_get(Item options_item, Item maybe_options, Item callbac
 // https Module Namespace
 // =============================================================================
 
-static Item https_namespace = {0};
-
 extern "C" Item js_get_https_namespace(void) {
+    if (!https_ensure_roots()) return ItemError;
     if (https_namespace.item != 0) return https_namespace;
 
     https_namespace = js_new_object();
@@ -681,6 +687,7 @@ extern "C" Item js_get_https_namespace(void) {
 }
 
 extern "C" void js_https_reset(void) {
+    if (!js_active_runtime_state) return;
     https_namespace = (Item){0};
     https_agent_prototype = (Item){0};
 }

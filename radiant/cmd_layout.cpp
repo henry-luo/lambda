@@ -5095,6 +5095,14 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     runtime_init(runtime);
+    EvalContext* layout_context = runtime_get_eval_context(runtime);
+    if (!layout_context) {
+        mem_free(runtime);
+        return nullptr;
+    }
+    // Template/render registration starts before run_script_mir initializes the
+    // heap, but it still belongs to this long-lived document Runtime.
+    context = layout_context;
 
     // Phase 5: Create result Input with arena for unified DOM allocation.
     // Elements from JIT execution will be fat DomElements on this arena.
@@ -5112,22 +5120,18 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     // Use MIR Direct JIT to evaluate the Lambda script as a functional document result.
     Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
-    // After run_script_mir returns, the thread-local context points to a
-    // stack-local Runner that has been destroyed. Restore it from the retained
-    // runtime so that GC operations (e.g. render_map_set_doc_root →
-    // heap_register_gc_root) can access context->heap->gc safely.
-    EvalContext retained_ctx;
-    memset(&retained_ctx, 0, sizeof(retained_ctx));
+    // The runner and later event handlers borrow this same canonical context.
+    // Never fabricate a heap-only stack context for post-evaluation roots.
     if (runtime->heap) {
-        retained_ctx.heap = runtime->heap;
-        retained_ctx.name_pool = runtime->name_pool;
-        retained_ctx.pool = runtime->heap->pool;
+        layout_context->heap = runtime->heap;
+        layout_context->name_pool = runtime->name_pool;
+        layout_context->pool = runtime->heap->pool;
         if (runtime->ui_mode && runtime->result_arena) {
-            retained_ctx.ui_mode = true;
-            retained_ctx.arena = runtime->result_arena;
+            layout_context->ui_mode = true;
+            layout_context->arena = runtime->result_arena;
         }
-        context = &retained_ctx;
-        input_context = (Context*)&retained_ctx;
+        context = layout_context;
+        input_context = (Context*)layout_context;
     }
 
     if (!script_output || !script_output->root.item) {
@@ -5432,9 +5436,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     Item html_item_root = {.element = html_elem};
     render_map_set_doc_root(html_item_root);
 
-    // The retained context above is stack-local and only exists to let the
-    // post-evaluation setup register Lambda roots. Event execution restores a
-    // fresh context from dom_doc->lambda_runtime, so clear the thread-local now.
+    // Event execution restores this document Runtime's canonical context.
     context = nullptr;
     input_context = nullptr;
 
@@ -6756,6 +6758,15 @@ static bool layout_single_file(
         if (doc->resource_manager) {
             radiant_cleanup_network_support(doc);
         }
+        // Document script execution clears transient TLS. The render-map and
+        // editor path table still belong to this document Runtime, so release
+        // them before JS teardown removes that canonical context.
+        Runtime* render_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+        if (render_runtime) {
+            context = runtime_get_eval_context(render_runtime);
+        }
+        source_pos_bridge_reset();
+        render_map_destroy();
         // Clean up retained JS state (MIR context, event registry, runtime heap)
         // before destroying the document that owns the pointers.
         script_runner_cleanup_js_state(doc);
@@ -6772,9 +6783,6 @@ static bool layout_single_file(
             ui_context->document = nullptr;
         }
     }
-    source_pos_bridge_reset();
-    render_map_destroy();
-
     if (event_log) {
         event_state_log_document(event_log, "unload_complete");
         event_state_log_close(event_log);

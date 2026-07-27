@@ -19,6 +19,7 @@
 #include "../validator/validator.hpp"
 #include "lambda-stack.h"
 #include "heap_api.h"
+#include "runtime-state.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <stddef.h>
@@ -69,7 +70,6 @@ extern Url* get_current_dir();
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void clear_persistent_last_error();
-extern __thread LambdaError* persistent_last_error;
 extern __thread EvalContext* context;
 
 // Ensure MIR inline allocation offsets stay correct if Context struct changes.
@@ -90,8 +90,7 @@ void resolve_sys_paths_recursive(Item item);
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
-    void register_bss_gc_roots(void* mir_ctx);
-    void reset_and_register_bss_gc_roots(void* mir_ctx);
+    bool prepare_context_module_state(Context* runtime, void* mir_ctx);
     extern int g_mir_interp_mode;
 }
 
@@ -138,7 +137,7 @@ struct MirTranspiler {
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
 
-    // Global variables: name -> GlobalVarEntry (BSS-backed module-level let bindings)
+    // Global variables: name -> GlobalVarEntry (context-module slab slots)
     struct hashmap* global_vars;
 
     // Variable scopes: array of hashmaps, each mapping name -> MirVarEntry
@@ -162,6 +161,14 @@ struct MirTranspiler {
     // Stored here during transpile_mir_ast so all functions in the module use it
     // instead of context->consts, enabling correct cross-module function calls.
     MIR_item_t consts_bss;
+
+    // Immutable module metadata BSS.  It contains only the sealed module id
+    // and slab sizes; every mutable value lives under EvalContext::module_states.
+    MIR_item_t module_layout_bss;
+    MIR_reg_t module_state_reg;
+    MIR_reg_t member_ic_base_reg;
+    uint32_t global_var_slot_count;
+    uint32_t member_ic_count;
 
     // Type-list pointer register: holds this module's type_list ArrayList* so that
     // cross-module function calls use the right type_list for map/elmt/object allocation.
@@ -293,7 +300,8 @@ HASHMAP_DEFINE_STRKEY(native_func, struct NativeFuncInfo, name)
 // Global variable entry (module-level let bindings stored in BSS)
 struct GlobalVarEntry {
     char name[128];
-    MIR_item_t bss_item;
+    MIR_item_t bss_item;  // immutable LambdaModuleVarRef for cross-module imports
+    uint32_t slot;
     TypeId type_id;
     MIR_type_t mir_type;
 };
@@ -1048,6 +1056,7 @@ static GlobalVarEntry* find_global_var(MirTranspiler* mt, const char* name) {
 // Forward declarations (defined after emit_box/emit_unbox)
 static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar);
 static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t val, TypeId val_tid);
+static MIR_reg_t emit_module_state(MirTranspiler* mt);
 
 // ============================================================================
 // Import management (lazy proto + import creation)
@@ -2028,21 +2037,54 @@ static bool mir_is_container_field_type(TypeId type_id) {
 }
 
 // ============================================================================
-// Global variable BSS access helpers
+// Context-module global access helpers
 // ============================================================================
 
-// Load a global variable from BSS storage into a register
-static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
-    // Get BSS address
-    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_I64);
+// Resolve the current module's context-owned slab once in the generated
+// function.  `_mod_layout` is immutable after the module is sealed; no
+// publication state, TLS lookup, lock, or atomic operation is emitted here.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static MIR_reg_t emit_module_state(MirTranspiler* mt) {
+    if (mt->module_state_reg) return mt->module_state_reg;
+    MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, addr),
-        MIR_new_ref_op(mt->ctx, gvar->bss_item)));
-    // Load boxed Item from BSS
+        MIR_new_reg_op(mt->ctx, table),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
+    MIR_reg_t layout_addr = new_reg(mt, "module_layout", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, layout_addr),
+        MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+    MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, module_id),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, layout_addr, 0, 1)));
+    mt->module_state_reg = new_reg(mt, "module_state", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->module_state_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
+    mt->member_ic_base_reg = new_reg(mt, "member_ic_base", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->member_ic_base_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, member_ics),
+            mt->module_state_reg, 0, 1)));
+    return mt->module_state_reg;
+}
+
+// Load a global variable from its context-owned slab into a register.
+static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
+    MIR_reg_t state = emit_module_state(mt);
+    MIR_reg_t vars = new_reg(mt, "module_vars", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, vars),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
+            state, 0, 1)));
     MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, boxed),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1)));
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)gvar->slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
     // Unbox to native type if needed
     TypeId tid = gvar->type_id;
     if (mir_is_native_scalar_value_type(tid) || tid == LMD_TYPE_STRING) {
@@ -2051,21 +2093,50 @@ static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
     return boxed;
 }
 
-// Store a value to a global variable's BSS storage
-static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t val, TypeId val_tid) {
-    // Box the value first
-    MIR_reg_t boxed = emit_box(mt, val, val_tid);
-    // Get BSS address
-    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_P);
+static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
+        TypeId tid) {
+    MIR_reg_t module_id = new_reg(mt, "import_module_id", MIR_T_I64);
+    MIR_reg_t slot = new_reg(mt, "import_slot", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, addr),
-        MIR_new_ref_op(mt->ctx, gvar->bss_item)));
-    // A bare boxed wide scalar would retain its producer's number-home pointer.
-    // Every BSS binding therefore owns the companion payload word used here.
-    emit_call_void_4(mt, "owned_item_slot_store",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, addr),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+        MIR_new_reg_op(mt->ctx, module_id),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, ref_addr, 0, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, slot),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, sizeof(uint32_t), ref_addr, 0, 1)));
+    MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, table),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, module_states),
+            mt->em.frame.runtime, 0, 1)));
+    MIR_reg_t state = new_reg(mt, "import_module_state", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, state),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
+    MIR_reg_t vars = new_reg(mt, "import_module_vars", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, vars),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
+            state, 0, 1)));
+    MIR_reg_t boxed = new_reg(mt, "impvar_boxed", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, vars, slot, 8)));
+    if (mir_is_native_scalar_value_type(tid) || tid == LMD_TYPE_STRING) {
+        return emit_unbox(mt, boxed, tid);
+    }
+    return boxed;
+}
+#pragma clang diagnostic pop
+
+// Store a value to a context-owned slab.  The native helper only rebases wide
+// scalar payloads into the slab's private homes; it has no shared state or
+// synchronization and matches the existing BSS ownership semantics.
+static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t val, TypeId val_tid) {
+    MIR_reg_t boxed = emit_box(mt, val, val_tid);
+    MIR_reg_t state = emit_module_state(mt);
+    emit_call_void_3(mt, "lambda_module_var_store",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, state),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, gvar->slot),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
 
@@ -2672,25 +2743,14 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             TypeId var_tid = entry_node->type ? entry_node->type->type_id : LMD_TYPE_ANY;
             log_debug("mir: loading imported variable '%s' type_id=%d", var_name->str, var_tid);
 
-            // MIR Direct BSS always stores a boxed Item (uint64_t), matching store_global_var.
-            // Load as int64 then unbox — same pattern as load_global_var.
+            // Import resolves to an immutable {module_id, slot} descriptor.
+            // The value is read from that module's slab in this EvalContext.
             MIR_item_t imp_item = MIR_new_import(mt->ctx, var_name->str);
             MIR_reg_t addr_reg = new_reg(mt, "impvar_addr", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, addr_reg),
                 MIR_new_ref_op(mt->ctx, imp_item)));
-            // Load boxed Item (uint64) from BSS
-            MIR_reg_t boxed_reg = new_reg(mt, "impvar_boxed", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, boxed_reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr_reg, 0, 1)));
-            // Unbox to native type if the declared type is a simple scalar
-            MIR_reg_t val_reg;
-            if (mir_is_native_scalar_value_type(var_tid) || var_tid == LMD_TYPE_STRING) {
-                val_reg = emit_unbox(mt, boxed_reg, var_tid);
-            } else {
-                val_reg = boxed_reg;
-            }
+            MIR_reg_t val_reg = load_module_var_ref(mt, addr_reg, var_tid);
 
             strbuf_free(var_name);
             return val_reg;
@@ -2765,6 +2825,9 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 if (use_wrapper) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
                 }
                 strbuf_free(fn_import_name);
                 return fn_obj;
@@ -2869,6 +2932,9 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     if (uses_wrapper) {
                         emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                        emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
                     }
 
                     return fn_obj;
@@ -2890,6 +2956,9 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     if (uses_wrapper) {
                         emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                        emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
                     }
 
                     strbuf_free(nm_buf);
@@ -7442,20 +7511,34 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     // repeat read on the same shape skips fn_member's type dispatch and the
     // shape-chain scan. Computed keys keep the plain call — one cell can only
     // stand for one key.
-    // The cell is script_pool-owned but its address is baked into MIR that the
-    // module cache replays in *later* runs, against a type arena this run's
-    // TypeMaps do not belong to. That is why the cell carries an epoch and
-    // fn_member_ic refuses to hit on a stale one — without it a recycled
-    // TypeMap at the same address reads back as a false hit.
-    LambdaMemberIC* member_ic = NULL;
-    if (field->node_type == AST_NODE_IDENT && mt->script_pool) {
-        member_ic = (LambdaMemberIC*)pool_calloc(mt->script_pool, sizeof(LambdaMemberIC));
+    // Site ids are immutable module metadata.  The actual cells live in the
+    // context-owned fixed slab selected in the function prologue, so repeated
+    // probes use ordinary owner-thread memory with no epoch, lock, or atomic.
+    int member_ic_site = -1;
+    if (field->node_type == AST_NODE_IDENT) {
+        member_ic_site = (int)mt->member_ic_count++;
+        char site_name[48];
+        snprintf(site_name, sizeof(site_name), "_mod_ic_site_%d", member_ic_site);
+        MIR_new_bss(mt->ctx, site_name, 1);
     }
-    MIR_reg_t result = member_ic
+    MIR_reg_t member_ic = 0;
+    if (member_ic_site >= 0) {
+        // Only functions that contain a static-name member probe need the
+        // context-owned IC slab.  Keeping this at the site preserves a zero
+        // module-state cost for functions that neither access globals nor ICs.
+        emit_module_state(mt);
+        member_ic = new_reg(mt, "member_ic", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, member_ic),
+            MIR_new_reg_op(mt->ctx, mt->member_ic_base_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)member_ic_site *
+                (int64_t)sizeof(LambdaMemberIC))));
+    }
+    MIR_reg_t result = member_ic_site >= 0
         ? emit_call_3(mt, "fn_member_ic", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field),
-            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)member_ic))
+            MIR_T_P, MIR_new_reg_op(mt->ctx, member_ic))
         : emit_call_2(mt, "fn_member", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
@@ -9213,24 +9296,26 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     abort();
                 }
 
-                // Build trampoline call: fn_call_boxed_N_into(fp, arg0, ..., home)
-                MIR_var_t tramp_vars[17];
-                tramp_vars[0] = {MIR_T_P, "fp", 0};
-                for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
-                tramp_vars[1 + ai] = {MIR_T_P, "home", 0};
+                // Build trampoline call: fn_call_boxed_N_into(runtime, fp, args..., home)
+                MIR_var_t tramp_vars[18];
+                tramp_vars[0] = {MIR_T_P, "runtime", 0};
+                tramp_vars[1] = {MIR_T_P, "fp", 0};
+                for (int i = 0; i < ai; i++) tramp_vars[2 + i] = arg_vars[i];
+                tramp_vars[2 + ai] = {MIR_T_P, "home", 0};
 
                 MirImportEntry* tramp_ie = ensure_import(mt, trampoline_name,
-                    MIR_T_I64, 2 + ai, tramp_vars, 1);
+                    MIR_T_I64, 3 + ai, tramp_vars, 1);
 
-                int nops = 3 + 2 + ai;  // proto + import + result + fp + args + home
-                MIR_op_t ops[20];
+                int nops = 3 + 3 + ai;  // proto + import + result + runtime + fp + args + home
+                MIR_op_t ops[21];
                 ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
                 result = new_reg(mt, "impcall", MIR_T_I64);
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
-                ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
-                for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
-                ops[4 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
+                ops[3] = MIR_new_reg_op(mt->ctx, mt->em.frame.runtime);
+                ops[4] = MIR_new_reg_op(mt->ctx, fp_reg);
+                for (int i = 0; i < ai; i++) ops[5 + i] = arg_ops[i];
+                ops[5 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
 
                 async_emit_invoke_resume_point(mt, call_node);
                 em_emit_borrowed_call(&mt->em, trampoline_name,
@@ -9618,7 +9703,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             if (local_func && local_entry && local_entry->variant) {
                 MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
                     (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR),
-                    false};
+                    false, true};
                 MirCallResult direct = em_call_direct(&mt->em, fn_mangled,
                     local_func, local_entry->variant, ai, call_types,
                     call_ops, &options);
@@ -12234,6 +12319,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 if (uses_wrapper) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
                 }
 
                 return fn_obj;
@@ -12255,6 +12343,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 if (uses_wrapper) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
                 }
 
                 strbuf_free(name_buf);
@@ -12848,9 +12939,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     // The wrapper preserves hidden env/self/vargs parameters but exposes boxed
     // Items for every user parameter plus a mandatory caller-owned result home.
-    MIR_var_t params[33];
-    char* param_name_copies[33];
+    MIR_var_t params[34];
+    char* param_name_copies[34];
     int param_count = 0;
+    params[param_count] = {MIR_T_P, raw_strdup("runtime"), 0};
+    param_name_copies[param_count] = (char*)params[param_count].name;
+    param_count++;
     if (is_closure) {
         params[param_count] = {MIR_T_P, raw_strdup("_env_ptr"), 0}; // RAWALLOC_OK: MIR owns a copy
         param_name_copies[param_count] = (char*)params[param_count].name;
@@ -12890,18 +12984,13 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
 
     // Free strdup copies
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
-    MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
-    MIR_reg_t rt_addr = new_reg(mt, "wrapper_rt_addr", MIR_T_I64);
-    MIR_reg_t runtime = new_reg(mt, "wrapper_runtime", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, rt_addr), MIR_new_ref_op(mt->ctx, rt_import)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, runtime),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
+    MIR_reg_t runtime = MIR_reg(mt->ctx, "runtime", wrapper_func);
     mt->em.frame.runtime = runtime;
     mt->em.frame.return_type = ret_type;
     emit_jit_root_frame_enter(mt);
@@ -12967,7 +13056,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         call_types[i] = call_vars[i].type;
     }
     MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-        (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR), false};
+        (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR), false, true};
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
         raw_entry ? raw_entry->variant : NULL, call_arg_count,
         call_types, call_args, &options);
@@ -13029,6 +13118,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     // Restore outer function context
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts;
     em_frame_dispose(&mt->em);
     em_frame_restore(&mt->em, saved_frame);
@@ -13159,8 +13250,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // ===== Build MIR parameter list =====
     // For native version: use resolved native MIR types for params
     // For boxed version (non-native): all params are MIR_T_I64 (Item)
-    MIR_var_t params[33];
+    MIR_var_t params[34];
     int param_count = 0;
+
+    // Every generated Lambda entry receives its owner context explicitly.
+    // Direct calls forward the caller register; no callee reloads `_lambda_rt`.
+    params[param_count] = {MIR_T_P, raw_strdup("runtime"), 0};
+    param_count++;
 
     // Hidden leading params (_env_ptr for closures, _self for methods)
     if (is_closure) {
@@ -13276,7 +13372,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Save original strdup pointers before MIR overwrites them
-    char* param_name_copies[33];
+    char* param_name_copies[34];
     for (int i = 0; i < param_count; i++) param_name_copies[i] = (char*)params[i].name;
 
     // Create function (MIR replaces params[i].name with internal copies)
@@ -13287,19 +13383,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->em.func_item = func_item;
     mt->em.func = func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
 
     // Free our strdup copies (MIR made its own)
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
-    // Load runtime context from _lambda_rt before setting up module-local state.
-    MIR_item_t rt_import_fn = MIR_new_import(mt->ctx, "_lambda_rt");
-    MIR_reg_t rt_addr_fn = new_reg(mt, "rt_addr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr_fn),
-        MIR_new_ref_op(mt->ctx, rt_import_fn)));
-    // Dereference: runtime = *(&_lambda_rt)
-    MIR_reg_t runtime_fn = new_reg(mt, "runtime", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_fn),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr_fn, 0, 1)));
+    MIR_reg_t runtime_fn = MIR_reg(mt->ctx, "runtime", func);
     emit_load_module_consts(mt);
 
     // Load this module's type_list from per-module BSS _mod_type_list_ptr. Used by
@@ -13864,6 +13954,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Restore function context
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     em_frame_restore(&mt->em, saved_frame);
@@ -14572,9 +14664,9 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
 static MIR_item_t create_global_var_bss(MirTranspiler* mt, const char* name) {
     char bss_name[140];
     snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
-    // A binding owns one Item plus one raw scalar sidecar. Keeping the shape
-    // uniform lets ANY bindings rehome INT64, UINT64, or out-of-band FLOAT.
-    return MIR_new_bss(mt->ctx, bss_name, 2 * sizeof(Item));
+    // This is an immutable cross-module reference, not the binding value.
+    // The value itself is stored in the importing context's module slab.
+    return MIR_new_bss(mt->ctx, bss_name, sizeof(LambdaModuleVarRef));
 }
 
 static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
@@ -14600,6 +14692,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                     memset(&entry, 0, sizeof(entry));
                     snprintf(entry.name, sizeof(entry.name), "%s", name);
                     entry.bss_item = bss;
+                    entry.slot = mt->global_var_slot_count++;
                     entry.type_id = tid;
                     entry.mir_type = type_to_mir(tid);
                     hashmap_set(mt->global_vars, &entry);
@@ -14614,6 +14707,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         memset(&err_entry, 0, sizeof(err_entry));
                         snprintf(err_entry.name, sizeof(err_entry.name), "%s", err_name);
                         err_entry.bss_item = err_bss;
+                        err_entry.slot = mt->global_var_slot_count++;
                         err_entry.type_id = LMD_TYPE_ANY;
                         err_entry.mir_type = MIR_T_I64;
                         hashmap_set(mt->global_vars, &err_entry);
@@ -14630,6 +14724,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         memset(&entry, 0, sizeof(entry));
                         snprintf(entry.name, sizeof(entry.name), "%s", name);
                         entry.bss_item = bss;
+                        entry.slot = mt->global_var_slot_count++;
                         entry.type_id = LMD_TYPE_ANY;
                         entry.mir_type = MIR_T_I64;
                         hashmap_set(mt->global_vars, &entry);
@@ -14745,25 +14840,23 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->block_returned = false;
     mt->func_body = view->body;
 
-    // create MIR function: Item _view_N(Item _model) -> Item (i64)
+    // create MIR function: Item _view_N(Context*, Item _model) -> Item (i64)
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_var_t params[1] = {{MIR_T_I64, raw_strdup("_model"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
-    char* param_name_copy = (char*)params[0].name;
+    MIR_var_t params[2] = {{MIR_T_P, raw_strdup("runtime"), 0},
+        {MIR_T_I64, raw_strdup("_model"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
+    char* runtime_name_copy = (char*)params[0].name;
+    char* param_name_copy = (char*)params[1].name;
 
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf, 1, &ret_type, 1, params);
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf, 1, &ret_type, 2, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->em.func_item = func_item;
     mt->em.func = func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
+    raw_free(runtime_name_copy);
     raw_free(param_name_copy);
 
-    // load runtime context from _lambda_rt
-    MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
-    MIR_reg_t rt_addr = new_reg(mt, "rt_addr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr),
-        MIR_new_ref_op(mt->ctx, rt_import)));
-    MIR_reg_t runtime_reg = new_reg(mt, "runtime", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
+    MIR_reg_t runtime_reg = MIR_reg(mt->ctx, "runtime", func);
 
     emit_load_module_consts(mt);
 
@@ -14872,6 +14965,8 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     // restore outer function context
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -14920,27 +15015,26 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->block_returned = false;
     mt->func_body = handler->body;
 
-    // create MIR function: Item _handler_N_M(Item _model, Item _event) -> Item (i64)
+    // create MIR function: Item _handler_N_M(Context*, Item _model, Item _event)
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_var_t params[2] = {{MIR_T_I64, raw_strdup("_model"), 0}, {MIR_T_I64, raw_strdup("_event"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
-    char* param_name_copy = (char*)params[0].name;
-    char* event_name_copy = (char*)params[1].name;
+    MIR_var_t params[3] = {{MIR_T_P, raw_strdup("runtime"), 0},
+        {MIR_T_I64, raw_strdup("_model"), 0},
+        {MIR_T_I64, raw_strdup("_event"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
+    char* runtime_name_copy = (char*)params[0].name;
+    char* param_name_copy = (char*)params[1].name;
+    char* event_name_copy = (char*)params[2].name;
 
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, handler_name, 1, &ret_type, 2, params);
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, handler_name, 1, &ret_type, 3, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->em.func_item = func_item;
     mt->em.func = func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
+    raw_free(runtime_name_copy);
     raw_free(param_name_copy);
     raw_free(event_name_copy);
 
-    // load runtime context from _lambda_rt
-    MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
-    MIR_reg_t rt_addr = new_reg(mt, "rt_addr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr),
-        MIR_new_ref_op(mt->ctx, rt_import)));
-    MIR_reg_t runtime_reg = new_reg(mt, "runtime", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
+    MIR_reg_t runtime_reg = MIR_reg(mt->ctx, "runtime", func);
 
     emit_load_module_consts(mt);
 
@@ -15055,6 +15149,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->view_template_ref = saved_view_template_ref;
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
+    mt->module_state_reg = 0;
+    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -15317,12 +15413,14 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
     mt.em.consts_bss = mt.consts_bss;
 
+    // Sealed module layout written after generation, when BSS addresses are
+    // final.  Generated code reads only this immutable descriptor to select
+    // its context-local binding/IC slab.
+    mt.module_layout_bss = MIR_new_bss(ctx, "_mod_layout", sizeof(LambdaModuleLayout));
+
     // Per-module BSS: stores this module's type_list pointer so that cross-module
     // map/element/object allocations use the right type_list.
     mt.type_list_bss = MIR_new_bss(ctx, "_mod_type_list_ptr", 8);
-
-    // Import _lambda_rt (shared context pointer)
-    MIR_item_t rt_import = MIR_new_import(ctx, "_lambda_rt");
 
     // Pre-pass: compile string/symbol patterns
     prepass_compile_patterns(&mt, script->child);
@@ -15348,22 +15446,13 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     MIR_func_t main_func = MIR_get_item_func(ctx, main_item);
     mt.em.func_item = main_item;
     mt.em.func = main_func;
+    mt.module_state_reg = 0;
+    mt.member_ic_base_reg = 0;
 
     // Get the runtime parameter register
     MIR_reg_t runtime_reg = MIR_reg(ctx, "runtime", main_func);
 
-    // Store runtime to _lambda_rt: *(&_lambda_rt) = runtime
-    // import_resolver("_lambda_rt") returns &_lambda_rt (a Context**)
-    // We load this address into a register, then store runtime through it
     mt.rt_reg = runtime_reg;
-    MIR_reg_t rt_addr = new_reg(&mt, "rt_addr", MIR_T_I64);
-    // Load the address that the import resolves to (= &_lambda_rt)
-    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, rt_addr),
-        MIR_new_ref_op(ctx, rt_import)));
-    // Store runtime pointer at that address: *(&_lambda_rt) = runtime
-    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV,
-        MIR_new_mem_op(ctx, MIR_T_I64, 0, rt_addr, 0, 1),
-        MIR_new_reg_op(ctx, runtime_reg)));
 
     emit_load_module_consts(&mt);
 
@@ -15476,9 +15565,13 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                 if (main_func) {
                     LocalFuncEntry* entry = find_local_func_entry(&mt,
                         main_name->str);
+                    MirCallOptions main_options = {{MIR_FRAME_REF_NONE, 0},
+                        (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR),
+                        false, true};
                     MirCallResult call = em_call_direct(&mt.em,
                         main_name->str, main_func,
-                        entry ? entry->variant : NULL, 0, NULL, NULL);
+                        entry ? entry->variant : NULL, 0, NULL, NULL,
+                        &main_options);
                     MIR_reg_t main_result = call.normal.reg;
                     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, result),
                         MIR_new_reg_op(ctx, main_result)));
@@ -15696,11 +15789,53 @@ static void register_cross_lang_pub_fns(AstImportNode* imp) {
 // Called from transpile_script() when runtime->use_mir_direct is true, for both
 // imported modules and the main script.  Depth-first import loading guarantees that
 // all of this module's sub-imports are already compiled before we are called.
+static void finalize_context_module_layout(MIR_context_t ctx, Script* script) {
+    if (!ctx || !script) return;
+    uint32_t slot = 0;
+    uint32_t member_ic_count = 0;
+    LambdaModuleLayout* layout = NULL;
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+         module != NULL; module = DLIST_NEXT(MIR_module_t, module)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+             item != NULL; item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr) continue;
+            if (strcmp(item->u.bss->name, "_mod_layout") == 0) {
+                layout = (LambdaModuleLayout*)item->addr;
+            } else if (strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
+                LambdaModuleVarRef* ref = (LambdaModuleVarRef*)item->addr;
+                ref->module_id = (uint32_t)script->index;
+                ref->slot = slot++;
+            } else if (strncmp(item->u.bss->name, "_mod_ic_site_", 13) == 0) {
+                member_ic_count++;
+            }
+        }
+    }
+    if (!layout) {
+        log_error("module-state: missing layout BSS for '%s'",
+            script->reference ? script->reference : "<unknown>");
+        return;
+    }
+    layout->module_id = (uint32_t)script->index;
+    layout->var_count = slot;
+    layout->member_ic_count = member_ic_count;
+    layout->reserved = 0;
+}
+
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms,
                                    double* out_transpile_ms,
                                    double* out_mir_gen_ms) {
     log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
+
+    EvalContext* template_context = tp && tp->runtime
+        ? runtime_get_eval_context(tp->runtime) : context;
+    if (!template_context) {
+        log_error("template-registry: MIR compilation has no canonical EvalContext");
+        return;
+    }
+    // Template registration is an isolate-instantiation operation performed
+    // while code is sealed; bind its owner once here, never in generated code.
+    EvalContextScope template_context_scope(template_context);
 
     // Ensure template registry exists for post-JIT template registration
     if (!g_template_registry) {
@@ -15800,6 +15935,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         log_error("MIR Direct: _mod_type_list_ptr BSS not found or no addr for '%s'",
                   script_path ? script_path : "<unknown>");
     }
+
+    finalize_context_module_layout(ctx, script);
 
     // Register view/edit templates: walk AST, look up compiled body functions,
     // and add them to the global template registry.
@@ -16053,36 +16190,40 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     if (import_cone && import_cone->length > 0) {
         // Set up context for module initialization
         runner_setup_context(&runner);
-        runner.context.run_main = run_main;
+        if (!runner.context) return nullptr;
+        runner.context->run_main = run_main;
 
-        // cached modules may hold heap Items from a previous batch run; zero BSS before rooting
+        // Instantiate every module's fixed context-owned slabs before any
+        // initialization code reads or writes a module binding.
         for (int i = 0; i < import_cone->length; i++) {
             Script* imp_script = (Script*)import_cone->data[i];
             if (imp_script && imp_script->jit_context) {
-                reset_and_register_bss_gc_roots((void*)imp_script->jit_context);
+                if (!prepare_context_module_state((Context*)runner.context,
+                        (void*)imp_script->jit_context)) return nullptr;
             }
         }
-        reset_and_register_bss_gc_roots((void*)runner.script->jit_context);
+        if (!prepare_context_module_state((Context*)runner.context,
+                (void*)runner.script->jit_context)) return nullptr;
 
         // run only the current main script's import cone, deps before dependents
         for (int i = 0; i < import_cone->length; i++) {
             Script* imp_script = (Script*)import_cone->data[i];
             if (!imp_script || !imp_script->main_func) continue;
             log_info("mir cache: running imported module main index=%d", imp_script->index);
-            runner.context.consts = imp_script->const_list ? imp_script->const_list->data : nullptr;
-            runner.context.type_list = imp_script->type_list;
-            imp_script->main_func(&runner.context);
+            runner.context->consts = imp_script->const_list ? imp_script->const_list->data : nullptr;
+            runner.context->type_list = imp_script->type_list;
+            imp_script->main_func(runner.context);
         }
         // Restore context for main script execution
-        runner.context.consts = runner.script->const_list ? runner.script->const_list->data : nullptr;
-        runner.context.type_list = runner.script->type_list;
+        runner.context->consts = runner.script->const_list ? runner.script->const_list->data : nullptr;
+        runner.context->type_list = runner.script->type_list;
 
         // Execute main script using already-initialized context
         log_notice("Executing JIT compiled code...");
-        runner.context.run_main = run_main;
+        runner.context->run_main = run_main;
         Item result;
         LambdaRecoveryCheckpoint recovery_checkpoint =
-            lambda_recovery_checkpoint_capture(&runner.context);
+            lambda_recovery_checkpoint_capture(runner.context);
         #if defined(__APPLE__) || defined(__linux__)
         if (sigsetjmp(_lambda_recovery_point, 1)) {
         #elif defined(_WIN32)
@@ -16095,17 +16236,17 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             _lambda_stack_overflow_flag = false;
             lambda_recovery_checkpoint_restore(&recovery_checkpoint);
             lambda_stack_overflow_error("<signal>");
-            result = runner.context.result = ItemError;
+            result = runner.context->result = ItemError;
         } else {
             _lambda_recovery_armed = 1;    // arm only for the duration of user code
-            result = runner.context.result = runner.script->main_func(&runner.context);
+            result = runner.context->result = runner.script->main_func(runner.context);
             _lambda_recovery_armed = 0;
             lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
         }
-        if (runner.context.heap) {
-            runner.context.heap->result_root = runner.context.result.item;
+        if (runner.context->heap) {
+            runner.context->heap->result_root = runner.context->result.item;
         }
-        preserve_context_last_error(&runner.context, result);
+        preserve_context_last_error(runner.context, result);
 
         // Create output
         Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
@@ -16113,17 +16254,17 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         if (!output) {
             log_error("Failed to create output Input");
             if (output_pool) pool_destroy(output_pool);
-            if (runner.context.cwd) {
-                url_destroy((Url*)runner.context.cwd);
-                runner.context.cwd = NULL;
+            if (runner.context->cwd) {
+                url_destroy((Url*)runner.context->cwd);
+                runner.context->cwd = NULL;
             }
             arraylist_free(import_cone);
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
-        if (runner.context.cwd) {
-            url_destroy((Url*)runner.context.cwd);
-            runner.context.cwd = NULL;
+        if (runner.context->cwd) {
+            url_destroy((Url*)runner.context->cwd);
+            runner.context->cwd = NULL;
         }
 
         // Return result directly on the GC heap — no deep_copy needed.

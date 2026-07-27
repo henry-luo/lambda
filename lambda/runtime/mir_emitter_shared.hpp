@@ -287,6 +287,7 @@ struct MirCallOptions {
     MirFrameRef scalar_return_home;
     uint8_t observed_return_lane_mask;
     bool is_tail_call;
+    bool has_hidden_context;
 };
 struct MirCallResult {
     MirValue normal;
@@ -2893,7 +2894,11 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     if (!em || !target || source_nargs < 0) return call_result;
     bool accepts_scalar_home = variant &&
         variant->result.scalar_home_lane_mask != 0;
-    int nargs = source_nargs + (accepts_scalar_home ? 1 : 0);
+    // Context-aware generated entries carry EvalContext in a call register.
+    // The option keeps JS on its current ABI until its full entry/call graph is
+    // migrated as one unit.
+    const int context_arg_count = options && options->has_hidden_context ? 1 : 0;
+    int nargs = context_arg_count + source_nargs + (accepts_scalar_home ? 1 : 0);
     MIR_var_t* args = nargs > 0 ? (MIR_var_t*)mem_alloc(
         (size_t)nargs * sizeof(MIR_var_t), MEM_CAT_TEMP) : NULL;
     JitAbiArg* abi_args = nargs > 0 ? (JitAbiArg*)mem_calloc(
@@ -2910,11 +2915,16 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         log_error("mir-direct-call: operand allocation failed for %s", call_name);
         abort();
     }
-    for (int i = 0; i < source_nargs; i++) {
-        physical_types[i] = arg_types[i];
-        physical_ops[i] = arg_ops[i];
+    if (context_arg_count) {
+        physical_types[0] = MIR_T_P;
+        physical_ops[0] = MIR_new_reg_op(em->ctx, em->frame.runtime);
     }
-    int scalar_home_arg_index = accepts_scalar_home ? source_nargs : -1;
+    for (int i = 0; i < source_nargs; i++) {
+        physical_types[context_arg_count + i] = arg_types[i];
+        physical_ops[context_arg_count + i] = arg_ops[i];
+    }
+    int scalar_home_arg_index = accepts_scalar_home
+        ? context_arg_count + source_nargs : -1;
     int scalar_home_id = 0;
     if (accepts_scalar_home) {
         uint8_t observed = options ? options->observed_return_lane_mask :
@@ -2944,15 +2954,16 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
             log_error("mir-direct-call: unresolved scalar home for %s", call_name);
             abort();
         }
-        physical_types[source_nargs] = MIR_T_P;
-        physical_ops[source_nargs] = MIR_new_reg_op(em->ctx, home);
+        physical_types[context_arg_count + source_nargs] = MIR_T_P;
+        physical_ops[context_arg_count + source_nargs] = MIR_new_reg_op(em->ctx, home);
     }
     for (int i = 0; i < nargs; i++) {
         args[i] = {physical_types[i], "a", 0};
         bool home = i == scalar_home_arg_index;
-        ValueRep param_rep = variant && variant->params &&
-            i < variant->param_count
-            ? variant->params[i].canonical_rep : VALUE_REP_NONE;
+        bool runtime = context_arg_count && i == 0;
+        ValueRep param_rep = !runtime && variant && variant->params &&
+            (i - context_arg_count) < variant->param_count
+            ? variant->params[i - context_arg_count].canonical_rep : VALUE_REP_NONE;
         JitValueClass value_class = param_rep != VALUE_REP_NONE
             ? em_value_class_for_rep(param_rep)
             : physical_types[i] == MIR_T_D || physical_types[i] == MIR_T_F
@@ -2960,11 +2971,11 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
                 : physical_types[i] == MIR_T_P
                     ? JIT_VALUE_RAW_GC_POINTER
                     : JIT_VALUE_BOXED_ITEM;
-        abi_args[i].value.abi_rep = home ? JIT_ABI_POINTER :
+        abi_args[i].value.abi_rep = (home || runtime) ? JIT_ABI_POINTER :
             em_abi_rep(physical_types[i], value_class, true);
-        abi_args[i].value.value_class = home ? JIT_VALUE_RAW_NON_GC_POINTER :
+        abi_args[i].value.value_class = (home || runtime) ? JIT_VALUE_RAW_NON_GC_POINTER :
             value_class;
-        abi_args[i].effects = home ? JIT_ARG_BORROWED
+        abi_args[i].effects = (home || runtime) ? JIT_ARG_BORROWED
             : JIT_ARG_EFFECT_UNKNOWN;
     }
     JitCallMetadata metadata = {};

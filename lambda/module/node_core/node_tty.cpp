@@ -1,12 +1,21 @@
 // node_tty.cpp — node:tty compatibility facade through opaque Jube services.
 #include "node_tty.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_tty_host = NULL;
-static void* node_tty_session = NULL;
-static bool node_tty_rooted = false;
-static Item node_tty_cached_namespace = {0};
+struct NodeTtySessionState {
+    void* session;
+    bool rooted;
+    Item cached_namespace;
+};
+static NodeTtySessionState* node_tty_state(void) {
+    return (NodeTtySessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_TTY);
+}
+#define node_tty_session (node_tty_state()->session)
+#define node_tty_rooted (node_tty_state()->rooted)
+#define node_tty_cached_namespace (node_tty_state()->cached_namespace)
 
 static Item node_tty_undefined(Item unused) {
     (void)unused;
@@ -166,14 +175,13 @@ int node_tty_init(const JubeHostAPI* host) {
 }
 
 void node_tty_shutdown(void) {
-    node_tty_cached_namespace = (Item){0};
-    node_tty_rooted = false;
-    node_tty_session = NULL;
     node_tty_host = NULL;
 }
 
 void node_tty_runtime_attach(void* session) {
     if (!node_tty_host || !node_tty_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_TTY,
+            sizeof(NodeTtySessionState))) return;
     node_tty_session = session;
     if (node_tty_host->node->roots->persistent_root_register(session,
             &node_tty_cached_namespace.item) == 0) node_tty_rooted = true;

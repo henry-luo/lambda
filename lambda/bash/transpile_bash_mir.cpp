@@ -38,9 +38,9 @@ extern "C" {
     void* find_func(MIR_context_t ctx, const char *fn_name);
 }
 
-// forward declarations for context and heap init
+// runtime-state owns the active context binding. Guests borrow it only for
+// their activation and never publish it through a process-global MIR symbol.
 extern __thread EvalContext* context;
-extern void* _lambda_rt;
 
 // ============================================================================
 // MIR transpiler state
@@ -6188,24 +6188,30 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         return (Item){.item = ITEM_ERROR};
     }
 
-    // set up evaluation context
-    EvalContext bash_context;
-    memset(&bash_context, 0, sizeof(EvalContext));
+    // Use Runtime's canonical context when this guest owns a fresh activation.
+    // A nested guest borrows its caller's already-bound heap for the duration.
     EvalContext* old_context = context;
     bool reusing_context = false;
 
     if (old_context && old_context->heap) {
-        context = old_context;
         reusing_context = true;
     } else {
-        context = &bash_context;
+        EvalContext* bash_context = runtime_get_eval_context(runtime);
+        if (!bash_context) {
+            log_error("bash-mir: failed to obtain canonical runtime context");
+            ts_tree_delete(tree);
+            ts_parser_delete(parser);
+            bash_transpiler_destroy(tp);
+            if (preproc_buf) strbuf_free(preproc_buf);
+            if (dd_buf) strbuf_free(dd_buf);
+            return (Item){.item = ITEM_ERROR};
+        }
+        context = bash_context;
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
     }
-
-    _lambda_rt = (Context*)context;
 
     // init Bash runtime
     bash_runtime_init();

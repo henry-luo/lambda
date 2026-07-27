@@ -221,8 +221,12 @@ Item js_get_length_item(Item object);
 // =============================================================================
 
 Item js_new_function(void* func_ptr, int param_count);
+Item js_new_function_context(Context* runtime, void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
+Item js_new_method_function_context(Context* runtime, void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
+Item js_new_closure_context(Context* runtime, void* func_ptr, int param_count,
+                            Item* env, int env_size);
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
@@ -249,6 +253,7 @@ enum {
     JS_FUNC_INIT_ANALYSIS_KNOWN = 1u << 7,
     JS_FUNC_INIT_READS_THIS = 1u << 8,
     JS_FUNC_INIT_READS_NEW_TARGET = 1u << 9,
+    JS_FUNC_INIT_MIR_CONTEXT_ABI = 1u << 10,
 };
 void js_finalize_function(Item fn_item, Item name_item, Item source_item,
                           int formal_length, int init_flags);
@@ -903,6 +908,8 @@ Item js_symbol_well_known(Item name);
  * env/env_size represent captured closure variables.
  */
 Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
+Item js_generator_create_context(Context* runtime, void* func_ptr, Item* env,
+                                 int env_size, int is_async);
 
 /**
  * Advance the generator: execute next state, return {value, done} result.
@@ -976,6 +983,8 @@ Item js_await_sync(Item value);                  // Phase 5: synchronous await u
 int64_t js_async_must_suspend(Item value);       // 1 if pending promise, 0 otherwise
 Item js_async_get_resolved(void);                // get cached resolved value
 Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val);
+Item js_async_context_create_context(Context* runtime, void* fn_ptr, Item* env,
+                                     int64_t env_size, Item this_val);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1100,6 +1109,7 @@ Item js_get_live_binding_default(Item specifier);
 void js_tla_register_continuation(Item func);
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
+int js_tla_module_depth_get(void);
 
 /**
  * Js57 P5 (fulfillment/rejection-order): TLA awaited-target tracking on the

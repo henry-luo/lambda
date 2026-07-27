@@ -9,6 +9,7 @@
  * createHash (streaming hash API), crypto module namespace.
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
@@ -52,8 +53,40 @@ extern __thread EvalContext* context;
 // ============================================================================
 
 static const uint8_t crypto_empty_bytes[1] = {0};
-static Item crypto_namespace = {0};
+#define crypto_namespace (js_runtime_state.crypto.namespace_object)
+
 #define JS_CRYPTO_MAX_LIVE_CONTEXTS 4096
+
+struct JsCryptoNativeState {
+    bool pseudo_random_warning_emitted;
+    void* hmac_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+    int hmac_context_count;
+    void* hash_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+    int hash_context_count;
+    void* sign_verify_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+    int sign_verify_context_count;
+    void* cipher_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+    int cipher_context_count;
+};
+
+static JsCryptoNativeState* crypto_native_state_ensure(void) {
+    if (!js_active_runtime_state) return NULL;
+    if (!js_runtime_state.crypto.native_state) {
+        // This is module-entry allocation, never an update/digest hot-path
+        // guard. All later registry operations are plain context-local loads.
+        js_runtime_state.crypto.native_state = mem_calloc(1, sizeof(JsCryptoNativeState),
+            MEM_CAT_JS_RUNTIME);
+    }
+    return (JsCryptoNativeState*)js_runtime_state.crypto.native_state;
+}
+
+#define crypto_native_state (*(JsCryptoNativeState*)js_runtime_state.crypto.native_state)
+#define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
+
+static bool crypto_ensure_roots(void) {
+    return crypto_native_state_ensure() &&
+        js_root_range_ensure_registered(&js_runtime_state.crypto.roots);
+}
 
 static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
     if (!digest) return 0;
@@ -648,9 +681,8 @@ extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
     return result;
 }
 
-static bool crypto_pseudo_random_warning_emitted = false;
-
 extern "C" Item js_crypto_pseudoRandomBytes(Item size_item, Item callback_item) {
+    if (!crypto_ensure_roots()) return ItemNull;
     if (!crypto_pseudo_random_warning_emitted) {
         crypto_pseudo_random_warning_emitted = true;
         Item warning = js_new_object();
@@ -1488,8 +1520,8 @@ struct HmacCtx {
     int data_cap;
 };
 
-static HmacCtx* crypto_live_hmac_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-static int crypto_live_hmac_context_count = 0;
+#define crypto_live_hmac_contexts ((HmacCtx**)crypto_native_state.hmac_contexts)
+#define crypto_live_hmac_context_count (crypto_native_state.hmac_context_count)
 
 static void crypto_track_hmac_context(HmacCtx* ctx) {
     if (!ctx) return;
@@ -1665,8 +1697,8 @@ struct HashCtx {
     bool finalized;
 };
 
-static HashCtx* crypto_live_hash_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-static int crypto_live_hash_context_count = 0;
+#define crypto_live_hash_contexts ((HashCtx**)crypto_native_state.hash_contexts)
+#define crypto_live_hash_context_count (crypto_native_state.hash_context_count)
 
 static void crypto_track_hash_context(HashCtx* ctx) {
     if (!ctx) return;
@@ -2004,8 +2036,8 @@ struct SignVerifyCtx {
     int data_cap;
 };
 
-static SignVerifyCtx* crypto_live_sign_verify_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-static int crypto_live_sign_verify_context_count = 0;
+#define crypto_live_sign_verify_contexts ((SignVerifyCtx**)crypto_native_state.sign_verify_contexts)
+#define crypto_live_sign_verify_context_count (crypto_native_state.sign_verify_context_count)
 
 static void crypto_track_sign_verify_context(SignVerifyCtx* ctx) {
     if (!ctx) return;
@@ -4432,8 +4464,8 @@ struct CipherCtx {
     bool auto_padding;
 };
 
-static CipherCtx* crypto_live_cipher_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-static int crypto_live_cipher_context_count = 0;
+#define crypto_live_cipher_contexts ((CipherCtx**)crypto_native_state.cipher_contexts)
+#define crypto_live_cipher_context_count (crypto_native_state.cipher_context_count)
 
 static void crypto_track_cipher_context(CipherCtx* ctx) {
     if (!ctx) return;
@@ -8582,6 +8614,7 @@ static void crypto_set_hidden_method(Item ns, const char* name, void* func_ptr, 
 }
 
 extern "C" Item js_get_crypto_namespace(void) {
+    if (!crypto_ensure_roots()) return ItemError;
     if (crypto_namespace.item != 0) return crypto_namespace;
 
     // The module cache is published only after this large constructor returns;
@@ -8720,6 +8753,33 @@ static void crypto_reset_live_contexts(void) {
 }
 
 extern "C" void js_crypto_reset(void) {
+    if (!js_active_runtime_state) return;
+    if (!js_runtime_state.crypto.native_state) {
+        crypto_namespace = (Item){0};
+        return;
+    }
     crypto_reset_live_contexts();
+    crypto_pseudo_random_warning_emitted = false;
     crypto_namespace = (Item){0};
+}
+
+#undef crypto_live_cipher_context_count
+#undef crypto_live_cipher_contexts
+#undef crypto_live_sign_verify_context_count
+#undef crypto_live_sign_verify_contexts
+#undef crypto_live_hash_context_count
+#undef crypto_live_hash_contexts
+#undef crypto_live_hmac_context_count
+#undef crypto_live_hmac_contexts
+#undef crypto_pseudo_random_warning_emitted
+#undef crypto_native_state
+
+extern "C" void js_crypto_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->crypto.native_state) return;
+    JsRuntimeState* previous = js_active_runtime_state;
+    js_active_runtime_state = runtime_state;
+    crypto_reset_live_contexts();
+    js_active_runtime_state = previous;
+    mem_free(runtime_state->crypto.native_state);
+    runtime_state->crypto.native_state = NULL;
 }

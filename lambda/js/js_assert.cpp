@@ -66,16 +66,17 @@ static Item assert_make_string_n(const char* str, size_t len) {
     return (Item){.item = s2it(s)};
 }
 
-static Item assert_namespace = {0};
-static Item internal_errors_namespace = {0};
-static Item internal_assert_myers_diff_namespace = {0};
-static Item assert_options_key = {0};
-static Item assert_diff_key = {0};
-static Item assert_instances[64];
-static int assert_instance_count = 0;
 extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t assert_key_epoch = 0;
-static uint64_t assert_instances_roots_epoch = 0;
+
+#define assert_namespace (js_runtime_state.assert.namespace_object)
+#define internal_errors_namespace (js_runtime_state.assert.internal_errors_namespace)
+#define internal_assert_myers_diff_namespace (js_runtime_state.assert.internal_myers_diff_namespace)
+#define assert_options_key (js_runtime_state.assert.options_key)
+#define assert_diff_key (js_runtime_state.assert.diff_key)
+#define assert_instances (js_runtime_state.assert.instances)
+#define assert_instance_count (js_runtime_state.assert.instance_count)
+#define assert_key_epoch (js_runtime_state.assert.key_epoch)
+#define assert_instances_roots_epoch (js_runtime_state.assert.instances_roots_epoch)
 
 static void js_assert_register_instance(Item instance) {
     uint64_t epoch = js_get_heap_epoch();
@@ -5466,29 +5467,35 @@ extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
     internal_errors_namespace = (Item){0};
     internal_assert_myers_diff_namespace = (Item){0};
-    for (int i = 0; i < assert_instance_count; i++) assert_instances[i] = (Item){0};
+    assert_options_key = (Item){0};
+    assert_diff_key = (Item){0};
+    // Batch reset drops a heap, so no cached assertion Item may survive into
+    // the next realm even though this context capsule itself is retained.
+    memset(assert_instances, 0, sizeof(assert_instances));
     assert_instance_count = 0;
+    assert_key_epoch = 0;
+    assert_instances_roots_epoch = 0;
 }
 
 // =============================================================================
 // node:test module — basic test runner with mock support
 // =============================================================================
 
-static Item node_test_namespace = {0};
-static Item g_node_before_each_store = {0};
-static Item g_node_after_each_store = {0};
-static Item g_node_test_event_queue = {0};
-static int g_node_test_total_count = 0;
-static int g_node_test_pass_count = 0;
-static int g_node_test_fail_count = 0;
-static int64_t g_node_test_next_id = 1;
-static uint64_t g_node_test_roots_epoch = 0;
+#define node_test_namespace (js_runtime_state.assert.node_test_namespace)
+#define g_node_before_each_store (js_runtime_state.assert.before_each_store)
+#define g_node_after_each_store (js_runtime_state.assert.after_each_store)
+#define g_node_test_event_queue (js_runtime_state.assert.event_queue)
+#define g_node_test_total_count (js_runtime_state.assert.node_test_total_count)
+#define g_node_test_pass_count (js_runtime_state.assert.node_test_pass_count)
+#define g_node_test_fail_count (js_runtime_state.assert.node_test_fail_count)
+#define g_node_test_next_id (js_runtime_state.assert.node_test_next_id)
+#define g_node_test_roots_epoch (js_runtime_state.assert.node_test_roots_epoch)
 
 #define MAX_NODE_TEST_HOOKS 64
-static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
-static Item g_node_after_each_hooks[MAX_NODE_TEST_HOOKS];
-static int g_node_before_each_count = 0;
-static int g_node_after_each_count = 0;
+#define g_node_before_each_hooks (js_runtime_state.assert.before_each_hooks)
+#define g_node_after_each_hooks (js_runtime_state.assert.after_each_hooks)
+#define g_node_before_each_count (js_runtime_state.assert.before_each_count)
+#define g_node_after_each_count (js_runtime_state.assert.after_each_count)
 
 // forward decls used throughout
 static Item js_mock_fn_impl(Item original_fn);
@@ -5502,18 +5509,13 @@ static Item js_mock_timers_reset_impl(void);
 static Item js_mock_timers_tick_impl(Item delay);
 
 // ---------------------------------------------------------------------------
-// mock.fn(original?) — creates a mock function that records calls
-// Uses a global registry since all mock wrappers share the same C function
-// and we can't get the JS function object from within the C wrapper.
+// mock.fn(original?) — creates a mock function that records calls.
+// Fixed wrappers use the active context's slots, so concurrent test realms do
+// not share a registry or need a hot-path lock.
 // ---------------------------------------------------------------------------
 #define MAX_MOCK_SLOTS 64
-static struct MockSlot {
-    Item calls;       // JS array of call records
-    Item original;    // original function (or undefined)
-    int call_count;
-    bool in_use;
-} g_mock_slots[MAX_MOCK_SLOTS];
-static int g_mock_slot_count = 0;
+#define g_mock_slots (js_runtime_state.assert.mock_slots)
+#define g_mock_slot_count (js_runtime_state.assert.mock_slot_count)
 
 static int mock_alloc_slot(void) {
     // first try to reuse
@@ -5574,7 +5576,7 @@ MOCK_WRAPPER_BODY(24) MOCK_WRAPPER_BODY(25) MOCK_WRAPPER_BODY(26) MOCK_WRAPPER_B
 MOCK_WRAPPER_BODY(28) MOCK_WRAPPER_BODY(29) MOCK_WRAPPER_BODY(30) MOCK_WRAPPER_BODY(31)
 
 typedef Item (*MockWrapperFn)(Item, Item, Item);
-static MockWrapperFn g_mock_wrappers[32] = {
+static const MockWrapperFn g_mock_wrappers[32] = {
     js_mock_wrapper_0,  js_mock_wrapper_1,  js_mock_wrapper_2,  js_mock_wrapper_3,
     js_mock_wrapper_4,  js_mock_wrapper_5,  js_mock_wrapper_6,  js_mock_wrapper_7,
     js_mock_wrapper_8,  js_mock_wrapper_9,  js_mock_wrapper_10, js_mock_wrapper_11,
@@ -5864,20 +5866,26 @@ static Item node_test_make_event_stream(Item events) {
 }
 
 extern "C" void js_node_test_reset_counts(void) {
+    // Node's shell runner resets counters before it creates a JS realm. There
+    // is no context-owned table to clear until the first runtime activation.
+    if (!js_active_runtime_state) return;
     g_node_test_total_count = 0;
     g_node_test_pass_count = 0;
     g_node_test_fail_count = 0;
 }
 
 extern "C" int js_node_test_total_count(void) {
+    if (!js_active_runtime_state) return 0;
     return g_node_test_total_count;
 }
 
 extern "C" int js_node_test_pass_count(void) {
+    if (!js_active_runtime_state) return 0;
     return g_node_test_pass_count;
 }
 
 extern "C" int js_node_test_fail_count(void) {
+    if (!js_active_runtime_state) return 0;
     return g_node_test_fail_count;
 }
 
@@ -6233,12 +6241,24 @@ extern "C" Item js_get_node_test_namespace(void) {
 }
 
 extern "C" void js_node_test_reset(void) {
+    // The pre-realm runner call must remain context-free; invoking the mock
+    // scheduler before a realm exists would dereference a null capsule.
+    if (!js_active_runtime_state) return;
     extern void js_mock_scheduler_reset(void);
     js_mock_scheduler_reset();
     node_test_namespace = (Item){0};
     g_node_before_each_store = (Item){0};
     g_node_after_each_store = (Item){0};
+    g_node_test_event_queue = (Item){0};
+    memset(g_node_before_each_hooks, 0, sizeof(g_node_before_each_hooks));
+    memset(g_node_after_each_hooks, 0, sizeof(g_node_after_each_hooks));
+    // Mock wrappers use fixed C entrypoints, but their records are heap Items;
+    // clear the context-local slots before a replacement heap reuses them.
+    memset(g_mock_slots, 0, sizeof(g_mock_slots));
+    g_mock_slot_count = 0;
     g_node_before_each_count = 0;
     g_node_after_each_count = 0;
+    g_node_test_next_id = 1;
+    g_node_test_roots_epoch = 0;
     js_node_test_reset_counts();
 }

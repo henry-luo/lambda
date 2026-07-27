@@ -1,6 +1,7 @@
 #include "js_dom_platform.h"
 #include "js_dom_events.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -9,34 +10,40 @@
 
 #include <string.h>
 
-#define JS_STORAGE_ENTRY_CAP 128
-#define JS_MEDIA_QUERY_CAP 64
+#define JS_STORAGE_ENTRY_CAP JS_DOM_STORAGE_ENTRY_CAP
+#define JS_MEDIA_QUERY_CAP JS_DOM_MEDIA_QUERY_CAP
+typedef JsDomStorageEntry JsStorageEntry;
+typedef JsDomStorageState JsStorageState;
+typedef JsDomMediaQueryState JsMediaQueryState;
 
-typedef struct JsStorageEntry {
-    char* key;
-    char* value;
-} JsStorageEntry;
-
-typedef struct JsStorageState {
-    Item object;
-    JsStorageEntry entries[JS_STORAGE_ENTRY_CAP];
-    int count;
-} JsStorageState;
-
-typedef struct JsMediaQueryState {
-    Item object;
-    char* query;
-    bool matches;
-} JsMediaQueryState;
-
-static JsStorageState local_storage = {};
-static JsStorageState session_storage = {};
-static JsMediaQueryState media_queries[JS_MEDIA_QUERY_CAP] = {};
-static int media_query_count = 0;
+#define js_dom_local_storage (js_runtime_state.dom_platform.local_storage)
+#define js_dom_session_storage (js_runtime_state.dom_platform.session_storage)
+#define js_dom_media_queries (js_runtime_state.dom_platform.media_queries)
+#define js_dom_media_query_count (js_runtime_state.dom_platform.media_query_count)
 
 extern "C" bool js_dom_evaluate_media_query(const char* query);
 extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
+extern "C" uint64_t js_get_heap_epoch(void);
 extern __thread EvalContext* context;
+
+static bool dom_platform_ensure_roots(void) {
+    if (!js_active_runtime_state || !context) return false;
+    JsDomPlatformState* state = &js_runtime_state.dom_platform;
+    uint64_t epoch = js_get_heap_epoch();
+    if (state->roots_epoch == epoch) return true;
+    if (!heap_register_gc_root_for((Context*)context, &state->local_storage.object.item) ||
+        !heap_register_gc_root_for((Context*)context, &state->session_storage.object.item)) {
+        return false;
+    }
+    for (int i = 0; i < JS_MEDIA_QUERY_CAP; i++) {
+        if (!heap_register_gc_root_for((Context*)context, &state->media_queries[i].object.item)) {
+            return false;
+        }
+    }
+    state->roots_epoch = epoch;
+    return true;
+}
 
 static char* platform_strdup(const char* value) {
     const char* source = value ? value : "";
@@ -55,8 +62,8 @@ static const char* platform_string(Item value) {
 
 static JsStorageState* storage_from_this(void) {
     Item receiver = js_get_this();
-    if (receiver.item == local_storage.object.item) return &local_storage;
-    if (receiver.item == session_storage.object.item) return &session_storage;
+    if (receiver.item == js_dom_local_storage.object.item) return &js_dom_local_storage;
+    if (receiver.item == js_dom_session_storage.object.item) return &js_dom_session_storage;
     return nullptr;
 }
 
@@ -150,7 +157,7 @@ static Item storage_object(JsStorageState* storage) {
     }
     // Storage state persists outside the GC heap; its Item slot is the
     // canonical owner and must remain visible throughout object construction.
-    heap_register_gc_root(&storage->object.item);
+    if (!dom_platform_ensure_roots()) return ItemError;
     Item object = js_new_object();
     storage->object = object;
 
@@ -180,11 +187,11 @@ static Item storage_object(JsStorageState* storage) {
 }
 
 extern "C" Item js_storage_local_object(void) {
-    return storage_object(&local_storage);
+    return storage_object(&js_dom_local_storage);
 }
 
 extern "C" Item js_storage_session_object(void) {
-    return storage_object(&session_storage);
+    return storage_object(&js_dom_session_storage);
 }
 
 static void reset_storage(JsStorageState* storage) {
@@ -196,14 +203,14 @@ static void reset_storage(JsStorageState* storage) {
 }
 
 extern "C" void js_storage_reset(void) {
-    reset_storage(&local_storage);
-    reset_storage(&session_storage);
+    reset_storage(&js_dom_local_storage);
+    reset_storage(&js_dom_session_storage);
 }
 
 static JsMediaQueryState* media_query_from_this(void) {
     Item receiver = js_get_this();
-    for (int i = 0; i < media_query_count; i++) {
-        if (media_queries[i].object.item == receiver.item) return &media_queries[i];
+    for (int i = 0; i < js_dom_media_query_count; i++) {
+        if (js_dom_media_queries[i].object.item == receiver.item) return &js_dom_media_queries[i];
     }
     return nullptr;
 }
@@ -234,16 +241,16 @@ static Item js_media_query_remove_listener(Item callback) {
 }
 
 extern "C" Item js_match_media(Item query_item) {
-    if (media_query_count >= JS_MEDIA_QUERY_CAP) {
+    if (js_dom_media_query_count >= JS_MEDIA_QUERY_CAP) {
         log_error("match-media: query capacity %d exhausted", JS_MEDIA_QUERY_CAP);
         return ItemNull;
     }
-    JsMediaQueryState* state = &media_queries[media_query_count++];
+    JsMediaQueryState* state = &js_dom_media_queries[js_dom_media_query_count++];
     state->query = platform_strdup(platform_string(query_item));
     state->matches = js_dom_evaluate_media_query(state->query);
     // Media-query records are persistent native owners, so register their
     // stable object homes before the first allocating construction call.
-    heap_register_gc_root(&state->object.item);
+    if (!dom_platform_ensure_roots()) return ItemError;
     state->object = js_create_event_target();
 
     RootFrame roots((Context*)context, 1);
@@ -269,8 +276,8 @@ extern "C" Item js_match_media(Item query_item) {
 }
 
 extern "C" void js_match_media_notify_resize(void) {
-    for (int i = 0; i < media_query_count; i++) {
-        JsMediaQueryState* state = &media_queries[i];
+    for (int i = 0; i < js_dom_media_query_count; i++) {
+        JsMediaQueryState* state = &js_dom_media_queries[i];
         bool next = js_dom_evaluate_media_query(state->query);
         if (next == state->matches) continue;
         state->matches = next;
@@ -286,9 +293,26 @@ extern "C" void js_match_media_notify_resize(void) {
 }
 
 extern "C" void js_match_media_reset(void) {
-    for (int i = 0; i < media_query_count; i++) {
-        if (media_queries[i].query) mem_free(media_queries[i].query);
+    for (int i = 0; i < js_dom_media_query_count; i++) {
+        if (js_dom_media_queries[i].query) mem_free(js_dom_media_queries[i].query);
     }
-    memset(media_queries, 0, sizeof(media_queries));
-    media_query_count = 0;
+    memset(js_dom_media_queries, 0, sizeof(js_dom_media_queries));
+    js_dom_media_query_count = 0;
+}
+
+extern "C" void js_dom_platform_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state) return;
+    JsDomPlatformState* state = &runtime_state->dom_platform;
+    for (int i = 0; i < state->local_storage.count; i++) {
+        mem_free(state->local_storage.entries[i].key);
+        mem_free(state->local_storage.entries[i].value);
+    }
+    for (int i = 0; i < state->session_storage.count; i++) {
+        mem_free(state->session_storage.entries[i].key);
+        mem_free(state->session_storage.entries[i].value);
+    }
+    for (int i = 0; i < state->media_query_count; i++) {
+        if (state->media_queries[i].query) mem_free(state->media_queries[i].query);
+    }
+    memset(state, 0, sizeof(*state));
 }

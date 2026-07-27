@@ -1010,11 +1010,6 @@ static void verify_incremental_layout_skip(LayoutContext* lycon, DomNode* child,
     }
 }
 
-// Thread-local iframe depth counter to prevent infinite recursion
-// (e.g., <iframe src="index.html"> loading itself)
-// Shared between layout_block.cpp and layout_flex_multipass.cpp
-__thread int iframe_depth = 0;
-
 // External timing accumulators from layout.cpp
 extern double g_table_layout_time;
 extern double g_flex_layout_time;
@@ -3500,9 +3495,10 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     log_debug("layout iframe");
 
     // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
-    // This is a thread-local variable shared with layout_flex_multipass.cpp
-    // Keep this low since each HTTP download can take seconds
-    if (iframe_depth >= MAX_IFRAME_DEPTH) {
+    // Keep this low since each HTTP download can take seconds. The depth is
+    // owned by this UI tree so unrelated documents on the same thread cannot
+    // suppress one another's iframe loads.
+    if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
         return;
     }
@@ -3518,10 +3514,10 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             log_debug("load iframe doc %s: %s (iframe viewport=%dx%d, depth=%d)",
                 (srcdoc && *srcdoc) ? "srcdoc" : "src",
                 (srcdoc && *srcdoc) ? "(inline)" : src,
-                iframe_width, iframe_height, iframe_depth);
+                iframe_width, iframe_height, lycon->ui_context->iframe_depth);
 
             // Increment depth before loading
-            iframe_depth++;
+            lycon->ui_context->iframe_depth++;
 
             if (srcdoc && *srcdoc) {
                 doc = load_iframe_srcdoc_doc(lycon, srcdoc,
@@ -3532,14 +3528,14 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             }
             if (!doc) {
                 log_debug("failed to load iframe document");
-                iframe_depth--;
+                lycon->ui_context->iframe_depth--;
                 // todo: use a placeholder
             } else {
                 radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->ensure_embed(lycon);
                 block->embed->doc = doc; // assign loaded document to embed property
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
-                iframe_depth--;
+                lycon->ui_context->iframe_depth--;
                 // embedded documents may already provide a pre-laid-out view tree
             }
         } else {

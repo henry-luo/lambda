@@ -901,6 +901,7 @@ void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
                               Item* new_items, int64_t new_capacity);
 void owned_item_slot_store(Item* storage, int64_t item_count,
                            int64_t index, Item item);
+void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
@@ -949,6 +950,7 @@ typedef void* (*fn_ptr)();
 #define FN_FLAG_IS_COROUTINE  0x08  // bit 3: function is a Python coroutine (async def)
 #define FN_FLAG_SYS_REF       0x10  // bit 4: first-class builtin identity, not dynamic-call ABI
 #define FN_FLAG_MIR_PUBLIC_ABI 0x20 // bit 5: trailing caller-owned scalar-home parameter
+#define FN_FLAG_MIR_CONTEXT_ABI 0x40 // bit 6: generated entry takes Context* first
 
 // Function as first-class value
 // Supports both direct function references and closures
@@ -962,6 +964,7 @@ struct Function {
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
     const char* name;     // function name for stack traces (may be NULL)
+    struct Context* runtime_context; // owner passed through generated calls
 };
 
 #if !defined(LAMBDA_C2MIR_RUNTIME)
@@ -1014,6 +1017,7 @@ Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 void lambda_function_mark_mir_public_abi(Function* fn);
+void lambda_function_mark_mir_context_abi(Function* fn, struct Context* runtime);
 
 // Memory allocation for closure environments
 typedef struct Context Context;
@@ -1578,6 +1582,21 @@ struct Context {
     uint64_t mir_bitcast_scratch;
 };
 
+// Immutable BSS metadata for one sealed MIR module.  It describes code only;
+// mutable bindings and inline caches are allocated per EvalContext.
+typedef struct LambdaModuleLayout {
+    uint32_t module_id;
+    uint32_t var_count;
+    uint32_t member_ic_count;
+    uint32_t reserved;
+} LambdaModuleLayout;
+
+typedef struct LambdaModuleVarRef {
+    uint32_t module_id;
+    uint32_t slot;
+} LambdaModuleVarRef;
+
+
 #ifndef LAMBDA_STATIC
 #ifdef __cplusplus
 extern "C" {
@@ -1723,21 +1742,11 @@ extern "C" {
     // existing entry — and the hit path re-reads entry->type/byte_offset, so a
     // retag is picked up rather than cached stale. Zero-initialised = empty.
     //
-    // The epoch is load-bearing. Compiled MIR is cached and replayed across
-    // script runs (L1 module cache), while TypeMaps come from a per-run arena
-    // that is freed and recycled. Without it a cell installed in one run can
-    // see a *different* TypeMap allocated at the same address in a later run
-    // and report a false hit, silently reading the wrong field.
     typedef struct LambdaMemberIC {
         void* shape;      // TypeMap* the entry belongs to (NULL = empty)
         void* entry;      // ShapeEntry* for the cached key
-        uint64_t epoch;   // lambda_shape_epoch() when installed
     } LambdaMemberIC;
     Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic);
-    // Monotonic counter bumped whenever a run activates its context (and hence
-    // its type arena). Never reused, so a stale cell can never alias a live one.
-    uint64_t lambda_shape_epoch(void);
-    void lambda_shape_epoch_bump(void);
     // length function
     int64_t fn_len(Item item);
     Item fn_int(Item a);

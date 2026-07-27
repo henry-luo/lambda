@@ -7,9 +7,15 @@
 // Built-in registry
 // =============================================================================
 
-// Built-in method function cache — keyed by builtin_id
-static Item js_builtin_cache[JS_BUILTIN_MAX];
-static bool js_builtin_cache_init = false;
+// Built-in method function cache — keyed by builtin_id and owned by the
+// current isolate.  These functions embed heap pointers, so process storage
+// cannot safely cache them across Runtime instances.
+#define js_builtin_cache (js_runtime_state.builtin_cache.entries)
+#define js_builtin_cache_init (js_runtime_state.builtin_cache.initialized)
+
+static bool js_builtin_cache_ensure_roots(void) {
+    return js_root_range_ensure_registered(&js_runtime_state.builtin_cache.roots);
+}
 
 extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
 
@@ -528,10 +534,12 @@ Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name,
 }
 
 void js_builtin_cache_reset() {
+    if (!js_active_runtime_state) return;
     for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
 }
 
 Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count) {
+    if (!js_active_runtime_state || !js_builtin_cache_ensure_roots()) return ItemError;
     if (!js_builtin_cache_init) {
         for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
         js_builtin_cache_init = true;

@@ -1,12 +1,15 @@
 // node_workers.cpp — node:worker_threads namespace through Jube worker services.
 #include "node_workers.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_workers_host = NULL;
-static void* node_workers_session = NULL;
-static bool node_workers_rooted = false;
-static Item node_workers_cached_namespace = {0};
+struct NodeWorkersSessionState { void* session; bool rooted; Item cached_namespace; };
+static NodeWorkersSessionState* node_workers_state(void) { return (NodeWorkersSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_WORKERS); }
+#define node_workers_session (node_workers_state()->session)
+#define node_workers_rooted (node_workers_state()->rooted)
+#define node_workers_cached_namespace (node_workers_state()->cached_namespace)
 
 static Item node_workers_empty_object(Item unused) {
     (void)unused;
@@ -111,9 +114,6 @@ int node_workers_init(const JubeHostAPI* host) {
 }
 
 void node_workers_shutdown(void) {
-    node_workers_cached_namespace = (Item){0};
-    node_workers_rooted = false;
-    node_workers_session = NULL;
     node_workers_host = NULL;
 }
 
@@ -121,6 +121,8 @@ void node_workers_runtime_attach(void* session) {
     if (!node_workers_host || !node_workers_host->node->runtime ||
             !node_workers_host->node->runtime->session_is_live ||
             !node_workers_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_WORKERS,
+            sizeof(NodeWorkersSessionState))) return;
     node_workers_session = session;
     if (node_workers_host->node->roots->persistent_root_register(
             session, &node_workers_cached_namespace.item) == 0) node_workers_rooted = true;

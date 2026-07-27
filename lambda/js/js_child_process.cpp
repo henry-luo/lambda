@@ -3712,14 +3712,10 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 // child_process Module Namespace
 // =============================================================================
 
-static Item cp_namespace = {0};
-static uint64_t cp_namespace_roots_epoch = 0;
+#define cp_namespace (js_runtime_state.child_process.namespace_object)
 
-static void js_cp_register_namespace_root(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (cp_namespace_roots_epoch == epoch) return;
-    heap_register_gc_root(&cp_namespace.item);
-    cp_namespace_roots_epoch = epoch;
+static bool js_cp_register_namespace_root(void) {
+    return js_root_range_ensure_registered(&js_runtime_state.child_process.roots);
 }
 
 static void js_cp_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
@@ -3729,7 +3725,8 @@ static void js_cp_set_method(Item ns, const char* name, void* func_ptr, int para
 }
 
 extern "C" Item js_get_child_process_namespace(void) {
-    js_cp_register_namespace_root();
+    if (!js_active_runtime_state) return ItemError;
+    if (!js_cp_register_namespace_root()) return ItemError;
     if (cp_namespace.item != 0) return cp_namespace;
 
     RootFrame roots((Context*)context, 1);
@@ -3755,7 +3752,7 @@ extern "C" Item js_get_child_process_namespace(void) {
 }
 
 extern "C" void js_child_process_reset(void) {
+    if (!js_active_runtime_state) return;
     cp_namespace = (Item){0};
-    cp_namespace_roots_epoch = 0;
     js_host_hooks_set_cluster_online_hook(NULL);
 }

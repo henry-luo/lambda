@@ -73,6 +73,25 @@ typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
 struct LambdaError;  // forward declaration
 struct LambdaScheduler;
+struct Runtime;
+struct JsRuntimeState;
+typedef struct TemplateRegistry TemplateRegistry;
+class MarkEditor;
+class Input;
+
+// One sealed MIR module is instantiated separately in every EvalContext.  The
+// generated code may retain only the module id/slot constants; the mutable
+// binding and inline-cache storage is reached through this context-owned slab.
+// The arrays never move after publication because `vars` is a precise GC root
+// range and compiled code addresses `member_ics` directly.
+typedef struct LambdaModuleState {
+    Item* vars;
+    uint64_t* var_payloads;
+    void* member_ics;
+    uint32_t var_count;
+    uint32_t member_ic_count;
+    bool vars_registered;
+} LambdaModuleState;
 
 // Runtime-facing scalar materializers are needed by native input adapters as
 // well as generated code. Keep DateTime construction here because static input
@@ -93,6 +112,25 @@ typedef struct EvalContext : Context {
     const char* current_file;   // current source file (for error reporting)
     LambdaError* last_error;    // most recent runtime error (owned)
     LambdaScheduler* scheduler; // per-runtime cooperative task scheduler
+    // Variadic calls may nest. The active list is execution state of this
+    // context, never a thread-wide register shared by unrelated runtimes.
+    List* current_vargs;
+    MarkEditor* edit_editor;    // active editor for this context's edit session
+    Input* edit_editor_input;   // input allocated with the editor's context
+    // Runtime owns the long-lived execution context. TLS may borrow this
+    // pointer while code runs, but it must never become the owner. Keep this
+    // after heap so MIR's hot allocation offsets remain stable.
+    Runtime* runtime;
+    TemplateRegistry* template_registry; // view/edit registry for this isolate
+    void* render_map_state;       // context-owned render reconciliation capsule
+    void* template_state_store;   // context-owned view/edit state map
+    void* jube_node_session;      // context-owned Jube Node service session
+    JsRuntimeState* js_state;  // context-owned JS semantic state capsule
+    // Indexed by sealed module id.  The table and every state are created at
+    // module-instantiation boundaries; generated hot paths only load this
+    // pointer and use ordinary owner-thread loads/stores in the selected slab.
+    LambdaModuleState** module_states;
+    uint32_t module_state_capacity;
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

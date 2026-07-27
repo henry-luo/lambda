@@ -24,6 +24,7 @@
  */
 
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "js_class.h"
 #include "js_dom_events.h"
@@ -73,13 +74,22 @@ static inline void mark_class(Item obj, const char* name) {
     if (cls != JS_CLASS_NONE) js_class_stamp(obj, cls);
 }
 
-static Item g_blob_proto = {0};
-static Item g_file_proto = {0};
-static Item g_clipboard_item_proto = {0};
-static Item g_clipboard_event_proto = {0};
-static Item g_data_transfer_proto = {0};
-static Item g_file_list_proto = {0};
-static int64_t g_clipboard_generation = 1;
+// Browser-visible wrapper identity belongs to the active JS realm. This
+// prevents one document's constructors or drag payload from crossing into
+// another document's heap while retaining ordinary TLS loads on hot paths.
+#define g_blob_proto (js_runtime_state.clipboard.blob_prototype)
+#define g_file_proto (js_runtime_state.clipboard.file_prototype)
+#define g_clipboard_item_proto (js_runtime_state.clipboard.clipboard_item_prototype)
+#define g_clipboard_event_proto (js_runtime_state.clipboard.clipboard_event_prototype)
+#define g_data_transfer_proto (js_runtime_state.clipboard.data_transfer_prototype)
+#define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
+#define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
+#define g_clipboard_generation (js_runtime_state.clipboard.generation)
+
+static bool clipboard_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.clipboard.roots);
+}
 
 static void attach_known_prototype(Item obj, Item proto) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return;
@@ -1090,17 +1100,10 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
 // those. A single DataTransfer persists across the whole gesture
 // (dragstart→dragover→drop→dragend) so setData() in dragstart is visible to
 // getData() in drop, matching the browser. The Item lives in a GC root
-// registered once at the stable static-address (never re-registered).
-static Item g_drag_data_transfer = { .item = ITEM_NULL };
-extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t g_drag_root_epoch = 0;
+// owned by the active context's exact root range.
 
 extern "C" void js_drag_session_begin(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (g_drag_root_epoch != epoch) {
-        heap_register_gc_root(&g_drag_data_transfer.item);
-        g_drag_root_epoch = epoch;
-    }
+    if (!clipboard_ensure_roots()) return;
     g_drag_data_transfer = js_data_transfer_new();
 }
 
@@ -1774,6 +1777,7 @@ extern "C" Item js_lambda_clipboard_get_perm(Item name_item) {
 // =============================================================================
 
 extern "C" void js_register_clipboard_globals(Item global_this) {
+    if (!clipboard_ensure_roots()) return;
     // ---- Blob -------------------------------------------------------------
     {
         Item ctor = js_new_function((void*)js_blob_new, 2);

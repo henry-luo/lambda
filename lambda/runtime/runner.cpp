@@ -19,10 +19,14 @@
 #include "module_registry.h"
 #include "../jube/jube_registry.h"
 #include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../js/js_exec_profile.h"
 #include "../input/css/css_style.hpp"
 #include "template_registry.h"
+#include "render_map.h"
+#include "template_state.h"
+#include "edit_bridge.h"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
@@ -428,19 +432,16 @@ static Script* runtime_script_index_get_current(Runtime* runtime, const char* pa
     return script;
 }
 
-// Persistent last error (survives beyond runner lifetime)
-// This is needed because context points to runner's stack-allocated EvalContext
-__thread LambdaError* persistent_last_error = NULL;
-
-// Accessor for persistent error from other modules
+// The canonical EvalContext outlives runners, so error diagnostics remain with
+// their semantic owner instead of escaping into a thread-wide side channel.
 LambdaError* get_persistent_last_error() {
-    return persistent_last_error;
+    return context ? context->last_error : NULL;
 }
 
 void clear_persistent_last_error() {
-    if (persistent_last_error) {
-        err_free(persistent_last_error);
-        persistent_last_error = NULL;
+    if (context && context->last_error) {
+        err_free(context->last_error);
+        context->last_error = NULL;
     }
 }
 
@@ -450,13 +451,11 @@ void preserve_context_last_error(EvalContext* ctx, Item result) {
     }
 
     if (get_type_id(result) == LMD_TYPE_ERROR) {
-        clear_persistent_last_error();  // free any previous error
-        persistent_last_error = ctx->last_error;
-        ctx->last_error = NULL;  // transfer ownership
         return;
     }
 
     // error() values can be consumed by total equality, so a non-error result must drop stale diagnostics.
+    // A completed non-error result cannot retain this context's old diagnostic.
     err_free(ctx->last_error);
     ctx->last_error = NULL;
 }
@@ -1398,52 +1397,74 @@ void runner_init(Runtime *runtime, Runner* runner) {
     runner->runtime = runtime;
 }
 
+EvalContext* runtime_get_eval_context(Runtime* runtime) {
+    if (!runtime) return NULL;
+    if (!runtime->eval_context) {
+        runtime->eval_context = (EvalContext*)mem_alloc(sizeof(EvalContext), MEM_CAT_EVAL);
+        if (!runtime->eval_context) {
+            log_error("runtime-context: failed to allocate canonical EvalContext");
+            return NULL;
+        }
+        memset(runtime->eval_context, 0, sizeof(EvalContext));
+    }
+    runtime->eval_context->runtime = runtime;
+    return runtime->eval_context;
+}
+
 #include "../../lib/url.h"
 #include "../validator/validator.hpp"
 #include "lambda-stack.h"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
+    if (!runner || !runner->runtime || !runner->script) {
+        log_error("runtime-context: runner setup requires Runtime and Script");
+        return;
+    }
+    EvalContext* ctx = runtime_get_eval_context(runner->runtime);
+    if (!ctx) return;
+    runner->context = ctx;
 
     // Initialize stack overflow protection (once per thread)
     lambda_stack_init();
 
     // Store stack_limit in context for fast access from JIT-compiled code
-    runner->context.stack_limit = _lambda_stack_limit;
-    if (!lambda_side_stack_bind(&runner->context)) {
+    ctx->stack_limit = _lambda_stack_limit;
+    if (!lambda_side_stack_bind(ctx)) {
         log_error("runner side-stack: failed to initialize execution regions");
     }
 
-    runner->context.pool = runner->script->pool;
-    runner->context.type_list = runner->script->type_list;
+    ctx->pool = runner->script->pool;
+    ctx->type_list = runner->script->type_list;
 
-    runner->context.type_info = type_info;
-    runner->context.consts = runner->script->const_list->data;
-    runner->context.result = ItemNull;  // exec result
-    runner->context.cwd = get_current_dir();  // proper URL object for current directory
+    ctx->type_info = type_info;
+    ctx->consts = runner->script->const_list->data;
+    ctx->result = ItemNull;  // exec result
+    ctx->cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
-    runner->context.decimal_ctx = decimal_fixed_context();
-    runner->context.context_alloc = heap_alloc;
+    ctx->decimal_ctx = decimal_fixed_context();
+    ctx->context_alloc = heap_alloc;
     // init AST validator
-    runner->context.validator = schema_validator_create(runner->context.pool);
+    ctx->validator = schema_validator_create(ctx->pool);
 
     // Initialize error handling and stack trace support
     // Use debug_info from script (built after MIR compilation for address → function mapping)
-    runner->context.debug_info = runner->script->debug_info;
-    runner->context.current_file = runner->script->reference;  // source file for error reporting
-    runner->context.last_error = NULL;
+    ctx->debug_info = runner->script->debug_info;
+    ctx->current_file = runner->script->reference;  // source file for error reporting
+    ctx->current_vargs = NULL;
+    if (ctx->last_error) {
+        // The canonical context may carry an error until the shell consumes it.
+        err_free(ctx->last_error);
+        ctx->last_error = NULL;
+    }
 
-    input_context = context = &runner->context;
-    // Tune6 L2: this run gets a fresh type arena, so every per-call-site member
-    // IC cell baked into cached MIR from an earlier run must stop matching —
-    // its TypeMap pointers belong to memory this run may recycle.
-    lambda_shape_epoch_bump();
-
+    input_context = (Context*)ctx;
+    eval_context_bind(ctx);
     // Phase 5: propagate ui_mode and result_arena from Runtime to context
     Runtime* ui_rt = runner->runtime;
     if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
-        context->ui_mode = true;
-        context->arena = ui_rt->result_arena;
+        ctx->ui_mode = true;
+        ctx->arena = ui_rt->result_arena;
     }
 
     // Reuse or create the GC heap and name_pool from the Runtime.
@@ -1452,37 +1473,44 @@ void runner_setup_context(Runner* runner) {
     if (rt && rt->heap) {
         // Reuse retained heap and name_pool from a previous evaluation
         log_debug("runner_setup_context: reusing retained heap from Runtime");
-        context->heap = rt->heap;
-        context->name_pool = rt->name_pool;
-        context->pool = context->heap->pool;
+        ctx->heap = rt->heap;
+        ctx->name_pool = rt->name_pool;
+        ctx->pool = ctx->heap->pool;
     } else {
         // First evaluation on this Runtime — create fresh resources
-        context->name_pool = name_pool_create(context->pool, nullptr);
-        if (!context->name_pool) {
+        ctx->name_pool = name_pool_create(ctx->pool, nullptr);
+        if (!ctx->name_pool) {
             log_error("Failed to create runtime name_pool");
         }
         heap_init();
-        context->pool = context->heap->pool;
+        ctx->pool = ctx->heap->pool;
         // Store on Runtime for reuse
         if (rt) {
-            rt->heap = context->heap;
-            rt->name_pool = context->name_pool;
+            rt->heap = ctx->heap;
+            rt->name_pool = ctx->name_pool;
         }
     }
     path_register_pool_provider(runner_path_pool_provider);
 
     if (rt && rt->scheduler) {
-        context->scheduler = rt->scheduler;
+        ctx->scheduler = rt->scheduler;
     } else {
-        context->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
-        if (rt) rt->scheduler = context->scheduler;
+        ctx->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
+        if (rt) rt->scheduler = ctx->scheduler;
     }
     if (rt && rt->js_bootstrap_context) {
         // The Lambda runner now owns every heap resource created while its JS
-        // imports were compiled; only the standalone bootstrap shell remains.
+        // imports were compiled. Move the JS capsule before freeing the shell;
+        // otherwise callbacks would retain semantic state in dead stack-like
+        // bootstrap storage.
+        if (!ctx->js_state) {
+            ctx->js_state = rt->js_bootstrap_context->js_state;
+            rt->js_bootstrap_context->js_state = NULL;
+        }
         mem_free(rt->js_bootstrap_context);
         rt->js_bootstrap_context = NULL;
     }
+    if (ctx->js_state) js_runtime_state_bind_context(ctx);
 
     // Initialize template registry for view/edit template dispatch
     if (!g_template_registry) {
@@ -1495,8 +1523,9 @@ void runner_setup_context(Runner* runner) {
 // Only handles List/Array since those are the common containers for script results
 extern "C" Item path_resolve_for_iteration(Path* path);
 
-// Forward declare BSS root registration from mir.c
-extern "C" void reset_and_register_bss_gc_roots(void* mir_ctx);
+// Module-state instantiation from mir.c. It runs before execution and owns
+// the one-time slab allocation/root publication for a sealed module.
+extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx);
 
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
@@ -1536,14 +1565,17 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     log_notice("Executing JIT compiled code...");
     runner_setup_context(runner);
+    EvalContext* ctx = runner->context;
+    if (!ctx) return nullptr;
 
-    // Register BSS global variables as GC roots (module-level let bindings)
+    // Establish the script's context-owned global and IC slabs.
     if (runner->script->jit_context) {
-        reset_and_register_bss_gc_roots((void*)runner->script->jit_context);
+        if (!prepare_context_module_state((Context*)ctx,
+                (void*)runner->script->jit_context)) return nullptr;
     }
 
     // set the run_main flag in the execution context
-    runner->context.run_main = run_main;
+    ctx->run_main = run_main;
     log_debug("Set context run_main = %s", run_main ? "true" : "false");
 
     // Phase 2: Set recovery point for signal-based stack overflow handling.
@@ -1592,18 +1624,18 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!output) {
         log_error("Failed to create output Input");
         if (output_pool) pool_destroy(output_pool);
-        if (runner->context.cwd) {
-            url_destroy(runner->context.cwd);
-            runner->context.cwd = NULL;
+        if (ctx->cwd) {
+            url_destroy(ctx->cwd);
+            ctx->cwd = NULL;
         }
         return nullptr;
     }
 
     // Resolve all sys:// paths in result (while context is still valid)
     resolve_sys_paths_recursive(result);
-    if (runner->context.cwd) {
-        url_destroy(runner->context.cwd);
-        runner->context.cwd = NULL;
+    if (ctx->cwd) {
+        url_destroy(ctx->cwd);
+        ctx->cwd = NULL;
     }
 
     // Return result directly on the GC heap — no deep_copy needed.
@@ -1726,13 +1758,22 @@ void runtime_log_mir_cache_summary(Runtime* runtime) {
 // script starts with a clean GC heap.  The next runner_setup_context()
 // call will create fresh heap/name_pool state and store it back.
 void runtime_reset_heap(Runtime* runtime) {
+    if (!runtime) return;
     if (runtime->heap) {
-        EvalContext tmp_ctx;
-        memset(&tmp_ctx, 0, sizeof(tmp_ctx));
-        tmp_ctx.heap = runtime->heap;
-        tmp_ctx.result = ItemNull;
-        tmp_ctx.scheduler = runtime->scheduler;
-        context = &tmp_ctx;
+        EvalContext* cleanup_context = runtime_get_eval_context(runtime);
+        if (!cleanup_context) return;
+        cleanup_context->heap = runtime->heap;
+        cleanup_context->name_pool = runtime->name_pool;
+        cleanup_context->type_list = runtime->type_list;
+        cleanup_context->result = ItemNull;
+        cleanup_context->scheduler = runtime->scheduler;
+        EvalContext* previous_context = eval_context_bind(cleanup_context);
+        if (cleanup_context->js_state) js_runtime_state_bind_context(cleanup_context);
+        // The editor may retain document Items allocated by this heap. Tear it
+        // down while its owning context is still bound.
+        edit_bridge_destroy();
+        render_map_destroy();
+        tmpl_state_destroy();
 
         if (runtime->js_runtime_used) {
             // Cross-language JS caches retain Items from the current heap.
@@ -1754,6 +1795,10 @@ void runtime_reset_heap(Runtime* runtime) {
         // Batch heap replacement invalidates module-owned callback Items just
         // as final runtime teardown does; release those roots before the GC.
         jube_notify_heap_cleanup(runtime->heap);
+        // Module bindings and ICs are context-owned slabs.  Drop their precise
+        // root registrations and bulk-clear them while the old heap is still
+        // current; the next module instantiation re-registers once.
+        lambda_module_state_reset((Context*)cleanup_context);
 
         // Release name_pool BEFORE heap_destroy: the NamePool struct is
         // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
@@ -1767,9 +1812,15 @@ void runtime_reset_heap(Runtime* runtime) {
             runtime->type_list = NULL;
         }
 
+        js_runtime_state_release_heap_resources(cleanup_context);
         heap_destroy();
         runtime->heap = NULL;
-        context = NULL;
+        cleanup_context->heap = NULL;
+        cleanup_context->name_pool = NULL;
+        cleanup_context->type_list = NULL;
+        cleanup_context->scheduler = NULL;
+        eval_context_restore(previous_context);
+        js_runtime_state_bind_context(previous_context);
     }
     if (runtime->js_bootstrap_context) {
         mem_free(runtime->js_bootstrap_context);
@@ -1778,13 +1829,17 @@ void runtime_reset_heap(Runtime* runtime) {
 }
 
 void runtime_cleanup(Runtime* runtime) {
+    if (!runtime) return;
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
     js_exec_profile_dump();
 
     js_canvas_cleanup();
     module_registry_cleanup();
-    template_registry_destroy(g_template_registry);
+    TemplateRegistry* template_registry = runtime->eval_context
+        ? runtime->eval_context->template_registry : NULL;
+    if (runtime->eval_context) runtime->eval_context->template_registry = NULL;
+    template_registry_destroy(template_registry);
     js_eval_preamble_cache_reset();
     js_fetch_reset();
 
@@ -1792,21 +1847,29 @@ void runtime_cleanup(Runtime* runtime) {
 
     // Destroy retained execution state (heap and name_pool)
     if (runtime->heap) {
-        // Set the thread-local context so heap_destroy can access context->heap
-        // (heap_destroy uses the context global)
-        EvalContext tmp_ctx;
-        memset(&tmp_ctx, 0, sizeof(tmp_ctx));
-        tmp_ctx.heap = runtime->heap;
-        tmp_ctx.result = ItemNull;
-        context = &tmp_ctx;
+        EvalContext* cleanup_context = runtime_get_eval_context(runtime);
+        if (!cleanup_context) return;
+        // heap_destroy is legacy context-based, so bind the Runtime-owned
+        // context rather than manufacturing a stack owner during teardown.
+        cleanup_context->heap = runtime->heap;
+        cleanup_context->name_pool = runtime->name_pool;
+        cleanup_context->type_list = runtime->type_list;
+        cleanup_context->result = ItemNull;
+        EvalContext* previous_context = eval_context_bind(cleanup_context);
+        if (cleanup_context->js_state) js_runtime_state_bind_context(cleanup_context);
+
+        // Destruction follows the same owner-bound path as heap replacement.
+        edit_bridge_destroy();
+        render_map_destroy();
+        tmpl_state_destroy();
 
         if (runtime->scheduler) {
-            tmp_ctx.scheduler = runtime->scheduler;
+            cleanup_context->scheduler = runtime->scheduler;
             lambda_scheduler_destroy(runtime->scheduler);
             runtime->scheduler = NULL;
         }
 
-        js_event_loop_shutdown();
+        if (cleanup_context->js_state) js_event_loop_shutdown();
         lambda_uv_cleanup();
         event_loop_cleaned = true;
 
@@ -1818,11 +1881,12 @@ void runtime_cleanup(Runtime* runtime) {
 
         // Intrinsic cache entries own native precise-root slots outside the GC
         // pool; release them while their heap is current and before leak accounting.
-        js_intrinsic_state_teardown();
+        if (cleanup_context->js_state) js_intrinsic_state_teardown();
 
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.
         jube_notify_heap_cleanup(runtime->heap);
+        lambda_module_state_destroy((Context*)cleanup_context);
 
         print_heap_entries();
         check_memory_leak();
@@ -1839,9 +1903,14 @@ void runtime_cleanup(Runtime* runtime) {
             runtime->type_list = NULL;
         }
 
+        js_runtime_state_release_heap_resources(cleanup_context);
         heap_destroy();
         runtime->heap = NULL;
-        context = NULL;
+        cleanup_context->heap = NULL;
+        cleanup_context->name_pool = NULL;
+        cleanup_context->type_list = NULL;
+        cleanup_context->scheduler = NULL;
+        eval_context_restore(previous_context);
     } else {
         js_dom_shutdown();
         if (runtime->dom_doc) {
@@ -1850,12 +1919,27 @@ void runtime_cleanup(Runtime* runtime) {
         }
     }
     if (!event_loop_cleaned) {
-        js_event_loop_shutdown();
+        if (runtime->eval_context && runtime->eval_context->js_state) {
+            js_runtime_state_bind_context(runtime->eval_context);
+            js_event_loop_shutdown();
+        }
         lambda_uv_cleanup();
     }
     if (runtime->js_bootstrap_context) {
         mem_free(runtime->js_bootstrap_context);
         runtime->js_bootstrap_context = NULL;
+    }
+    if (runtime->eval_context) {
+        // Do not restore a TLS pointer to freed runtime-owned context.
+        if (context == runtime->eval_context) context = NULL;
+        if (runtime->eval_context->last_error) {
+            err_free(runtime->eval_context->last_error);
+            runtime->eval_context->last_error = NULL;
+        }
+        js_runtime_state_destroy_context(runtime->eval_context);
+        lambda_module_state_destroy((Context*)runtime->eval_context);
+        mem_free(runtime->eval_context);
+        runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
     if (runtime->scripts) {

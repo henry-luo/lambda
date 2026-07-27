@@ -1117,9 +1117,13 @@ static inline int js_upper_hex_digit_value(char c) {
 
 extern "C" uint64_t js_get_heap_epoch();
 
-static Item g_last_four_byte_uri_escape_string = {0};
-static uint32_t g_last_four_byte_uri_escape_cp = 0;
-static uint64_t g_last_four_byte_uri_escape_epoch = 0;
+// These are context-local TLS-backed fields so a tight concatenation loop
+// remains direct loads/stores while never retaining another runtime's strings.
+#define g_last_four_byte_uri_escape_string (js_runtime_state.string_concat.last_four_byte_escape)
+#define g_last_four_byte_uri_escape_cp (js_runtime_state.string_concat.last_four_byte_cp)
+#define g_last_four_byte_uri_escape_epoch (js_runtime_state.string_concat.last_four_byte_epoch)
+#define js_percent_prefix_cache (js_runtime_state.string_concat.percent_prefixes)
+#define js_percent_byte_cache (js_runtime_state.string_concat.percent_bytes)
 
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
@@ -1170,25 +1174,23 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
     int right_value = js_upper_hex_digit_value(right_ch);
     if (right_value < 0) return ItemNull;
     if (left->len == 1 && left->chars[0] == '%') {
-        static Item prefix_cache[16] = {0};
-        if (prefix_cache[right_value].item) return prefix_cache[right_value];
+        if (js_percent_prefix_cache[right_value].item) return js_percent_prefix_cache[right_value];
         char buf[2];
         buf[0] = '%';
         buf[1] = right_ch;
-        prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
-        return prefix_cache[right_value];
+        js_percent_prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
+        return js_percent_prefix_cache[right_value];
     }
     int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
     if (left_value >= 0) {
         int byte_value = (left_value << 4) | right_value;
-        static Item byte_cache[256] = {0};
-        if (byte_cache[byte_value].item) return byte_cache[byte_value];
+        if (js_percent_byte_cache[byte_value].item) return js_percent_byte_cache[byte_value];
         char buf[3];
         buf[0] = '%';
         buf[1] = left->chars[1];
         buf[2] = right_ch;
-        byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
-        return byte_cache[byte_value];
+        js_percent_byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
+        return js_percent_byte_cache[byte_value];
     }
     return ItemNull;
 }

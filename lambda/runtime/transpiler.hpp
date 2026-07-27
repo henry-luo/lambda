@@ -47,7 +47,7 @@ extern "C" {
 typedef struct Runner {
     Runtime* runtime;    // back-pointer to owning Runtime (for heap reuse)
     Script* script;
-    EvalContext context;  // execution context
+    EvalContext* context;  // runtime-owned execution context
 } Runner;
 
 struct Runtime {
@@ -88,6 +88,9 @@ struct Runtime {
     int mir_cache_compiles;
     int mir_cache_invalidations;
     LambdaScheduler* scheduler;
+    // Canonical runtime-owned execution state.  Runners, callbacks, and guest
+    // bridges bind this stable object through TLS; none embeds it on a stack.
+    EvalContext* eval_context;
     EvalContext* js_bootstrap_context;
     bool js_runtime_used;
     bool no_task_drain;
@@ -187,6 +190,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
+EvalContext* runtime_get_eval_context(Runtime* runtime);
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
 void runtime_teardown_batch_scripts(Runtime* runtime);

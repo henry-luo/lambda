@@ -1133,16 +1133,15 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         uintptr_t elmt_name = flex_item->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
-            // Uses the same thread-local counter as layout_iframe in layout_block.cpp
             // Keep this low since each HTTP download can take seconds
-            extern __thread int iframe_depth;
-            if (iframe_depth >= MAX_IFRAME_DEPTH) {
+            if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
                 log_warn("flex iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
                 return;
             }
 
             log_debug(">>> FLEX ITEM IFRAME: loading embedded document for %s (flex size=%.1fx%.1f, depth=%d)",
-                      flex_item->node_name(), flex_item->width, flex_item->height, iframe_depth);
+                      flex_item->node_name(), flex_item->width, flex_item->height,
+                      lycon->ui_context->iframe_depth);
 
             // Save the flex-determined dimensions - we must preserve these
             float flex_width = flex_item->width;
@@ -1155,7 +1154,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     log_debug(">>> FLEX ITEM IFRAME: loading src=%s (iframe viewport=%.0fx%.0f)", src_value, flex_width, flex_height);
 
                     // Increment depth before loading
-                    iframe_depth++;
+                    lycon->ui_context->iframe_depth++;
 
                     // Use iframe's actual dimensions as viewport, not window dimensions
                     // This ensures the embedded document layouts to fit within the iframe
@@ -1212,9 +1211,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                             lycon->ui_context->viewport_width = saved_viewport_width;
                             lycon->ui_context->viewport_height = saved_viewport_height;
                         }
-                        iframe_depth--;
+                        lycon->ui_context->iframe_depth--;
                     } else {
-                        iframe_depth--;
+                        lycon->ui_context->iframe_depth--;
                     }
                 }
             }

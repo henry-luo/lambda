@@ -6,13 +6,16 @@
  * namespace cache remains owned by the active JS session.
  */
 #include "node_punycode.hpp"
+#include "../../jube/jube_registry.h"
 
 #include <cstring>
 
 static const JubeHostAPI* node_punycode_host = NULL;
-static void* node_punycode_session = NULL;
-static bool node_punycode_rooted = false;
-static Item node_punycode_cached_namespace = {0};
+struct NodePunycodeSessionState { void* session; bool rooted; Item cached_namespace; };
+static NodePunycodeSessionState* node_punycode_state(void) { return (NodePunycodeSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_PUNYCODE); }
+#define node_punycode_session (node_punycode_state()->session)
+#define node_punycode_rooted (node_punycode_state()->rooted)
+#define node_punycode_cached_namespace (node_punycode_state()->cached_namespace)
 
 static Item node_punycode_undefined(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -110,15 +113,14 @@ int node_punycode_init(const JubeHostAPI* host) {
 }
 
 void node_punycode_shutdown(void) {
-    node_punycode_cache_reset();
-    node_punycode_rooted = false;
-    node_punycode_session = NULL;
     node_punycode_host = NULL;
 }
 
 void node_punycode_runtime_attach(void* session) {
     if (!node_punycode_host || !node_punycode_host->node->runtime->session_is_live ||
             !node_punycode_host->node->runtime->session_is_live(session)) return;
+    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PUNYCODE,
+            sizeof(NodePunycodeSessionState))) return;
     node_punycode_session = session;
     if (node_punycode_host->node->roots->persistent_root_register(session,
             &node_punycode_cached_namespace.item) == 0) {

@@ -140,7 +140,16 @@ typedef struct PathTableEntry {
     SourcePathC path;            // owned
 } PathTableEntry;
 
-static HashMap* s_path_table = NULL;
+typedef struct SourcePathBridgeState {
+    HashMap* path_table;
+} SourcePathBridgeState;
+
+static void source_path_bridge_state_destroy(void* opaque) {
+    SourcePathBridgeState* state = (SourcePathBridgeState*)opaque;
+    if (!state) return;
+    if (state->path_table) hashmap_free(state->path_table);
+    mem_free(state);
+}
 
 static uint64_t path_hash(const void* item, uint64_t s0, uint64_t s1) {
     const PathTableEntry* e = (const PathTableEntry*)item;
@@ -168,28 +177,44 @@ static void path_entry_free(void* item) {
     if (e) source_path_free(&e->path);
 }
 
+static SourcePathBridgeState* source_path_bridge_state(bool create) {
+    SourcePathBridgeState* state = (SourcePathBridgeState*)
+        render_map_get_path_recorder_state();
+    if (!state && create) {
+        state = (SourcePathBridgeState*)mem_calloc(1, sizeof(SourcePathBridgeState),
+            MEM_CAT_RENDER);
+        if (state) {
+            render_map_set_path_recorder_state(state);
+            render_map_set_path_recorder_state_cleanup(source_path_bridge_state_destroy);
+        }
+    }
+    return state;
+}
+
 static HashMap* ensure_path_table(void) {
-    if (!s_path_table) {
-        s_path_table = hashmap_new(
+    SourcePathBridgeState* state = source_path_bridge_state(true);
+    if (!state) return NULL;
+    if (!state->path_table) {
+        state->path_table = hashmap_new(
             sizeof(PathTableEntry), 64,
             0xBEEF1234u, 0x5678CAFEu,
             path_hash, path_compare,
             path_entry_free, NULL);
     }
-    return s_path_table;
+    return state->path_table;
 }
 
 void source_pos_bridge_reset(void) {
-    if (s_path_table) {
-        // hashmap_free invokes path_entry_free on each entry.
-        hashmap_free(s_path_table);
-        s_path_table = NULL;
-    }
+    SourcePathBridgeState* state = source_path_bridge_state(false);
+    if (!state) return;
+    render_map_set_path_recorder_state(NULL);
+    source_path_bridge_state_destroy(state);
 }
 
 void render_map_record_path(Item source_item, const char* template_ref,
                             const int* path_indices, int depth) {
     HashMap* m = ensure_path_table();
+    if (!m) return;
     PathTableEntry e;
     memset(&e, 0, sizeof(e));
     e.source_item_bits = source_item.item;
@@ -214,12 +239,13 @@ void render_map_record_path(Item source_item, const char* template_ref,
 // pointer into the table on hit; caller must NOT free.
 static const SourcePathC* path_table_get(Item source_item,
                                          const char* template_ref) {
-    if (!s_path_table) return NULL;
+    SourcePathBridgeState* state = source_path_bridge_state(false);
+    if (!state || !state->path_table) return NULL;
     PathTableEntry q;
     memset(&q, 0, sizeof(q));
     q.source_item_bits = source_item.item;
     q.template_ref = template_ref;
-    const PathTableEntry* hit = (const PathTableEntry*)hashmap_get(s_path_table, &q);
+    const PathTableEntry* hit = (const PathTableEntry*)hashmap_get(state->path_table, &q);
     return hit ? &hit->path : NULL;
 }
 

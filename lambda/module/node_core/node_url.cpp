@@ -5,6 +5,7 @@
  * Registered by node-core through its Jube namespace descriptor.
  */
 #include "node_url.hpp"
+#include "../../jube/jube_registry.h"
 #include "../../../lib/url.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/hex.h"
@@ -15,8 +16,25 @@
 #include <math.h>
 
 static const JubeHostAPI* node_url_host = NULL;
-static void* node_url_session = NULL;
-static bool node_url_namespace_rooted = false;
+
+#define JS_BLOB_URL_MAX 1024
+struct NodeUrlSessionState {
+    void* session;
+    bool namespace_rooted;
+    Item blob_url_values[JS_BLOB_URL_MAX];
+    char blob_url_ids[JS_BLOB_URL_MAX][64];
+    int64_t blob_url_next_id;
+    Item module_namespace;
+};
+static NodeUrlSessionState* node_url_state(void) {
+    return (NodeUrlSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_URL);
+}
+#define node_url_session (node_url_state()->session)
+#define node_url_namespace_rooted (node_url_state()->namespace_rooted)
+#define js_blob_url_values (node_url_state()->blob_url_values)
+#define js_blob_url_ids (node_url_state()->blob_url_ids)
+#define js_blob_url_next_id (node_url_state()->blob_url_next_id)
+#define url_module_namespace (node_url_state()->module_namespace)
 
 // Helper: make JS undefined value
 // Helper: extract C string from Item
@@ -159,11 +177,6 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
 #define js_is_truthy(VALUE) node_url_host->script->is_truthy(VALUE)
 
 // Helper: create string Item
-#define JS_BLOB_URL_MAX 1024
-static Item js_blob_url_values[JS_BLOB_URL_MAX];
-static char js_blob_url_ids[JS_BLOB_URL_MAX][64];
-static int64_t js_blob_url_next_id = 1;
-
 extern "C" Item js_blob_url_resolve(Item id_item) {
     if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
     char id[64] = {};
@@ -1332,8 +1345,6 @@ extern "C" Item js_url_search_params_new(Item init) {
 // url Module Namespace Object
 // =============================================================================
 
-static Item url_module_namespace = {0};
-
 static Item js_url_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return ItemNull;
@@ -1424,9 +1435,6 @@ int node_url_init(const JubeHostAPI* host) {
 }
 
 void node_url_shutdown(void) {
-    node_url_cache_reset();
-    node_url_namespace_rooted = false;
-    node_url_session = NULL;
     node_url_host = NULL;
 }
 
@@ -1434,6 +1442,12 @@ void node_url_runtime_attach(void* session) {
     if (!node_url_host || !node_url_host->node || !node_url_host->node->runtime ||
             !node_url_host->node->runtime->session_is_live ||
             !node_url_host->node->runtime->session_is_live(session)) return;
+    NodeUrlSessionState* state = (NodeUrlSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_URL, sizeof(NodeUrlSessionState));
+    if (!state) return;
+    // A zeroed session starts blob identifiers at one without sharing a
+    // counter between contexts.
+    if (state->blob_url_next_id == 0) state->blob_url_next_id = 1;
     node_url_session = session;
     if (node_url_host->node->roots->persistent_root_register(session,
             &url_module_namespace.item) != 0) return;

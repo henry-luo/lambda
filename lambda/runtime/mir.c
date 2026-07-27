@@ -16,6 +16,11 @@
 #include "lambda-error.h"
 #include "sys_func_registry.h"
 
+// Defined by runtime-state.cpp. This is an instantiation-boundary operation;
+// generated code never calls it from a variable or inline-cache path.
+extern bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
+                                        uint32_t var_count, uint32_t member_ic_count);
+
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
@@ -479,51 +484,22 @@ void jit_cleanup(MIR_context_t ctx) {
     MIR_finish(ctx);
 }
 
-// ============================================================================
-// BSS Global Root Registration for GC
-// ============================================================================
-// Walk all MIR modules to find BSS items with _gvar_ prefix (module-level
-// let bindings). Register their resolved addresses as GC root slots so the
-// garbage collector scans them during mark phase.
-
-extern void heap_register_gc_root(uint64_t* slot);
-
-static void walk_bss_gc_roots(void* mir_ctx, bool reset_slots) {
-    if (!mir_ctx) return;
+bool prepare_context_module_state(Context* runtime, void* mir_ctx) {
+    if (!runtime || !mir_ctx) return false;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
-#ifndef NDEBUG
-    int count = 0;
-#endif
-
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
-         module != NULL;
-         module = DLIST_NEXT(MIR_module_t, module)) {
+         module != NULL; module = DLIST_NEXT(MIR_module_t, module)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
-             item != NULL;
-             item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type == MIR_bss_item && item->u.bss->name && item->addr &&
-                strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
-                if (reset_slots) {
-                    memset(item->addr, 0, item->u.bss->len);
-                }
-                heap_register_gc_root((uint64_t*)item->addr);
-#ifndef NDEBUG
-                count++;
-#endif
-            }
+             item != NULL; item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr ||
+                    strcmp(item->u.bss->name, "_mod_layout") != 0) continue;
+            LambdaModuleLayout* layout = (LambdaModuleLayout*)item->addr;
+            return lambda_module_state_prepare(runtime, layout->module_id,
+                layout->var_count, layout->member_ic_count);
         }
     }
-    log_debug("%s: registered %d BSS global roots",
-              reset_slots ? "reset_and_register_bss_gc_roots" : "register_bss_gc_roots",
-              count);
-}
-
-void register_bss_gc_roots(void* mir_ctx) {
-    walk_bss_gc_roots(mir_ctx, false);
-}
-
-void reset_and_register_bss_gc_roots(void* mir_ctx) {
-    walk_bss_gc_roots(mir_ctx, true);
+    log_error("module-state: sealed MIR module has no layout descriptor");
+    return false;
 }
 
 // ============================================================================

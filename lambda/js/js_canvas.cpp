@@ -10,12 +10,14 @@
  */
 
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"
 #include "../../lib/font/font.h"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -26,54 +28,79 @@
 // Lazy FontContext singleton — no UiContext/GLFW required
 // ============================================================================
 
-static FontContext* s_canvas_font_ctx = nullptr;
+#define MAX_CANVAS_FONT_HANDLES 64
+
+struct JsCanvasRuntimeState {
+    FontContext* font_context;
+    FontHandle* font_handles[MAX_CANVAS_FONT_HANDLES];
+    int font_handle_count;
+};
+
+static JsCanvasRuntimeState* canvas_runtime_state(void) {
+    return js_active_runtime_state ?
+        (JsCanvasRuntimeState*)js_runtime_state.canvas_state : NULL;
+}
+
+static JsCanvasRuntimeState* canvas_runtime_state_ensure(void) {
+    if (!js_active_runtime_state) return NULL;
+    if (!js_runtime_state.canvas_state) {
+        // Canvas setup is cold; measurement reads this context-owned table
+        // directly and never contends with another JS realm.
+        js_runtime_state.canvas_state = mem_calloc(1, sizeof(JsCanvasRuntimeState),
+            MEM_CAT_JS_RUNTIME);
+    }
+    return (JsCanvasRuntimeState*)js_runtime_state.canvas_state;
+}
 
 static FontContext* canvas_get_font_context() {
-    if (!s_canvas_font_ctx) {
+    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
+    if (!state) return nullptr;
+    if (!state->font_context) {
         FontContextConfig cfg = {};
         cfg.pixel_ratio = 1.0f;
         cfg.max_cached_faces = 32;
-        s_canvas_font_ctx = font_context_create(&cfg);
-        if (!s_canvas_font_ctx) {
+        state->font_context = font_context_create(&cfg);
+        if (!state->font_context) {
             log_error("js_canvas: failed to create FontContext");
         }
     }
-    return s_canvas_font_ctx;
+    return state->font_context;
 }
 
 // ============================================================================
 // Font handle pool — store FontHandle* indexed by integer ID
 // ============================================================================
 
-#define MAX_CANVAS_FONT_HANDLES 64
-
-static FontHandle* s_font_handles[MAX_CANVAS_FONT_HANDLES];
-static int s_font_handle_count = 0;
-
 static int canvas_store_font_handle(FontHandle* handle) {
     if (!handle) return -1;
+    JsCanvasRuntimeState* state = canvas_runtime_state_ensure();
+    if (!state) {
+        font_handle_release(handle);
+        return -1;
+    }
     // check for reuse of existing identical handle
-    for (int i = 0; i < s_font_handle_count; i++) {
-        if (s_font_handles[i] == handle) {
+    for (int i = 0; i < state->font_handle_count; i++) {
+        if (state->font_handles[i] == handle) {
             font_handle_release(handle); // already retained by pool
             return i;
         }
     }
-    if (s_font_handle_count >= MAX_CANVAS_FONT_HANDLES) {
+    if (state->font_handle_count >= MAX_CANVAS_FONT_HANDLES) {
         // evict oldest
-        font_handle_release(s_font_handles[0]);
+        font_handle_release(state->font_handles[0]);
         for (int i = 1; i < MAX_CANVAS_FONT_HANDLES; i++)
-            s_font_handles[i - 1] = s_font_handles[i];
-        s_font_handle_count = MAX_CANVAS_FONT_HANDLES - 1;
+            state->font_handles[i - 1] = state->font_handles[i];
+        state->font_handle_count = MAX_CANVAS_FONT_HANDLES - 1;
     }
-    int id = s_font_handle_count++;
-    s_font_handles[id] = handle;
+    int id = state->font_handle_count++;
+    state->font_handles[id] = handle;
     return id;
 }
 
 static FontHandle* canvas_get_font_handle(int id) {
-    if (id < 0 || id >= s_font_handle_count) return nullptr;
-    return s_font_handles[id];
+    JsCanvasRuntimeState* state = canvas_runtime_state();
+    if (!state || id < 0 || id >= state->font_handle_count) return nullptr;
+    return state->font_handles[id];
 }
 
 // ============================================================================
@@ -416,16 +443,29 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
 // ============================================================================
 
 extern "C" void js_canvas_cleanup(void) {
-    for (int i = 0; i < s_font_handle_count; i++) {
-        if (s_font_handles[i]) {
-            font_handle_release(s_font_handles[i]);
-            s_font_handles[i] = nullptr;
+    JsCanvasRuntimeState* state = canvas_runtime_state();
+    if (!state) return;
+    for (int i = 0; i < state->font_handle_count; i++) {
+        if (state->font_handles[i]) {
+            font_handle_release(state->font_handles[i]);
+            state->font_handles[i] = nullptr;
         }
     }
-    s_font_handle_count = 0;
+    state->font_handle_count = 0;
 
-    if (s_canvas_font_ctx) {
-        font_context_destroy(s_canvas_font_ctx);
-        s_canvas_font_ctx = nullptr;
+    if (state->font_context) {
+        font_context_destroy(state->font_context);
+        state->font_context = nullptr;
     }
+}
+
+extern "C" void js_canvas_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->canvas_state) return;
+    JsCanvasRuntimeState* state = (JsCanvasRuntimeState*)runtime_state->canvas_state;
+    for (int i = 0; i < state->font_handle_count; i++) {
+        if (state->font_handles[i]) font_handle_release(state->font_handles[i]);
+    }
+    if (state->font_context) font_context_destroy(state->font_context);
+    mem_free(state);
+    runtime_state->canvas_state = NULL;
 }

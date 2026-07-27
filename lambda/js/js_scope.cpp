@@ -50,19 +50,15 @@ static bool g_js_identifier_counters_enabled = false;
 static bool g_js_identifier_counters_checked = false;
 static bool g_js_identifier_counters_registered = false;
 static JsIdentifierCounters g_js_identifier_counters = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-static bool g_js_parse_error_valid = false;
-static int64_t g_js_parse_error_row = 0;
-static int64_t g_js_parse_error_col = 0;
-static char g_js_parse_error_message[128];
-
 static void js_identifier_counters_report(void);
 static void js_identifier_counters_write_line(int fd, const char* line);
 
-static void js_parse_error_reset(void) {
-    g_js_parse_error_valid = false;
-    g_js_parse_error_row = 0;
-    g_js_parse_error_col = 0;
-    g_js_parse_error_message[0] = '\0';
+static void js_parse_error_reset(JsTranspiler* tp) {
+    if (!tp) return;
+    tp->parse_error_valid = false;
+    tp->parse_error_row = 0;
+    tp->parse_error_col = 0;
+    tp->parse_error_message[0] = '\0';
 }
 
 static bool js_parse_error_is_ident_char(char c) {
@@ -70,13 +66,14 @@ static bool js_parse_error_is_ident_char(char c) {
            c == '_' || c == '$';
 }
 
-static void js_parse_error_record(TSNode node, const char* source,
+static void js_parse_error_record(JsTranspiler* tp, TSNode node, const char* source,
                                   size_t length, bool missing) {
+    if (!tp) return;
     TSPoint s = ts_node_start_point(node);
     uint32_t start_byte = ts_node_start_byte(node);
-    g_js_parse_error_valid = true;
-    g_js_parse_error_row = (int64_t)s.row;
-    g_js_parse_error_col = (int64_t)s.column;
+    tp->parse_error_valid = true;
+    tp->parse_error_row = (int64_t)s.row;
+    tp->parse_error_col = (int64_t)s.column;
     const char* message = "Unexpected token";
     if (missing) {
         message = "Unexpected end of input";
@@ -85,18 +82,18 @@ static void js_parse_error_record(TSNode node, const char* source,
     } else if (js_parse_error_is_ident_char(source[start_byte])) {
         message = "Unexpected identifier";
     }
-    snprintf(g_js_parse_error_message, sizeof(g_js_parse_error_message), "%s", message);
+    snprintf(tp->parse_error_message, sizeof(tp->parse_error_message), "%s", message);
 }
 
-extern "C" int js_parse_error_get(int64_t* out_row, int64_t* out_col,
-                                  char* out_message,
+int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
+                                  int64_t* out_col, char* out_message,
                                   int64_t out_message_size) {
-    if (!g_js_parse_error_valid) return 0;
-    if (out_row) *out_row = g_js_parse_error_row;
-    if (out_col) *out_col = g_js_parse_error_col;
+    if (!tp || !tp->parse_error_valid) return 0;
+    if (out_row) *out_row = tp->parse_error_row;
+    if (out_col) *out_col = tp->parse_error_col;
     if (out_message && out_message_size > 0) {
         snprintf(out_message, (size_t)out_message_size, "%s",
-                 g_js_parse_error_message);
+                 tp->parse_error_message);
     }
     return 1;
 }
@@ -1182,7 +1179,7 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
 }
 
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
-    js_parse_error_reset();
+    js_parse_error_reset(tp);
     if (tp->normalized_source) {
         mem_free(tp->normalized_source);
         tp->normalized_source = NULL;
@@ -1227,7 +1224,7 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
                     TSPoint s = ts_node_start_point(child);
                     // Preserve the parser's actual failure location; eval
                     // callers need it after the transpiler object is gone.
-                    js_parse_error_record(child, source, length, true);
+                    js_parse_error_record(tp, child, source, length, true);
                     log_error("  [depth %d] MISSING node '%s' at line %u:%u",
                         depth, ts_node_type(child), s.row + 1, s.column);
                 } else if (strcmp(ts_node_type(child), "ERROR") == 0) {
@@ -1235,7 +1232,7 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
                     TSPoint e = ts_node_end_point(child);
                     // Preserve the deepest ERROR node so REPL SyntaxErrors
                     // point at the offending token instead of the whole input.
-                    js_parse_error_record(child, source, length, false);
+                    js_parse_error_record(tp, child, source, length, false);
                     log_error("  [depth %d] ERROR node at line %u:%u - %u:%u",
                         depth, s.row + 1, s.column, e.row + 1, e.column);
                     // Print source around the error

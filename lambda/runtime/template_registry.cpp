@@ -9,8 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Global template registry
-TemplateRegistry* g_template_registry = NULL;
+extern __thread EvalContext* context;
+
+TemplateRegistry** template_registry_current_slot(void) {
+    if (!context) {
+        log_error("template-registry: no bound EvalContext");
+        abort();
+    }
+    return &context->template_registry;
+}
 
 // ============================================================================
 // Registry lifecycle
@@ -40,8 +47,8 @@ void template_registry_destroy(TemplateRegistry* registry) {
         entry = next_entry;
     }
 
-    if (g_template_registry == registry) {
-        g_template_registry = NULL;
+    if (context && context->template_registry == registry) {
+        context->template_registry = NULL;
     }
     mem_free(registry);
 }
@@ -217,11 +224,15 @@ TemplateEntry* template_registry_match(TemplateRegistry* registry,
 // invoke a template body function
 static Item invoke_template(TemplateEntry* tmpl, Item target) {
     if (!tmpl || !tmpl->body_func) return ItemNull;
-    // template body function signature: Item body(Item model)
-    // the function loads runtime context from _lambda_rt global internally
-    typedef Item (*template_body_fn)(Item);
+    if (!context) {
+        log_error("template invoke: no bound EvalContext");
+        return ItemError;
+    }
+    // Host dispatch establishes the canonical context once; generated code
+    // receives it explicitly and never reloads `_lambda_rt`.
+    typedef Item (*template_body_fn)(Context*, Item);
     template_body_fn fn = (template_body_fn)tmpl->body_func;
-    return fn(target);
+    return fn((Context*)context, target);
 }
 
 Item fn_apply1(Item target) {

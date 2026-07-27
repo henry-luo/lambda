@@ -5,6 +5,7 @@
  * Registered as built-in module 'readline' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
@@ -36,14 +37,19 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern "C" void js_stream_flush_data_now(Item self);
 extern Item js_make_number(double d);
 
-static Item readline_namespace = {0};
-static Item readline_promises_namespace = {0};
-static Item readline_completion_rl = {0};
-static bool readline_create_promises_mode = false;
-static const int READLINE_INPUT_MAP_MAX = 256;
-static Item readline_inputs[READLINE_INPUT_MAP_MAX];
-static Item readline_interfaces[READLINE_INPUT_MAP_MAX];
-static int readline_input_count = 0;
+#define readline_namespace (js_runtime_state.readline.namespace_object)
+#define readline_promises_namespace (js_runtime_state.readline.promises_namespace)
+#define readline_completion_rl (js_runtime_state.readline.completion_interface)
+#define readline_create_promises_mode (js_runtime_state.readline.create_promises_mode)
+#define READLINE_INPUT_MAP_MAX JS_READLINE_INPUT_MAP_MAX
+#define readline_inputs (js_runtime_state.readline.inputs)
+#define readline_interfaces (js_runtime_state.readline.interfaces)
+#define readline_input_count (js_runtime_state.readline.input_count)
+
+static bool readline_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.readline.roots);
+}
 
 static Item readline_get(Item obj, const char* name) {
     return js_property_get(obj, make_string_item(name));
@@ -1837,6 +1843,7 @@ extern "C" Item js_readline_promises_interface_constructor(Item input_item, Item
 // =============================================================================
 
 extern "C" Item js_get_readline_namespace(void) {
+    if (!readline_ensure_roots()) return ItemError;
     if (readline_namespace.item != 0) return readline_namespace;
 
     readline_namespace = js_new_object();
@@ -1854,6 +1861,7 @@ extern "C" Item js_get_readline_namespace(void) {
 }
 
 extern "C" Item js_get_readline_promises_namespace(void) {
+    if (!readline_ensure_roots()) return ItemError;
     if (readline_promises_namespace.item != 0) return readline_promises_namespace;
 
     readline_promises_namespace = js_new_object();
@@ -1871,6 +1879,7 @@ extern "C" Item js_get_readline_promises_namespace(void) {
 }
 
 extern "C" void js_readline_reset(void) {
+    if (!js_active_runtime_state) return;
     readline_namespace = (Item){0};
     readline_promises_namespace = (Item){0};
     readline_input_count = 0;

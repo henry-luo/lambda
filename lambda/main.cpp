@@ -63,6 +63,7 @@
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
+#include "js/js_runtime_state.hpp"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #ifdef LAMBDA_BASH
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
@@ -281,8 +282,9 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
-    js_event_loop_shutdown();
-    lambda_uv_cleanup();
+    // Runtime cleanup runs on the caller thread after this worker joins. It
+    // owns the context binding required by libuv callbacks, so do not drain
+    // them here after the worker's temporary binding has been restored.
     return NULL;
 }
 
@@ -1717,7 +1719,6 @@ static int node_runner_run_file(const char* exe_path, const char* file,
     lambda_stack_init();
     js_node_test_reset();
     js_node_test_reset_counts();
-    js_process_set_exitCode((Item){.item = i2it(0)});
 
     const char* js_argv_store[2];
     js_argv_store[0] = exe_path;
@@ -1736,6 +1737,11 @@ static int node_runner_run_file(const char* exe_path, const char* file,
 #else
         Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, file, &result_home);
 #endif
+        EvalContext* js_result_context = runtime_get_eval_context(&runtime);
+        if (js_result_context && js_result_context->js_state) {
+            context = js_result_context;
+            js_runtime_state_bind_context(js_result_context);
+        }
         if (result.item == ITEM_ERROR) exit_code = 1;
         else exit_code = js_process_current_exit_code();
         if (js_check_exception()) {
@@ -2585,6 +2591,14 @@ int main(int argc, char *argv[]) {
             uint64_t result_home = 0;
             Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file, &result_home);
 #endif
+            // The JS compiler may execute on a dedicated native-stack thread.
+            // Rebind the Runtime-owned capsule before caller-thread checks
+            // inspect exceptions, promises, or other JS semantic state.
+            EvalContext* js_result_context = runtime_get_eval_context(&runtime);
+            if (js_result_context && js_result_context->js_state) {
+                context = js_result_context;
+                js_runtime_state_bind_context(js_result_context);
+            }
             if (input_type_module) {
                 const char* promise_state = js_promise_state_name(result);
                 if ((promise_state && strcmp(promise_state, "pending") == 0) ||

@@ -165,6 +165,7 @@ Item js_atomics_wait_async(Item typed_array, Item index, Item expected, Item tim
 Item js_atomics_notify(Item typed_array, Item index, Item count);
 Item js_atomics_is_lock_free(Item size);
 void js_atomics_reset_waiters(void);
+bool js_atomics_runtime_state_ensure(void);
 int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);
 bool js_atomics_report_waiter_ready(int waiter_id);
 Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string);

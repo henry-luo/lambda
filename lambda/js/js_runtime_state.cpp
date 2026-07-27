@@ -3,13 +3,138 @@
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
 
-JsRuntimeState js_runtime_state;
+__thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
+extern "C" int js_initial_call_stack_limit(void);
+extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
+extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
+extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
+extern "C" void js_reset_template_registry(void);
+extern "C" void js_dom_platform_destroy_context(JsRuntimeState* state);
+extern "C" void js_dom_events_destroy_context(JsRuntimeState* state);
+extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
+extern "C" void js_xhr_reset(void);
+extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
+extern "C" void js_history_reset(void);
+extern "C" void js_history_destroy_context(JsRuntimeState* state);
+extern "C" void js_window_dialog_reset(void);
+extern "C" void js_dom_collections_release_context(void);
+extern "C" void js_dom_collections_destroy_context(JsRuntimeState* state);
+extern "C" void js_dom_foreign_documents_release_context(void);
+extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
+extern "C" void js_fetch_apply_bootstrap_base_path(void);
+extern "C" void js_fetch_reset(void);
+extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
+extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
+extern "C" void js_tls_destroy_context(JsRuntimeState* state);
+extern "C" void js_permission_destroy_context(JsRuntimeState* state);
+extern "C" void js_net_destroy_context(JsRuntimeState* state);
+extern "C" void js_crypto_destroy_context(JsRuntimeState* state);
+extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
+extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
+extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
+extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
-#define JS_ROOT_RANGE_REGISTRY_MAX 64
-static JsRootRange* js_root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX];
-static int js_root_range_registry_count = 0;
+bool js_runtime_state_bind_context(EvalContext* runtime_context) {
+    if (!runtime_context) {
+        js_active_runtime_state = NULL;
+        return false;
+    }
+    if (!runtime_context->js_state) {
+        runtime_context->js_state = (JsRuntimeState*)mem_alloc(sizeof(JsRuntimeState),
+            MEM_CAT_JS_RUNTIME);
+        if (!runtime_context->js_state) {
+            log_error("js-runtime-state: failed to allocate context state");
+            js_active_runtime_state = NULL;
+            return false;
+        }
+        memset(runtime_context->js_state, 0, sizeof(JsRuntimeState));
+        runtime_context->js_state->heap_epoch = 1;
+        runtime_context->js_state->active_module_vars =
+            runtime_context->js_state->module_vars;
+        // This capsule is raw-allocated for C-compatible runtime ownership,
+        // so restore non-zero queue identities that C++ default initializers
+        // would otherwise provide only for a constructed object.
+        runtime_context->js_state->event_loop.next_raf_id = 1;
+        runtime_context->js_state->timers.next_id = 1;
+        runtime_context->js_state->current_private_home_class_index = -1;
+        runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
+        runtime_context->js_state->test262_agent.current_slot = -1;
+        runtime_context->js_state->operations.next_symbol_id = 100;
+        runtime_context->js_state->global_string_caches.last_from_char_code_cp = -1;
+        runtime_context->js_state->global_string_caches.ascii_chars_epoch = ~0ULL;
+        runtime_context->js_state->stream.default_byte_hwm = 16 * 1024;
+        runtime_context->js_state->stream.default_object_hwm = 16;
+        runtime_context->js_state->clipboard.generation = 1;
+        runtime_context->js_state->intrinsics.mutation_serial = 1;
+        runtime_context->js_state->async_roots_registered_epoch = UINT64_MAX;
+        runtime_context->js_state->async_hooks.next_id = 2;
+        runtime_context->js_state->promises.unhandled_strict =
+            js_promise_initial_unhandled_rejections_strict();
+        runtime_context->js_state->cluster.next_worker_id = 1;
+        runtime_context->js_state->assert.node_test_next_id = 1;
+        runtime_context->js_state->performance.origin_epoch = UINT64_MAX;
+    }
+    js_active_runtime_state = runtime_context->js_state;
+    js_fetch_apply_bootstrap_base_path();
+    return true;
+}
+
+void js_runtime_state_release_heap_resources(EvalContext* runtime_context) {
+    if (!runtime_context || !runtime_context->js_state) return;
+    // Regex cache records point into the current GC heap. Release their native
+    // engines before heap_destroy invalidates those records; capsule teardown
+    // later only disposes context-owned containers that are still present.
+    JsRuntimeState* previous = js_active_runtime_state;
+    js_active_runtime_state = runtime_context->js_state;
+    // Listener root slots and DOM pins must leave while both their heap and
+    // document owner are still valid. Dispatch remains direct state access.
+    js_dom_events_reset();
+    js_xhr_reset();
+    js_history_reset();
+    js_window_dialog_reset();
+    js_dom_collections_release_context();
+    js_dom_foreign_documents_release_context();
+    js_fetch_reset();
+    js_reset_template_registry();
+    js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    js_active_runtime_state = previous;
+}
+
+void js_runtime_state_destroy_context(EvalContext* runtime_context) {
+    if (!runtime_context || !runtime_context->js_state) return;
+    bool was_active = js_active_runtime_state == runtime_context->js_state;
+    js_runtime_owned_cache_destroy_context(runtime_context->js_state);
+    js_dom_platform_destroy_context(runtime_context->js_state);
+    js_dom_events_destroy_context(runtime_context->js_state);
+    js_dom_observers_destroy_context(runtime_context->js_state);
+    js_xhr_destroy_context(runtime_context->js_state);
+    js_history_destroy_context(runtime_context->js_state);
+    js_dom_collections_destroy_context(runtime_context->js_state);
+    js_dom_foreign_documents_destroy_context(runtime_context->js_state);
+    js_fetch_destroy_context(runtime_context->js_state);
+    js_fs_pending_destroy_context(runtime_context->js_state);
+    js_tls_destroy_context(runtime_context->js_state);
+    js_permission_destroy_context(runtime_context->js_state);
+    js_net_destroy_context(runtime_context->js_state);
+    js_crypto_destroy_context(runtime_context->js_state);
+    js_atomics_destroy_context(runtime_context->js_state);
+    js_canvas_destroy_context(runtime_context->js_state);
+    js_dynfunc_cache_destroy_context(runtime_context->js_state);
+    jm_compile_recovery_state_destroy_context(runtime_context->js_state);
+    js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
+    js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    // Promise records are allocated lazily outside the fixed state capsule.
+    // They must leave with their owning context so another context cannot
+    // inherit semantic state or retain a multi-megabyte unused table.
+    if (runtime_context->js_state->promises.records) {
+        mem_free(runtime_context->js_state->promises.records);
+    }
+    mem_free(runtime_context->js_state);
+    runtime_context->js_state = NULL;
+    if (was_active) js_active_runtime_state = NULL;
+}
 
 static void js_root_range_set_storage(JsRootRange* range, Item* slots, int slot_count,
                                       const char* name) {
@@ -21,8 +146,9 @@ static void js_root_range_set_storage(JsRootRange* range, Item* slots, int slot_
 // The state capsule has self-referential range descriptors. Initialize those
 // pointers after the final global object exists; copying a default-initialized
 // subobject would otherwise leave a descriptor pointing at a temporary.
-static void js_runtime_state_prepare_root_ranges(void) {
-    JsEvalState* eval = &js_runtime_state.eval;
+static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
+    if (!state) return;
+    JsEvalState* eval = &state->eval;
     JsEvalSourceState* source = &eval->source;
     js_root_range_set_storage(&source->filename_roots, source->filename_slots,
         JS_EVAL_SOURCE_STACK_MAX, "eval source filenames");
@@ -53,8 +179,115 @@ static void js_runtime_state_prepare_root_ranges(void) {
     js_root_range_set_storage(&local->immutable_key_roots, local->immutable_keys,
         JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys");
 
-    js_root_range_set_storage(&js_runtime_state.super_this_values.roots,
-        js_runtime_state.super_this_value_slots, 128, "super-this values");
+    js_root_range_set_storage(&state->super_this_values.roots,
+        state->super_this_value_slots, 128, "super-this values");
+
+    JsCjsState* cjs = &state->cjs;
+    js_root_range_set_storage(&cjs->module_stack.roots, cjs->module_stack_slots,
+        JS_CJS_STACK_MAX, "CommonJS module stack");
+    js_root_range_set_storage(&cjs->module_name_roots, cjs->module_names,
+        JS_CJS_MODULE_MAX, "CommonJS module names");
+    js_root_range_set_storage(&cjs->module_object_roots, cjs->module_objects,
+        JS_CJS_MODULE_MAX, "CommonJS module objects");
+
+    JsWithScopeState* with_scope = &state->with_scope;
+    js_root_range_set_storage(&with_scope->stack.roots, with_scope->stack_slots,
+        JS_WITH_STACK_MAX, "with-scope stack");
+    js_root_range_set_storage(&with_scope->last_binding_roots,
+        with_scope->last_binding_slots, 2, "with binding cache");
+
+    js_root_range_set_storage(&state->builtin_cache.roots,
+        state->builtin_cache.entries, JS_BUILTIN_MAX, "builtin function cache");
+    js_root_range_set_storage(&state->readline.roots,
+        &state->readline.namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX,
+        "readline namespaces and input map");
+    js_root_range_set_storage(&state->buffer.roots,
+        &state->buffer.namespace_object, 2, "Buffer namespace and prototype");
+    js_root_range_set_storage(&state->https.roots,
+        &state->https.agent_prototype, 2, "HTTPS namespace and Agent prototype");
+    js_root_range_set_storage(&state->util.roots,
+        &state->util.namespace_object, 1, "util namespace");
+    js_root_range_set_storage(&state->crypto.roots,
+        &state->crypto.namespace_object, 1, "crypto namespace");
+    js_root_range_set_storage(&state->child_process.roots,
+        &state->child_process.namespace_object, 1, "child_process namespace");
+    js_root_range_set_storage(&state->zlib.roots,
+        state->zlib.constructor_prototypes, 9, "zlib constructors and namespace");
+    js_root_range_set_storage(&state->tls.roots,
+        &state->tls.namespace_object, 5, "TLS namespace and certificate caches");
+    js_root_range_set_storage(&state->stream.roots,
+        // 33 keys, 9 prototypes/internal namespaces, and 2 public namespaces.
+        &state->stream.key_on, 44, "stream keys, prototypes, and namespaces");
+    js_root_range_set_storage(&state->http.roots,
+        &state->http.server_prototype, 5, "HTTP namespace and prototypes");
+    js_root_range_set_storage(&state->net.roots,
+        &state->net.socket_prototype, 5, "net namespace and prototypes");
+    js_root_range_set_storage(&state->fs.roots,
+        &state->fs.internal_binding_namespace, 7,
+        "fs namespaces and prototypes");
+    js_root_range_set_storage(&state->clipboard.roots,
+        &state->clipboard.blob_prototype, 7,
+        "clipboard prototypes and drag session");
+    js_root_range_set_storage(&state->dom.roots,
+        &state->dom.implementation, 5,
+        "DOM singleton wrappers");
+    js_root_range_set_storage(&state->string_concat.roots,
+        &state->string_concat.last_four_byte_escape, 273,
+        "string concatenation fast caches");
+    js_root_range_set_storage(&state->global_var_module_bindings.roots,
+        &state->global_var_module_bindings.global,
+        1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP,
+        "global var module bindings");
+    js_root_range_set_storage(&state->runtime_core_cache.roots,
+        &state->runtime_core_cache.proto_key, 1, "runtime prototype key cache");
+    js_root_range_set_storage(&state->function_prototypes.roots,
+        &state->function_prototypes.generator_function, 3,
+        "generator function prototypes");
+    js_root_range_set_storage(&state->global_string_caches.roots,
+        &state->global_string_caches.uri_last_four_byte_string, 132,
+        "global URI and ASCII string caches");
+    js_root_range_set_storage(&state->global_bindings.roots,
+        &state->global_bindings.global_this,
+        1 + 64 + 1 + 1 + 1 + 2 * JS_GLOBAL_LEX_BIND_MAX,
+        "global object and lexical bindings");
+    js_root_range_set_storage(&state->constructors.roots,
+        state->constructors.global_builtin_functions,
+        32 + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT,
+        "global builtin and constructor caches");
+    js_root_range_set_storage(&state->namespaces.roots,
+        &state->namespaces.math, 8, "core JS namespace objects");
+    js_root_range_set_storage(&state->test262_agent.roots,
+        &state->test262_agent.object,
+        1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX,
+        "Test262 agent state");
+    js_root_range_set_storage(&state->process.roots, &state->process.argv,
+        3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state");
+    js_root_range_set_storage(&state->iterators.roots,
+        &state->iterators.generator_return_marker, 7,
+        "generator and iterator prototype caches");
+    js_root_range_set_storage(&state->diagnostics_channels.roots,
+        state->diagnostics_channels.channel_names,
+        2 * JS_DIAGNOSTICS_CHANNEL_MAX + 6 + JS_DIAGNOSTICS_DEFERRED_ERROR_MAX,
+        "diagnostics channel state");
+    js_root_range_set_storage(&state->async_hooks.roots,
+        &state->async_hooks.root_resource,
+        2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX,
+        "async hooks state");
+    js_root_range_set_storage(&state->promises.roots,
+        state->promises.unhandled_queue,
+        JS_PROMISE_UNHANDLED_QUEUE_MAX + 2 + JS_DOMAIN_STACK_MAX,
+        "Promise unhandled queue and domain state");
+    js_root_range_set_storage(&state->promises.domain_stack.roots,
+        state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack");
+    js_root_range_set_storage(&state->modules.continuation_roots,
+        state->modules.continuations, JS_TLA_MAX_CONTINUATIONS,
+        "module TLA continuations");
+    js_root_range_set_storage(&state->modules.p5_roots,
+        state->modules.p5_slot_namespace, JS_P5_DYNAMIC_IMPORT_SLOTS,
+        "dynamic import namespace slots");
+    js_root_range_set_storage(&state->async_local_storage.roots,
+        state->async_local_storage.instances, JS_MAX_ALS_INSTANCES,
+        "AsyncLocalStorage instances");
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,
@@ -70,20 +303,20 @@ bool js_root_range_register_reset(JsRootRange* range, void* owner,
         }
         return true;
     }
-    if (js_root_range_registry_count >= JS_ROOT_RANGE_REGISTRY_MAX) {
+    if (js_runtime_state.root_range_registry_count >= JS_ROOT_RANGE_REGISTRY_MAX) {
         log_error("js-root-range: reset registry overflow for %s",
             range->name ? range->name : "unnamed range");
         return false;
     }
     range->reset_owner = owner;
     range->reset = reset;
-    js_root_range_registry[js_root_range_registry_count++] = range;
+    js_runtime_state.root_range_registry[js_runtime_state.root_range_registry_count++] = range;
     range->reset_registered = true;
     return true;
 }
 
 bool js_root_range_ensure_registered(JsRootRange* range) {
-    js_runtime_state_prepare_root_ranges();
+    js_runtime_state_prepare_root_ranges(js_active_runtime_state);
     if (!range || !range->slots || range->slot_count <= 0) return false;
     if (!js_root_range_register_reset(range, NULL, NULL)) return false;
     if (!context || !context->heap || !context->heap->gc) return false;
@@ -99,8 +332,8 @@ void js_root_range_clear(JsRootRange* range) {
 }
 
 void js_root_range_reset_all(void) {
-    for (int i = 0; i < js_root_range_registry_count; i++) {
-        JsRootRange* range = js_root_range_registry[i];
+    for (int i = 0; i < js_runtime_state.root_range_registry_count; i++) {
+        JsRootRange* range = js_runtime_state.root_range_registry[i];
         if (!range) continue;
         js_root_range_clear(range);
         if (range->reset) range->reset(range->reset_owner);
@@ -158,7 +391,7 @@ void js_item_stack_shrink(JsItemStack* stack, int depth) {
 
 void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
-    js_runtime_state_prepare_root_ranges();
+    js_runtime_state_prepare_root_ranges(js_active_runtime_state);
     js_root_range_clear(&state->source.filename_roots);
     js_root_range_clear(&state->source.code_roots);
     memset(state->source.line_offset_slots, 0, sizeof(state->source.line_offset_slots));
@@ -385,11 +618,10 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
 }
 
 static void js_ensure_module_vars_gc_rooted() {
-    static struct gc_heap* rooted_gc = NULL;
     if (!context || !context->heap || !context->heap->gc) return;
-    if (rooted_gc == context->heap->gc) return;
+    if (js_runtime_state.module_vars_rooted_gc == context->heap->gc) return;
     heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
-    rooted_gc = context->heap->gc;
+    js_runtime_state.module_vars_rooted_gc = context->heap->gc;
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -682,6 +914,9 @@ extern "C" void js_fetch_reset(void);
 extern "C" void js_history_reset(void);
 
 extern "C" void js_batch_reset() {
+    // A host can finish a document after its context-owned JS state was
+    // released.  Do not manufacture a replacement capsule just to reset it.
+    if (!js_active_runtime_state) return;
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
     // reset module variable table and active pointer

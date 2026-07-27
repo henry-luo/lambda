@@ -1,5 +1,8 @@
 #include "js_permission.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
+#include "../../lib/mem.h"
+#include "../../lib/log.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -32,14 +35,54 @@ typedef struct JsPermissionGrant {
     bool active;
 } JsPermissionGrant;
 
-static bool g_permission_enabled = false;
-static bool g_permission_child_process = false;
-static bool g_permission_net = false;
-static bool g_permission_inspector = false;
-static bool g_permission_addon = false;
-static bool g_permission_wasi = false;
-static JsPermissionGrant g_fs_read_grants[JS_PERMISSION_MAX_GRANTS];
-static JsPermissionGrant g_fs_write_grants[JS_PERMISSION_MAX_GRANTS];
+struct JsPermissionPolicy {
+    bool enabled = false;
+    bool child_process = false;
+    bool net = false;
+    bool inspector = false;
+    bool addon = false;
+    bool wasi = false;
+    JsPermissionGrant fs_read_grants[JS_PERMISSION_MAX_GRANTS] = {};
+    JsPermissionGrant fs_write_grants[JS_PERMISSION_MAX_GRANTS] = {};
+};
+
+// Command-line policy is immutable bootstrap configuration. Per-context
+// mutations (notably process.permission.drop()) use a private copy below.
+static JsPermissionPolicy js_permission_bootstrap_policy = {};
+
+static JsPermissionPolicy* js_permission_context_policy() {
+    if (!js_active_runtime_state || !js_runtime_state.permission_state) return NULL;
+    return (JsPermissionPolicy*)js_runtime_state.permission_state;
+}
+
+static JsPermissionPolicy* js_permission_policy_current() {
+    JsPermissionPolicy* policy = js_permission_context_policy();
+    return policy ? policy : &js_permission_bootstrap_policy;
+}
+
+static JsPermissionPolicy* js_permission_policy_mutable() {
+    if (!js_active_runtime_state) return &js_permission_bootstrap_policy;
+    JsPermissionPolicy* policy = js_permission_context_policy();
+    if (policy) return policy;
+    policy = (JsPermissionPolicy*)mem_calloc(1, sizeof(JsPermissionPolicy),
+        MEM_CAT_JS_RUNTIME);
+    if (!policy) {
+        log_error("js-permission: failed to allocate context state");
+        return NULL;
+    }
+    memcpy(policy, &js_permission_bootstrap_policy, sizeof(*policy));
+    js_runtime_state.permission_state = policy;
+    return policy;
+}
+
+#define g_permission_enabled (js_permission_policy_current()->enabled)
+#define g_permission_child_process (js_permission_policy_current()->child_process)
+#define g_permission_net (js_permission_policy_current()->net)
+#define g_permission_inspector (js_permission_policy_current()->inspector)
+#define g_permission_addon (js_permission_policy_current()->addon)
+#define g_permission_wasi (js_permission_policy_current()->wasi)
+#define g_fs_read_grants (js_permission_policy_current()->fs_read_grants)
+#define g_fs_write_grants (js_permission_policy_current()->fs_write_grants)
 
 static Item js_perm_string_item(const char* str) {
     if (!str) str = "";
@@ -74,14 +117,17 @@ static void js_permission_clear_grants(JsPermissionGrant* grants) {
 }
 
 extern "C" void js_permission_reset(void) {
-    g_permission_enabled = false;
-    g_permission_child_process = false;
-    g_permission_net = false;
-    g_permission_inspector = false;
-    g_permission_addon = false;
-    g_permission_wasi = false;
-    js_permission_clear_grants(g_fs_read_grants);
-    js_permission_clear_grants(g_fs_write_grants);
+    JsPermissionPolicy* policy = js_active_runtime_state
+        ? js_permission_context_policy() : &js_permission_bootstrap_policy;
+    if (!policy) return;
+    policy->enabled = false;
+    policy->child_process = false;
+    policy->net = false;
+    policy->inspector = false;
+    policy->addon = false;
+    policy->wasi = false;
+    js_permission_clear_grants(policy->fs_read_grants);
+    js_permission_clear_grants(policy->fs_write_grants);
 }
 
 extern "C" int js_permission_enabled(void) {
@@ -204,31 +250,40 @@ static void js_permission_add_grant_values(JsPermissionGrant* grants, const char
 }
 
 extern "C" void js_permission_init_from_argv(int argc, const char** argv) {
-    js_permission_reset();
+    JsPermissionPolicy* policy = js_permission_policy_mutable();
+    if (!policy) return;
+    policy->enabled = false;
+    policy->child_process = false;
+    policy->net = false;
+    policy->inspector = false;
+    policy->addon = false;
+    policy->wasi = false;
+    js_permission_clear_grants(policy->fs_read_grants);
+    js_permission_clear_grants(policy->fs_write_grants);
     for (int i = 0; i < argc; i++) {
         const char* arg = argv[i];
         if (!arg) continue;
         if (strcmp(arg, "--permission") == 0) {
-            g_permission_enabled = true;
+            policy->enabled = true;
         } else if (strcmp(arg, "--allow-child-process") == 0) {
-            g_permission_child_process = true;
+            policy->child_process = true;
         } else if (strcmp(arg, "--allow-net") == 0) {
-            g_permission_net = true;
+            policy->net = true;
         } else if (strcmp(arg, "--allow-inspector") == 0) {
-            g_permission_inspector = true;
+            policy->inspector = true;
         } else if (strcmp(arg, "--allow-addons") == 0 || strcmp(arg, "--allow-addon") == 0) {
-            g_permission_addon = true;
+            policy->addon = true;
         } else if (strcmp(arg, "--allow-wasi") == 0) {
-            g_permission_wasi = true;
+            policy->wasi = true;
         } else {
             const char* read_val = js_permission_flag_value(arg, "--allow-fs-read");
             const char* write_val = js_permission_flag_value(arg, "--allow-fs-write");
             if (read_val) {
                 if (!read_val[0] && i + 1 < argc) read_val = argv[++i];
-                js_permission_add_grant_values(g_fs_read_grants, read_val);
+                js_permission_add_grant_values(policy->fs_read_grants, read_val);
             } else if (write_val) {
                 if (!write_val[0] && i + 1 < argc) write_val = argv[++i];
-                js_permission_add_grant_values(g_fs_write_grants, write_val);
+                js_permission_add_grant_values(policy->fs_write_grants, write_val);
             }
         }
     }
@@ -345,7 +400,8 @@ extern "C" Item js_process_permission_has(Item scope_item, Item resource_item) {
 }
 
 extern "C" Item js_process_permission_drop(Item scope_item, Item resource_item) {
-    if (!g_permission_enabled) return (Item){.item = ITEM_FALSE};
+    JsPermissionPolicy* policy = js_permission_policy_mutable();
+    if (!policy || !policy->enabled) return (Item){.item = ITEM_FALSE};
     JsPermissionFsKind kind;
     if (!js_permission_scope_kind(scope_item, &kind)) return (Item){.item = ITEM_FALSE};
 
@@ -355,7 +411,8 @@ extern "C" Item js_process_permission_drop(Item scope_item, Item resource_item) 
         if (!js_perm_item_to_cstr(resource_item, resource, sizeof(resource))) return (Item){.item = ITEM_FALSE};
         path = resource;
     }
-    js_permission_drop_grants(kind == JS_PERMISSION_FS_READ ? g_fs_read_grants : g_fs_write_grants, path);
+    js_permission_drop_grants(kind == JS_PERMISSION_FS_READ
+            ? policy->fs_read_grants : policy->fs_write_grants, path);
     return (Item){.item = ITEM_TRUE};
 }
 
@@ -399,4 +456,19 @@ extern "C" Item js_permission_check_fs_read(const char* path) {
 extern "C" Item js_permission_check_fs_write(const char* path) {
     if (!g_permission_enabled || js_permission_has_fs_write(path)) return (Item){.item = ITEM_TRUE};
     return js_permission_throw_fs_error("FileSystemWrite", path, NULL);
+}
+
+#undef g_permission_enabled
+#undef g_permission_child_process
+#undef g_permission_net
+#undef g_permission_inspector
+#undef g_permission_addon
+#undef g_permission_wasi
+#undef g_fs_read_grants
+#undef g_fs_write_grants
+
+extern "C" void js_permission_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->permission_state) return;
+    mem_free(runtime_state->permission_state);
+    runtime_state->permission_state = NULL;
 }

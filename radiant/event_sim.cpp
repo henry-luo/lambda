@@ -21,6 +21,7 @@
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -75,7 +76,6 @@ extern "C" void js_window_dialog_push_response(const char* value);
 extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Context* _lambda_rt;
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
@@ -83,33 +83,29 @@ void parse_json(Input* input, const char* json_string);
 static bool g_replay_assert_state = false;
 
 static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
-    if (!doc || !target || !doc->js.runtime_heap || !doc->js.runtime_name_pool) {
+    if (!doc || !target || !doc->js.runtime) {
         return false;
     }
 
-    Heap* heap = (Heap*)doc->js.runtime_heap;
-    EvalContext focus_ctx = {};
-    focus_ctx.heap = heap;
-    focus_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
-    focus_ctx.pool = doc->js.runtime_pool ? (Pool*)doc->js.runtime_pool : heap->pool;
-    ArrayList* type_list = arraylist_new(16);
-    if (!type_list) return false;
-    focus_ctx.type_list = type_list;
+    Runtime* runtime = doc->js.runtime;
+    EvalContext* focus_ctx = runtime_get_eval_context(runtime);
+    if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
+    focus_ctx->heap = runtime->heap;
+    focus_ctx->name_pool = runtime->name_pool;
+    focus_ctx->type_list = runtime->type_list;
+    focus_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
 
-    EvalContext* saved_ctx = context;
     Context* saved_input_ctx = input_context;
-    Context* saved_lambda_rt = _lambda_rt;
     void* saved_doc = js_dom_get_document();
-    context = &focus_ctx;
+    EvalContext* saved_ctx = eval_context_bind(focus_ctx);
     input_context = nullptr;
-    _lambda_rt = (Context*)&focus_ctx;
+    if (focus_ctx->js_state) js_runtime_state_bind_context(focus_ctx);
     js_dom_set_document(doc);
     js_dom_focus_method_bridge(target, true);
     js_dom_restore_active_document(saved_doc);
-    context = saved_ctx;
+    eval_context_restore(saved_ctx);
     input_context = saved_input_ctx;
-    _lambda_rt = saved_lambda_rt;
-    arraylist_free(type_list);
+    js_runtime_state_bind_context(saved_ctx);
     return true;
 }
 

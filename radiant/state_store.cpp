@@ -11,6 +11,7 @@
 #include "view.hpp"
 #include "render.hpp"
 #include "../lambda/runtime/ast.hpp"
+#include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 // str.h included via view.hpp
 #include "../lib/tagged.hpp"
@@ -34,6 +35,7 @@
 // Declared in event.cpp
 extern bool is_view_focusable(View* view);
 extern bool is_view_programmatically_focusable(View* view);
+extern __thread EvalContext* context;
 
 static void focus_sync_text_control_state(DocState* state, View* view);
 
@@ -119,26 +121,22 @@ static void view_state_release_all_payloads(HashMap* view_state_map) {
 // Interned State Names
 // ============================================================================
 
-// Static storage for interned state name strings
-// These pointers are used for fast pointer comparison
-static const char* s_interned_names[64] = {0};
-static int s_interned_count = 0;
-static bool s_interned_initialized = false;
-
-static const char* intern_state_name(const char* name) {
-    if (!name) return NULL;
+// State-map keys use pointer identity. Keep their backing strings with the
+// owning document so two documents never mutate or race on a shared table.
+static const char* intern_state_name(DocState* state, const char* name) {
+    if (!state || !name) return name;
 
     // Check if already interned
-    for (int i = 0; i < s_interned_count; i++) {
-        if (strcmp(s_interned_names[i], name) == 0) {
-            return s_interned_names[i];
+    for (int i = 0; i < state->interned_state_name_count; i++) {
+        if (strcmp(state->interned_state_names[i], name) == 0) {
+            return state->interned_state_names[i];
         }
     }
 
-    // Intern new name (static storage, never freed)
-    if (s_interned_count < 64) {
-        char* interned = mem_strdup(name, MEM_CAT_LAYOUT);
-        s_interned_names[s_interned_count++] = interned;
+    if (state->interned_state_name_count < 64 && state->pool) {
+        char* interned = pool_strdup(state->pool, name);
+        if (!interned) return name;
+        state->interned_state_names[state->interned_state_name_count++] = interned;
         return interned;
     }
 
@@ -147,55 +145,9 @@ static const char* intern_state_name(const char* name) {
     return name;
 }
 
-// Initialize common state names at startup
-static void init_interned_names(void) {
-    if (s_interned_initialized) return;
-    s_interned_initialized = true;
-
-    // Pre-intern all common state names
-    intern_state_name(STATE_HOVER);
-    intern_state_name(STATE_ACTIVE);
-    intern_state_name(STATE_FOCUS);
-    intern_state_name(STATE_FOCUS_WITHIN);
-    intern_state_name(STATE_FOCUS_VISIBLE);
-    intern_state_name(STATE_VISITED);
-    intern_state_name(STATE_LINK);
-    intern_state_name(STATE_CHECKED);
-    intern_state_name(STATE_INDETERMINATE);
-    intern_state_name(STATE_DISABLED);
-    intern_state_name(STATE_ENABLED);
-    intern_state_name(STATE_READONLY);
-    intern_state_name(STATE_VALID);
-    intern_state_name(STATE_INVALID);
-    intern_state_name(STATE_REQUIRED);
-    intern_state_name(STATE_OPTIONAL);
-    intern_state_name(STATE_PLACEHOLDER);
-    intern_state_name(STATE_SELECTED);
-    intern_state_name(STATE_EMPTY);
-    intern_state_name(STATE_TARGET);
-    intern_state_name(STATE_VALUE);
-    intern_state_name(STATE_SELECTION_START);
-    intern_state_name(STATE_SELECTION_END);
-    intern_state_name(STATE_CARET_OFFSET);
-    intern_state_name(STATE_CARET_LINE);
-    intern_state_name(STATE_CARET_COLUMN);
-    intern_state_name(STATE_ANCHOR_OFFSET);
-    intern_state_name(STATE_ANCHOR_LINE);
-    intern_state_name(STATE_FOCUS_OFFSET);
-    intern_state_name(STATE_FOCUS_LINE);
-    intern_state_name(STATE_SCROLL_X);
-    intern_state_name(STATE_SCROLL_Y);
-}
-
 void radiant_state_cleanup_interned_names(void) {
-    for (int i = 0; i < s_interned_count; i++) {
-        if (s_interned_names[i]) {
-            mem_free((void*)s_interned_names[i]);
-            s_interned_names[i] = NULL;
-        }
-    }
-    s_interned_count = 0;
-    s_interned_initialized = false;
+    // State-name storage is released with each owning document pool. Keep the
+    // process shutdown hook as a compatible no-op for existing shell cleanup.
 }
 
 // ============================================================================
@@ -887,8 +839,6 @@ void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id) {
 // ============================================================================
 
 bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
-    init_interned_names();
-
     if (!backing_pool) {
         log_error("radiant_state_create: pool is NULL");
         return false;
@@ -945,18 +895,18 @@ bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     // Initialize reflow scheduler arena
     reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
 
-    // Initialize template reactive state: create the map and inject it into
-    // the global template state store so Lambda views use the same map.
-    tmpl_state_init();
-    template_state_map = tmpl_state_get_map();
-
-    // Initialize render map for observer-based reconciliation (Phase 3)
-    render_map_init();
-    render_map = render_map_get_map();
-
-    // R7 step 3c — register the source-path recorder so apply() persists
-    // child-index paths into the editor bridge's path side-table.
-    render_map_set_path_recorder(&render_map_record_path);
+    // Plain HTML documents have no Lambda Runtime. Their native state does
+    // not create template/render semantic maps; those maps are initialized
+    // only while a document-owned EvalContext is bound by Lambda execution.
+    if (context) {
+        tmpl_state_init();
+        template_state_map = tmpl_state_get_map();
+        render_map_init();
+        render_map = render_map_get_map();
+        // R7 step 3c — register the source-path recorder so apply() persists
+        // child-index paths into the editor bridge's path side-table.
+        render_map_set_path_recorder(&render_map_record_path);
+    }
 
     // Initialize animation scheduler
     animation_scheduler = animation_scheduler_create(pool);
@@ -2192,7 +2142,7 @@ void editing_interaction_sync_projection(DocState* state) {
 Item state_get(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return ItemNull;
 
-    const char* interned = intern_state_name(name);
+    const char* interned = intern_state_name(state, name);
     StateEntry query = { .key = { node, interned } };
 
     const StateEntry* found = (const StateEntry*)hashmap_get(state->state_map, &query);
@@ -2595,7 +2545,7 @@ static uint32_t view_state_clear_interaction_flag(DocState* state, const char* n
 
 static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
     if (!state || !state->state_map || !name) return 0;
-    const char* interned = intern_state_name(name);
+    const char* interned = intern_state_name(state, name);
     uint32_t removed = 0;
     bool found_entry = true;
     while (found_entry) {
@@ -2621,7 +2571,7 @@ static uint32_t state_map_set_bool_no_assert(DocState* state, void* node,
                                              const char* name, bool value) {
     if (!state || !state->state_map || !node || !name) return 0;
     bool old_value = state_get_bool(state, node, name);
-    const char* interned = intern_state_name(name);
+    const char* interned = intern_state_name(state, name);
     if (!value) {
         StateEntry query = { .key = { node, interned } };
         return hashmap_delete(state->state_map, &query) ? 1 : 0;
@@ -3679,14 +3629,13 @@ void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
     state_assert_after_mutation(state, "doc_state_sync_viewport_scroll");
 }
 
-static bool s_in_batch = false;
-
 static void state_sync_selection_before_assert(DocState* state);
 static void state_sync_dirty_flags_before_assert(DocState* state);
 
 static void state_assert_after_mutation(DocState* state, const char* context) {
     if (!state) return;
-    if (state->transition_depth > 0 || state->active_cascade_depth > 0 || s_in_batch) return;
+    if (state->transition_depth > 0 || state->active_cascade_depth > 0 ||
+            state->state_batch_depth > 0) return;
     state_sync_selection_before_assert(state);
     state_sync_dirty_flags_before_assert(state);
     radiant_state_assert_valid(state, context);
@@ -3695,7 +3644,7 @@ static void state_assert_after_mutation(DocState* state, const char* context) {
 static const StateEntry* state_entry_get(DocState* state, void* node,
                                          const char* name, StateEntry* query) {
     query->key.node = node;
-    query->key.name = intern_state_name(name);
+    query->key.name = intern_state_name(state, name);
     return (const StateEntry*)hashmap_get(state->state_map, query);
 }
 
@@ -4771,7 +4720,7 @@ DocState* state_set_immutable(DocState* state, void* node, const char* name, Ite
     }
 
     // Set the new value
-    const char* interned = intern_state_name(name);
+    const char* interned = intern_state_name(new_state, name);
     StateEntry entry = {
         .key = { node, interned },
         .value = value,
@@ -4813,7 +4762,7 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
         NULL, NULL
     );
 
-    const char* interned = intern_state_name(name);
+    const char* interned = intern_state_name(new_state, name);
 
     // Copy all entries except the one to remove
     size_t iter = 0;
@@ -4840,8 +4789,8 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
 // ============================================================================
 
 void state_begin_batch(DocState* state) {
-    (void)state;
-    s_in_batch = true;
+    if (!state) return;
+    state->state_batch_depth++;
 }
 
 static void state_sync_selection_before_assert(DocState* state) {
@@ -4864,9 +4813,11 @@ static void state_sync_dirty_flags_before_assert(DocState* state) {
 }
 
 void state_end_batch(DocState* state) {
+    if (!state || state->state_batch_depth == 0) return;
+    state->state_batch_depth--;
+    if (state->state_batch_depth > 0) return;
     state_sync_selection_before_assert(state);
     state_sync_dirty_flags_before_assert(state);
-    s_in_batch = false;
     // TODO: trigger deferred callbacks
     radiant_state_assert_valid(state, "state_end_batch");
 }

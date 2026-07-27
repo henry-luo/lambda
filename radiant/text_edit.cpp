@@ -17,8 +17,8 @@
 // F4: tc_set_value pushes a history snapshot on every mutation. To prevent
 // undo/redo restores from re-pushing (and corrupting the cursor), they
 // bracket their tc_set_value call with this guard.
-extern "C" void tc_history_guard_enter();
-extern "C" void tc_history_guard_exit ();
+extern "C" void tc_history_guard_enter(DocState* state);
+extern "C" void tc_history_guard_exit(DocState* state);
 
 extern "C" __attribute__((weak)) void radiant_text_edit_history_notify(
     DomElement* elem, const char* action, const char* input_type,
@@ -26,8 +26,6 @@ extern "C" __attribute__((weak)) void radiant_text_edit_history_notify(
 extern "C" __attribute__((weak)) void radiant_text_edit_history_notify(
     DomElement* /*elem*/, const char* /*action*/, const char* /*input_type*/,
     uint32_t /*depth*/, uint32_t /*cursor*/) {}
-
-static thread_local const char* g_te_history_input_type = nullptr;
 
 // Default ring capacity for the undo history. 64 entries is enough for
 // typical interactive editing sessions while bounding worst-case memory.
@@ -402,14 +400,21 @@ static EditHistory* tc_get_or_create_history(FormControlProp* f) {
     return (EditHistory*)f->history;
 }
 
-const char* te_history_input_type_set(const char* input_type) {
-    const char* previous = g_te_history_input_type;
-    g_te_history_input_type = input_type;
+static DocState* te_history_state(DomElement* elem) {
+    if (!elem) return nullptr;
+    if (elem->form && elem->form->state_ref) return elem->form->state_ref;
+    return elem->doc ? (DocState*)elem->doc->state : nullptr;
+}
+
+const char* te_history_input_type_set(DocState* state, const char* input_type) {
+    if (!state) return nullptr;
+    const char* previous = state->text_edit_history_input_type;
+    state->text_edit_history_input_type = input_type;
     return previous;
 }
 
-void te_history_input_type_restore(const char* previous) {
-    g_te_history_input_type = previous;
+void te_history_input_type_restore(DocState* state, const char* previous) {
+    if (state) state->text_edit_history_input_type = previous;
 }
 
 void te_history_push(DomElement* elem) {
@@ -455,7 +460,9 @@ void te_history_push(DomElement* elem) {
 
     h->head = (uint16_t)((h->head + 1) % h->cap);
     if (h->count < h->cap) h->count++;
-    radiant_text_edit_history_notify(elem, "push", g_te_history_input_type,
+    DocState* state = te_history_state(elem);
+    radiant_text_edit_history_notify(elem, "push",
+                                     state ? state->text_edit_history_input_type : nullptr,
                                      h->count, h->cursor);
 }
 
@@ -464,9 +471,10 @@ static bool te_history_apply_current(DomElement* elem, EditHistory* history) {
     EditHistoryEntry* entry = &history->ring[index];
     if (!entry->snapshot) return false;
 
-    tc_history_guard_enter();
+    DocState* state = te_history_state(elem);
+    tc_history_guard_enter(state);
     tc_set_value(elem, entry->snapshot, entry->length);
-    tc_history_guard_exit();
+    tc_history_guard_exit(state);
     tc_set_selection_range(elem, entry->sel_start_u16, entry->sel_end_u16, entry->sel_dir);
     return true;
 }

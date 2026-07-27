@@ -6,6 +6,7 @@
  * Registered as built-in module 'zlib' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -302,7 +303,13 @@ extern "C" Item js_zlib_unzip(Item input_item, Item options_item, Item callback_
 // createGzip/createGunzip/etc. — Transform-backed one-shot chunk transforms
 // =============================================================================
 
-static Item zlib_constructor_prototypes[8] = {};
+#define zlib_constructor_prototypes (js_runtime_state.zlib.constructor_prototypes)
+#define zlib_namespace (js_runtime_state.zlib.namespace_object)
+
+static bool zlib_ensure_roots(void) {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.zlib.roots);
+}
 
 struct JsZlibStreamState {
     z_stream strm;
@@ -942,8 +949,6 @@ extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
     return (Item){.item = i2it((int64_t)crc_val)};
 }
 
-static Item zlib_namespace = {0};
-
 static void zlib_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     RootFrame roots((Context*)context, 3);
     Rooted<Item> ns_root(roots, ns);
@@ -977,7 +982,7 @@ static Item zlib_set_constructor(Item ns, const char* name, void* func_ptr, int 
 }
 
 extern "C" Item js_get_zlib_namespace(void) {
-    heap_register_gc_root(&zlib_namespace.item);
+    if (!zlib_ensure_roots()) return ItemError;
     if (zlib_namespace.item != 0) return zlib_namespace;
 
     zlib_namespace = js_new_object();
@@ -1118,6 +1123,7 @@ extern "C" Item js_get_zlib_namespace(void) {
 }
 
 extern "C" void js_zlib_reset(void) {
+    if (!js_active_runtime_state) return;
     zlib_namespace = (Item){0};
     for (int i = 0; i < 8; i++) zlib_constructor_prototypes[i] = (Item){0};
 }

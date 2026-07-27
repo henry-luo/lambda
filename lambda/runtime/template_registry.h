@@ -90,8 +90,11 @@ void template_entry_add_handler(TemplateEntry* entry,
                                 const char* event_name,
                                 fn_ptr handler_func);
 
-// Global template registry (set by the runtime before execution)
-extern TemplateRegistry* g_template_registry;
+// The registry is semantic state of the active EvalContext. The compatibility
+// name preserves existing lowering code while preventing process-global
+// template visibility between live isolates.
+TemplateRegistry** template_registry_current_slot(void);
+#define g_template_registry (*template_registry_current_slot())
 
 #ifdef __cplusplus
 }

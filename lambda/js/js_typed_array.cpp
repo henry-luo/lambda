@@ -1053,13 +1053,42 @@ typedef struct JsAtomicsWaiter {
     JsAtomicsWaiterStatus status;
 } JsAtomicsWaiter;
 
-static JsAtomicsWaiter js_atomics_waiters[JS_ATOMICS_MAX_WAITERS];
-static int js_atomics_next_waiter_id = 1;
-static int js_atomics_last_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
-static int js_atomics_blocking_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
-static double js_atomics_virtual_now_ms = 0.0;
+typedef struct JsAtomicsRuntimeState {
+    JsAtomicsWaiter waiters[JS_ATOMICS_MAX_WAITERS];
+    int next_waiter_id;
+    int last_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
+    int blocking_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
+    double virtual_now_ms;
+    uint64_t waiter_roots_epoch;
+} JsAtomicsRuntimeState;
+
+static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
+    return js_active_runtime_state ?
+        (JsAtomicsRuntimeState*)js_runtime_state.test262_agent.atomics_waiter_state : NULL;
+}
+
+extern "C" bool js_atomics_runtime_state_ensure(void) {
+    if (!js_active_runtime_state) return false;
+    if (!js_runtime_state.test262_agent.atomics_waiter_state) {
+        // Atomics namespace creation is cold; waiter lookup and notification
+        // below use direct owner-context storage without synchronization.
+        JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)mem_calloc(1,
+            sizeof(JsAtomicsRuntimeState), MEM_CAT_JS_RUNTIME);
+        if (!state) return false;
+        state->next_waiter_id = 1;
+        js_runtime_state.test262_agent.atomics_waiter_state = state;
+    }
+    return true;
+}
+
+#define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent.atomics_waiter_state)
+#define js_atomics_waiters (js_atomics_state.waiters)
+#define js_atomics_next_waiter_id (js_atomics_state.next_waiter_id)
+#define js_atomics_last_waiter_by_agent (js_atomics_state.last_waiter_by_agent)
+#define js_atomics_blocking_waiter_by_agent (js_atomics_state.blocking_waiter_by_agent)
+#define js_atomics_virtual_now_ms (js_atomics_state.virtual_now_ms)
 extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t js_atomics_waiter_roots_epoch = 0;
+#define js_atomics_waiter_roots_epoch (js_atomics_state.waiter_roots_epoch)
 
 static void js_atomics_register_waiter_roots(void) {
     uint64_t epoch = js_get_heap_epoch();
@@ -1193,6 +1222,7 @@ static Item js_atomics_replace_wait_suffix(Item report_string, const char* statu
 }
 
 extern "C" void js_atomics_reset_waiters(void) {
+    if (!js_atomics_runtime_state()) return;
     js_atomics_register_waiter_roots();
     memset(js_atomics_waiters, 0, sizeof(js_atomics_waiters));
     for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) js_atomics_waiters[i].promise = ItemNull;
@@ -1200,6 +1230,12 @@ extern "C" void js_atomics_reset_waiters(void) {
     memset(js_atomics_blocking_waiter_by_agent, 0, sizeof(js_atomics_blocking_waiter_by_agent));
     js_atomics_next_waiter_id = 1;
     js_atomics_virtual_now_ms = 0.0;
+}
+
+extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->test262_agent.atomics_waiter_state) return;
+    mem_free(runtime_state->test262_agent.atomics_waiter_state);
+    runtime_state->test262_agent.atomics_waiter_state = NULL;
 }
 
 extern "C" int js_atomics_report_waiter_for_agent(int agent_slot, Item report_string) {

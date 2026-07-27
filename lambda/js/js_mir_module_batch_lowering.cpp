@@ -9,19 +9,6 @@ extern "C" void js_dynfunc_cache_reset(void);
 // ES Module support: deferred MIR cleanup and path resolution
 // ============================================================================
 
-// Module MIR contexts must survive until main program finishes
-// (exported functions have JIT-compiled pointers that must remain valid)
-#define MAX_MODULE_CONTEXTS 4096
-MIR_context_t module_mir_contexts[MAX_MODULE_CONTEXTS];
-NamePool* module_mir_name_pools[MAX_MODULE_CONTEXTS];
-Pool* module_mir_ast_pools[MAX_MODULE_CONTEXTS];
-char* module_mir_source_buffers[MAX_MODULE_CONTEXTS];
-int module_mir_context_count = 0;
-
-// Runtime context saved for use by js_new_function_from_string (new Function(...) support)
-Runtime* js_source_runtime = NULL;
-int js_dynamic_func_counter = 0;
-
 static int js_debug_func_name_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
     return strcmp(*(const char**)a, *(const char**)b);
@@ -107,74 +94,86 @@ void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename) {
     return debug_info;
 }
 
-// Track the active MIR context during compilation/execution so that
-// batch timeout recovery (longjmp from SIGALRM) can finish the leaked context.
-// Set before execution, cleared after normal cleanup in transpile_js_to_mir_core.
-MIR_context_t g_active_mir_ctx = NULL;
-JsTranspiler* g_active_js_transpiler = NULL;
-JsMirTranspiler* g_active_mir_transpiler = NULL;
-char* g_active_js_owned_source = NULL;
+// Track compilation ownership for timeout recovery on the owning JS realm.
+// Compilation is cold; this capsule is never consulted by generated JS code.
+JsMirCompileRecoveryState* jm_compile_recovery_state_ensure(void) {
+    if (!js_active_runtime_state) return NULL;
+    if (!js_runtime_state.mir_compile_recovery_state) {
+        js_runtime_state.mir_compile_recovery_state = mem_calloc(1,
+            sizeof(JsMirCompileRecoveryState), MEM_CAT_JS_RUNTIME);
+    }
+    return (JsMirCompileRecoveryState*)js_runtime_state.mir_compile_recovery_state;
+}
 
-#define JS_ACTIVE_TRANSPILE_MAX 32
-typedef struct ActiveJsTranspileOwner {
-    JsTranspiler* tp;
-    JsMirTranspiler* mt;
-    char* owned_source;
-} ActiveJsTranspileOwner;
+JsMirCompileRecoveryState* jm_compile_recovery_state_current(void) {
+    return js_active_runtime_state ?
+        (JsMirCompileRecoveryState*)js_runtime_state.mir_compile_recovery_state : NULL;
+}
 
-static ActiveJsTranspileOwner g_active_js_transpile_stack[JS_ACTIVE_TRANSPILE_MAX];
-static int g_active_js_transpile_count = 0;
+static JsMirCompileRecoveryState* jm_compile_recovery_state_required(void) {
+    JsMirCompileRecoveryState* state = jm_compile_recovery_state_ensure();
+    if (!state) {
+        log_error("js-mir-recovery: compilation without a bound JS realm");
+    }
+    return state;
+}
 
-static void jm_sync_active_js_transpile_top(void) {
-    if (g_active_js_transpile_count <= 0) {
+static void jm_sync_active_js_transpile_top(JsMirCompileRecoveryState* state) {
+    if (!state) return;
+    if (state->count <= 0) {
         g_active_js_transpiler = NULL;
         g_active_mir_transpiler = NULL;
         g_active_js_owned_source = NULL;
         return;
     }
-    ActiveJsTranspileOwner* top = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
+    ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
     g_active_js_transpiler = top->tp;
     g_active_mir_transpiler = top->mt;
     g_active_js_owned_source = top->owned_source;
 }
 
-static void jm_pop_empty_active_js_transpile_owners(void) {
-    while (g_active_js_transpile_count > 0) {
-        ActiveJsTranspileOwner* top = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
+static void jm_pop_empty_active_js_transpile_owners(JsMirCompileRecoveryState* state) {
+    if (!state) return;
+    while (state->count > 0) {
+        ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
         if (top->tp || top->mt || top->owned_source) break;
-        g_active_js_transpile_count--;
+        state->count--;
     }
-    jm_sync_active_js_transpile_top();
+    jm_sync_active_js_transpile_top(state);
 }
 
 void jm_track_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source) {
     if (!tp && !mt && !owned_source) return;
-    if (g_active_js_transpile_count <= 0) {
-        memset(&g_active_js_transpile_stack[0], 0, sizeof(g_active_js_transpile_stack[0]));
-        g_active_js_transpile_count = 1;
+    JsMirCompileRecoveryState* state = jm_compile_recovery_state_required();
+    if (!state) return;
+    if (state->count <= 0) {
+        memset(&state->stack[0], 0, sizeof(state->stack[0]));
+        state->count = 1;
     }
-    ActiveJsTranspileOwner* top = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
+    ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
     bool starts_nested_owner =
         (tp && top->tp && top->tp != tp) ||
         (mt && top->mt && top->mt != mt) ||
         (owned_source && (top->tp || top->mt) && top->owned_source != owned_source);
     if (starts_nested_owner) {
-        if (g_active_js_transpile_count >= JS_ACTIVE_TRANSPILE_MAX) {
+        if (state->count >= JS_ACTIVE_TRANSPILE_MAX) {
             log_error("js-mir-recovery: active transpile owner stack overflow");
             return;
         }
-        top = &g_active_js_transpile_stack[g_active_js_transpile_count++];
+        top = &state->stack[state->count++];
         memset(top, 0, sizeof(*top));
     }
     if (tp) top->tp = tp;
     if (mt) top->mt = mt;
     if (owned_source) top->owned_source = owned_source;
-    jm_sync_active_js_transpile_top();
+    jm_sync_active_js_transpile_top(state);
 }
 
 void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source) {
-    for (int i = g_active_js_transpile_count - 1; i >= 0; i--) {
-        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[i];
+    JsMirCompileRecoveryState* state = jm_compile_recovery_state_required();
+    if (!state) return;
+    for (int i = state->count - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = &state->stack[i];
         bool matched = false;
         if (tp && owner->tp == tp) {
             owner->tp = NULL;
@@ -190,7 +189,7 @@ void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
         }
         if (matched) break;
     }
-    jm_pop_empty_active_js_transpile_owners();
+    jm_pop_empty_active_js_transpile_owners(state);
 }
 
 // Js57 Track A (P7a): walk the AST collecting names of let/const variables that
@@ -1787,63 +1786,80 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     }
 }
 
-void jm_cleanup_active_mir(void) {
-    for (int i = g_active_js_transpile_count - 1; i >= 0; i--) {
-        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[i];
+static void jm_cleanup_active_mir_state(JsMirCompileRecoveryState* state) {
+    if (!state) return;
+    for (int i = state->count - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = &state->stack[i];
         if (owner->mt) {
             jm_destroy_mir_transpiler(owner->mt);
             owner->mt = NULL;
         }
     }
-    jm_sync_active_js_transpile_top();
-    if (g_active_mir_ctx) {
-        MIR_finish(g_active_mir_ctx);
-        g_active_mir_ctx = NULL;
+    if (state->active_mir_ctx) {
+        MIR_finish(state->active_mir_ctx);
+        state->active_mir_ctx = NULL;
     }
-    while (g_active_js_transpile_count > 0) {
-        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
+    while (state->count > 0) {
+        ActiveJsTranspileOwner* owner = &state->stack[state->count - 1];
         JsTranspiler* tp = owner->tp;
         char* owned_source = owner->owned_source;
         owner->mt = NULL;
         owner->tp = NULL;
         owner->owned_source = NULL;
-        jm_pop_empty_active_js_transpile_owners();
+        jm_pop_empty_active_js_transpile_owners(state);
         if (tp) js_transpiler_destroy(tp);
         if (owned_source) mem_free(owned_source);
     }
-    jm_sync_active_js_transpile_top();
+}
+
+static void jm_abandon_active_mir_after_signal_state(JsMirCompileRecoveryState* state) {
+    if (!state) return;
+    for (int i = state->count - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = &state->stack[i];
+        if (owner->mt) {
+            jm_destroy_mir_transpiler(owner->mt);
+            owner->mt = NULL;
+        }
+    }
+    if (state->active_mir_ctx) {
+        // A recovered SIGSEGV/SIGBUS may leave MIR's import/module lists
+        // inconsistent; re-entering MIR_finish can fault while formatting errors.
+        state->active_mir_ctx = NULL;
+    }
+    while (state->count > 0) {
+        ActiveJsTranspileOwner* owner = &state->stack[state->count - 1];
+        JsTranspiler* tp = owner->tp;
+        char* owned_source = owner->owned_source;
+        owner->mt = NULL;
+        owner->tp = NULL;
+        owner->owned_source = NULL;
+        jm_pop_empty_active_js_transpile_owners(state);
+        if (tp) js_transpiler_destroy(tp);
+        if (owned_source) mem_free(owned_source);
+    }
+}
+
+void jm_cleanup_active_mir(void) {
+    jm_cleanup_active_mir_state(jm_compile_recovery_state_current());
 }
 
 void jm_abandon_active_mir_after_signal(void) {
-    for (int i = g_active_js_transpile_count - 1; i >= 0; i--) {
-        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[i];
-        if (owner->mt) {
-            jm_destroy_mir_transpiler(owner->mt);
-            owner->mt = NULL;
-        }
-    }
-    jm_sync_active_js_transpile_top();
-    if (g_active_mir_ctx) {
-        // A recovered SIGSEGV/SIGBUS may leave MIR's import/module lists
-        // inconsistent; re-entering MIR_finish can fault while formatting errors.
-        g_active_mir_ctx = NULL;
-    }
-    while (g_active_js_transpile_count > 0) {
-        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
-        JsTranspiler* tp = owner->tp;
-        char* owned_source = owner->owned_source;
-        owner->mt = NULL;
-        owner->tp = NULL;
-        owner->owned_source = NULL;
-        jm_pop_empty_active_js_transpile_owners();
-        if (tp) js_transpiler_destroy(tp);
-        if (owned_source) mem_free(owned_source);
-    }
-    jm_sync_active_js_transpile_top();
+    jm_abandon_active_mir_after_signal_state(jm_compile_recovery_state_current());
+}
+
+void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
+    if (!runtime_state || !runtime_state->mir_compile_recovery_state) return;
+    JsMirCompileRecoveryState* state =
+        (JsMirCompileRecoveryState*)runtime_state->mir_compile_recovery_state;
+    // Context teardown is a cold ownership boundary. Finish any interrupted
+    // compilation before dropping the capsule so no MIR owner crosses realms.
+    jm_cleanup_active_mir_state(state);
+    mem_free(state);
+    runtime_state->mir_compile_recovery_state = NULL;
 }
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
-    if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
+    if (module_mir_context_count < JS_DEFERRED_MIR_MAX) {
         module_mir_name_pools[module_mir_context_count] = NULL;
         module_mir_ast_pools[module_mir_context_count] = NULL;
         module_mir_source_buffers[module_mir_context_count] = NULL;
@@ -1852,11 +1868,14 @@ void jm_defer_mir_cleanup(MIR_context_t ctx) {
         // Cannot MIR_finish — JIT-compiled function pointers still live and
         // would crash on call. Just leak the context (rare path; survives
         // until process exit anyway).
-        log_error("module: exceeded max deferred MIR contexts (%d) — leaking ctx", MAX_MODULE_CONTEXTS);
+        log_error("module: exceeded max deferred MIR contexts (%d) — leaking ctx", JS_DEFERRED_MIR_MAX);
     }
 }
 
 void jm_cleanup_deferred_mir() {
+    // Deferred MIR storage is inside the active JS capsule.  Once its owner
+    // has been released there is no remaining per-context entry to finish.
+    if (!js_active_runtime_state) return;
     js_dynfunc_cache_reset();
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
@@ -6411,14 +6430,13 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     bool p7d_has_tla = false;
     MIR_label_t p7d_post_await_label = NULL;
     {
-        extern int g_tla_module_depth;
         extern int js_dynamic_import_suppress_module_drain;
         // Body split applies only to statically loaded nested modules. The
         // entry module (depth == 1) keeps its existing sync-with-microtask
         // semantics so the top-level-ticks family stays observable. Modules
         // loaded via js_dynamic_import (suppress > 0) also keep the sync path
         // so `await import('…')` callers see the fully-evaluated namespace.
-        if (mt->is_module && mt->in_main && mt->filename && g_tla_module_depth >= 2 &&
+        if (mt->is_module && mt->in_main && mt->filename && js_tla_module_depth_get() >= 2 &&
             js_dynamic_import_suppress_module_drain == 0) {
             int p7d_tla_count = 0;
             for (JsAstNode* s = program->body; s; s = s->next) {
@@ -6456,7 +6474,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
                     // Keep hoisted declarations on the same atomic metadata path as
@@ -6746,7 +6765,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
                     }
-                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -8091,13 +8111,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // when this is the outermost call.
     extern void js_tla_enter_module(void);
     js_tla_enter_module();
-    Runtime* prev_source_runtime = js_source_runtime;
-    js_source_runtime = runtime;
-
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: module: failed to create transpiler for '%s'", filename);
-        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
@@ -8112,7 +8128,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_error("js-mir: module: parse failed for '%s'", filename);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -8123,7 +8138,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_error("js-mir: module: AST build failed for '%s'", filename);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -8137,7 +8151,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -8165,9 +8178,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // top-level ticks rely on that semantics. Modules loaded via dynamic
     // import (suppress > 0) also stay on the sync path so `await import('…')`
     // callers see the fully-evaluated namespace.
-    extern int g_tla_module_depth;
     extern int js_dynamic_import_suppress_module_drain;
-    if (g_tla_module_depth >= 2 && js_dynamic_import_suppress_module_drain == 0) {
+    if (js_tla_module_depth_get() >= 2 && js_dynamic_import_suppress_module_drain == 0) {
         int p7d_tla_count = 0;
         if (js_ast && js_ast->node_type == JS_AST_NODE_PROGRAM) {
             JsProgramNode* prog = (JsProgramNode*)js_ast;
@@ -8190,7 +8202,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -8199,7 +8210,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         MIR_finish(ctx);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
@@ -8213,7 +8223,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         MIR_finish(ctx);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -8224,7 +8233,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         MIR_finish(ctx);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -8240,7 +8248,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         MIR_finish(ctx);
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -8262,16 +8269,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
-    // Set _lambda_rt for the duration of module execution. Template literals
-    // (and many other JIT-emitted code paths) read it via the import resolver
-    // to obtain the runtime pool. Without this, _lambda_rt stays at whatever
-    // the previous test left it as — NULL on first run, stale otherwise —
-    // and the template-literal path crashes dereferencing rt->pool. This
-    // mirrors transpile_js_to_mir_core_len which sets it before its js_main.
-    extern Context* _lambda_rt;
-    Context* prev_lambda_rt = _lambda_rt;
-    _lambda_rt = (Context*)context;
-
     // Js57 P7d: save the module's evaluation context (module_vars pointer +
     // namespace already on JsModule) and stash js_main as the deferred entry.
     // Used by the AEO drain to re-enter js_main with the same module-level
@@ -8299,22 +8296,15 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         namespace_obj = js_main((Context*)context);
         module_body_threw = js_check_exception() != 0;
     }
-    // Js56 P9 (SIGSEGV fix): keep _lambda_rt set during the microtask drain.
-    // Microtasks scheduled by the module (e.g. `Promise.resolve(0).then(...)`
-    // chains in top-level-await tests) run inside js_event_loop_drain() and
-    // their JIT'd handler bodies dereference _lambda_rt to access the runtime
-    // pool. The old order restored _lambda_rt BEFORE the drain, so first-run
-    // tests (prev_lambda_rt == NULL) hit a NULL-deref EXC_BAD_ACCESS in the
-    // microtask. Restore after the drain instead. Same reasoning for
-    // module_vars and module_namespace — handlers may read module-level vars.
+    // Microtasks retain their function owner context, while module-vars and
+    // namespace remain dynamically scoped around this drain.
     if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
-    _lambda_rt = prev_lambda_rt;
     js_set_active_module_vars(prev_module_vars);
     js_set_active_module_namespace(prev_namespace);
     // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
-    // chunks. Sits AFTER the namespace/module-vars/_lambda_rt restore so
+    // chunks. Sits AFTER the namespace/module-vars restore so
     // continuations that touch module-level state read whichever active
     // namespace the outer caller had — typically the entry module's.
     extern void js_tla_exit_module(void);
@@ -8336,7 +8326,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         tp->ast_pool = NULL;
         jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
-        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -8366,8 +8355,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     tp->ast_pool = NULL;
     jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
-    js_source_runtime = prev_source_runtime;
-
     return namespace_obj;
 }
 
