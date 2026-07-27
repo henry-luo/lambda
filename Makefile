@@ -776,7 +776,6 @@ build-lang-python: build $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_PYTHO
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	$(MAKE) -C build/premake config=debug_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
 	@ls -lh modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll 2>/dev/null || true
 
 build-node-core: build
@@ -836,7 +835,6 @@ release-lang-python: release $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_P
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	$(MAKE) -C build/premake config=release_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
 	@mkdir -p release/modules/lang-python
 	@cp modules/lang-python/module.json release/modules/lang-python/module.json
 	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll release/modules/lang-python/ 2>/dev/null || true
@@ -943,6 +941,7 @@ test-jube-module-integrity: build build-lang-python
 	@mkdir -p temp/jube-integrity/lang-python
 	@cp modules/lang-python/module.json temp/jube-integrity/lang-python/module.json
 	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll temp/jube-integrity/lang-python/ 2>/dev/null || true
+	@$(PYTHON) utils/update_jube_manifest_integrity.py --force temp/jube-integrity/lang-python
 	@library_path=$$(find temp/jube-integrity/lang-python -maxdepth 1 -type f \( -name 'lang-python.dylib' -o -name 'lang-python.so' -o -name 'lang-python.dll' \) | head -n 1); \
 	if [ -z "$$library_path" ]; then echo "missing copied lang-python library"; exit 1; fi; \
 	printf x | dd of="$$library_path" bs=1 seek=0 conv=notrunc status=none

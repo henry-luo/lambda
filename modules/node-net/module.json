@@ -21,5 +21,5 @@
   "library_linux": "node-net.so",
   "library_windows": "node-net.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "cb10563087b0c83db13e9e4bf28ee442fa8496992bc0cf5d2363db145274aacd"
+  "sha256_macos": "c68396952e9b996a012f5f46cf5d5e4114feb861860ed966327809fa043765fd"
 }

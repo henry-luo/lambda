@@ -39,10 +39,15 @@ def host_build_id() -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: update_jube_manifest_integrity.py <module-dir>", file=sys.stderr)
+    force = False
+    arguments = sys.argv[1:]
+    if arguments and arguments[0] == "--force":
+        force = True
+        arguments = arguments[1:]
+    if len(arguments) != 1:
+        print("usage: update_jube_manifest_integrity.py [--force] <module-dir>", file=sys.stderr)
         return 2
-    module_dir = Path(sys.argv[1])
+    module_dir = Path(arguments[0])
     manifest_path = module_dir / "module.json"
     library_key, digest_key = library_name()
     try:
@@ -51,6 +56,16 @@ def main() -> int:
     except (OSError, KeyError, json.JSONDecodeError) as error:
         print(f"JUBE_MANIFEST: cannot read {manifest_path}: {error}", file=sys.stderr)
         return 1
+    # Hosted-language descriptors are source-controlled compatibility metadata.
+    # Their binary digest and host build identity vary per local build, so only
+    # an explicit disposable-fixture update is allowed to stamp those fields.
+    if manifest.get("language") and not force:
+        manifest.pop("host_build_id", None)
+        manifest.pop("sha256_macos", None)
+        manifest.pop("sha256_linux", None)
+        manifest.pop("sha256_windows", None)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return 0
     if not library.is_file():
         print(f"JUBE_MANIFEST: native library is missing: {library}", file=sys.stderr)
         return 1

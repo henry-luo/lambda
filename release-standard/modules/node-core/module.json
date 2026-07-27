@@ -78,5 +78,5 @@
   "library_linux": "node-core.so",
   "library_windows": "node-core.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "8691ec94d97a126226d119b495ac4fcf5c526e53202be1f3332a41300cd5aaa7"
+  "sha256_macos": "d1a78f3787ab68290e3be7f591aa7fbe24185c65de36dc50c9232c65ad2094b8"
 }

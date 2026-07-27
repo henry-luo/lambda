@@ -4817,22 +4817,26 @@ static int jube_load_manifest_path_internal(const char* manifest_path, const cha
     char module_version[128];
     char manifest_build_id[128];
     char manifest_digest[65];
+    char manifest_language[128];
     uint32_t base_abi = 0;
     uint32_t hosted_api = 0;
     bool has_library = jube_manifest_string(text, jube_manifest_library_key(), library,
                                             sizeof(library));
     bool has_entry = jube_manifest_string(text, "entry_symbol", entry, sizeof(entry));
+    bool is_hosted_language = jube_manifest_string(text, "language", manifest_language,
+                                                   sizeof(manifest_language));
+    bool has_build_id = jube_manifest_string(text, "host_build_id", manifest_build_id,
+                                              sizeof(manifest_build_id));
+    bool has_digest = jube_manifest_string(text, jube_manifest_integrity_key(), manifest_digest,
+                                           sizeof(manifest_digest));
     bool valid = has_library &&
         jube_manifest_string(text, "name", module_name, sizeof(module_name)) &&
         jube_manifest_string(text, "version", module_version, sizeof(module_version)) &&
-        jube_manifest_string(text, "host_build_id", manifest_build_id,
-                             sizeof(manifest_build_id)) &&
-        jube_manifest_string(text, jube_manifest_integrity_key(), manifest_digest,
-                             sizeof(manifest_digest)) &&
         jube_manifest_uint32(text, "base_abi_version", &base_abi) &&
         jube_manifest_uint32(text, "hosted_api_version", &hosted_api) &&
         base_abi == JUBE_ABI_VERSION && hosted_api == JUBE_HOST_LANG_API_VERSION &&
-        strcmp(manifest_build_id, JUBE_HOST_BUILD_ID) == 0;
+        (has_build_id ? strcmp(manifest_build_id, JUBE_HOST_BUILD_ID) == 0 : is_hosted_language) &&
+        (has_digest || is_hosted_language);
     if (!valid) {
         log_error("JUBE_REG: manifest '%s' is malformed or incompatible", manifest_path);
         free(text);
@@ -4883,7 +4887,7 @@ static int jube_load_manifest_path_internal(const char* manifest_path, const cha
     memcpy(library_path, manifest_path, dir_length);
     library_path[dir_length] = '/';
     strcpy(library_path + dir_length + 1, library);
-    if (!jube_manifest_verify_library_sha256(library_path, manifest_digest)) {
+    if (has_digest && !jube_manifest_verify_library_sha256(library_path, manifest_digest)) {
         log_error("JUBE_REG: library integrity check failed for '%s'", library_path);
         free(text);
         jube_manifest_loading_depth--;
