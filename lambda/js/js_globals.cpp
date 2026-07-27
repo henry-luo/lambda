@@ -8108,7 +8108,13 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     if (type == LMD_TYPE_MAP && name_str->len == 9 &&
         memcmp(name_str->chars, "__proto__", 9) == 0) {
         ShapeEntry* _se_pp = js_find_shape_entry(obj, "__proto__", 9);
-        if (!_se_pp || !jspd_is_accessor(_se_pp)) {
+        bool own_proto_marker = false;
+        Item own_proto_value = js_map_get_fast_ext(
+            obj.map, "__json_own_proto__", 18, &own_proto_marker);
+        // an own data __proto__ is backed by the public slot after the original
+        // prototype has moved to __internal_proto__; do not hide that descriptor.
+        if ((!own_proto_marker || !js_is_truthy(own_proto_value)) &&
+            (!_se_pp || !jspd_is_accessor(_se_pp))) {
             return make_js_undefined();
         }
         // fall through: explicit own accessor — return real descriptor below
@@ -8651,6 +8657,17 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
         String* name_str = it2s(name_root.get());
         if (name_str && name_str->len == 9 && strncmp(name_str->chars, "__proto__", 9) == 0) {
             js_mark_own_proto_property(obj_root.get());
+            ShapeEntry* proto_entry = js_find_shape_entry(obj_root.get(), "__proto__", 9);
+            if (proto_entry && !jspd_is_accessor(proto_entry)) {
+                // the marker preserves [[Prototype]] in __internal_proto__; replace
+                // the public slot directly so CreateDataProperty cannot invoke the
+                // inherited __proto__ setter and overwrite that preserved value.
+                fn_map_set(obj_root.get(), name_root.get(), value_root.get());
+                js_attr_set_writable(obj_root.get(), "__proto__", 9, /*writable=*/true);
+                js_attr_set_enumerable(obj_root.get(), "__proto__", 9, /*enumerable=*/true);
+                js_attr_set_configurable(obj_root.get(), "__proto__", 9, /*configurable=*/true);
+                return obj_root.get();
+            }
         }
     }
     // The slow path performs multiple allocations after constructing the

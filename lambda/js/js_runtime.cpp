@@ -7347,6 +7347,14 @@ static bool js_is_class_instance_prototype(Item proto) {
 
 static Item js_super_lookup_base(Item receiver) {
     if (js_is_class_object_item(receiver)) {
+        bool has_raw_static_proto = false;
+        Item raw_static_proto = js_map_get_fast_ext(
+            receiver.map, "__proto__", 9, &has_raw_static_proto);
+        // class objects otherwise fall back to Function.prototype, but an
+        // explicit null prototype is stored as this undefined sentinel. Probe
+        // the receiver's current shape because a cached missing proto entry can
+        // predate Object.setPrototypeOf(C, null).
+        if (has_raw_static_proto && raw_static_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
         Item static_proto = js_get_prototype_of(receiver);
         if (static_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
         return static_proto;
@@ -7464,7 +7472,9 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 // call setter with receiver as 'this'. If no setter, set on receiver.
 static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool strict_reference) {
     Item proto = js_super_lookup_base(receiver);
-    if (proto.item == ItemNull.item) {
+    // Object.setPrototypeOf(C, null) stores an undefined sentinel; super writes
+    // must reject that null base just as super reads do.
+    if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
     }
     TypeId type = get_type_id(proto);
@@ -28816,6 +28826,14 @@ extern "C" void js_mark_own_proto_property(Item object) {
         ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
             raw_proto);
+    } else if (!marker_found || !js_is_truthy(marker_val)) {
+        // plain objects synthesize Object.prototype until an explicit slot exists;
+        // preserve that effective prototype before exposing __proto__ as data.
+        Item effective_proto = js_get_prototype_of(object);
+        ScopedSkipAccessorDispatch _skip_guard;
+        js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
+            effective_proto.item == ItemNull.item ?
+                (Item){.item = ITEM_JS_UNDEFINED} : effective_proto);
     }
     ScopedSkipAccessorDispatch _skip_guard;
     js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
@@ -29059,6 +29077,18 @@ extern "C" Item js_get_prototype(Item object) {
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;
+    bool own_proto_marker = false;
+    Item own_proto_value = js_map_get_fast_ext(
+        m, "__json_own_proto__", 18, &own_proto_marker);
+    if (own_proto_marker && js_is_truthy(own_proto_value)) {
+        // defining a public __proto__ can transition the shape after a negative
+        // cache entry was recorded; read the preserved internal slot directly.
+        Item internal_proto = ItemNull;
+        JsShapeSlotStatus internal_status = js_own_shape_slot_status(
+            object, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_proto, NULL);
+        return (internal_status == JS_SHAPE_SLOT_DATA ||
+                internal_status == JS_SHAPE_SLOT_ACCESSOR) ? internal_proto : ItemNull;
+    }
     TypeMap* tm = m && typemap_ptr_is_plausible(m->type) ? (TypeMap*)m->type : NULL;
     Item internal_proto = ItemNull;
     ShapeEntry* internal_se = js_proto_shape_entry(tm,
