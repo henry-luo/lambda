@@ -1490,15 +1490,17 @@ struct JubeModuleDef {
     // loadable through struct_size gating.
     const JubeModuleRequirements* requirements;
 
-    // Explicit globals are installed only by the JS host's global setup. A
-    // namespace descriptor never acts as an implicit global declaration.
+    // The JS host reserves explicit global names during global setup, but the
+    // builder runs only when the owning module is first activated. A namespace
+    // descriptor never acts as an implicit global declaration.
     const JubeGlobalDef* globals;
     int32_t global_count;
 
-    // Runtime hooks receive an opaque per-JS-runtime session token.  The host
-    // calls attach only after globalThis and process exist, then reset/detach
-    // while that heap is still live. Modules must release every heap-backed
-    // cache during reset or detach and must never retain a detached token.
+    // Runtime hooks receive an opaque per-JS-runtime session token. The host
+    // calls attach lazily, after globalThis and process exist and before the
+    // module's first use, then reset/detach while that heap is still live.
+    // Modules must release every heap-backed cache during reset or detach and
+    // must never retain a detached token.
     void (*runtime_attach)(void* session);
     void (*runtime_reset_session)(void* session);
     void (*runtime_detach)(void* session);

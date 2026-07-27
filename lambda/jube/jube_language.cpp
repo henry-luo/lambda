@@ -76,8 +76,11 @@ static bool jube_language_matches_extension(const JubeLanguageDef* language,
 const JubeLanguageDef* jube_find_language(const char* name) {
     if (!name || !*name) return NULL;
     for (int i = 0; i < jube_static_module_count(); i++) {
-        const JubeLanguageDef* language = jube_module_language(jube_static_module_at(i));
-        if (jube_language_matches_name(language, name)) return language;
+        const JubeModuleDef* module = jube_static_module_at(i);
+        const JubeLanguageDef* language = jube_module_language(module);
+        if (jube_language_matches_name(language, name)) {
+            return jube_activate_module(module) ? language : NULL;
+        }
     }
     return NULL;
 }
@@ -91,8 +94,11 @@ const JubeLanguageDef* jube_find_language_for_path(const char* path) {
     }
     if (!extension || !extension[1]) return NULL;
     for (int i = 0; i < jube_static_module_count(); i++) {
-        const JubeLanguageDef* language = jube_module_language(jube_static_module_at(i));
-        if (jube_language_matches_extension(language, extension)) return language;
+        const JubeModuleDef* module = jube_static_module_at(i);
+        const JubeLanguageDef* language = jube_module_language(module);
+        if (jube_language_matches_extension(language, extension)) {
+            return jube_activate_module(module) ? language : NULL;
+        }
     }
     return NULL;
 }

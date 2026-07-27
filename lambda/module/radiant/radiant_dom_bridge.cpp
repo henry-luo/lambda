@@ -1248,6 +1248,12 @@ RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
         radiant_dom_is_node_host_type(item.vmap->host_type)) {
         return item.vmap->host_data;
     }
+    // Generic event/property paths probe arbitrary JS values before Radiant is
+    // requested; an inactive module has no DOM bridge table to delegate to.
+    if (!radiant_host_api || !radiant_host_api->dom ||
+            !radiant_host_api->dom->unwrap_element_impl) {
+        return NULL;
+    }
     return js_dom_unwrap_element_impl(item);
 }
 
@@ -4949,7 +4955,11 @@ static Item radiant_dom_window_dimension(float value) {
 }
 
 RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out) {
-    if (!out || object.item != radiant_host_api->script->global_this().item ||
+    // Ordinary JS property reads probe this optional hook before any Radiant
+    // value exists, so lazy module registration must leave the bridge inert.
+    if (!out || !radiant_host_api || !radiant_host_api->script ||
+        !radiant_host_api->script->global_this ||
+        object.item != radiant_host_api->script->global_this().item ||
         !js_dom_get_ui_context) {
         return 0;
     }
@@ -5013,7 +5023,13 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
 
 
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
-    if (!out) return 0;
+    // Map-method dispatch probes CSSOM for every ordinary object method call;
+    // keep that probe callback-free until the Radiant module is activated.
+    if (!out || !radiant_host_api || !radiant_host_api->dom ||
+            !radiant_host_api->dom->is_css_namespace ||
+            !radiant_host_api->dom->css_namespace_method) {
+        return 0;
+    }
 
     if (js_is_css_namespace(obj)) {
         // CSSOM parsing and mutation internals remain in js_cssom.cpp.

@@ -85,11 +85,22 @@ static void js_install_jube_global_namespaces(Item global) {
             const char* name = global_def->name;
             if (!name || !name[0]) continue;
             Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
-            void* session = jube_internal_host_api()->node->runtime->current_session();
-            js_property_set(global, key, global_def->build(session));
+            // Keep Jube globals as ordinary writable data properties while
+            // deferring module activation until the property is actually read.
+            js_property_set(global, key, (Item){.item = ITEM_JS_JUBE_LAZY_SENTINEL});
             js_mark_non_enumerable(global, key);
         }
     }
+}
+
+extern "C" bool js_jube_resolve_lazy_global(Item object, Item key, Item* out_value) {
+    if (out_value) *out_value = ItemNull;
+    if (!js_is_global_this_object_value(object) ||
+            get_type_id(key) != LMD_TYPE_STRING) {
+        return false;
+    }
+    String* name = it2s(key);
+    return name && jube_resolve_global(name->chars, name->len, out_value);
 }
 
 static bool js_host_object_delete_property(Item object, Item key, Item* out) {

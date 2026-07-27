@@ -23,8 +23,8 @@ typedef bool (*JubeSpecifierNameCallback)(const char* name, void* user);
 
 bool jube_specifier_catalog_contains(const char* name);
 bool jube_specifier_is_builtin(const char* name);
-// Resolves only a descriptor that is already active in this process. This is
-// safe for compiler and engine fast paths that must never activate a library.
+// Resolves only a descriptor already resident in this process, so it never
+// loads a library. Requesting its namespace may initialize and attach it.
 JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace);
 JubeSpecifierResolveStatus jube_specifier_resolve(const char* name, Item* out_namespace);
 bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user);
@@ -53,6 +53,10 @@ Item jube_node_resource_active_resources_info(void);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
+// Registration catalogs a descriptor without running guest callbacks. Actual
+// imports, namespaces, globals, languages, and host-type use activate it here.
+bool jube_activate_module(const JubeModuleDef* module);
+bool jube_resolve_global(const char* name, size_t name_length, Item* out_value);
 const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
 const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 void jube_notify_heap_cleanup(void* heap);

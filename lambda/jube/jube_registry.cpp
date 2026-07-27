@@ -54,9 +54,17 @@
 
 typedef struct JubeStaticModuleEntry {
     const JubeModuleDef* module;
-    bool initialized;
+    uint32_t activation_state;
+    uint32_t attached_generation;
     void* dynamic_handle;
 } JubeStaticModuleEntry;
+
+typedef enum JubeModuleActivationState {
+    JUBE_MODULE_REGISTERED = 0,
+    JUBE_MODULE_ACTIVATING = 1,
+    JUBE_MODULE_ACTIVE = 2,
+    JUBE_MODULE_FAILED = 3,
+} JubeModuleActivationState;
 
 static JubeStaticModuleEntry jube_static_modules[JUBE_STATIC_MODULE_CAPACITY];
 static int jube_static_modules_count = 0;
@@ -97,6 +105,7 @@ static int jube_specifier_index_module(const JubeModuleDef* module);
 static bool jube_specifier_catalog_ensure(void);
 static int jube_load_manifest_path_internal(const char* manifest_path, const char* selector,
                                             const char* expected_name);
+static bool jube_activate_module_descriptor(const JubeModuleDef* module);
 
 struct JubeMirCursorSlot {
     MirEmitter* emitter;
@@ -4119,6 +4128,9 @@ JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item*
     if (!found) return JUBE_SPECIFIER_UNKNOWN;
     JubeSpecifierEntry entry = *found;
     if (!entry.module) return JUBE_SPECIFIER_UNAVAILABLE;
+    if (!jube_activate_module_descriptor(entry.module)) {
+        return JUBE_SPECIFIER_ACTIVATION_FAILED;
+    }
     if (entry.namespace_index < 0 || entry.namespace_index >= entry.module->namespace_count) {
         return JUBE_SPECIFIER_ACTIVATION_FAILED;
     }
@@ -4202,7 +4214,9 @@ static void jube_install_module_globals(const JubeModuleDef* module, void* sessi
             !jube_host_api.script || !jube_host_api.node->roots->root_frame_begin ||
             !jube_host_api.node->roots->root_frame_take_slot ||
             !jube_host_api.node->roots->root_frame_end ||
-            !jube_host_api.value->string_from_utf8_n || !jube_host_api.value->property_set ||
+            !jube_host_api.value->string_from_utf8_n ||
+            !jube_host_api.value->property_set_own ||
+            !jube_host_api.value->property_get_own_data ||
             !jube_host_api.script->mark_non_enumerable) {
         return;
     }
@@ -4225,14 +4239,125 @@ static void jube_install_module_globals(const JubeModuleDef* module, void* sessi
         Item key = jube_host_api.value->string_from_utf8_n(global_def->name,
             strlen(global_def->name));
         *key_root = key.item;
+        Item existing = ItemNull;
+        if (jube_host_api.value->property_get_own_data(
+                (Item){.item = *global_root}, (Item){.item = *key_root}, &existing) &&
+                existing.item != ITEM_JS_JUBE_LAZY_SENTINEL) {
+            // A script may replace a writable lazy global before first read.
+            // Activating another surface of the module must preserve that write.
+            continue;
+        }
         // The builder may allocate before its value is published on globalThis.
         *value_root = global_def->build(session).item;
-        jube_host_api.value->property_set((Item){.item = *global_root},
+        jube_host_api.value->property_set_own((Item){.item = *global_root},
             (Item){.item = *key_root}, (Item){.item = *value_root});
         jube_host_api.script->mark_non_enumerable((Item){.item = *global_root},
             (Item){.item = *key_root});
     }
     jube_host_api.node->roots->root_frame_end(&frame);
+}
+
+static JubeStaticModuleEntry* jube_module_entry(const JubeModuleDef* module) {
+    if (!module) return NULL;
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        if (jube_static_modules[i].module == module) return &jube_static_modules[i];
+    }
+    return NULL;
+}
+
+static bool jube_attach_module_to_active_runtime(JubeStaticModuleEntry* entry) {
+    if (!entry || entry->activation_state != JUBE_MODULE_ACTIVE) return false;
+    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    if (!session || !session->live || session->detaching) return true;
+    if (entry->attached_generation == session->generation) return true;
+
+    // Mark the generation before invoking module code so a namespace/global
+    // builder that re-enters the registry cannot attach the same module twice.
+    entry->attached_generation = session->generation;
+    const JubeModuleDef* module = entry->module;
+    size_t attach_end = offsetof(JubeModuleDef, runtime_attach) +
+        sizeof(((JubeModuleDef*)NULL)->runtime_attach);
+    if (jube_module_has_field(module, attach_end) && module->runtime_attach) {
+        module->runtime_attach(session);
+    }
+    jube_install_module_globals(module, session);
+    return true;
+}
+
+static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
+    JubeStaticModuleEntry* entry = jube_module_entry(module);
+    if (!entry) return false;
+    if (entry->activation_state == JUBE_MODULE_ACTIVE) {
+        return jube_attach_module_to_active_runtime(entry);
+    }
+    if (entry->activation_state == JUBE_MODULE_FAILED) return false;
+    if (entry->activation_state == JUBE_MODULE_ACTIVATING) {
+        log_error("JUBE_REG: cyclic activation of module '%s'", module->name);
+        return false;
+    }
+
+    // Descriptor registration is intentionally callback-free. This single
+    // transition protects every import/global/language/type activation path.
+    entry->activation_state = JUBE_MODULE_ACTIVATING;
+    if (module->init) {
+        int rc = module->init(&jube_host_api);
+        if (rc != 0) {
+            log_error("JUBE_REG: module '%s' init failed with code %d", module->name, rc);
+            if (module->shutdown) module->shutdown();
+            entry->activation_state = JUBE_MODULE_FAILED;
+            return false;
+        }
+    }
+    if (jube_compile_module_interface(module) != 0) {
+        log_error("JUBE_REG: module '%s' interface compilation failed", module->name);
+        if (module->shutdown) module->shutdown();
+        jube_interface_remove_module(module);
+        entry->activation_state = JUBE_MODULE_FAILED;
+        return false;
+    }
+
+    entry->activation_state = JUBE_MODULE_ACTIVE;
+    log_info("JUBE_REG: activated module '%s' version '%s'", module->name,
+             module->version ? module->version : "(none)");
+#if !defined(NDEBUG)
+    jube_log_module_type_ops(module);
+#endif
+    return jube_attach_module_to_active_runtime(entry);
+}
+
+bool jube_activate_module(const JubeModuleDef* module) {
+    return jube_activate_module_descriptor(module);
+}
+
+bool jube_resolve_global(const char* name, size_t name_length, Item* out_value) {
+    if (out_value) *out_value = ItemNull;
+    if (!name || name_length == 0 || !jube_active_node_runtime_session ||
+            !jube_active_node_runtime_session->live) {
+        return false;
+    }
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        int32_t global_count = 0;
+        const JubeGlobalDef* globals = jube_module_globals(module, &global_count);
+        for (int j = 0; globals && j < global_count; j++) {
+            const JubeGlobalDef* global_def = &globals[j];
+            if (!global_def->name || strlen(global_def->name) != name_length ||
+                    memcmp(global_def->name, name, name_length) != 0) {
+                continue;
+            }
+            if (!jube_activate_module_descriptor(module)) return false;
+            Item key = jube_host_api.value->string_from_utf8_n(name, name_length);
+            Item value = ItemNull;
+            Item global = jube_host_node_session_global_this(jube_active_node_runtime_session);
+            if (!jube_host_api.value->property_get_own_data(global, key, &value) ||
+                    value.item == ITEM_JS_JUBE_LAZY_SENTINEL) {
+                return false;
+            }
+            if (out_value) *out_value = value;
+            return true;
+        }
+    }
+    return false;
 }
 
 static int jube_register_module_descriptor(const JubeModuleDef* module, void* dynamic_handle,
@@ -4291,43 +4416,10 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
 
     int slot = jube_static_modules_count++;
     jube_static_modules[slot].module = module;
-    jube_static_modules[slot].initialized = false;
+    jube_static_modules[slot].activation_state = JUBE_MODULE_REGISTERED;
+    jube_static_modules[slot].attached_generation = 0;
     // Dynamic descriptors and function tables live in the loaded image, so keep the handle open.
     jube_static_modules[slot].dynamic_handle = dynamic_handle;
-
-    if (module->init) {
-        int rc = module->init(&jube_host_api);
-        if (rc != 0) {
-            log_error("JUBE_REG: %s module '%s' init failed with code %d",
-                      source_label ? source_label : "Jube", module->name, rc);
-            // init may allocate module-owned state before reporting failure, so
-            // pair it with shutdown before the descriptor becomes unreachable.
-            if (module->shutdown) module->shutdown();
-            jube_static_modules_count--;
-            jube_static_modules[slot].module = NULL;
-            jube_static_modules[slot].initialized = false;
-            jube_static_modules[slot].dynamic_handle = NULL;
-            // Dynamic descriptors live in their image; never dereference one
-            // after dlclose while reporting registration rollback.
-            jube_close_dynamic_handle(dynamic_handle);
-            return -1;
-        }
-    }
-
-    // DOM3: compile the module's interface declaration against its binding
-    // tables; a half-valid interface must fail registration, not limp along.
-    if (jube_compile_module_interface(module) != 0) {
-        log_error("JUBE_REG: %s module '%s' interface compilation failed",
-                  source_label ? source_label : "Jube", module->name);
-        if (module->shutdown) module->shutdown();
-        jube_interface_remove_module(module);
-        jube_static_modules_count--;
-        jube_static_modules[slot].module = NULL;
-        jube_static_modules[slot].initialized = false;
-        jube_static_modules[slot].dynamic_handle = NULL;
-        jube_close_dynamic_handle(dynamic_handle);
-        return -1;
-    }
 
     if (jube_specifier_index_module(module) != 0) {
         // A descriptor is not visible until every namespace alias has one
@@ -4338,33 +4430,44 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
         jube_interface_remove_module(module);
         jube_static_modules_count--;
         jube_static_modules[slot].module = NULL;
-        jube_static_modules[slot].initialized = false;
+        jube_static_modules[slot].activation_state = JUBE_MODULE_REGISTERED;
+        jube_static_modules[slot].attached_generation = 0;
         jube_static_modules[slot].dynamic_handle = NULL;
         jube_close_dynamic_handle(dynamic_handle);
         return -1;
     }
 
-    log_info("JUBE_REG: registered %s module '%s' version '%s'",
+    log_info("JUBE_REG: cataloged %s module '%s' version '%s'",
              source_label ? source_label : "Jube", module->name,
              module->version ? module->version : "(none)");
-#if !defined(NDEBUG)
-    jube_log_module_type_ops(module);
-#endif
-    // A descriptor without init() is still an active module. Lifecycle hooks
-    // such as heap_cleanup must run for it after successful registration.
-    jube_static_modules[slot].initialized = true;
-    if (jube_active_node_runtime_session && jube_active_node_runtime_session->live &&
-            !jube_active_node_runtime_session->detaching &&
-            jube_module_has_field(module, offsetof(JubeModuleDef, runtime_attach) +
-                sizeof(((JubeModuleDef*)NULL)->runtime_attach)) && module->runtime_attach) {
-        // Dynamic activation can occur after JS startup; attach immediately so
-        // namespace builders never observe an otherwise-live session as null.
-        module->runtime_attach(jube_active_node_runtime_session);
-        // Startup installs static-module globals in js_globals.cpp. A module
-        // activated later must publish its explicit globals in the same session.
-        jube_install_module_globals(module, jube_active_node_runtime_session);
-    }
     return 0;
+}
+
+static void jube_specifier_forget_module(const JubeModuleDef* module) {
+    if (!module || !jube_specifier_index) return;
+    for (;;) {
+        JubeSpecifierEntry changed = {};
+        bool found = false;
+        size_t cursor = 0;
+        void* item = NULL;
+        while (hashmap_iter(jube_specifier_index, &cursor, &item)) {
+            const JubeSpecifierEntry* entry = (const JubeSpecifierEntry*)item;
+            if (entry && entry->module == module) {
+                changed = *entry;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return;
+        if (changed.manifest_path[0]) {
+            changed.module = NULL;
+            changed.namespace_index = -1;
+            changed.state = JUBE_SPECIFIER_OWNER_CATALOGED;
+            hashmap_set(jube_specifier_index, &changed);
+        } else {
+            hashmap_delete(jube_specifier_index, &changed);
+        }
+    }
 }
 
 static void jube_rollback_registered_modules(int first_index) {
@@ -4373,13 +4476,17 @@ static void jube_rollback_registered_modules(int first_index) {
         int index = --jube_static_modules_count;
         JubeStaticModuleEntry entry = jube_static_modules[index];
         jube_static_modules[index].module = NULL;
-        jube_static_modules[index].initialized = false;
+        jube_static_modules[index].activation_state = JUBE_MODULE_REGISTERED;
+        jube_static_modules[index].attached_generation = 0;
         jube_static_modules[index].dynamic_handle = NULL;
         if (!entry.module) continue;
         // Dependency loading is transactional: remove every host-side record
         // before closing the image that owns its descriptor and callbacks.
+        jube_specifier_forget_module(entry.module);
         jube_interface_remove_module(entry.module);
-        if (entry.initialized && entry.module->shutdown) entry.module->shutdown();
+        if (entry.activation_state == JUBE_MODULE_ACTIVE && entry.module->shutdown) {
+            entry.module->shutdown();
+        }
         jube_close_dynamic_handle(entry.dynamic_handle);
     }
 }
@@ -4447,7 +4554,24 @@ static int jube_load_dynamic_module_checked(const char* path, const char* entry_
         jube_close_dynamic_handle(handle);
         return -1;
     }
-    return jube_register_module_descriptor(module, handle, "dynamic");
+    char module_name[JUBE_SPECIFIER_MODULE_NAME_CAPACITY];
+    if (!module->name || strlen(module->name) >= sizeof(module_name)) {
+        log_error("JUBE_REG: dynamic module from '%s' has an invalid name", path);
+        jube_close_dynamic_handle(handle);
+        return -1;
+    }
+    strcpy(module_name, module->name);
+    int transaction_start = jube_static_modules_count;
+    if (jube_register_module_descriptor(module, handle, "dynamic") != 0) return -1;
+    int index = jube_find_static_module_index(module_name);
+    if (index < 0 ||
+            !jube_activate_module_descriptor(jube_static_modules[index].module)) {
+        // Explicit/demand-selected dynamic loads remain synchronous, but share
+        // the same lazy activation gate used by resident static descriptors.
+        jube_rollback_registered_modules(transaction_start);
+        return -1;
+    }
+    return 0;
 }
 
 int jube_load_dynamic_module(const char* path, const char* entry_symbol) {
@@ -5397,12 +5521,13 @@ const JubeModuleDef* jube_static_module_at(int index) {
 }
 
 void jube_modules_runtime_reset(void) {
-    void* session = jube_host_node_current_session();
+    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
     size_t session_reset_end = offsetof(JubeModuleDef, runtime_reset_session) +
         sizeof(((JubeModuleDef*)NULL)->runtime_reset_session);
     for (int i = 0; session && i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (jube_static_modules[i].initialized &&
+        if (jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
+                jube_static_modules[i].attached_generation == session->generation &&
                 jube_module_has_field(module, session_reset_end) && module->runtime_reset_session) {
             module->runtime_reset_session(session);
         }
@@ -5411,7 +5536,9 @@ void jube_modules_runtime_reset(void) {
         sizeof(((JubeModuleDef*)NULL)->runtime_reset);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (jube_static_modules[i].initialized &&
+        if (session &&
+                jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
+                jube_static_modules[i].attached_generation == session->generation &&
                 jube_module_has_field(module, end) && module->runtime_reset) {
             module->runtime_reset();
         }
@@ -5435,15 +5562,6 @@ void jube_modules_runtime_attach(void) {
     if (session->generation == 0) session->generation = ++jube_node_runtime_generation;
     session->live = true;
     jube_active_node_runtime_session = session;
-    size_t attach_end = offsetof(JubeModuleDef, runtime_attach) +
-        sizeof(((JubeModuleDef*)NULL)->runtime_attach);
-    for (int i = 0; i < jube_static_modules_count; i++) {
-        const JubeModuleDef* module = jube_static_modules[i].module;
-        if (jube_static_modules[i].initialized &&
-                jube_module_has_field(module, attach_end) && module->runtime_attach) {
-            module->runtime_attach(session);
-        }
-    }
 }
 
 void jube_modules_runtime_detach(void) {
@@ -5456,9 +5574,15 @@ void jube_modules_runtime_detach(void) {
         sizeof(((JubeModuleDef*)NULL)->runtime_detach);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (jube_static_modules[i].initialized &&
+        if (jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
+                jube_static_modules[i].attached_generation ==
+                    jube_active_node_runtime_session->generation &&
                 jube_module_has_field(module, detach_end) && module->runtime_detach) {
             module->runtime_detach(session);
+        }
+        if (jube_static_modules[i].attached_generation ==
+                jube_active_node_runtime_session->generation) {
+            jube_static_modules[i].attached_generation = 0;
         }
     }
     jube_node_async_cancel_session(session);
@@ -5510,7 +5634,8 @@ void jube_registry_cleanup(void) {
 const JubeModuleDef* jube_find_static_module(const char* name) {
     int index = jube_find_static_module_index(name);
     if (index < 0) return NULL;
-    return jube_static_modules[index].module;
+    const JubeModuleDef* module = jube_static_modules[index].module;
+    return jube_activate_module_descriptor(module) ? module : NULL;
 }
 
 void jube_notify_heap_cleanup(void* heap) {
@@ -5519,7 +5644,7 @@ void jube_notify_heap_cleanup(void* heap) {
         sizeof(((JubeModuleDef*)0)->heap_cleanup);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (!module || !jube_static_modules[i].initialized ||
+        if (!module || jube_static_modules[i].activation_state != JUBE_MODULE_ACTIVE ||
             !jube_module_has_field(module, field_end) || !module->heap_cleanup) {
             continue;
         }
@@ -5534,7 +5659,9 @@ const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) {
         if (!module || !module->types || module->type_count <= 0) continue;
         for (int j = 0; j < module->type_count; j++) {
             const JubeTypeDef* type = &module->types[j];
-            if ((const void*)type == host_type) return type;
+            if ((const void*)type == host_type) {
+                return jube_activate_module_descriptor(module) ? type : NULL;
+            }
         }
     }
     return NULL;
