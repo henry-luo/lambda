@@ -1,5 +1,6 @@
 // Test file for EditSession bridge API
 #include <gtest/gtest.h>
+#include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -8,7 +9,7 @@
 #include "../lib/log.h"
 #include "../lib/test_utils.h"
 
-extern "C" Context* _lambda_rt = nullptr;
+__thread EvalContext* context = nullptr;
 
 typedef struct SessionCounters {
     int change_count;
@@ -352,4 +353,3 @@ TEST_F(EditBridgeSessionTest, ExecAppliesRichTextBlockCommands) {
 
     edit_session_destroy(session);
 }
-

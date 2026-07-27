@@ -10,6 +10,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count) {
+    (void)runtime;
+    (void)base;
+    (void)count;
+    // This directory fixture uses a non-collecting heap; provide the root
+    // publication ABI required by runtime-state without linking lambda-mem.cpp.
+    return true;
+}
+
+extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
+    (void)runtime;
+    (void)base;
+}
+
 // Test fixture for directory tests
 class InputDirTest : public ::testing::Test {
 protected:

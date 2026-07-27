@@ -4396,7 +4396,8 @@
             "source": "test/test_lambda_concurrency_gtest.cpp",
             "name": "Lambda Concurrency Runtime Tests",
             "dependencies": [
-              "lambda-rt"
+              "lambda-rt",
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -4409,6 +4410,26 @@
               "rpmalloc",
               "libuv"
             ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "icon": "🔀"
           },
           {
