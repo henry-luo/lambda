@@ -297,6 +297,19 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
     block->base = memory;
     block->size = block_size;
     block->next = NULL;
+    // Costs block_size/128 (32 KB per 4 MB block). A failed allocation is not
+    // fatal: gc_bump_block_owns_exact falls back to the linear replay scan.
+    block->alloc_bits = (uint8_t*)calloc(1, GC_BUMP_BITMAP_BYTES(block_size));
+    if (!block->alloc_bits) {
+        log_error("gc_alloc_bump_block: no allocation bitmap for %zu byte block "
+                  "— ownership queries fall back to linear scan", block_size);
+    }
+
+    // Widen the bump bounds so a pointer outside every block is rejected in O(1).
+    if (!gc->bump_min_addr || memory < gc->bump_min_addr) gc->bump_min_addr = memory;
+    if (!gc->bump_max_addr || memory + block_size > gc->bump_max_addr) {
+        gc->bump_max_addr = memory + block_size;
+    }
 
     // Register the block with the object zone's sorted range array so it joins
     // the zone's min/max fast-rejection bounds. The zone reports no ownership
@@ -499,6 +512,8 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
     gc->bump_end = NULL;
+    gc->bump_min_addr = NULL;
+    gc->bump_max_addr = NULL;
     gc_bump_block_t* first_block = gc_alloc_bump_block(gc, GC_BUMP_BLOCK_INITIAL_SIZE);
     if (first_block) {
         first_block->next = gc->bump_blocks;
@@ -567,10 +582,13 @@ void gc_heap_destroy(gc_heap_t* gc) {
     gc_bump_block_t* block = gc->bump_blocks;
     while (block) {
         gc_bump_block_t* next = block->next;
+        free(block->alloc_bits);
         free(block);
         block = next;
     }
     gc->bump_blocks = NULL;
+    gc->bump_min_addr = NULL;
+    gc->bump_max_addr = NULL;
 
     // free zone metadata (zone memory is pool-allocated, freed by pool_destroy)
     if (gc->object_zone) gc_object_zone_destroy(gc->object_zone);
@@ -760,6 +778,18 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     }
 
     gc->bump_cursor = cursor + slot_size;
+
+    // Record this slot start so the exact-slot test is a bit lookup instead of
+    // an allocation replay. gc->bump_blocks is by construction the block that
+    // owns bump_cursor. Bits are never cleared: sweep only flags dead bump
+    // slots GC_FLAG_FREED and leaves them addressable, so a set bit continues
+    // to mean "a real slot begins here" — exactly what the old scan reported.
+    gc_bump_block_t* cur_block = gc->bump_blocks;
+    if (cur_block && cur_block->alloc_bits) {
+        size_t off = (size_t)(cursor - cur_block->base);
+        size_t bit = off / GC_BUMP_GRANULE;
+        cur_block->alloc_bits[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
+    }
 
     // Initialize header in-place (memory is pre-zeroed from block allocation)
     gc_header_t* header = (gc_header_t*)cursor;
@@ -1134,41 +1164,56 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
     return ptr;
 }
 
-// check if a pointer is to a GC-managed OBJECT (has GCHeader)
-static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr) return 0;
-    uint8_t* p = (uint8_t*)ptr;
-    gc_bump_block_t* block = gc->bump_blocks;
-    while (block) {
-        uint8_t* start = block->base;
-        uint8_t* end = block->base + block->size;
-        if (p >= start + sizeof(gc_header_t) && p < end) {
-            uint8_t* cursor = start;
-            uint8_t* used_end = (block == gc->bump_blocks) ? gc->bump_cursor : end;
-            if (used_end > end) used_end = end;
+// Fallback for a block whose allocation bitmap could not be allocated: replay
+// the block's allocation sequence from its base to decide whether `p` names a
+// slot start. O(slots preceding p) — correct, but quadratic when marking.
+static int gc_bump_block_scan_exact(gc_heap_t* gc, gc_bump_block_t* block, uint8_t* p) {
+    uint8_t* start = block->base;
+    uint8_t* end = block->base + block->size;
+    uint8_t* cursor = start;
+    uint8_t* used_end = (block == gc->bump_blocks) ? gc->bump_cursor : end;
+    if (used_end > end) used_end = end;
 
-            while (cursor + sizeof(gc_header_t) <= used_end) {
-                gc_header_t* header = (gc_header_t*)cursor;
-                if (header->type_tag == 0 || header->alloc_size == 0) return 0;
+    while (cursor + sizeof(gc_header_t) <= used_end) {
+        gc_header_t* header = (gc_header_t*)cursor;
+        if (header->type_tag == 0 || header->alloc_size == 0) return 0;
 
-                int cls = gc_object_zone_class_index(header->alloc_size);
-                if (cls < 0) return 0;
-                size_t class_size = gc_object_zone_class_size(cls);
-                size_t slot_size = sizeof(gc_header_t) + class_size;
-                uint8_t* user_ptr = (uint8_t*)(header + 1);
-                uint8_t* next_cursor = cursor + slot_size;
+        int cls = gc_object_zone_class_index(header->alloc_size);
+        if (cls < 0) return 0;
+        size_t class_size = gc_object_zone_class_size(cls);
+        size_t slot_size = sizeof(gc_header_t) + class_size;
+        uint8_t* user_ptr = (uint8_t*)(header + 1);
+        uint8_t* next_cursor = cursor + slot_size;
 
-                if (p == user_ptr) return 1;
-                if (p < next_cursor) return 0;
-                cursor = next_cursor;
-            }
-            return 0;
-        }
-        block = block->next;
+        if (p == user_ptr) return 1;
+        if (p < next_cursor) return 0;
+        cursor = next_cursor;
     }
     return 0;
 }
 
+// Exact-slot ownership test. Conservative data-word tracing feeds this
+// arbitrary words, so it must reject interior and misaligned addresses rather
+// than merely range-check them — hence the per-slot-start bitmap.
+static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    uint8_t* p = (uint8_t*)ptr;
+    if (p < gc->bump_min_addr || p >= gc->bump_max_addr) return 0;
+
+    // A user pointer sits one header past its slot start, so search by header.
+    uint8_t* h = p - sizeof(gc_header_t);
+    for (gc_bump_block_t* block = gc->bump_blocks; block; block = block->next) {
+        if (h < block->base || h >= block->base + block->size) continue;
+        if (!block->alloc_bits) return gc_bump_block_scan_exact(gc, block, p);
+        size_t off = (size_t)(h - block->base);
+        if (off % GC_BUMP_GRANULE) return 0;   // interior address, never a slot
+        size_t bit = off / GC_BUMP_GRANULE;
+        return (block->alloc_bits[bit >> 3] >> (bit & 7u)) & 1u;
+    }
+    return 0;
+}
+
+// check if a pointer is to a GC-managed OBJECT (has GCHeader)
 static int is_gc_object(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;

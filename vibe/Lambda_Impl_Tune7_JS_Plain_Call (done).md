@@ -13,7 +13,7 @@ R4.1–R4.4) as a phased plan.
 **Baseline assumptions (verified 2026-07-26 against the landed merges and
 Tune6 execution record):**
 
-1. **`vibe/Lambda_Impl_Merge_Stack.md` Merges A/B/C are COMPLETE and
+1. **`vibe/Lambda_Impl_Stack_Marge (done).md` Merges A/B/C are COMPLETE and
    performance-repaired.** Merge A's final form has **no per-call argument
    ABI at all**: each generated function reserves its maximum lexically
    overlapping argument arity as a **fixed suffix of its canonical side-root
@@ -68,7 +68,7 @@ post-merge baseline), test262 baseline (40,261) zero regressions,
 `make node-baseline` **no new failures vs the current honest baseline** (the
 absolute count is red with ~1,473 pre-Result12 compatibility defects exposed
 by the beforeExit exception-preservation fix — see
-`Lambda_Impl_Merge_Stack.md`; gate on the per-test pass/fail delta, not the
+`Lambda_Impl_Stack_Marge (done).md`; gate on the per-test pass/fail delta, not the
 count), MT7 emission budgets lifted only deliberately with dump diffs quoted.
 
 ---

@@ -11,7 +11,9 @@
 #include <string.h>
 
 // User data size classes (not including gc_header_t)
-static const size_t SIZE_CLASSES[GC_NUM_SIZE_CLASSES] = {16, 32, 48, 64, 96, 128, 256};
+static const size_t SIZE_CLASSES[GC_NUM_SIZE_CLASSES] = {
+    16, 32, 48, 64, 96, 128, 256, 384
+};
 
 // Slab configuration: number of slots per slab for each size class
 // Smaller objects get more slots per slab; larger objects fewer.
@@ -24,6 +26,7 @@ static const size_t SLOTS_PER_SLAB[GC_NUM_SIZE_CLASSES] = {
     128,    // 96B class: 128 * 112 = 14 KB per slab
     64,     // 128B class: 64 * 144 = 9 KB per slab
     32,     // 256B class: 32 * 272 = 8.5 KB per slab
+    32,     // 384B class: 32 * 400 = 12.5 KB per slab
 };
 
 // find the smallest size class that fits the requested size

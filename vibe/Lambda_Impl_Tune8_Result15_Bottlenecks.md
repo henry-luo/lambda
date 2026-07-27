@@ -92,7 +92,7 @@ Cross-cutting residue confirmed again: `js_intrinsic_note_property_mutation` (1.
 
 ## 3. What to do — ranked by measured ceiling
 
-1. **O(1) bump-block ownership test** (L-C′): per-block allocation bitmap or move constructor births into the size-class zone. Ceiling: hashmap's ~53% mark share ≈ gone (seconds → ms per collection); also trims every allocation-heavy row's collections. Small, mechanical, no semantics.
+1. **O(1) bump-block ownership test** (L-C′): per-block allocation bitmap or move constructor births into the size-class zone. Ceiling: hashmap's ~53% mark share ≈ gone (seconds → ms per collection); also trims every allocation-heavy row's collections. Small, mechanical, no semantics. — **POC built and measured 2026-07-27; ceiling confirmed, see §5.**
 2. **Stop stringifying numeric keys** (L-D′.1 + fast paths): keep number keys as Items through compound/update refs; add an integral fast path (`%lld`-free itoa) to `js_to_property_key`/`js_to_string`; replace `lambda_finite_double_to_shortest`'s search loop with a real shortest-double algorithm (Ryu/Grisu-class); arithmetic canonical check in `js_ta_key_canonical_numeric` (Result13 Tier-2 #4, still open). Ceiling: spectralnorm ~50%, navier ~15–25%, hashmap ~9%, havlak ~8%.
 3. **De-descriptor the array store slow path** (L-I): lightweight own-property probe (no Map materialization); hole-aware dense define fast path so first writes to `new Array(n)` slots stay native when the receiver is a plain dense array and canonical prototypes are accessor-clean (epoch flag); this also deletes most of hashmap's garbage generation. Ceiling: navier's 56% descriptor subtree; hashmap's store-side litter; shares of cd/havlak stores.
 4. **Dedicated [[Prototype]] slot** (L-B′): proto hops become pointer chases. Compounds with R2b on cd/havlak (their ~36–49% lookup chains have 18–24% rooted in proto resolution).
@@ -109,3 +109,32 @@ Sequencing note vs the Tune7 line: items 1–3 are runtime/GC-side and do not to
 - GC stats: `temp/prof15/hashmap_gcstats.log` (`__TIMING__:124837`, `mark_collections=9 mark_ms=92474.148`; wall 2x-contaminated, see caveat).
 - Key resolutions: hashmap hot cluster `0x102be7710..0x102be77a4` → `_gc_mark_item+0x318..0x3ac` (inlined `is_gc_object`/`gc_bump_block_owns_exact` scan); havlak/cd zone-alloc callers → JIT-emitted `js_new_closure`/`js_new_method_function` sites; navier store statics → `js_property_set_array` region (`_js_array_sparse_collect_indices+…` by nm bisection).
 - Benchmarks profiled exactly as the runner invokes them: `lambda.exe js temp/_ljs_jetstream_{hashmap,navier_stokes}.js`, `awfy/{havlak2,cd2}_bundle.js`, `beng/js/spectralnorm.js` (scaled copy `temp/prof15/spectralnorm_x20.js`).
+
+## 5. POC — O(1) bump-ownership bitmap (item 1), built and measured
+
+**Date:** 2026-07-27. **Diff:** `lambda/runtime/gc/gc_heap.{c,h}` (+ a warning comment in `transpile-mir.cpp`), ~100 lines. Both binaries built `make release` from the same source (HEAD `eca5fe446`, no commits between the two builds); baseline kept at `temp/prof15/lambda_base.exe`, patched at `temp/prof15/lambda_bitmap.exe`.
+
+**Change.** Each `gc_bump_block_t` carries an allocation-start bitmap — one bit per 16-byte granule, set in `gc_heap_bump_alloc` when a slot header is placed. Every bump slot is a 16-byte `gc_header_t` plus an object-zone size class (all classes are multiples of 16), so slot headers always land on a 16-byte granule from the block base and the bitmap is exact. `gc_bump_block_owns_exact` becomes: reject against new `gc->bump_{min,max}_addr` bounds → find the block → require 16-byte alignment → test one bit. Bits are never cleared, which is correct because sweep never recycles bump slots (dead ones only get `GC_FLAG_FREED` and stay addressable), so a set bit keeps meaning exactly what the old scan reported. Cost: `block_size/128` bytes (32 KB per 4 MB block) and one OR per allocation. The old replay scan is retained as `gc_bump_block_scan_exact` and used if a bitmap allocation ever fails, so the change is strictly an optimization.
+
+**Mechanism confirmed** (`LAMBDA_GC_STATS=1`, same workload, release):
+
+| | collections | mark time | wall |
+|---|---:|---:|---:|
+| base | 9 | **39,316 ms** | 64.4 s |
+| bitmap | 9 | **28.2 ms** | 24.9 s |
+
+Identical collection count — this is not fewer GCs, it is **1393× cheaper marking**, which is the L-C′ prediction exactly. Marking ~90 K live objects now costs ~3 ms per collection instead of ~4.4 s.
+
+**Interleaved A/B, jetstream/hashmap** (3 pairs): base 65.31 / 67.69 / 65.00 s → bitmap 25.58 / 25.42 / 24.96 s. Median **65.31 s → 25.42 s = 2.57× faster**; the row's LambdaJS/Node ratio drops from 1131x to roughly **440x**, and hashmap stops being the worst cell in the matrix.
+
+**Regression controls** (interleaved, medians): larceny/gcbench LJS 862 → 827 ms (−4%); larceny/gcbench MIR 291 → 294 ms; jetstream/splay MIR 51.2 → 51.4 ms; jetstream/splay LJS 51.2 → 51.1 ms; beng/binarytrees LJS 34.8 → 35.2 ms; awfy/cd LJS ~9.9 s both. All within ±2% except gcbench LJS, which improves. No regression on the allocation-heavy rows where the added per-allocation store would show.
+
+**Correctness.**
+- All 8 `test-gc-rooting-core` gates pass under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (collection at every allocation, dead payloads poisoned) — the strongest available check that no live bump slot is misreported as unmanaged.
+- `test_mir_gc_stress_gtest` (forced-GC corpus sweep): **25/25**. MIR emission + ratchet suites: **33/33** green, so no emission-budget movement.
+- `make test-lambda-baseline`: 1587 gtests, **17 failures — all pre-existing**, not caused by this change. Proof: every failing script was re-run directly against both saved release binaries and produced **byte-identical output and identical exit codes** on base and patched (`zlib_*` ×6 rc=1 both, `jube_{fs_permission,zlib_dynamic,zlib_parity}_registry` rc=1 both, `jube_console_minimal_formatter` and `number_model_bigint_fs_position_range` rc=0 both). The registry/zlib rows need Jube modules that `test-lambda-baseline` does not build; the formatter row is a `"%d 42"` vs `"42"` golden mismatch. None is GC-related.
+- hashmap's own in-benchmark result verification passes.
+
+**Latent bug found while validating (separate from this POC).** `transpile-mir.cpp`'s inline bump-allocation fast path (the "#10 + #11" optimization) uses stale `gc_heap_t` offsets: it reads `bump_cursor`/`bump_end` at 16/24, but `gc_large_set_t` (24 bytes) sits between `all_objects` and `bump_cursor`, so the real offsets are 40/48 and it actually loads `large_objects.{slots,capacity}`. A live `slots` pointer always exceeds a small `capacity` count, and `capacity` is 0 whenever `slots` is NULL, so the guard branch always falls through to the slow path — **the inline allocator has never executed**, which is the only reason the wrong offsets are harmless. This matters for the bitmap: whoever repairs the offsets must also set the owning block's `alloc_bits` bit inline, or the unrecorded slot will be swept while live. A warning comment now sits at that site.
+
+---

@@ -46,9 +46,23 @@ extern "C" {
 #endif
 
 // Helper function to execute a JavaScript file with lambda js and capture output
-char* execute_js_script(const char* script_path) {
-    const char* args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+static char* execute_js_script_configured(const char* script_path,
+        bool permission, const char* module_path) {
+    const char* args[7] = {LAMBDA_EXE, "js", script_path, NULL, NULL, NULL, NULL};
+    int arg_count = 3;
+    if (permission) args[arg_count++] = "--permission";
+    args[arg_count++] = "--no-log";
+    args[arg_count] = NULL;
+
+    ShellEnvEntry env[2] = {};
+    ShellOptions options = {};
+    if (module_path && module_path[0]) {
+        env[0].key = "JUBE_MODULE_PATH";
+        env[0].value = module_path;
+        options.env = env;
+    }
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args,
+        options.env ? &options : NULL);
     if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s\n",
                 shell_result.exit_code, script_path);
@@ -72,6 +86,10 @@ char* execute_js_script(const char* script_path) {
     }
 
     return full_output;
+}
+
+char* execute_js_script(const char* script_path) {
+    return execute_js_script_configured(script_path, false, NULL);
 }
 
 int execute_js_script_status(const char* script_path, char* output, size_t output_size) {
@@ -370,6 +388,8 @@ struct JsTestParam {
     std::string expected_path;
     std::string html_path;   // non-empty → DOM test (has matching .html)
     std::string test_name;   // sanitised for GTest (alphanumeric + underscore)
+    bool permission;         // true → execute with the permission sandbox enabled
+    char module_path[512];   // optional isolated Jube module profile
 };
 
 static bool js_baseline_excludes_library_test(const JsTestParam& test) {
@@ -384,27 +404,35 @@ static bool js_baseline_excludes_library_test(const JsTestParam& test) {
     return false;
 }
 
-static bool read_js_document_fixture(const char* script_path,
+static void read_js_test_metadata(const char* script_path, JsTestParam* test,
         char* fixture_name, size_t fixture_name_size) {
-    if (!script_path || !fixture_name || fixture_name_size == 0) return false;
+    if (!script_path || !test || !fixture_name || fixture_name_size == 0) return;
     fixture_name[0] = '\0';
     FILE* file = fopen(script_path, "r");
-    if (!file) return false;
+    if (!file) return;
     char line[512];
-    const char* prefix = "// @document ";
-    bool found = false;
+    const char* document_prefix = "// @document ";
+    const char* module_prefix = "// @test-module-path ";
     for (int line_count = 0; line_count < 8 && fgets(line, sizeof(line), file); line_count++) {
-        if (strncmp(line, prefix, strlen(prefix)) != 0) continue;
-        const char* value = line + strlen(prefix);
-        size_t value_len = strcspn(value, "\r\n");
-        if (value_len == 0 || value_len >= fixture_name_size) break;
-        memcpy(fixture_name, value, value_len);
-        fixture_name[value_len] = '\0';
-        found = true;
-        break;
+        if (strncmp(line, document_prefix, strlen(document_prefix)) == 0) {
+            const char* value = line + strlen(document_prefix);
+            size_t value_len = strcspn(value, "\r\n");
+            if (value_len > 0 && value_len < fixture_name_size) {
+                memcpy(fixture_name, value, value_len);
+                fixture_name[value_len] = '\0';
+            }
+        } else if (strncmp(line, "// @test-permission", 19) == 0) {
+            test->permission = true;
+        } else if (strncmp(line, module_prefix, strlen(module_prefix)) == 0) {
+            const char* value = line + strlen(module_prefix);
+            size_t value_len = strcspn(value, "\r\n");
+            if (value_len > 0 && value_len < sizeof(test->module_path)) {
+                memcpy(test->module_path, value, value_len);
+                test->module_path[value_len] = '\0';
+            }
+        }
     }
     fclose(file);
-    return found;
 }
 
 // Discover .js test files in a single directory (one level, no recursion).
@@ -441,7 +469,7 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
         std::string txt = dir_str + "/" + base + ".txt";
         if (access(txt.c_str(), F_OK) != 0) continue;
 
-        JsTestParam p;
+        JsTestParam p = {};
         p.script_path   = dir_str + "/" + name;
         p.expected_path  = txt;
 
@@ -451,14 +479,16 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
             if (!isalnum((unsigned char)c)) c = '_';
         }
 
+        char fixture_name[256] = {};
+        read_js_test_metadata(p.script_path.c_str(), &p,
+            fixture_name, sizeof(fixture_name));
+
         // matching .html → DOM test
         std::string html = dir_str + "/" + base + ".html";
         if (access(html.c_str(), F_OK) == 0) {
             p.html_path = html;
         } else {
-            char fixture_name[256];
-            if (read_js_document_fixture(p.script_path.c_str(), fixture_name,
-                    sizeof(fixture_name))) {
+            if (fixture_name[0]) {
                 char shared_html[1024];
                 int shared_len = snprintf(shared_html, sizeof(shared_html), "%s/%s",
                     dir_path, fixture_name);
@@ -537,7 +567,9 @@ public:
         auto all = discover_all_js_tests();
         std::vector<std::string> batch_scripts;
         for (const auto& t : all) {
-            if (t.html_path.empty()) {
+            // Batch workers share one CLI and environment; profile-sensitive
+            // scripts must run alone or they silently exercise the wrong host.
+            if (t.html_path.empty() && !t.permission && !t.module_path[0]) {
                 batch_scripts.push_back(t.script_path);
             }
         }
@@ -573,7 +605,8 @@ TEST_P(JsFileTest, Run) {
     // found-but-failed results below.
     auto it = batch_results.find(p.script_path);
     if (it == batch_results.end()) {
-        char* retry_output = execute_js_script(p.script_path.c_str());
+        char* retry_output = execute_js_script_configured(
+            p.script_path.c_str(), p.permission, p.module_path);
         ASSERT_NE(retry_output, nullptr)
             << "Script absent from batch results and retry execution failed: "
             << p.script_path;
@@ -606,7 +639,8 @@ TEST_P(JsFileTest, Run) {
     // crashes or exits through an unusual path, retry this script in a fresh
     // process before reporting a failure.
     if (br.status != 0 || strcmp(expected_output, actual.c_str()) != 0) {
-        char* retry_output = execute_js_script(p.script_path.c_str());
+        char* retry_output = execute_js_script_configured(
+            p.script_path.c_str(), p.permission, p.module_path);
         if (retry_output) {
             trim_trailing_whitespace(retry_output);
             if (strcmp(expected_output, retry_output) == 0) {

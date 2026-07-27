@@ -1274,6 +1274,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_set_prototype,
     js_promise_with_resolvers,
     jube_host_script_bigint_from_decimal,
+    bigint_to_int64_exact,
 };
 
 static const JubeHostDomAPI jube_host_dom_api = {
@@ -2972,6 +2973,11 @@ static int jube_host_value_kind(Item value) {
         case LMD_TYPE_VMAP: return JUBE_VALUE_OBJECT;
         case LMD_TYPE_FUNC: return JUBE_VALUE_FUNCTION;
         case LMD_TYPE_SYMBOL: return JUBE_VALUE_SYMBOL;
+        case LMD_TYPE_DECIMAL: {
+            Decimal* decimal = value.get_decimal();
+            return decimal && decimal->unlimited == DECIMAL_BIGINT
+                ? JUBE_VALUE_BIGINT : JUBE_VALUE_OTHER;
+        }
         default: return JUBE_VALUE_OTHER;
     }
 }

@@ -2970,9 +2970,12 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	fi
 	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
 	$(call run_make_with_error_summary,tests,debug_native,,all)
-	@# The debug "all" target also rebuilds lang-python; refresh its manifest
-	@# before restoring the release host so loader integrity never sees stale bytes.
-	@$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
+	@# The debug "all" target also rebuilds hosted modules; refresh every
+	@# manifest before restoring the release host. Otherwise a rebuilt Node DSO
+	@# retains its previous digest and all module-backed JS tests fail at load.
+	@for module_dir in modules/lang-python modules/node-core modules/node-fs modules/node-zlib; do \
+		$(PYTHON) utils/update_jube_manifest_integrity.py $$module_dir || exit 1; \
+	done
 	@# Restore release lambda.exe over the debug one
 	@if [ -f .lambda_build_backup.exe ]; then \
 		echo "Restoring release lambda.exe..."; \
