@@ -1083,6 +1083,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
 #define ITEM_TASK_SUSPENDED ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 2)  // internal resumable-call sentinel
+#define ITEM_JS_JUBE_LAZY_SENTINEL (((uint64_t)LMD_TYPE_INT << 56) | UINT64_C(0x004A5542454C5A))  // unresolved Jube global
 #define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
@@ -1172,6 +1173,7 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL >> 56)), "ITEM_N
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL_SPREADABLE >> 56)), "ITEM_NULL_SPREADABLE tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_UNDEFINED >> 56)), "ITEM_JS_UNDEFINED tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_TDZ >> 56)), "ITEM_JS_TDZ tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_JUBE_LAZY_SENTINEL >> 56)), "ITEM_JS_JUBE_LAZY_SENTINEL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56)), "ITEM_JS_DELETED_SENTINEL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56)), "ITEM_JS_ITER_DONE_SENTINEL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_INT >> 56)), "ITEM_INT tag must be non-double");

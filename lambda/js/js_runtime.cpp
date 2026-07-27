@@ -37,6 +37,7 @@ extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_object_keys(Item object);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" bool js_jube_resolve_lazy_global(Item object, Item key, Item* out_value);
 extern "C" void js_dom_event_handler_property_set(Item target,
                                                     const char* property_name,
                                                     int property_name_len,
@@ -4447,6 +4448,15 @@ extern "C" Item js_property_get(Item object, Item key) {
             Item recv = js_proxy_receiver;
             JsOwnGetStatus st = js_ordinary_get_own(object, key, recv, &ord_val);
             if (st == JS_OWN_READY) {
+                if (ord_val.item == ITEM_JS_JUBE_LAZY_SENTINEL) {
+                    Item lazy_value = ItemNull;
+                    // The placeholder is an ordinary data slot so reflection,
+                    // assignment, and own-key behavior remain unchanged.
+                    if (js_jube_resolve_lazy_global(object, key, &lazy_value)) {
+                        return lazy_value;
+                    }
+                    return make_js_undefined();
+                }
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* private_key = it2s(key);
                     if (private_key && private_key->len > 10 && strncmp(private_key->chars, "__private_", 10) == 0 &&
