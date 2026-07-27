@@ -224,16 +224,20 @@ static Item url_to_js_object(Url* url) {
 
     Item obj = js_new_object();
     JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 1)) return obj;
+    if (!node_url_roots_begin(&frame, 3)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    if (!object_root) {
+    uint64_t* params_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    if (!object_root || !params_root || !key_root) {
         node_url_host->node->roots->root_frame_end(&frame);
         return obj;
     }
     *object_root = obj.item;
+    *params_root = ItemNull.item;
+    *key_root = ItemNull.item;
 
     // T5b: legacy `__class_name__` string write retired.
-    node_url_host->script->class_stamp(obj, JUBE_SCRIPT_CLASS_URL);
+    node_url_host->script->class_stamp(node_url_root_value(object_root), JUBE_SCRIPT_CLASS_URL);
 
     const char* href = url_get_href(url);
     const char* origin_str = url_get_origin(url);
@@ -247,21 +251,21 @@ static Item url_to_js_object(Url* url) {
     const char* search = url_get_search(url);
     const char* hash = url_get_hash(url);
 
-    node_url_set_string_property(obj, "href", href);
-    node_url_set_string_property(obj, "origin", origin_str);
-    node_url_set_string_property(obj, "protocol", protocol);
-    node_url_set_string_property(obj, "username", username);
-    node_url_set_string_property(obj, "password", password);
-    node_url_set_string_property(obj, "host", host);
-    node_url_set_string_property(obj, "hostname", hostname);
-    node_url_set_string_property(obj, "port", port);
-    node_url_set_string_property(obj, "pathname", pathname);
-    node_url_set_string_property(obj, "search", search);
-    node_url_set_string_property(obj, "hash", hash);
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "href", href).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "origin", origin_str).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "protocol", protocol).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "username", username).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "password", password).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "host", host).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "hostname", hostname).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "port", port).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "pathname", pathname).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "search", search).item;
+    *object_root = node_url_set_string_property(node_url_root_value(object_root), "hash", hash).item;
 
     // searchParams — basic object (not full URLSearchParams)
     if (search && search[0] == '?' && search[1] != '\0') {
-        Item params = js_new_object();
+        *params_root = js_new_object().item;
         // parse query string into key-value pairs
         char query_buf[4096];
         int qlen = (int)strlen(search + 1);
@@ -274,27 +278,35 @@ static Item url_to_js_object(Url* url) {
             char* eq = strchr(pair, '=');
             if (eq) {
                 *eq = '\0';
-                js_property_set(params, make_string_item(pair), make_string_item(eq + 1));
+                *params_root = node_url_set_string_property(node_url_root_value(params_root),
+                    pair, eq + 1).item;
             } else {
-                js_property_set(params, make_string_item(pair), make_string_item(""));
+                *params_root = node_url_set_string_property(node_url_root_value(params_root),
+                    pair, "").item;
             }
             pair = strtok(NULL, "&");
         }
-        Item search_params_key = make_string_item("searchParams");
-        js_property_set(obj, search_params_key, params);
+        *key_root = make_string_item("searchParams").item;
+        node_url_host->value->property_set(node_url_root_value(object_root),
+            node_url_root_value(key_root), node_url_root_value(params_root));
         // searchParams is a per-instance wrapper; if enumerable, deep equality
         // compares wrapper identity instead of the URL's canonical href.
-        js_mark_non_enumerable(obj, search_params_key);
+        js_mark_non_enumerable(node_url_root_value(object_root), node_url_root_value(key_root));
     } else {
-        Item search_params_key = make_string_item("searchParams");
-        js_property_set(obj, search_params_key, js_new_object());
+        *params_root = js_new_object().item;
+        *key_root = make_string_item("searchParams").item;
+        // The outer roots stay authoritative after each property allocation;
+        // reusing the original local Item here lost URL fields under forced GC.
+        node_url_host->value->property_set(node_url_root_value(object_root),
+            node_url_root_value(key_root), node_url_root_value(params_root));
         // searchParams is a per-instance wrapper; if enumerable, deep equality
         // compares wrapper identity instead of the URL's canonical href.
-        js_mark_non_enumerable(obj, search_params_key);
+        js_mark_non_enumerable(node_url_root_value(object_root), node_url_root_value(key_root));
     }
 
+    Item result = node_url_root_value(object_root);
     node_url_host->node->roots->root_frame_end(&frame);
-    return obj;
+    return result;
 }
 
 static Item node_url_legacy_new(void);

@@ -55,6 +55,8 @@ typedef struct JubeHostAsyncAPI JubeHostAsyncAPI;
 typedef struct JubeHostBinaryAPI JubeHostBinaryAPI;
 typedef struct JubeHostStreamAPI JubeHostStreamAPI;
 typedef struct JubeHostNetworkAPI JubeHostNetworkAPI;
+typedef struct JubeHostNodeZlibAPI JubeHostNodeZlibAPI;
+typedef struct JubeHostFilesystemAPI JubeHostFilesystemAPI;
 typedef struct JubeBinaryView JubeBinaryView;
 
 // Native work callbacks operate only on module-owned POD state.  They never
@@ -1138,6 +1140,10 @@ struct JubeHostNodeErrorAPI {
     // Creates the existing Node coded Error form for compatibility leaves
     // whose error category is not a platform errno.
     Item (*throw_error_code)(void* session, const char* code, const char* message);
+    // Builds Node's code/errno/syscall network error from a host libuv status;
+    // a module never imports libuv merely to reproduce this observable shape.
+    Item (*throw_network_error)(void* session, int status, const char* syscall,
+                                const char* address, int port);
 };
 
 // This is intentionally the first Node async slice: it proves session-owned
@@ -1268,10 +1274,25 @@ struct JubeHostStreamAPI {
     uint32_t struct_size;
     Item (*file_read_stream_new)(Item path, Item options);
     Item (*file_write_stream_new)(Item path, Item options);
+    // TCP handles are host-owned opaque resources. A Node module may retain
+    // only the returned rid; no uv handle or loop pointer crosses this ABI.
+    int (*tcp_create)(void* session, Item owner, uint32_t* out_resource_id);
+    // Bind/address/fd adoption stay POD-only so the module owns the
+    // BoundSocket object while the host remains the platform socket owner.
+    int (*tcp_bind)(void* session, uint32_t resource_id, const char* address,
+                    int port, bool ipv6_only, bool reuse_port);
+    int (*tcp_address)(void* session, uint32_t resource_id,
+                       char* address, size_t address_size, int* out_port,
+                       int* out_family);
+    int (*tcp_fd)(void* session, uint32_t resource_id, int* out_fd);
+    int (*tcp_adopt_fd)(void* session, uint32_t resource_id, int* out_fd);
+    int (*resource_close)(void* session, uint32_t resource_id);
+    int (*resource_ref)(void* session, uint32_t resource_id, bool referenced);
+    bool (*resource_is_live)(void* session, uint32_t resource_id);
 };
 
-// Network policy affects host-owned connect scheduling, while node-net owns
-// the public Node setters/getters. The module never observes libuv handles.
+// Network policy and raw resolver operations stay host-owned, while node-net
+// owns public Node setters/getters. The module never observes libuv handles.
 struct JubeHostNetworkAPI {
     uint32_t api_version;
     uint32_t struct_size;
@@ -1284,6 +1305,202 @@ struct JubeHostNetworkAPI {
     bool (*permission_has_net)(void);
     Item (*permission_make_net_error)(void* session, const char* syscall,
                                       const char* resource);
+    // Platform resolver implementation remains host-owned; modules receive
+    // only plain strings and never import resolver or socket APIs themselves.
+    int (*ip_family)(const char* address);
+    bool (*lookup_sync)(const char* hostname, char* address, size_t address_size);
+};
+
+// Zlib stays statically linked with the host. Node modules receive only this
+// byte-oriented provider and cannot create a second codec dependency in a DSO.
+enum JubeNodeZlibCodecMode {
+    JUBE_NODE_ZLIB_GZIP,
+    JUBE_NODE_ZLIB_GUNZIP,
+    JUBE_NODE_ZLIB_DEFLATE,
+    JUBE_NODE_ZLIB_INFLATE,
+    JUBE_NODE_ZLIB_DEFLATE_RAW,
+    JUBE_NODE_ZLIB_INFLATE_RAW,
+    JUBE_NODE_ZLIB_UNZIP,
+};
+
+struct JubeNodeZlibResult {
+    uint8_t* data;
+    int length;
+    int status;
+};
+
+struct JubeHostNodeZlibAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    uint32_t (*crc32)(const uint8_t* data, int length, uint32_t seed);
+    bool (*codec)(enum JubeNodeZlibCodecMode mode, const uint8_t* data, int length,
+                  JubeNodeZlibResult* out_result);
+    void (*result_release)(JubeNodeZlibResult* result);
+};
+
+// The host owns filesystem implementation and platform descriptors. Node
+// modules keep only Node argument/error/callback semantics around these ops.
+enum JubeNodeFilesystemMode {
+    JUBE_NODE_FILESYSTEM_READ,
+    JUBE_NODE_FILESYSTEM_WRITE,
+    JUBE_NODE_FILESYSTEM_APPEND,
+};
+
+struct JubeNodeFilesystemReadWrite {
+    enum JubeNodeFilesystemMode mode;
+    const char* path;
+    const uint8_t* input;
+    size_t input_length;
+    uint8_t* output;
+    size_t output_length;
+    int error_number;
+    const char* error_syscall;
+};
+
+struct JubeNodeFilesystemCopy {
+    const char* source_path;
+    const char* destination_path;
+    int error_number;
+    const char* error_syscall;
+};
+
+enum JubeNodeFilesystemPathMode {
+    JUBE_NODE_FILESYSTEM_PATH_ACCESS,
+    JUBE_NODE_FILESYSTEM_PATH_CHMOD,
+    JUBE_NODE_FILESYSTEM_PATH_UNLINK,
+    JUBE_NODE_FILESYSTEM_PATH_RMDIR,
+    JUBE_NODE_FILESYSTEM_PATH_RENAME,
+    JUBE_NODE_FILESYSTEM_PATH_MKDIR,
+    JUBE_NODE_FILESYSTEM_PATH_TRUNCATE,
+    JUBE_NODE_FILESYSTEM_PATH_RM,
+    JUBE_NODE_FILESYSTEM_PATH_LINK,
+    JUBE_NODE_FILESYSTEM_PATH_SYMLINK,
+    JUBE_NODE_FILESYSTEM_PATH_CHOWN,
+    JUBE_NODE_FILESYSTEM_PATH_LCHOWN,
+    JUBE_NODE_FILESYSTEM_PATH_LCHMOD,
+};
+
+// Simple path operations deliberately carry only POD. The module owns Node's
+// argument and permission semantics; the host owns platform syscalls.
+struct JubeNodeFilesystemPathOperation {
+    enum JubeNodeFilesystemPathMode mode;
+    const char* path;
+    const char* secondary_path;
+    int64_t numeric_value;
+    int64_t secondary_numeric_value;
+    bool recursive;
+    int error_number;
+    const char* error_syscall;
+};
+
+enum JubeNodeFilesystemStringMode {
+    JUBE_NODE_FILESYSTEM_STRING_REALPATH,
+    JUBE_NODE_FILESYSTEM_STRING_MKDTEMP,
+    JUBE_NODE_FILESYSTEM_STRING_READLINK,
+};
+
+struct JubeNodeFilesystemStringOperation {
+    enum JubeNodeFilesystemStringMode mode;
+    const char* path;
+    char* output;
+    size_t output_length;
+    int error_number;
+    const char* error_syscall;
+};
+
+struct JubeNodeFilesystemDirectoryOperation {
+    const char* path;
+    char** entries;
+    size_t entry_count;
+    int error_number;
+    const char* error_syscall;
+};
+
+enum JubeNodeFilesystemDescriptorMode {
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_OPEN,
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE,
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_FCHMOD,
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_READ,
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_WRITE,
+    JUBE_NODE_FILESYSTEM_DESCRIPTOR_FCHOWN,
+};
+
+struct JubeNodeFilesystemDescriptorOperation {
+    enum JubeNodeFilesystemDescriptorMode mode;
+    const char* path;
+    int descriptor;
+    int flags;
+    int mode_value;
+    int secondary_mode_value;
+    uint8_t* bytes;
+    size_t byte_length;
+    int64_t position;
+    size_t transferred;
+    int error_number;
+    const char* error_syscall;
+};
+
+struct JubeNodeFilesystemMetadata {
+    uint64_t mode;
+    uint64_t size;
+    uint64_t ino;
+    uint64_t nlink;
+    uint64_t dev;
+    uint64_t uid;
+    uint64_t gid;
+    uint64_t rdev;
+    uint64_t blksize;
+    uint64_t blocks;
+    int64_t atime_millis;
+    int64_t mtime_millis;
+    int64_t ctime_millis;
+    int64_t birthtime_millis;
+};
+
+enum JubeNodeFilesystemMetadataMode {
+    JUBE_NODE_FILESYSTEM_METADATA_STAT,
+    JUBE_NODE_FILESYSTEM_METADATA_LSTAT,
+    JUBE_NODE_FILESYSTEM_METADATA_FSTAT,
+};
+
+struct JubeNodeFilesystemMetadataOperation {
+    enum JubeNodeFilesystemMetadataMode mode;
+    const char* path;
+    int descriptor;
+    JubeNodeFilesystemMetadata value;
+    int error_number;
+    const char* error_syscall;
+};
+
+struct JubeNodeFilesystemStatfsOperation {
+    const char* path;
+    uint64_t type;
+    uint64_t bsize;
+    uint64_t frsize;
+    uint64_t blocks;
+    uint64_t bfree;
+    uint64_t bavail;
+    uint64_t files;
+    uint64_t ffree;
+    int error_number;
+    const char* error_syscall;
+};
+
+struct JubeHostFilesystemAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    bool (*read_write)(JubeNodeFilesystemReadWrite* operation);
+    void (*read_write_release)(JubeNodeFilesystemReadWrite* operation);
+    // Appended so older filesystem consumers retain their released prefix.
+    bool (*copy_file)(JubeNodeFilesystemCopy* operation);
+    bool (*path_operation)(JubeNodeFilesystemPathOperation* operation);
+    bool (*string_operation)(JubeNodeFilesystemStringOperation* operation);
+    void (*string_operation_release)(JubeNodeFilesystemStringOperation* operation);
+    bool (*directory_read)(JubeNodeFilesystemDirectoryOperation* operation);
+    void (*directory_read_release)(JubeNodeFilesystemDirectoryOperation* operation);
+    bool (*descriptor_operation)(JubeNodeFilesystemDescriptorOperation* operation);
+    bool (*metadata_operation)(JubeNodeFilesystemMetadataOperation* operation);
+    bool (*statfs_operation)(JubeNodeFilesystemStatfsOperation* operation);
 };
 
 struct JubeHostNodeAPI {
@@ -1303,6 +1520,10 @@ struct JubeHostNodeAPI {
     const JubeHostStreamAPI* streams;
     // Additive network-policy tail consumed by node-net.
     const JubeHostNetworkAPI* network;
+    // Additive static-host codec provider consumed by node-zlib.
+    const JubeHostNodeZlibAPI* zlib;
+    // Additive static-host filesystem provider consumed by node-fs.
+    const JubeHostFilesystemAPI* filesystem;
 };
 
 struct JubeHostAPI {
@@ -1504,6 +1725,11 @@ struct JubeModuleDef {
     void (*runtime_attach)(void* session);
     void (*runtime_reset_session)(void* session);
     void (*runtime_detach)(void* session);
+
+    // Mirrors the manifest dependency edges for statically linked profiles,
+    // where no manifest loader exists to establish activation order.
+    const char* const* dependencies;
+    int32_t dependency_count;
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

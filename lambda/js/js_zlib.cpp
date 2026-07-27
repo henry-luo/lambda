@@ -12,7 +12,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
-#include "../module/node_zlib/node_zlib_codec.hpp"
+#include "js_zlib_codec.hpp"
 
 #include <climits>
 #include <cstdio>

@@ -1,4 +1,4 @@
-#include "node_zlib_codec.hpp"
+#include "js_zlib_codec.hpp"
 
 #include <limits.h>
 #include <stdlib.h>

@@ -1,7 +1,6 @@
 #include "../../jube/jube_registry.h"
 #include "node_path.hpp"
 #include "node_constants.hpp"
-#include "node_events.hpp"
 #include "node_os.hpp"
 #include "node_perf_hooks.hpp"
 #include "node_process.hpp"
@@ -10,7 +9,6 @@
 #include "node_string_decoder.hpp"
 #include "node_timers.hpp"
 #include "node_tty.hpp"
-#include "node_url.hpp"
 #include "node_v8.hpp"
 #include "node_workers.hpp"
 
@@ -37,14 +35,6 @@ static Item node_core_querystring_namespace(void) {
 
 static Item node_core_os_namespace(void) {
     return node_os_namespace();
-}
-
-static Item node_core_url_namespace(void) {
-    return node_url_namespace();
-}
-
-static Item node_core_events_namespace(void) {
-    return node_events_namespace();
 }
 
 static Item node_core_punycode_namespace(void) {
@@ -80,6 +70,18 @@ static Item node_core_host_namespace(const char* specifier) {
         return ItemNull;
     }
     return module_namespace;
+}
+
+static Item node_core_url_namespace(void) {
+    // URL constructors also back the global URL surface, so the host owns one
+    // identity-stable primitive while this descriptor controls Node exposure.
+    return node_core_host_namespace("url");
+}
+
+static Item node_core_events_namespace(void) {
+    // Readline emits through the host EventEmitter primitive; resolving this
+    // namespace through the same service prevents a second event-class copy.
+    return node_core_host_namespace("events");
 }
 
 static Item node_core_module_namespace(void) {
@@ -517,24 +519,7 @@ static int node_core_init(const JubeHostAPI* host) {
         node_path_shutdown();
         return -1;
     }
-    if (node_url_init(host) != 0) {
-        node_os_shutdown();
-        node_querystring_shutdown();
-        node_string_decoder_shutdown();
-        node_path_shutdown();
-        return -1;
-    }
-    if (node_events_init(host) != 0) {
-        node_url_shutdown();
-        node_os_shutdown();
-        node_querystring_shutdown();
-        node_string_decoder_shutdown();
-        node_path_shutdown();
-        return -1;
-    }
     if (node_punycode_init(host) != 0) {
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -543,8 +528,6 @@ static int node_core_init(const JubeHostAPI* host) {
     }
     if (node_timers_init(host) != 0) {
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -554,8 +537,6 @@ static int node_core_init(const JubeHostAPI* host) {
     if (node_constants_init(host) != 0) {
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -566,8 +547,6 @@ static int node_core_init(const JubeHostAPI* host) {
         node_constants_shutdown();
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -579,8 +558,6 @@ static int node_core_init(const JubeHostAPI* host) {
         node_constants_shutdown();
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -593,8 +570,6 @@ static int node_core_init(const JubeHostAPI* host) {
         node_constants_shutdown();
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -608,8 +583,6 @@ static int node_core_init(const JubeHostAPI* host) {
         node_constants_shutdown();
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -624,8 +597,6 @@ static int node_core_init(const JubeHostAPI* host) {
         node_constants_shutdown();
         node_timers_shutdown();
         node_punycode_shutdown();
-        node_events_shutdown();
-        node_url_shutdown();
         node_os_shutdown();
         node_querystring_shutdown();
         node_string_decoder_shutdown();
@@ -644,8 +615,6 @@ static void node_core_shutdown(void) {
     node_constants_shutdown();
     node_timers_shutdown();
     node_punycode_shutdown();
-    node_events_shutdown();
-    node_url_shutdown();
     node_os_shutdown();
     node_querystring_shutdown();
     node_string_decoder_shutdown();
@@ -665,8 +634,6 @@ static void node_core_runtime_attach(void* session) {
     node_string_decoder_runtime_attach(session);
     node_querystring_runtime_attach(session);
     node_os_runtime_attach(session);
-    node_url_runtime_attach(session);
-    node_events_runtime_attach(session);
     node_punycode_runtime_attach(session);
     node_timers_runtime_attach(session);
     node_constants_runtime_attach(session);
@@ -688,8 +655,6 @@ static void node_core_runtime_reset(void* session) {
     node_string_decoder_runtime_reset(session);
     node_querystring_runtime_reset(session);
     node_os_runtime_reset(session);
-    node_url_runtime_reset(session);
-    node_events_runtime_reset(session);
     node_punycode_runtime_reset(session);
     node_timers_runtime_reset(session);
     node_constants_runtime_reset(session);
@@ -705,8 +670,6 @@ static void node_core_runtime_detach(void* session) {
     node_string_decoder_runtime_detach(session);
     node_querystring_runtime_detach(session);
     node_os_runtime_detach(session);
-    node_url_runtime_detach(session);
-    node_events_runtime_detach(session);
     node_punycode_runtime_detach(session);
     node_timers_runtime_detach(session);
     node_constants_runtime_detach(session);

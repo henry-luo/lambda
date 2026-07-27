@@ -9,15 +9,6 @@
 #include "jube/jube_interface.h"
 #include "jube/jube_language.h"
 #include "jube/jube_registry.h"
-#if defined(LAMBDA_NODE_CORE_STATIC_LINKED)
-#include "module/node_core/node_core_module.hpp"
-#endif
-#if defined(LAMBDA_NODE_FS_STATIC_LINKED)
-#include "module/node_fs/node_fs_module.hpp"
-#endif
-#if defined(LAMBDA_NODE_NET_STATIC_LINKED)
-#include "module/node_net/node_net_module.hpp"
-#endif
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
@@ -1856,28 +1847,6 @@ int main(int argc, char *argv[]) {
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
     jube_set_host_executable_path(argc > 0 ? argv[0] : NULL);
-#if defined(LAMBDA_NODE_CORE_STATIC_LINKED)
-    if (jube_node_core_module_enabled()) {
-        // Node-core objects exist only in the full executable; keeping this
-        // registration here preserves boundary-DSO source-closure checks.
-        node_core_jube_register_static();
-    }
-#endif
-#if defined(LAMBDA_NODE_FS_STATIC_LINKED)
-    if (jube_node_module_enabled("node-fs")) {
-        // node-fs depends on node-core's active profile but owns the fs
-        // descriptor, so register it after the core compatibility module.
-        node_fs_jube_register_static();
-    }
-#endif
-#if defined(LAMBDA_NODE_NET_STATIC_LINKED)
-    if (jube_node_module_enabled("node-net")) {
-        // node-net owns the public net/dns descriptors while its libuv
-        // implementation is progressively moved behind stream services.
-        node_net_jube_register_static();
-    }
-#endif
-
     // Strip --no-log before reading log.conf. Batch workers share the working
     // directory, so even briefly opening configured outputs races on log.txt.
     bool no_log = false;

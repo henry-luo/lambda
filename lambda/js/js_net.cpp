@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_host_hooks.h"
+#include "js_network_service.h"
 #include "../jube/jube_registry.h"
 #include "js_class.h"
 #include "js_permission.h"
@@ -2511,6 +2512,44 @@ static int bound_socket_dup_fd(JsBoundSocket* bound) {
 #endif
 }
 
+static bool bound_socket_jube_resource_id(Item self, uint32_t* out_resource_id) {
+    if (!net_is_object_like(self)) return false;
+    Item resource_item = js_property_get(self,
+        make_string_item("__jube_bound_socket_resource_id__"));
+    int64_t resource_id = 0;
+    if (!net_item_to_integral_int64(resource_item, &resource_id) || resource_id <= 0 ||
+            resource_id > UINT32_MAX) return false;
+    if (out_resource_id) *out_resource_id = (uint32_t)resource_id;
+    return true;
+}
+
+static bool bound_socket_is_jube_object(Item self) {
+    return net_is_object_like(self) && js_is_truthy(js_property_get(self,
+        make_string_item("__jube_bound_socket__")));
+}
+
+static bool bound_socket_jube_is_adopted(Item self) {
+    return net_is_object_like(self) && js_is_truthy(js_property_get(self,
+        make_string_item("__jube_bound_socket_adopted__")));
+}
+
+static int bound_socket_item_dup_fd(Item self) {
+    JsBoundSocket* bound = bound_socket_from_item(self);
+    if (bound) return bound_socket_dup_fd(bound);
+    uint32_t resource_id = 0;
+    if (!bound_socket_jube_resource_id(self, &resource_id)) return -1;
+    void* session = jube_node_runtime_current_session();
+    int descriptor = -1;
+    if (!session || js_node_stream_tcp_adopt_fd(session, resource_id, &descriptor) != 0) return -1;
+    // The host service consumed this rid while duplicating the descriptor; the
+    // module-visible marker prevents a second listener from adopting it again.
+    js_property_set(self, make_string_item("__jube_bound_socket_resource_id__"),
+        make_undefined_item());
+    js_property_set(self, make_string_item("__jube_bound_socket_adopted__"),
+        (Item){.item = ITEM_TRUE});
+    return descriptor;
+}
+
 static Item js_bound_socket_address(void) {
     Item self = js_get_this();
     JsBoundSocket* bound = bound_socket_from_item(self);
@@ -4778,11 +4817,13 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     bool listen_signal_aborted = false;
 
     JsBoundSocket* bound_listen = bound_socket_from_item(port_item);
-    if (bound_listen) {
-        if (bound_listen->closed || bound_listen->adopted) {
+    bool jube_bound_listen = bound_socket_is_jube_object(port_item);
+    if (bound_listen || jube_bound_listen) {
+        if ((bound_listen && (bound_listen->closed || bound_listen->adopted)) ||
+                (jube_bound_listen && bound_socket_jube_is_adopted(port_item))) {
             return bound_socket_throw_adopted();
         }
-        int fd = bound_socket_dup_fd(bound_listen);
+        int fd = bound_socket_item_dup_fd(port_item);
         if (fd < 0) {
             Item err = make_uv_error(UV_EBADF, "listen", NULL, -1);
             server_schedule_error(self, err);
@@ -5331,8 +5372,13 @@ extern "C" Item js_net_Socket(Item options) {
         get_type_id(options) == LMD_TYPE_VMAP) {
         bound_handle = js_property_get(options, make_string_item("handle"));
         JsBoundSocket* bound = bound_socket_from_item(bound_handle);
-        if (bound) {
-            int fd = bound_socket_dup_fd(bound);
+        bool jube_bound = bound_socket_is_jube_object(bound_handle);
+        if (bound || jube_bound) {
+            if (jube_bound && bound_socket_jube_is_adopted(bound_handle)) {
+                mem_free(sock);
+                return bound_socket_throw_adopted();
+            }
+            int fd = bound_socket_item_dup_fd(bound_handle);
             if (fd < 0 || uv_tcp_open(&sock->tcp, (uv_os_sock_t)fd) != 0) {
 #ifndef _WIN32
                 if (fd >= 0) close(fd);

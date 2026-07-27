@@ -6,7 +6,6 @@
  * Jube value/binary boundary.
  */
 #include "../../jube/jube.h"
-#include "node_zlib_codec.hpp"
 
 #include <cstring>
 #include <math.h>
@@ -137,19 +136,24 @@ static Item node_zlib_crc32(Item data_item, Item seed_item) {
         node_zlib_host->node->roots->root_frame_end(&frame);
         return node_zlib_throw_input_error(input_status);
     }
-    uint32_t result = node_zlib_crc32_bytes(bytes, length, seed);
+    const JubeHostNodeZlibAPI* zlib = node_zlib_host->node->zlib;
+    if (!zlib || !zlib->crc32) {
+        node_zlib_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    uint32_t result = zlib->crc32(bytes, length, seed);
     node_zlib_host->node->roots->root_frame_end(&frame);
     return (Item){.item = i2it((int64_t)result)};
 }
 
-typedef bool (*NodeZlibSyncCodec)(const uint8_t* data, int length, NodeZlibBytes* out_bytes);
-
-static Item node_zlib_sync_transform(Item data_item, NodeZlibSyncCodec codec,
+static Item node_zlib_sync_transform(Item data_item, enum JubeNodeZlibCodecMode mode,
                                      const char* method, const char* failure_message) {
     if (!node_zlib_host || !node_zlib_host->node || !node_zlib_host->node->binary ||
-            !node_zlib_session || !codec) return ItemNull;
+            !node_zlib_host->node->zlib || !node_zlib_session) return ItemNull;
     const JubeHostBinaryAPI* binary = node_zlib_host->node->binary;
-    if (!binary->buffer_alloc || !binary->buffer_prepare_write) return ItemNull;
+    const JubeHostNodeZlibAPI* zlib = node_zlib_host->node->zlib;
+    if (!binary->buffer_alloc || !binary->buffer_prepare_write || !zlib->codec ||
+            !zlib->result_release) return ItemNull;
     JubeRootFrame frame = {};
     if (!node_zlib_root_frame(&frame, 4)) return ItemNull;
     const uint8_t* bytes = NULL;
@@ -159,8 +163,8 @@ static Item node_zlib_sync_transform(Item data_item, NodeZlibSyncCodec codec,
         node_zlib_host->node->roots->root_frame_end(&frame);
         return node_zlib_throw_input_error(input_status);
     }
-    NodeZlibBytes transformed = {};
-    if (!codec(bytes, length, &transformed)) {
+    JubeNodeZlibResult transformed = {};
+    if (!zlib->codec(mode, bytes, length, &transformed)) {
         node_zlib_host->node->roots->root_frame_end(&frame);
         if (node_zlib_host->node->error && node_zlib_host->node->error->throw_zlib_error) {
             return node_zlib_host->node->error->throw_zlib_error(node_zlib_session, method,
@@ -170,7 +174,7 @@ static Item node_zlib_sync_transform(Item data_item, NodeZlibSyncCodec codec,
     }
     uint64_t* output_root = node_zlib_host->node->roots->root_frame_take_slot(&frame);
     if (!output_root) {
-        node_zlib_bytes_free(&transformed);
+        zlib->result_release(&transformed);
         node_zlib_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
@@ -178,54 +182,54 @@ static Item node_zlib_sync_transform(Item data_item, NodeZlibSyncCodec codec,
     *output_root = output.item;
     uint8_t* output_bytes = binary->buffer_prepare_write((Item){.item = *output_root});
     if (transformed.length > 0 && !output_bytes) {
-        node_zlib_bytes_free(&transformed);
+        zlib->result_release(&transformed);
         node_zlib_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
     if (transformed.length > 0) memcpy(output_bytes, transformed.data, (size_t)transformed.length);
-    node_zlib_bytes_free(&transformed);
+    zlib->result_release(&transformed);
     output = (Item){.item = *output_root};
     node_zlib_host->node->roots->root_frame_end(&frame);
     return output;
 }
 
 static Item node_zlib_gzip_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_gzip_encode, "gzip",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_GZIP, "gzip",
                                     "gzip compression failed");
 }
 
 static Item node_zlib_gunzip_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_gunzip_decode, "gunzip",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_GUNZIP, "gunzip",
                                     "gzip decompression failed");
 }
 
 static Item node_zlib_deflate_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_deflate_encode, "deflate",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_DEFLATE, "deflate",
                                     "deflate compression failed");
 }
 
 static Item node_zlib_inflate_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_inflate_decode, "inflate",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_INFLATE, "inflate",
                                     "deflate decompression failed");
 }
 
 static Item node_zlib_deflate_raw_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_deflate_raw_encode, "deflateRaw",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_DEFLATE_RAW, "deflateRaw",
                                     "raw deflate compression failed");
 }
 
 static Item node_zlib_inflate_raw_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_inflate_raw_decode, "inflateRaw",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_INFLATE_RAW, "inflateRaw",
                                     "raw deflate decompression failed");
 }
 
 static Item node_zlib_unzip_sync(Item data_item) {
-    return node_zlib_sync_transform(data_item, node_zlib_unzip_decode, "unzip",
+    return node_zlib_sync_transform(data_item, JUBE_NODE_ZLIB_UNZIP, "unzip",
                                     "compressed data decompression failed");
 }
 
 static Item node_zlib_callback_transform(Item data_item, Item options_item, Item callback_item,
-                                         NodeZlibSyncCodec codec, const char* method,
+                                         enum JubeNodeZlibCodecMode mode, const char* method,
                                          const char* failure_message) {
     if (!node_zlib_host || !node_zlib_host->node || !node_zlib_host->node->async_ops ||
             !node_zlib_host->value || !node_zlib_host->value->kind ||
@@ -249,7 +253,7 @@ static Item node_zlib_callback_transform(Item data_item, Item options_item, Item
     *callback_root = callback_item.item;
     *error_root = ItemNull.item;
     *result_root = ITEM_JS_UNDEFINED;
-    Item result = node_zlib_sync_transform(data_item, codec, method, failure_message);
+    Item result = node_zlib_sync_transform(data_item, mode, method, failure_message);
     if (result.item == ItemNull.item) {
         if (node_zlib_host->script && node_zlib_host->script->check_exception &&
                 node_zlib_host->script->clear_exception && node_zlib_host->script->check_exception()) {
@@ -268,18 +272,18 @@ static Item node_zlib_callback_transform(Item data_item, Item options_item, Item
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-#define NODE_ZLIB_CALLBACK_WRAPPER(name, codec, method, message) \
+#define NODE_ZLIB_CALLBACK_WRAPPER(name, mode, method, message) \
     static Item name(Item data_item, Item options_item, Item callback_item) { \
-        return node_zlib_callback_transform(data_item, options_item, callback_item, codec, method, message); \
+        return node_zlib_callback_transform(data_item, options_item, callback_item, mode, method, message); \
     }
 
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_gzip, node_zlib_gzip_encode, "gzip", "gzip compression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_gunzip, node_zlib_gunzip_decode, "gunzip", "gzip decompression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_deflate, node_zlib_deflate_encode, "deflate", "deflate compression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_inflate, node_zlib_inflate_decode, "inflate", "deflate decompression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_deflate_raw, node_zlib_deflate_raw_encode, "deflateRaw", "raw deflate compression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_inflate_raw, node_zlib_inflate_raw_decode, "inflateRaw", "raw deflate decompression failed")
-NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_unzip, node_zlib_unzip_decode, "unzip", "compressed data decompression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_gzip, JUBE_NODE_ZLIB_GZIP, "gzip", "gzip compression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_gunzip, JUBE_NODE_ZLIB_GUNZIP, "gunzip", "gzip decompression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_deflate, JUBE_NODE_ZLIB_DEFLATE, "deflate", "deflate compression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_inflate, JUBE_NODE_ZLIB_INFLATE, "inflate", "deflate decompression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_deflate_raw, JUBE_NODE_ZLIB_DEFLATE_RAW, "deflateRaw", "raw deflate compression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_inflate_raw, JUBE_NODE_ZLIB_INFLATE_RAW, "inflateRaw", "raw deflate decompression failed")
+NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_unzip, JUBE_NODE_ZLIB_UNZIP, "unzip", "compressed data decompression failed")
 
 #undef NODE_ZLIB_CALLBACK_WRAPPER
 
@@ -346,13 +350,15 @@ static Item node_zlib_namespace(void) {
 
 static int node_zlib_init(const JubeHostAPI* host) {
     if (!host || !host->node || !host->node->runtime || !host->node->roots || !host->value ||
-            !host->script || !host->node->binary || !host->node->error ||
+            !host->script || !host->node->binary || !host->node->error || !host->node->zlib ||
             !host->node->async_ops ||
             host->node->binary->struct_size < sizeof(JubeHostBinaryAPI) ||
             host->node->error->struct_size < sizeof(JubeHostNodeErrorAPI) ||
+            host->node->zlib->struct_size < sizeof(JubeHostNodeZlibAPI) ||
             host->node->async_ops->struct_size < sizeof(JubeHostAsyncAPI) ||
             !host->node->binary->buffer_alloc || !host->node->binary->buffer_prepare_write ||
             !host->node->error->throw_zlib_error ||
+            !host->node->zlib->crc32 || !host->node->zlib->codec || !host->node->zlib->result_release ||
             !host->node->async_ops->next_tick_callback ||
             !host->script->check_exception || !host->script->clear_exception) return -1;
     node_zlib_host = host;
@@ -403,6 +409,8 @@ static const JubeModuleRequirements node_zlib_requirements = {
     sizeof(JubeHostRootAPI),
 };
 
+static const char* const node_zlib_dependencies[] = { "node-core" };
+
 static const JubeModuleDef node_zlib_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
@@ -429,6 +437,8 @@ static const JubeModuleDef node_zlib_module = {
     node_zlib_runtime_attach,
     node_zlib_runtime_reset,
     node_zlib_runtime_detach,
+    node_zlib_dependencies,
+    1,
 };
 
 extern "C" const JubeModuleDef* jube_module(void) { return &node_zlib_module; }

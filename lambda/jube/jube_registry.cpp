@@ -13,6 +13,11 @@
 #include "../js/js_permission.h"
 #include "../js/js_typed_array.h"
 #include "../js/js_state_guards.h"
+#include "../js/js_fs_service.h"
+#include "../js/js_network_service.h"
+#include "../js/js_zlib_codec.hpp"
+#include "../module/node_core/node_events.hpp"
+#include "../module/node_core/node_url.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/side_stack.h"
@@ -162,6 +167,8 @@ struct JubeNodeResource {
     uint32_t id;
     Item value;
     const char* kind;
+    JubeNodeResourceCloseCallback close_callback;
+    void* close_user;
 };
 
 struct JubeNodeResourceSlot {
@@ -691,6 +698,8 @@ static Item jube_host_node_throw_system_error(void* session, const char* syscall
                                               int error_number);
 static Item jube_host_node_throw_error_code(void* session, const char* code,
                                             const char* message);
+static Item jube_host_node_throw_network_error(void* session, int status, const char* syscall,
+                                               const char* address, int port);
 static bool jube_host_node_network_permission_has_net(void);
 static Item jube_host_node_network_permission_make_error(void* session, const char* syscall,
                                                           const char* resource);
@@ -708,6 +717,10 @@ static uint8_t* jube_host_node_typed_array_data(Item value);
 static int jube_host_node_typed_array_length(Item value);
 static Item jube_host_node_buffer_from_bytes(const uint8_t* data, int length);
 static Item jube_host_node_buffer_alloc(int length);
+static uint32_t jube_host_node_zlib_crc32(const uint8_t* data, int length, uint32_t seed);
+static bool jube_host_node_zlib_codec(enum JubeNodeZlibCodecMode mode, const uint8_t* data,
+                                      int length, JubeNodeZlibResult* out_result);
+static void jube_host_node_zlib_result_release(JubeNodeZlibResult* result);
 static uint8_t* jube_host_node_buffer_prepare_write(Item value);
 static bool jube_host_node_is_buffer(Item value);
 static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_view);
@@ -1118,6 +1131,7 @@ static const JubeHostNodeErrorAPI jube_host_node_error_api = {
     jube_host_node_throw_zlib_error,
     jube_host_node_throw_system_error,
     jube_host_node_throw_error_code,
+    jube_host_node_throw_network_error,
 };
 
 static const JubeHostAsyncAPI jube_host_node_async_api = {
@@ -1191,6 +1205,14 @@ static const JubeHostStreamAPI jube_host_node_stream_api = {
     sizeof(JubeHostStreamAPI),
     js_fs_createReadStream,
     js_fs_createWriteStream,
+    js_node_stream_tcp_create,
+    js_node_stream_tcp_bind,
+    js_node_stream_tcp_address,
+    js_node_stream_tcp_fd,
+    js_node_stream_tcp_adopt_fd,
+    js_node_stream_resource_close,
+    js_node_stream_resource_ref,
+    js_node_stream_resource_is_live,
 };
 
 static const JubeHostNetworkAPI jube_host_node_network_api = {
@@ -1202,6 +1224,32 @@ static const JubeHostNetworkAPI jube_host_node_network_api = {
     js_net_default_auto_select_family_timeout_set,
     jube_host_node_network_permission_has_net,
     jube_host_node_network_permission_make_error,
+    js_node_network_ip_family,
+    js_node_network_lookup_sync,
+};
+
+static const JubeHostNodeZlibAPI jube_host_node_zlib_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodeZlibAPI),
+    jube_host_node_zlib_crc32,
+    jube_host_node_zlib_codec,
+    jube_host_node_zlib_result_release,
+};
+
+static const JubeHostFilesystemAPI jube_host_filesystem_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostFilesystemAPI),
+    js_node_fs_read_write,
+    js_node_fs_read_write_release,
+    js_node_fs_copy_file,
+    js_node_fs_path_operation,
+    js_node_fs_string_operation,
+    js_node_fs_string_operation_release,
+    js_node_fs_directory_read,
+    js_node_fs_directory_read_release,
+    js_node_fs_descriptor_operation,
+    js_node_fs_metadata_operation,
+    js_node_fs_statfs_operation,
 };
 
 static const JubeHostNodeAPI jube_host_node_api = {
@@ -1218,6 +1266,8 @@ static const JubeHostNodeAPI jube_host_node_api = {
     &jube_host_node_permission_api,
     &jube_host_node_stream_api,
     &jube_host_node_network_api,
+    &jube_host_node_zlib_api,
+    &jube_host_filesystem_api,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -3203,6 +3253,55 @@ static Item jube_host_node_throw_zlib_error(void* session, const char* method, i
     return js_zlib_throw_error_status(method, status);
 }
 
+static uint32_t jube_host_node_zlib_crc32(const uint8_t* data, int length, uint32_t seed) {
+    return node_zlib_crc32_bytes(data, length, seed);
+}
+
+static bool jube_host_node_zlib_codec(enum JubeNodeZlibCodecMode mode, const uint8_t* data,
+                                      int length, JubeNodeZlibResult* out_result) {
+    if (!out_result) return false;
+    NodeZlibBytes host_result = {};
+    bool success = false;
+    switch (mode) {
+    case JUBE_NODE_ZLIB_GZIP:
+        success = node_zlib_gzip_encode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_GUNZIP:
+        success = node_zlib_gunzip_decode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_DEFLATE:
+        success = node_zlib_deflate_encode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_INFLATE:
+        success = node_zlib_inflate_decode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_DEFLATE_RAW:
+        success = node_zlib_deflate_raw_encode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_INFLATE_RAW:
+        success = node_zlib_inflate_raw_decode(data, length, &host_result);
+        break;
+    case JUBE_NODE_ZLIB_UNZIP:
+        success = node_zlib_unzip_decode(data, length, &host_result);
+        break;
+    }
+    // The host allocated this result, so its release must stay paired with the
+    // host codec even when a module returns early while shaping a Node error.
+    out_result->data = host_result.data;
+    out_result->length = host_result.length;
+    out_result->status = host_result.status;
+    return success;
+}
+
+static void jube_host_node_zlib_result_release(JubeNodeZlibResult* result) {
+    if (!result) return;
+    NodeZlibBytes host_result = {result->data, result->length, result->status};
+    node_zlib_bytes_free(&host_result);
+    result->data = NULL;
+    result->length = 0;
+    result->status = 0;
+}
+
 static Item jube_host_node_throw_system_error(void* session, const char* syscall,
                                               int error_number) {
     if (!jube_host_node_session_is_live(session) || !syscall) return ItemNull;
@@ -3213,6 +3312,36 @@ static Item jube_host_node_throw_error_code(void* session, const char* code,
                                             const char* message) {
     if (!jube_host_node_session_is_live(session) || !code || !message) return ItemNull;
     return js_throw_error_with_code(code, message);
+}
+
+static Item jube_host_node_throw_network_error(void* session, int status, const char* syscall,
+        const char* address, int port) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    const char* code = uv_err_name(status);
+    if (!code) code = "UNKNOWN";
+    char message[512];
+    const char* operation = syscall ? syscall : "connect";
+    if (address && port >= 0) {
+        snprintf(message, sizeof(message), "%s %s %s:%d", operation, code, address, port);
+    } else if (address) {
+        snprintf(message, sizeof(message), "%s %s %s", operation, code, address);
+    } else {
+        snprintf(message, sizeof(message), "%s %s", operation, code);
+    }
+    Item error = js_new_error(js_make_string_len(message, (int)strlen(message)));
+    js_property_set(error, js_make_string_len("code", 4), js_make_string_len(code, (int)strlen(code)));
+    js_property_set(error, js_make_string_len("errno", 5), (Item){.item = i2it(status)});
+    js_property_set(error, js_make_string_len("syscall", 7),
+        js_make_string_len(operation, (int)strlen(operation)));
+    if (address) {
+        js_property_set(error, js_make_string_len("address", 7),
+            js_make_string_len(address, (int)strlen(address)));
+    }
+    if (port >= 0) {
+        js_property_set(error, js_make_string_len("port", 4), (Item){.item = i2it(port)});
+    }
+    js_throw_value(error);
+    return error;
 }
 
 static bool jube_host_node_network_permission_has_net(void) {
@@ -3366,6 +3495,7 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
     // descriptors, rather than js_runtime's legacy dispatcher, decide which
     // profiles expose these names while their implementations migrate.
     static const JubeHostNamespaceEntry entries[] = {
+        {"events", node_events_namespace},
         {"fs", js_get_fs_namespace},
         {"fs/promises", js_get_fs_promises_namespace},
         {"internal/fs/promises", js_get_internal_fs_promises_namespace},
@@ -3397,6 +3527,7 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"internal/test/binding", js_get_internal_test_binding_namespace},
         {"buffer", js_get_buffer_namespace},
         {"util", js_get_util_namespace},
+        {"url", node_url_namespace},
         {"assert", js_get_assert_namespace},
         {"stream", js_get_stream_namespace},
         {"stream/consumers", js_get_stream_namespace},
@@ -3806,6 +3937,51 @@ static JubeHostAPI jube_host_api = {
 
 extern "C" const JubeHostAPI* jube_internal_host_api(void) {
     return &jube_host_api;
+}
+
+// URL and EventEmitter also serve JS globals and readline. Their lifecycle is
+// host-owned so node-core can be a dynamic descriptor without importing host
+// symbols or constructing a second copy of either primitive.
+static bool jube_node_shared_primitives_initialized = false;
+static bool jube_node_shared_primitives_attached = false;
+
+static int jube_node_shared_primitives_init(void) {
+    if (jube_node_shared_primitives_initialized) return 0;
+    if (node_url_init(&jube_host_api) != 0) return -1;
+    if (node_events_init(&jube_host_api) != 0) {
+        node_url_shutdown();
+        return -1;
+    }
+    jube_node_shared_primitives_initialized = true;
+    return 0;
+}
+
+static void jube_node_shared_primitives_shutdown(void) {
+    if (!jube_node_shared_primitives_initialized) return;
+    node_events_shutdown();
+    node_url_shutdown();
+    jube_node_shared_primitives_attached = false;
+    jube_node_shared_primitives_initialized = false;
+}
+
+static void jube_node_shared_primitives_attach(void* session) {
+    if (!jube_node_shared_primitives_initialized || jube_node_shared_primitives_attached) return;
+    node_url_runtime_attach(session);
+    node_events_runtime_attach(session);
+    jube_node_shared_primitives_attached = true;
+}
+
+static void jube_node_shared_primitives_reset(void* session) {
+    if (!jube_node_shared_primitives_attached) return;
+    node_url_runtime_reset(session);
+    node_events_runtime_reset(session);
+}
+
+static void jube_node_shared_primitives_detach(void* session) {
+    if (!jube_node_shared_primitives_attached) return;
+    node_events_runtime_detach(session);
+    node_url_runtime_detach(session);
+    jube_node_shared_primitives_attached = false;
 }
 
 // size-gated access to the DOM3 additive tail: a field exists only when the
@@ -4265,6 +4441,8 @@ static JubeStaticModuleEntry* jube_module_entry(const JubeModuleDef* module) {
     return NULL;
 }
 
+static bool jube_activate_module_descriptor(const JubeModuleDef* module);
+
 static bool jube_attach_module_to_active_runtime(JubeStaticModuleEntry* entry) {
     if (!entry || entry->activation_state != JUBE_MODULE_ACTIVE) return false;
     JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
@@ -4275,12 +4453,40 @@ static bool jube_attach_module_to_active_runtime(JubeStaticModuleEntry* entry) {
     // builder that re-enters the registry cannot attach the same module twice.
     entry->attached_generation = session->generation;
     const JubeModuleDef* module = entry->module;
+    if (module && module->name && strcmp(module->name, "node-core") == 0) {
+        jube_node_shared_primitives_attach(session);
+    }
     size_t attach_end = offsetof(JubeModuleDef, runtime_attach) +
         sizeof(((JubeModuleDef*)NULL)->runtime_attach);
     if (jube_module_has_field(module, attach_end) && module->runtime_attach) {
         module->runtime_attach(session);
     }
     jube_install_module_globals(module, session);
+    return true;
+}
+
+static bool jube_activate_module_dependencies(const JubeModuleDef* module) {
+    size_t dependencies_end = offsetof(JubeModuleDef, dependency_count) +
+        sizeof(((JubeModuleDef*)NULL)->dependency_count);
+    if (!jube_module_has_field(module, dependencies_end) || !module->dependencies ||
+            module->dependency_count <= 0) return true;
+    for (int32_t i = 0; i < module->dependency_count; i++) {
+        const char* dependency_name = module->dependencies[i];
+        if (!dependency_name || !dependency_name[0] ||
+                (module->name && strcmp(dependency_name, module->name) == 0)) {
+            log_error("JUBE_REG: module '%s' has an invalid dependency edge",
+                      module && module->name ? module->name : "(unknown)");
+            return false;
+        }
+        const JubeModuleDef* dependency = jube_find_static_module(dependency_name);
+        if (!dependency || !jube_activate_module_descriptor(dependency)) {
+            // Static profiles have no manifest-load step, so descriptor edges
+            // must activate the dependency before its consumer attaches.
+            log_error("JUBE_REG: module '%s' dependency '%s' is unavailable or inactive",
+                      module->name, dependency_name);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -4299,11 +4505,21 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     // Descriptor registration is intentionally callback-free. This single
     // transition protects every import/global/language/type activation path.
     entry->activation_state = JUBE_MODULE_ACTIVATING;
+    if (!jube_activate_module_dependencies(module)) {
+        entry->activation_state = JUBE_MODULE_FAILED;
+        return false;
+    }
+    bool shared_primitives = module->name && strcmp(module->name, "node-core") == 0;
+    if (shared_primitives && jube_node_shared_primitives_init() != 0) {
+        entry->activation_state = JUBE_MODULE_FAILED;
+        return false;
+    }
     if (module->init) {
         int rc = module->init(&jube_host_api);
         if (rc != 0) {
             log_error("JUBE_REG: module '%s' init failed with code %d", module->name, rc);
             if (module->shutdown) module->shutdown();
+            if (shared_primitives) jube_node_shared_primitives_shutdown();
             entry->activation_state = JUBE_MODULE_FAILED;
             return false;
         }
@@ -4311,6 +4527,7 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     if (jube_compile_module_interface(module) != 0) {
         log_error("JUBE_REG: module '%s' interface compilation failed", module->name);
         if (module->shutdown) module->shutdown();
+        if (shared_primitives) jube_node_shared_primitives_shutdown();
         jube_interface_remove_module(module);
         entry->activation_state = JUBE_MODULE_FAILED;
         return false;
@@ -5018,22 +5235,32 @@ static int jube_load_manifest_path_internal(const char* manifest_path, const cha
     int transaction_start = jube_static_modules_count;
     for (int i = 0; i < dependency_count; i++) {
         const char* dependency_name = dependencies[i];
-        if (strcmp(dependency_name, module_name) == 0 ||
-            jube_find_static_module_index(dependency_name) >= 0) {
-            if (strcmp(dependency_name, module_name) == 0) {
-                log_error("JUBE_REG: manifest '%s' depends on itself", manifest_path);
+        if (strcmp(dependency_name, module_name) == 0) {
+            log_error("JUBE_REG: manifest '%s' depends on itself", manifest_path);
+            jube_rollback_registered_modules(transaction_start);
+            free(text);
+            jube_manifest_loading_depth--;
+            return -1;
+        }
+        int dependency_index = jube_find_static_module_index(dependency_name);
+        if (dependency_index < 0) {
+            char dependency_manifest[JUBE_MANIFEST_PATH_CAPACITY];
+            if (!jube_find_sibling_manifest(manifest_path, dependency_name,
+                                            dependency_manifest, sizeof(dependency_manifest)) ||
+                jube_load_manifest_path_internal(dependency_manifest, NULL, dependency_name) != 1) {
+                log_error("JUBE_REG: manifest '%s' dependency '%s' is unavailable or failed",
+                          manifest_path, dependency_name);
                 jube_rollback_registered_modules(transaction_start);
                 free(text);
                 jube_manifest_loading_depth--;
                 return -1;
             }
-            continue;
+            dependency_index = jube_find_static_module_index(dependency_name);
         }
-        char dependency_manifest[JUBE_MANIFEST_PATH_CAPACITY];
-        if (!jube_find_sibling_manifest(manifest_path, dependency_name,
-                                        dependency_manifest, sizeof(dependency_manifest)) ||
-            jube_load_manifest_path_internal(dependency_manifest, NULL, dependency_name) != 1 ||
-            jube_find_static_module_index(dependency_name) < 0) {
+        if (dependency_index < 0 || !jube_activate_module_descriptor(
+                jube_static_modules[dependency_index].module)) {
+            // Loading a descriptor is insufficient: its runtime_attach hook
+            // must run before a dependent publishes Node-visible objects.
             log_error("JUBE_REG: manifest '%s' dependency '%s' is unavailable or failed",
                       manifest_path, dependency_name);
             jube_rollback_registered_modules(transaction_start);
@@ -5379,6 +5606,11 @@ static void jube_node_resource_cleanup(JubeNodeRuntimeSession* session) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
         if (!slot) continue;
         if (slot->resource) {
+            // A libuv handle can outlive its JS wrapper until its close turn;
+            // close the host payload before releasing the rooted JS owner.
+            if (slot->resource->close_callback) {
+                slot->resource->close_callback(slot->resource->close_user);
+            }
             heap_unregister_gc_root(&slot->resource->value.item);
             mem_free(slot->resource);
         }
@@ -5401,9 +5633,11 @@ static JubeNodeResourceSlot* jube_node_resource_slot(JubeNodeRuntimeSession* ses
     return slot && slot->generation == generation && slot->resource ? slot : NULL;
 }
 
-uint32_t jube_node_resource_add(Item value, const char* kind) {
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
-    if (!session || !session->live || session->detaching || !value.item || !kind) return 0;
+uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, const char* kind,
+        JubeNodeResourceCloseCallback close_callback, void* close_user) {
+    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    if (!session || session != jube_active_node_runtime_session || !session->live ||
+            session->detaching || !value.item || !kind) return 0;
     if (!session->resource_slots) {
         session->resource_slots = arraylist_new(8);
         if (!session->resource_slots) return 0;
@@ -5411,7 +5645,11 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
         JubeNodeResource* resource = slot ? slot->resource : NULL;
-        if (resource && resource->value.item == value.item) return resource->id;
+        if (resource && resource->value.item == value.item) {
+            // A new native owner for an already rooted JS handle would leak:
+            // the existing slot must remain that handle's sole close authority.
+            return close_callback ? 0 : resource->id;
+        }
     }
     JubeNodeResourceSlot* slot = NULL;
     int slot_index = -1;
@@ -5441,6 +5679,8 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
         (uint32_t)(slot_index + 1);
     resource->value = value;
     resource->kind = kind;
+    resource->close_callback = close_callback;
+    resource->close_user = close_user;
     // Resource slots own the JS edge until close removes it; net callbacks can
     // otherwise outlive a compacting collection between libuv turns.
     heap_register_gc_root(&resource->value.item);
@@ -5448,13 +5688,37 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
     return resource->id;
 }
 
-void jube_node_resource_remove(uint32_t resource_id) {
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+uint32_t jube_node_resource_add(Item value, const char* kind) {
+    return jube_node_resource_add_with_close(jube_active_node_runtime_session, value, kind, NULL, NULL);
+}
+
+void jube_node_resource_remove_for_session(void* session_handle, uint32_t resource_id) {
+    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    if (session != jube_active_node_runtime_session) return;
     JubeNodeResourceSlot* slot = jube_node_resource_slot(session, resource_id);
     if (!slot) return;
+    if (slot->resource->close_callback) {
+        slot->resource->close_callback(slot->resource->close_user);
+    }
     heap_unregister_gc_root(&slot->resource->value.item);
     mem_free(slot->resource);
     slot->resource = NULL;
+}
+
+void jube_node_resource_remove(uint32_t resource_id) {
+    jube_node_resource_remove_for_session(jube_active_node_runtime_session, resource_id);
+}
+
+void* jube_node_resource_user_data_for_session(void* session_handle, uint32_t resource_id) {
+    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    if (session != jube_active_node_runtime_session) return NULL;
+    JubeNodeResourceSlot* slot = jube_node_resource_slot(session, resource_id);
+    return slot ? slot->resource->close_user : NULL;
+}
+
+void* jube_node_runtime_current_session(void) {
+    return jube_active_node_runtime_session && jube_active_node_runtime_session->live &&
+            !jube_active_node_runtime_session->detaching ? jube_active_node_runtime_session : NULL;
 }
 
 void jube_node_resource_clear(void) {
@@ -5541,6 +5805,7 @@ void jube_modules_runtime_reset(void) {
             module->runtime_reset();
         }
     }
+    if (session) jube_node_shared_primitives_reset(session);
 }
 
 void jube_modules_runtime_attach(void) {
@@ -5593,6 +5858,7 @@ void jube_modules_runtime_detach(void) {
             jube_static_modules[i].attached_generation = 0;
         }
     }
+    jube_node_shared_primitives_detach(session);
     jube_node_async_cancel_session(session);
     jube_node_resource_cleanup(jube_active_node_runtime_session);
     // Invalidate before the next attach so stale module tokens cannot resolve
@@ -5602,6 +5868,7 @@ void jube_modules_runtime_detach(void) {
 }
 
 void jube_registry_cleanup(void) {
+    jube_node_shared_primitives_shutdown();
     // Retired cursor slots are process-lifetime metadata, but must be released
     // before memtrack shutdown after their emitters have been destroyed.
     jube_host_mir_cursor_slots_cleanup();

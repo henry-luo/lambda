@@ -37,9 +37,6 @@
     "lambda/js",
     "lambda/module/radiant",
     "lambda/module/hostobj_demo",
-    "lambda/module/node_core",
-    "lambda/module/node_fs",
-    "lambda/module/node_net",
     "lambda/ts",
     "lambda/npm",
     "lambda/network",
@@ -47,7 +44,9 @@
   ],
   "source_files": [
     "lib/sqlite/sqlite3.c",
-    "lambda/module/node_zlib/node_zlib_codec.cpp",
+    "lambda/module/node_core/node_events.cpp",
+    "lambda/module/node_core/node_url.cpp",
+    "lambda/js/js_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
@@ -69,9 +68,7 @@
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
-    "LAMBDA_NODE_CORE_STATIC_LINKED=1",
-    "LAMBDA_NODE_FS_STATIC_LINKED=1",
-    "LAMBDA_NODE_NET_STATIC_LINKED=1"
+    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -342,7 +339,6 @@
       "source_files": [
         "lambda/module/node_core/node_constants.cpp",
         "lambda/module/node_core/node_core_module.cpp",
-        "lambda/module/node_core/node_events.cpp",
         "lambda/module/node_core/node_os.cpp",
         "lambda/module/node_core/node_perf_hooks.cpp",
         "lambda/module/node_core/node_path.cpp",
@@ -352,7 +348,6 @@
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_tty.cpp",
-        "lambda/module/node_core/node_url.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
       ]
@@ -380,11 +375,7 @@
     {
       "name": "node-zlib",
       "description": "External Node zlib Jube module",
-      "libraries": [
-        "zlib"
-      ],
       "source_files": [
-        "lambda/module/node_zlib/node_zlib_codec.cpp",
         "lambda/module/node_zlib/node_zlib_module.cpp"
       ]
     }
@@ -612,7 +603,8 @@
         "lambda/runtime/headless_stubs.cpp"
       ],
       "source_files": [
-        "lambda/module/node_zlib/node_zlib_codec.cpp",
+        "lambda/module/node_core/node_events.cpp",
+        "lambda/module/node_core/node_url.cpp",
         "lambda/runtime/parse.c",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
@@ -766,24 +758,7 @@
       "lang": "c++17",
       "source_files": [
         "lambda/main.cpp",
-        "lambda/main-repl.cpp",
-        "lambda/module/node_core/node_constants.cpp",
-        "lambda/module/node_core/node_core_module.cpp",
-        "lambda/module/node_core/node_events.cpp",
-        "lambda/module/node_core/node_os.cpp",
-        "lambda/module/node_core/node_path.cpp",
-        "lambda/module/node_core/node_perf_hooks.cpp",
-        "lambda/module/node_core/node_process.cpp",
-        "lambda/module/node_core/node_punycode.cpp",
-        "lambda/module/node_core/node_querystring.cpp",
-        "lambda/module/node_core/node_string_decoder.cpp",
-        "lambda/module/node_core/node_timers.cpp",
-        "lambda/module/node_core/node_tty.cpp",
-        "lambda/module/node_core/node_url.cpp",
-        "lambda/module/node_core/node_v8.cpp",
-        "lambda/module/node_core/node_workers.cpp",
-        "lambda/module/node_fs/node_fs_module.cpp",
-        "lambda/module/node_net/node_net_module.cpp"
+        "lambda/main-repl.cpp"
       ],
       "libraries": [
         "radiant",

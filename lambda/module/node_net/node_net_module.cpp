@@ -5,15 +5,6 @@
 #include <cstring>
 #include <climits>
 
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netdb.h>
-#endif
-
 static const JubeHostAPI* node_net_host = NULL;
 static void* node_net_session = NULL;
 
@@ -103,7 +94,8 @@ static Item node_net_normalize_args(Item input) {
 }
 
 static Item node_net_is_ip(Item input) {
-    if (!node_net_host || !node_net_host->value || !node_net_host->script ||
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->network ||
+            !node_net_host->node->network->ip_family || !node_net_host->value || !node_net_host->script ||
             !node_net_host->value->string_bytes || !node_net_host->value->string_length ||
             !node_net_host->script->make_number || !node_net_host->node ||
             !node_net_host->node->roots || !node_net_host->node->roots->root_frame_begin ||
@@ -140,15 +132,8 @@ static Item node_net_is_ip(Item input) {
     char address[256];
     memcpy(address, bytes, length);
     address[length] = '\0';
-    struct in_addr ipv4 = {};
-    Item result = node_net_host->script->make_number(0.0);
-    if (inet_pton(AF_INET, address, &ipv4) == 1) {
-        result = node_net_host->script->make_number(4.0);
-    } else {
-        struct in6_addr ipv6 = {};
-        result = node_net_host->script->make_number(
-            inet_pton(AF_INET6, address, &ipv6) == 1 ? 6.0 : 0.0);
-    }
+    int family = node_net_host->node->network->ip_family(address);
+    Item result = node_net_host->script->make_number((double)family);
     node_net_host->node->roots->root_frame_end(&frame);
     return result;
 }
@@ -204,6 +189,272 @@ static Item node_net_set_default_auto_select_family_timeout(Item timeout) {
     return (Item){.item = ITEM_UNDEFINED};
 }
 
+static Item node_net_throw_type(const char* code, const char* message) {
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->error ||
+            !node_net_host->node->error->throw_type_error_code) return ItemNull;
+    return node_net_host->node->error->throw_type_error_code(node_net_session, code, message);
+}
+
+static Item node_net_throw_error(const char* code, const char* message) {
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->error ||
+            !node_net_host->node->error->throw_error_code) return ItemNull;
+    return node_net_host->node->error->throw_error_code(node_net_session, code, message);
+}
+
+static Item node_net_property_get_name(Item object, uint64_t* key_root, const char* name) {
+    if (!node_net_host || !node_net_host->value || !node_net_host->value->property_get ||
+            !key_root) return ItemNull;
+    Item key = node_net_property_key(key_root, name);
+    return key.item ? node_net_host->value->property_get(object, key) : ItemNull;
+}
+
+static bool node_net_bound_socket_resource_id(Item object, uint64_t* key_root,
+        uint32_t* out_resource_id) {
+    if (!node_net_host || !node_net_host->value || !node_net_host->value->number_to_int64_exact ||
+            !out_resource_id) return false;
+    int64_t resource_id = 0;
+    Item resource = node_net_property_get_name(object, key_root,
+        "__jube_bound_socket_resource_id__");
+    if (!node_net_host->value->number_to_int64_exact(resource, &resource_id) || resource_id <= 0 ||
+            resource_id > 0xffffffffLL) return false;
+    *out_resource_id = (uint32_t)resource_id;
+    return true;
+}
+
+static bool node_net_bound_socket_adopted(Item object, uint64_t* key_root) {
+    if (!node_net_host || !node_net_host->script || !node_net_host->script->is_truthy) return false;
+    return node_net_host->script->is_truthy(node_net_property_get_name(object, key_root,
+        "__jube_bound_socket_adopted__"));
+}
+
+static Item node_net_bound_socket_address(void) {
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->runtime ||
+            !node_net_host->node->streams || !node_net_host->node->streams->tcp_address ||
+            !node_net_host->node->roots || !node_net_host->node->roots->root_frame_begin ||
+            !node_net_host->node->roots->root_frame_take_slot ||
+            !node_net_host->node->roots->root_frame_end || !node_net_host->value ||
+            !node_net_host->value->new_object || !node_net_host->value->string_from_utf8_n ||
+            !node_net_host->value->property_set || !node_net_host->script ||
+            !node_net_host->script->make_number) return ItemNull;
+    JubeRootFrame frame = {};
+    if (!node_net_host->node->roots->root_frame_begin(&frame, 4)) return ItemNull;
+    uint64_t* self_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* result_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* value_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    if (!self_root || !result_root || !key_root || !value_root) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *self_root = node_net_host->node->runtime->current_this(node_net_session).item;
+    *result_root = ItemNull.item;
+    *key_root = ItemNull.item;
+    *value_root = ItemNull.item;
+    Item self = node_net_root_value(self_root);
+    if (node_net_bound_socket_adopted(self, key_root)) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return node_net_throw_error("ERR_SOCKET_HANDLE_ADOPTED", "Socket handle has been adopted");
+    }
+    uint32_t resource_id = 0;
+    if (!node_net_bound_socket_resource_id(self, key_root, &resource_id)) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    char address[128] = {};
+    int port = 0;
+    int family = 0;
+    if (node_net_host->node->streams->tcp_address(node_net_session, resource_id, address,
+            sizeof(address), &port, &family) != 0) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *result_root = node_net_host->value->new_object().item;
+    *value_root = node_net_host->value->string_from_utf8_n(address, strlen(address)).item;
+    node_net_property_set_name(result_root, key_root, "address", node_net_root_value(value_root));
+    *value_root = node_net_host->value->string_from_utf8_n(family == 6 ? "IPv6" : "IPv4", 4).item;
+    node_net_property_set_name(result_root, key_root, "family", node_net_root_value(value_root));
+    *value_root = node_net_host->script->make_number((double)port).item;
+    node_net_property_set_name(result_root, key_root, "port", node_net_root_value(value_root));
+    Item result = node_net_root_value(result_root);
+    node_net_host->node->roots->root_frame_end(&frame);
+    return result;
+}
+
+static Item node_net_bound_socket_fd(void) {
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->runtime ||
+            !node_net_host->node->streams || !node_net_host->node->streams->tcp_fd ||
+            !node_net_host->node->roots || !node_net_host->node->roots->root_frame_begin ||
+            !node_net_host->node->roots->root_frame_take_slot ||
+            !node_net_host->node->roots->root_frame_end || !node_net_host->script ||
+            !node_net_host->script->make_number) return ItemNull;
+    JubeRootFrame frame = {};
+    if (!node_net_host->node->roots->root_frame_begin(&frame, 2)) return ItemNull;
+    uint64_t* self_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    if (!self_root || !key_root) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *self_root = node_net_host->node->runtime->current_this(node_net_session).item;
+    *key_root = ItemNull.item;
+    Item self = node_net_root_value(self_root);
+    if (node_net_bound_socket_adopted(self, key_root)) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return node_net_throw_error("ERR_SOCKET_HANDLE_ADOPTED", "Socket handle has been adopted");
+    }
+    uint32_t resource_id = 0;
+    int descriptor = -1;
+    if (node_net_bound_socket_resource_id(self, key_root, &resource_id)) {
+        node_net_host->node->streams->tcp_fd(node_net_session, resource_id, &descriptor);
+    }
+    Item result = node_net_host->script->make_number((double)descriptor);
+    node_net_host->node->roots->root_frame_end(&frame);
+    return result;
+}
+
+static Item node_net_bound_socket_close(void) {
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->runtime ||
+            !node_net_host->node->streams || !node_net_host->node->streams->resource_close ||
+            !node_net_host->node->roots || !node_net_host->node->roots->root_frame_begin ||
+            !node_net_host->node->roots->root_frame_take_slot ||
+            !node_net_host->node->roots->root_frame_end) return ItemNull;
+    JubeRootFrame frame = {};
+    if (!node_net_host->node->roots->root_frame_begin(&frame, 2)) return ItemNull;
+    uint64_t* self_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    if (!self_root || !key_root) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *self_root = node_net_host->node->runtime->current_this(node_net_session).item;
+    *key_root = ItemNull.item;
+    Item self = node_net_root_value(self_root);
+    if (node_net_bound_socket_adopted(self, key_root)) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return node_net_throw_error("ERR_SOCKET_HANDLE_ADOPTED", "Socket handle has been adopted");
+    }
+    uint32_t resource_id = 0;
+    if (node_net_bound_socket_resource_id(self, key_root, &resource_id)) {
+        node_net_host->node->streams->resource_close(node_net_session, resource_id);
+        // Closing removes the host resource slot, so clear this rid before a
+        // later GC turn can observe a stale generation-checked identifier.
+        node_net_property_set_name(self_root, key_root, "__jube_bound_socket_resource_id__",
+            (Item){.item = ITEM_UNDEFINED});
+    }
+    node_net_host->node->roots->root_frame_end(&frame);
+    return (Item){.item = ITEM_UNDEFINED};
+}
+
+static void node_net_bound_socket_set_method(uint64_t* object_root, uint64_t* key_root,
+        uint64_t* function_root, const char* name, void* function) {
+    if (!object_root || !key_root || !function_root || !node_net_host || !node_net_host->script ||
+            !node_net_host->value || !node_net_host->value->property_set) return;
+    Item key = node_net_property_key(key_root, name);
+    *function_root = node_net_host->script->new_function(function, 0).item;
+    if (key.item) node_net_host->value->property_set(node_net_root_value(object_root), key,
+        node_net_root_value(function_root));
+}
+
+static Item node_net_bound_socket_new(Item options) {
+    if (!node_net_host || !node_net_session || !node_net_host->node || !node_net_host->node->streams ||
+            !node_net_host->node->streams->tcp_create || !node_net_host->node->streams->tcp_bind ||
+            !node_net_host->node->streams->resource_close || !node_net_host->node->streams->resource_ref ||
+            !node_net_host->node->network || !node_net_host->node->network->ip_family ||
+            !node_net_host->node->error || !node_net_host->node->error->throw_network_error ||
+            !node_net_host->node->roots || !node_net_host->node->roots->root_frame_begin ||
+            !node_net_host->node->roots->root_frame_take_slot ||
+            !node_net_host->node->roots->root_frame_end || !node_net_host->value ||
+            !node_net_host->value->kind || !node_net_host->value->property_get ||
+            !node_net_host->value->string_copy || !node_net_host->value->number_to_int64_exact ||
+            !node_net_host->value->new_object || !node_net_host->value->property_set ||
+            !node_net_host->script || !node_net_host->script->make_number ||
+            !node_net_host->script->is_truthy) return ItemNull;
+    if (!node_net_is_undefined_or_null(options) &&
+            node_net_host->value->kind(options) != JUBE_VALUE_OBJECT) {
+        return node_net_throw_type("ERR_INVALID_ARG_TYPE", "The \"options\" argument must be an object.");
+    }
+    JubeRootFrame frame = {};
+    if (!node_net_host->node->roots->root_frame_begin(&frame, 5)) return ItemNull;
+    uint64_t* options_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* object_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* function_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* value_root = node_net_host->node->roots->root_frame_take_slot(&frame);
+    if (!options_root || !object_root || !key_root || !function_root || !value_root) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *options_root = options.item;
+    *object_root = ItemNull.item;
+    *key_root = ItemNull.item;
+    *function_root = ItemNull.item;
+    *value_root = ItemNull.item;
+    int port = 0;
+    char address[256] = "0.0.0.0";
+    bool ipv6_only = false;
+    bool reuse_port = false;
+    if (!node_net_is_undefined_or_null(node_net_root_value(options_root))) {
+        Item host = node_net_property_get_name(node_net_root_value(options_root), key_root, "host");
+        if (!node_net_is_undefined_or_null(host)) {
+            if (node_net_host->value->kind(host) != JUBE_VALUE_STRING) {
+                node_net_host->node->roots->root_frame_end(&frame);
+                return node_net_throw_type("ERR_INVALID_ARG_TYPE", "The \"options.host\" property must be a string.");
+            }
+            size_t length = 0;
+            if (!node_net_host->value->string_copy(host, address, sizeof(address), &length) ||
+                    length == 0 || length >= sizeof(address) || memchr(address, '\0', length)) {
+                node_net_host->node->roots->root_frame_end(&frame);
+                return node_net_throw_type("ERR_INVALID_ARG_VALUE", "The \"options.host\" property is invalid.");
+            }
+        }
+        Item port_value = node_net_property_get_name(node_net_root_value(options_root), key_root, "port");
+        if (!node_net_is_undefined_or_null(port_value)) {
+            int64_t numeric_port = 0;
+            if (!node_net_host->value->number_to_int64_exact(port_value, &numeric_port) ||
+                    numeric_port < 0 || numeric_port > 65535) {
+                node_net_host->node->roots->root_frame_end(&frame);
+                return node_net_host->node->error->throw_range_error_code(node_net_session,
+                    "ERR_SOCKET_BAD_PORT", "The \"options.port\" property must be a valid port.");
+            }
+            port = (int)numeric_port;
+        }
+        Item ipv6_value = node_net_property_get_name(node_net_root_value(options_root), key_root, "ipv6Only");
+        ipv6_only = node_net_host->script->is_truthy(ipv6_value);
+        Item reuse_value = node_net_property_get_name(node_net_root_value(options_root), key_root, "reusePort");
+        reuse_port = node_net_host->script->is_truthy(reuse_value);
+        if (node_net_is_undefined_or_null(host) && ipv6_only) memcpy(address, "::", 3);
+    }
+    if (node_net_host->node->network->ip_family(address) == 0) {
+        node_net_host->node->roots->root_frame_end(&frame);
+        return node_net_throw_type("ERR_INVALID_ARG_VALUE", "The \"options.host\" property is invalid.");
+    }
+    *object_root = node_net_host->value->new_object().item;
+    uint32_t resource_id = 0;
+    int status = node_net_host->node->streams->tcp_create(node_net_session,
+        node_net_root_value(object_root), &resource_id);
+    if (status == 0) status = node_net_host->node->streams->tcp_bind(node_net_session,
+        resource_id, address, port, ipv6_only, reuse_port);
+    if (status != 0) {
+        if (resource_id) node_net_host->node->streams->resource_close(node_net_session, resource_id);
+        node_net_host->node->roots->root_frame_end(&frame);
+        return node_net_host->node->error->throw_network_error(node_net_session, status,
+            "bind", address, port);
+    }
+    node_net_property_set_name(object_root, key_root, "__jube_bound_socket__", (Item){.item = ITEM_TRUE});
+    *value_root = node_net_host->script->make_number((double)resource_id).item;
+    node_net_property_set_name(object_root, key_root, "__jube_bound_socket_resource_id__",
+        node_net_root_value(value_root));
+    node_net_bound_socket_set_method(object_root, key_root, function_root, "address",
+        (void*)node_net_bound_socket_address);
+    node_net_bound_socket_set_method(object_root, key_root, function_root, "fd",
+        (void*)node_net_bound_socket_fd);
+    node_net_bound_socket_set_method(object_root, key_root, function_root, "close",
+        (void*)node_net_bound_socket_close);
+    Item result = node_net_root_value(object_root);
+    node_net_host->node->roots->root_frame_end(&frame);
+    return result;
+}
+
 static void node_net_set_method(uint64_t* namespace_root, uint64_t* key_root,
         uint64_t* function_root, const char* name, void* function, int parameter_count) {
     if (!namespace_root || !key_root || !function_root || !node_net_host ||
@@ -248,6 +499,10 @@ static Item node_net_install_ip_helpers(Item namespace_item) {
     node_net_set_method(namespace_root, key_root, function_root,
         "setDefaultAutoSelectFamilyAttemptTimeout",
         (void*)node_net_set_default_auto_select_family_timeout, 1);
+    // BoundSocket is a real module-owned Node object; only its opaque TCP rid
+    // crosses into the statically linked host stream provider.
+    node_net_set_method(namespace_root, key_root, function_root, "BoundSocket",
+        (void*)node_net_bound_socket_new, 1);
     node_net_set_method(namespace_root, key_root, function_root, "_normalizeArgs",
         (void*)node_net_normalize_args, 1);
     Item result = (Item){.item = *namespace_root};
@@ -299,7 +554,8 @@ static Item node_net_internal_namespace(void) {
 }
 
 static Item node_net_dns_lookup_sync(Item hostname) {
-    if (!node_net_host || !node_net_host->node || !node_net_host->node->roots ||
+    if (!node_net_host || !node_net_host->node || !node_net_host->node->network ||
+            !node_net_host->node->network->lookup_sync || !node_net_host->node->roots ||
             !node_net_host->node->roots->root_frame_begin ||
             !node_net_host->node->roots->root_frame_take_slot ||
             !node_net_host->node->roots->root_frame_end || !node_net_host->value ||
@@ -324,25 +580,11 @@ static Item node_net_dns_lookup_sync(Item hostname) {
     memcpy(hostname_buffer, hostname_bytes, hostname_length);
     hostname_buffer[hostname_length] = '\0';
 
-    struct addrinfo hints = {};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    struct addrinfo* result_info = NULL;
-    int status = getaddrinfo(hostname_buffer, NULL, &hints, &result_info);
-    if (status != 0 || !result_info) {
-        if (result_info) freeaddrinfo(result_info);
+    char address[64] = {};
+    if (!node_net_host->node->network->lookup_sync(hostname_buffer, address, sizeof(address))) {
         node_net_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
-    char address[INET6_ADDRSTRLEN] = {};
-    if (result_info->ai_family == AF_INET) {
-        const struct sockaddr_in* socket_address = (const struct sockaddr_in*)result_info->ai_addr;
-        (void)inet_ntop(AF_INET, &socket_address->sin_addr, address, sizeof(address));
-    } else if (result_info->ai_family == AF_INET6) {
-        const struct sockaddr_in6* socket_address = (const struct sockaddr_in6*)result_info->ai_addr;
-        (void)inet_ntop(AF_INET6, &socket_address->sin6_addr, address, sizeof(address));
-    }
-    freeaddrinfo(result_info);
     Item output = address[0] ? node_net_host->value->string_from_utf8_n(address, strlen(address)) : ItemNull;
     node_net_host->node->roots->root_frame_end(&frame);
     return output;
@@ -410,10 +652,12 @@ static const JubeModuleRequirements node_net_requirements = {
     sizeof(JubeHostRootAPI),
 };
 
+static const char* const node_net_dependencies[] = { "node-core" };
+
 static int node_net_init(const JubeHostAPI* host) {
     if (!host || !host->node || !host->node->runtime ||
             !host->node->runtime->resolve_host_namespace ||
-            !host->node->runtime->session_is_live || !host->node->roots ||
+            !host->node->runtime->session_is_live || !host->node->runtime->current_this || !host->node->roots ||
             !host->node->roots->root_frame_begin || !host->node->roots->root_frame_take_slot ||
             !host->node->roots->root_frame_end || !host->value || !host->value->kind ||
             !host->value->string_bytes || !host->value->string_length ||
@@ -425,8 +669,14 @@ static int node_net_init(const JubeHostAPI* host) {
             !host->node->network->default_auto_select_family_timeout_get ||
             !host->node->network->default_auto_select_family_timeout_set ||
             !host->node->network->permission_has_net ||
-            !host->node->network->permission_make_net_error || !host->node->error ||
-            !host->node->error->throw_range_error_code || !host->value->number_to_int64_exact) return -1;
+            !host->node->network->permission_make_net_error || !host->node->network->ip_family ||
+            !host->node->network->lookup_sync || !host->node->error ||
+            !host->node->error->throw_type_error_code || !host->node->error->throw_range_error_code ||
+            !host->node->error->throw_error_code || !host->node->error->throw_network_error ||
+            !host->node->streams || !host->node->streams->tcp_create ||
+            !host->node->streams->tcp_bind || !host->node->streams->tcp_address ||
+            !host->node->streams->tcp_fd || !host->node->streams->resource_close ||
+            !host->node->streams->resource_ref || !host->value->number_to_int64_exact) return -1;
     node_net_host = host;
     return 0;
 }
@@ -477,6 +727,8 @@ static const JubeModuleDef node_net_module = {
     node_net_runtime_attach,
     node_net_runtime_reset,
     node_net_runtime_detach,
+    node_net_dependencies,
+    1,
 };
 
 #if !defined(LAMBDA_NODE_NET_DYNAMIC_MODULE)

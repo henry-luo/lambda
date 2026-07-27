@@ -1,59 +1,32 @@
 // node_fs_module.cpp -- callback fs slice owned by the node-fs Jube module.
 #include "../../jube/jube.h"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/file.h"
 
 #include <cerrno>
 #include <climits>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
 
-#if defined(_WIN32)
-#include <direct.h>
-#include <io.h>
-#include <windows.h>
-typedef struct _stat64 NodeFsStat;
-#define NODE_FS_CLOSE _close
-#define NODE_FS_ACCESS _access
-#define NODE_FS_CHMOD _chmod
-#define NODE_FS_FCHMOD _chmod
-#define NODE_FS_LINK _link
-#define NODE_FS_FSTAT _fstat64
-#define NODE_FS_MKDIR(path, mode) _mkdir(path)
-#define NODE_FS_OPEN _open
-#define NODE_FS_READ _read
-#define NODE_FS_RMDIR _rmdir
-#define NODE_FS_STAT _stat64
-#define NODE_FS_LSTAT _stat64
-#define NODE_FS_UNLINK _unlink
-#define NODE_FS_WRITE _write
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
-#else
-#include <dirent.h>
-#include <sys/statvfs.h>
-#include <unistd.h>
-typedef struct stat NodeFsStat;
-#define NODE_FS_CLOSE close
-#define NODE_FS_ACCESS access
-#define NODE_FS_CHMOD chmod
-#define NODE_FS_FCHMOD fchmod
-#define NODE_FS_LINK link
-#define NODE_FS_FSTAT fstat
-#define NODE_FS_MKDIR(path, mode) mkdir(path, mode)
-#define NODE_FS_OPEN open
-#define NODE_FS_READ read
-#define NODE_FS_RMDIR rmdir
-#define NODE_FS_STAT stat
-#define NODE_FS_LSTAT lstat
-#define NODE_FS_UNLINK unlink
-#define NODE_FS_WRITE write
-#define O_BINARY 0
+
+// Access-mode constants are Node API values, not platform operations; keep
+// them local so the dynamic module does not need a platform I/O header.
+#ifndef F_OK
+#define F_OK 0
+#endif
+#ifndef X_OK
+#define X_OK 1
+#endif
+#ifndef W_OK
+#define W_OK 2
+#endif
+#ifndef R_OK
+#define R_OK 4
 #endif
 
 static const JubeHostAPI* node_fs_host = NULL;
@@ -77,6 +50,7 @@ typedef struct NodeFsRequest {
     bool detached;
     bool roots_registered;
     uint32_t work_request_id;
+    JubeNodeFilesystemReadWrite operation;
     struct NodeFsRequest* next;
 } NodeFsRequest;
 
@@ -85,7 +59,7 @@ typedef struct NodeFsFileHandle {
 } NodeFsFileHandle;
 
 typedef struct NodeFsStats {
-    NodeFsStat value;
+    JubeNodeFilesystemMetadata value;
     bool bigint;
 } NodeFsStats;
 
@@ -175,6 +149,10 @@ static void node_fs_request_destroy(void* user) {
     node_fs_unregister_roots(request);
     free(request->path);
     free(request->bytes);
+    if (node_fs_host && node_fs_host->node && node_fs_host->node->filesystem &&
+            node_fs_host->node->filesystem->read_write_release) {
+        node_fs_host->node->filesystem->read_write_release(&request->operation);
+    }
     free(request);
 }
 
@@ -199,65 +177,32 @@ static void node_fs_call(NodeFsRequest* request, Item* args, int arg_count) {
                                             ItemNull, args, arg_count);
 }
 
-static Item node_fs_system_error(int error_number) {
+static Item node_fs_system_error(const char* syscall, int error_number) {
     if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->error ||
             !node_fs_host->node->error->throw_system_error || !node_fs_host->script ||
             !node_fs_host->script->clear_exception) return ItemNull;
     node_fs_host->node->error->throw_system_error(node_fs_session,
-                                                  "open", error_number);
+                                                  syscall ? syscall : "open", error_number);
     return node_fs_host->script->clear_exception();
 }
 
 static void node_fs_work(void* user) {
     NodeFsRequest* request = (NodeFsRequest*)user;
     if (!request || request->initial_error.item != 0) return;
-    int flags = O_RDONLY | O_BINARY;
-    if (request->mode == NODE_FS_MODE_WRITE) flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;
-    if (request->mode == NODE_FS_MODE_APPEND) flags = O_WRONLY | O_CREAT | O_APPEND | O_BINARY;
-    int descriptor = NODE_FS_OPEN(request->path, flags, 0644);
-    if (descriptor < 0) {
-        request->error_number = errno;
+    if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->filesystem ||
+            !node_fs_host->node->filesystem->read_write) {
+        request->error_number = EIO;
         return;
     }
-    if (request->mode != NODE_FS_MODE_READ) {
-        size_t offset = 0;
-        while (offset < request->byte_count) {
-            int written = (int)NODE_FS_WRITE(descriptor, request->bytes + offset,
-                                             request->byte_count - offset);
-            if (written <= 0) {
-                request->error_number = written < 0 ? errno : EIO;
-                break;
-            }
-            offset += (size_t)written;
-        }
-    } else {
-        NodeFsStat info = {};
-        if (NODE_FS_FSTAT(descriptor, &info) != 0 || info.st_size < 0 ||
-                (uintmax_t)info.st_size > (uintmax_t)INT_MAX) {
-            request->error_number = errno ? errno : EFBIG;
-        } else {
-            request->byte_count = (size_t)info.st_size;
-            request->bytes = (char*)malloc(request->byte_count > 0 ? request->byte_count : 1);
-            if (!request->bytes) {
-                request->error_number = ENOMEM;
-            } else {
-                size_t offset = 0;
-                while (offset < request->byte_count) {
-                    int read_count = (int)NODE_FS_READ(descriptor, request->bytes + offset,
-                                                        request->byte_count - offset);
-                    if (read_count < 0) {
-                        request->error_number = errno;
-                        break;
-                    }
-                    if (read_count == 0) break;
-                    offset += (size_t)read_count;
-                }
-                request->byte_count = offset;
-            }
-        }
-    }
-    if (NODE_FS_CLOSE(descriptor) != 0 && request->error_number == 0) {
-        request->error_number = errno;
+    request->operation.mode = request->mode == NODE_FS_MODE_READ ? JUBE_NODE_FILESYSTEM_READ :
+        request->mode == NODE_FS_MODE_WRITE ? JUBE_NODE_FILESYSTEM_WRITE : JUBE_NODE_FILESYSTEM_APPEND;
+    request->operation.path = request->path;
+    request->operation.input = (const uint8_t*)request->bytes;
+    request->operation.input_length = request->byte_count;
+    // The host owns descriptors and raw I/O so a module image cannot retain a
+    // platform filesystem dependency after it is dynamically loaded.
+    if (!node_fs_host->node->filesystem->read_write(&request->operation)) {
+        request->error_number = request->operation.error_number;
     }
 }
 
@@ -276,7 +221,8 @@ static void node_fs_complete(void* user, int status) {
     *callback_root = request->callback.item;
     Item error = request->initial_error;
     if (error.item == 0 && (status < 0 || request->error_number != 0)) {
-        error = node_fs_system_error(request->error_number != 0 ? request->error_number : EIO);
+        error = node_fs_system_error(request->operation.error_syscall,
+                                     request->error_number != 0 ? request->error_number : EIO);
     }
     *error_root = error.item;
     if (request->mode != NODE_FS_MODE_READ) {
@@ -286,7 +232,8 @@ static void node_fs_complete(void* user, int status) {
         Item args[2] = {node_fs_root_value(error_root), ItemNull};
         node_fs_call(request, args, 2);
     } else {
-        Item data = node_fs_host->value->string_from_utf8_n(request->bytes, request->byte_count);
+        Item data = node_fs_host->value->string_from_utf8_n((const char*)request->operation.output,
+                                                            request->operation.output_length);
         *data_root = data.item;
         Item args[2] = {ItemNull, node_fs_root_value(data_root)};
         node_fs_call(request, args, 2);
@@ -352,6 +299,45 @@ static Item node_fs_sync_error(const char* syscall, int error_number) {
     return node_fs_host->node->error->throw_system_error(node_fs_session, syscall, error_number);
 }
 
+static Item node_fs_path_operation_error(JubeNodeFilesystemPathOperation* operation) {
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    if (filesystem && filesystem->path_operation && filesystem->path_operation(operation)) {
+        return node_fs_undefined();
+    }
+    const char* syscall = operation && operation->error_syscall ? operation->error_syscall : "fs";
+    int error_number = operation && operation->error_number ? operation->error_number : EIO;
+    return node_fs_sync_error(syscall, error_number);
+}
+
+static bool node_fs_descriptor_operation(JubeNodeFilesystemDescriptorOperation* operation) {
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    return filesystem && filesystem->descriptor_operation && filesystem->descriptor_operation(operation);
+}
+
+static int node_fs_descriptor_io(int descriptor, uint8_t* bytes, size_t byte_length,
+                                 int64_t position, bool write, int* out_error_number) {
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = write ? JUBE_NODE_FILESYSTEM_DESCRIPTOR_WRITE :
+                             JUBE_NODE_FILESYSTEM_DESCRIPTOR_READ;
+    operation.descriptor = descriptor;
+    operation.bytes = bytes;
+    operation.byte_length = byte_length;
+    operation.position = position;
+    if (!node_fs_descriptor_operation(&operation)) {
+        if (out_error_number) *out_error_number = operation.error_number ? operation.error_number : EIO;
+        return -1;
+    }
+    return (int)operation.transferred;
+}
+
+static bool node_fs_metadata_operation(JubeNodeFilesystemMetadataOperation* operation) {
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    return filesystem && filesystem->metadata_operation && filesystem->metadata_operation(operation);
+}
+
 static bool node_fs_access_mode(Item value, int* out_mode) {
     if (!out_mode || !node_fs_host || !node_fs_host->value || !node_fs_host->script) return false;
     int kind = node_fs_host->value->kind(value);
@@ -374,11 +360,13 @@ static Item node_fs_access_sync(Item path_item, Item mode_item) {
     if (!node_fs_access_mode(mode_item, &mode)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, (mode & 2) != 0)) return ItemNull;
-    int result = NODE_FS_ACCESS(path, mode);
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_ACCESS;
+    operation.path = path;
+    operation.numeric_value = mode;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("access", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static bool node_fs_option_truthy(Item options, const char* name) {
@@ -406,17 +394,13 @@ static Item node_fs_rm_sync(Item path_item, Item options) {
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
     bool recursive = node_fs_option_truthy(options, "recursive");
-    int result = 0;
-    if (recursive) {
-        result = file_delete_recursive(path);
-    } else {
-        result = NODE_FS_UNLINK(path);
-        if (result != 0) result = NODE_FS_RMDIR(path);
-    }
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_RM;
+    operation.path = path;
+    operation.recursive = recursive;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("rm", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static bool node_fs_file_mode(Item value, int* out_mode) {
@@ -437,11 +421,13 @@ static Item node_fs_chmod_sync(Item path_item, Item mode_item) {
     if (!node_fs_file_mode(mode_item, &mode)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-    int result = NODE_FS_CHMOD(path, mode);
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_CHMOD;
+    operation.path = path;
+    operation.numeric_value = mode;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("chmod", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_copy_file_sync(Item source_item, Item destination_item) {
@@ -452,60 +438,18 @@ static Item node_fs_copy_file_sync(Item source_item, Item destination_item) {
         free(source);
         return ItemNull;
     }
-    int source_descriptor = NODE_FS_OPEN(source, O_RDONLY | O_BINARY, 0);
-    int error_number = errno;
-    if (source_descriptor < 0) {
-        free(source);
-        free(destination);
-        return node_fs_sync_error("open", error_number);
-    }
-    int destination_descriptor = NODE_FS_OPEN(destination, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
-    error_number = errno;
-    if (destination_descriptor < 0) {
-        NODE_FS_CLOSE(source_descriptor);
-        free(source);
-        free(destination);
-        return node_fs_sync_error("open", error_number);
-    }
-    const size_t buffer_size = 65536;
-    char* buffer = (char*)malloc(buffer_size);
-    if (!buffer) {
-        NODE_FS_CLOSE(destination_descriptor);
-        NODE_FS_CLOSE(source_descriptor);
-        free(source);
-        free(destination);
-        return node_fs_sync_error("copyfile", ENOMEM);
-    }
-    error_number = 0;
-    for (;;) {
-        int read_count = (int)NODE_FS_READ(source_descriptor, buffer, (unsigned int)buffer_size);
-        if (read_count < 0) {
-            error_number = errno;
-            break;
-        }
-        if (read_count == 0) break;
-        size_t offset = 0;
-        while (offset < (size_t)read_count) {
-            int write_count = (int)NODE_FS_WRITE(destination_descriptor, buffer + offset,
-                                                  (unsigned int)((size_t)read_count - offset));
-            if (write_count < 0) {
-                error_number = errno;
-                break;
-            }
-            if (write_count == 0) {
-                error_number = EIO;
-                break;
-            }
-            offset += (size_t)write_count;
-        }
-        if (error_number != 0) break;
-    }
-    if (NODE_FS_CLOSE(destination_descriptor) != 0 && error_number == 0) error_number = errno;
-    if (NODE_FS_CLOSE(source_descriptor) != 0 && error_number == 0) error_number = errno;
-    free(buffer);
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemCopy operation = {};
+    operation.source_path = source;
+    operation.destination_path = destination;
+    // The host owns both descriptors so dynamically loaded node-fs cannot
+    // retain platform I/O implementation or dependency state in its image.
+    bool success = filesystem && filesystem->copy_file && filesystem->copy_file(&operation);
     free(source);
     free(destination);
-    if (error_number != 0) return node_fs_sync_error("copyfile", error_number);
+    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "copyfile",
+                                            operation.error_number ? operation.error_number : EIO);
     return node_fs_undefined();
 }
 
@@ -519,71 +463,40 @@ static Item node_fs_truncate_sync(Item path_item, Item length_item) {
     }
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-#if defined(_WIN32)
-    int descriptor = NODE_FS_OPEN(path, O_WRONLY | O_BINARY, 0);
-    int error_number = errno;
-    int result = -1;
-    if (descriptor >= 0) {
-        result = _chsize_s(descriptor, (size_t)length);
-        if (result != 0) error_number = result;
-        if (NODE_FS_CLOSE(descriptor) != 0 && result == 0) {
-            result = -1;
-            error_number = errno;
-        }
-    }
-#else
-    int result = truncate(path, (off_t)length);
-    int error_number = errno;
-#endif
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_TRUNCATE;
+    operation.path = path;
+    operation.numeric_value = length;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("truncate", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_read_file_sync(Item path_item, Item options) {
     (void)options;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
-    int descriptor = NODE_FS_OPEN(path, O_RDONLY | O_BINARY, 0);
-    if (descriptor < 0) {
-        int error_number = errno;
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    if (!filesystem || !filesystem->read_write || !filesystem->read_write_release) {
         free(path);
-        return node_fs_sync_error("open", error_number);
+        return node_fs_sync_error("read", EIO);
     }
-    NodeFsStat info = {};
-    if (NODE_FS_FSTAT(descriptor, &info) != 0 || info.st_size < 0 ||
-            (uintmax_t)info.st_size > (uintmax_t)INT_MAX) {
-        int error_number = errno ? errno : EFBIG;
-        NODE_FS_CLOSE(descriptor);
-        free(path);
-        return node_fs_sync_error("fstat", error_number);
-    }
-    size_t count = (size_t)info.st_size;
-    char* bytes = (char*)malloc(count > 0 ? count : 1);
-    if (!bytes) {
-        NODE_FS_CLOSE(descriptor);
-        free(path);
-        return node_fs_sync_error("read", ENOMEM);
-    }
-    size_t offset = 0;
-    int error_number = 0;
-    while (offset < count) {
-        int read_count = (int)NODE_FS_READ(descriptor, bytes + offset, count - offset);
-        if (read_count < 0) {
-            error_number = errno;
-            break;
-        }
-        if (read_count == 0) break;
-        offset += (size_t)read_count;
-    }
-    if (NODE_FS_CLOSE(descriptor) != 0 && error_number == 0) error_number = errno;
+    JubeNodeFilesystemReadWrite operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_READ;
+    operation.path = path;
+    // Sync reads share the host I/O service with queued reads, preventing the
+    // module from growing a second platform-descriptor implementation.
+    bool success = filesystem->read_write(&operation);
+    int error_number = operation.error_number;
     free(path);
-    if (error_number != 0) {
-        free(bytes);
-        return node_fs_sync_error("read", error_number);
+    if (!success) {
+        filesystem->read_write_release(&operation);
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "read", error_number);
     }
-    Item result = node_fs_host->value->string_from_utf8_n(bytes, offset);
-    free(bytes);
+    Item result = node_fs_host->value->string_from_utf8_n((const char*)operation.output,
+                                                           operation.output_length);
+    filesystem->read_write_release(&operation);
     return result;
 }
 
@@ -613,25 +526,22 @@ static Item node_fs_write_file_sync(Item path_item, Item data_item, Item options
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
-    int flags = O_WRONLY | O_CREAT | O_BINARY | (append ? O_APPEND : O_TRUNC);
-    int descriptor = NODE_FS_OPEN(path, flags, 0644);
-    int error_number = descriptor < 0 ? errno : 0;
-    size_t offset = 0;
-    while (descriptor >= 0 && offset < count) {
-        int written = (int)NODE_FS_WRITE(descriptor, bytes + offset, count - offset);
-        if (written <= 0) {
-            error_number = written < 0 ? errno : EIO;
-            break;
-        }
-        offset += (size_t)written;
-    }
-    if (descriptor >= 0 && NODE_FS_CLOSE(descriptor) != 0 && error_number == 0) {
-        error_number = errno;
-    }
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemReadWrite operation = {};
+    operation.mode = append ? JUBE_NODE_FILESYSTEM_APPEND : JUBE_NODE_FILESYSTEM_WRITE;
+    operation.path = path;
+    operation.input = (const uint8_t*)bytes;
+    operation.input_length = count;
+    bool success = filesystem && filesystem->read_write && filesystem->read_write(&operation);
+    int error_number = operation.error_number;
     free(bytes);
     free(path);
     node_fs_host->node->roots->root_frame_end(&frame);
-    if (error_number != 0) return node_fs_sync_error("write", error_number);
+    if (!success) {
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "write",
+                                  error_number ? error_number : EIO);
+    }
     return node_fs_undefined();
 }
 
@@ -664,10 +574,10 @@ static Item node_fs_exists_sync(Item path_item) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return (Item){.item = b2it(false)};
     }
-    NodeFsStat info = {};
-    int descriptor = NODE_FS_OPEN(path, O_RDONLY | O_BINARY, 0);
-    bool exists = descriptor >= 0 && NODE_FS_FSTAT(descriptor, &info) == 0;
-    if (descriptor >= 0) NODE_FS_CLOSE(descriptor);
+    JubeNodeFilesystemMetadataOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_METADATA_STAT;
+    operation.path = path;
+    bool exists = node_fs_metadata_operation(&operation);
     free(path);
     node_fs_host->node->roots->root_frame_end(&frame);
     return (Item){.item = b2it(exists)};
@@ -676,20 +586,23 @@ static Item node_fs_exists_sync(Item path_item) {
 static Item node_fs_unlink_sync(Item path_item) {
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-    int result = NODE_FS_UNLINK(path);
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_UNLINK;
+    operation.path = path;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("unlink", errno);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_rmdir_sync(Item path_item) {
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-    int result = NODE_FS_RMDIR(path);
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_RMDIR;
+    operation.path = path;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("rmdir", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_rename_sync(Item old_path_item, Item new_path_item) {
@@ -702,12 +615,14 @@ static Item node_fs_rename_sync(Item old_path_item, Item new_path_item) {
         free(old_path);
         return ItemNull;
     }
-    int result = rename(old_path, new_path);
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_RENAME;
+    operation.path = old_path;
+    operation.secondary_path = new_path;
+    Item result = node_fs_path_operation_error(&operation);
     free(old_path);
     free(new_path);
-    if (result != 0) return node_fs_sync_error("rename", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static bool node_fs_options_mkdir(Item options, int* out_mode, bool* out_recursive) {
@@ -756,26 +671,14 @@ static Item node_fs_mkdir_sync(Item path_item, Item options) {
         free(path);
         return ItemNull;
     }
-    int result = 0;
-    if (recursive) {
-        for (char* part = path + 1; *part; ++part) {
-            if (*part != '/') continue;
-            *part = '\0';
-            if (NODE_FS_MKDIR(path, mode) != 0 && errno != EEXIST) {
-                result = -1;
-                *part = '/';
-                break;
-            }
-            *part = '/';
-        }
-    }
-    if (result == 0 && NODE_FS_MKDIR(path, mode) != 0 && !(recursive && errno == EEXIST)) {
-        result = -1;
-    }
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_MKDIR;
+    operation.path = path;
+    operation.numeric_value = mode;
+    operation.recursive = recursive;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("mkdir", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static bool node_fs_encoding_is_valid(Item encoding) {
@@ -854,50 +757,22 @@ static Item node_fs_readdir_sync(Item path_item, Item options) {
     }
     Item array = node_fs_host->value->array_new(0);
     *array_root = array.item;
-#if defined(_WIN32)
-    size_t path_length = strlen(path);
-    char* pattern = (char*)malloc(path_length + 3);
-    if (!pattern) {
-        free(path);
-        node_fs_host->node->roots->root_frame_end(&frame);
-        return node_fs_sync_error("readdir", ENOMEM);
-    }
-    memcpy(pattern, path, path_length);
-    if (path_length > 0 && path[path_length - 1] != '/' && path[path_length - 1] != '\\') {
-        pattern[path_length++] = '\\';
-    }
-    pattern[path_length++] = '*';
-    pattern[path_length] = '\0';
-    WIN32_FIND_DATAA entry = {};
-    HANDLE directory = FindFirstFileA(pattern, &entry);
-    free(pattern);
-    if (directory == INVALID_HANDLE_VALUE) {
-        int error_number = errno;
-        free(path);
-        node_fs_host->node->roots->root_frame_end(&frame);
-        return node_fs_sync_error("readdir", error_number ? error_number : ENOENT);
-    }
-    do {
-        if (strcmp(entry.cFileName, ".") != 0 && strcmp(entry.cFileName, "..") != 0 &&
-                !node_fs_readdir_append(node_fs_root_value(array_root), entry.cFileName)) break;
-    } while (FindNextFileA(directory, &entry));
-    FindClose(directory);
-#else
-    DIR* directory = opendir(path);
-    if (!directory) {
-        int error_number = errno;
-        free(path);
-        node_fs_host->node->roots->root_frame_end(&frame);
-        return node_fs_sync_error("readdir", error_number);
-    }
-    struct dirent* entry = NULL;
-    while ((entry = readdir(directory)) != NULL) {
-        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0 &&
-                !node_fs_readdir_append(node_fs_root_value(array_root), entry->d_name)) break;
-    }
-    closedir(directory);
-#endif
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemDirectoryOperation operation = {};
+    operation.path = path;
+    bool success = filesystem && filesystem->directory_read && filesystem->directory_read_release &&
+        filesystem->directory_read(&operation);
     free(path);
+    if (!success) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "readdir",
+                                  operation.error_number ? operation.error_number : EIO);
+    }
+    for (size_t index = 0; index < operation.entry_count; ++index) {
+        if (!node_fs_readdir_append(node_fs_root_value(array_root), operation.entries[index])) break;
+    }
+    filesystem->directory_read_release(&operation);
     Item result = node_fs_root_value(array_root);
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;
@@ -907,16 +782,18 @@ static Item node_fs_realpath_sync(Item path_item, Item options) {
     if (!node_fs_readdir_options_valid(options)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
-#if defined(_WIN32)
-    char* resolved = _fullpath(NULL, path, 0);
-#else
-    char* resolved = realpath(path, NULL);
-#endif
-    int error_number = errno;
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemStringOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_STRING_REALPATH;
+    operation.path = path;
+    bool success = filesystem && filesystem->string_operation &&
+        filesystem->string_operation_release && filesystem->string_operation(&operation);
     free(path);
-    if (!resolved) return node_fs_sync_error("realpath", error_number);
-    Item result = node_fs_host->value->string_from_utf8_n(resolved, strlen(resolved));
-    free(resolved);
+    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "realpath",
+                                            operation.error_number ? operation.error_number : EIO);
+    Item result = node_fs_host->value->string_from_utf8_n(operation.output, operation.output_length);
+    filesystem->string_operation_release(&operation);
     return result;
 }
 
@@ -924,33 +801,18 @@ static Item node_fs_mkdtemp_sync(Item prefix_item, Item options) {
     if (!node_fs_readdir_options_valid(options)) return ItemNull;
     char* prefix = NULL;
     if (!node_fs_copy_path(prefix_item, &prefix, true)) return ItemNull;
-    size_t prefix_length = strlen(prefix);
-    char* path = (char*)malloc(prefix_length + 7);
-    if (!path) {
-        free(prefix);
-        return node_fs_sync_error("mkdtemp", ENOMEM);
-    }
-    memcpy(path, prefix, prefix_length);
-    memcpy(path + prefix_length, "XXXXXX", 7);
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemStringOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_STRING_MKDTEMP;
+    operation.path = prefix;
+    bool success = filesystem && filesystem->string_operation &&
+        filesystem->string_operation_release && filesystem->string_operation(&operation);
     free(prefix);
-#if defined(_WIN32)
-    int result = _mktemp_s(path, prefix_length + 7);
-    int error_number = result;
-    if (result == 0 && NODE_FS_MKDIR(path, 0700) != 0) {
-        result = -1;
-        error_number = errno;
-    }
-#else
-    char* created = mkdtemp(path);
-    int result = created ? 0 : -1;
-    int error_number = errno;
-#endif
-    if (result != 0) {
-        free(path);
-        return node_fs_sync_error("mkdtemp", error_number);
-    }
-    Item output = node_fs_host->value->string_from_utf8_n(path, strlen(path));
-    free(path);
+    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "mkdtemp",
+                                            operation.error_number ? operation.error_number : EIO);
+    Item output = node_fs_host->value->string_from_utf8_n(operation.output, operation.output_length);
+    filesystem->string_operation_release(&operation);
     return output;
 }
 
@@ -962,12 +824,14 @@ static Item node_fs_link_sync(Item existing_path_item, Item new_path_item) {
         free(existing_path);
         return ItemNull;
     }
-    int result = NODE_FS_LINK(existing_path, new_path);
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_LINK;
+    operation.path = existing_path;
+    operation.secondary_path = new_path;
+    Item result = node_fs_path_operation_error(&operation);
     free(existing_path);
     free(new_path);
-    if (result != 0) return node_fs_sync_error("link", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_symlink_sync(Item target_item, Item path_item) {
@@ -978,18 +842,22 @@ static Item node_fs_symlink_sync(Item target_item, Item path_item) {
         free(target);
         return ItemNull;
     }
-    int result = file_symlink(target, path);
-    int error_number = errno ? errno : EIO;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_SYMLINK;
+    operation.path = target;
+    operation.secondary_path = path;
+    Item result = node_fs_path_operation_error(&operation);
     free(target);
     free(path);
-    if (result != 0) return node_fs_sync_error("symlink", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_schedule(Item path_item, Item data_item, Item callback, NodeFsMode mode) {
     if (!node_fs_host || !node_fs_session || !node_fs_host->value || !node_fs_host->script ||
             !node_fs_host->node || !node_fs_host->node->async_ops ||
-            !node_fs_host->node->async_ops->work_submit || !node_fs_host->node->events ||
+            !node_fs_host->node->async_ops->work_submit || !node_fs_host->node->filesystem ||
+            !node_fs_host->node->filesystem->read_write ||
+            !node_fs_host->node->filesystem->read_write_release || !node_fs_host->node->events ||
             !node_fs_host->node->events->domain_current || !node_fs_host->node->permission ||
             !node_fs_host->node->permission->has_fs_read || !node_fs_host->node->permission->has_fs_write) {
         return ItemNull;
@@ -1211,7 +1079,15 @@ static void node_fs_filehandle_destroy(void* payload) {
     if (!handle) return;
     // A forgotten FileHandle must still release its OS descriptor when the
     // owning Jube object dies; otherwise dynamic module teardown leaks fds.
-    if (handle->descriptor >= 0) NODE_FS_CLOSE(handle->descriptor);
+    if (handle->descriptor >= 0) {
+        JubeNodeFilesystemDescriptorOperation operation = {};
+        operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE;
+        operation.descriptor = handle->descriptor;
+        // FileHandle finalization can run during module teardown; the host is
+        // still responsible for closing the descriptor even when no JS error
+        // can be surfaced to the caller.
+        node_fs_descriptor_operation(&operation);
+    }
     free(handle);
 }
 
@@ -1227,8 +1103,11 @@ static int node_fs_filehandle_close_call(Item receiver, Item* args, int argc, It
     (void)argc;
     NodeFsFileHandle* handle = node_fs_filehandle_data(receiver);
     if (!handle || !out) return 0;
-    if (handle->descriptor >= 0 && NODE_FS_CLOSE(handle->descriptor) != 0) {
-        int error_number = errno;
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE;
+    operation.descriptor = handle->descriptor;
+    if (handle->descriptor >= 0 && !node_fs_descriptor_operation(&operation)) {
+        int error_number = operation.error_number ? operation.error_number : EIO;
         node_fs_host->node->error->throw_system_error(node_fs_session, "close", error_number);
         Item error = node_fs_host->script->clear_exception();
         *out = node_fs_promise_settled(error, true);
@@ -1304,16 +1183,17 @@ static int node_fs_filehandle_read_file_call(Item receiver, Item* args, int argc
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
-    NodeFsStat info = {};
-    if (NODE_FS_FSTAT(handle->descriptor, &info) != 0 || info.st_size < 0 ||
-            (uintmax_t)info.st_size > (uintmax_t)INT_MAX) {
-        int error_number = errno ? errno : EFBIG;
+    JubeNodeFilesystemMetadataOperation metadata = {};
+    metadata.mode = JUBE_NODE_FILESYSTEM_METADATA_FSTAT;
+    metadata.descriptor = handle->descriptor;
+    if (!node_fs_metadata_operation(&metadata) || metadata.value.size > (uint64_t)INT_MAX) {
+        int error_number = metadata.error_number ? metadata.error_number : EFBIG;
         node_fs_host->node->error->throw_system_error(node_fs_session, "fstat", error_number);
         Item error = node_fs_host->script->clear_exception();
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
-    size_t byte_count = (size_t)info.st_size;
+    size_t byte_count = (size_t)metadata.value.size;
     char* bytes = (char*)malloc(byte_count > 0 ? byte_count : 1);
     if (!bytes) {
         node_fs_host->node->error->throw_system_error(node_fs_session, "read", ENOMEM);
@@ -1324,9 +1204,9 @@ static int node_fs_filehandle_read_file_call(Item receiver, Item* args, int argc
     size_t offset = 0;
     int error_number = 0;
     while (offset < byte_count) {
-        int count = (int)NODE_FS_READ(handle->descriptor, bytes + offset, byte_count - offset);
+        int count = node_fs_descriptor_io(handle->descriptor, (uint8_t*)bytes + offset,
+                                          byte_count - offset, -1, false, &error_number);
         if (count < 0) {
-            error_number = errno;
             break;
         }
         if (count == 0) break;
@@ -1368,23 +1248,12 @@ enum NodeFsStatTime {
     NODE_FS_STAT_BIRTHTIME,
 };
 
-static int64_t node_fs_stats_time_millis(const NodeFsStat* value, NodeFsStatTime which) {
-#if defined(_WIN32)
-    int64_t seconds = which == NODE_FS_STAT_ATIME ? (int64_t)value->st_atime :
-        which == NODE_FS_STAT_MTIME ? (int64_t)value->st_mtime : (int64_t)value->st_ctime;
-    return seconds * 1000;
-#elif defined(__APPLE__)
-    const struct timespec* time = which == NODE_FS_STAT_ATIME ? &value->st_atimespec :
-        which == NODE_FS_STAT_MTIME ? &value->st_mtimespec :
-        which == NODE_FS_STAT_CTIME ? &value->st_ctimespec : &value->st_birthtimespec;
-    return (int64_t)time->tv_sec * 1000 + (int64_t)(time->tv_nsec / 1000000);
-#else
-    const struct timespec* time = which == NODE_FS_STAT_ATIME ? &value->st_atim :
-        which == NODE_FS_STAT_MTIME ? &value->st_mtim : &value->st_ctim;
-    // POSIX stat has no portable creation timestamp, so match libuv's
-    // fallback and expose ctime when the platform cannot report birthtime.
-    return (int64_t)time->tv_sec * 1000 + (int64_t)(time->tv_nsec / 1000000);
-#endif
+static int64_t node_fs_stats_time_millis(const JubeNodeFilesystemMetadata* value, NodeFsStatTime which) {
+    if (!value) return 0;
+    if (which == NODE_FS_STAT_ATIME) return value->atime_millis;
+    if (which == NODE_FS_STAT_MTIME) return value->mtime_millis;
+    if (which == NODE_FS_STAT_CTIME) return value->ctime_millis;
+    return value->birthtime_millis;
 }
 
 static Item node_fs_stats_time_value(const NodeFsStats* stats, NodeFsStatTime which) {
@@ -1398,14 +1267,14 @@ static Item node_fs_stats_time_value(const NodeFsStats* stats, NodeFsStatTime wh
 static int node_fs_stats_size_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_size, stats->bigint);
+    *out = node_fs_stats_unsigned(stats->value.size, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_ino_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_ino, stats->bigint);
+    *out = node_fs_stats_unsigned(stats->value.ino, stats->bigint);
     return 1;
 }
 
@@ -1450,69 +1319,49 @@ static int function_name(Item receiver, Item* out) { \
     return 1; \
 }
 
-NODE_FS_STATS_UINT_GET(node_fs_stats_mode_get, st_mode)
-NODE_FS_STATS_UINT_GET(node_fs_stats_nlink_get, st_nlink)
-NODE_FS_STATS_UINT_GET(node_fs_stats_dev_get, st_dev)
+NODE_FS_STATS_UINT_GET(node_fs_stats_mode_get, mode)
+NODE_FS_STATS_UINT_GET(node_fs_stats_nlink_get, nlink)
+NODE_FS_STATS_UINT_GET(node_fs_stats_dev_get, dev)
 
 static int node_fs_stats_uid_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-#if defined(_WIN32)
-    *out = node_fs_stats_unsigned(0, stats->bigint);
-#else
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_uid, stats->bigint);
-#endif
+    *out = node_fs_stats_unsigned(stats->value.uid, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_gid_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-#if defined(_WIN32)
-    *out = node_fs_stats_unsigned(0, stats->bigint);
-#else
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_gid, stats->bigint);
-#endif
+    *out = node_fs_stats_unsigned(stats->value.gid, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_rdev_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-#if defined(_WIN32)
-    *out = node_fs_stats_unsigned(0, stats->bigint);
-#else
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_rdev, stats->bigint);
-#endif
+    *out = node_fs_stats_unsigned(stats->value.rdev, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_blksize_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-#if defined(_WIN32)
-    *out = node_fs_stats_unsigned(0, stats->bigint);
-#else
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_blksize, stats->bigint);
-#endif
+    *out = node_fs_stats_unsigned(stats->value.blksize, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_blocks_get(Item receiver, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-#if defined(_WIN32)
-    *out = node_fs_stats_unsigned(0, stats->bigint);
-#else
-    *out = node_fs_stats_unsigned((uint64_t)stats->value.st_blocks, stats->bigint);
-#endif
+    *out = node_fs_stats_unsigned(stats->value.blocks, stats->bigint);
     return 1;
 }
 
 static int node_fs_stats_kind(Item receiver, int mode, Item* out) {
     NodeFsStats* stats = node_fs_stats_data(receiver);
     if (!stats || !out) return 0;
-    *out = (Item){.item = b2it((stats->value.st_mode & S_IFMT) == mode)};
+    *out = (Item){.item = b2it((stats->value.mode & S_IFMT) == mode)};
     return 1;
 }
 
@@ -1616,13 +1465,18 @@ static Item node_fs_stat_sync(Item path_item, Item options, bool link) {
         free(path);
         return node_fs_sync_error(link ? "lstat" : "stat", ENOMEM);
     }
-    int result = link ? NODE_FS_LSTAT(path, &stats->value) : NODE_FS_STAT(path, &stats->value);
-    int error_number = errno;
+    JubeNodeFilesystemMetadataOperation operation = {};
+    operation.mode = link ? JUBE_NODE_FILESYSTEM_METADATA_LSTAT : JUBE_NODE_FILESYSTEM_METADATA_STAT;
+    operation.path = path;
+    bool loaded = node_fs_metadata_operation(&operation);
     free(path);
-    if (result != 0) {
+    if (!loaded) {
         free(stats);
-        return node_fs_sync_error(link ? "lstat" : "stat", error_number);
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall :
+                                  (link ? "lstat" : "stat"),
+                                  operation.error_number ? operation.error_number : EIO);
     }
+    stats->value = operation.value;
     return node_fs_stats_wrap(stats, options);
 }
 
@@ -1642,11 +1496,15 @@ static Item node_fs_fstat_sync_export(Item descriptor_item, Item options) {
     int descriptor = (int)node_fs_host->script->get_number(descriptor_item);
     NodeFsStats* stats = (NodeFsStats*)calloc(1, sizeof(NodeFsStats));
     if (!stats) return node_fs_sync_error("fstat", ENOMEM);
-    if (NODE_FS_FSTAT(descriptor, &stats->value) != 0) {
-        int error_number = errno;
+    JubeNodeFilesystemMetadataOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_METADATA_FSTAT;
+    operation.descriptor = descriptor;
+    if (!node_fs_metadata_operation(&operation)) {
         free(stats);
-        return node_fs_sync_error("fstat", error_number);
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "fstat",
+                                  operation.error_number ? operation.error_number : EIO);
     }
+    stats->value = operation.value;
     return node_fs_stats_wrap(stats, options);
 }
 
@@ -2199,7 +2057,13 @@ static Item node_fs_close_sync_export(Item descriptor_item) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "fd must be a number");
     }
     int descriptor = (int)node_fs_host->script->get_number(descriptor_item);
-    if (NODE_FS_CLOSE(descriptor) != 0) return node_fs_sync_error("close", errno);
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE;
+    operation.descriptor = descriptor;
+    if (!node_fs_descriptor_operation(&operation)) {
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "close",
+                                  operation.error_number ? operation.error_number : EIO);
+    }
     return node_fs_undefined();
 }
 
@@ -2332,17 +2196,27 @@ static Item node_fs_promises_open(Item path_item, Item flags_item, Item mode_ite
     }
     int mode = node_fs_host->value->kind(mode_item) == JUBE_VALUE_NUMBER ?
         (int)node_fs_host->script->get_number(mode_item) : 0666;
-    int descriptor = NODE_FS_OPEN(path, flags, mode);
-    int error_number = errno;
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_OPEN;
+    operation.path = path;
+    operation.flags = flags;
+    operation.mode_value = mode;
+    bool opened = node_fs_descriptor_operation(&operation);
     free(path);
-    if (descriptor < 0) {
-        node_fs_host->node->error->throw_system_error(node_fs_session, "open", error_number);
+    if (!opened) {
+        node_fs_host->node->error->throw_system_error(node_fs_session,
+                                                      operation.error_syscall ? operation.error_syscall : "open",
+                                                      operation.error_number ? operation.error_number : EIO);
         Item error = node_fs_host->script->clear_exception();
         return node_fs_promise_settled(error, true);
     }
+    int descriptor = operation.descriptor;
     NodeFsFileHandle* native = (NodeFsFileHandle*)calloc(1, sizeof(NodeFsFileHandle));
     if (!native) {
-        NODE_FS_CLOSE(descriptor);
+        JubeNodeFilesystemDescriptorOperation close_operation = {};
+        close_operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE;
+        close_operation.descriptor = descriptor;
+        node_fs_descriptor_operation(&close_operation);
         node_fs_host->node->error->throw_system_error(node_fs_session, "open", ENOMEM);
         Item error = node_fs_host->script->clear_exception();
         return node_fs_promise_settled(error, true);
@@ -2372,11 +2246,16 @@ static Item node_fs_open_sync_export(Item path_item, Item flags_item, Item mode_
     }
     int mode = node_fs_host->value->kind(mode_item) == JUBE_VALUE_NUMBER ?
         (int)node_fs_host->script->get_number(mode_item) : 0666;
-    int descriptor = NODE_FS_OPEN(path, flags, mode);
-    int error_number = errno;
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_OPEN;
+    operation.path = path;
+    operation.flags = flags;
+    operation.mode_value = mode;
+    bool opened = node_fs_descriptor_operation(&operation);
     free(path);
-    if (descriptor < 0) return node_fs_sync_error("open", error_number);
-    return (Item){.item = i2it((int64_t)descriptor)};
+    if (!opened) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "open",
+                                           operation.error_number ? operation.error_number : EIO);
+    return (Item){.item = i2it((int64_t)operation.descriptor)};
 }
 
 static bool node_fs_number_arg(Item value, int64_t fallback, int64_t* out_value) {
@@ -2398,8 +2277,14 @@ static Item node_fs_fchmod_sync(Item descriptor_item, Item mode_item) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "fd must be a number");
     }
     if (!node_fs_file_mode(mode_item, &mode)) return ItemNull;
-    int result = NODE_FS_FCHMOD((int)descriptor, mode);
-    if (result != 0) return node_fs_sync_error("fchmod", errno);
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_FCHMOD;
+    operation.descriptor = (int)descriptor;
+    operation.mode_value = mode;
+    if (!node_fs_descriptor_operation(&operation)) {
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "fchmod",
+                                  operation.error_number ? operation.error_number : EIO);
+    }
     return node_fs_undefined();
 }
 
@@ -2508,19 +2393,10 @@ static Item node_fs_vector_io(Item descriptor_item, Item buffers_item, Item posi
         while (offset < vectors[index].length) {
             size_t remaining = vectors[index].length - offset;
             unsigned int chunk = remaining > (size_t)UINT_MAX ? UINT_MAX : (unsigned int)remaining;
-            int count = position >= 0 ?
-#if defined(_WIN32)
-                (_lseeki64((int)descriptor, position + total, SEEK_SET) < 0 ? -1 :
-                    (is_write ? NODE_FS_WRITE((int)descriptor, vectors[index].data + offset, chunk) :
-                             NODE_FS_READ((int)descriptor, vectors[index].data + offset, chunk))) :
-#else
-                (is_write ? (int)pwrite((int)descriptor, vectors[index].data + offset, chunk, position + total) :
-                         (int)pread((int)descriptor, vectors[index].data + offset, chunk, position + total)) :
-#endif
-                (is_write ? NODE_FS_WRITE((int)descriptor, vectors[index].data + offset, chunk) :
-                         NODE_FS_READ((int)descriptor, vectors[index].data + offset, chunk));
+            int count = node_fs_descriptor_io((int)descriptor, vectors[index].data + offset, chunk,
+                                              position >= 0 ? position + total : -1, is_write,
+                                              &error_number);
             if (count < 0) {
-                error_number = errno;
                 break;
             }
             if (count == 0) break;
@@ -2567,14 +2443,10 @@ static Item node_fs_read_sync_export(Item descriptor_item, Item buffer_item, Ite
     }
     uint8_t* data = node_fs_host->node->binary->typed_array_data(buffer_item);
     if (!data && length > 0) return node_fs_sync_error("read", EINVAL);
-    int count = position >= 0 ?
-#if defined(_WIN32)
-        (_lseeki64((int)descriptor, position, SEEK_SET) < 0 ? -1 : NODE_FS_READ((int)descriptor, data + offset, (unsigned int)length)) :
-#else
-        (int)pread((int)descriptor, data + offset, (size_t)length, position) :
-#endif
-        NODE_FS_READ((int)descriptor, data + offset, (size_t)length);
-    if (count < 0) return node_fs_sync_error("read", errno);
+    int error_number = 0;
+    int count = node_fs_descriptor_io((int)descriptor, data + offset, (size_t)length, position,
+                                      false, &error_number);
+    if (count < 0) return node_fs_sync_error("read", error_number);
     return node_fs_host->script->make_number((double)count);
 }
 
@@ -2607,14 +2479,9 @@ static Item node_fs_write_sync_export(Item descriptor_item, Item data_item, Item
         return node_fs_host->node->error->throw_range_error_code(node_fs_session,
                                                                   "ERR_OUT_OF_RANGE", "offset and length exceed data");
     }
-    int count = position >= 0 ?
-#if defined(_WIN32)
-        (_lseeki64((int)descriptor, position, SEEK_SET) < 0 ? -1 : NODE_FS_WRITE((int)descriptor, bytes + offset, (unsigned int)length)) :
-#else
-        (int)pwrite((int)descriptor, bytes + offset, (size_t)length, position) :
-#endif
-        NODE_FS_WRITE((int)descriptor, bytes + offset, (size_t)length);
-    int error_number = errno;
+    int error_number = 0;
+    int count = node_fs_descriptor_io((int)descriptor, (uint8_t*)bytes + offset, (size_t)length,
+                                      position, true, &error_number);
     free(copied);
     if (count < 0) return node_fs_sync_error("write", error_number);
     return node_fs_host->script->make_number((double)count);
@@ -2792,40 +2659,19 @@ static Item node_fs_readlink_sync(Item path_item, Item options) {
     if (!node_fs_readdir_options_valid(options)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
-#if defined(_WIN32)
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemStringOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_STRING_READLINK;
+    operation.path = path;
+    bool success = filesystem && filesystem->string_operation &&
+        filesystem->string_operation_release && filesystem->string_operation(&operation);
     free(path);
-    return node_fs_sync_error("readlink", ENOSYS);
-#else
-    size_t capacity = 256;
-    char* target = (char*)malloc(capacity);
-    if (!target) {
-        free(path);
-        return node_fs_sync_error("readlink", ENOMEM);
-    }
-    ssize_t length = -1;
-    while (capacity <= 1024 * 1024) {
-        length = readlink(path, target, capacity);
-        if (length < 0 || (size_t)length < capacity) break;
-        size_t next_capacity = capacity * 2;
-        char* resized = (char*)realloc(target, next_capacity);
-        if (!resized) {
-            free(target);
-            free(path);
-            return node_fs_sync_error("readlink", ENOMEM);
-        }
-        target = resized;
-        capacity = next_capacity;
-    }
-    int error_number = errno;
-    free(path);
-    if (length < 0 || (size_t)length == capacity) {
-        free(target);
-        return node_fs_sync_error("readlink", length < 0 ? error_number : ENAMETOOLONG);
-    }
-    Item result = node_fs_host->value->string_from_utf8_n(target, (size_t)length);
-    free(target);
+    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "readlink",
+                                            operation.error_number ? operation.error_number : EIO);
+    Item result = node_fs_host->value->string_from_utf8_n(operation.output, operation.output_length);
+    filesystem->string_operation_release(&operation);
     return result;
-#endif
 }
 
 static Item node_fs_readlink_export(Item path, Item options_or_callback, Item callback) {
@@ -2866,15 +2712,14 @@ static Item node_fs_chown_sync(Item path_item, Item uid_item, Item gid_item, boo
     if (!node_fs_uid_gid(uid_item, "uid", &uid) || !node_fs_uid_gid(gid_item, "gid", &gid)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-#if defined(_WIN32)
-    int result = _chown(path, uid, gid);
-#else
-    int result = link ? lchown(path, uid, gid) : chown(path, uid, gid);
-#endif
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = link ? JUBE_NODE_FILESYSTEM_PATH_LCHOWN : JUBE_NODE_FILESYSTEM_PATH_CHOWN;
+    operation.path = path;
+    operation.numeric_value = uid;
+    operation.secondary_numeric_value = gid;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error(link ? "lchown" : "chown", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_chown_sync_export(Item path, Item uid, Item gid) {
@@ -2896,12 +2741,16 @@ static Item node_fs_fchown_sync(Item descriptor_item, Item uid_item, Item gid_it
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                                             "fd, uid, and gid must be non-negative integers");
     }
-#if defined(_WIN32)
-    return node_fs_sync_error("fchown", ENOSYS);
-#else
-    if (fchown((int)descriptor, uid, gid) != 0) return node_fs_sync_error("fchown", errno);
+    JubeNodeFilesystemDescriptorOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_FCHOWN;
+    operation.descriptor = (int)descriptor;
+    operation.mode_value = uid;
+    operation.secondary_mode_value = gid;
+    if (!node_fs_descriptor_operation(&operation)) {
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "fchown",
+                                  operation.error_number ? operation.error_number : EIO);
+    }
     return node_fs_undefined();
-#endif
 }
 
 static Item node_fs_lchmod_sync(Item path_item, Item mode_item) {
@@ -2909,18 +2758,13 @@ static Item node_fs_lchmod_sync(Item path_item, Item mode_item) {
     if (!node_fs_file_mode(mode_item, &mode)) return ItemNull;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, true)) return ItemNull;
-#if defined(__APPLE__)
-    int result = lchmod(path, (mode_t)mode);
-#elif defined(_WIN32)
-    int result = -1;
-    errno = ENOSYS;
-#else
-    int result = NODE_FS_CHMOD(path, mode);
-#endif
-    int error_number = errno;
+    JubeNodeFilesystemPathOperation operation = {};
+    operation.mode = JUBE_NODE_FILESYSTEM_PATH_LCHMOD;
+    operation.path = path;
+    operation.numeric_value = mode;
+    Item result = node_fs_path_operation_error(&operation);
     free(path);
-    if (result != 0) return node_fs_sync_error("lchmod", error_number);
-    return node_fs_undefined();
+    return result;
 }
 
 static Item node_fs_chown_export(Item path, Item uid, Item gid, Item callback) {
@@ -3146,30 +2990,14 @@ static void node_fs_install_constants(Item namespace_item) {
 static Item node_fs_statfs_sync(Item path_item, Item options) {
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
-    uint64_t type = 0;
-    uint64_t bsize = 4096;
-    uint64_t frsize = 4096;
-    uint64_t blocks = 0;
-    uint64_t bfree = 0;
-    uint64_t bavail = 0;
-    uint64_t files = 0;
-    uint64_t ffree = 0;
-#if !defined(_WIN32)
-    struct statvfs value = {};
-    if (statvfs(path, &value) != 0) {
-        int error_number = errno;
-        free(path);
-        return node_fs_sync_error("statfs", error_number);
-    }
-    bsize = (uint64_t)value.f_bsize;
-    frsize = value.f_frsize ? (uint64_t)value.f_frsize : bsize;
-    blocks = (uint64_t)value.f_blocks;
-    bfree = (uint64_t)value.f_bfree;
-    bavail = (uint64_t)value.f_bavail;
-    files = (uint64_t)value.f_files;
-    ffree = (uint64_t)value.f_ffree;
-#endif
+    const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
+        node_fs_host->node->filesystem : NULL;
+    JubeNodeFilesystemStatfsOperation operation = {};
+    operation.path = path;
+    bool loaded = filesystem && filesystem->statfs_operation && filesystem->statfs_operation(&operation);
     free(path);
+    if (!loaded) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "statfs",
+                                           operation.error_number ? operation.error_number : EIO);
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 1)) return ItemNull;
     uint64_t* result_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -3180,14 +3008,14 @@ static Item node_fs_statfs_sync(Item path_item, Item options) {
     Item result = node_fs_host->script->object_create(ItemNull);
     *result_root = result.item;
     bool bigint = node_fs_options_bigint(options);
-    bool populated = node_fs_set_unsigned_property(node_fs_root_value(result_root), "type", type, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bsize", bsize, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "frsize", frsize, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "blocks", blocks, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bfree", bfree, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bavail", bavail, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "files", files, bigint) &&
-                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "ffree", ffree, bigint);
+    bool populated = node_fs_set_unsigned_property(node_fs_root_value(result_root), "type", operation.type, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bsize", operation.bsize, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "frsize", operation.frsize, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "blocks", operation.blocks, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bfree", operation.bfree, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "bavail", operation.bavail, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "files", operation.files, bigint) &&
+                     node_fs_set_unsigned_property(node_fs_root_value(result_root), "ffree", operation.ffree, bigint);
     Item completed = populated ? node_fs_root_value(result_root) : ItemNull;
     node_fs_host->node->roots->root_frame_end(&frame);
     return completed;
@@ -3385,13 +3213,16 @@ static const JubeModuleRequirements node_fs_requirements = {
 
 static int node_fs_init(const JubeHostAPI* host) {
     if (!host || !host->node || !host->node->runtime || !host->node->roots || !host->node->async_ops ||
-            !host->node->events || !host->node->permission || !host->value || !host->script ||
+            !host->node->events || !host->node->permission || !host->node->filesystem ||
+            !host->value || !host->script ||
             !host->node->streams || !host->node->streams->file_read_stream_new ||
             !host->node->streams->file_write_stream_new ||
             !host->node->runtime->resolve_host_namespace || !host->node->roots->persistent_root_register ||
             !host->node->events->domain_current || !host->node->events->domain_call ||
             !host->node->permission->has_fs_read || !host->node->permission->has_fs_write ||
             !host->node->permission->check_fs_read || !host->node->permission->check_fs_write ||
+            host->node->filesystem->struct_size < sizeof(JubeHostFilesystemAPI) ||
+            !host->node->filesystem->read_write || !host->node->filesystem->read_write_release ||
             !host->node->async_ops->work_submit || !host->value->kind ||
             !host->node->async_ops->function_install_promisify_custom ||
             !host->node->async_ops->function_install_promisify_args ||
@@ -3442,6 +3273,8 @@ static void node_fs_shutdown(void) {
     node_fs_session = NULL;
 }
 
+static const char* const node_fs_dependencies[] = { "node-core" };
+
 static const JubeModuleDef node_fs_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
@@ -3468,6 +3301,8 @@ static const JubeModuleDef node_fs_module = {
     node_fs_runtime_attach,
     node_fs_runtime_reset,
     node_fs_runtime_detach,
+    node_fs_dependencies,
+    1,
 };
 
 #if !defined(LAMBDA_NODE_FS_DYNAMIC_MODULE)

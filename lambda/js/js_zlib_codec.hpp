@@ -19,8 +19,8 @@ enum NodeZlibCodecMode {
     NODE_ZLIB_CODEC_UNZIP,
 };
 
-// This primitive is shared by the static checkpoint and the hosted module so
-// both paths use zlib's exact seed and unsigned-result semantics.
+// This host primitive is shared by the legacy checkpoint and the Jube provider
+// so both paths use zlib's exact seed and unsigned-result semantics.
 static inline uint32_t node_zlib_crc32_bytes(const uint8_t* data, int length, uint32_t seed) {
     static const uint8_t empty_data = 0;
     const uint8_t* input = data ? data : &empty_data;
