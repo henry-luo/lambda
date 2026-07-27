@@ -1,0 +1,7 @@
+true
+number
+function
+true
+bigint
+bigint
+true

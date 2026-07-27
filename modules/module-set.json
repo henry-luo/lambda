@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "modules": [
+    "node-core",
+    "node-fs"
+  ]
+}

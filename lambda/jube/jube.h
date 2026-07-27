@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lambda.h"
+#include "../lambda-data.hpp"
 #include "../runtime/side_stack.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260724-h7e38"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260727-h9b40"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -46,6 +46,22 @@ typedef struct JubeRuntimeCatalogAPI JubeRuntimeCatalogAPI;
 typedef struct JubeRuntimeImport JubeRuntimeImport;
 typedef struct JubeRuntimeImportMetadata JubeRuntimeImportMetadata;
 typedef struct JubeModuleNamespaceOps JubeModuleNamespaceOps;
+typedef struct JubeModuleRequirements JubeModuleRequirements;
+typedef struct JubeGlobalDef JubeGlobalDef;
+typedef struct JubeHostRuntimeAPI JubeHostRuntimeAPI;
+typedef struct JubeHostNodeAPI JubeHostNodeAPI;
+typedef struct JubeHostNodeErrorAPI JubeHostNodeErrorAPI;
+typedef struct JubeHostAsyncAPI JubeHostAsyncAPI;
+typedef struct JubeHostBinaryAPI JubeHostBinaryAPI;
+typedef struct JubeHostStreamAPI JubeHostStreamAPI;
+typedef struct JubeBinaryView JubeBinaryView;
+
+// Native work callbacks operate only on module-owned POD state.  They never
+// receive an Item, a JS session, or a libuv handle; the host invokes completion
+// on the owning JS thread after it has checked that the session remains live.
+typedef void (*JubeAsyncWorkCallback)(void* user);
+typedef void (*JubeAsyncCompletionCallback)(void* user, int status);
+typedef void (*JubeAsyncDestroyCallback)(void* user);
 
 // Public compiler value kinds are intentionally narrower than MIR_type_t.
 // Hosted languages may request only ABI-relevant register classes; the host
@@ -54,6 +70,15 @@ enum JubeCompilerValueKind {
     JUBE_COMPILER_VALUE_I64 = 0,
     JUBE_COMPILER_VALUE_F64 = 1,
     JUBE_COMPILER_VALUE_POINTER = 2,
+};
+
+// Hosted modules name only stable, host-neutral class identities.  The JS
+// engine owns its concrete class tags and translates these at the boundary.
+enum JubeScriptClass {
+    JUBE_SCRIPT_CLASS_URL = 1,
+    JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS = 2,
+    JUBE_SCRIPT_CLASS_BLOB = 3,
+    JUBE_SCRIPT_CLASS_EVENT_EMITTER = 4,
 };
 
 // A hosted compiler emits only semantic instruction forms.  These remain
@@ -153,6 +178,7 @@ typedef enum JubeHostCapability {
     JUBE_HOST_CAP_MODULE_GRAPH = 1ull << 3,
     JUBE_HOST_CAP_GUEST_EXECUTION = 1ull << 4,
     JUBE_HOST_CAP_COMPILER = 1ull << 5,
+    JUBE_HOST_CAP_NODE_RUNTIME = 1ull << 6,
 } JubeHostCapability;
 
 // Hosted-language service capabilities are separate from the base host
@@ -236,6 +262,21 @@ typedef enum JubeFuncFlags {
     JUBE_FN_VARARGS = 1u << 1,
 } JubeFuncFlags;
 
+// Modules classify only the JavaScript-observable shapes they consume. The
+// host retains its richer internal TypeId representation.
+typedef enum JubeValueKind {
+    JUBE_VALUE_OTHER = 0,
+    JUBE_VALUE_UNDEFINED = 1,
+    JUBE_VALUE_NULL = 2,
+    JUBE_VALUE_BOOLEAN = 3,
+    JUBE_VALUE_NUMBER = 4,
+    JUBE_VALUE_STRING = 5,
+    JUBE_VALUE_ARRAY = 6,
+    JUBE_VALUE_OBJECT = 7,
+    JUBE_VALUE_FUNCTION = 8,
+    JUBE_VALUE_SYMBOL = 9,
+} JubeValueKind;
+
 typedef enum JubeTypeFlags {
     JUBE_TYPE_NONE = 0,
     JUBE_TYPE_NON_OWNING_HOST = 1u << 0,
@@ -281,6 +322,40 @@ struct JubeNamespaceDef {
     const JubeFuncDef* funcs;
     int32_t func_count;
 };
+
+// Import specifiers and globals are intentionally independent: declaring a
+// namespace must not silently publish an observable globalThis property.
+struct JubeGlobalDef {
+    const char* name;
+    uint32_t flags;
+    // The host invokes this only for an attached JS runtime.  A global builder
+    // may use the token to select its session-local cache, but never stores it
+    // beyond runtime_detach.
+    Item (*build)(void* session);
+};
+
+// Declares registration-time host requirements.  This is deliberately a
+// compact, additive contract: a loader rejects an incompatible descriptor
+// before init can allocate module state or publish callbacks.
+struct JubeModuleRequirements {
+    uint32_t struct_size;
+    uint32_t min_host_api_version;
+    uint32_t min_host_api_size;
+    uint32_t reserved;
+    uint64_t required_host_capabilities;
+    // Optional additive Node contract. A record ending at the v1 prefix asks
+    // only for the generic host requirements above.
+    uint32_t min_node_api_version;
+    uint32_t min_node_api_size;
+    // Node modules also consume these generic tables.  Keep their minimum
+    // layouts explicit so a descriptor cannot enter init with a truncated
+    // value, script, or session-root service.
+    uint32_t min_value_api_size;
+    uint32_t min_script_api_size;
+    uint32_t min_root_api_size;
+};
+
+#define JUBE_MODULE_REQUIREMENTS_V1_SIZE offsetof(JubeModuleRequirements, min_node_api_version)
 
 // DOM3: binding-table halves of the module interface declaration.
 // Shape (names, types, purity, arity, defaults) lives in Lambda type syntax in
@@ -376,6 +451,9 @@ struct JubeHostRootAPI {
     // Persistent slots belong to a guest runtime, not to a stack frame.  The
     // session token prevents a module from registering roots in another run.
     int (*persistent_root_register)(void* session, uint64_t* slot);
+    // Removal is likewise session-bound so a module cannot unregister another
+    // runtime's root while a heap is active.
+    int (*persistent_root_unregister)(void* session, uint64_t* slot);
 };
 
 // Language-neutral projection of Lambda Item/container mechanics.  The
@@ -416,8 +494,30 @@ struct JubeHostValueAPI {
     Item (*array_push)(Item array, Item value);
     int64_t (*array_length)(Item array);
     Item (*array_get)(Item array, int64_t index);
+    Item (*array_set)(Item array, int64_t index, Item value);
     Item (*property_get)(Item object, Item key);
     Item (*property_set)(Item object, Item key, Item value);
+    // Defines an own data property while bypassing accessor dispatch.  This
+    // preserves null-prototype dictionary keys such as "__proto__".
+    Item (*property_set_own)(Item object, Item key, Item value);
+    bool (*property_has_own)(Item object, Item key);
+    bool (*property_get_own_data)(Item object, Item key, Item* out_value);
+    bool (*is_array)(Item value);
+    int (*kind)(Item value);
+    bool (*string_copy)(Item value, char* out, size_t out_size, size_t* out_length);
+    Item (*string_from_utf8_n)(const char* text, size_t length);
+    size_t (*string_length)(Item value);
+    // Borrowed UTF-8 storage remains valid until the caller releases or
+    // overwrites its rooted Item. This avoids exposing String layout to a
+    // binary/codec module that needs read-only input bytes.
+    const uint8_t* (*string_bytes)(Item value);
+    // Preserves integer-vs-float behavior without exposing tagged values.
+    bool (*number_to_int64_exact)(Item value, int64_t* out_value);
+    // Creates and unwraps a branded native object without publishing VMap's
+    // concrete layout. The type must be a module-declared JubeTypeDef, and
+    // its destroy hook owns the payload's lifetime.
+    Item (*native_object_new)(const JubeTypeDef* type, void* payload);
+    void* (*native_object_data)(Item object, const JubeTypeDef* type);
 };
 
 struct JubeHostScriptAPI {
@@ -430,6 +530,7 @@ struct JubeHostScriptAPI {
     Item (*new_error_with_name)(Item error_name, Item message);
     void (*throw_value)(Item error);
     Item (*reflect_own_keys)(Item obj);
+    Item (*object_keys)(Item obj);
     Item (*reflect_delete_property)(Item obj, Item key);
     Item (*call_function)(Item func_item, Item this_val, Item* args, int arg_count);
     int (*check_exception)(void);
@@ -441,6 +542,33 @@ struct JubeHostScriptAPI {
     Item (*date_method)(Item date, int method_id);
     int (*class_id)(Item value);
     Item (*to_string)(Item value);
+    Item (*throw_type_error_code)(const char* code, const char* message);
+    // Creates a JavaScript object with the supplied prototype.  Node leaves
+    // need Object.create(null) semantics without naming JS object layouts.
+    Item (*object_create)(Item prototype);
+    Item (*throw_uri_error_code)(const char* code, const char* message);
+    // Clears a caught guest exception so a hosted module can implement a
+    // language-level fallback without leaking pending exception state.
+    Item (*clear_exception)(void);
+    void (*mark_non_writable)(Item object, Item key);
+    Item (*object_freeze)(Item object);
+    Item (*current_this)(void);
+    Item (*strict_equal)(Item left, Item right);
+    bool (*class_stamp)(Item object, int class_id);
+    bool (*class_is)(Item object, int class_id);
+    // Preserves the engine's observable typeof distinction when a compact
+    // host value category intentionally groups multiple internal variants.
+    Item (*type_of)(Item value);
+    // Closure environments remain host-owned GC objects; a module may fill
+    // the returned slots only before handing them to new_closure().
+    Item* (*closure_env_new)(int count);
+    Item (*new_closure)(void* func_ptr, int param_count, Item* env, int env_size);
+    Item (*get_prototype)(Item object);
+    void (*set_prototype)(Item object, Item prototype);
+    Item (*promise_with_resolvers)(void);
+    // Parses decimal text into the engine's BigInt representation without
+    // exposing its allocation layout to hosted Node compatibility modules.
+    Item (*bigint_from_decimal)(const char* text, size_t length);
 };
 
 struct JubeHostDomAPI {
@@ -973,6 +1101,187 @@ struct JubeHostLangAPI {
     const JubeHostRootAPI* roots;
 };
 
+// Node modules compose namespaces through this narrow session boundary; they
+// never import JavaScript runtime implementation symbols directly.
+struct JubeHostRuntimeAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    void* (*current_session)(void);
+    bool (*session_is_live)(void* session);
+    Item (*session_global_this)(void* session);
+    Item (*session_process)(void* session);
+    Item (*current_this)(void* session);
+    int (*resolve_namespace)(void* session, const char* specifier, Item* out_namespace);
+    int (*resolve_host_namespace)(void* session, const char* specifier, Item* out_namespace);
+    // Host-owned resource inventory stays session-scoped until node-net owns
+    // rid enumeration; node-core only publishes this Node-visible method.
+    Item (*session_active_resources_info)(void* session);
+    Item (*session_active_handles)(void* session);
+};
+
+struct JubeHostNodeErrorAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    Item (*throw_type_error_code)(void* session, const char* code, const char* message);
+    Item (*throw_range_error_code)(void* session, const char* code, const char* message);
+    // Preserves Node zlib's observable `code` and numeric `errno` error shape
+    // while keeping the host's Error object layout opaque to native modules.
+    Item (*throw_zlib_error)(void* session, const char* method, int status);
+    // Preserves Node's code/errno/syscall error object shape for a failed
+    // platform syscall without leaking JS Error allocation to a module.
+    Item (*throw_system_error)(void* session, const char* syscall, int error_number);
+    // Creates the existing Node coded Error form for compatibility leaves
+    // whose error category is not a platform errno.
+    Item (*throw_error_code)(void* session, const char* code, const char* message);
+};
+
+// This is intentionally the first Node async slice: it proves session-owned
+// work/cancellation without exposing libuv or an event-loop pointer.  Stream,
+// rid, timer, and completion-post services append in later compatible tails.
+struct JubeHostAsyncAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    int (*work_submit)(void* session, JubeAsyncWorkCallback work,
+                       JubeAsyncCompletionCallback complete,
+                       JubeAsyncDestroyCallback destroy, void* user,
+                       uint32_t* out_request_id);
+    int (*work_cancel)(void* session, uint32_t request_id);
+    // Timer helpers keep event-loop ownership in the host while allowing the
+    // node-core promises facade to avoid direct JS-runtime symbol imports.
+    Item (*timer_set_timeout_promise)(Item delay, Item value, Item options);
+    Item (*timer_set_immediate_promise)(Item value, Item options);
+    Item (*timer_set_interval)(Item callback, Item delay);
+    Item (*timer_scheduler_wait)(Item delay, Item options);
+    Item (*timer_scheduler_yield)(void);
+    Item (*timer_set_timeout)(Item callback, Item delay);
+    void (*timer_clear_timeout)(Item timer);
+    void (*timer_clear_interval)(Item timer);
+    Item (*timer_set_immediate)(Item callback);
+    void (*timer_install_promisify_custom)(Item function);
+    // Installs a custom promisify implementation without exposing the
+    // host-owned well-known Symbol to a compatibility module.
+    void (*function_install_promisify_custom)(Item function, void* func_ptr, int parameter_count);
+    // Publishes callback result field names under the same host-owned Symbol.
+    void (*function_install_promisify_args)(Item function, const char* first, const char* second);
+    // Posts Node's conventional (err, result) callback shape through the
+    // host-owned next-tick queue; the module never retains callback values.
+    void (*next_tick_callback)(void* session, Item callback, Item error, Item result);
+};
+
+// Binary values stay host-owned.  The returned byte pointer is borrowed for
+// the duration of the native call and modules must root the source Item before
+// any operation that can allocate or re-enter JS.
+struct JubeHostBinaryAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    bool (*is_typed_array)(Item value);
+    uint8_t* (*typed_array_data)(Item value);
+    int (*typed_array_length)(Item value);
+    // Copies native bytes into a host-owned Buffer value.  The input remains
+    // owned by the caller and is not retained after this call returns.  A
+    // NULL pointer is valid when length is zero.
+    Item (*buffer_from_bytes)(const uint8_t* data, int length);
+    // Additive Buffer construction tail.  These preserve typed-array storage
+    // ownership in the host while node-core owns Buffer's JS namespace.
+    Item (*buffer_alloc)(int length);
+    uint8_t* (*buffer_prepare_write)(Item value);
+    bool (*is_buffer)(Item value);
+    // Exposes ArrayBuffer, typed-array, and DataView byte windows without
+    // publishing host object layouts.  The caller roots value before the
+    // call because creating a missing backing-buffer wrapper may allocate.
+    int (*describe_view)(Item value, JubeBinaryView* out_view);
+    // Creates a Buffer view over a validated ArrayBuffer byte range.  The
+    // returned Buffer shares backing storage; callers retain no raw host
+    // pointers after this call.
+    Item (*buffer_view)(Item array_buffer, int byte_offset, int byte_length);
+};
+
+enum JubeBinaryViewStatus {
+    JUBE_BINARY_VIEW_NOT_VIEW = 0,
+    JUBE_BINARY_VIEW_OK = 1,
+    JUBE_BINARY_VIEW_DETACHED = 2,
+    JUBE_BINARY_VIEW_OUT_OF_BOUNDS = 3,
+};
+
+struct JubeBinaryView {
+    Item array_buffer;
+    int byte_offset;
+    int byte_length;
+};
+
+// EventEmitter is the first dependency hub to cross the boundary. These
+// operations preserve host-owned async-local, domain, and process-warning
+// semantics without exposing their runtime state or JS implementation calls.
+struct JubeHostNodeEventsAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    Item (*als_capture_context)(void);
+    Item (*als_context_call)(Item context, Item callback, Item this_val,
+                             Item arg1, int64_t has_arg);
+    int (*domain_emit_current_error)(Item error);
+    Item (*process_emit_warning)(Item warning, Item type_item, Item code_item);
+    bool (*is_error_like)(Item value);
+    // Callback-style Node services must restore their captured domain before
+    // entering guest code; the domain stack itself remains runtime-owned.
+    Item (*domain_current)(void);
+    Item (*domain_call)(Item domain, Item callback, Item this_val,
+                        Item* args, int arg_count);
+};
+
+// Permission policy is host-owned so a module cannot infer or bypass its
+// configured filesystem allowlist by reaching into the JS runtime directly.
+struct JubeHostNodePermissionAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    bool (*has_fs_read)(const char* path);
+    bool (*has_fs_write)(const char* path);
+    // The checks retain Node's existing coded error construction and throw on
+    // denial. A callback-style client captures that exception before posting.
+    Item (*check_fs_read)(const char* path);
+    Item (*check_fs_write)(const char* path);
+};
+
+// Worker/message-port objects remain host-owned because their transfer and
+// queue invariants are part of the JS runtime. Node modules receive only this
+// narrow constructor/operation surface and never their layouts.
+struct JubeHostWorkerAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    Item (*message_channel_new)(void);
+    Item (*message_port_new)(void);
+    Item (*message_port_move_to_context)(Item port, Item context);
+    Item (*receive_message_on_port)(Item port);
+    Item (*mark_as_untransferable)(Item value);
+    Item (*is_marked_as_untransferable)(Item value);
+};
+
+// Node's generic stream implementation stays host-owned until its dedicated
+// extraction. Filesystem modules use these factories without importing stream
+// classes, EventEmitter internals, or JS runtime symbols.
+struct JubeHostStreamAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    Item (*file_read_stream_new)(Item path, Item options);
+    Item (*file_write_stream_new)(Item path, Item options);
+};
+
+struct JubeHostNodeAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    uint64_t capabilities;
+    const JubeHostRuntimeAPI* runtime;
+    const JubeHostRootAPI* roots;
+    const JubeHostNodeErrorAPI* error;
+    // Appended after the original Node v1 prefix; consumers size-gate it.
+    const JubeHostAsyncAPI* async_ops;
+    const JubeHostBinaryAPI* binary;
+    const JubeHostNodeEventsAPI* events;
+    const JubeHostWorkerAPI* workers;
+    // Additive permission tail consumed by extracted filesystem services.
+    const JubeHostNodePermissionAPI* permission;
+    const JubeHostStreamAPI* streams;
+};
+
 struct JubeHostAPI {
     uint32_t api_version;
     uint32_t struct_size;
@@ -986,6 +1295,8 @@ struct JubeHostAPI {
     const JubeRuntimeCatalogAPI* runtime_catalog;
     // Additive tail: old generic Jube modules must size-gate this service.
     const JubeHostDataAPI* data;
+    // Node-only services are absent from minimal/non-Node hosts.
+    const JubeHostNodeAPI* node;
 };
 
 // A hosted language owns parsing and language semantics while the host owns
@@ -1051,7 +1362,7 @@ struct JubeLanguageDef {
 #define JUBE_LANGUAGE_MODULE_REQUEST_V1_SIZE sizeof(JubeLanguageModuleRequest)
 #define JUBE_HOSTED_SOURCE_V1_SIZE sizeof(JubeHostedSource)
 #define JUBE_HOSTED_DIAGNOSTIC_V1_SIZE sizeof(JubeHostedDiagnostic)
-#define JUBE_HOST_SERVICE_API_VERSION 3
+#define JUBE_HOST_SERVICE_API_VERSION 7
 #define JUBE_SOURCE_API_V1_SIZE sizeof(JubeSourceAPI)
 #define JUBE_DIAGNOSTIC_API_V1_SIZE sizeof(JubeDiagnosticAPI)
 #define JUBE_OUTPUT_API_V1_SIZE sizeof(JubeOutputAPI)
@@ -1150,6 +1461,24 @@ struct JubeModuleDef {
     // Hosted-language descriptor. This additive tail keeps ordinary native
     // modules independent of language registration and execution.
     const JubeLanguageDef* language;
+
+    // Optional registration-time capability/host-shape contract.  Keep this
+    // tail-appended so descriptors compiled against earlier Jube headers stay
+    // loadable through struct_size gating.
+    const JubeModuleRequirements* requirements;
+
+    // Explicit globals are installed only by the JS host's global setup. A
+    // namespace descriptor never acts as an implicit global declaration.
+    const JubeGlobalDef* globals;
+    int32_t global_count;
+
+    // Runtime hooks receive an opaque per-JS-runtime session token.  The host
+    // calls attach only after globalThis and process exist, then reset/detach
+    // while that heap is still live. Modules must release every heap-backed
+    // cache during reset or detach and must never retain a detached token.
+    void (*runtime_attach)(void* session);
+    void (*runtime_reset_session)(void* session);
+    void (*runtime_detach)(void* session);
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

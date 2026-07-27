@@ -14,6 +14,7 @@
 #include "js_error_codes.h"
 #include "js_permission.h"
 #include "js_property_attrs.h"
+#include "js_host_hooks.h"
 #include "js_props.h"
 #include "js_class.h"
 #include "js_coerce.h"
@@ -23,6 +24,7 @@
 #include "js_state_guards.h"
 #include "js_dom_platform.h"
 #include "js_dom_observers.h"
+#include "js_host_hooks.h"
 #include "js_test262_fast_paths.h"
 #include "../lambda-data.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -75,14 +77,16 @@ static void js_install_jube_global_namespaces(Item global) {
     int module_count = jube_static_module_count();
     for (int i = 0; i < module_count; i++) {
         const JubeModuleDef* module = jube_static_module_at(i);
-        if (!module || !module->namespaces || module->namespace_count <= 0) continue;
-        for (int j = 0; j < module->namespace_count; j++) {
-            const JubeNamespaceDef* ns = &module->namespaces[j];
-            if (!ns || !ns->build || !ns->specifiers || ns->specifier_count <= 0) continue;
-            const char* name = ns->specifiers[0];
+        int32_t global_count = 0;
+        const JubeGlobalDef* globals = jube_module_globals(module, &global_count);
+        for (int j = 0; globals && j < global_count; j++) {
+            const JubeGlobalDef* global_def = &globals[j];
+            if (!global_def || !global_def->build) continue;
+            const char* name = global_def->name;
             if (!name || !name[0]) continue;
             Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
-            js_property_set(global, key, ns->build());
+            void* session = jube_internal_host_api()->node->runtime->current_session();
+            js_property_set(global, key, global_def->build(session));
             js_mark_non_enumerable(global, key);
         }
     }
@@ -134,8 +138,6 @@ static bool js_host_object_prototype(Item object, Item* out) {
 #include <cstdlib>
 #include <cerrno>
 #include <time.h>
-
-extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 
 static bool js_reflect_define_property_mode = false;
 static bool js_reflect_define_property_failed = false;
@@ -1253,7 +1255,6 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
 // Process I/O
 // =============================================================================
 
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 static Item js_process_stdio_key(const char* key, int len) {
     return (Item){.item = s2it(heap_create_name(key, len))};
@@ -1419,60 +1420,6 @@ extern "C" Item js_process_stdin_pipe(Item dest) {
         js_process_stdin_drain(self, dest, true);
     }
     return dest;
-}
-
-extern "C" Item js_process_hrtime_bigint(void) {
-    // Return nanosecond-precision monotonic time as BigInt (per Node.js spec)
-    extern Item bigint_from_string(const char* str, int len);
-    uint64_t ns;
-#ifdef __APPLE__
-    static mach_timebase_info_data_t timebase = {0, 0};
-    if (timebase.denom == 0) {
-        mach_timebase_info(&timebase);
-    }
-    uint64_t ticks = mach_absolute_time();
-    ns = ticks * timebase.numer / timebase.denom;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-#endif
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)ns);
-    return bigint_from_string(buf, (int)strlen(buf));
-}
-
-// process.hrtime([prev]) — returns [seconds, nanoseconds]
-// If prev is given, returns difference from prev
-extern "C" Item js_process_hrtime(Item prev) {
-#ifdef __APPLE__
-    static mach_timebase_info_data_t timebase = {0, 0};
-    if (timebase.denom == 0) {
-        mach_timebase_info(&timebase);
-    }
-    uint64_t ticks = mach_absolute_time();
-    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    double ns = (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
-#endif
-    // If prev is an array [sec, nsec], subtract it
-    if (get_type_id(prev) == LMD_TYPE_ARRAY) {
-        Item prev_sec_item = js_array_get_int(prev, 0);
-        Item prev_nsec_item = js_array_get_int(prev, 1);
-        int64_t prev_sec_val = (get_type_id(prev_sec_item) == LMD_TYPE_INT) ? it2i(prev_sec_item) : 0;
-        int64_t prev_nsec_val = (get_type_id(prev_nsec_item) == LMD_TYPE_INT) ? it2i(prev_nsec_item) : 0;
-        double prev_ns = (double)prev_sec_val * 1e9 + (double)prev_nsec_val;
-        ns -= prev_ns;
-    }
-    uint64_t total_ns = (uint64_t)ns;
-    uint64_t sec = total_ns / 1000000000ULL;
-    uint64_t nsec = total_ns % 1000000000ULL;
-    Item arr = js_array_new(0);
-    js_array_push(arr, (Item){.item = i2it((int64_t)sec)});
-    js_array_push(arr, (Item){.item = i2it((int64_t)nsec)});
-    return arr;
 }
 
 // performance clock — one origin per isolated JS heap/document.
@@ -1930,10 +1877,20 @@ extern "C" Item js_date_now(void) {
 extern "C" Item js_get_global_property(Item key);
 
 static void js_date_set_instance_prototype(Item obj) {
-    Item date_ctor = js_get_global_property((Item){.item = s2it(heap_create_name("Date", 4))});
-    if (get_type_id(date_ctor) == LMD_TYPE_FUNC) {
-        Item proto = js_property_get(date_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
-        if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> constructor_root(roots, ItemNull);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    Item date_key = (Item){.item = s2it(heap_create_name("Date", 4))};
+    constructor_root.set(js_get_global_property(date_key));
+    if (get_type_id(constructor_root.get()) == LMD_TYPE_FUNC) {
+        Item prototype_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        prototype_root.set(js_property_get(constructor_root.get(), prototype_key));
+        // Name creation and prototype lookup may compact the new Date object
+        // before class identity is attached to its instance prototype.
+        if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
+            js_set_prototype(object_root.get(), prototype_root.get());
+        }
     }
 }
 
@@ -1944,13 +1901,14 @@ static Item js_date_get_time_value(Item date_obj, bool* found) {
 }
 
 extern "C" Item js_date_new(void) {
-    Item obj = js_new_object();
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> object_root(roots, js_new_object());
     Item time_val = js_date_now();
-    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
-    js_property_set(obj, key, time_val);
-    js_class_stamp(obj, JS_CLASS_DATE);
-    js_date_set_instance_prototype(obj);
-    return obj;
+    Rooted<Item> key_root(roots, (Item){.item = s2it(heap_create_name("__time__"))});
+    js_property_set(object_root.get(), key_root.get(), time_val);
+    js_class_stamp(object_root.get(), JS_CLASS_DATE);
+    js_date_set_instance_prototype(object_root.get());
+    return object_root.get();
 }
 
 // Date() without 'new' — returns a string representation of the current date/time
@@ -1961,9 +1919,11 @@ extern "C" Item js_date_now_string(void) {
 
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
-    Item obj = js_new_object();
-    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
-    TypeId tid = get_type_id(value);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> object_root(roots, js_new_object());
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, (Item){.item = s2it(heap_create_name("__time__"))});
+    TypeId tid = get_type_id(value_root.get());
 
     // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
     auto store_time = [&](double ms) {
@@ -1972,17 +1932,17 @@ extern "C" Item js_date_new_from(Item value) {
         static int date_idx = 0;
         double* fp = &date_buf[date_idx++ % 16];
         *fp = ms;
-        js_property_set(obj, key, lambda_float_ptr_to_item(fp));
+        js_property_set(object_root.get(), key_root.get(), lambda_float_ptr_to_item(fp));
     };
 
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
         double ms;
-        if (tid == LMD_TYPE_FLOAT) ms = it2d(value);
-        else ms = (double)it2i(value);
+        if (tid == LMD_TYPE_FLOAT) ms = it2d(value_root.get());
+        else ms = (double)it2i(value_root.get());
         store_time(ms);
     } else if (tid == LMD_TYPE_STRING) {
         // parse date string — try ISO 8601 format
-        String* s = it2s(value);
+        String* s = it2s(value_root.get());
         // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
         if (s && s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
             store_time(NAN);
@@ -2027,14 +1987,14 @@ extern "C" Item js_date_new_from(Item value) {
     } else if (tid == LMD_TYPE_MAP) {
         // Date object: extract _time from the other Date
         bool has_time = false;
-        Item other_time = js_date_get_time_value(value, &has_time);
+        Item other_time = js_date_get_time_value(value_root.get(), &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
             double ms = js_date_number_to_double(other_time);
             store_time(ms);
         } else {
             // Non-Date object: ToPrimitive(value, default) per ES spec §21.4.2.
             // J39-1b: route through unified js_to_primitive (ES §7.1.1).
-            Item prim = js_to_primitive(value, JS_HINT_DEFAULT);
+            Item prim = js_to_primitive(value_root.get(), JS_HINT_DEFAULT);
             if (js_check_exception()) return ItemNull;
             TypeId pt = get_type_id(prim);
             // Symbol results → throw TypeError
@@ -2064,7 +2024,7 @@ extern "C" Item js_date_new_from(Item value) {
     } else {
         // Per spec: ToNumber(value) then TimeClip
         // null→0, undefined→NaN, true→1, false→0
-        Item num = js_to_number(value);
+        Item num = js_to_number(value_root.get());
         TypeId nt = get_type_id(num);
         if (nt == LMD_TYPE_FLOAT) store_time(it2d(num));
         else if (nt == LMD_TYPE_INT) store_time((double)it2i(num));
@@ -2072,9 +2032,9 @@ extern "C" Item js_date_new_from(Item value) {
         else store_time(NAN);
     }
 date_done:
-    js_class_stamp(obj, JS_CLASS_DATE);
-    js_date_set_instance_prototype(obj);
-    return obj;
+    js_class_stamp(object_root.get(), JS_CLASS_DATE);
+    js_date_set_instance_prototype(object_root.get());
+    return object_root.get();
 }
 
 // Date.UTC(year, month[, day[, hour[, min[, sec[, ms]]]]]) — returns ms since epoch
@@ -2757,30 +2717,6 @@ extern "C" int js_is_process_object_value(Item object) {
     return js_process_object.item != ITEM_NULL && object.item == js_process_object.item;
 }
 
-// process.cwd()
-extern "C" Item js_process_cwd(void) {
-    char* cwd = file_getcwd();
-    if (!cwd) return (Item){.item = s2it(heap_create_name(""))};
-    Item result = (Item){.item = s2it(heap_create_name(cwd, strlen(cwd)))};
-    mem_free(cwd);
-    return result;
-}
-
-// process.chdir(directory)
-extern "C" Item js_process_chdir(Item dir_item) {
-    if (get_type_id(dir_item) != LMD_TYPE_STRING) return make_js_undefined();
-    String* s = it2s(dir_item);
-    char buf[2048];
-    int len = (int)s->len;
-    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    if (chdir(buf) != 0) {
-        log_error("process: chdir failed for '%s'", buf);
-    }
-    return make_js_undefined();
-}
-
 // process.exit([code])
 static int js_process_exit_code_value = 0;
 static bool js_process_exit_requested_value = false;
@@ -2838,20 +2774,6 @@ extern "C" int js_process_current_exit_code(void) {
     // has been restored; at that boundary only the synchronized scalar is valid.
     js_process_exit_code_value = code;
     return code;
-}
-
-// process.uptime()
-extern "C" Item js_process_uptime(void) {
-    static double start_time = 0;
-    if (start_time == 0) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        start_time = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    }
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    return push_d(now - start_time);
 }
 
 // build process.env as a map of environment variables
@@ -3014,70 +2936,6 @@ extern "C" Item js_process_report_getReport(void) {
     return report;
 }
 
-#ifndef _WIN32
-#include <unistd.h>
-#include <grp.h>
-// process.setuid(uid)
-extern "C" Item js_process_setuid(Item uid_item) {
-    if (get_type_id(uid_item) == LMD_TYPE_INT) {
-        int r = setuid((uid_t)it2i(uid_item));
-        if (r != 0) {
-            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
-                "setuid failed");
-        }
-    }
-    return make_js_undefined();
-}
-
-// process.setgid(gid)
-extern "C" Item js_process_setgid(Item gid_item) {
-    if (get_type_id(gid_item) == LMD_TYPE_INT) {
-        int r = setgid((gid_t)it2i(gid_item));
-        if (r != 0) {
-            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
-                "setgid failed");
-        }
-    }
-    return make_js_undefined();
-}
-
-// process.seteuid(uid)
-extern "C" Item js_process_seteuid(Item uid_item) {
-    if (get_type_id(uid_item) == LMD_TYPE_INT) {
-        int r = seteuid((uid_t)it2i(uid_item));
-        if (r != 0) {
-            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
-                "seteuid failed");
-        }
-    }
-    return make_js_undefined();
-}
-
-// process.setegid(gid)
-extern "C" Item js_process_setegid(Item gid_item) {
-    if (get_type_id(gid_item) == LMD_TYPE_INT) {
-        int r = setegid((gid_t)it2i(gid_item));
-        if (r != 0) {
-            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
-                "setegid failed");
-        }
-    }
-    return make_js_undefined();
-}
-
-// process.initgroups(user, group)
-extern "C" Item js_process_initgroups(Item user, Item group) {
-    (void)user; (void)group;
-    return make_js_undefined();
-}
-
-// process.setgroups(groups)
-extern "C" Item js_process_setgroups(Item groups) {
-    (void)groups;
-    return make_js_undefined();
-}
-#endif
-
 // process.emitWarning(warning, type, code) — emit a warning
 // Node.js: emits 'warning' event on process after the default stderr write.
 extern "C" Item js_process_emit(Item event_name, Item arg1);
@@ -3142,205 +3000,39 @@ extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_i
     return make_js_undefined();
 }
 
+extern "C" Item js_node_throw_system_error(const char* syscall, int error_number) {
+    if (!syscall) return ItemNull;
+#ifndef _WIN32
+    const char* code = error_number == ESRCH ? "ESRCH" :
+        uv_err_name(uv_translate_sys_error(error_number));
+#else
+    const char* code = uv_err_name(uv_translate_sys_error(error_number));
+#endif
+    char message[128];
+    snprintf(message, sizeof(message), "%s %s", syscall, code ? code : "UNKNOWN");
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> message_root(roots,
+        (Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
+    Rooted<Item> error_root(roots, js_new_error(message_root.get()));
+    Rooted<Item> key_root(roots, (Item){.item = s2it(heap_create_name("code", 4))});
+    Rooted<Item> value_root(roots,
+        (Item){.item = s2it(heap_create_name(code ? code : "UNKNOWN", (int)strlen(code ? code : "UNKNOWN")))});
+    js_property_set(error_root.get(), key_root.get(), value_root.get());
+    key_root.set((Item){.item = s2it(heap_create_name("errno", 5))});
+    js_property_set(error_root.get(), key_root.get(),
+        (Item){.item = i2it((int64_t)-error_number)});
+    key_root.set((Item){.item = s2it(heap_create_name("syscall", 7))});
+    value_root.set((Item){.item = s2it(heap_create_name(syscall, (int)strlen(syscall)))});
+    js_property_set(error_root.get(), key_root.get(), value_root.get());
+    js_throw_value(error_root.get());
+    return ItemNull;
+}
+
 // POSIX: process.getuid/getgid/geteuid/getegid
 #ifndef _WIN32
 #include <unistd.h>
 #include <signal.h>
-extern "C" Item js_process_getuid(void) { return (Item){.item = i2it(getuid())}; }
-extern "C" Item js_process_getgid(void) { return (Item){.item = i2it(getgid())}; }
-extern "C" Item js_process_geteuid(void) { return (Item){.item = i2it(geteuid())}; }
-extern "C" Item js_process_getegid(void) { return (Item){.item = i2it(getegid())}; }
-
-// process.kill(pid, signal) — send a signal to a process
-extern "C" Item js_process_kill(Item pid_item, Item signal_item) {
-    int pid = (int)it2i(pid_item);
-    int sig = SIGTERM; // default
-    if (get_type_id(signal_item) == LMD_TYPE_INT) {
-        sig = (int)it2i(signal_item);
-    } else if (get_type_id(signal_item) == LMD_TYPE_STRING) {
-        String* s = it2s(signal_item);
-        if (s->len == 7 && memcmp(s->chars, "SIGKILL", 7) == 0) sig = SIGKILL;
-        else if (s->len == 7 && memcmp(s->chars, "SIGTERM", 7) == 0) sig = SIGTERM;
-        else if (s->len == 6 && memcmp(s->chars, "SIGINT", 6) == 0) sig = SIGINT;
-        else if (s->len == 7 && memcmp(s->chars, "SIGHUP", 6) == 0) sig = SIGHUP;
-        else if (s->len == 7 && memcmp(s->chars, "SIGUSR1", 7) == 0) sig = SIGUSR1;
-        else if (s->len == 7 && memcmp(s->chars, "SIGUSR2", 7) == 0) sig = SIGUSR2;
-        else if (s->len == 7 && memcmp(s->chars, "SIGCONT", 7) == 0) sig = SIGCONT;
-        else if (s->len == 1 && s->chars[0] == '0') sig = 0;
-    }
-    // Node's common.isAlive probes with signal 0/SIGCONT; falling back to
-    // SIGTERM turns a harmless liveness check into exit 143.
-    int r = kill(pid, sig);
-    if (r != 0) {
-        int saved_errno = errno;
-        const char* code = saved_errno == ESRCH ? "ESRCH" : uv_err_name(uv_translate_sys_error(saved_errno));
-        char message[128];
-        snprintf(message, sizeof(message), "kill %s", code ? code : "UNKNOWN");
-        // process.kill must surface kernel errors synchronously; logging and
-        // returning true hides exited children from Node's detached-process tests.
-        Item err = js_new_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
-        if (code) {
-            js_property_set(err, (Item){.item = s2it(heap_create_name("code", 4))},
-                            (Item){.item = s2it(heap_create_name(code, (int)strlen(code)))});
-        }
-        js_property_set(err, (Item){.item = s2it(heap_create_name("errno", 5))},
-                        (Item){.item = i2it((int64_t)-saved_errno)});
-        js_property_set(err, (Item){.item = s2it(heap_create_name("syscall", 7))},
-                        (Item){.item = s2it(heap_create_name("kill", 4))});
-        js_throw_value(err);
-        return ItemNull;
-    }
-    return (Item){.item = ITEM_TRUE};
-}
-
-// process.getgroups() — returns array of group IDs
-extern "C" Item js_process_getgroups(void) {
-    gid_t groups[256];
-    int ngroups = getgroups(256, groups);
-    if (ngroups < 0) ngroups = 0;
-    Item arr = js_array_new(ngroups);
-    for (int i = 0; i < ngroups; i++) {
-        js_array_set(arr, (Item){.item = i2it(i)}, (Item){.item = i2it(groups[i])});
-    }
-    return arr;
-}
 #endif
-
-// process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
-extern "C" Item js_process_memoryUsage(void) {
-    Item result = js_new_object();
-    // approximate memory info
-#ifdef __APPLE__
-    struct task_basic_info info;
-    mach_msg_type_number_t size = TASK_BASIC_INFO_COUNT;
-    kern_return_t kr = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&info, &size);
-    int64_t rss = (kr == KERN_SUCCESS) ? (int64_t)info.resident_size : 0;
-#elif defined(__linux__)
-    int64_t rss = 0;
-    FILE* f = fopen("/proc/self/statm", "r");
-    if (f) {
-        long pages = 0;
-        if (fscanf(f, "%*ld %ld", &pages) == 1)
-            rss = (int64_t)pages * sysconf(_SC_PAGESIZE);
-        fclose(f);
-    }
-#elif defined(_WIN32)
-    PROCESS_MEMORY_COUNTERS pmc;
-    int64_t rss = 0;
-    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
-        rss = (int64_t)pmc.WorkingSetSize;
-#else
-    int64_t rss = 0;
-#endif
-    js_property_set(result, (Item){.item = s2it(heap_create_name("rss", 3))},
-                    (Item){.item = i2it(rss)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("heapTotal", 9))},
-                    (Item){.item = i2it(rss)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("heapUsed", 8))},
-                    (Item){.item = i2it(rss / 2)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("external", 8))},
-                    (Item){.item = i2it(0)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("arrayBuffers", 12))},
-                    (Item){.item = i2it(0)});
-    return result;
-}
-
-// process.cpuUsage() — returns {user, system} in microseconds
-extern "C" Item js_process_cpuUsage(void) {
-    Item result = js_new_object();
-#ifndef _WIN32
-    struct rusage usage;
-    getrusage(RUSAGE_SELF, &usage);
-    int64_t user_us = (int64_t)usage.ru_utime.tv_sec * 1000000 + (int64_t)usage.ru_utime.tv_usec;
-    int64_t sys_us = (int64_t)usage.ru_stime.tv_sec * 1000000 + (int64_t)usage.ru_stime.tv_usec;
-#else
-    int64_t user_us = 0, sys_us = 0;
-    FILETIME create, exit_t, kernel, user_ft;
-    if (GetProcessTimes(GetCurrentProcess(), &create, &exit_t, &kernel, &user_ft)) {
-        ULARGE_INTEGER u, k;
-        u.LowPart = user_ft.dwLowDateTime; u.HighPart = user_ft.dwHighDateTime;
-        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
-        user_us = (int64_t)(u.QuadPart / 10); // 100ns → us
-        sys_us = (int64_t)(k.QuadPart / 10);
-    }
-#endif
-    js_property_set(result, (Item){.item = s2it(heap_create_name("user", 4))},
-                    (Item){.item = i2it(user_us)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("system", 6))},
-                    (Item){.item = i2it(sys_us)});
-    return result;
-}
-
-static int js_process_umask_value = 0022;
-
-// process.umask([mask]) — get/set file mode creation mask
-extern "C" Item js_process_umask(Item mask_item) {
-#ifndef _WIN32
-    TypeId tid = get_type_id(mask_item);
-    if (tid == LMD_TYPE_INT) {
-        int64_t val = it2i(mask_item);
-        if (val < 0 || val > 0777) {
-            return js_throw_range_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mask' is invalid");
-        }
-        int old = js_process_umask_value;
-        js_process_umask_value = (int)val;
-        return (Item){.item = i2it((int64_t)old)};
-    }
-    if (tid == LMD_TYPE_STRING) {
-        String* s = it2s(mask_item);
-        if (s && s->len > 0) {
-            // parse as octal string
-            char buf[16];
-            int len = (int)s->len < 15 ? (int)s->len : 15;
-            memcpy(buf, s->chars, (size_t)len);
-            buf[len] = '\0';
-            char* end = NULL;
-            long val = strtol(buf, &end, 8);
-            if (end == buf || *end != '\0' || val < 0 || val > 0777) {
-                // invalid octal string
-                return js_throw_range_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mask' is invalid");
-            }
-            int old = js_process_umask_value;
-            js_process_umask_value = (int)val;
-            return (Item){.item = i2it((int64_t)old)};
-        }
-    }
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_BOOL) {
-        // invalid type
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", "The \"mask\" argument must be of type number or string");
-    }
-    return (Item){.item = i2it((int64_t)js_process_umask_value)};
-#else
-    return (Item){.item = i2it(0)};
-#endif
-}
-
-// process.constrainedMemory() — returns 0 (no cgroup constraints on most systems)
-extern "C" Item js_process_constrainedMemory(void) {
-    return (Item){.item = i2it(0)};
-}
-
-// process.availableMemory() — returns an estimate of available memory in bytes
-extern "C" Item js_process_availableMemory(void) {
-#ifdef __APPLE__
-    // rough estimate: free + inactive pages
-    vm_statistics64_data_t vm_stat;
-    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
-                          (host_info64_t)&vm_stat, &count) == KERN_SUCCESS) {
-        int64_t avail = ((int64_t)vm_stat.free_count + (int64_t)vm_stat.inactive_count) * 4096;
-        return (Item){.item = i2it(avail)};
-    }
-#endif
-    // fallback: return 0
-    return (Item){.item = i2it(0)};
-}
-
-// process.abort() — abort the process
-extern "C" Item js_process_abort() {
-    abort();
-    return (Item){.item = ITEM_NULL}; // unreachable
-}
 
 // build process.versions object
 static Item build_process_versions(void) {
@@ -3689,48 +3381,9 @@ extern "C" Item js_process_listeners(Item event_name) {
     return arr;
 }
 
-// process.hasUncaughtExceptionCaptureCallback()
-static Item js_uncaught_exception_cb = {.item = 0};
-extern "C" Item js_process_hasUncaughtExceptionCaptureCallback(void) {
-    return (Item){.item = b2it(js_uncaught_exception_cb.item != 0 &&
-        get_type_id(js_uncaught_exception_cb) == LMD_TYPE_FUNC)};
-}
-
-// process.setUncaughtExceptionCaptureCallback(fn)
-extern "C" Item js_process_setUncaughtExceptionCaptureCallback(Item fn) {
-    TypeId tid = get_type_id(fn);
-    if (tid == LMD_TYPE_FUNC) {
-        js_uncaught_exception_cb = fn;
-    } else if (tid == LMD_TYPE_NULL) {
-        js_uncaught_exception_cb = (Item){.item = 0};
-    } else {
-        extern Item js_throw_type_error_code(const char*, const char*);
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"fn\" argument must be of type function or null.");
-    }
-    return make_js_undefined();
-}
-
-extern "C" Item js_net_get_active_handles(void);
-extern "C" Item js_net_get_active_resources_info(void);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
 extern "C" void js_microtask_flush(void);
-
-extern "C" Item js_process_getActiveHandles(void) {
-    return js_net_get_active_handles();
-}
-
-// process.getActiveResourcesInfo()
-extern "C" Item js_process_getActiveResourcesInfo(void) {
-    return js_net_get_active_resources_info();
-}
-
-// process.setSourceMapsEnabled(val) — stub no-op
-extern "C" Item js_process_setSourceMapsEnabled(Item val) {
-    (void)val;
-    return make_js_undefined();
-}
 
 typedef struct JsProcessIpcWriteReq {
     uv_write_t req;
@@ -3828,7 +3481,7 @@ static bool js_process_ipc_is_undefined(Item item) {
 }
 
 static Item js_process_ipc_take_pending_handle(void) {
-    Item handle = js_net_accept_ipc_tcp_handle(&js_process_ipc_pipe);
+    Item handle = js_host_hooks_accept_ipc_handle(&js_process_ipc_pipe);
     if (handle.item == 0) return make_js_undefined();
     return handle;
 }
@@ -4153,23 +3806,9 @@ extern "C" Item js_get_process_object_value(void) {
             (Item){.item = s2it(heap_create_name("version", 7))},
             (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
 
-        // methods: cwd, chdir, exit, uptime, hrtime.bigint
-        js_process_set_method(js_process_object, "cwd", (void*)js_process_cwd, 0);
-        js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
+        // Host-owned process lifecycle and event-loop methods.
         js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
-        js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
         js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, -1);
-        js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
-        js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
-        js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
-        js_process_set_method(js_process_object, "abort", (void*)js_process_abort, 0);
-        js_process_set_method(js_process_object, "constrainedMemory", (void*)js_process_constrainedMemory, 0);
-        js_process_set_method(js_process_object, "availableMemory", (void*)js_process_availableMemory, 0);
-        js_process_set_method(js_process_object, "hasUncaughtExceptionCaptureCallback", (void*)js_process_hasUncaughtExceptionCaptureCallback, 0);
-        js_process_set_method(js_process_object, "setUncaughtExceptionCaptureCallback", (void*)js_process_setUncaughtExceptionCaptureCallback, 1);
-        js_process_set_method(js_process_object, "_getActiveHandles", (void*)js_process_getActiveHandles, 0);
-        js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
-        js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
         if (getenv("LAMBDA_JS_IPC")) {
             js_process_set_method(js_process_object, "send", (void*)js_process_send, 2);
             js_process_set_method(js_process_object, "disconnect", (void*)js_process_disconnect, 0);
@@ -4198,12 +3837,6 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("title", 5))},
             (Item){.item = s2it(heap_create_name("lambda", 6))});
-
-        // hrtime function with bigint() method
-        Item hrtime_fn = js_new_function((void*)js_process_hrtime, 1);
-        js_process_set_method(hrtime_fn, "bigint", (void*)js_process_hrtime_bigint, 0);
-        js_property_set(js_process_object,
-            (Item){.item = s2it(heap_create_name("hrtime", 6))}, hrtime_fn);
 
         // env
         js_property_set(js_process_object,
@@ -4326,35 +3959,6 @@ extern "C" Item js_get_process_object_value(void) {
         }
 
         // POSIX: process.getuid(), getgid(), geteuid(), getegid()
-#ifndef _WIN32
-        {
-            extern Item js_process_getuid(void);
-            extern Item js_process_getgid(void);
-            extern Item js_process_geteuid(void);
-            extern Item js_process_getegid(void);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("getuid", 6))},
-                js_new_function((void*)js_process_getuid, 0));
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("getgid", 6))},
-                js_new_function((void*)js_process_getgid, 0));
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("geteuid", 7))},
-                js_new_function((void*)js_process_geteuid, 0));
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("getegid", 7))},
-                js_new_function((void*)js_process_getegid, 0));
-            extern Item js_process_kill(Item, Item);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("kill", 4))},
-                js_new_function((void*)js_process_kill, 2));
-            extern Item js_process_getgroups(void);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("getgroups", 9))},
-                js_new_function((void*)js_process_getgroups, 0));
-        }
-#endif
-
         // process.argv0 — the original argv[0] value
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("argv0", 5))},
@@ -4431,35 +4035,6 @@ extern "C" Item js_get_process_object_value(void) {
                 report);
         }
 
-#ifndef _WIN32
-        // process.setuid / process.setgid
-        {
-            extern Item js_process_setuid(Item uid);
-            extern Item js_process_setgid(Item gid);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("setuid", 6))},
-                js_new_function((void*)js_process_setuid, 1));
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("setgid", 6))},
-                js_new_function((void*)js_process_setgid, 1));
-            extern Item js_process_seteuid(Item uid);
-            extern Item js_process_setegid(Item gid);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("seteuid", 7))},
-                js_new_function((void*)js_process_seteuid, 1));
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("setegid", 7))},
-                js_new_function((void*)js_process_setegid, 1));
-            extern Item js_process_initgroups(Item user, Item group);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("initgroups", 10))},
-                js_new_function((void*)js_process_initgroups, 2));
-            extern Item js_process_setgroups(Item groups);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("setgroups", 9))},
-                js_new_function((void*)js_process_setgroups, 1));
-        }
-#endif
     }
     return js_process_object;
 }
@@ -5986,9 +5561,6 @@ extern "C" void js_console_write_to_stderr(const char* data, int len) {
 // Console multi-argument log
 // =============================================================================
 
-// forward declaration for util.format
-extern "C" Item js_util_format(Item args_item);
-
 // check if a string contains printf-style format specifiers
 static bool has_format_specifiers(String* s) {
     for (int i = 0; i < (int)s->len - 1; i++) {
@@ -6048,28 +5620,28 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
         for (int i = 0; i < argc; i++) {
             js_array_push(arr, args[i]);
         }
-        Item formatted = js_util_format(arr);
+        Item formatted = js_host_hooks_format_console(arr);
         if (get_type_id(formatted) == LMD_TYPE_STRING) {
             String* s = it2s(formatted);
             if (s && s->len > 0) {
                 int copy = (int)s->len < capacity - 1 ? (int)s->len : capacity - 1;
                 memcpy(buf, s->chars, copy);
                 pos = copy;
+                return pos;
             }
         }
-    } else {
-        for (int i = 0; i < argc; i++) {
-            if (i > 0 && pos < capacity - 1) buf[pos++] = ' ';
-            // Error.prototype.toString can be shadowed or unavailable while an
-            // exception sink is itself reporting a plugin failure. Console
-            // diagnostics must still retain the error name and message.
-            Item str = js_console_arg_to_string(args[i]);
-            String* s = it2s(str);
-            if (s && s->len > 0) {
-                int copy = (int)s->len < capacity - 1 - pos ? (int)s->len : capacity - 1 - pos;
-                memcpy(buf + pos, s->chars, copy);
-                pos += copy;
-            }
+    }
+    for (int i = 0; i < argc; i++) {
+        if (i > 0 && pos < capacity - 1) buf[pos++] = ' ';
+        // Error.prototype.toString can be shadowed or unavailable while an
+        // exception sink is itself reporting a plugin failure. Console
+        // diagnostics must still retain the error name and message.
+        Item str = js_console_arg_to_string(args[i]);
+        String* s = it2s(str);
+        if (s && s->len > 0) {
+            int copy = (int)s->len < capacity - 1 - pos ? (int)s->len : capacity - 1 - pos;
+            memcpy(buf + pos, s->chars, copy);
+            pos += copy;
         }
     }
     return pos;
@@ -10193,8 +9765,14 @@ extern "C" Item js_object_keys(Item object) {
     }
 
     TypeMap* tm = (TypeMap*)m->type;
-    Item result = js_array_new(0);
-    Array* arr = result.array;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> result_root(roots, js_array_new(0));
+    Rooted<Item> final_result_root(roots, ItemNull);
+    // OwnKeys builds its temporary arrays while allocating key strings. Keep
+    // their Items rooted so a forced collection cannot leave `arr` pointing
+    // at a relocated Array before the overflow and final merge pushes.
+    Array* arr = result_root.get().array;
 
     // v20: ES spec property enumeration order:
     //   1. Integer indices in ascending numeric order
@@ -10244,7 +9822,7 @@ extern "C" Item js_object_keys(Item object) {
                 if (idx_count >= idx_cap) {
                     // overflow alloca - just append to string keys as fallback
                     if (str_count < str_cap) str_items[str_count++] = key_str;
-                    else array_push(arr, key_str);
+                    else array_push(result_root.get().array, key_str);
                 } else {
                     idx_vals[idx_count] = idx;
                     idx_items[idx_count] = key_str;
@@ -10252,7 +9830,7 @@ extern "C" Item js_object_keys(Item object) {
                 }
             } else {
                 if (str_count < str_cap) str_items[str_count++] = key_str;
-                else array_push(arr, key_str);
+                else array_push(result_root.get().array, key_str);
             }
         }
         e = e->next;
@@ -10278,15 +9856,24 @@ extern "C" Item js_object_keys(Item object) {
     }
 
     // Build final result: index keys first, then string keys, then overflow
+    arr = result_root.get().array;
     Item final_result = js_array_new(idx_count + str_count + arr->length);
-    Array* final_arr = final_result.array;
+    final_result_root.set(final_result);
+    Array* final_arr = final_result_root.get().array;
     final_arr->length = 0; // reset - we'll push
 
-    for (int i = 0; i < idx_count; i++) array_push(final_arr, idx_items[i]);
-    for (int i = 0; i < str_count; i++) array_push(final_arr, str_items[i]);
-    for (int i = 0; i < arr->length; i++) array_push(final_arr, arr->items[i]);
+    for (int i = 0; i < idx_count; i++) {
+        array_push(final_result_root.get().array, idx_items[i]);
+    }
+    for (int i = 0; i < str_count; i++) {
+        array_push(final_result_root.get().array, str_items[i]);
+    }
+    arr = result_root.get().array;
+    for (int i = 0; i < arr->length; i++) {
+        array_push(final_result_root.get().array, arr->items[i]);
+    }
 
-    return final_result;
+    return final_result_root.get();
 }
 
 extern "C" Item js_typed_array_enumerable_custom_keys(Item object) {
@@ -12893,7 +12480,7 @@ static int64_t js_array_from_array_like_length(Item object) {
 }
 
 static void js_array_from_array_like_into(Item result, Item iterable, int64_t len, Item mapFn, Item this_arg, bool mapping) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots((Context*)context, 7);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> map_fn_root(roots, mapFn);
@@ -15530,12 +15117,16 @@ static Item js_message_port_make_close_event(void) {
 }
 
 static Item js_message_port_queue(Item port) {
-    Item queue = js_property_get(port, make_string_item("__message_queue__"));
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> port_root(roots, port);
+    Item queue = js_property_get(port_root.get(), make_string_item("__message_queue__"));
+    Rooted<Item> queue_root(roots, queue);
     if (get_type_id(queue) != LMD_TYPE_ARRAY) {
-        queue = js_array_new(0);
-        js_property_set(port, make_string_item("__message_queue__"), queue);
+        queue_root.set(js_array_new(0));
+        // The fallback queue allocation and key creation can compact the port.
+        js_property_set(port_root.get(), make_string_item("__message_queue__"), queue_root.get());
     }
-    return queue;
+    return queue_root.get();
 }
 
 static Item js_message_port_shift_message(Item port) {
@@ -15799,10 +15390,18 @@ static Item js_message_port_deliver(Item env_item) {
 
 static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Item self = js_get_this();
-    Item closed = js_property_get(self, make_string_item("__closed__"));
+    RootFrame roots((Context*)context, 6);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> message_root(roots, msg);
+    Rooted<Item> transfer_root(roots, transfer_list);
+    Rooted<Item> peer_root(roots, ItemNull);
+    Rooted<Item> clone_root(roots, ItemNull);
+    Rooted<Item> queue_root(roots, ItemNull);
+    Rooted<Item> deliver_root(roots, ItemNull);
+    Item closed = js_property_get(self_root.get(), make_string_item("__closed__"));
     if (closed.item == ITEM_TRUE) return make_js_undefined();
-    if (get_type_id(msg) == LMD_TYPE_FUNC) {
-        Item msg_str = js_to_string(msg);
+    if (get_type_id(message_root.get()) == LMD_TYPE_FUNC) {
+        Item msg_str = js_to_string(message_root.get());
         char buf[512];
         if (get_type_id(msg_str) == LMD_TYPE_STRING) {
             String* s = it2s(msg_str);
@@ -15814,37 +15413,42 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
         js_throw_value(err);
         return make_js_undefined();
     }
-    bool transfer_filehandle = js_message_port_is_filehandle(msg) &&
-        js_message_port_transfer_list_has(transfer_list, msg);
-    if (js_message_port_is_filehandle(msg) && !transfer_filehandle) {
+    bool transfer_filehandle = js_message_port_is_filehandle(message_root.get()) &&
+        js_message_port_transfer_list_has(transfer_root.get(), message_root.get());
+    if (js_message_port_is_filehandle(message_root.get()) && !transfer_filehandle) {
         js_throw_value(js_message_port_data_clone_error("FileHandle object could not be cloned."));
         return make_js_undefined();
     }
-    if (!js_message_port_validate_transfer_list(transfer_list)) {
+    if (!js_message_port_validate_transfer_list(transfer_root.get())) {
         return make_js_undefined();
     }
-    Item peer = js_property_get(self, make_string_item("__peer__"));
-    if (!js_message_port_is_port(peer)) return make_js_undefined();
-    Item peer_closed = js_property_get(peer, make_string_item("__closed__"));
+    peer_root.set(js_property_get(self_root.get(), make_string_item("__peer__")));
+    if (!js_message_port_is_port(peer_root.get())) return make_js_undefined();
+    Item peer_closed = js_property_get(peer_root.get(), make_string_item("__closed__"));
     if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
 
-    Item clone = transfer_filehandle ? js_message_port_clone_filehandle_for_transfer(msg)
-        : structured_clone_transfer_impl(msg, transfer_list, 0);
-    Item peer_moved = js_property_get(peer, make_string_item("__moved_context__"));
+    clone_root.set(transfer_filehandle ?
+        js_message_port_clone_filehandle_for_transfer(message_root.get()) :
+        structured_clone_transfer_impl(message_root.get(), transfer_root.get(), 0));
+    Item peer_moved = js_property_get(peer_root.get(), make_string_item("__moved_context__"));
     if (transfer_filehandle && peer_moved.item == ITEM_TRUE) {
-        js_message_port_schedule_message_error(peer, js_message_port_context_unavailable_error());
+        js_message_port_schedule_message_error(peer_root.get(), js_message_port_context_unavailable_error());
         return make_js_undefined();
     }
 
-    Item queue = js_message_port_queue(peer);
-    js_array_push(queue, clone);
+    queue_root.set(js_message_port_queue(peer_root.get()));
+    // Structured clone and queue growth may compact; retain every endpoint
+    // and payload until the queue has installed its new message.
+    js_array_push(queue_root.get(), clone_root.get());
 
     Item* env = js_alloc_env(1);
-    env[0] = peer;
-    Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 1);
+    env[0] = peer_root.get();
+    deliver_root.set(js_new_closure((void*)js_message_port_deliver, 0, env, 1));
     extern Item js_setTimeout(Item callback, Item delay);
-    js_setTimeout(deliver, (Item){.item = i2it(0)});
-    js_message_port_detach_arraybuffers_in_transfer_list(transfer_list);
+    // Timer scheduling may allocate after closure creation; preserve the
+    // callback until the event loop has taken ownership of it.
+    js_setTimeout(deliver_root.get(), (Item){.item = i2it(0)});
+    js_message_port_detach_arraybuffers_in_transfer_list(transfer_root.get());
     return make_js_undefined();
 }
 
@@ -15889,9 +15493,14 @@ extern "C" Item js_message_port_receive_message_on_port(Item port) {
     Item msg = js_message_port_shift_message(port);
     if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
 
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> message_root(roots, msg);
     Item result = js_new_object();
-    js_property_set(result, make_string_item("message"), msg);
-    return result;
+    Rooted<Item> result_root(roots, result);
+    // The envelope/key allocations can compact after dequeuing the message,
+    // so both values stay rooted until the result property owns the payload.
+    js_property_set(result_root.get(), make_string_item("message"), message_root.get());
+    return result_root.get();
 }
 
 extern "C" Item js_message_port_new(void) {
@@ -16014,13 +15623,12 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
+        // Jube Node modules may now cache namespace values: globalThis and
+        // process are both installed, and teardown will run before this heap.
+        jube_modules_runtime_attach();
         js_install_jube_global_namespaces(js_global_this_obj);
         extern Item js_get_crypto_namespace(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
-        extern Item js_get_os_namespace(void);
-        extern Item js_get_vm_namespace(void);
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("os", 2))}, js_get_os_namespace());
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("vm", 2))}, js_get_vm_namespace());
 
         // Global function names, arity, and installation policy come from the catalog.
         for (int i = 0; i < js_builtin_global_count(); i++) {
@@ -16093,12 +15701,6 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj,
             (Item){.item = s2it(heap_create_name("IntersectionObserver", 20))},
             js_new_function((void*)js_intersection_observer_new, 2));
-
-        // Node.js: Buffer is a global
-        extern Item js_get_buffer_namespace(void);
-        js_property_set(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("Buffer", 6))},
-            js_get_buffer_namespace());
 
         // AbortController constructor
         {

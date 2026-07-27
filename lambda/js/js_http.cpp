@@ -36,7 +36,6 @@ extern "C" Item js_net_createConnection(Item rest_args);
 extern "C" Item js_net_get_socket_prototype(void);
 extern "C" void js_cluster_notify_worker_listening(void);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);

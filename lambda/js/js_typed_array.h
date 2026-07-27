@@ -100,6 +100,9 @@ extern char js_typed_array_marker;
 
 // Core typed array operations
 Item js_typed_array_new(int type_id, int length);
+// Host-owned binary construction primitive. Node-facing modules consume this
+// through JubeHostBinaryAPI so host I/O never depends on Buffer's namespace.
+Item js_buffer_from_bytes(const char* data, int len);
 Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length);
 Item js_typed_array_new_from_array(int type_id, Item source);
 Item js_typed_array_from_binary(Binary* bin);

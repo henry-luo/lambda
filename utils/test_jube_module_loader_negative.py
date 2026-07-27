@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import hashlib
+import argparse
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,7 +27,7 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def library_path(manifest: dict) -> Path:
+def library_path(manifest: dict, module_dir: Path = MODULE_DIR) -> Path:
     if sys.platform == "darwin":
         name = manifest.get("library_macos")
     elif sys.platform.startswith("linux"):
@@ -37,7 +38,7 @@ def library_path(manifest: dict) -> Path:
         fail(f"unsupported platform {sys.platform}")
     if not isinstance(name, str) or not name:
         fail("module manifest has no library for this platform")
-    path = MODULE_DIR / name
+    path = module_dir / name
     if not path.is_file():
         fail(f"native module is missing: {path.relative_to(ROOT)}")
     return path
@@ -69,7 +70,10 @@ def build_fixture_library(fixture_name: str,
         fail(f"init-failure fixture source is missing: {INIT_FAILURE_SOURCE.relative_to(ROOT)}")
     output = TEST_ROOT / fixture_library_name(fixture_name)
     compiler = os.environ.get("CXX", "clang++")
-    command = [compiler, "-std=c++17", "-I", str(ROOT)]
+    # jube.h exposes the complete public Item representation, whose public
+    # parser declarations include Tree-sitter's installed-style include root.
+    command = [compiler, "-std=c++17", "-I", str(ROOT), "-I",
+               str(ROOT / "lambda" / "tree-sitter" / "lib" / "include")]
     for compiler_define in compiler_defines or []:
         command.append(f"-D{compiler_define}")
     if sys.platform == "darwin":
@@ -265,7 +269,104 @@ def expect_dependency_rollback(bundle_root: Path, isolated_host: Path) -> None:
         fail("dependency was not shut down during dependent rollback")
 
 
+def copy_runtime_module(bundle_root: Path, module_dir: Path, copy_library: bool) -> tuple[dict, Path]:
+    try:
+        manifest_bytes = (module_dir / "module.json").read_bytes()
+        manifest = json.loads(manifest_bytes)
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"could not read runtime module manifest: {error}")
+    library = library_path(manifest, module_dir)
+    module_name = manifest.get("name")
+    if not isinstance(module_name, str) or not module_name:
+        fail("runtime module manifest has no name")
+    write_module(bundle_root, module_name, manifest_bytes, copy_library, library)
+    return manifest, library
+
+
+def expect_runtime_rejection(case_name: str, bundle_root: Path, isolated_host: Path,
+                             specifier: str, module_name: str) -> None:
+    environment = dict(os.environ)
+    environment["JUBE_MODULE_PATH"] = str(bundle_root)
+    completed = subprocess.run(
+        [str(isolated_host), "js", "-e",
+         f"try {{ require('{specifier}'); console.log('unexpected-success'); }} "
+         "catch (error) { console.log(error.code); }"],
+        cwd=TEST_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or "unexpected-success" in completed.stdout:
+        fail(f"{case_name} runtime bundle was accepted")
+    if "MODULE_NOT_FOUND" not in completed.stdout:
+        fail(f"{case_name} runtime rejection did not report MODULE_NOT_FOUND")
+    diagnostics = completed.stdout + completed.stderr
+    if f"module '{module_name}'" not in diagnostics:
+        fail(f"{case_name} runtime rejection did not identify {module_name} in the host log")
+
+
+def run_runtime_module_negative(module_dir: Path, specifier: str) -> int:
+    if not HOST.is_file():
+        fail("lambda.exe is missing; build the host first")
+    if TEST_ROOT.exists():
+        shutil.rmtree(TEST_ROOT)
+    TEST_ROOT.mkdir(parents=True)
+    isolated_host = TEST_ROOT / "lambda.exe"
+    shutil.copy2(HOST, isolated_host)
+
+    manifest, library = copy_runtime_module(TEST_ROOT / "missing-library", module_dir, False)
+    module_name = manifest["name"]
+    dependencies = manifest.get("dependencies", [])
+    if not isinstance(dependencies, list):
+        fail("runtime module dependencies must be an array")
+    for dependency_name in dependencies:
+        if not isinstance(dependency_name, str) or not dependency_name:
+            fail("runtime module dependency name is invalid")
+        copy_runtime_module(TEST_ROOT / "missing-library", ROOT / "modules" / dependency_name, True)
+    expect_runtime_rejection("missing-library", TEST_ROOT / "missing-library", isolated_host,
+                             specifier, module_name)
+
+    tampered_root = TEST_ROOT / "checksum-mismatch"
+    copy_runtime_module(tampered_root, module_dir, True)
+    for dependency_name in dependencies:
+        copy_runtime_module(tampered_root, ROOT / "modules" / dependency_name, True)
+    checksum_library = tampered_root / module_name / library.name
+    with checksum_library.open("r+b") as file:
+        first_byte = file.read(1)
+        if not first_byte:
+            fail("native runtime module is empty")
+        file.seek(0)
+        file.write(bytes([first_byte[0] ^ 0x01]))
+    expect_runtime_rejection("checksum-mismatch", tampered_root, isolated_host, specifier,
+                             module_name)
+
+    wrong_abi_root = TEST_ROOT / "wrong-base-abi"
+    manifest, library = copy_runtime_module(wrong_abi_root, module_dir, True)
+    for dependency_name in dependencies:
+        copy_runtime_module(wrong_abi_root, ROOT / "modules" / dependency_name, True)
+    wrong_abi = dict(manifest)
+    wrong_abi["base_abi_version"] = int(manifest["base_abi_version"]) + 1
+    wrong_abi_bytes = (json.dumps(wrong_abi, indent=2, sort_keys=True) + "\n").encode()
+    (wrong_abi_root / module_name / "module.json").write_bytes(wrong_abi_bytes)
+    expect_runtime_rejection("wrong-base-abi", wrong_abi_root, isolated_host, specifier,
+                             module_name)
+
+    print(f"JUBE_LOADER_NEGATIVE: runtime module {module_name} passed")
+    return 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runtime-module-dir", type=Path)
+    parser.add_argument("--runtime-specifier")
+    arguments = parser.parse_args()
+    if arguments.runtime_module_dir or arguments.runtime_specifier:
+        if not arguments.runtime_module_dir or not arguments.runtime_specifier:
+            fail("runtime negative tests require both --runtime-module-dir and --runtime-specifier")
+        return run_runtime_module_negative(arguments.runtime_module_dir.resolve(),
+                                           arguments.runtime_specifier)
     if not HOST.is_file():
         fail("lambda.exe is missing; build the host first")
     try:
@@ -427,6 +528,74 @@ def main() -> int:
         undersized_root = write_bundle("undersized-descriptor", undersized_bytes, True,
                                       undersized_library)
         expect_descriptor_rejection("undersized-descriptor", undersized_root, isolated_host)
+
+        unsupported_requirements_library = build_fixture_library(
+            "unsupported-requirements", ["JUBE_TEST_REQUIRES_UNSUPPORTED_REQUIREMENTS"])
+        unsupported_requirements = dict(manifest)
+        fixture_name = unsupported_requirements_library.name
+        if sys.platform == "darwin":
+            unsupported_requirements["library_macos"] = fixture_name
+        else:
+            unsupported_requirements["library_linux"] = fixture_name
+        unsupported_requirements[integrity_key()] = sha256_file(unsupported_requirements_library)
+        unsupported_requirements_bytes = (
+            json.dumps(unsupported_requirements, indent=2, sort_keys=True) + "\n").encode()
+        unsupported_requirements_root = write_bundle("unsupported-requirements",
+                                                     unsupported_requirements_bytes, True,
+                                                     unsupported_requirements_library)
+        expect_descriptor_rejection("unsupported-requirements",
+                                    unsupported_requirements_root, isolated_host)
+
+        unsupported_node_version_library = build_fixture_library(
+            "unsupported-node-version", ["JUBE_TEST_REQUIRES_UNSUPPORTED_NODE_VERSION"])
+        unsupported_node_version = dict(manifest)
+        fixture_name = unsupported_node_version_library.name
+        if sys.platform == "darwin":
+            unsupported_node_version["library_macos"] = fixture_name
+        else:
+            unsupported_node_version["library_linux"] = fixture_name
+        unsupported_node_version[integrity_key()] = sha256_file(unsupported_node_version_library)
+        unsupported_node_version_bytes = (
+            json.dumps(unsupported_node_version, indent=2, sort_keys=True) + "\n").encode()
+        unsupported_node_version_root = write_bundle(
+            "unsupported-node-version", unsupported_node_version_bytes, True,
+            unsupported_node_version_library)
+        expect_descriptor_rejection("unsupported-node-version",
+                                    unsupported_node_version_root, isolated_host)
+
+        undersized_node_api_library = build_fixture_library(
+            "undersized-node-api", ["JUBE_TEST_REQUIRES_UNDERSIZED_NODE_API"])
+        undersized_node_api = dict(manifest)
+        fixture_name = undersized_node_api_library.name
+        if sys.platform == "darwin":
+            undersized_node_api["library_macos"] = fixture_name
+        else:
+            undersized_node_api["library_linux"] = fixture_name
+        undersized_node_api[integrity_key()] = sha256_file(undersized_node_api_library)
+        undersized_node_api_bytes = (
+            json.dumps(undersized_node_api, indent=2, sort_keys=True) + "\n").encode()
+        undersized_node_api_root = write_bundle(
+            "undersized-node-api", undersized_node_api_bytes, True,
+            undersized_node_api_library)
+        expect_descriptor_rejection("undersized-node-api", undersized_node_api_root,
+                                    isolated_host)
+
+        undersized_value_api_library = build_fixture_library(
+            "undersized-value-api", ["JUBE_TEST_REQUIRES_UNDERSIZED_VALUE_API"])
+        undersized_value_api = dict(manifest)
+        fixture_name = undersized_value_api_library.name
+        if sys.platform == "darwin":
+            undersized_value_api["library_macos"] = fixture_name
+        else:
+            undersized_value_api["library_linux"] = fixture_name
+        undersized_value_api[integrity_key()] = sha256_file(undersized_value_api_library)
+        undersized_value_api_bytes = (
+            json.dumps(undersized_value_api, indent=2, sort_keys=True) + "\n").encode()
+        undersized_value_api_root = write_bundle(
+            "undersized-value-api", undersized_value_api_bytes, True,
+            undersized_value_api_library)
+        expect_descriptor_rejection("undersized-value-api", undersized_value_api_root,
+                                    isolated_host)
 
         missing_dependency = dict(manifest)
         missing_dependency["dependencies"] = ["missing-test-dependency"]

@@ -117,7 +117,9 @@ static Item jube_name_item(const char* name) {
 }
 
 static char* jube_strndup(const char* src, size_t len) {
-    char* copy = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+    // Interface metadata outlives individual JS heaps and is released after
+    // memtrack may change mode, so it cannot use a phase-bound tracked block.
+    char* copy = (char*)malloc(len + 1);
     if (!copy) return NULL;
     memcpy(copy, src, len);
     copy[len] = '\0';
@@ -127,7 +129,9 @@ static char* jube_strndup(const char* src, size_t len) {
 // snake_case -> camelCase; returns owned copy (identity copy when no '_')
 static char* jube_derive_camel(const char* snake) {
     size_t len = strlen(snake);
-    char* out = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+    // Matches jube_strndup(): member metadata is released outside a JS heap
+    // lifetime, so its ownership must not depend on memtrack's current mode.
+    char* out = (char*)malloc(len + 1);
     if (!out) return NULL;
     size_t oi = 0;
     for (size_t i = 0; i < len; i++) {
@@ -868,7 +872,7 @@ static void jube_parse_fn_type(const char* source, TSNode fn_node, int* arity,
             char* text = jube_node_text(source, child);
             if (text) {
                 if (strchr(text, '^')) *can_raise = true;
-                mem_free(text);
+                free(text);
             }
         }
     }
@@ -883,7 +887,7 @@ static bool jube_parse_default_literal(const char* source, TSNode value_node,
         // strip the surrounding quotes the grammar keeps in the literal text
         if (len >= 2 && (text[0] == '"' || text[0] == '\'')) {
             member->default_str = jube_strndup(text + 1, len - 2);
-            mem_free(text);
+            free(text);
         } else {
             member->default_str = text;
         }
@@ -894,14 +898,14 @@ static bool jube_parse_default_literal(const char* source, TSNode value_node,
     member->default_int = strtoll(text, NULL, 10);
     member->default_is_str = false;
     member->has_default = true;
-    mem_free(text);
+    free(text);
     return true;
 }
 
 static void jube_free_parsed_members(JubeParsedMember* members, int count) {
     for (int i = 0; i < count; i++) {
-        if (members[i].name) mem_free(members[i].name);
-        if (members[i].default_str) mem_free(members[i].default_str);
+        if (members[i].name) free(members[i].name);
+        if (members[i].default_str) free(members[i].default_str);
     }
 }
 
@@ -978,7 +982,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (!binding) {
         log_error("JUBE_IFACE: module '%s' declares type '%s' with no binding table",
                   module->name, type_name);
-        mem_free(type_name);
+        free(type_name);
         return -1;
     }
     host_brand = binding->host_brand ? binding->host_brand
@@ -986,7 +990,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (!host_brand) {
         log_error("JUBE_IFACE: module '%s' type '%s' has no host brand JubeTypeDef",
                   module->name, type_name);
-        mem_free(type_name);
+        free(type_name);
         return -1;
     }
 
@@ -1000,11 +1004,11 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             log_error("JUBE_IFACE: module '%s' type '%s' inherits unknown/uncompiled "
                       "base '%s' (declare bases before derived types)",
                       module->name, type_name, base_name ? base_name : "(null)");
-            if (base_name) mem_free(base_name);
-            mem_free(type_name);
+            if (base_name) free(base_name);
+            free(type_name);
             return -1;
         }
-        mem_free(base_name);
+        free(base_name);
     }
 
     JubeParsedMember parsed[JUBE_PARSE_MEMBER_CAPACITY];
@@ -1018,7 +1022,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         if (parsed_count >= JUBE_PARSE_MEMBER_CAPACITY) {
             log_error("JUBE_IFACE: type '%s' exceeds member capacity", type_name);
             jube_free_parsed_members(parsed, parsed_count);
-            mem_free(type_name);
+            free(type_name);
             return -1;
         }
         TSNode attr_name = ts_node_child_by_field_name(child, "name", 4);
@@ -1033,7 +1037,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         if (name_len >= 2 && member->name[0] == '\'' &&
                 member->name[name_len - 1] == '\'') {
             char* bare = jube_strndup(member->name + 1, name_len - 2);
-            mem_free(member->name);
+            free(member->name);
             member->name = bare;
             if (!member->name) continue;
         }
@@ -1057,7 +1061,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                           "(only default-valued constants may omit a binding)",
                           type_name, parsed[i].name);
                 jube_free_parsed_members(parsed, parsed_count);
-                mem_free(type_name);
+                free(type_name);
                 return -1;
             }
             continue;
@@ -1066,14 +1070,14 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             log_error("JUBE_IFACE: type '%s' method '%s' binding lacks a call handler",
                       type_name, parsed[i].name);
             jube_free_parsed_members(parsed, parsed_count);
-            mem_free(type_name);
+            free(type_name);
             return -1;
         }
         if (!parsed[i].is_method && !bind->get && !bind->reflect_attr) {
             log_error("JUBE_IFACE: type '%s' field '%s' binding lacks a getter",
                       type_name, parsed[i].name);
             jube_free_parsed_members(parsed, parsed_count);
-            mem_free(type_name);
+            free(type_name);
             return -1;
         }
     }
@@ -1092,7 +1096,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             log_error("JUBE_IFACE: type '%s' binds undeclared member '%s'",
                       type_name, bind_name);
             jube_free_parsed_members(parsed, parsed_count);
-            mem_free(type_name);
+            free(type_name);
             return -1;
         }
     }
@@ -1100,21 +1104,23 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (s_type_record_count >= JUBE_TYPE_RECORD_CAPACITY) {
         log_error("JUBE_IFACE: type record capacity exceeded at '%s'", type_name);
         jube_free_parsed_members(parsed, parsed_count);
-        mem_free(type_name);
+        free(type_name);
         return -1;
     }
 
     int base_count = base_rec ? base_rec->member_count : 0;
     int total = base_count + parsed_count;
-    JubeTypeRecord* trec = (JubeTypeRecord*)mem_calloc(1, sizeof(JubeTypeRecord),
-                                                       MEM_CAT_JS_RUNTIME);
-    JubeMemberRecord* records = (JubeMemberRecord*)mem_calloc(
-        (size_t)(total > 0 ? total : 1), sizeof(JubeMemberRecord), MEM_CAT_JS_RUNTIME);
+    // Interface records survive runtime teardown and are released after the
+    // tracker can change phase, so keep their C ownership independent of a
+    // particular JS heap or memtrack mode.
+    JubeTypeRecord* trec = (JubeTypeRecord*)calloc(1, sizeof(JubeTypeRecord));
+    JubeMemberRecord* records = (JubeMemberRecord*)calloc(
+        (size_t)(total > 0 ? total : 1), sizeof(JubeMemberRecord));
     if (!trec || !records) {
-        if (trec) mem_free(trec);
-        if (records) mem_free(records);
+        if (trec) free(trec);
+        if (records) free(records);
         jube_free_parsed_members(parsed, parsed_count);
-        mem_free(type_name);
+        free(type_name);
         return -1;
     }
 
@@ -1172,7 +1178,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         } else {
             rec->kind = JUBE_MEMBER_FIELD;
             rec->readonly = !bind->set && !bind->reflect_attr;
-            if (parsed[i].default_str) mem_free(parsed[i].default_str);
+            if (parsed[i].default_str) free(parsed[i].default_str);
             parsed[i].default_str = NULL;
         }
         // constants live on the prototype in WebIDL terms and aliases shadow a
@@ -1205,7 +1211,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
              module->name, type_name, out_count, method_count, const_count, base_count);
 #endif
     jube_free_parsed_members(parsed, parsed_count);
-    mem_free(type_name);
+    free(type_name);
     return 0;
 }
 
@@ -1219,15 +1225,20 @@ static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_
             if (rec->method_fn_rooted) host->gc->unregister_root(&rec->method_fn.item);
         }
     }
+    // The index stores borrowed member-name pointers; release it before the
+    // records so hashmap teardown never hashes already-freed key storage.
+    if (trec->index) {
+        hashmap_free(trec->index);
+        trec->index = NULL;
+    }
     for (int j = 0; j < trec->member_count; j++) {
         JubeMemberRecord* rec = &trec->members[j];
-        if (rec->snake_name) mem_free(rec->snake_name);
-        if (rec->camel_name) mem_free(rec->camel_name);
-        if (rec->const_str) mem_free(rec->const_str);
+        if (rec->snake_name) free(rec->snake_name);
+        if (rec->camel_name) free(rec->camel_name);
+        if (rec->const_str) free(rec->const_str);
     }
-    if (trec->members) mem_free(trec->members);
-    if (trec->index) hashmap_free(trec->index);
-    mem_free(trec);
+    if (trec->members) free(trec->members);
+    free(trec);
 }
 
 static bool jube_interface_record_belongs_to_module(const JubeTypeRecord* trec,

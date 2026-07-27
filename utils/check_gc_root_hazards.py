@@ -73,22 +73,30 @@ def main() -> int:
                 continue
 
             source = path.read_text(encoding="utf-8", errors="replace")
+            functions = list(function_bodies(path))
             # A static process flag survives heap replacement, but the root
             # registry does not. Epoch gates or idempotent registration are
-            # required for persistent roots.
+            # required for persistent roots. Jube module images instead have
+            # an explicit runtime_detach lifecycle; a flag reset there is
+            # session-scoped rather than process-lifetime.
             for match in re.finditer(
                 r"static\s+bool\s+([A-Za-z_]\w*(?:rooted|root_registered|roots_registered))\s*(?:=|;)",
                 source,
             ):
                 name = match.group(1)
-                if name in RESETTABLE_ROOT_FLAGS:
+                reset_on_detach = any(
+                    function.name.endswith("_runtime_detach") and
+                    re.search(rf"\b{re.escape(name)}\s*=\s*false\s*;", function.body)
+                    for function in functions
+                )
+                if name in RESETTABLE_ROOT_FLAGS or reset_on_detach:
                     continue
                 line = source.count("\n", 0, match.start()) + 1
                 errors.append(
                     f"process-lifetime GC root gate {name} at {relative(path)}:{line}"
                 )
 
-            for function in function_bodies(path):
+            for function in functions:
                 functions_checked += 1
                 body = function.body
                 has_register = "heap_register_gc_root" in body

@@ -5,6 +5,7 @@
  * Registered as built-in module 'util' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_host_hooks.h"
 #include "js_typed_array.h"
 #include "js_class.h"
 #include "js_function.hpp"
@@ -1131,21 +1132,26 @@ static Item js_util_promisify_callback(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    Item resolve = env[0];
-    Item reject = env[1];
-    Item custom_args = env[2];
-    int64_t argc = js_array_length(rest_args);
-    Item err = (argc > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> resolve_root(roots, env[0]);
+    Rooted<Item> reject_root(roots, env[1]);
+    Rooted<Item> custom_args_root(roots, env[2]);
+    Rooted<Item> rest_args_root(roots, rest_args);
+    Rooted<Item> value_root(roots, ItemNull);
+    int64_t argc = js_array_length(rest_args_root.get());
+    Item err = (argc > 0) ? js_array_get_int(rest_args_root.get(), 0) : make_js_undefined();
 
     if (js_is_truthy(err)) {
         Item reject_args[1] = {err};
-        js_call_function(reject, make_js_undefined(), reject_args, 1);
+        js_call_function(reject_root.get(), make_js_undefined(), reject_args, 1);
         return make_js_undefined();
     }
 
-    Item value = js_util_promisify_result_from_args(custom_args, rest_args);
-    Item resolve_args[1] = {value};
-    js_call_function(resolve, make_js_undefined(), resolve_args, 1);
+    // Promise callbacks enter from an unrooted native argument frame; retain
+    // the closure environment and result while custom result construction allocates.
+    value_root.set(js_util_promisify_result_from_args(custom_args_root.get(), rest_args_root.get()));
+    Item resolve_args[1] = {value_root.get()};
+    js_call_function(resolve_root.get(), make_js_undefined(), resolve_args, 1);
     return make_js_undefined();
 }
 
@@ -1153,31 +1159,36 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    Item original = env[0];
-    Item this_arg = env[1];
-    Item call_args_array = env[2];
-    Item custom_args = env[3];
-    int64_t argc64 = js_array_length(call_args_array);
+    RootFrame roots((Context*)context, 9);
+    Rooted<Item> original_root(roots, env[0]);
+    Rooted<Item> this_root(roots, env[1]);
+    Rooted<Item> call_args_root(roots, env[2]);
+    Rooted<Item> custom_args_root(roots, env[3]);
+    Rooted<Item> resolve_root(roots, resolve);
+    Rooted<Item> reject_root(roots, reject);
+    Rooted<Item> callback_root(roots, ItemNull);
+    Rooted<Item> error_root(roots, ItemNull);
+    int64_t argc64 = js_array_length(call_args_root.get());
     if (argc64 < 0) argc64 = 0;
 
     Item* cb_env = js_alloc_env(3);
-    cb_env[0] = resolve;
-    cb_env[1] = reject;
-    cb_env[2] = custom_args;
-    Item callback = js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 3);
+    cb_env[0] = resolve_root.get();
+    cb_env[1] = reject_root.get();
+    cb_env[2] = custom_args_root.get();
+    callback_root.set(js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 3));
 
     int argc = (int)argc64 + 1;
     Item* call_args = (Item*)alloca((size_t)argc * sizeof(Item));
     for (int i = 0; i < (int)argc64; i++) {
-        call_args[i] = js_array_get_int(call_args_array, i);
+        call_args[i] = js_array_get_int(call_args_root.get(), i);
     }
-    call_args[argc - 1] = callback;
+    call_args[argc - 1] = callback_root.get();
 
-    Item call_result = js_call_function(original, this_arg, call_args, argc);
+    Item call_result = js_call_function(original_root.get(), this_root.get(), call_args, argc);
     if (js_check_exception()) {
-        Item error = js_clear_exception();
-        Item reject_args[1] = {error};
-        js_call_function(reject, make_js_undefined(), reject_args, 1);
+        error_root.set(js_clear_exception());
+        Item reject_args[1] = {error_root.get()};
+        js_call_function(reject_root.get(), make_js_undefined(), reject_args, 1);
         if (js_check_exception()) js_clear_exception();
     } else if (js_util_is_promise_like(call_result)) {
         js_util_emit_promisify_promise_warning();
@@ -1189,23 +1200,26 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_reject(make_string_item("promisified function missing target"));
 
-    Item original = env[0];
-    Item custom_args = env[1];
-    Item this_arg = js_get_this();
-
-    Item call_args_array = js_array_new(0);
-    int64_t argc = js_array_length(rest_args);
+    RootFrame roots((Context*)context, 6);
+    Rooted<Item> original_root(roots, env[0]);
+    Rooted<Item> custom_args_root(roots, env[1]);
+    Rooted<Item> this_root(roots, js_get_this());
+    Rooted<Item> rest_args_root(roots, rest_args);
+    Rooted<Item> call_args_root(roots, ItemNull);
+    Rooted<Item> executor_root(roots, ItemNull);
+    call_args_root.set(js_array_new(0));
+    int64_t argc = js_array_length(rest_args_root.get());
     for (int64_t i = 0; i < argc; i++) {
-        js_array_push(call_args_array, js_array_get_int(rest_args, i));
+        js_array_push(call_args_root.get(), js_array_get_int(rest_args_root.get(), i));
     }
 
     Item* exec_env = js_alloc_env(4);
-    exec_env[0] = original;
-    exec_env[1] = this_arg;
-    exec_env[2] = call_args_array;
-    exec_env[3] = custom_args;
-    Item executor = js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 4);
-    return js_promise_create(executor);
+    exec_env[0] = original_root.get();
+    exec_env[1] = this_root.get();
+    exec_env[2] = call_args_root.get();
+    exec_env[3] = custom_args_root.get();
+    executor_root.set(js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 4));
+    return js_promise_create(executor_root.get());
 }
 
 extern "C" Item js_util_promisify_custom_symbol(void) {
@@ -2815,6 +2829,10 @@ static void js_util_set_method(Item ns, const char* name, void* func_ptr, int pa
 }
 
 extern "C" Item js_get_util_namespace(void) {
+    // The console hook is valid for the process lifetime and has no Item
+    // ownership; node-core activates this namespace at session attach so the
+    // Node profile retains util.format before the first console call.
+    js_host_hooks_set_console_format_hook(js_util_format);
     if (util_namespace.item != 0) return util_namespace;
 
     // The namespace escapes this helper and is not published in the module
@@ -2940,4 +2958,5 @@ extern "C" Item js_get_util_namespace(void) {
 
 extern "C" void js_util_reset(void) {
     util_namespace = (Item){0};
+    js_host_hooks_set_console_format_hook(NULL);
 }

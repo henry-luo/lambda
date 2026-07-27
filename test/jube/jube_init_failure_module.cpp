@@ -151,6 +151,10 @@ static int jube_test_init_failure(const JubeHostAPI* host) {
 #elif defined(JUBE_TEST_REQUIRES_MISSING_CAPABILITY)
     jube_test_write_marker("JUBE_CAPABILITY_INIT_MARKER", "init\n");
     return host ? 0 : -72;
+#elif defined(JUBE_TEST_REQUIRES_UNSUPPORTED_REQUIREMENTS) || \
+      defined(JUBE_TEST_REQUIRES_UNDERSIZED_NODE_API)
+    jube_test_write_marker("JUBE_DESCRIPTOR_INIT_MARKER", "init\n");
+    return host ? 0 : -72;
 #elif defined(JUBE_TEST_UNSUPPORTED_ABI) || defined(JUBE_TEST_UNDERSIZED_DESCRIPTOR)
     jube_test_write_marker("JUBE_DESCRIPTOR_INIT_MARKER", "init\n");
     return host ? 0 : -72;
@@ -210,6 +214,57 @@ static const JubeLanguageDef jube_test_missing_capability_language = {
 #define JUBE_TEST_LANGUAGE_DESCRIPTOR NULL
 #endif
 
+#if defined(JUBE_TEST_REQUIRES_UNSUPPORTED_REQUIREMENTS)
+static const JubeModuleRequirements jube_test_unsupported_requirements = {
+    sizeof(JubeModuleRequirements),
+    JUBE_HOST_API_VERSION,
+    sizeof(JubeHostAPI),
+    0,
+    UINT64_C(1) << 63,
+    0,
+    0,
+};
+#define JUBE_TEST_REQUIREMENTS &jube_test_unsupported_requirements
+#elif defined(JUBE_TEST_REQUIRES_UNSUPPORTED_NODE_VERSION)
+static const JubeModuleRequirements jube_test_unsupported_node_requirements = {
+    sizeof(JubeModuleRequirements),
+    JUBE_HOST_API_VERSION,
+    sizeof(JubeHostAPI),
+    0,
+    JUBE_HOST_CAP_NODE_RUNTIME,
+    JUBE_HOST_SERVICE_API_VERSION + 1,
+    sizeof(JubeHostNodeAPI),
+};
+#define JUBE_TEST_REQUIREMENTS &jube_test_unsupported_node_requirements
+#elif defined(JUBE_TEST_REQUIRES_UNDERSIZED_NODE_API)
+static const JubeModuleRequirements jube_test_undersized_node_requirements = {
+    sizeof(JubeModuleRequirements),
+    JUBE_HOST_API_VERSION,
+    sizeof(JubeHostAPI),
+    0,
+    JUBE_HOST_CAP_NODE_RUNTIME,
+    JUBE_HOST_SERVICE_API_VERSION,
+    (uint32_t)(sizeof(JubeHostNodeAPI) + 1),
+};
+#define JUBE_TEST_REQUIREMENTS &jube_test_undersized_node_requirements
+#elif defined(JUBE_TEST_REQUIRES_UNDERSIZED_VALUE_API)
+static const JubeModuleRequirements jube_test_undersized_value_requirements = {
+    sizeof(JubeModuleRequirements),
+    JUBE_HOST_API_VERSION,
+    sizeof(JubeHostAPI),
+    0,
+    JUBE_HOST_CAP_NODE_RUNTIME,
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodeAPI),
+    (uint32_t)(sizeof(JubeHostValueAPI) + 1),
+    0,
+    0,
+};
+#define JUBE_TEST_REQUIREMENTS &jube_test_undersized_value_requirements
+#else
+#define JUBE_TEST_REQUIREMENTS NULL
+#endif
+
 #if defined(JUBE_TEST_UNSUPPORTED_ABI)
 #define JUBE_TEST_DESCRIPTOR_ABI (JUBE_ABI_VERSION + 1)
 #else
@@ -242,6 +297,7 @@ static const JubeModuleDef jube_test_init_failure_module = {
     NULL,
     NULL,
     JUBE_TEST_LANGUAGE_DESCRIPTOR,
+    JUBE_TEST_REQUIREMENTS,
 };
 
 extern "C" const JubeModuleDef* jube_module(void) {

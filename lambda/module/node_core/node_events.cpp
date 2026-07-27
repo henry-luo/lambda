@@ -1,0 +1,1217 @@
+/**
+ * node_events.cpp — Node.js-style 'events' module through the Jube boundary
+ *
+ * Provides EventEmitter class with on, once, off, emit, etc.
+ * Registered by node-core through its Jube namespace descriptor.
+ *
+ * EventEmitter instances store listeners in a hidden __events__ property
+ * which maps event names to arrays of listener functions.
+ */
+#include "node_events.hpp"
+#include "../../lib/log.h"
+#include "../../lib/mem.h"
+
+#include <cstring>
+
+static const JubeHostAPI* node_events_host = NULL;
+static void* node_events_session = NULL;
+static bool node_events_rooted = false;
+
+static Item node_events_string(const char* text) {
+    return node_events_host && node_events_host->value &&
+            node_events_host->value->string_from_utf8_n ?
+        node_events_host->value->string_from_utf8_n(text ? text : "", text ? strlen(text) : 0) :
+        ItemNull;
+}
+
+static Item node_events_string(const char* text, int length) {
+    return node_events_host && node_events_host->value &&
+            node_events_host->value->string_from_utf8_n && text && length >= 0 ?
+        node_events_host->value->string_from_utf8_n(text, (size_t)length) : ItemNull;
+}
+
+static Item node_events_undefined(void) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+
+static Item node_events_number(int64_t value) {
+    return node_events_host && node_events_host->script && node_events_host->script->make_number ?
+        node_events_host->script->make_number((double)value) : ItemNull;
+}
+
+static bool node_events_string_copy(Item value, char* out, int out_size) {
+    return node_events_host && node_events_host->value &&
+        node_events_host->value->string_copy && out && out_size > 0 &&
+        node_events_host->value->string_copy(value, out, (size_t)out_size, NULL);
+}
+
+static bool node_events_string_equals(Item value, const char* expected) {
+    if (!expected || node_events_host->value->kind(value) != JUBE_VALUE_STRING) return false;
+    char text[128] = {};
+    return node_events_string_copy(value, text, sizeof(text)) && strcmp(text, expected) == 0;
+}
+
+static bool node_events_roots_begin(JubeRootFrame* frame, size_t count) {
+    return node_events_host && node_events_host->node && node_events_host->node->roots &&
+        node_events_host->node->roots->root_frame_begin &&
+        node_events_host->node->roots->root_frame_take_slot &&
+        node_events_host->node->roots->root_frame_end &&
+        node_events_host->node->roots->root_frame_begin(frame, count);
+}
+
+static Item node_events_root_item(const uint64_t* root) {
+    return (Item){.item = root ? *root : 0};
+}
+
+static void node_events_set_named_property(Item object, const char* name, Item value) {
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 3)) return;
+    uint64_t* object_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* value_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!object_root || !key_root || !value_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return;
+    }
+    *object_root = object.item;
+    *value_root = value.item;
+    Item key = node_events_string(name);
+    *key_root = key.item;
+    // compacting GC updates root slots, not the by-value arguments held here.
+    object = node_events_root_item(object_root);
+    value = node_events_root_item(value_root);
+    node_events_host->value->property_set(object, key, value);
+    node_events_host->node->roots->root_frame_end(&frame);
+}
+
+#define get_type_id(VALUE) node_events_host->value->kind(VALUE)
+#define LMD_TYPE_UNDEFINED JUBE_VALUE_UNDEFINED
+#define LMD_TYPE_STRING JUBE_VALUE_STRING
+#define LMD_TYPE_ARRAY JUBE_VALUE_ARRAY
+#define LMD_TYPE_MAP JUBE_VALUE_OBJECT
+#define LMD_TYPE_FUNC JUBE_VALUE_FUNCTION
+#define LMD_TYPE_BOOL JUBE_VALUE_BOOLEAN
+#define LMD_TYPE_INT JUBE_VALUE_NUMBER
+#define LMD_TYPE_INT64 JUBE_VALUE_NUMBER
+#define make_string_item node_events_string
+#define make_js_undefined() node_events_undefined()
+#define js_new_object() node_events_host->value->new_object()
+#define js_array_new(CAPACITY) node_events_host->value->array_new(CAPACITY)
+#define js_array_push(ARRAY, VALUE) node_events_host->value->array_push(ARRAY, VALUE)
+#define js_array_length(ARRAY) node_events_host->value->array_length(ARRAY)
+#define js_array_get_int(ARRAY, INDEX) node_events_host->value->array_get(ARRAY, INDEX)
+#define js_property_get(OBJECT, KEY) node_events_host->value->property_get(OBJECT, KEY)
+#define js_property_set(OBJECT, KEY, VALUE) node_events_host->value->property_set(OBJECT, KEY, VALUE)
+#define js_object_keys(OBJECT) node_events_host->script->object_keys(OBJECT)
+#define js_new_function(FUNCTION, COUNT) node_events_host->script->new_function(FUNCTION, COUNT)
+#define js_call_function(FUNCTION, THIS, ARGS, COUNT) node_events_host->script->call_function(FUNCTION, THIS, ARGS, COUNT)
+#define js_get_this() node_events_host->script->current_this()
+#define js_function_set_prototype(FUNCTION, PROTOTYPE) node_events_host->script->function_set_prototype(FUNCTION, PROTOTYPE)
+#define js_get_prototype(OBJECT) node_events_host->script->get_prototype(OBJECT)
+#define js_set_prototype(OBJECT, PROTOTYPE) node_events_host->script->set_prototype(OBJECT, PROTOTYPE)
+#define js_class_stamp(OBJECT, CLASS) node_events_host->script->class_stamp(OBJECT, CLASS)
+#define js_new_closure(FUNCTION, COUNT, ENV, ENV_COUNT) node_events_host->script->new_closure(FUNCTION, COUNT, ENV, ENV_COUNT)
+#define js_alloc_env(COUNT) node_events_host->script->closure_env_new(COUNT)
+
+static Item events_key;       // "__events__"
+static Item once_key;         // "__once__"
+static Item max_listeners_key; // "__maxListeners__"
+static Item new_listener_key; // "newListener"
+static Item remove_listener_key; // "removeListener"
+static Item listener_fn_key; // "__listener_fn__"
+static Item listener_context_key; // "__listener_als_context__"
+static Item warned_key;       // "__max_listener_warned__"
+static Item events_namespace = {0};
+static bool keys_initialized = false;
+
+static void ensure_keys() {
+    if (keys_initialized) return;
+    events_key = make_string_item("__events__");
+    once_key = make_string_item("__once__");
+    max_listeners_key = make_string_item("__maxListeners__");
+    new_listener_key = make_string_item("newListener");
+    remove_listener_key = make_string_item("removeListener");
+    listener_fn_key = make_string_item("__listener_fn__");
+    listener_context_key = make_string_item("__listener_als_context__");
+    warned_key = make_string_item("__max_listener_warned__");
+    keys_initialized = true;
+}
+
+static bool is_listener_record(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item fn = js_property_get(value, listener_fn_key);
+    return get_type_id(fn) == LMD_TYPE_FUNC;
+}
+
+static Item listener_record_fn(Item value) {
+    if (is_listener_record(value)) return js_property_get(value, listener_fn_key);
+    return value;
+}
+
+static Item listener_record_context(Item value) {
+    if (is_listener_record(value)) return js_property_get(value, listener_context_key);
+    return ItemNull;
+}
+
+static bool node_events_require_listener(Item listener) {
+    if (get_type_id(listener) == LMD_TYPE_FUNC) return true;
+    // Listener records store callable guests; accepting a non-function here
+    // defers failure until emit(), unlike Node's insertion-time contract.
+    node_events_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        get_type_id(listener) == JUBE_VALUE_NULL ?
+            "The \"listener\" argument must be of type function. Received null" :
+            "The \"listener\" argument must be of type function.");
+    return false;
+}
+
+static Item make_listener_record(Item listener) {
+    Item record = js_new_object();
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 3)) return record;
+    uint64_t* record_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* listener_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* context_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!record_root || !listener_root || !context_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return record;
+    }
+    *record_root = record.item;
+    *listener_root = listener.item;
+    js_property_set(record, listener_fn_key, listener);
+    record = node_events_root_item(record_root);
+    listener = node_events_root_item(listener_root);
+    Item context = node_events_host->node->events->als_capture_context();
+    *context_root = context.item;
+    record = node_events_root_item(record_root);
+    js_property_set(record, listener_context_key, context);
+    node_events_host->node->roots->root_frame_end(&frame);
+    return record;
+}
+
+static bool listener_matches(Item stored, Item listener) {
+    if (stored.item == listener.item) return true;
+    Item fn = listener_record_fn(stored);
+    return fn.item == listener.item;
+}
+
+// Get or create the __events__ map on an emitter object
+// Also exposes as _events for Node.js compatibility
+static Item get_events_map(Item emitter) {
+    ensure_keys();
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 2)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* map_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !map_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *emitter_root = emitter.item;
+    Item map = js_property_get(emitter, events_key);
+    *map_root = map.item;
+    if (map.item == 0 || get_type_id(map) == LMD_TYPE_UNDEFINED) {
+        map = js_new_object();
+        *map_root = map.item;
+        emitter = node_events_root_item(emitter_root);
+        js_property_set(emitter, events_key, map);
+        emitter = node_events_root_item(emitter_root);
+        map = node_events_root_item(map_root);
+        // Also set _events alias for Node.js compatibility
+        node_events_set_named_property(emitter, "_events", map);
+        emitter = node_events_root_item(emitter_root);
+        map = node_events_root_item(map_root);
+        node_events_set_named_property(emitter, "_eventsCount", node_events_number(0));
+    }
+    node_events_host->node->roots->root_frame_end(&frame);
+    return map;
+}
+
+// Get or create the __once__ set (array of functions marked as once) on an emitter
+static Item get_once_set(Item emitter) {
+    ensure_keys();
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 2)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* set_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !set_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *emitter_root = emitter.item;
+    Item set = js_property_get(emitter, once_key);
+    *set_root = set.item;
+    if (set.item == 0 || get_type_id(set) == LMD_TYPE_UNDEFINED) {
+        set = js_array_new(0);
+        *set_root = set.item;
+        emitter = node_events_root_item(emitter_root);
+        js_property_set(emitter, once_key, set);
+    }
+    node_events_host->node->roots->root_frame_end(&frame);
+    return set;
+}
+
+// Check if a function is in the once set
+static bool is_once_listener(Item emitter, Item fn) {
+    Item set = get_once_set(emitter);
+    int64_t len = js_array_length(set);
+    for (int64_t i = 0; i < len; i++) {
+        Item f = js_array_get_int(set, i);
+        if (f.item == fn.item || listener_matches(f, listener_record_fn(fn))) return true;
+    }
+    return false;
+}
+
+// Get listeners array for a given event name
+static Item get_listeners_array(Item emitter, Item event_name) {
+    Item map = get_events_map(emitter);
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 6)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* event_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* map_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* array_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !event_root || !map_root || !array_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *emitter_root = emitter.item;
+    *event_root = event_name.item;
+    *map_root = map.item;
+    Item arr = js_property_get(map, event_name);
+    *array_root = arr.item;
+    if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
+        arr = js_array_new(0);
+        *array_root = arr.item;
+        // The event key can be a movable JS string, so reload it before
+        // installing the newly allocated listener array in the event map.
+        map = node_events_root_item(map_root);
+        event_name = node_events_root_item(event_root);
+        js_property_set(map, event_name, arr);
+    }
+    node_events_host->node->roots->root_frame_end(&frame);
+    return arr;
+}
+
+static int64_t get_default_max_listeners(void) {
+    Item val = js_property_get(events_namespace, make_string_item("defaultMaxListeners"));
+    // JS assignments store listener limits as numbers, so accept all numeric Items here.
+    if (get_type_id(val) == LMD_TYPE_INT) return (int64_t)node_events_host->script->get_number(val);
+    return 10;
+}
+
+static int64_t get_emitter_max_listeners(Item emitter) {
+    ensure_keys();
+    Item val = js_property_get(emitter, max_listeners_key);
+    // setMaxListeners receives JS numbers even when the value is an integer literal.
+    if (get_type_id(val) == LMD_TYPE_INT) return (int64_t)node_events_host->script->get_number(val);
+    return get_default_max_listeners();
+}
+
+static void maybe_emit_max_listener_warning(Item emitter, Item event_name, Item arr) {
+    int64_t max = get_emitter_max_listeners(emitter);
+    if (max <= 0) return;
+    int64_t len = js_array_length(arr);
+    if (len <= max) return;
+    Item warned = js_property_get(arr, warned_key);
+    if (get_type_id(warned) == LMD_TYPE_BOOL && node_events_host->script->is_truthy(warned)) return;
+    js_property_set(arr, warned_key, (Item){.item = b2it(true)});
+
+    char event_buf[96];
+    const char* event_chars = "event";
+    if (get_type_id(event_name) == LMD_TYPE_STRING &&
+            node_events_string_copy(event_name, event_buf, sizeof(event_buf)) && event_buf[0]) {
+        event_chars = event_buf;
+    }
+
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "Possible EventEmitter memory leak detected. %lld %s listeners added to [EventEmitter]. MaxListeners is %lld.",
+        (long long)len, event_chars, (long long)max);
+    // listener growth warnings are emitted at insertion time so process
+    // warning handlers observe the same state as Node's EventEmitter.
+    node_events_host->node->events->process_emit_warning(make_string_item(msg),
+        make_string_item("MaxListenersExceededWarning"), make_js_undefined());
+}
+
+// Update _eventsCount on an emitter
+static void update_events_count(Item emitter) {
+    Item map = get_events_map(emitter);
+    Item all_keys = js_object_keys(map);
+    int64_t count = 0;
+    int64_t klen = js_array_length(all_keys);
+    for (int64_t i = 0; i < klen; i++) {
+        Item key = js_array_get_int(all_keys, i);
+        Item arr = js_property_get(map, key);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
+            count++;
+        }
+    }
+    node_events_set_named_property(emitter, "_eventsCount", node_events_number(count));
+}
+
+static void update_events_count_after_add(Item emitter, Item listeners) {
+    if (js_array_length(listeners) != 1) return;
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 2)) return;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !key_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return;
+    }
+    *emitter_root = emitter.item;
+    Item key = node_events_string("_eventsCount");
+    *key_root = key.item;
+    emitter = node_events_root_item(emitter_root);
+    Item count_item = js_property_get(emitter, key);
+    int64_t count = get_type_id(count_item) == LMD_TYPE_INT ?
+        (int64_t)node_events_host->script->get_number(count_item) : 0;
+    emitter = node_events_root_item(emitter_root);
+    node_events_set_named_property(emitter, "_eventsCount", node_events_number(count + 1));
+    node_events_host->node->roots->root_frame_end(&frame);
+}
+
+// Emit newListener event (before adding listener, per Node.js spec)
+static void emit_new_listener(Item emitter, Item event_name, Item listener) {
+    // Don't emit newListener for the newListener event itself (avoid infinite recursion)
+    if (node_events_string_equals(event_name, "newListener")) return;
+    Item map = get_events_map(emitter);
+    Item nl_arr = js_property_get(map, new_listener_key);
+    if (nl_arr.item == 0 || get_type_id(nl_arr) == LMD_TYPE_UNDEFINED) return;
+    int64_t nl_len = js_array_length(nl_arr);
+    if (nl_len == 0) return;
+    Item args[2] = {event_name, listener};
+    for (int64_t i = 0; i < nl_len; i++) {
+        Item fn = listener_record_fn(js_array_get_int(nl_arr, i));
+        js_call_function(fn, emitter, args, 2);
+    }
+}
+
+// Emit removeListener event (after removing listener, per Node.js spec)
+static void emit_remove_listener(Item emitter, Item event_name, Item listener) {
+    // Don't emit removeListener for the removeListener event itself
+    if (node_events_string_equals(event_name, "removeListener")) return;
+    Item map = get_events_map(emitter);
+    Item rl_arr = js_property_get(map, remove_listener_key);
+    if (rl_arr.item == 0 || get_type_id(rl_arr) == LMD_TYPE_UNDEFINED) return;
+    int64_t rl_len = js_array_length(rl_arr);
+    if (rl_len == 0) return;
+    Item args[2] = {event_name, listener};
+    for (int64_t i = 0; i < rl_len; i++) {
+        Item fn = listener_record_fn(js_array_get_int(rl_arr, i));
+        js_call_function(fn, emitter, args, 2);
+    }
+}
+
+// ─── emitter.on(event, listener) ─────────────────────────────────────────────
+// Adds listener to end of listeners array. Returns emitter for chaining.
+extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    if (!node_events_require_listener(listener)) return ItemNull;
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 5)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* event_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* listener_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* array_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* record_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !event_root || !listener_root || !array_root || !record_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *emitter_root = emitter.item;
+    *event_root = event_name.item;
+    *listener_root = listener.item;
+    emit_new_listener(emitter, event_name, listener);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    listener = node_events_root_item(listener_root);
+    Item arr = get_listeners_array(emitter, event_name);
+    *array_root = arr.item;
+    Item record = make_listener_record(listener);
+    *record_root = record.item;
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    record = node_events_root_item(record_root);
+    js_array_push(arr, record);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    update_events_count_after_add(emitter, arr);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    maybe_emit_max_listener_warning(emitter, event_name, arr);
+    node_events_host->node->roots->root_frame_end(&frame);
+    return emitter;
+}
+
+// ─── emitter.once(event, listener) ───────────────────────────────────────────
+// Adds a one-time listener. Returns emitter for chaining.
+extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    if (!node_events_require_listener(listener)) return ItemNull;
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 6)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* event_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* listener_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* array_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* record_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* set_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !event_root || !listener_root || !array_root || !record_root || !set_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *emitter_root = emitter.item;
+    *event_root = event_name.item;
+    *listener_root = listener.item;
+    emit_new_listener(emitter, event_name, listener);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    listener = node_events_root_item(listener_root);
+    Item arr = get_listeners_array(emitter, event_name);
+    *array_root = arr.item;
+    Item record = make_listener_record(listener);
+    *record_root = record.item;
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    record = node_events_root_item(record_root);
+    js_array_push(arr, record);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    record = node_events_root_item(record_root);
+    // mark this function as once
+    Item set = get_once_set(emitter);
+    *set_root = set.item;
+    record = node_events_root_item(record_root);
+    js_array_push(set, record);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    update_events_count_after_add(emitter, arr);
+    emitter = node_events_root_item(emitter_root);
+    event_name = node_events_root_item(event_root);
+    arr = node_events_root_item(array_root);
+    maybe_emit_max_listener_warning(emitter, event_name, arr);
+    node_events_host->node->roots->root_frame_end(&frame);
+    return emitter;
+}
+
+// ─── emitter.off(event, listener) / removeListener ──────────────────────────
+// Removes most-recently added instance of listener. Returns emitter.
+extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    if (!node_events_require_listener(listener)) return ItemNull;
+    Item map = get_events_map(emitter);
+    Item arr = js_property_get(map, event_name);
+    if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) return emitter;
+
+    int64_t len = js_array_length(arr);
+    // find last occurrence
+    for (int64_t i = len - 1; i >= 0; i--) {
+        Item f = js_array_get_int(arr, i);
+        if (listener_matches(f, listener)) {
+            Item original = listener_record_fn(f);
+            // rebuild array without this element
+            Item new_arr = js_array_new(0);
+            for (int64_t j = 0; j < len; j++) {
+                if (j != i) js_array_push(new_arr, js_array_get_int(arr, j));
+            }
+            js_property_set(map, event_name, new_arr);
+            update_events_count(emitter);
+            emit_remove_listener(emitter, event_name, original);
+            break;
+        }
+    }
+    return emitter;
+}
+
+// ─── emitter.emit(event, ...args) ───────────────────────────────────────────
+// Calls each listener with args. Returns true if had listeners.
+extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
+    if (emitter.item == 0) return (Item){.item = b2it(false)};
+    Item map = get_events_map(emitter);
+    Item arr = js_property_get(map, event_name);
+
+    bool has_listeners = (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED &&
+                          js_array_length(arr) > 0);
+
+    // Node.js error event behavior: throw if no listeners for 'error'
+    if (!has_listeners) {
+        if (node_events_string_equals(event_name, "error")) {
+                // Node.js: throw error arg if it's an Error, else wrap in ERR_UNHANDLED_ERROR
+                Item err_arg = ItemNull;
+                if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
+                    int64_t argc = js_array_length(args_rest);
+                    if (argc > 0) err_arg = js_array_get_int(args_rest, 0);
+                }
+                // check if err_arg is an Error instance
+                bool is_error = node_events_host->node->events->is_error_like(err_arg);
+                if (is_error) {
+                    if (node_events_host->node->events->domain_emit_current_error(err_arg)) {
+                        return (Item){.item = b2it(true)};
+                    }
+                    // Error instance: throw directly
+                    node_events_host->script->throw_value(err_arg);
+                } else {
+                    // wrap in ERR_UNHANDLED_ERROR
+                    char buf[512];
+                    int len;
+                    if (err_arg.item == 0 || get_type_id(err_arg) == LMD_TYPE_UNDEFINED) {
+                        len = snprintf(buf, sizeof(buf), "Unhandled error.");
+                    } else {
+                        Item inspected = node_events_host->script->to_string(err_arg);
+                        char inspected_text[384] = {};
+                        node_events_string_copy(inspected, inspected_text, sizeof(inspected_text));
+                        len = snprintf(buf, sizeof(buf), "Unhandled error. (%s)", inspected_text);
+                    }
+                    Item wrapped = node_events_host->script->new_error_with_name(
+                        make_string_item("Error"), make_string_item(buf, len));
+                    js_property_set(wrapped, make_string_item("code"), make_string_item("ERR_UNHANDLED_ERROR"));
+                    if (err_arg.item != 0 && get_type_id(err_arg) != LMD_TYPE_UNDEFINED) {
+                        js_property_set(wrapped, make_string_item("context"), err_arg);
+                    }
+                    node_events_host->script->throw_value(wrapped);
+                }
+                return (Item){.item = b2it(false)};
+            }
+        return (Item){.item = b2it(false)};
+    }
+
+    int64_t len = js_array_length(arr);
+
+    // collect args from rest parameter array
+    int64_t argc = 0;
+    Item args[32];
+    if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
+        argc = js_array_length(args_rest);
+        if (argc > 32) argc = 32;
+        for (int64_t i = 0; i < argc; i++) {
+            args[i] = js_array_get_int(args_rest, i);
+        }
+    }
+
+    // call each listener — snapshot the array first since once-listeners modify it
+    Item snapshot = js_array_new(0);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(snapshot, js_array_get_int(arr, i));
+    }
+
+    // Remove ALL once-listeners from the emitter BEFORE calling any of them.
+    // This prevents recursive emit() from re-firing once-listeners.
+    for (int64_t i = 0; i < len; i++) {
+        Item fn = js_array_get_int(snapshot, i);
+        if (is_once_listener(emitter, fn)) {
+            js_ee_off(emitter, event_name, listener_record_fn(fn));
+            // remove from once-set
+            Item set = get_once_set(emitter);
+            int64_t slen = js_array_length(set);
+            Item new_set = js_array_new(0);
+            for (int64_t j = 0; j < slen; j++) {
+                Item f = js_array_get_int(set, j);
+                if (f.item != fn.item && !listener_matches(f, listener_record_fn(fn))) {
+                    js_array_push(new_set, f);
+                }
+            }
+            js_property_set(emitter, once_key, new_set);
+        }
+    }
+
+    // Now call all listeners from the snapshot
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(snapshot, i);
+        Item fn = listener_record_fn(entry);
+        Item context = listener_record_context(entry);
+
+        if (argc == 0) {
+            node_events_host->node->events->als_context_call(context, fn, emitter, ItemNull, 0);
+        } else if (argc == 1) {
+            node_events_host->node->events->als_context_call(context, fn, emitter, args[0], 1);
+        } else {
+            js_call_function(fn, emitter, args, (int)argc);
+        }
+    }
+
+    return (Item){.item = b2it(true)};
+}
+
+// ─── emitter.removeAllListeners(event?) ─────────────────────────────────────
+extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
+    if (emitter.item == 0) return emitter;
+    Item map = get_events_map(emitter);
+    if (event_name.item == 0 || get_type_id(event_name) == LMD_TYPE_UNDEFINED) {
+        // remove all events
+        js_property_set(emitter, events_key, js_new_object());
+        js_property_set(emitter, make_string_item("_events"), js_new_object());
+        js_property_set(emitter, once_key, js_array_new(0));
+        node_events_set_named_property(emitter, "_eventsCount", node_events_number(0));
+    } else {
+        // Emit removeListener for each removed listener
+        Item arr = js_property_get(map, event_name);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED) {
+            int64_t len = js_array_length(arr);
+            for (int64_t i = len - 1; i >= 0; i--) {
+                emit_remove_listener(emitter, event_name,
+                    listener_record_fn(js_array_get_int(arr, i)));
+            }
+        }
+        js_property_set(map, event_name, js_array_new(0));
+        update_events_count(emitter);
+    }
+    return emitter;
+}
+
+// ─── emitter.listeners(event) ───────────────────────────────────────────────
+// Returns a copy of the listeners array for event.
+extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
+    if (emitter.item == 0) return js_array_new(0);
+    Item map = get_events_map(emitter);
+    Item arr = js_property_get(map, event_name);
+    if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
+        return js_array_new(0);
+    }
+    // return a copy
+    int64_t len = js_array_length(arr);
+    Item copy = js_array_new(0);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(copy, listener_record_fn(js_array_get_int(arr, i)));
+    }
+    return copy;
+}
+
+// ─── emitter.listenerCount(event [, listener]) ─────────────────────────────
+static bool event_name_matches(Item a, Item b) {
+    if (a.item == b.item) return true;
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    char left[256] = {};
+    char right[256] = {};
+    return node_events_string_copy(a, left, sizeof(left)) &&
+        node_events_string_copy(b, right, sizeof(right)) && strcmp(left, right) == 0;
+}
+
+static Item event_target_listener_count(Item emitter, Item event_name, Item listener) {
+    Item listeners = js_property_get(emitter, make_string_item("__listeners__"));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return node_events_number(0);
+
+    bool match_listener = listener.item != 0 && get_type_id(listener) != LMD_TYPE_UNDEFINED;
+    int64_t count = 0;
+    int64_t len = js_array_length(listeners);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(listeners, i);
+        Item type = js_property_get(entry, make_string_item("type"));
+        if (!event_name_matches(type, event_name)) continue;
+        if (match_listener) {
+            Item handler = js_property_get(entry, make_string_item("handler"));
+            if (handler.item != listener.item) continue;
+        }
+        count++;
+    }
+    return node_events_number(count);
+}
+
+extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return node_events_number(0);
+    Item map = get_events_map(emitter);
+    Item arr = js_property_get(map, event_name);
+    if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
+        return event_target_listener_count(emitter, event_name, listener);
+    }
+    int64_t len = js_array_length(arr);
+    // if no specific listener requested, return total count
+    if (listener.item == 0 || get_type_id(listener) == LMD_TYPE_UNDEFINED) {
+        return node_events_number(len);
+    }
+    // count only matching listeners
+    int64_t count = 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item f = js_array_get_int(arr, i);
+        if (listener_matches(f, listener)) count++;
+    }
+    return node_events_number(count);
+}
+
+// ─── emitter.eventNames() ──────────────────────────────────────────────────
+extern "C" Item js_ee_eventNames(Item emitter) {
+    if (emitter.item == 0) return js_array_new(0);
+    Item map = get_events_map(emitter);
+    Item all_keys = js_object_keys(map);
+    // filter out event names with 0 listeners
+    Item result = js_array_new(0);
+    int64_t klen = js_array_length(all_keys);
+    for (int64_t i = 0; i < klen; i++) {
+        Item key = js_array_get_int(all_keys, i);
+        Item arr = js_property_get(map, key);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
+            js_array_push(result, key);
+        }
+    }
+    return result;
+}
+
+// ─── emitter.setMaxListeners(n) ─────────────────────────────────────────────
+extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
+    if (emitter.item == 0) return emitter;
+    ensure_keys();
+    js_property_set(emitter, max_listeners_key, n);
+    return emitter;
+}
+
+// ─── static events.setMaxListeners(n, ...eventTargets) ──────────────────────
+// Namespace version uses same (emitter, n) signature as other static methods
+// for consistency with events.on(emitter, event, fn) pattern.
+// (same order, but listed here for clarity)
+
+// ─── emitter.getMaxListeners() ──────────────────────────────────────────────
+extern "C" Item js_ee_getMaxListeners(Item emitter) {
+    if (emitter.item == 0) return node_events_number(10);
+    ensure_keys();
+    Item val = js_property_get(emitter, max_listeners_key);
+    if (val.item == 0 || get_type_id(val) == LMD_TYPE_UNDEFINED) {
+        return node_events_number(10); // default
+    }
+    return val;
+}
+
+// ─── emitter.prependListener(event, listener) ───────────────────────────────
+// Adds listener to beginning of listeners array.
+extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    if (!node_events_require_listener(listener)) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
+    Item arr = get_listeners_array(emitter, event_name);
+    // rebuild with listener at front
+    int64_t len = js_array_length(arr);
+    Item new_arr = js_array_new((int)(len + 1));
+    js_array_push(new_arr, make_listener_record(listener));
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(new_arr, js_array_get_int(arr, i));
+    }
+    Item map = get_events_map(emitter);
+    js_property_set(map, event_name, new_arr);
+    update_events_count(emitter);
+    maybe_emit_max_listener_warning(emitter, event_name, new_arr);
+    return emitter;
+}
+
+// ─── emitter.prependOnceListener(event, listener) ───────────────────────────
+extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    if (!node_events_require_listener(listener)) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
+    Item arr = get_listeners_array(emitter, event_name);
+    int64_t len = js_array_length(arr);
+    Item new_arr = js_array_new((int)(len + 1));
+    Item record = make_listener_record(listener);
+    js_array_push(new_arr, record);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(new_arr, js_array_get_int(arr, i));
+    }
+    Item map = get_events_map(emitter);
+    js_property_set(map, event_name, new_arr);
+    // mark as once
+    Item set = get_once_set(emitter);
+    js_array_push(set, record);
+    update_events_count(emitter);
+    return emitter;
+}
+
+// ─── Instance method wrappers (use js_get_this() for emitter) ────────────────
+// These wrappers allow prototype methods to work as instance.method(event, fn)
+// where 'this' provides the emitter instead of the first explicit argument.
+
+static Item js_ee_inst_on(Item event_name, Item listener) {
+    return js_ee_on(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_once(Item event_name, Item listener) {
+    return js_ee_once(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_off(Item event_name, Item listener) {
+    return js_ee_off(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_emit(Item event_name, Item args_rest) {
+    // emit is variadic — re-build args with emitter prepended
+    Item emitter = js_get_this();
+    // Build full args: [emitter, event_name, ...rest]
+    // The original js_ee_emit expects (emitter, event, ...rest) as variadic
+    // For now use direct call since we have the rest array
+    return js_ee_emit(emitter, event_name, args_rest);
+}
+static Item js_ee_inst_removeAllListeners(Item event_name) {
+    return js_ee_removeAllListeners(js_get_this(), event_name);
+}
+static Item js_ee_inst_listeners(Item event_name) {
+    return js_ee_listeners(js_get_this(), event_name);
+}
+static Item js_ee_inst_listenerCount(Item event_name, Item listener) {
+    return js_ee_listenerCount(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_eventNames(void) {
+    return js_ee_eventNames(js_get_this());
+}
+static Item js_ee_inst_setMaxListeners(Item n) {
+    return js_ee_setMaxListeners(js_get_this(), n);
+}
+static Item js_ee_inst_getMaxListeners(void) {
+    return js_ee_getMaxListeners(js_get_this());
+}
+static Item js_ee_inst_prependListener(Item event_name, Item listener) {
+    return js_ee_prependListener(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_prependOnceListener(Item event_name, Item listener) {
+    return js_ee_prependOnceListener(js_get_this(), event_name, listener);
+}
+
+// ─── new EventEmitter() constructor ─────────────────────────────────────────
+static Item ee_prototype = {0};
+
+extern "C" Item js_ee_constructor(void) {
+    ensure_keys();
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 3)) return ItemNull;
+    uint64_t* emitter_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* events_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* once_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!emitter_root || !events_root || !once_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    // Check if called via 'new EventEmitter()' — the runtime pre-builds an object
+    // with __proto__ set. Detect this by checking if this_val's prototype is ee_prototype.
+    Item this_val = js_get_this();
+    if (get_type_id(this_val) == LMD_TYPE_MAP) {
+        Item proto = js_get_prototype(this_val);
+        if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
+            // Called via 'new' — initialize the pre-built object
+            // T5b: typed JsClass byte is now the class identity; legacy
+            // `__class_name__` string write retired.
+            js_class_stamp(this_val, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
+            Item events_map = js_new_object();
+            *emitter_root = this_val.item;
+            *events_root = events_map.item;
+            // Initializing an EventEmitter allocates several children. Keep its
+            // pre-built instance rooted so forced GC cannot sweep it mid-init.
+            this_val = node_events_root_item(emitter_root);
+            js_property_set(this_val, events_key, events_map);
+            this_val = node_events_root_item(emitter_root);
+            events_map = node_events_root_item(events_root);
+            node_events_set_named_property(this_val, "_events", events_map);
+            this_val = node_events_root_item(emitter_root);
+            node_events_set_named_property(this_val, "_eventsCount", node_events_number(0));
+            Item once_set = js_array_new(0);
+            *once_root = once_set.item;
+            this_val = node_events_root_item(emitter_root);
+            js_property_set(this_val, once_key, once_set);
+            node_events_host->node->roots->root_frame_end(&frame);
+            return make_js_undefined();
+        }
+    }
+    // Direct call (not via new) — create a new object with prototype
+    Item emitter = js_new_object();
+    *emitter_root = emitter.item;
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(emitter, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
+    Item events_map = js_new_object();
+    *events_root = events_map.item;
+    emitter = node_events_root_item(emitter_root);
+    js_property_set(emitter, events_key, events_map);
+    emitter = node_events_root_item(emitter_root);
+    events_map = node_events_root_item(events_root);
+    node_events_set_named_property(emitter, "_events", events_map);
+    emitter = node_events_root_item(emitter_root);
+    node_events_set_named_property(emitter, "_eventsCount", node_events_number(0));
+    Item once_set = js_array_new(0);
+    *once_root = once_set.item;
+    emitter = node_events_root_item(emitter_root);
+    js_property_set(emitter, once_key, once_set);
+    emitter = node_events_root_item(emitter_root);
+    if (ee_prototype.item != 0) {
+        js_set_prototype(emitter, ee_prototype);
+    }
+    emitter = node_events_root_item(emitter_root);
+    node_events_host->node->roots->root_frame_end(&frame);
+    return emitter;
+}
+
+static Item js_ee_once_resolve_handler(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item resolve = env[0];
+    int64_t total = js_array_length(rest_args);
+    Item args_array = js_array_new(0);
+    for (int64_t i = 0; i < total; i++) {
+        js_array_push(args_array, js_array_get_int(rest_args, i));
+    }
+    Item call_args[1] = {args_array};
+    js_call_function(resolve, make_js_undefined(), call_args, 1);
+    return make_js_undefined();
+}
+
+static Item js_ee_once_reject_handler(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item reject = env[0];
+    int64_t total = js_array_length(rest_args);
+    Item err = (total > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item call_args[1] = {err};
+    js_call_function(reject, make_js_undefined(), call_args, 1);
+    return make_js_undefined();
+}
+
+// events.once(emitter, eventName) — static, returns a Promise that resolves
+// with an array of args when the event fires, or rejects on 'error'.
+static Item js_ee_static_once(Item emitter, Item event_name) {
+    Item resolvers = node_events_host->script->promise_with_resolvers();
+    Item promise = js_property_get(resolvers, make_string_item("promise"));
+    Item resolve_fn = js_property_get(resolvers, make_string_item("resolve"));
+    Item reject_fn = js_property_get(resolvers, make_string_item("reject"));
+
+    Item* resolve_env = js_alloc_env(1);
+    resolve_env[0] = resolve_fn;
+    Item bound = js_new_closure((void*)js_ee_once_resolve_handler, -1, resolve_env, 1);
+
+    // Call emitter.once(eventName, bound_wrapper)
+    Item once_method = js_property_get(emitter, make_string_item("once"));
+    if (get_type_id(once_method) == LMD_TYPE_FUNC) {
+        Item args[2] = {event_name, bound};
+        js_call_function(once_method, emitter, args, 2);
+    }
+
+    // Also listen for 'error' event to reject the promise (unless event IS 'error')
+    bool is_error_event = false;
+    if (node_events_string_equals(event_name, "error")) is_error_event = true;
+    if (!is_error_event) {
+        Item* reject_env = js_alloc_env(1);
+        reject_env[0] = reject_fn;
+        Item err_bound = js_new_closure((void*)js_ee_once_reject_handler, -1, reject_env, 1);
+        Item err_once_args[2] = {make_string_item("error"), err_bound};
+        if (get_type_id(once_method) == LMD_TYPE_FUNC) {
+            js_call_function(once_method, emitter, err_once_args, 2);
+        }
+    }
+
+    return promise;
+}
+
+// Combined events.once — 3-arg form adds listener, 2-arg form returns Promise
+static Item js_ee_once_combined(Item emitter, Item event_name, Item listener) {
+    if (get_type_id(listener) == LMD_TYPE_FUNC) {
+        return js_ee_once(emitter, event_name, listener);
+    }
+    return js_ee_static_once(emitter, event_name);
+}
+
+// ─── Namespace ───────────────────────────────────────────────────────────────
+
+// static EventEmitter.getEventListeners(emitter, eventName)
+static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
+    return js_ee_listeners(emitter, event_name);
+}
+
+static void ee_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 2)) return;
+    uint64_t* key_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* function_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!key_root || !function_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return;
+    }
+    Item key = make_string_item(name);
+    *key_root = key.item;
+    Item fn = js_new_function(func_ptr, param_count);
+    *function_root = fn.item;
+    js_property_set(ns, key, fn);
+    node_events_host->node->roots->root_frame_end(&frame);
+}
+
+Item node_events_namespace(void) {
+    if (events_namespace.item != 0) return events_namespace;
+    ensure_keys();
+
+    events_namespace = js_new_object();
+    JubeRootFrame frame = {};
+    if (!node_events_roots_begin(&frame, 2)) return events_namespace;
+    uint64_t* namespace_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* prototype_root = node_events_host->node->roots->root_frame_take_slot(&frame);
+    if (!namespace_root || !prototype_root) {
+        node_events_host->node->roots->root_frame_end(&frame);
+        return events_namespace;
+    }
+    *namespace_root = events_namespace.item;
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(events_namespace, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
+
+    // Create prototype object with instance methods (this-based wrappers)
+    ee_prototype = js_new_object();
+    *prototype_root = ee_prototype.item;
+    ee_set_method(ee_prototype, "on",                  (void*)js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "addListener",         (void*)js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "once",                (void*)js_ee_inst_once, 2);
+    ee_set_method(ee_prototype, "off",                 (void*)js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "removeListener",      (void*)js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "emit",                (void*)js_ee_inst_emit, -2);
+    ee_set_method(ee_prototype, "removeAllListeners",  (void*)js_ee_inst_removeAllListeners, 1);
+    ee_set_method(ee_prototype, "listeners",           (void*)js_ee_inst_listeners, 1);
+    ee_set_method(ee_prototype, "listenerCount",       (void*)js_ee_inst_listenerCount, 2);
+    ee_set_method(ee_prototype, "eventNames",          (void*)js_ee_inst_eventNames, 0);
+    ee_set_method(ee_prototype, "setMaxListeners",     (void*)js_ee_inst_setMaxListeners, 1);
+    ee_set_method(ee_prototype, "getMaxListeners",     (void*)js_ee_inst_getMaxListeners, 0);
+    ee_set_method(ee_prototype, "prependListener",     (void*)js_ee_inst_prependListener, 2);
+    ee_set_method(ee_prototype, "prependOnceListener", (void*)js_ee_inst_prependOnceListener, 2);
+    ee_set_method(ee_prototype, "rawListeners",        (void*)js_ee_inst_listeners, 1);
+
+    // EventEmitter constructor
+    ee_set_method(events_namespace, "EventEmitter", (void*)js_ee_constructor, 0);
+
+    // Also put methods on namespace for direct use (e.g. events.on(emitter, event, fn))
+    ee_set_method(events_namespace, "on",                  (void*)js_ee_on, 3);
+    ee_set_method(events_namespace, "addListener",         (void*)js_ee_on, 3);
+    ee_set_method(events_namespace, "once",                (void*)js_ee_once, 3);
+    ee_set_method(events_namespace, "off",                 (void*)js_ee_off, 3);
+    ee_set_method(events_namespace, "removeListener",      (void*)js_ee_off, 3);
+    ee_set_method(events_namespace, "emit",                (void*)js_ee_emit, -3);
+    ee_set_method(events_namespace, "removeAllListeners",  (void*)js_ee_removeAllListeners, 2);
+    ee_set_method(events_namespace, "listeners",           (void*)js_ee_listeners, 2);
+    ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 3);
+    ee_set_method(events_namespace, "eventNames",          (void*)js_ee_eventNames, 1);
+    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_setMaxListeners, 2);
+    ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
+    ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
+    ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
+    ee_set_method(events_namespace, "rawListeners",        (void*)js_ee_listeners, 2);
+
+    // Set EventEmitter.prototype to the prototype object
+    js_property_set(events_namespace, make_string_item("prototype"), ee_prototype);
+    // Set __instance_proto__ so 'new EventEmitter()' (MAP constructor path)
+    // sets up the prototype chain on instances correctly
+    js_property_set(events_namespace, make_string_item("__instance_proto__"), ee_prototype);
+    // Set __ctor__ so 'new EventEmitter()' calls the constructor to init storage
+    Item ee_ctor = js_property_get(events_namespace, make_string_item("EventEmitter"));
+    js_property_set(events_namespace, make_string_item("__ctor__"), ee_ctor);
+    // Also set prototype on the constructor function's internal field
+    if (get_type_id(ee_ctor) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(ee_ctor, ee_prototype);
+    }
+
+    // static property: defaultMaxListeners = 10
+    js_property_set(events_namespace, make_string_item("defaultMaxListeners"), node_events_number(10));
+
+    // static property: captureRejections = false
+    js_property_set(events_namespace, make_string_item("captureRejections"), (Item){.item = b2it(false)});
+
+    // static property: captureRejectionSymbol
+    js_property_set(events_namespace, make_string_item("captureRejectionSymbol"),
+        make_string_item("nodejs.rejection"));
+
+    // static method: getEventListeners
+    ee_set_method(events_namespace, "getEventListeners", (void*)js_ee_static_getEventListeners, 2);
+
+    // static EventEmitter.listenerCount(emitter, event) — the 3-arg form at line ~627
+    // already handles this: when called with 2 args, 3rd param (listener) is null/0,
+    // and the function falls through to return total count. No override needed.
+
+    // default export is the constructor
+    js_property_set(events_namespace, make_string_item("default"), events_namespace);
+
+    // static events.once — combined: 3 args = listener, 2 args = Promise
+    ee_set_method(events_namespace, "once", (void*)js_ee_once_combined, 3);
+
+    node_events_host->node->roots->root_frame_end(&frame);
+    return events_namespace;
+}
+
+static void node_events_cache_reset(void) {
+    events_key = (Item){0};
+    once_key = (Item){0};
+    max_listeners_key = (Item){0};
+    new_listener_key = (Item){0};
+    remove_listener_key = (Item){0};
+    listener_fn_key = (Item){0};
+    listener_context_key = (Item){0};
+    warned_key = (Item){0};
+    events_namespace = (Item){0};
+    ee_prototype = (Item){0};
+    keys_initialized = false;
+}
+
+int node_events_init(const JubeHostAPI* host) {
+    if (!host || !host->node || !host->node->runtime || !host->node->roots ||
+            !host->node->events || !host->value || !host->script ||
+            !host->value->kind || !host->value->new_object || !host->value->array_new ||
+            !host->value->array_push || !host->value->array_get ||
+            !host->value->array_length || !host->value->property_get ||
+            !host->value->property_set || !host->value->string_copy ||
+            !host->value->string_from_utf8_n || !host->script->new_function ||
+            !host->script->function_set_prototype || !host->script->object_keys ||
+            !host->script->call_function || !host->script->current_this ||
+            !host->script->get_number || !host->script->is_truthy ||
+            !host->script->class_stamp || !host->script->to_string ||
+            !host->script->new_error_with_name || !host->script->throw_value ||
+            !host->script->throw_type_error_code ||
+            !host->script->closure_env_new || !host->script->new_closure ||
+            !host->script->get_prototype || !host->script->set_prototype ||
+            !host->script->promise_with_resolvers ||
+            !host->node->events->als_capture_context ||
+            !host->node->events->als_context_call ||
+            !host->node->events->domain_emit_current_error ||
+            !host->node->events->process_emit_warning ||
+            !host->node->events->is_error_like) return -1;
+    node_events_host = host;
+    return 0;
+}
+
+void node_events_shutdown(void) {
+    node_events_cache_reset();
+    node_events_rooted = false;
+    node_events_session = NULL;
+    node_events_host = NULL;
+}
+
+void node_events_runtime_attach(void* session) {
+    if (!node_events_host || !node_events_host->node || !node_events_host->node->runtime ||
+            !node_events_host->node->runtime->session_is_live ||
+            !node_events_host->node->runtime->session_is_live(session)) return;
+    uint64_t* roots[] = {
+        &events_key.item, &once_key.item, &max_listeners_key.item, &new_listener_key.item,
+        &remove_listener_key.item, &listener_fn_key.item, &listener_context_key.item,
+        &warned_key.item, &events_namespace.item, &ee_prototype.item,
+    };
+    int registered = 0;
+    for (; registered < (int)(sizeof(roots) / sizeof(roots[0])); registered++) {
+        if (node_events_host->node->roots->persistent_root_register(session, roots[registered]) != 0) {
+            // The cache belongs to one attached runtime; unwind partial roots
+            // so a failed attach cannot retain values from a later session.
+            while (registered-- > 0) {
+                node_events_host->node->roots->persistent_root_unregister(session, roots[registered]);
+            }
+            return;
+        }
+    }
+    node_events_session = session;
+    node_events_rooted = true;
+}
+
+void node_events_runtime_reset(void* session) {
+    if (session == node_events_session) node_events_cache_reset();
+}
+
+void node_events_runtime_detach(void* session) {
+    if (!node_events_host || session != node_events_session) return;
+    if (node_events_rooted) {
+        uint64_t* roots[] = {
+            &events_key.item, &once_key.item, &max_listeners_key.item, &new_listener_key.item,
+            &remove_listener_key.item, &listener_fn_key.item, &listener_context_key.item,
+            &warned_key.item, &events_namespace.item, &ee_prototype.item,
+        };
+        for (int i = 0; i < (int)(sizeof(roots) / sizeof(roots[0])); i++) {
+            node_events_host->node->roots->persistent_root_unregister(session, roots[i]);
+        }
+        node_events_rooted = false;
+    }
+    node_events_cache_reset();
+    node_events_session = NULL;
+}

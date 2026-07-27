@@ -1,0 +1,12 @@
+path global initially: undefined
+namespace function: function
+aliases share namespace: true
+is builtin: true
+catalog listed: true
+path registry builtin: true
+node core path: a/b
+path aliases share namespace: true
+path win32 distinct: true
+string decoder registry builtin: true
+os registry builtin: true
+os namespace: darwin:2

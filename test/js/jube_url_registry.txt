@@ -1,0 +1,9 @@
+https://example.test/a?b=c#d
+https://example.test/b
+/foo/quux
+../../baz
+a=1&a=2
+true
+value
+true
+true

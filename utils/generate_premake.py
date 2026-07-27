@@ -85,9 +85,48 @@ class PremakeGenerator:
         if self.variant:
             self._apply_variant_overlay(self.variant)
 
+        self._expand_node_module_targets()
         self._expand_validation_source_targets()
 
         self.external_libraries = self._parse_external_libraries()
+
+    def _expand_node_module_targets(self) -> None:
+        """Materialize Node Jube module targets from the JSON-owned template.
+
+        Every Node leaf uses the same dynamic-link and PIC contract. Keep that
+        contract in one data template instead of duplicating it for each
+        extracted module, while each instance retains an explicit source list.
+        """
+        template = self.config.get('node_module_template')
+        instances = self.config.get('node_modules', [])
+        if template is None and not instances:
+            return
+        if not isinstance(template, dict):
+            raise ValueError("node_module_template must be an object")
+        if not isinstance(instances, list):
+            raise ValueError("node_modules must be an array")
+
+        targets = self.config.setdefault('targets', [])
+        configured_names = {target.get('name') for target in targets if target.get('name')}
+        for instance in instances:
+            if not isinstance(instance, dict):
+                raise ValueError("each node_modules entry must be an object")
+            name = instance.get('name')
+            if not isinstance(name, str) or not name:
+                raise ValueError("each node_modules entry needs a non-empty name")
+            if name in configured_names:
+                raise ValueError(f"node_modules target duplicates configured target: {name}")
+            source_files = instance.get('source_files')
+            if not isinstance(source_files, list) or not source_files:
+                raise ValueError(f"node_modules target {name} needs explicit source_files")
+
+            target = copy.deepcopy(template)
+            target.update(copy.deepcopy(instance))
+            target.setdefault('description', f"External Node Jube module: {name}")
+            target.setdefault('target_name', name)
+            target.setdefault('target_dir', f"modules/{name}")
+            targets.append(target)
+            configured_names.add(name)
 
     def _expand_validation_source_targets(self) -> None:
         """Reuse a shipped module's exact source manifest for a validation DSO.

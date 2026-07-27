@@ -421,10 +421,23 @@ static inline int path_str_normalize_lexical_win32(const char* path,
     const char* segments[256];
     int seg_count = 0;
     bool is_absolute = false;
+    bool is_unc_path = false;
     int prefix_len = 0;
     char prefix[16] = {0};
 
-    if (plen >= 2 && path_str_is_drive_letter(path[0]) && path[1] == ':') {
+    if (plen >= 4 && path_str_is_win32_separator(path[0]) &&
+               path_str_is_win32_separator(path[1]) &&
+               (path[2] == '.' || path[2] == '?') &&
+               path_str_is_win32_separator(path[3])) {
+        // Device namespaces are not dot segments: \\.\\foo and \\?\\foo
+        // retain the marker while their following components normalize.
+        prefix[0] = '\\';
+        prefix[1] = '\\';
+        prefix[2] = path[2];
+        prefix[3] = '\\';
+        prefix_len = 4;
+        is_absolute = true;
+    } else if (plen >= 2 && path_str_is_drive_letter(path[0]) && path[1] == ':') {
         prefix[0] = path[0];
         prefix[1] = ':';
         prefix_len = 2;
@@ -439,6 +452,7 @@ static inline int path_str_normalize_lexical_win32(const char* path,
         prefix[1] = '\\';
         prefix_len = 2;
         is_absolute = true;
+        is_unc_path = true;
     } else if (path_str_is_win32_separator(path[0])) {
         prefix[0] = '\\';
         prefix_len = 1;
@@ -465,9 +479,15 @@ static inline int path_str_normalize_lexical_win32(const char* path,
 
         if (strcmp(seg_start, ".") == 0) continue;
         if (strcmp(seg_start, "..") == 0) {
-            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
+            if (seg_count > (is_unc_path ? 2 : 0) && strcmp(segments[seg_count - 1], "..") != 0) {
                 seg_count--;
+            } else if (is_unc_path && seg_count == 2) {
+                // A UNC share root cannot be traversed above its share name.
+                continue;
             } else if (!is_absolute && seg_count < 256) {
+                segments[seg_count++] = "..";
+            } else if (is_unc_path && seg_count < 256) {
+                // Before a complete server/share root, keep traversal lexical.
                 segments[seg_count++] = "..";
             }
         } else if (seg_count < 256) {
@@ -479,6 +499,15 @@ static inline int path_str_normalize_lexical_win32(const char* path,
     for (int i = 0; i < prefix_len && pos < result_size - 1; i++) {
         result[pos++] = prefix[i];
     }
+    if (prefix_len == 0 && seg_count > 0 &&
+            ((path_str_is_drive_letter(segments[0][0]) && segments[0][1] == ':') ||
+             (segments[0][0] == '?' && segments[0][1] == '?')) &&
+            pos < result_size - 2) {
+        // Keep a drive-like segment relative after traversal; otherwise
+        // "test/../C:/..." would incorrectly become a drive-rooted path.
+        result[pos++] = '.';
+        result[pos++] = '\\';
+    }
     for (int i = 0; i < seg_count && pos < result_size - 1; i++) {
         if (i > 0 && pos < result_size - 1) result[pos++] = '\\';
         int slen = (int)strlen(segments[i]);
@@ -487,6 +516,10 @@ static inline int path_str_normalize_lexical_win32(const char* path,
             memcpy(result + pos, segments[i], (size_t)slen);
             pos += slen;
         }
+    }
+    if (prefix_len == 2 && seg_count == 0 && pos < result_size - 1) {
+        // A drive-relative root is normalized as "C:." by Node, not "C:".
+        result[pos++] = '.';
     }
     if (pos == 0 && empty_relative_dot && result_size > 1) {
         result[pos++] = '.';

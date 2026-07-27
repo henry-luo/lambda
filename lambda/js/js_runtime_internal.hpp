@@ -92,9 +92,6 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 extern "C" Item js_array_get_custom_proto(Item arr);
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
-extern "C" void js_path_reset();
-extern "C" void js_os_reset();
-extern "C" void js_url_module_reset();
 extern "C" void js_util_reset();
 
 

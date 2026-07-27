@@ -1,0 +1,21 @@
+true
+true
+object true number
+object number number
+string true true
+number true
+true true true
+bigint
+number number
+number true true
+function true
+function
+true
+true
+true
+true
+true
+function function function
+function true
+function function function
+function function function

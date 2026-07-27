@@ -1,0 +1,7 @@
+true
+function
+function
+2.3.1
+true
+object
+undefined

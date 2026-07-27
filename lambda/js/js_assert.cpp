@@ -5336,51 +5336,54 @@ static Item js_assert_create_instance(Item options) {
         if (!js_assert_valid_diff(diff)) return js_assert_throw_invalid_diff(diff);
     }
 
-    // create a callable function object (assert(value) works)
-    Item instance = js_new_method_function((void*)js_assert_ok, 2);
-    bool strict_mode = js_assert_options_strict(options);
+    // Fresh wrappers allocate methods before they are published, so every
+    // alias must remain rooted across a compacting collection.
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> instance_root(roots, js_new_method_function((void*)js_assert_ok, 2));
+    bool strict_mode = js_assert_options_strict(options_root.get());
 
     // copy all assert methods onto this instance without reusing the module
     // assert() function object from js_new_function's native-wrapper cache.
-    assert_set_fresh_method(instance, "ok",                  (void*)js_assert_ok, 2);
-    Item strict_equal = assert_set_fresh_method(instance, "strictEqual", (void*)js_assert_strictEqual, 3);
-    Item not_strict_equal = assert_set_fresh_method(instance, "notStrictEqual", (void*)js_assert_notStrictEqual, 3);
-    Item deep_strict_equal = assert_set_fresh_method(instance, "deepStrictEqual", (void*)js_assert_deepStrictEqual, 3);
-    Item not_deep_strict_equal = assert_set_fresh_method(instance, "notDeepStrictEqual", (void*)js_assert_notDeepStrictEqual, 3);
+    assert_set_fresh_method(instance_root.get(), "ok",                  (void*)js_assert_ok, 2);
+    Rooted<Item> strict_equal_root(roots, assert_set_fresh_method(instance_root.get(), "strictEqual", (void*)js_assert_strictEqual, 3));
+    Rooted<Item> not_strict_equal_root(roots, assert_set_fresh_method(instance_root.get(), "notStrictEqual", (void*)js_assert_notStrictEqual, 3));
+    Rooted<Item> deep_strict_equal_root(roots, assert_set_fresh_method(instance_root.get(), "deepStrictEqual", (void*)js_assert_deepStrictEqual, 3));
+    Rooted<Item> not_deep_strict_equal_root(roots, assert_set_fresh_method(instance_root.get(), "notDeepStrictEqual", (void*)js_assert_notDeepStrictEqual, 3));
     if (strict_mode) {
-        assert_set_method_item(instance, "equal", strict_equal);
-        assert_set_method_item(instance, "notEqual", not_strict_equal);
-        assert_set_method_item(instance, "deepEqual", deep_strict_equal);
-        assert_set_method_item(instance, "notDeepEqual", not_deep_strict_equal);
+        assert_set_method_item(instance_root.get(), "equal", strict_equal_root.get());
+        assert_set_method_item(instance_root.get(), "notEqual", not_strict_equal_root.get());
+        assert_set_method_item(instance_root.get(), "deepEqual", deep_strict_equal_root.get());
+        assert_set_method_item(instance_root.get(), "notDeepEqual", not_deep_strict_equal_root.get());
     } else {
-        assert_set_fresh_method(instance, "equal",       (void*)js_assert_equal, 3);
-        assert_set_fresh_method(instance, "notEqual",    (void*)js_assert_notEqual, 3);
-        assert_set_fresh_method(instance, "deepEqual",   (void*)js_assert_deepEqual, 3);
-        assert_set_fresh_method(instance, "notDeepEqual", (void*)js_assert_notDeepEqual, 3);
+        assert_set_fresh_method(instance_root.get(), "equal",       (void*)js_assert_equal, 3);
+        assert_set_fresh_method(instance_root.get(), "notEqual",    (void*)js_assert_notEqual, 3);
+        assert_set_fresh_method(instance_root.get(), "deepEqual",   (void*)js_assert_deepEqual, 3);
+        assert_set_fresh_method(instance_root.get(), "notDeepEqual", (void*)js_assert_notDeepEqual, 3);
     }
-    assert_set_fresh_method(instance, "fail",                (void*)js_assert_fail, 1);
-    assert_set_fresh_method(instance, "throws",              (void*)js_assert_module_throws, 3);
-    assert_set_fresh_method(instance, "doesNotThrow",        (void*)js_assert_module_doesNotThrow, 3);
-    assert_set_fresh_method(instance, "ifError",             (void*)js_assert_ifError, 1);
-    assert_set_fresh_method(instance, "match",               (void*)js_assert_match, 3);
-    assert_set_fresh_method(instance, "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
-    assert_set_fresh_method(instance, "rejects",             (void*)js_assert_rejects, 3);
-    assert_set_fresh_method(instance, "doesNotReject",       (void*)js_assert_doesNotReject, 3);
-    assert_set_fresh_method(instance, "partialDeepStrictEqual", (void*)js_assert_partialDeepStrictEqual, 3);
-    Item assertion_error = assert_namespace.item != 0 ?
+    assert_set_fresh_method(instance_root.get(), "fail",                (void*)js_assert_fail, 1);
+    assert_set_fresh_method(instance_root.get(), "throws",              (void*)js_assert_module_throws, 3);
+    assert_set_fresh_method(instance_root.get(), "doesNotThrow",        (void*)js_assert_module_doesNotThrow, 3);
+    assert_set_fresh_method(instance_root.get(), "ifError",             (void*)js_assert_ifError, 1);
+    assert_set_fresh_method(instance_root.get(), "match",               (void*)js_assert_match, 3);
+    assert_set_fresh_method(instance_root.get(), "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
+    assert_set_fresh_method(instance_root.get(), "rejects",             (void*)js_assert_rejects, 3);
+    assert_set_fresh_method(instance_root.get(), "doesNotReject",       (void*)js_assert_doesNotReject, 3);
+    assert_set_fresh_method(instance_root.get(), "partialDeepStrictEqual", (void*)js_assert_partialDeepStrictEqual, 3);
+    Rooted<Item> assertion_error_root(roots, assert_namespace.item != 0 ?
         js_property_get(assert_namespace, assert_make_string("AssertionError")) :
-        js_new_function((void*)js_assert_AssertionError_ctor, 1);
-    js_property_set(instance, assert_make_string("AssertionError"), assertion_error);
+        js_new_function((void*)js_assert_AssertionError_ctor, 1));
+    js_property_set(instance_root.get(), assert_make_string("AssertionError"), assertion_error_root.get());
 
     // store options
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        js_property_set(instance, js_assert_options_key(), options);
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
+        js_property_set(instance_root.get(), js_assert_options_key(), options_root.get());
     }
     // Only Assert constructor instances may carry option state; module-level
     // calls can have arbitrary receivers and must not probe them for _options.
-    js_assert_register_instance(instance);
+    js_assert_register_instance(instance_root.get());
 
-    return instance;
+    return instance_root.get();
 }
 
 // Assert constructor: new Assert(options?) — creates an instance with all assert methods
@@ -5400,6 +5403,7 @@ extern "C" Item js_get_assert_namespace(void) {
 
     // namespace doubles as the assert() function itself
     assert_namespace = js_new_function((void*)js_assert_ok, 2);
+    heap_register_gc_root(&assert_namespace.item);
 
     assert_set_method(assert_namespace, "ok",                  (void*)js_assert_ok, 2);
     assert_set_method(assert_namespace, "equal",               (void*)js_assert_equal, 3);

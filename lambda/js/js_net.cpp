@@ -7,6 +7,7 @@
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
+#include "js_host_hooks.h"
 #include "js_class.h"
 #include "js_permission.h"
 #include "js_typed_array.h"
@@ -29,7 +30,6 @@
 extern __thread EvalContext* context;
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_new_aggregate_error(Item errors, Item message);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
@@ -2238,6 +2238,10 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     // IPC-adopted sockets are delivered paused; eager uv_read_start can close
     // a delayed SCM_RIGHTS descriptor before userland performs the first write.
     return obj;
+}
+
+static Item js_net_accept_ipc_tcp_handle_hook(void* pipe) {
+    return js_net_accept_ipc_tcp_handle((uv_pipe_t*)pipe);
 }
 
 // =============================================================================
@@ -5713,26 +5717,34 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
 static Item net_namespace = {0};
 
 static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
-    return fn;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> namespace_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item(name));
+    Rooted<Item> function_root(roots, js_new_function(func_ptr, param_count));
+    // Key/function allocation can compact before the namespace property owns
+    // the constructor, so all three values stay exact-rooted until publish.
+    js_property_set(namespace_root.get(), key_root.get(), function_root.get());
+    return function_root.get();
 }
 
 static Item net_constructor_prototype(Item ctor, JsClass cls) {
-    Item proto_key = make_string_item("prototype");
-    Item proto = js_property_get(ctor, proto_key);
-    if (get_type_id(proto) != LMD_TYPE_MAP) {
-        proto = js_new_object();
-        js_property_set(ctor, proto_key, proto);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> constructor_root(roots, ctor);
+    Rooted<Item> key_root(roots, make_string_item("prototype"));
+    Rooted<Item> prototype_root(roots,
+        js_property_get(constructor_root.get(), key_root.get()));
+    if (get_type_id(prototype_root.get()) != LMD_TYPE_MAP) {
+        prototype_root.set(js_new_object());
+        js_property_set(constructor_root.get(), key_root.get(), prototype_root.get());
     }
-    js_class_stamp(proto, cls);
-    js_property_set(proto, make_string_item("constructor"), ctor);
-    js_mark_non_enumerable(proto, make_string_item("constructor"));
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        js_function_set_prototype(ctor, proto);
+    js_class_stamp(prototype_root.get(), cls);
+    key_root.set(make_string_item("constructor"));
+    js_property_set(prototype_root.get(), key_root.get(), constructor_root.get());
+    js_mark_non_enumerable(prototype_root.get(), key_root.get());
+    if (get_type_id(constructor_root.get()) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(constructor_root.get(), prototype_root.get());
     }
-    return proto;
+    return prototype_root.get();
 }
 
 static Item js_net_getDefaultAutoSelectFamilyAttemptTimeout(void) {
@@ -5813,48 +5825,64 @@ extern "C" Item js_get_net_namespace(void) {
     if (net_namespace.item != 0) return net_namespace;
 
     net_apply_cli_options();
+    js_host_hooks_set_shutdown_participant(js_net_close_all_active_servers);
+    js_host_hooks_set_ipc_accept_hook(js_net_accept_ipc_tcp_handle_hook);
 
     net_namespace = js_new_object();
+    // The namespace is process-cached; register its root before any exported
+    // constructor allocation so forced collection cannot reclaim the cache.
+    heap_register_gc_root(&net_namespace.item);
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> namespace_root(roots, net_namespace);
+    Rooted<Item> create_server_root(roots, ItemNull);
+    Rooted<Item> socket_root(roots, ItemNull);
+    Rooted<Item> block_list_root(roots, ItemNull);
+    Rooted<Item> bound_socket_root(roots, ItemNull);
+    Rooted<Item> stream_root(roots, ItemNull);
+    Rooted<Item> server_root(roots, ItemNull);
 
-    Item create_server_fn = net_set_method(net_namespace, "createServer", (void*)js_net_createServer, -1);
-    net_set_method(net_namespace, "createConnection", (void*)js_net_createConnection, -1);
-    net_set_method(net_namespace, "connect",          (void*)js_net_createConnection, -1); // alias
-    Item socket_fn = net_set_method(net_namespace, "Socket", (void*)js_net_Socket, 1);
-    Item block_list_fn = net_set_method(net_namespace, "BlockList", (void*)js_net_BlockList, 1);
-    Item bound_socket_fn = net_set_method(net_namespace, "BoundSocket", (void*)js_net_BoundSocket, 1);
-    Item stream_fn = net_set_method(net_namespace, "Stream", (void*)js_net_Socket, 1); // legacy alias
-    Item server_fn = net_set_method(net_namespace, "Server", (void*)js_net_createServer, -1); // alias
-    net_set_method(net_namespace, "isIP",             (void*)js_net_isIP, 1);
-    net_set_method(net_namespace, "isIPv4",           (void*)js_net_isIPv4, 1);
-    net_set_method(net_namespace, "isIPv6",           (void*)js_net_isIPv6, 1);
-    net_set_method(net_namespace, "getDefaultAutoSelectFamily",
+    create_server_root.set(net_set_method(namespace_root.get(), "createServer", (void*)js_net_createServer, -1));
+    net_set_method(namespace_root.get(), "createConnection", (void*)js_net_createConnection, -1);
+    net_set_method(namespace_root.get(), "connect",          (void*)js_net_createConnection, -1); // alias
+    socket_root.set(net_set_method(namespace_root.get(), "Socket", (void*)js_net_Socket, 1));
+    block_list_root.set(net_set_method(namespace_root.get(), "BlockList", (void*)js_net_BlockList, 1));
+    bound_socket_root.set(net_set_method(namespace_root.get(), "BoundSocket", (void*)js_net_BoundSocket, 1));
+    stream_root.set(net_set_method(namespace_root.get(), "Stream", (void*)js_net_Socket, 1)); // legacy alias
+    server_root.set(net_set_method(namespace_root.get(), "Server", (void*)js_net_createServer, -1)); // alias
+    net_set_method(namespace_root.get(), "isIP",             (void*)js_net_isIP, 1);
+    net_set_method(namespace_root.get(), "isIPv4",           (void*)js_net_isIPv4, 1);
+    net_set_method(namespace_root.get(), "isIPv6",           (void*)js_net_isIPv6, 1);
+    net_set_method(namespace_root.get(), "getDefaultAutoSelectFamily",
                    (void*)js_net_getDefaultAutoSelectFamily, 0);
-    net_set_method(net_namespace, "setDefaultAutoSelectFamily",
+    net_set_method(namespace_root.get(), "setDefaultAutoSelectFamily",
                    (void*)js_net_setDefaultAutoSelectFamily, 1);
-    net_set_method(net_namespace, "getDefaultAutoSelectFamilyAttemptTimeout",
+    net_set_method(namespace_root.get(), "getDefaultAutoSelectFamilyAttemptTimeout",
                    (void*)js_net_getDefaultAutoSelectFamilyAttemptTimeout, 0);
-    net_set_method(net_namespace, "setDefaultAutoSelectFamilyAttemptTimeout",
+    net_set_method(namespace_root.get(), "setDefaultAutoSelectFamilyAttemptTimeout",
                    (void*)js_net_setDefaultAutoSelectFamilyAttemptTimeout, 1);
-    net_set_method(net_namespace, "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
-    js_property_set(block_list_fn, make_string_item("isBlockList"),
+    net_set_method(namespace_root.get(), "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
+    js_property_set(block_list_root.get(), make_string_item("isBlockList"),
                     js_new_function((void*)js_block_list_isBlockList, 1));
-    net_constructor_prototype(bound_socket_fn, JS_CLASS_OBJECT);
+    net_constructor_prototype(bound_socket_root.get(), JS_CLASS_OBJECT);
 
     Item default_key = make_string_item("default");
-    js_property_set(net_namespace, default_key, net_namespace);
+    js_property_set(namespace_root.get(), default_key, namespace_root.get());
 
-    net_socket_prototype = net_constructor_prototype(socket_fn, JS_CLASS_SOCKET);
-    net_socket_connect_fn = js_new_function((void*)js_socket_connect, -1);
-    js_property_set(net_socket_prototype, make_string_item("connect"), net_socket_connect_fn);
-    js_property_set(stream_fn, make_string_item("prototype"), net_socket_prototype);
-    if (get_type_id(stream_fn) == LMD_TYPE_FUNC) {
-        js_function_set_prototype(stream_fn, net_socket_prototype);
+    bound_socket_root.set(net_constructor_prototype(socket_root.get(), JS_CLASS_SOCKET));
+    net_socket_prototype = bound_socket_root.get();
+    socket_root.set(js_new_function((void*)js_socket_connect, -1));
+    net_socket_connect_fn = socket_root.get();
+    js_property_set(bound_socket_root.get(), make_string_item("connect"), socket_root.get());
+    js_property_set(stream_root.get(), make_string_item("prototype"), bound_socket_root.get());
+    if (get_type_id(stream_root.get()) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(stream_root.get(), bound_socket_root.get());
     }
 
-    net_server_prototype = net_constructor_prototype(server_fn, JS_CLASS_SERVER);
-    js_property_set(create_server_fn, make_string_item("prototype"), net_server_prototype);
-    if (get_type_id(create_server_fn) == LMD_TYPE_FUNC) {
-        js_function_set_prototype(create_server_fn, net_server_prototype);
+    block_list_root.set(net_constructor_prototype(server_root.get(), JS_CLASS_SERVER));
+    net_server_prototype = block_list_root.get();
+    js_property_set(create_server_root.get(), make_string_item("prototype"), block_list_root.get());
+    if (get_type_id(create_server_root.get()) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(create_server_root.get(), block_list_root.get());
     }
 
     return net_namespace;
@@ -5868,6 +5896,8 @@ extern "C" Item js_net_get_socket_prototype(void) {
 }
 
 extern "C" void js_net_reset(void) {
+    js_host_hooks_set_shutdown_participant(NULL);
+    js_host_hooks_set_ipc_accept_hook(NULL);
     net_namespace = (Item){0};
     internal_js_stream_socket_ctor = (Item){0};
     net_socket_prototype = (Item){0};

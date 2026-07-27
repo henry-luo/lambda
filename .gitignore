@@ -103,6 +103,10 @@ compile_commands.json
 *.backup
 temp/
 
+# Generated Jube profile bundles; their contents are verified by Make targets.
+release-node-reduced/
+release-minimal/
+
 # Garbage created by AI agents
 _
 

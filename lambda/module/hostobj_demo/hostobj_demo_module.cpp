@@ -210,6 +210,15 @@ static const JubeNamespaceDef s_hostobj_demo_namespaces[] = {
     {s_hostobj_demo_specifiers, 2, hostobj_demo_namespace, NULL, 0},
 };
 
+static Item hostobj_demo_global_namespace(void* session) {
+    (void)session;
+    return hostobj_demo_namespace();
+}
+
+static const JubeGlobalDef s_hostobj_demo_globals[] = {
+    {"hostobjDemo", 0, hostobj_demo_global_namespace},
+};
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 static const JubeFuncDef s_hostobj_demo_functions[] = {
@@ -261,6 +270,10 @@ static const JubeModuleDef s_hostobj_demo_module = {
     (int32_t)(sizeof(s_hostobj_demo_bindings) / sizeof(s_hostobj_demo_bindings[0])),
     hostobj_demo_runtime_reset,
     NULL,
+    NULL,
+    NULL,
+    s_hostobj_demo_globals,
+    1,
 };
 
 extern "C" void hostobj_demo_jube_register_static(void) {

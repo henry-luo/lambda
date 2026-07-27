@@ -1,0 +1,4 @@
+true true
+function function function
+42
+object 1

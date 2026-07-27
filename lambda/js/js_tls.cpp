@@ -27,7 +27,6 @@
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_get_net_namespace(void);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" void heap_register_gc_root(uint64_t* slot);

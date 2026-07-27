@@ -19,6 +19,7 @@
 #include "js_property_attrs.h"
 #include "js_function.hpp"
 #include "js_typed_array.h"
+#include "../jube/jube_registry.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
@@ -6595,10 +6596,27 @@ static Item js_transform_inst_end(Item chunk, Item callback) {
     return js_transform_end(js_get_this(), chunk, callback);
 }
 
+static void js_stream_set_method(Item object, Item key, void* function, int parameter_count) {
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> function_root(roots, js_new_function(function, parameter_count));
+    js_property_set(object_root.get(), key_root.get(), function_root.get());
+}
+
 // Readable constructor
 extern "C" Item js_readable_new(Item opts) {
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> options_root(roots, opts);
+    Rooted<Item> readable_root(roots, ItemNull);
+    Rooted<Item> listeners_root(roots, ItemNull);
+    Rooted<Item> off_root(roots, ItemNull);
     ensure_keys();
-    Item obj = js_stream_create_instance(stream_readable_prototype);
+    readable_root.set(js_stream_create_instance(stream_readable_prototype));
+    // Readable construction creates properties, callbacks, and helper objects;
+    // retain both the instance and options across every compacting allocation.
+#define obj readable_root.get()
+#define opts options_root.get()
 
     js_class_stamp(obj, JS_CLASS_READABLE);
     js_property_set(obj, key_readable, js_bool_item(true));
@@ -6620,39 +6638,42 @@ extern "C" Item js_readable_new(Item opts) {
     js_property_set(obj, key_readable_state, js_create_readable_state());
     js_stream_define_bool(obj, "readableEnded", false);
     js_stream_set_readable_buffer(obj, js_array_new(0));
-    Item listeners = js_new_object();
-    js_property_set(obj, key_listeners, listeners);
+    listeners_root.set(js_new_object());
+    js_property_set(obj, key_listeners, listeners_root.get());
     js_property_set(obj, make_string_item("_events"), js_new_object());
     js_stream_init_readable_options(obj);
 
-    js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
-    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
-    Item off_fn = js_new_function((void*)js_stream_inst_off, 2);
-    js_property_set(obj, make_string_item("off"), off_fn);
-    js_property_set(obj, make_string_item("removeListener"), off_fn);
-    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
-    js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
-    js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
-    js_property_set(obj, make_string_item("listeners"), js_new_function((void*)js_stream_inst_listeners, 1));
-    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
-    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
-    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
-    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
-    js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
-    js_property_set(obj, make_string_item("unpipe"), js_new_function((void*)js_readable_inst_unpipe, 1));
-    js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 2));
-    js_property_set(obj, make_string_item("_undestroy"), js_new_function((void*)js_stream_inst_undestroy, 0));
-    js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
-    js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
-    js_property_set(obj, make_string_item("isPaused"), js_new_function((void*)js_readable_inst_isPaused, 0));
-    js_property_set(obj, make_string_item("setEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
-    js_property_set(obj, make_string_item("iterator"), js_new_function((void*)js_readable_inst_iterator, 1));
+    js_stream_set_method(obj, key_on, (void*)js_stream_inst_on, 2);
+    js_stream_set_method(obj, make_string_item("once"), (void*)js_stream_inst_once, 2);
+    off_root.set(js_new_function((void*)js_stream_inst_off, 2));
+    js_property_set(obj, make_string_item("off"), off_root.get());
+    js_property_set(obj, make_string_item("removeListener"), off_root.get());
+    js_stream_set_method(obj, make_string_item("removeAllListeners"), (void*)js_stream_inst_removeAllListeners, 1);
+    js_stream_set_method(obj, key_emit, (void*)js_stream_inst_emit, 2);
+    js_stream_set_method(obj, make_string_item("eventNames"), (void*)js_stream_inst_eventNames, 0);
+    js_stream_set_method(obj, make_string_item("listeners"), (void*)js_stream_inst_listeners, 1);
+    js_stream_set_method(obj, make_string_item("listenerCount"), (void*)js_stream_inst_listenerCount, 2);
+    js_stream_set_method(obj, key_push, (void*)js_readable_inst_push, 2);
+    js_stream_set_method(obj, make_string_item("unshift"), (void*)js_readable_inst_unshift, 2);
+    js_stream_set_method(obj, key_read, (void*)js_readable_inst_read, 1);
+    js_stream_set_method(obj, key_pipe, (void*)js_readable_inst_pipe, 1);
+    js_stream_set_method(obj, make_string_item("unpipe"), (void*)js_readable_inst_unpipe, 1);
+    js_stream_set_method(obj, key_destroy, (void*)js_stream_inst_destroy, 2);
+    js_stream_set_method(obj, make_string_item("_undestroy"), (void*)js_stream_inst_undestroy, 0);
+    js_stream_set_method(obj, make_string_item("resume"), (void*)js_readable_inst_resume, 0);
+    js_stream_set_method(obj, make_string_item("pause"), (void*)js_readable_inst_pause, 0);
+    js_stream_set_method(obj, make_string_item("isPaused"), (void*)js_readable_inst_isPaused, 0);
+    js_stream_set_method(obj, make_string_item("setEncoding"), (void*)js_stream_inst_setEncoding, 1);
+    js_stream_set_method(obj, make_string_item("iterator"), (void*)js_readable_inst_iterator, 1);
     js_stream_install_async_iterator(obj);
     js_stream_install_readable_helpers(obj);
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
     js_stream_call_construct(obj);
-    return obj;
+    Item result = obj;
+#undef opts
+#undef obj
+    return result;
 }
 
 // =============================================================================
@@ -9654,6 +9675,9 @@ extern "C" Item js_get_stream_promises_namespace(void) {
     ensure_keys();
 
     stream_promises_namespace = js_new_object();
+    // The sibling stream namespace can allocate before it publishes promises;
+    // retain this process cache across forced collection between requires.
+    heap_register_gc_root(&stream_promises_namespace.item);
     Item pipeline = stream_set_method(stream_promises_namespace, "pipeline",
                                       (void*)js_stream_promises_pipeline, -1);
     Item finished = stream_set_method(stream_promises_namespace, "finished",
@@ -9877,6 +9901,9 @@ extern "C" Item js_get_stream_namespace(void) {
     ensure_keys();
 
     stream_namespace = js_new_object();
+    // A host-backed node-core descriptor may request sibling stream surfaces
+    // during setup, so the shared namespace cannot rely on a later global root.
+    heap_register_gc_root(&stream_namespace.item);
 
     Item readable_constructor =
         stream_set_method(stream_namespace, "Readable",    (void*)js_readable_new, 1);
@@ -9919,8 +9946,8 @@ extern "C" Item js_get_stream_namespace(void) {
     js_mark_non_enumerable(finished_fn, custom_key);
 
     // Stream — base class that inherits from EventEmitter and provides pipe().
-    extern Item js_get_events_namespace(void);
-    Item events_ctor = js_get_events_namespace();
+    Item events_ctor = ItemNull;
+    jube_specifier_resolve("events", &events_ctor);
     Item stream_base = js_new_function((void*)js_stream_base_constructor, 0);
     Item stream_base_proto = js_new_object();
     Item events_proto = js_property_get(events_ctor, make_string_item("prototype"));
@@ -10010,6 +10037,7 @@ extern "C" Item js_get_stream_iter_namespace(void) {
     if (stream_iter_namespace.item != 0) return stream_iter_namespace;
     ensure_keys();
     stream_iter_namespace = js_new_object();
+    heap_register_gc_root(&stream_iter_namespace.item);
     stream_set_method(stream_iter_namespace, "from", (void*)js_stream_iter_from, 1);
     stream_set_method(stream_iter_namespace, "fromSync", (void*)js_stream_iter_fromSync, 1);
     stream_set_method(stream_iter_namespace, "pipeTo", (void*)js_stream_iter_pipeTo, 4);
@@ -10035,6 +10063,7 @@ extern "C" Item js_get_stream_web_namespace(void) {
     if (stream_web_namespace.item != 0) return stream_web_namespace;
     ensure_keys();
     stream_web_namespace = js_new_object();
+    heap_register_gc_root(&stream_web_namespace.item);
 
     Item readable_ctor = js_new_function((void*)js_readable_stream_new, 1);
     Item writable_ctor = js_new_function((void*)js_writable_stream_new, 1);
@@ -10096,6 +10125,7 @@ extern "C" Item js_get_internal_stream_end_of_stream_namespace(void) {
 
 extern "C" void js_stream_reset(void) {
     stream_namespace = (Item){0};
+    stream_promises_namespace = (Item){0};
     stream_web_namespace = (Item){0};
     keys_init = false;
     stream_readable_prototype = (Item){0};

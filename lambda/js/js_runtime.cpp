@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime_internal.hpp"
+#include "js_host_hooks.h"
 #include "js_job_queue.h"
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
@@ -59,7 +60,6 @@ extern "C" Item js_get_process_exec_argv(void);
 extern "C" Item js_get_process_argv(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_cp_fork(Item rest_args);
-extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -81,7 +81,6 @@ extern "C" int js_intrinsic_array_methods_pristine();
 extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
-extern "C" Item js_get_os_namespace(void);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -4310,6 +4309,13 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
 
 extern "C" Item js_property_get(Item object, Item key) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
+    RootFrame property_roots((Context*)context, 2);
+    Rooted<Item> object_root(property_roots, object);
+    Rooted<Item> key_root(property_roots, key);
+    // Getter dispatch may allocate before it calls the accessor. Keep the
+    // original receiver rooted so an accessor never observes a reclaimed map.
+    object = object_root.get();
+    key = key_root.get();
     TypeId type = get_type_id(object);
     bool proxy_key = false;
     if (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_PROXY) {
@@ -8430,7 +8436,7 @@ extern "C" Item js_get_length_item(Item object) {
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
-        // expand_list may trigger GC before the new element is stored, so root the incoming value.
+        // The value must survive the growth allocation before it is stored.
         RootFrame roots((Context*)context, 1);
         Rooted<Item> rooted_value(roots, value);
         int64_t old_capacity = arr->capacity;
@@ -23608,6 +23614,17 @@ extern "C" Item js_throw_type_error_code(const char* code, const char* message) 
     return ItemNull;
 }
 
+extern "C" Item js_throw_uri_error_code(const char* code, const char* message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("URIError"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
+    Item code_value = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
+    js_property_set(error, code_key, code_value);
+    js_throw_value(error);
+    return ItemNull;
+}
+
 extern "C" Item js_throw_range_error_code(const char* code, const char* message) {
     Item type_name = (Item){.item = s2it(heap_create_name("RangeError"))};
     Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
@@ -34109,7 +34126,6 @@ extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_delete_property(Item obj, Item key);
 extern "C" Item js_get_prototype(Item object);
 extern "C" Item js_get_prototype_of(Item object);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 struct JsVmEvalOptions {
     Item filename;
@@ -35329,35 +35345,39 @@ static Item js_dc_channel_withStoreScope(Item message) {
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_dc_register_roots();
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> name_root(roots, name);
     if (!js_dc_is_channel_name(name)) {
         return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
     }
     for (int i = 0; i < js_dc_channel_count; i++) {
-        if (js_dc_item_same(js_dc_channel_names[i], name)) {
+        if (js_dc_item_same(js_dc_channel_names[i], name_root.get())) {
             return js_dc_channels[i];
         }
     }
 
-    Item ch = js_new_object();
-    if (js_dc_channel_proto.item != 0) js_set_prototype(ch, js_dc_channel_proto);
-    js_property_set(ch, js_dc_key("name"), name);
-    js_property_set(ch, js_dc_channel_marker_key(), (Item){.item = ITEM_TRUE});
-    js_property_set(ch, js_dc_key("_subscribers"), js_array_new(0));
-    js_property_set(ch, js_dc_stores_key(), js_array_new(0));
-    js_property_set(ch, js_dc_key("subscribe"), js_new_function((void*)js_dc_channel_subscribe, 1));
-    js_property_set(ch, js_dc_key("unsubscribe"), js_new_function((void*)js_dc_channel_unsubscribe, 1));
-    js_property_set(ch, js_dc_key("publish"), js_new_function((void*)js_dc_channel_publish, 1));
-    js_property_set(ch, js_dc_key("hasSubscribers"), (Item){.item = ITEM_FALSE});
-    js_property_set(ch, js_dc_key("bindStore"), js_new_function((void*)js_dc_channel_bindStore, 2));
-    js_property_set(ch, js_dc_key("unbindStore"), js_new_function((void*)js_dc_channel_unbindStore, 1));
-    js_property_set(ch, js_dc_key("runStores"), js_new_function((void*)js_dc_channel_runStores, 5));
-    js_property_set(ch, js_dc_key("withStoreScope"), js_new_function((void*)js_dc_channel_withStoreScope, 1));
+    Rooted<Item> channel_root(roots, js_new_object());
+    if (js_dc_channel_proto.item != 0) js_set_prototype(channel_root.get(), js_dc_channel_proto);
+    // Key and callback allocation can compact the new channel before its
+    // persistent cache owns it, so preserve both values through construction.
+    js_property_set(channel_root.get(), js_dc_key("name"), name_root.get());
+    js_property_set(channel_root.get(), js_dc_channel_marker_key(), (Item){.item = ITEM_TRUE});
+    js_property_set(channel_root.get(), js_dc_key("_subscribers"), js_array_new(0));
+    js_property_set(channel_root.get(), js_dc_stores_key(), js_array_new(0));
+    js_property_set(channel_root.get(), js_dc_key("subscribe"), js_new_function((void*)js_dc_channel_subscribe, 1));
+    js_property_set(channel_root.get(), js_dc_key("unsubscribe"), js_new_function((void*)js_dc_channel_unsubscribe, 1));
+    js_property_set(channel_root.get(), js_dc_key("publish"), js_new_function((void*)js_dc_channel_publish, 1));
+    js_property_set(channel_root.get(), js_dc_key("hasSubscribers"), (Item){.item = ITEM_FALSE});
+    js_property_set(channel_root.get(), js_dc_key("bindStore"), js_new_function((void*)js_dc_channel_bindStore, 2));
+    js_property_set(channel_root.get(), js_dc_key("unbindStore"), js_new_function((void*)js_dc_channel_unbindStore, 1));
+    js_property_set(channel_root.get(), js_dc_key("runStores"), js_new_function((void*)js_dc_channel_runStores, 5));
+    js_property_set(channel_root.get(), js_dc_key("withStoreScope"), js_new_function((void*)js_dc_channel_withStoreScope, 1));
     if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
-        js_dc_channel_names[js_dc_channel_count] = name;
-        js_dc_channels[js_dc_channel_count] = ch;
+        js_dc_channel_names[js_dc_channel_count] = name_root.get();
+        js_dc_channels[js_dc_channel_count] = channel_root.get();
         js_dc_channel_count++;
     }
-    return ch;
+    return channel_root.get();
 }
 
 // dc.tracingChannel(name) — create a TracingChannel with start/end/asyncStart/asyncEnd/error channels
@@ -36106,8 +36126,6 @@ static bool js_cluster_is_worker_process(void) {
     return worker_id && worker_id[0] != '\0';
 }
 
-extern "C" void js_net_close_all_active_servers(void);
-
 static Item js_cluster_worker_on(Item event_item, Item callback) {
     Item self = js_get_this();
     if (js_runtime_string_equals(event_item, "exit") && get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -36121,7 +36139,7 @@ static Item js_cluster_worker_on(Item event_item, Item callback) {
 }
 
 static Item js_cluster_worker_disconnect(void) {
-    js_net_close_all_active_servers();
+    js_host_hooks_run_shutdown_participants();
     Item process_obj = js_get_process_object_value();
     Item disconnect = js_property_get(process_obj, js_cluster_key("disconnect"));
     if (js_cluster_is_callable(disconnect)) {
@@ -36281,7 +36299,7 @@ static Item js_cluster_fork(Item fork_env) {
     js_property_set(child, js_cluster_key("process"), child);
     // cluster workers report online after fork; without queuing this, callers
     // that send initial IPC from worker.on('online') never start their worker.
-    js_child_process_emit_or_queue_cluster_online(child);
+    js_host_hooks_emit_cluster_online(child);
     // cluster primaries own worker lifetimes; otherwise process.exit(0) leaves
     // the worker's server handle alive after the primary intentionally exits.
     js_cluster_register_worker_exit_kill(child);
@@ -37975,50 +37993,55 @@ extern "C" Item js_get_async_hooks_namespace(void) {
         ah_epoch = js_heap_epoch;
         ah_ns = js_new_object();
         heap_register_gc_root(&ah_ns.item);
+        RootFrame roots((Context*)context, 6);
 
         // AsyncLocalStorage class
-        Item als_class = js_new_object();
-        Item als_proto = js_new_object();
-        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("run", 3))},
+        Rooted<Item> als_class_root(roots, js_new_object());
+        Rooted<Item> als_proto_root(roots, js_new_object());
+        Rooted<Item> als_ctor_root(roots, ItemNull);
+        js_property_set(als_proto_root.get(), (Item){.item = s2it(heap_create_name("run", 3))},
                         js_new_function((void*)js_als_run, 2));
-        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("getStore", 8))},
+        js_property_set(als_proto_root.get(), (Item){.item = s2it(heap_create_name("getStore", 8))},
                         js_new_function((void*)js_als_getStore, 0));
-        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("enterWith", 9))},
+        js_property_set(als_proto_root.get(), (Item){.item = s2it(heap_create_name("enterWith", 9))},
                         js_new_function((void*)js_als_enterWith, 1));
-        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("disable", 7))},
+        js_property_set(als_proto_root.get(), (Item){.item = s2it(heap_create_name("disable", 7))},
                         js_new_function((void*)js_als_disable, 0));
-        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("withScope", 9))},
+        js_property_set(als_proto_root.get(), (Item){.item = s2it(heap_create_name("withScope", 9))},
                         js_new_function((void*)js_als_withScope, 1));
-        js_property_set(als_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, als_proto);
-        js_property_set(als_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, als_proto);
-        Item als_ctor_fn = js_new_function((void*)js_als_constructor, 1);
-        js_property_set(als_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, als_ctor_fn);
-        js_function_set_prototype(als_ctor_fn, als_proto);
+        js_property_set(als_class_root.get(), (Item){.item = s2it(heap_create_name("prototype", 9))}, als_proto_root.get());
+        js_property_set(als_class_root.get(), (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, als_proto_root.get());
+        als_ctor_root.set(js_new_function((void*)js_als_constructor, 1));
+        js_property_set(als_class_root.get(), (Item){.item = s2it(heap_create_name("__ctor__", 8))}, als_ctor_root.get());
+        js_function_set_prototype(als_ctor_root.get(), als_proto_root.get());
 
         // AsyncResource class
-        Item ar_class = js_new_object();
-        Item ar_proto = js_new_object();
-        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("runInAsyncScope", 15))},
+        Rooted<Item> ar_class_root(roots, js_new_object());
+        Rooted<Item> ar_proto_root(roots, js_new_object());
+        Rooted<Item> ar_ctor_root(roots, ItemNull);
+        js_property_set(ar_proto_root.get(), (Item){.item = s2it(heap_create_name("runInAsyncScope", 15))},
                         js_new_function((void*)js_ar_runInAsyncScope, 2));
-        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("emitDestroy", 11))},
+        js_property_set(ar_proto_root.get(), (Item){.item = s2it(heap_create_name("emitDestroy", 11))},
                         js_new_function((void*)js_ar_emitDestroy, 0));
-        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("asyncId", 7))},
+        js_property_set(ar_proto_root.get(), (Item){.item = s2it(heap_create_name("asyncId", 7))},
                         js_new_function((void*)js_ar_asyncId, 0));
-        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("triggerAsyncId", 14))},
+        js_property_set(ar_proto_root.get(), (Item){.item = s2it(heap_create_name("triggerAsyncId", 14))},
                         js_new_function((void*)js_ar_triggerAsyncId_method, 0));
-        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("bind", 4))},
+        js_property_set(ar_proto_root.get(), (Item){.item = s2it(heap_create_name("bind", 4))},
                         js_new_function((void*)js_ar_bind, -1));
-        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, ar_proto);
-        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, ar_proto);
-        Item ar_ctor_fn = js_new_function((void*)js_ar_constructor, 2);
-        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("bind", 4))},
+        js_property_set(ar_class_root.get(), (Item){.item = s2it(heap_create_name("prototype", 9))}, ar_proto_root.get());
+        js_property_set(ar_class_root.get(), (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, ar_proto_root.get());
+        ar_ctor_root.set(js_new_function((void*)js_ar_constructor, 2));
+        js_property_set(ar_class_root.get(), (Item){.item = s2it(heap_create_name("bind", 4))},
                         js_new_function((void*)js_ar_static_bind, -1));
-        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, ar_ctor_fn);
-        js_function_set_prototype(ar_ctor_fn, ar_proto);
+        js_property_set(ar_class_root.get(), (Item){.item = s2it(heap_create_name("__ctor__", 8))}, ar_ctor_root.get());
+        js_function_set_prototype(ar_ctor_root.get(), ar_proto_root.get());
 
         // Module exports
-        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncLocalStorage", 17))}, als_class);
-        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncResource", 13))}, ar_class);
+        // Constructor graphs must stay rooted until the namespace publishes
+        // them; property-key creation can collect between their setup calls.
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncLocalStorage", 17))}, als_class_root.get());
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncResource", 13))}, ar_class_root.get());
         js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("createHook", 10))},
                         js_new_function((void*)js_ah_createHook, 1));
         js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("executionAsyncId", 16))},
@@ -38676,18 +38699,6 @@ static void js_node_binding_set_readonly_int(Item object, const char* name, int6
     js_node_binding_set_readonly(object, name, (Item){.item = i2it(value)});
 }
 
-static const char* const js_node_fs_constant_names[] = {
-    "F_OK", "R_OK", "W_OK", "X_OK",
-    "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND", "O_EXCL",
-    "S_IFMT", "S_IFREG", "S_IFDIR", "S_IFCHR", "S_IFBLK", "S_IFIFO", "S_IFLNK", "S_IFSOCK",
-    "S_IRUSR", "S_IWUSR", "S_IXUSR", "S_IRGRP", "S_IWGRP", "S_IXGRP", "S_IROTH", "S_IWOTH", "S_IXOTH",
-    "UV_DIRENT_UNKNOWN", "UV_DIRENT_FILE", "UV_DIRENT_DIR", "UV_DIRENT_LINK",
-    "UV_DIRENT_FIFO", "UV_DIRENT_SOCKET", "UV_DIRENT_CHAR", "UV_DIRENT_BLOCK",
-    "UV_FS_SYMLINK_DIR", "UV_FS_SYMLINK_JUNCTION",
-    "COPYFILE_EXCL", "COPYFILE_FICLONE", "COPYFILE_FICLONE_FORCE",
-    NULL
-};
-
 static const char* const js_node_errno_constant_names[] = {
     "E2BIG", "EACCES", "EADDRINUSE", "EADDRNOTAVAIL", "EAGAIN",
     "EALREADY", "EBADF", "EBUSY", "ECANCELED", "ECHILD",
@@ -38734,7 +38745,8 @@ static Item js_node_binding_clone_constants(Item src, const char* const* names) 
 }
 
 static Item js_node_binding_os_constants(void) {
-    Item os_ns = js_get_os_namespace();
+    Item os_ns = ItemNull;
+    if (jube_specifier_resolve("os", &os_ns) != JUBE_SPECIFIER_RESOLVED) return ItemNull;
     Item os_constants = js_property_get(os_ns, js_node_binding_key("constants"));
     Item errno_src = js_property_get(os_constants, js_node_binding_key("errno"));
     Item priority_src = js_property_get(os_constants, js_node_binding_key("priority"));
@@ -38768,23 +38780,6 @@ static Item js_node_binding_constants(void) {
     js_object_freeze(js_property_get(constants, js_node_binding_key("zlib")));
     js_object_freeze(constants);
     return constants;
-}
-
-static Item js_node_public_constants(void) {
-    Item internal = js_node_binding_constants();
-    Item public_constants = js_node_binding_null_object();
-    Item fs = js_property_get(internal, js_node_binding_key("fs"));
-    Item os = js_property_get(internal, js_node_binding_key("os"));
-    Item errno_obj = js_property_get(os, js_node_binding_key("errno"));
-    Item priority_obj = js_property_get(os, js_node_binding_key("priority"));
-    Item signals_obj = js_property_get(os, js_node_binding_key("signals"));
-
-    js_node_binding_copy_constants(public_constants, fs, js_node_fs_constant_names);
-    js_node_binding_copy_constants(public_constants, errno_obj, js_node_errno_constant_names);
-    js_node_binding_copy_constants(public_constants, priority_obj, js_node_priority_constant_names);
-    js_node_binding_copy_constants(public_constants, signals_obj, js_node_signal_constant_names);
-    js_object_freeze(public_constants);
-    return public_constants;
 }
 
 static Item js_emit_internal_test_binding_warning(void) {
@@ -39179,954 +39174,310 @@ extern "C" Item js_module_flush_compile_cache(void) {
     return make_js_undefined();
 }
 
+static bool js_module_append_catalog_name(const char* name, void* user) {
+    Array* names = (Array*)user;
+    if (!name || !*name || !names) return true;
+    size_t length = strlen(name);
+    for (int64_t i = 0; i < names->length; i++) {
+        Item existing = array_get(names, i);
+        if (get_type_id(existing) != LMD_TYPE_STRING) continue;
+        String* text = it2s(existing);
+        if (text && text->len == (int64_t)length && memcmp(text->chars, name, length) == 0) {
+            return true;
+        }
+    }
+    array_push(names, (Item){.item = s2it(heap_create_name(name, length))});
+    return true;
+}
+
+extern "C" Item js_module_is_builtin(Item id);
+
+// The module-loader remains a host service because require(), the active
+// module cache, and compile-cache lifecycle are runtime-owned. Node-core owns
+// the public specifier and obtains this namespace through that service bridge.
+extern "C" Item js_get_node_module_namespace(void) {
+    js_cc_init_from_env();
+    static Item module_ns = {0};
+    static uint64_t module_epoch = (uint64_t)-1;
+    if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
+        module_epoch = js_heap_epoch;
+        module_ns = js_new_object();
+        heap_register_gc_root(&module_ns.item);
+        RootFrame roots((Context*)context, 3);
+        Rooted<Item> builtin_modules_root(roots, ItemNull);
+        Rooted<Item> constants_root(roots, ItemNull);
+        Rooted<Item> status_root(roots, ItemNull);
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        builtin_modules_root.set((Item){.array = arr});
+        // Reflection follows the exact owner index used by resolution, so a
+        // profile cannot advertise a legacy host fallback it does not load.
+        jube_specifier_index_names(js_module_append_catalog_name, arr);
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("builtinModules", 14))},
+                        builtin_modules_root.get());
+        // isBuiltin(id) — check if a module is built-in
+        // (implemented as a simple function that checks the list)
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("isBuiltin", 9))},
+                        js_new_function((void*)js_module_is_builtin, 1));
+        // createRequire(filename) — returns a require function
+        extern Item js_module_create_require(Item filename);
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("createRequire", 13))},
+                        js_new_function((void*)js_module_create_require, 1));
+        extern Item js_module_enable_compile_cache(Item arg);
+        extern Item js_module_get_compile_cache_dir(void);
+        extern Item js_module_flush_compile_cache(void);
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("enableCompileCache", 18))},
+                        js_new_function((void*)js_module_enable_compile_cache, 1));
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("getCompileCacheDir", 18))},
+                        js_new_function((void*)js_module_get_compile_cache_dir, 0));
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("flushCompileCache", 17))},
+                        js_new_function((void*)js_module_flush_compile_cache, 0));
+        constants_root.set(js_new_object());
+        status_root.set(js_new_object());
+        js_property_set(status_root.get(), js_cc_key("FAILED"), (Item){.item = i2it(0)});
+        js_property_set(status_root.get(), js_cc_key("ENABLED"), (Item){.item = i2it(1)});
+        js_property_set(status_root.get(), js_cc_key("ALREADY_ENABLED"), (Item){.item = i2it(2)});
+        js_property_set(status_root.get(), js_cc_key("DISABLED"), (Item){.item = i2it(3)});
+        js_property_set(constants_root.get(), js_cc_key("compileCacheStatus"), status_root.get());
+        js_property_set(module_ns, js_cc_key("constants"), constants_root.get());
+        // Module constructor stub
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("Module", 6))}, module_ns);
+        // default export is the module object itself
+        js_property_set(module_ns, (Item){.item = s2it(heap_create_name("default", 7))}, module_ns);
+    }
+    js_cc_emit_cache_report();
+    return module_ns;
+}
+
+extern "C" Item js_get_domain_namespace(void) {
+    static uint64_t dom_epoch = (uint64_t)-1;
+    if (js_domain_namespace.item == 0 || dom_epoch != js_heap_epoch) {
+        dom_epoch = js_heap_epoch;
+        js_domain_namespace = js_new_object();
+        heap_register_gc_root(&js_domain_namespace.item);
+        js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("create", 6))},
+                        js_new_function((void*)js_domain_create, 0));
+        js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("createDomain", 12))},
+                        js_new_function((void*)js_domain_create, 0));
+        js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("Domain", 6))},
+                        js_new_function((void*)js_domain_create, 0));
+        js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("default", 7))}, js_domain_namespace);
+        js_domain_sync_visible_state();
+    }
+    return js_domain_namespace;
+}
+
+extern "C" Item js_get_cluster_namespace(void) {
+    static Item cl_ns = {0};
+    static uint64_t cl_epoch = (uint64_t)-1;
+    static bool cl_worker_mode = false;
+    bool is_worker = js_cluster_is_worker_process();
+    if (cl_ns.item == 0 || cl_epoch != js_heap_epoch || cl_worker_mode != is_worker) {
+        cl_epoch = js_heap_epoch;
+        cl_worker_mode = is_worker;
+        cl_ns = js_new_object();
+        heap_register_gc_root(&cl_ns.item);
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
+                        (Item){.item = b2it(!is_worker)});
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isMaster", 8))},
+                        (Item){.item = b2it(!is_worker)});
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
+                        (Item){.item = b2it(is_worker)});
+        if (is_worker) {
+            // Cluster workers are selected by the inherited worker id, not
+            // argv; otherwise the worker re-enters primary/testcase code.
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("worker", 6))},
+                            js_cluster_make_worker_object());
+        }
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupPrimary", 12))},
+                        js_new_function((void*)js_cluster_setup_primary, 1));
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupMaster", 11))},
+                        js_new_function((void*)js_cluster_setup_primary, 1));
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("fork", 4))},
+                        js_new_function((void*)js_cluster_fork, 1));
+        js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
+    }
+    return cl_ns;
+}
+
+extern "C" Item js_get_repl_namespace(void) {
+    static Item repl_namespace = {0};
+    static uint64_t repl_epoch = (uint64_t)-1;
+    if (repl_namespace.item != 0 && repl_epoch == js_heap_epoch) return repl_namespace;
+    repl_epoch = js_heap_epoch;
+    repl_namespace = js_new_object();
+    heap_register_gc_root(&repl_namespace.item);
+    // The host owns REPL evaluation and terminal I/O; node-core publishes its
+    // observable namespace through the resolver boundary.
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("start", 5))},
+                    js_new_function((void*)js_repl_start, 3));
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("REPLServer", 10))},
+                    js_new_function((void*)js_repl_start, 3));
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("REPL_MODE_SLOPPY", 16))},
+                    (Item){.item = s2it(heap_create_name("sloppy", 6))});
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("REPL_MODE_STRICT", 16))},
+                    (Item){.item = s2it(heap_create_name("strict", 6))});
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("Recoverable", 11))},
+                    js_new_function((void*)js_repl_recoverable_ctor, 1));
+    js_property_set(repl_namespace, (Item){.item = s2it(heap_create_name("default", 7))}, repl_namespace);
+    return repl_namespace;
+}
+
+extern "C" Item js_get_diagnostics_channel_namespace(void) {
+    static Item diagnostics_namespace = {0};
+    static uint64_t diagnostics_epoch = (uint64_t)-1;
+    if (diagnostics_namespace.item != 0 && diagnostics_epoch == js_heap_epoch) {
+        return diagnostics_namespace;
+    }
+    diagnostics_epoch = js_heap_epoch;
+    diagnostics_namespace = js_new_object();
+    heap_register_gc_root(&diagnostics_namespace.item);
+    js_dc_register_roots();
+    js_dc_channel_proto = js_new_object();
+    js_dc_tracing_channel_proto = js_new_object();
+    js_dc_bounded_channel_proto = js_new_object();
+    js_dc_channel_ctor = js_new_function((void*)js_dc_channel_factory, 1);
+    js_dc_tracing_channel_ctor = js_new_function((void*)js_dc_tracing_channel, 1);
+    js_dc_bounded_channel_ctor = js_new_function((void*)js_dc_bounded_channel, 1);
+    js_function_set_prototype(js_dc_channel_ctor, js_dc_channel_proto);
+    js_function_set_prototype(js_dc_tracing_channel_ctor, js_dc_tracing_channel_proto);
+    js_function_set_prototype(js_dc_bounded_channel_ctor, js_dc_bounded_channel_proto);
+    js_set_prototype(js_dc_bounded_channel_proto, js_dc_tracing_channel_proto);
+    js_property_set(js_dc_channel_proto, (Item){.item = s2it(heap_create_name("constructor", 11))}, js_dc_channel_ctor);
+    js_property_set(js_dc_tracing_channel_proto, (Item){.item = s2it(heap_create_name("constructor", 11))}, js_dc_tracing_channel_ctor);
+    js_property_set(js_dc_bounded_channel_proto, (Item){.item = s2it(heap_create_name("constructor", 11))}, js_dc_bounded_channel_ctor);
+    js_install_native_accessor(js_dc_tracing_channel_proto,
+        (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
+        js_new_function((void*)js_dc_tc_hasSubscribers_getter, 0), ItemNull, JSPD_NON_ENUMERABLE);
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("channel", 7))}, js_new_function((void*)js_dc_channel_factory, 1));
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("tracingChannel", 14))}, js_new_function((void*)js_dc_tracing_channel, 1));
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("boundedChannel", 14))}, js_dc_bounded_channel_ctor);
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("subscribe", 9))}, js_new_function((void*)js_dc_subscribe, 2));
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("unsubscribe", 11))}, js_new_function((void*)js_dc_unsubscribe, 2));
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))}, js_new_function((void*)js_dc_hasSubscribers, 1));
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("Channel", 7))}, js_dc_channel_ctor);
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("TracingChannel", 14))}, js_dc_tracing_channel_ctor);
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("BoundedChannel", 14))}, js_dc_bounded_channel_ctor);
+    js_property_set(diagnostics_namespace, (Item){.item = s2it(heap_create_name("default", 7))}, diagnostics_namespace);
+    return diagnostics_namespace;
+}
+
+extern "C" Item js_get_internal_crypto_util_namespace(void) {
+    static Item crypto_util_ns = {0};
+    static uint64_t crypto_util_epoch = (uint64_t)-1;
+    if (crypto_util_ns.item == 0 || crypto_util_epoch != js_heap_epoch) {
+        crypto_util_epoch = js_heap_epoch;
+        crypto_util_ns = js_new_object();
+        heap_register_gc_root(&crypto_util_ns.item);
+        js_property_set(crypto_util_ns,
+            (Item){.item = s2it(heap_create_name("getOpenSSLSecLevel", 18))},
+            js_new_function((void*)js_internal_crypto_getOpenSSLSecLevel, 0));
+        js_property_set(crypto_util_ns,
+            (Item){.item = s2it(heap_create_name("default", 7))}, crypto_util_ns);
+    }
+    return crypto_util_ns;
+}
+
+extern "C" Item js_get_internal_util_namespace(void) {
+    static Item internal_util_ns = {0};
+    static uint64_t internal_util_epoch = (uint64_t)-1;
+    if (internal_util_ns.item == 0 || internal_util_epoch != js_heap_epoch) {
+        internal_util_epoch = js_heap_epoch;
+        internal_util_ns = js_new_object();
+        heap_register_gc_root(&internal_util_ns.item);
+        js_property_set(internal_util_ns,
+            (Item){.item = s2it(heap_create_name("customPromisifyArgs", 19))},
+            js_util_custom_promisify_args_symbol());
+        js_property_set(internal_util_ns,
+            (Item){.item = s2it(heap_create_name("default", 7))}, internal_util_ns);
+    }
+    return internal_util_ns;
+}
+
+extern "C" Item js_get_internal_util_inspect_namespace(void) {
+    static Item internal_util_inspect_ns = {0};
+    static uint64_t internal_util_inspect_epoch = (uint64_t)-1;
+    if (internal_util_inspect_ns.item == 0 || internal_util_inspect_epoch != js_heap_epoch) {
+        internal_util_inspect_epoch = js_heap_epoch;
+        internal_util_inspect_ns = js_new_object();
+        heap_register_gc_root(&internal_util_inspect_ns.item);
+        js_property_set(internal_util_inspect_ns,
+            (Item){.item = s2it(heap_create_name("getStringWidth", 14))},
+            js_new_function((void*)js_internal_util_inspect_get_string_width, 1));
+        js_property_set(internal_util_inspect_ns,
+            (Item){.item = s2it(heap_create_name("stripVTControlCharacters", 24))},
+            js_new_function((void*)js_internal_util_inspect_strip_vt, 1));
+        js_property_set(internal_util_inspect_ns,
+            (Item){.item = s2it(heap_create_name("default", 7))}, internal_util_inspect_ns);
+    }
+    return internal_util_inspect_ns;
+}
+
+extern "C" Item js_get_internal_repl_namespace(void) {
+    static Item internal_repl_ns = {0};
+    static uint64_t internal_repl_epoch = (uint64_t)-1;
+    if (internal_repl_ns.item == 0 || internal_repl_epoch != js_heap_epoch) {
+        internal_repl_epoch = js_heap_epoch;
+        internal_repl_ns = js_new_object();
+        heap_register_gc_root(&internal_repl_ns.item);
+        js_property_set(internal_repl_ns, (Item){.item = s2it(heap_create_name("createInternalRepl", 18))},
+                        js_new_function((void*)js_internal_repl_create, 3));
+        js_property_set(internal_repl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, internal_repl_ns);
+    }
+    return internal_repl_ns;
+}
+
+extern "C" Item js_get_internal_test_binding_namespace(void) {
+    static Item itb_ns = {0};
+    static uint64_t itb_epoch = (uint64_t)-1;
+    static uint64_t itb_warning_epoch = (uint64_t)-1;
+    static bool itb_warning_scheduled = false;
+    if (itb_ns.item == 0 || itb_epoch != js_heap_epoch) {
+        itb_epoch = js_heap_epoch;
+        itb_ns = js_new_object();
+        heap_register_gc_root(&itb_ns.item);
+        js_property_set(itb_ns,
+            (Item){.item = s2it(heap_create_name("internalBinding", 15))},
+            js_new_function((void*)js_internal_binding, 1));
+        js_property_set(itb_ns, (Item){.item = s2it(heap_create_name("default", 7))}, itb_ns);
+    }
+    if (itb_warning_epoch != js_heap_epoch) {
+        itb_warning_epoch = js_heap_epoch;
+        itb_warning_scheduled = false;
+    }
+    if (!itb_warning_scheduled) {
+        itb_warning_scheduled = true;
+        js_next_tick_enqueue(js_new_function((void*)js_emit_internal_test_binding_warning, 0));
+    }
+    return itb_ns;
+}
+
 extern "C" Item js_module_get_builtin(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
     String* spec = it2s(specifier);
 
-    // check for built-in modules (bare specifier or with .js suffix from resolver)
-    if ((spec->len == 2 && memcmp(spec->chars, "fs", 2) == 0) ||
-        (spec->len == 5 && memcmp(spec->chars, "fs.js", 5) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "node:fs", 7) == 0)) {
-        extern Item js_get_fs_namespace(void);
-        return js_get_fs_namespace();
+    Item jube_namespace = ItemNull;
+    // Cataloged providers activate through Jube before legacy fallback. This
+    // keeps an explicit minimal profile from reviving a host implementation
+    // and lets an isolated manifest load its matching dynamic image.
+    JubeSpecifierResolveStatus jube_status = jube_specifier_resolve(spec->chars, &jube_namespace);
+    if (jube_status == JUBE_SPECIFIER_RESOLVED) {
+        return jube_namespace;
     }
-    if ((spec->len == 13 && memcmp(spec->chars, "child_process", 13) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "child_process.js", 16) == 0) ||
-        (spec->len == 18 && memcmp(spec->chars, "node:child_process", 18) == 0)) {
-        extern Item js_get_child_process_namespace(void);
-        return js_get_child_process_namespace();
-    }
-    // node:path
-    if ((spec->len == 4 && memcmp(spec->chars, "path", 4) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "path.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:path", 9) == 0)) {
-        extern Item js_get_path_namespace(void);
-        return js_get_path_namespace();
-    }
-    // path/posix, node:path/posix — returns the same path namespace (POSIX on POSIX)
-    if ((spec->len == 10 && memcmp(spec->chars, "path/posix", 10) == 0) ||
-        (spec->len == 13 && memcmp(spec->chars, "path/posix.js", 13) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "node:path/posix", 15) == 0)) {
-        extern Item js_get_path_namespace(void);
-        return js_get_path_namespace();
-    }
-    // path/win32, node:path/win32 — returns path.win32 sub-namespace
-    if ((spec->len == 10 && memcmp(spec->chars, "path/win32", 10) == 0) ||
-        (spec->len == 13 && memcmp(spec->chars, "path/win32.js", 13) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "node:path/win32", 15) == 0)) {
-        extern Item js_get_path_win32_namespace(void);
-        return js_get_path_win32_namespace();
-    }
-    // node:os
-    if ((spec->len == 2 && memcmp(spec->chars, "os", 2) == 0) ||
-        (spec->len == 5 && memcmp(spec->chars, "os.js", 5) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "node:os", 7) == 0)) {
-        extern Item js_get_os_namespace(void);
-        return js_get_os_namespace();
-    }
-    // node:constants
-    if ((spec->len == 9 && memcmp(spec->chars, "constants", 9) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "constants.js", 12) == 0) ||
-        (spec->len == 14 && memcmp(spec->chars, "node:constants", 14) == 0)) {
-        return js_node_public_constants();
-    }
-    // node:url
-    if ((spec->len == 3 && memcmp(spec->chars, "url", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "url.js", 6) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "node:url", 8) == 0)) {
-        extern Item js_get_url_namespace(void);
-        return js_get_url_namespace();
-    }
-    // node:util
-    if ((spec->len == 4 && memcmp(spec->chars, "util", 4) == 0) ||
-        (spec->len == 5 && memcmp(spec->chars, "util/", 5) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "util.js", 7) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "util/.js", 8) == 0) ||
-        (spec->len == 3 && memcmp(spec->chars, "sys", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "sys.js", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:util", 9) == 0)) {
-        extern Item js_get_util_namespace(void);
-        return js_get_util_namespace();
-    }
-    // npm 'inherits' package — commonly bundled by Browserify-era libraries.
-    if ((spec->len == 8 && memcmp(spec->chars, "inherits", 8) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "inherits.js", 11) == 0)) {
-        extern Item js_util_inherits(Item ctor_item, Item super_item);
-        return js_new_function((void*)js_util_inherits, 2);
-    }
-    // util/types, node:util/types — type checking utilities
-    if ((spec->len == 10 && memcmp(spec->chars, "util/types", 10) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "node:util/types", 15) == 0)) {
-        extern Item js_get_util_namespace(void);
-        Item util_ns = js_get_util_namespace();
-        Item types_key = (Item){.item = s2it(heap_create_name("types", 5))};
-        Item types_obj = js_property_get(util_ns, types_key);
-        if (types_obj.item != ITEM_NULL) return types_obj;
-        return util_ns; // fallback
-    }
-    // node:process
-    if ((spec->len == 7 && memcmp(spec->chars, "process", 7) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "node:process", 12) == 0)) {
-        return js_get_process_object_value();
-    }
-    // node:querystring
-    if ((spec->len == 11 && memcmp(spec->chars, "querystring", 11) == 0) ||
-        (spec->len == 14 && memcmp(spec->chars, "querystring.js", 14) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "node:querystring", 16) == 0)) {
-        extern Item js_get_querystring_namespace(void);
-        return js_get_querystring_namespace();
-    }
-    // node:events
-    if ((spec->len == 6 && memcmp(spec->chars, "events", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "events.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:events", 11) == 0)) {
-        extern Item js_get_events_namespace(void);
-        return js_get_events_namespace();
-    }
-    // node:buffer
-    if ((spec->len == 6 && memcmp(spec->chars, "buffer", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "buffer.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:buffer", 11) == 0)) {
-        extern Item js_get_buffer_namespace(void);
-        return js_get_buffer_namespace();
-    }
-    // node:crypto
-    if ((spec->len == 6 && memcmp(spec->chars, "crypto", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "crypto.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:crypto", 11) == 0)) {
-        extern Item js_get_crypto_namespace(void);
-        return js_get_crypto_namespace();
-    }
-    // node:dns
-    if ((spec->len == 3 && memcmp(spec->chars, "dns", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "dns.js", 6) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "node:dns", 8) == 0)) {
-        extern Item js_get_dns_namespace(void);
-        return js_get_dns_namespace();
-    }
-    // node:zlib
+    if (jube_status != JUBE_SPECIFIER_UNKNOWN) return ItemNull;
+
+    // The N4 parity checkpoint intentionally runs with no catalog so it can
+    // compare the pre-flip host zlib implementation against node-zlib. Keep
+    // this sole fallback until N4.4 removes that source from the host image.
     if ((spec->len == 4 && memcmp(spec->chars, "zlib", 4) == 0) ||
         (spec->len == 7 && memcmp(spec->chars, "zlib.js", 7) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "node:zlib", 9) == 0)) {
         extern Item js_get_zlib_namespace(void);
         return js_get_zlib_namespace();
     }
-    // node:readline
-    if ((spec->len == 8 && memcmp(spec->chars, "readline", 8) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "readline.js", 11) == 0) ||
-        (spec->len == 13 && memcmp(spec->chars, "node:readline", 13) == 0)) {
-        extern Item js_get_readline_namespace(void);
-        return js_get_readline_namespace();
-    }
-    // node:stream
-    if ((spec->len == 6 && memcmp(spec->chars, "stream", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "stream.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:stream", 11) == 0)) {
-        extern Item js_get_stream_namespace(void);
-        return js_get_stream_namespace();
-    }
-    // stream/promises, node:stream/promises
-    if ((spec->len == 15 && memcmp(spec->chars, "stream/promises", 15) == 0) ||
-        (spec->len == 20 && memcmp(spec->chars, "node:stream/promises", 20) == 0)) {
-        extern Item js_get_stream_promises_namespace(void);
-        return js_get_stream_promises_namespace();
-    }
-    // stream/web, node:stream/web
-    if ((spec->len == 10 && memcmp(spec->chars, "stream/web", 10) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "node:stream/web", 15) == 0)) {
-        extern Item js_get_stream_web_namespace(void);
-        return js_get_stream_web_namespace();
-    }
-    // stream/consumers, node:stream/consumers — return stream namespace
-    if ((spec->len == 16 && memcmp(spec->chars, "stream/consumers", 16) == 0) ||
-        (spec->len == 21 && memcmp(spec->chars, "node:stream/consumers", 21) == 0)) {
-        extern Item js_get_stream_namespace(void);
-        return js_get_stream_namespace();
-    }
-    // stream/iter — internal stream iteration helpers
-    if ((spec->len == 11 && memcmp(spec->chars, "stream/iter", 11) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "node:stream/iter", 16) == 0)) {
-        extern Item js_get_stream_iter_namespace(void);
-        return js_get_stream_iter_namespace();
-    }
-    // node:net
-    if ((spec->len == 3 && memcmp(spec->chars, "net", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "net.js", 6) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "node:net", 8) == 0)) {
-        extern Item js_get_net_namespace(void);
-        return js_get_net_namespace();
-    }
-    // internal/net
-    if ((spec->len == 12 && memcmp(spec->chars, "internal/net", 12) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "internal/net.js", 15) == 0)) {
-        extern Item js_get_internal_net_namespace(void);
-        return js_get_internal_net_namespace();
-    }
-    // internal/js_stream_socket — JSStreamSocket constructor used by stream wrap tests.
-    if ((spec->len == 25 && memcmp(spec->chars, "internal/js_stream_socket", 25) == 0) ||
-        (spec->len == 28 && memcmp(spec->chars, "internal/js_stream_socket.js", 28) == 0)) {
-        extern Item js_get_internal_js_stream_socket_constructor(void);
-        return js_get_internal_js_stream_socket_constructor();
-    }
-    // node:tls
-    if ((spec->len == 3 && memcmp(spec->chars, "tls", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "tls.js", 6) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "node:tls", 8) == 0)) {
-        extern Item js_get_tls_namespace(void);
-        return js_get_tls_namespace();
-    }
-    // node:http
-    if ((spec->len == 4 && memcmp(spec->chars, "http", 4) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "http.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:http", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "_http_agent", 11) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "_http_common", 12) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "_http_server", 12) == 0) ||
-        (spec->len == 14 && memcmp(spec->chars, "_http_outgoing", 14) == 0)) {
-        extern Item js_get_http_namespace(void);
-        return js_get_http_namespace();
-    }
-    // node:https
-    if ((spec->len == 5 && memcmp(spec->chars, "https", 5) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "https.js", 8) == 0) ||
-        (spec->len == 10 && memcmp(spec->chars, "node:https", 10) == 0)) {
-        extern Item js_get_https_namespace(void);
-        return js_get_https_namespace();
-    }
-    // node:string_decoder
-    if ((spec->len == 14 && memcmp(spec->chars, "string_decoder", 14) == 0) ||
-        (spec->len == 17 && memcmp(spec->chars, "string_decoder.js", 17) == 0) ||
-        (spec->len == 19 && memcmp(spec->chars, "node:string_decoder", 19) == 0)) {
-        extern Item js_get_string_decoder_namespace(void);
-        return js_get_string_decoder_namespace();
-    }
-    // node:assert
-    if ((spec->len == 6 && memcmp(spec->chars, "assert", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "assert.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:assert", 11) == 0)) {
-        extern Item js_get_assert_namespace(void);
-        return js_get_assert_namespace();
-    }
-    // internal/errors — Node's internal coded-error constructors used by
-    // assert internals and test shims.
-    if ((spec->len == 15 && memcmp(spec->chars, "internal/errors", 15) == 0) ||
-        (spec->len == 18 && memcmp(spec->chars, "internal/errors.js", 18) == 0)) {
-        extern Item js_get_internal_errors_namespace(void);
-        return js_get_internal_errors_namespace();
-    }
-    // internal/assert/myers_diff — assert diff helpers and their Node range guard.
-    if ((spec->len == 26 && memcmp(spec->chars, "internal/assert/myers_diff", 26) == 0) ||
-        (spec->len == 29 && memcmp(spec->chars, "internal/assert/myers_diff.js", 29) == 0)) {
-        extern Item js_get_internal_assert_myers_diff_namespace(void);
-        return js_get_internal_assert_myers_diff_namespace();
-    }
-    // assert/strict, node:assert/strict — return the strict export, not the
-    // loose namespace, so identity matches require('assert').strict.
-    if ((spec->len == 13 && memcmp(spec->chars, "assert/strict", 13) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "assert/strict.js", 16) == 0) ||
-        (spec->len == 18 && memcmp(spec->chars, "node:assert/strict", 18) == 0)) {
-        extern Item js_get_assert_namespace(void);
-        Item assert_ns = js_get_assert_namespace();
-        return js_property_get(assert_ns, (Item){.item = s2it(heap_create_name("strict", 6))});
-    }
-    // node:timers — alias to global timer functions
-    if ((spec->len == 6 && memcmp(spec->chars, "timers", 6) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:timers", 11) == 0)) {
-        // return a namespace with setTimeout/setInterval/etc
-        static Item timers_ns = {0};
-        static uint64_t timers_epoch = (uint64_t)-1;
-        if (timers_ns.item == 0 || timers_epoch != js_heap_epoch) {
-            timers_epoch = js_heap_epoch;
-            extern Item js_setTimeout(Item, Item);
-            extern Item js_setInterval(Item, Item);
-            extern void js_clearTimeout(Item);
-            extern void js_clearInterval(Item);
-            extern Item js_setImmediate(Item);
-            extern void js_timer_install_promisify_custom(Item fn_item);
-            timers_ns = js_new_object();
-            Item timeout_fn = js_new_function((void*)js_setTimeout, 2);
-            js_timer_install_promisify_custom(timeout_fn);
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setTimeout", 10))},
-                            timeout_fn);
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setInterval", 11))},
-                            js_new_function((void*)js_setInterval, 2));
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("clearTimeout", 12))},
-                            js_new_function((void*)js_clearTimeout, 1));
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("clearInterval", 13))},
-                            js_new_function((void*)js_clearInterval, 1));
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setImmediate", 12))},
-                            js_new_function((void*)js_setImmediate, 1));
-            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("default", 7))}, timers_ns);
-            // Add .promises sub-namespace (lazy: fetched via require('timers/promises'))
-            // This enables: const timers = require('timers'); timers.promises.setTimeout(...)
-        }
-        // Always set .promises to the timers/promises namespace (may be created lazily)
-        {
-            Item promises_key = (Item){.item = s2it(heap_create_name("promises", 8))};
-            Item existing = js_property_get(timers_ns, promises_key);
-            if (existing.item == 0 || get_type_id(existing) == LMD_TYPE_UNDEFINED) {
-                // Trigger creation of timers/promises namespace and store it
-                Item tp_spec = (Item){.item = s2it(heap_create_name("timers/promises", 15))};
-                Item tp_ns_ref = js_module_get(tp_spec);
-                if (tp_ns_ref.item != 0 && get_type_id(tp_ns_ref) != LMD_TYPE_UNDEFINED) {
-                    js_property_set(timers_ns, promises_key, tp_ns_ref);
-                }
-            }
-        }
-        return timers_ns;
-    }
-    // timers/promises, node:timers/promises
-    if ((spec->len == 15 && memcmp(spec->chars, "timers/promises", 15) == 0) ||
-        (spec->len == 20 && memcmp(spec->chars, "node:timers/promises", 20) == 0)) {
-        // return a namespace with promisified setTimeout
-        static Item tp_ns = {0};
-        static uint64_t tp_epoch = (uint64_t)-1;
-        if (tp_ns.item == 0 || tp_epoch != js_heap_epoch) {
-            tp_epoch = js_heap_epoch;
-            tp_ns = js_new_object();
-            heap_register_gc_root(&tp_ns.item);
-            extern Item js_setTimeout_promise(Item, Item, Item);
-            extern Item js_setImmediate_promise(Item, Item);
-            extern Item js_setInterval(Item, Item);
-            extern Item js_scheduler_wait(Item, Item);
-            extern Item js_scheduler_yield(void);
-            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setTimeout", 10))},
-                            js_new_function((void*)js_setTimeout_promise, 3));
-            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setInterval", 11))},
-                            js_new_function((void*)js_setInterval, 2));
-            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setImmediate", 12))},
-                            js_new_function((void*)js_setImmediate_promise, 2));
-            // scheduler object — { wait(delay), yield() }
-            Item sched = js_new_object();
-            js_property_set(sched, (Item){.item = s2it(heap_create_name("wait", 4))},
-                            js_new_function((void*)js_scheduler_wait, 2));
-            js_property_set(sched, (Item){.item = s2it(heap_create_name("yield", 5))},
-                            js_new_function((void*)js_scheduler_yield, 0));
-            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("scheduler", 9))}, sched);
-            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tp_ns);
-        }
-        return tp_ns;
-    }
-    // node:console — alias to global console
-    if ((spec->len == 7 && memcmp(spec->chars, "console", 7) == 0) ||
-        (spec->len == 10 && memcmp(spec->chars, "console.js", 10) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "node:console", 12) == 0)) {
-        extern Item js_get_console_object_value(void);
-        return js_get_console_object_value();
-    }
-    // node:module — Module object with isBuiltin, builtinModules
-    if ((spec->len == 6 && memcmp(spec->chars, "module", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "module.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:module", 11) == 0)) {
-        js_cc_init_from_env();
-        static Item module_ns = {0};
-        static uint64_t module_epoch = (uint64_t)-1;
-        if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
-            module_epoch = js_heap_epoch;
-            module_ns = js_new_object();
-            heap_register_gc_root(&module_ns.item);
-            // builtinModules — array of built-in module names
-            static const char* builtin_names[] = {
-                "assert", "async_hooks", "buffer", "child_process", "cluster",
-                "console", "crypto", "diagnostics_channel", "dns", "domain",
-                "events", "fs", "http", "https", "module", "net", "os", "path",
-                "perf_hooks", "process", "punycode", "querystring", "readline",
-                "repl", "stream", "string_decoder", "timers", "tls", "tty",
-                "url", "util", "v8", "vm", "worker_threads", "zlib"
-            };
-            int builtin_count = sizeof(builtin_names) / sizeof(builtin_names[0]);
-            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-            arr->type_id = LMD_TYPE_ARRAY;
-            arr->items = nullptr;
-            arr->length = 0;
-            arr->capacity = 0;
-            for (int i = 0; i < builtin_count; i++) {
-                array_push(arr, (Item){.item = s2it(heap_create_name(builtin_names[i], strlen(builtin_names[i])))});
-            }
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("builtinModules", 14))},
-                            (Item){.array = arr});
-            // isBuiltin(id) — check if a module is built-in
-            // (implemented as a simple function that checks the list)
-            extern Item js_module_is_builtin(Item id);
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("isBuiltin", 9))},
-                            js_new_function((void*)js_module_is_builtin, 1));
-            // createRequire(filename) — returns a require function
-            extern Item js_module_create_require(Item filename);
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("createRequire", 13))},
-                            js_new_function((void*)js_module_create_require, 1));
-            extern Item js_module_enable_compile_cache(Item arg);
-            extern Item js_module_get_compile_cache_dir(void);
-            extern Item js_module_flush_compile_cache(void);
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("enableCompileCache", 18))},
-                            js_new_function((void*)js_module_enable_compile_cache, 1));
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("getCompileCacheDir", 18))},
-                            js_new_function((void*)js_module_get_compile_cache_dir, 0));
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("flushCompileCache", 17))},
-                            js_new_function((void*)js_module_flush_compile_cache, 0));
-            Item constants = js_new_object();
-            Item status = js_new_object();
-            js_property_set(status, js_cc_key("FAILED"), (Item){.item = i2it(0)});
-            js_property_set(status, js_cc_key("ENABLED"), (Item){.item = i2it(1)});
-            js_property_set(status, js_cc_key("ALREADY_ENABLED"), (Item){.item = i2it(2)});
-            js_property_set(status, js_cc_key("DISABLED"), (Item){.item = i2it(3)});
-            js_property_set(constants, js_cc_key("compileCacheStatus"), status);
-            js_property_set(module_ns, js_cc_key("constants"), constants);
-            // Module constructor stub
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("Module", 6))}, module_ns);
-            // default export is the module object itself
-            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("default", 7))}, module_ns);
-        }
-        js_cc_emit_cache_report();
-        return module_ns;
-    }
-    // node:test — basic test runner (test, describe, it)
-    if ((spec->len == 9 && memcmp(spec->chars, "node:test", 9) == 0)) {
-        extern Item js_get_node_test_namespace(void);
-        return js_get_node_test_namespace();
-    }
-    // worker_threads — minimal stub (isMainThread: true)
-    if ((spec->len == 14 && memcmp(spec->chars, "worker_threads", 14) == 0) ||
-        (spec->len == 17 && memcmp(spec->chars, "worker_threads.js", 17) == 0) ||
-        (spec->len == 19 && memcmp(spec->chars, "node:worker_threads", 19) == 0)) {
-        static Item wt_ns = {0};
-        static uint64_t wt_epoch = (uint64_t)-1;
-        if (wt_ns.item == 0 || wt_epoch != js_heap_epoch) {
-            wt_epoch = js_heap_epoch;
-            wt_ns = js_new_object();
-            heap_register_gc_root(&wt_ns.item);
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("isMainThread", 12))},
-                            (Item){.item = ITEM_TRUE});
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("parentPort", 10))},
-                            ItemNull);
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("workerData", 10))},
-                            ItemNull);
-            // MessageChannel/MessagePort constructors
-            extern Item js_message_channel_new(void);
-            extern Item js_message_port_new(void);
-            extern Item js_message_port_move_to_context(Item port, Item context);
-            extern Item js_message_port_receive_message_on_port(Item port);
-            extern Item js_worker_mark_as_untransferable(Item value);
-            extern Item js_worker_is_marked_as_untransferable(Item value);
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessageChannel", 14))},
-                            js_new_function((void*)js_message_channel_new, 0));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessagePort", 11))},
-                            js_new_function((void*)js_message_port_new, 0));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("moveMessagePortToContext", 24))},
-                            js_new_function((void*)js_message_port_move_to_context, 2));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("receiveMessageOnPort", 20))},
-                            js_new_function((void*)js_message_port_receive_message_on_port, 1));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("markAsUntransferable", 20))},
-                            js_new_function((void*)js_worker_mark_as_untransferable, 1));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("isMarkedAsUntransferable", 24))},
-                            js_new_function((void*)js_worker_is_marked_as_untransferable, 1));
-            // Worker constructor stub — creates a non-functional object
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("Worker", 6))},
-                            js_new_function((void*)js_stub_noop_object, 1));
-            // threadId
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("threadId", 8))},
-                            (Item){.item = i2it(0)});
-            // BroadcastChannel
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("BroadcastChannel", 16))},
-                            js_new_function((void*)js_stub_noop_object, 1));
-            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("default", 7))}, wt_ns);
-        }
-        return wt_ns;
-    }
-
-    // cluster — minimal primary/worker shim
-    if ((spec->len == 7 && memcmp(spec->chars, "cluster", 7) == 0) ||
-        (spec->len == 10 && memcmp(spec->chars, "cluster.js", 10) == 0) ||
-        (spec->len == 12 && memcmp(spec->chars, "node:cluster", 12) == 0)) {
-        static Item cl_ns = {0};
-        static uint64_t cl_epoch = (uint64_t)-1;
-        static bool cl_worker_mode = false;
-        bool is_worker = js_cluster_is_worker_process();
-        if (cl_ns.item == 0 || cl_epoch != js_heap_epoch || cl_worker_mode != is_worker) {
-            cl_epoch = js_heap_epoch;
-            cl_worker_mode = is_worker;
-            cl_ns = js_new_object();
-            heap_register_gc_root(&cl_ns.item);
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
-                            (Item){.item = b2it(!is_worker)});
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isMaster", 8))},
-                            (Item){.item = b2it(!is_worker)});
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
-                            (Item){.item = b2it(is_worker)});
-            if (is_worker) {
-                // cluster workers are selected by the inherited worker id, not
-                // by argv; otherwise the worker re-enters primary/testcase code.
-                js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("worker", 6))},
-                                js_cluster_make_worker_object());
-            }
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupPrimary", 12))},
-                            js_new_function((void*)js_cluster_setup_primary, 1));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupMaster", 11))},
-                            js_new_function((void*)js_cluster_setup_primary, 1));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("fork", 4))},
-                            js_new_function((void*)js_cluster_fork, 1));
-            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
-        }
-        return cl_ns;
-    }
-
-    // node:vm — code execution in contexts
-    if ((spec->len == 2 && memcmp(spec->chars, "vm", 2) == 0) ||
-        (spec->len == 5 && memcmp(spec->chars, "vm.js", 5) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "node:vm", 7) == 0)) {
-        extern Item js_get_vm_namespace(void);
-        return js_get_vm_namespace();
-    }
-    // node:perf_hooks — minimal stub with performance.now(), mark(), measure(), PerformanceObserver
-    if ((spec->len == 10 && memcmp(spec->chars, "perf_hooks", 10) == 0) ||
-        (spec->len == 13 && memcmp(spec->chars, "perf_hooks.js", 13) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "node:perf_hooks", 15) == 0)) {
-        static Item ph_ns = {0};
-        static uint64_t ph_epoch = (uint64_t)-1;
-        if (ph_ns.item == 0 || ph_epoch != js_heap_epoch) {
-            ph_epoch = js_heap_epoch;
-            ph_ns = js_new_object();
-            heap_register_gc_root(&ph_ns.item);
-            // performance object with now(), mark(), measure(), timeOrigin, etc.
-            extern Item js_performance_now(void);
-            Item perf = js_new_object();
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("now", 3))},
-                            js_new_function((void*)js_performance_now, 0));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("mark", 4))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("measure", 7))},
-                            js_new_function((void*)js_stub_noop, 3));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("clearMarks", 10))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("clearMeasures", 13))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("getEntries", 10))},
-                            js_new_function((void*)js_stub_noop, 0));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("getEntriesByName", 16))},
-                            js_new_function((void*)js_stub_noop, 2));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("getEntriesByType", 16))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("timeOrigin", 10))},
-                            (Item){.item = i2it(0)});
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("nodeTiming", 10))}, js_new_object());
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("timerify", 8))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(perf, (Item){.item = s2it(heap_create_name("eventLoopUtilization", 20))},
-                            js_new_function((void*)js_stub_noop_object, 0));
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
-            // PerformanceObserver — constructor that accepts callback
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("PerformanceObserver", 19))},
-                            js_new_function((void*)js_stub_noop_object, 1));
-            // PerformanceEntry — constructor stub
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("PerformanceEntry", 16))},
-                            js_new_function((void*)js_stub_noop_object, 0));
-            // monitorEventLoopDelay — returns histogram object
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("monitorEventLoopDelay", 21))},
-                            js_new_function((void*)js_stub_noop_object, 1));
-            // createHistogram
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("createHistogram", 15))},
-                            js_new_function((void*)js_stub_noop_object, 1));
-            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("default", 7))}, ph_ns);
-        }
-        return ph_ns;
-    }
-    // node:async_hooks — stub with AsyncLocalStorage, AsyncResource, createHook
-    if ((spec->len == 11 && memcmp(spec->chars, "async_hooks", 11) == 0) ||
-        (spec->len == 14 && memcmp(spec->chars, "async_hooks.js", 14) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "node:async_hooks", 16) == 0)) {
-        extern Item js_get_async_hooks_namespace(void);
-        return js_get_async_hooks_namespace();
-    }
-    // node:trace_events — dynamic trace category control used by Node tests.
-    if ((spec->len == 12 && memcmp(spec->chars, "trace_events", 12) == 0) ||
-        (spec->len == 15 && memcmp(spec->chars, "trace_events.js", 15) == 0) ||
-        (spec->len == 17 && memcmp(spec->chars, "node:trace_events", 17) == 0)) {
-        return js_get_trace_events_namespace();
-    }
-    // node:diagnostics_channel — channel/tracingChannel/subscribe/unsubscribe
-    if ((spec->len == 19 && memcmp(spec->chars, "diagnostics_channel", 19) == 0) ||
-        (spec->len == 22 && memcmp(spec->chars, "diagnostics_channel.js", 22) == 0) ||
-        (spec->len == 24 && memcmp(spec->chars, "node:diagnostics_channel", 24) == 0)) {
-        static Item dc_ns = {0};
-        static uint64_t dc_epoch = (uint64_t)-1;
-        if (dc_ns.item == 0 || dc_epoch != js_heap_epoch) {
-            dc_epoch = js_heap_epoch;
-            dc_ns = js_new_object();
-            heap_register_gc_root(&dc_ns.item);
-            js_dc_register_roots();
-            js_dc_channel_proto = js_new_object();
-            js_dc_tracing_channel_proto = js_new_object();
-            js_dc_bounded_channel_proto = js_new_object();
-            js_dc_channel_ctor = js_new_function((void*)js_dc_channel_factory, 1);
-            js_dc_tracing_channel_ctor = js_new_function((void*)js_dc_tracing_channel, 1);
-            js_dc_bounded_channel_ctor = js_new_function((void*)js_dc_bounded_channel, 1);
-            js_function_set_prototype(js_dc_channel_ctor, js_dc_channel_proto);
-            js_function_set_prototype(js_dc_tracing_channel_ctor, js_dc_tracing_channel_proto);
-            js_function_set_prototype(js_dc_bounded_channel_ctor, js_dc_bounded_channel_proto);
-            js_set_prototype(js_dc_bounded_channel_proto, js_dc_tracing_channel_proto);
-            js_property_set(js_dc_channel_proto,
-                            (Item){.item = s2it(heap_create_name("constructor", 11))},
-                            js_dc_channel_ctor);
-            js_property_set(js_dc_tracing_channel_proto,
-                            (Item){.item = s2it(heap_create_name("constructor", 11))},
-                            js_dc_tracing_channel_ctor);
-            js_property_set(js_dc_bounded_channel_proto,
-                            (Item){.item = s2it(heap_create_name("constructor", 11))},
-                            js_dc_bounded_channel_ctor);
-            js_install_native_accessor(
-                js_dc_tracing_channel_proto,
-                (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
-                js_new_function((void*)js_dc_tc_hasSubscribers_getter, 0),
-                ItemNull,
-                JSPD_NON_ENUMERABLE);
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("channel", 7))},
-                            js_new_function((void*)js_dc_channel_factory, 1));
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("tracingChannel", 14))},
-                            js_new_function((void*)js_dc_tracing_channel, 1));
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("boundedChannel", 14))},
-                            js_dc_bounded_channel_ctor);
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("subscribe", 9))},
-                            js_new_function((void*)js_dc_subscribe, 2));
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
-                            js_new_function((void*)js_dc_unsubscribe, 2));
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
-                            js_new_function((void*)js_dc_hasSubscribers, 1));
-            // Channel and TracingChannel classes
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("Channel", 7))},
-                            js_dc_channel_ctor);
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("TracingChannel", 14))},
-                            js_dc_tracing_channel_ctor);
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("BoundedChannel", 14))},
-                            js_dc_bounded_channel_ctor);
-            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dc_ns);
-        }
-        return dc_ns;
-    }
-    // node:v8 — minimal stub with serialize/deserialize and GC helpers
-    if ((spec->len == 2 && memcmp(spec->chars, "v8", 2) == 0) ||
-        (spec->len == 5 && memcmp(spec->chars, "v8.js", 5) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "node:v8", 7) == 0)) {
-        static Item v8_ns = {0};
-        static uint64_t v8_epoch = (uint64_t)-1;
-        if (v8_ns.item == 0 || v8_epoch != js_heap_epoch) {
-            v8_epoch = js_heap_epoch;
-            v8_ns = js_new_object();
-            heap_register_gc_root(&v8_ns.item);
-            js_new_function((void*)js_stub_noop, 0);
-            Item noop1 = js_new_function((void*)js_stub_noop, 1);
-            // promiseHooks stub — { onInit, onBefore, onAfter, onSettled, createHook }
-            Item ph = js_new_object();
-            js_property_set(ph, (Item){.item = s2it(heap_create_name("onInit", 6))}, noop1);
-            js_property_set(ph, (Item){.item = s2it(heap_create_name("onBefore", 8))}, noop1);
-            js_property_set(ph, (Item){.item = s2it(heap_create_name("onAfter", 7))}, noop1);
-            js_property_set(ph, (Item){.item = s2it(heap_create_name("onSettled", 9))}, noop1);
-            js_property_set(ph, (Item){.item = s2it(heap_create_name("createHook", 10))}, noop1);
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("promiseHooks", 12))}, ph);
-            // GC-related no-ops
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("getHeapStatistics", 17))},
-                            js_new_function((void*)js_stub_noop_object, 0));
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("getHeapSpaceStatistics", 21))},
-                            js_new_function((void*)js_stub_noop_object, 0));
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("setFlagsFromString", 18))}, noop1);
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("serialize", 9))}, noop1);
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("deserialize", 11))}, noop1);
-            Item startup_snapshot = js_new_object();
-            js_property_set(startup_snapshot,
-                            (Item){.item = s2it(heap_create_name("setDeserializeMainFunction", 26))},
-                            noop1);
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("startupSnapshot", 15))},
-                            startup_snapshot);
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("GCProfiler", 10))},
-                            js_new_function((void*)js_stub_noop_object, 0));
-            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("default", 7))}, v8_ns);
-        }
-        return v8_ns;
-    }
-    // node:tty — minimal stub with isatty, ReadStream, WriteStream
-    if ((spec->len == 3 && memcmp(spec->chars, "tty", 3) == 0) ||
-        (spec->len == 6 && memcmp(spec->chars, "tty.js", 6) == 0) ||
-        (spec->len == 8 && memcmp(spec->chars, "node:tty", 8) == 0)) {
-        static Item tty_ns = {0};
-        static uint64_t tty_epoch = (uint64_t)-1;
-        if (tty_ns.item == 0 || tty_epoch != js_heap_epoch) {
-            tty_epoch = js_heap_epoch;
-            tty_ns = js_new_object();
-            heap_register_gc_root(&tty_ns.item);
-            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("isatty", 6))},
-                            js_new_function((void*)js_stub_noop, 1));
-            Item write_stream_fn = js_new_function((void*)js_stub_noop_object, 1);
-            Item read_stream_fn = js_new_function((void*)js_stub_noop_object, 1);
-            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("WriteStream", 11))},
-                            write_stream_fn);
-            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("ReadStream", 10))},
-                            read_stream_fn);
-
-            Item write_stream_proto = js_new_object();
-            Item read_stream_proto = js_new_object();
-            js_property_set(write_stream_fn, (Item){.item = s2it(heap_create_name("prototype", 9))},
-                            write_stream_proto);
-            js_property_set(read_stream_fn, (Item){.item = s2it(heap_create_name("prototype", 9))},
-                            read_stream_proto);
-            js_property_set(write_stream_proto, (Item){.item = s2it(heap_create_name("constructor", 11))},
-                            write_stream_fn);
-            js_property_set(read_stream_proto, (Item){.item = s2it(heap_create_name("constructor", 11))},
-                            read_stream_fn);
-            js_mark_non_enumerable(write_stream_proto,
-                                   (Item){.item = s2it(heap_create_name("constructor", 11))});
-            js_mark_non_enumerable(read_stream_proto,
-                                   (Item){.item = s2it(heap_create_name("constructor", 11))});
-            js_function_set_prototype(write_stream_fn, write_stream_proto);
-            js_function_set_prototype(read_stream_fn, read_stream_proto);
-
-            extern Item js_get_net_namespace(void);
-            Item net_ns = js_get_net_namespace();
-            Item socket_fn = js_property_get(net_ns, (Item){.item = s2it(heap_create_name("Socket", 6))});
-            Item socket_proto = js_property_get(socket_fn,
-                                                (Item){.item = s2it(heap_create_name("prototype", 9))});
-            if (get_type_id(socket_fn) == LMD_TYPE_FUNC) {
-                js_set_prototype(write_stream_fn, socket_fn);
-                js_set_prototype(read_stream_fn, socket_fn);
-            }
-            if (get_type_id(socket_proto) == LMD_TYPE_MAP) {
-                js_set_prototype(write_stream_proto, socket_proto);
-                js_set_prototype(read_stream_proto, socket_proto);
-            }
-            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tty_ns);
-        }
-        return tty_ns;
-    }
-    // node:fs/promises — wrap fs sync methods as promise-returning functions
-    if ((spec->len == 11 && memcmp(spec->chars, "fs/promises", 11) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "node:fs/promises", 16) == 0)) {
-        return js_get_fs_promises_namespace();
-    }
-    // internal/fs/promises — FileHandle constructor surface used by official tests.
-    if ((spec->len == 20 && memcmp(spec->chars, "internal/fs/promises", 20) == 0) ||
-        (spec->len == 23 && memcmp(spec->chars, "internal/fs/promises.js", 23) == 0)) {
-        return js_get_internal_fs_promises_namespace();
-    }
-    // internal/fs/utils — selected helpers used by official fs tests
-    if ((spec->len == 17 && memcmp(spec->chars, "internal/fs/utils", 17) == 0) ||
-        (spec->len == 20 && memcmp(spec->chars, "internal/fs/utils.js", 20) == 0)) {
-        extern Item js_get_internal_fs_utils_namespace(void);
-        return js_get_internal_fs_utils_namespace();
-    }
-    // node:dns/promises — promise-based DNS API
-    if ((spec->len == 12 && memcmp(spec->chars, "dns/promises", 12) == 0) ||
-        (spec->len == 17 && memcmp(spec->chars, "node:dns/promises", 17) == 0)) {
-        extern Item js_get_dns_promises_namespace(void);
-        return js_get_dns_promises_namespace();
-    }
-    // internal/crypto/util — selected helpers used by crypto tests.
-    if ((spec->len == 20 && memcmp(spec->chars, "internal/crypto/util", 20) == 0) ||
-        (spec->len == 23 && memcmp(spec->chars, "internal/crypto/util.js", 23) == 0)) {
-        static Item crypto_util_ns = {0};
-        static uint64_t crypto_util_epoch = (uint64_t)-1;
-        if (crypto_util_ns.item == 0 || crypto_util_epoch != js_heap_epoch) {
-            crypto_util_epoch = js_heap_epoch;
-            crypto_util_ns = js_new_object();
-            heap_register_gc_root(&crypto_util_ns.item);
-            js_property_set(crypto_util_ns,
-                (Item){.item = s2it(heap_create_name("getOpenSSLSecLevel", 18))},
-                js_new_function((void*)js_internal_crypto_getOpenSSLSecLevel, 0));
-            js_property_set(crypto_util_ns,
-                (Item){.item = s2it(heap_create_name("default", 7))},
-                crypto_util_ns);
-        }
-        return crypto_util_ns;
-    }
-    // internal/util — selected internal symbols used by official Node.js tests
-    if ((spec->len == 13 && memcmp(spec->chars, "internal/util", 13) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "internal/util.js", 16) == 0)) {
-        static Item internal_util_ns = {0};
-        static uint64_t internal_util_epoch = (uint64_t)-1;
-        if (internal_util_ns.item == 0 || internal_util_epoch != js_heap_epoch) {
-            internal_util_epoch = js_heap_epoch;
-            internal_util_ns = js_new_object();
-            heap_register_gc_root(&internal_util_ns.item);
-            js_property_set(internal_util_ns,
-                (Item){.item = s2it(heap_create_name("customPromisifyArgs", 19))},
-                js_util_custom_promisify_args_symbol());
-            js_property_set(internal_util_ns,
-                (Item){.item = s2it(heap_create_name("default", 7))},
-                internal_util_ns);
-        }
-        return internal_util_ns;
-    }
-    // internal/util/inspect — selected string-width helpers for readline tests
-    if ((spec->len == 21 && memcmp(spec->chars, "internal/util/inspect", 21) == 0) ||
-        (spec->len == 24 && memcmp(spec->chars, "internal/util/inspect.js", 24) == 0)) {
-        static Item internal_util_inspect_ns = {0};
-        static uint64_t internal_util_inspect_epoch = (uint64_t)-1;
-        if (internal_util_inspect_ns.item == 0 || internal_util_inspect_epoch != js_heap_epoch) {
-            internal_util_inspect_epoch = js_heap_epoch;
-            internal_util_inspect_ns = js_new_object();
-            heap_register_gc_root(&internal_util_inspect_ns.item);
-            js_property_set(internal_util_inspect_ns,
-                (Item){.item = s2it(heap_create_name("getStringWidth", 14))},
-                js_new_function((void*)js_internal_util_inspect_get_string_width, 1));
-            js_property_set(internal_util_inspect_ns,
-                (Item){.item = s2it(heap_create_name("stripVTControlCharacters", 24))},
-                js_new_function((void*)js_internal_util_inspect_strip_vt, 1));
-            js_property_set(internal_util_inspect_ns,
-                (Item){.item = s2it(heap_create_name("default", 7))},
-                internal_util_inspect_ns);
-        }
-        return internal_util_inspect_ns;
-    }
-    // internal/async_hooks — selected helpers used by stream/async tests.
-    if ((spec->len == 20 && memcmp(spec->chars, "internal/async_hooks", 20) == 0) ||
-        (spec->len == 23 && memcmp(spec->chars, "internal/async_hooks.js", 23) == 0)) {
-        return js_get_internal_async_hooks_namespace();
-    }
-    // internal/repl — minimal createInternalRepl used by permission/completion tests.
-    if ((spec->len == 13 && memcmp(spec->chars, "internal/repl", 13) == 0) ||
-        (spec->len == 16 && memcmp(spec->chars, "internal/repl.js", 16) == 0)) {
-        static Item internal_repl_ns = {0};
-        static uint64_t internal_repl_epoch = (uint64_t)-1;
-        if (internal_repl_ns.item == 0 || internal_repl_epoch != js_heap_epoch) {
-            internal_repl_epoch = js_heap_epoch;
-            internal_repl_ns = js_new_object();
-            heap_register_gc_root(&internal_repl_ns.item);
-            js_property_set(internal_repl_ns, (Item){.item = s2it(heap_create_name("createInternalRepl", 18))},
-                            js_new_function((void*)js_internal_repl_create, 3));
-            js_property_set(internal_repl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, internal_repl_ns);
-        }
-        return internal_repl_ns;
-    }
-    // internal/async_context_frame — selected AsyncContextFrame surface.
-    if ((spec->len == 28 && memcmp(spec->chars, "internal/async_context_frame", 28) == 0) ||
-        (spec->len == 31 && memcmp(spec->chars, "internal/async_context_frame.js", 31) == 0)) {
-        return js_get_internal_async_context_frame_namespace();
-    }
-    // internal/streams/add-abort-signal — no-validate helper used by stream tests.
-    if ((spec->len == 33 && memcmp(spec->chars, "internal/streams/add-abort-signal", 33) == 0) ||
-        (spec->len == 36 && memcmp(spec->chars, "internal/streams/add-abort-signal.js", 36) == 0)) {
-        extern Item js_get_internal_stream_add_abort_signal_namespace(void);
-        return js_get_internal_stream_add_abort_signal_namespace();
-    }
-    // internal/streams/end-of-stream — bounded native EOS shim backed by stream.finished.
-    if ((spec->len == 30 && memcmp(spec->chars, "internal/streams/end-of-stream", 30) == 0) ||
-        (spec->len == 33 && memcmp(spec->chars, "internal/streams/end-of-stream.js", 33) == 0)) {
-        extern Item js_get_internal_stream_end_of_stream_namespace(void);
-        return js_get_internal_stream_end_of_stream_namespace();
-    }
-    // internal/streams/state — selected stream state helpers used by Node tests.
-    if ((spec->len == 22 && memcmp(spec->chars, "internal/streams/state", 22) == 0) ||
-        (spec->len == 25 && memcmp(spec->chars, "internal/streams/state.js", 25) == 0)) {
-        extern Item js_get_internal_stream_state_namespace(void);
-        return js_get_internal_stream_state_namespace();
-    }
-    // internal/test/binding — provides internalBinding() for Node.js tests
-    if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0) ||
-        (spec->len == 24 && memcmp(spec->chars, "internal/test/binding.js", 24) == 0)) {
-        static Item itb_ns = {0};
-        static uint64_t itb_epoch = (uint64_t)-1;
-        static uint64_t itb_warning_epoch = (uint64_t)-1;
-        static bool itb_warning_scheduled = false;
-        if (itb_ns.item == 0 || itb_epoch != js_heap_epoch) {
-            itb_epoch = js_heap_epoch;
-            itb_ns = js_new_object();
-            heap_register_gc_root(&itb_ns.item);
-            // internalBinding('uv') — UV error codes
-            // Build a stub that returns objects based on binding name
-            // The actual implementation is in js_internal_binding()
-            extern Item js_internal_binding(Item name);
-            js_property_set(itb_ns,
-                (Item){.item = s2it(heap_create_name("internalBinding", 15))},
-                js_new_function((void*)js_internal_binding, 1));
-            js_property_set(itb_ns, (Item){.item = s2it(heap_create_name("default", 7))}, itb_ns);
-        }
-        if (itb_warning_epoch != js_heap_epoch) {
-            itb_warning_epoch = js_heap_epoch;
-            itb_warning_scheduled = false;
-        }
-        if (!itb_warning_scheduled) {
-            itb_warning_scheduled = true;
-            js_next_tick_enqueue(js_new_function((void*)js_emit_internal_test_binding_warning, 0));
-        }
-        return itb_ns;
-    }
-    // node:repl — minimal stub with start(), REPLServer, REPL_MODE_*
-    if ((spec->len == 4 && memcmp(spec->chars, "repl", 4) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "repl.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:repl", 9) == 0)) {
-        static Item repl_ns = {0};
-        static uint64_t repl_epoch = (uint64_t)-1;
-        if (repl_ns.item == 0 || repl_epoch != js_heap_epoch) {
-            repl_epoch = js_heap_epoch;
-            repl_ns = js_new_object();
-            heap_register_gc_root(&repl_ns.item);
-            // start() — returns a minimal REPL server object
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("start", 5))},
-                            js_new_function((void*)js_repl_start, 3));
-            // REPLServer constructor
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("REPLServer", 10))},
-                            js_new_function((void*)js_repl_start, 3));
-            // REPL mode constants
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("REPL_MODE_SLOPPY", 16))},
-                            (Item){.item = s2it(heap_create_name("sloppy", 6))});
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("REPL_MODE_STRICT", 16))},
-                            (Item){.item = s2it(heap_create_name("strict", 6))});
-            // Recoverable error class
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("Recoverable", 11))},
-                            js_new_function((void*)js_repl_recoverable_ctor, 1));
-            js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, repl_ns);
-        }
-        return repl_ns;
-    }
-    // readline/promises, node:readline/promises
-    if ((spec->len == 17 && memcmp(spec->chars, "readline/promises", 17) == 0) ||
-        (spec->len == 22 && memcmp(spec->chars, "node:readline/promises", 22) == 0)) {
-        extern Item js_get_readline_promises_namespace(void);
-        return js_get_readline_promises_namespace();
-    }
-    // node:punycode — deprecated but some tests import it
-    if ((spec->len == 8 && memcmp(spec->chars, "punycode", 8) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "punycode.js", 11) == 0) ||
-        (spec->len == 13 && memcmp(spec->chars, "node:punycode", 13) == 0)) {
-        static Item pc_ns = {0};
-        static uint64_t pc_epoch = (uint64_t)-1;
-        if (pc_ns.item == 0 || pc_epoch != js_heap_epoch) {
-            pc_epoch = js_heap_epoch;
-            pc_ns = js_new_object();
-            heap_register_gc_root(&pc_ns.item);
-            // Basic stubs
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("encode", 6))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("decode", 6))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("toASCII", 7))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("toUnicode", 9))},
-                            js_new_function((void*)js_stub_noop, 1));
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("version", 7))},
-                            (Item){.item = s2it(heap_create_name("2.3.1", 5))});
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("ucs2", 4))}, js_new_object());
-            js_property_set(pc_ns, (Item){.item = s2it(heap_create_name("default", 7))}, pc_ns);
-        }
-        return pc_ns;
-    }
-    // node:domain — stub with create() method that returns Domain-like objects
-    if ((spec->len == 6 && memcmp(spec->chars, "domain", 6) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "domain.js", 9) == 0) ||
-        (spec->len == 11 && memcmp(spec->chars, "node:domain", 11) == 0)) {
-        static uint64_t dom_epoch = (uint64_t)-1;
-        if (js_domain_namespace.item == 0 || dom_epoch != js_heap_epoch) {
-            dom_epoch = js_heap_epoch;
-            js_domain_namespace = js_new_object();
-            heap_register_gc_root(&js_domain_namespace.item);
-            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("create", 6))},
-                            js_new_function((void*)js_domain_create, 0));
-            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("createDomain", 12))},
-                            js_new_function((void*)js_domain_create, 0));
-            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("Domain", 6))},
-                            js_new_function((void*)js_domain_create, 0));
-            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("default", 7))}, js_domain_namespace);
-            js_domain_sync_visible_state();
-        }
-        return js_domain_namespace;
-    }
-
     return ItemNull;
 }
 
@@ -40147,27 +39498,7 @@ extern "C" Item js_module_get(Item specifier) {
 extern "C" Item js_module_is_builtin(Item id) {
     if (get_type_id(id) != LMD_TYPE_STRING) return (Item){.item = ITEM_FALSE};
     String* s = it2s(id);
-    const char* name = s->chars;
-    int len = (int)s->len;
-    // strip "node:" prefix if present
-    if (len > 5 && memcmp(name, "node:", 5) == 0) {
-        name += 5;
-        len -= 5;
-    }
-    static const char* builtins[] = {
-        "assert", "buffer", "child_process", "cluster", "console", "crypto", "dns",
-        "diagnostics_channel", "domain", "events", "fs", "http", "https",
-        "module", "net", "os", "path", "perf_hooks", "process", "punycode",
-        "querystring", "readline", "readline/promises", "repl", "stream", "string_decoder",
-        "timers", "tls", "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
-        "async_hooks", "internal/util", "internal/util/inspect"
-    };
-    int n = sizeof(builtins) / sizeof(builtins[0]);
-    for (int i = 0; i < n; i++) {
-        if ((int)strlen(builtins[i]) == len && memcmp(builtins[i], name, len) == 0)
-            return (Item){.item = ITEM_TRUE};
-    }
-    return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(jube_specifier_is_builtin(s->chars))};
 }
 
 extern "C" Item js_module_create_require(Item filename) {

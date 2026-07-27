@@ -7435,12 +7435,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val));
                     return jm_emit_null(mt);
                 }
-                // process.hrtime.bigint()
-                if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "process", 7) == 0 &&
-                    mid->name && mid->name->len == 6 && strncmp(mid->name->chars, "hrtime", 6) == 0 &&
-                    prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "bigint", 6) == 0) {
-                    return jm_call_0(mt, "js_process_hrtime_bigint", MIR_T_I64);
-                }
             }
         }
     }
@@ -11322,6 +11316,11 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
 
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+    if (mem->object && mem->object->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        // A call-result receiver has no lexical binding. Root it before key
+        // materialization can collect and relocate it on the way to property access.
+        jm_create_gc_root_slot(mt, obj);
+    }
     jm_emit_exc_propagate_check(mt);
 
     // Generator spill: if computed key contains yield, obj reg will be stale after resume

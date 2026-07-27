@@ -8,6 +8,26 @@ extern "C" {
 
 int jube_register_static_module(const JubeModuleDef* module);
 int jube_load_dynamic_module(const char* path, const char* entry_symbol);
+
+// Runtime-library specifiers are cataloged separately from dynamic activation.
+// Catalog queries never execute a module initializer; resolve may activate a
+// manifest-selected module only when a script actually requests its namespace.
+typedef enum JubeSpecifierResolveStatus {
+    JUBE_SPECIFIER_UNKNOWN = 0,
+    JUBE_SPECIFIER_UNAVAILABLE = 1,
+    JUBE_SPECIFIER_ACTIVATION_FAILED = 2,
+    JUBE_SPECIFIER_RESOLVED = 3,
+} JubeSpecifierResolveStatus;
+
+typedef bool (*JubeSpecifierNameCallback)(const char* name, void* user);
+
+bool jube_specifier_catalog_contains(const char* name);
+bool jube_specifier_is_builtin(const char* name);
+// Resolves only a descriptor that is already active in this process. This is
+// safe for compiler and engine fast paths that must never activate a library.
+JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace);
+JubeSpecifierResolveStatus jube_specifier_resolve(const char* name, Item* out_namespace);
+bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user);
 // Supplies argv[0] so the registry can discover a bundle next to the unified
 // host even when the current working directory is a user project.
 void jube_set_host_executable_path(const char* executable_path);
@@ -15,15 +35,27 @@ void jube_set_host_executable_path(const char* executable_path);
 // fallback. It performs no work for already registered languages.
 bool jube_discover_hosted_language(const char* selector);
 void jube_register_builtin_modules(void);
+// Returns whether the selected bundle profile includes the optional Node
+// compatibility descriptor. The executable owns its registration because
+// validation DSOs deliberately do not link node-core implementation objects.
+bool jube_node_core_module_enabled(void);
+// Tests and launchers select Node compatibility services through the same
+// module-set manifest. Optional static modules must not bypass that profile.
+bool jube_node_module_enabled(const char* module_name);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);
+const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
 const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 void jube_notify_heap_cleanup(void* heap);
 // Releases process-lifetime Jube registry allocations before memtrack shutdown.
 void jube_registry_cleanup(void);
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 void jube_modules_runtime_reset(void);
+// JS owns the lifecycle boundary and calls these only while its current heap
+// is live. The opaque session becomes invalid immediately after detach.
+void jube_modules_runtime_attach(void);
+void jube_modules_runtime_detach(void);
 
 // Internal host bridge for import-time language dispatch.  The returned
 // wrapper is opaque to the language module and is always released by the

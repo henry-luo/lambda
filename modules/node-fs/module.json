@@ -1,0 +1,22 @@
+{
+  "name": "node-fs",
+  "version": "0.1.0",
+  "base_abi_version": 2,
+  "hosted_api_version": 1,
+  "host_build_id": "lambda-hosted-lang-20260727-h9b40",
+  "kind": "runtime-library",
+  "engine": "js",
+  "provides": [
+    "fs",
+    "fs/promises"
+  ],
+  "dependencies": [
+    "node-core"
+  ],
+  "resources": [],
+  "library_macos": "node-fs.dylib",
+  "library_linux": "node-fs.so",
+  "library_windows": "node-fs.dll",
+  "entry_symbol": "jube_module",
+  "sha256_macos": "90ff140e6f024d12880a23d887587905f989a05c1c4bfbd8eb19d960370ddd55"
+}
