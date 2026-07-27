@@ -22,6 +22,7 @@
 #include "js_dom_observers.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../jube/jube_registry.h"
 #include "../io/mark_builder.hpp"
 #include "../io/mark_editor.hpp"
 #include "../core/mark_reader.hpp"
@@ -1689,6 +1690,14 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         }
     }
     if (dom_doc) {
+        // document binding creates Radiant-owned wrappers before the first JS
+        // DOM property read; lazy module activation must therefore complete at
+        // this boundary or radiant_host_api remains null during bootstrap.
+        const JubeModuleDef* radiant = jube_find_static_module("radiant");
+        if (!radiant || !jube_activate_module(radiant)) {
+            log_error("js_dom_set_document: failed to activate radiant module");
+            return;
+        }
         js_doc_mark_has_browsing_context(dom_doc);
         DomDocument* doc = (DomDocument*)dom_doc;
         // Batch-mode page scripts enter a fresh JS realm after document load;

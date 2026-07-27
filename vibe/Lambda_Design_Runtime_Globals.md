@@ -9,10 +9,34 @@
 
 ## 1. Goal
 
-> Only `lambda.exe` (the CLI/batch shell in `lambda/main.cpp`) may hold process globals.
-> The Lambda and JS runtimes run purely on `EvalContext`. Executed/interpreted code must not
-> read or write any process global. All runtime process globals and TLS variables migrate to
-> fields (or capsules) under `EvalContext`.
+> **No context-dependent mutable semantic state may remain process-global.**
+> The Lambda and JS runtimes execute through a long-lived `EvalContext` identity. Any value
+> that may differ between two live contexts, and whose mutation can affect script-visible
+> results, errors, timing, visibility, or behavior, belongs to that context (or to an explicitly
+> shared object such as an agent cluster), never to one process-wide storage slot.
+
+The practical review test is:
+
+> If context A writes the value, can context B subsequently observe different behavior because
+> of that write? If yes, the value is context-dependent semantic state and must not be global.
+
+This deliberately permits process-wide storage that is independent of context semantics:
+immutable registries, explicitly process-wide policy frozen before execution, diagnostics that
+never feed execution, signal/thread infrastructure, and locked library bookkeeping. Those
+exceptions are tagged and constrained below; "global" alone is not the bug, shared mutable
+semantic ownership is.
+
+The migration has an equally strong performance invariant:
+
+> **No lock, atomic read-modify-write, publication check, or shared-cache coherence operation is
+> added to a repeated execution path.** Synchronization is allowed at module/context
+> construction, one-time publication, invalidation, and explicitly shared language operations
+> such as Atomics. Mutable hot-path data is context-owned and accessed with ordinary loads and
+> stores by its single owner thread.
+
+The desired result is structural cleanup **and** equal-or-better steady-state performance.
+Moving a global behind a lock or atomic is not an acceptable migration for ICs, module variables,
+call/eval registers, exception state, queues, timers, or other repeated runtime paths.
 
 Why now:
 
@@ -35,32 +59,91 @@ Every file-scope mutable variable (global, `static`, `__thread`, `thread_local`)
 
 | Tag | Meaning | Verdict |
 |-----|---------|---------|
-| **B** | Bootstrap root — the one pointer that *finds* the context | stays TLS (see RG1) |
-| **R** | Runtime state — read/written while script executes | **migrate to EvalContext** |
+| **B** | Bootstrap root — the one pointer that *finds* the active context | stays TLS (see RG1) |
+| **R** | Context-dependent mutable semantic runtime state | **migrate to EvalContext** (or an explicit shared semantic owner) |
 | **C** | Compile-time state — parser/AST/transpiler/MIR-codegen | migrate to `Runtime` / transpiler object (RG12) |
-| **I** | Init-once immutable registry — written during process init, read-only after | stays process-global (RG6) |
+| **I** | Init-once immutable registry/config — safely published, read-only after freeze | stays process-global (RG6) |
 | **T** | Thread infrastructure — stack guard, side-stack backing, signal recovery | stays `__thread` (RG10) |
 | **S** | Shell state — `lambda/main.cpp`, REPL, batch protocol | stays (user rule: lambda.exe may hold globals) |
-| **D** | Env-gated diagnostics/stats — profile counters, atexit reports | may stay process-global; must never feed semantics (RG7) |
-| **L** | Library infra — log, mempool, mem_context, memtrack | stays; already process-scoped by design |
+| **D** | Env-gated diagnostics/stats — profile counters, atexit reports | may stay process-global; must be race-safe and never feed semantics (RG7) |
+| **L** | Library infra — log, mempool, mem_context, memtrack | stays only where process scope is intentional and no context pointer/state is retained |
 | **X** | Vendored third-party (`lib/sqlite`, tree-sitter) | out of scope |
 
 The end-state invariant, checkable by grep + lint:
 
 > In `lambda/runtime/`, `lambda/core/`, `lambda/js/`, `lambda/module/`, guest runtimes:
-> **no mutable file-scope variable tagged R remains.** Every remaining global is tagged
-> B/C/I/T/D in a comment at its declaration, e.g. `// global-ok: I (init-once registry)`.
+> **no mutable file-scope variable tagged R or C remains.** During migration every remaining
+> mutable global is tagged B/C/I/T/D; at exit only B/I/T/D remain, e.g.
+> `// global-ok: I (frozen registry)`.
+> A tag is a reviewed ownership claim, not a lint escape hatch: I must be frozen and safely
+> published; D must not affect semantics; T must not carry context-owned data.
 
 ---
 
 ## 3. Design decisions (RG ledger)
 
+### RG0 — `EvalContext` is the long-lived isolate identity
+
+Today `EvalContext` is used for several different things: `Runner::context` is embedded in a
+short-lived runner, cleanup builds a stack temporary containing only a heap, timers fabricate a
+borrowed `runtime_ctx`, and guest/module entrypoints construct activation-local contexts. That
+is compatible with process globals because the real state lives elsewhere; it is incompatible
+with capsules owned by "the context".
+
+End state:
+
+- A logical isolate has one **canonical, long-lived `EvalContext`**. `Runtime` owns compile
+  artifacts and owns or indexes its live contexts; a context owns its heap-facing runtime state,
+  scheduler binding, and capsules.
+- `Runner`, timer callbacks, module entrypoints, cleanup, and guest activations **borrow a
+  canonical context**. They do not create a partial `EvalContext` merely to make TLS-dependent
+  helpers work.
+- `EvalContextScope` (name illustrative) saves the previous `context`, binds the canonical
+  context for a native/JIT entry, and restores it on every normal exit. Recovery checkpoints
+  also snapshot/restore the binding explicitly; `siglongjmp` cannot rely on a C++ destructor.
+  Async records retain a stable context handle/control block plus a generation token, not a raw
+  pointer whose token check would dereference freed storage. A callback for a destroyed or
+  replaced context is suppressed, never rebound to a look-alike heap.
+- Truly standalone paths (`convert`, standalone guest execution) create a complete minimal
+  context through `eval_context_init` / `eval_context_destroy`. Raw `memset`, copying, or
+  partial stack fabrication of an initialized `EvalContext` is forbidden.
+- `Runtime` and `EvalContext` are not synonyms: `Runtime` owns context-independent compile and
+  module artifacts; `EvalContext` owns one isolate's instantiated semantic state. A Runtime may
+  serve more than one context only where the shared artifacts satisfy the MT2 contract (§5.5).
+- A Runtime outlives every context it indexes. Context destruction first closes its stable
+  handle, cancels/drains records that retain it, and releases context module instances; only
+  after all contexts are gone may Runtime-owned code and metadata be destroyed.
+
+This makes `persistent_last_error` mergeable into the canonical context: its current separate
+TLS lifetime exists only because `Runner::context` is stack-owned. Establish this ownership
+model before moving the first global.
+
+The current `Runtime` mixes these owners too. Its `heap`, `name_pool`, scheduler, DOM/result
+arena, JS bootstrap/runtime-used flags, and other instantiated-run fields become context-owned
+(or per-context entries); compile options, source/module indexes, and sealed artifacts remain
+Runtime-owned. Transitional Runtime pointers may alias a designated context but are non-owning
+and cannot be used once one Runtime serves multiple contexts.
+
+| State kind | Owner |
+|---|---|
+| Sealed code, AST/type metadata, immutable module descriptors | `Runtime` |
+| Heap, globals, module instances, event loop, DOM/guest state | canonical `EvalContext` |
+| Current call/eval/exception registers | activation portion of the context capsule, owner-thread only |
+| Atomics/SharedArrayBuffer agent coordination | explicit shared `JsAgentCluster` |
+| Stack guard, signal checkpoint, side-stack backing | thread infrastructure |
+| CLI/REPL/batch protocol | shell |
+
 ### RG1 — Exactly one bootstrap TLS root
 
 `__thread EvalContext* context` ([runtime-state.cpp:6](../lambda/runtime/runtime-state.cpp)) is
-the *only* sanctioned runtime TLS variable. It is not state — it is the address of the state.
-Chicken-and-egg makes it irreducible: something outside `EvalContext` must locate the current
-`EvalContext`.
+the *only* sanctioned runtime TLS root. It is execution authority, not semantic storage: it
+identifies which canonical context the current native/JIT activation may access. Chicken-and-egg
+makes one such root irreducible.
+
+Every entry from shell, worker, event loop, retained callback, guest runtime, or host API must
+install an `EvalContextScope` before it can execute code or register roots. Nested entries restore
+the previous binding. Functions may assume `context != NULL` only when their API contract says
+they execute inside such a scope; init/compile helpers must accept an explicit owner instead.
 
 `input_context` / `input_allocation_context` ([input.cpp:27](../lambda/input/input.cpp)) are a
 second and third root today. They exist because input parsing can run without a full
@@ -69,13 +152,14 @@ second and third root today. They exist because input parsing can run without a 
 construct a minimal `EvalContext` (it already builds a `Context` with pool/arena; the marginal
 cost is nil). Until that lands they are tolerated as transitional roots, tagged B-transitional.
 
-### RG2 — Capsule pointers, not inline megastructs
+### RG2 — Capsule pointers on the canonical context, not inline megastructs
 
 `EvalContext` grows **opaque capsule pointers**, lazily allocated:
 
 ```c
 struct EvalContext : Context {
     ...existing...
+    EvalContextHandle* handle;    // stable async lifetime/generation control block
     JsRuntimeState* js_state;     // JS "registers" + eval bridge + intrinsics (NULL until JS runs)
     JsEventLoop*    js_loop;      // uv loop + microtask/nextTick/rAF rings + timers (K3)
     JsDomState*     js_dom;       // document bindings + live-collection caches
@@ -90,21 +174,26 @@ struct EvalContext : Context {
 Rules:
 - The JIT-visible `Context` **prefix stays frozen** — capsules are appended on the
   `EvalContext` C++ side only, so no MIR ABI change and no `lambda.h` layout churn.
-- Capsules are **allocated once per context and never reallocated** — `JsRootRange` slots and
+- Capsules are **allocated once per canonical context and never reallocated** — `JsRootRange` slots and
   every GC-registered `Item` array must have addresses that "outlive every heap epoch"
   (js_runtime_state.hpp's own contract). No growable containers for rooted ranges.
-- Root registration already targets the per-context collector
-  (`heap_register_gc_root_range` → `context->heap->gc`, [lambda-mem.cpp:429](../lambda/runtime/lambda-mem.cpp)),
-  so capsule roots register against the owning heap with no collector change.
+- Capsule creation is explicit at execution boundaries (`eval_context_ensure_js_state`, etc.),
+  never hidden in a macro, signal/recovery handler, GC callback, or allocator fast path.
+- `eval_context_reset_run_state`, `eval_context_replace_heap`, and `eval_context_destroy` define
+  separate lifecycle operations. Destruction clears/unregisters precise roots and drains/releases
+  async owners before the heap or capsule storage is released.
+- Existing `memset(..., sizeof(EvalContext))` and partial temporary contexts must be removed or
+  confined to pre-init storage as part of RG0. Once initialized, a context is non-copyable and
+  can only be reset through lifecycle APIs.
 
 ### RG3 — The macro pivot is the migration mechanism
 
 `js_runtime_state.hpp` already funnels ~40 legacy names through defines:
 `#define js_exception_pending (js_runtime_state.exception.pending)` etc. That makes step one
-mechanical: change the expansion root once —
+mostly mechanical after RG0/RG5: change the expansion root once —
 
 ```c
-#define js_rt_state (*context->js_state)          // was: extern JsRuntimeState js_runtime_state
+#define js_rt_state (*context->js_state)          // boundary-established, no per-use check
 #define js_exception_pending (js_rt_state.exception.pending)
 ```
 
@@ -113,7 +202,14 @@ file-scope statics: group each file's statics into a named file-capsule struct, 
 names with `#define`, hang the capsule off the right `EvalContext` capsule. Mass-rename comes
 later (or never); ownership moves now.
 
-### RG4 — `_lambda_rt`: from process global to derived register
+Before the pivot, classify every macro use as execution-side R or compile-side C. Compile/init
+code must not acquire an implicit current context. A checked boundary operation establishes
+`context != NULL && context->js_state != NULL` before JS execution; the compatibility macros do
+not repeat that check. Debug boundary assertions make ownership bugs visible during migration.
+Native hotspots progressively take/hoist `JsRuntimeState*` explicitly so repeated macro
+expansions do not reload TLS and the capsule pointer.
+
+### RG4 — `_lambda_rt`: from process global to hidden context argument
 
 The one global with a hard constraint: MIR cannot express TLS, and the import mechanism bakes
 `&_lambda_rt` into generated code at `MIR_link` time
@@ -124,37 +220,71 @@ other thread. Options:
 | Option | Mechanism | Cost | Concurrency |
 |---|---|---|---|
 | A (status quo) | plain global + save/restore discipline (`prev_lambda_rt` dances in [js_event_loop.cpp:465](../lambda/js/js_event_loop.cpp), [js_mir_module_batch_lowering.cpp:8295](../lambda/js/js_mir_module_batch_lowering.cpp)) | zero | single executor only |
-| B (entry call) | JIT'd function calls `Context* lambda_rt_current(void)` once at entry (native helper reads `__thread context`), caches in a local reg; all `rt` uses read the local | one call+move per function entry; replaces today's absolute-address load per use | correct for N threads |
-| C (hidden arg) | thread `Context*` as an extra parameter through every JIT↔JIT call (generalizes `main(Context*)`) | best steady-state perf (a register); ABI change touching fn->invoke entries, closures, dynamic dispatch | correct for N threads |
+| B (entry call) | JIT'd function calls `Context* lambda_rt_current(void)` once at entry, caches in a local reg | repeated native call/TLS lookup at every function entry | correct but not an acceptable performance end-state |
+| C (hidden arg) | thread `Context*` as a hidden parameter through every JIT↔JIT call (generalizes `main(Context*)`) | ABI/codegen change; steady-state context stays in a call argument/register | correct for N threads; no lookup/call added per function |
 
-**Decision:** phase it. Keep A while single-executor holds (it is not wrong today, and every JT
-decision keeps it additive). Implement **B** as the concurrency-enabling step — it is local to
-codegen (`transpile-mir.cpp` prologue + the JS lowering's `jm_ensure_import("_lambda_rt")`
-sites) and deletes the global and all save/restore dances at once. Record **C** as the KIV
-end-state, to be costed together with the next dynamic-call ABI revision (it composes with the
-fn->invoke per-callee entry design). The same treatment covers the per-module BSS cells
+**Decision:** implement **C** as the migration end-state. Option B may exist only as a temporary
+diagnostic flag while validating codegen and must not be the merged steady-state path. Host,
+event-loop, and async entry boundaries already resolve the canonical context once through
+`EvalContextScope`; their invoke adapter passes that pointer into generated code. JIT↔JIT calls,
+closures, methods, dynamic dispatch, and per-callee invoke entries forward the same hidden
+argument. Hot native helpers that need context take it explicitly; context-free helpers keep
+their existing ABI.
+
+Every direct native read/write of `_lambda_rt`, every `&_lambda_rt` ABI exposure (including Jube
+frame slots), and every `prev_lambda_rt` save/restore migrates to the explicit argument or
+boundary scope. The global is deleted when that inventory is empty. This ABI work composes with
+the fn->invoke per-callee entry design and is benchmarked for register pressure/code size before
+landing. The same MT2 audit covers the per-module BSS cells
 (`_mod_consts_ptr`, `_mod_type_list_ptr`) — those hold compile-time pointers (tag C, per-module,
-immutable after link) and are fine as-is.
+immutable after publication) and may remain only under the publication contract in §5.5.
 
 ### RG5 — Rooted-Item address stability
 
 Everything GC-rooted that moves must keep the `JsRootRange` ownership contract: registration
-owned by the range, re-registration on heap-epoch change, reset hooks registered once. Capsules
-therefore expose the same `js_root_range_*` API, just with `range->slots` pointing into
+is owned by the range, against an **explicit collector owner**, with re-registration whenever
+that collector is replaced. Address stability and collector registration are separate
+invariants: a capsule slot may keep the same address while its old collector and root table
+have already been destroyed.
+
+Change the root API shape so registration/unregistration receives `EvalContext*`, `Heap*`, or
+`gc_heap*`; it must not silently choose `context->heap->gc` from TLS. A `JsRootRange` records the
+collector identity/generation it is registered with. `roots_epoch` (or an equivalent owner token)
+remains until the collector lifetime itself guarantees registration; capsule lifetime alone is
+not sufficient. Registration happens at capsule/module-instance construction and heap
+replacement, before execution can publish an Item into the range. Repeated operations such as
+stack push, cache fill, or module-variable store do not call `ensure_registered` or compare a
+root epoch; a debug-only invariant check may remain outside release hot paths.
+
+Capsules expose the same semantic `js_root_range_*` operations, with `range->slots` pointing into
 context-owned storage. The root-range *registry* itself
 (`js_root_range_registry[]`, [js_runtime_state.cpp:11](../lambda/js/js_runtime_state.cpp)) moves
-into `JsRuntimeState` so reset-all is per-context.
+into `JsRuntimeState` so reset-all is per-context. Registered Item storage never moves after
+publication. Registry metadata (pointers/descriptors, not Item slots) may grow on the context
+owner thread; cross-thread requests enqueue work to that owner instead of mutating the registry
+directly. Dynamic modules allocate new fixed slabs instead of resizing a rooted slab. Either
+prove the current fixed registry bound or replace it—overflow must be detected before the new
+range publishes any Item, not opportunistically afterward.
 
 ### RG6 — What legitimately stays process-global (tag I)
 
-Written only during init (or under a lock), content independent of any context:
+Constructed during process init, safely published, then read-only and independent of any
+context. A catalog that must grow later uses locked/atomic append-only publication of immutable
+records and is tagged I only if existing records and execution semantics never mutate. Catalog
+lookup occurs at init/module-resolution boundaries and the resolved immutable record is cached;
+repeated execution does not lock or poll the catalog:
 
 - `sys_func_defs[]` / `jit_runtime_imports[]` / `func_map` hashmap ([mir.c:47](../lambda/runtime/mir.c)) — the JIT import symbol table.
 - `sys_func_map` / `sys_func_name_set` ([build_ast.cpp:95](../lambda/runtime/build_ast.cpp)) — name→SysFuncInfo, init-once. (The *jube dynamic* records appended at manifest load are init-phase too, but guard with the specifier-catalog lock already present.)
 - Type singletons `TYPE_NULL`…`TYPE_DECIMAL` ([lambda-data.cpp:28](../lambda/core/lambda-data.cpp)) and `type_info[]` — immutable descriptors.
 - Identity-marker statics whose *address* is the value: `js_typed_array_marker`, `js_array_iter_marker`, `TypeMap` markers (`js_computed_style_marker`, stylesheet/rule markers). Never written; keep.
 - ASCII char table ([lambda-mem.cpp:217](../lambda/runtime/lambda-mem.cpp)) — init-once interned strings (verify the `String*` it holds are static-storage, not heap — they are, `ascii_char_storage`).
-- Decimal contexts `g_fixed_ctx`/`g_unlimited_ctx`/`g_bigint_ctx` ([lambda-decimal.cpp:23](../lambda/core/lambda-decimal.cpp)) — init-once mpd configs. *Caveat:* `mpd_context_t` carries status flags mutated by operations; audit that Lambda always uses local copies for status (it does — ops take `ctx` by pointer but status is read-and-cleared per call; verify during migration and either lock or per-context-copy if not).
+- Decimal **configuration templates** may be I, but live `mpd_context_t` objects are not:
+  status/trap fields are mutable and current lazy-init flags are unsynchronized.
+  `g_fixed_ctx`/`g_unlimited_ctx`/`g_bigint_ctx`
+  ([lambda-decimal.cpp:23](../lambda/core/lambda-decimal.cpp)) become immutable safely-published
+  templates copied into per-context decimal state (or local operation copies). No executed
+  decimal operation receives a pointer to a shared mutable template.
 - Jube static module registry + specifier index ([jube_registry.cpp:69,97](../lambda/jube/jube_registry.cpp)) — module *catalog* (I). But the node runtime *sessions* (`jube_node_runtime_sessions`, `jube_active_node_runtime_session`, async work queues, MIR cursor/state-token slots, `jube_active_guest_execution` TLS) are execution state → R.
 - Input/format registries (`format_registry.cpp`, latex tables, css_properties tables) — I.
 - Hook registrations set once by the embedder: `g_emit_fn`/`g_selection_fn` (radiant_event_hook), `g_heap_alloc_fn` (lambda-error), `g_gc_heap_node_release` — set-once function pointers; audit-only.
@@ -165,7 +295,10 @@ Env-gated stats (COW profile counters in lambda-eval, `g_js_call_stats_*`, MIR v
 timing counters, scope/identifier counters, TA-set stats, dynfunc stats) aggregate across a
 process run by design and feed atexit reports, not semantics. They stay process-global tagged D
 — with the rule that **no semantic path may read them**. Anything that fails that rule (e.g. a
-cache doubling as a counter) is R and moves.
+cache doubling as a counter) is R and moves. Repeated-path counters are per-context/per-thread
+ordinary fields and merge into the process report only at a quiescent/reporting boundary.
+Process-global atomics or mutexes are not added to hot paths; "diagnostic only" does not excuse
+either a data race or unnecessary cache-line contention.
 
 ### RG8 — Event loop per context
 
@@ -175,6 +308,13 @@ become a `JsEventLoop` capsule = K3's "one loop per context", owned and pumped o
 context thread (JT6). The event-loop SIGSEGV drain guard
 ([js_event_loop.cpp:1766](../lambda/js/js_event_loop.cpp)) converts to the shared recovery kit
 (Js_Thread P2.2), not to the capsule.
+
+This requires an API change in `lib/uv_loop.c`, not only moving `g_loop`: loop, prepare/check
+handles, drain callbacks, and active flags become fields of an explicit loop instance passed to
+`lambda_uv_*` operations (or recovered from `uv_handle_t::data` inside callbacks). No libuv
+callback may consult a process-global "current loop". Timer/request records retain a stable
+handle to their owning canonical context plus generation and enter it through
+`EvalContextScope` only after successful validation.
 
 ### RG9 — Guest runtimes get the same treatment
 
@@ -199,35 +339,94 @@ correct.
 ### RG11 — Reset becomes construction
 
 After migration, hot-context reuse (batch) keeps its perf but changes shape: instead of
-resetting scattered statics, the runner either (a) reuses the context and calls one
-`eval_context_reset_run_state()` that walks capsules, or (b) frees and reallocates capsules.
-The per-cache `*_roots_epoch` re-registration checks collapse to capsule-create-time
-registration — delete the epoch fields where the capsule lifetime now guarantees freshness
-(keep `heap_epoch` itself; it also guards cross-epoch cached Items inside one context run).
+resetting scattered statics, the runner reuses the canonical context and calls lifecycle APIs
+with distinct contracts:
+
+- `eval_context_reset_run_state()` clears activation/transient state while keeping the same heap
+  and valid root registrations;
+- `eval_context_replace_heap()` first closes callback admission and advances the handle
+  generation, then drains/cancels async owners, clears heap-bound Items, unregisters roots from
+  the old collector, replaces the heap, and registers fixed ranges with the new collector;
+- `eval_context_destroy()` performs full capsule teardown before destroying the collector and
+  context storage.
+
+Capsules are allocated once and retain stable addresses. Collector-registration tokens remain
+lifecycle metadata checked during heap replacement, not repeated slot access. Other heap-bound
+epochs remain only where semantics truly require an owner-thread version guard; module-variable
+and IC slabs are bulk-cleared/rebuilt so they do not pay a cross-run epoch check per access.
 
 ### RG12 — Compile-time state belongs to `Runtime`, not `EvalContext`
 
-The user rule says runtime state lives on `EvalContext`; compile-side state has a different
+Context-dependent runtime state lives on `EvalContext`; compile-side state has a different
 natural owner — the `Runtime` object ([transpiler.hpp:53](../lambda/runtime/transpiler.hpp))
-that already holds scripts, parser, heap, name_pool. Tag C items move there (or to a
-per-compilation transpiler object):
+or a per-compilation transpiler object. A Runtime may be shared by contexts only for immutable
+context-independent artifacts that are complete before one-time publication:
 
 - `g_active_mir_ctx`, `g_active_js_transpiler`, `g_active_mir_transpiler`,
   `g_active_js_owned_source`, the active-transpile stack
   ([js_mir_module_batch_lowering.cpp:113–126](../lambda/js/js_mir_module_batch_lowering.cpp)) —
-  "current compile" pointers; also consulted by crash/timeout cleanup, so once the batch worker
-  exists they may need a `__thread` mirror for the recovery path (JT4) — decide at
-  implementation; either is compatible with this doc.
+  "current compile" pointers. They belong to the per-compilation object. Crash/timeout cleanup
+  reaches that object through `context->runtime` and its active compilation record; it does not
+  introduce a second TLS root.
 - `module_mir_contexts[]` / name pools / ast pools / source buffers ([js_mir_module_batch_lowering.cpp:15–19](../lambda/js/js_mir_module_batch_lowering.cpp)), `js_source_runtime`, `js_dynamic_func_counter`.
 - Preamble mode flags + output (`g_jm_preamble_*`, [js_mir_entrypoints_require.cpp:383–385](../lambda/js/js_mir_entrypoints_require.cpp)), eval-preamble entries ([js_mir_eval_lowering.cpp:27–29](../lambda/js/js_mir_eval_lowering.cpp)).
-- `dynamic_import_map` (already `__thread`, [mir.c:166](../lambda/runtime/mir.c)) → `Runtime` field.
+- `dynamic_import_map` (already `__thread`, [mir.c:166](../lambda/runtime/mir.c)) → per-compilation
+  state while linking; the frozen resolved import table may publish onto `Runtime`.
 - `tls_parser` ([runner.cpp:310](../lambda/runtime/runner.cpp)) → `Runtime::parser` already exists; reconcile.
 - `g_mir_interp_mode` ([mir.c:26](../lambda/runtime/mir.c)) — env-derived config read at compile time; tag I (set once at startup).
 
 `EvalContext::runtime` (new back-pointer, RG2) gives execution-side code that needs script
-lookup (module registry, import resolution at runtime) its path without globals; the module
-`registry_map` ([module_registry.cpp:36](../lambda/runtime/module_registry.cpp)) moves onto
-`Runtime`.
+lookup its path without globals. Split the current module `registry_map`
+([module_registry.cpp:36](../lambda/runtime/module_registry.cpp)): compiled module metadata,
+sealed MIR contexts, and immutable export descriptors belong to `Runtime`; instantiated
+`namespace_obj` Items, loading/initialized state, and their precise roots belong to the
+context's module capsule. A Runtime registry must never retain an Item rooted in one context's
+heap and expose it to another.
+
+### RG13 — Mutation is context-local; sharing is immutable
+
+The migration uses three mutation classes:
+
+1. **Shared and immutable after publication.** Sealed MIR/code, module ids, const/type pointers,
+   compiled metadata, and process registries are built privately and published once at a
+   module/context boundary. A Runtime module lock (or equivalent one-time release/acquire
+   publication) is allowed there. After publication, execution uses ordinary reads—no READY
+   checks, atomics, locks, or refcount traffic per call.
+2. **Mutable and context-owned.** IC entries, module-variable slabs, globals, call/eval registers,
+   exceptions, queues, timers, DOM caches, guest state, and diagnostic counters live in the
+   canonical context. The context has one owner thread at a time, so these use ordinary
+   loads/stores with no synchronization. A context may move threads only through a quiescent
+   handoff after the old owner stops executing it.
+3. **Intentionally cross-context.** `JsAgentCluster`, SharedArrayBuffer/Atomics waiters, and
+   similar language-visible coordination use synchronization inside those explicit APIs. Their
+   locks/atomics do not leak into unrelated property access, calls, IC probes, or event-loop
+   checkpoints.
+
+If a proposed migrated field is written repeatedly and would require synchronization, its owner
+is wrong: move it into the context (or a context-owned per-module slab). Runtime sharing is for
+immutable artifacts, not mutable execution caches.
+
+The common module shape is:
+
+```c
+struct RuntimeModule {          // Runtime-owned; immutable after publication
+    uint32_t module_id;
+    uint32_t var_slot_count;
+    uint32_t ic_site_count;
+    ...sealed code/type/const metadata...
+};
+
+struct ContextModuleState {     // EvalContext-owned; owner-thread mutation
+    RuntimeModule* module;
+    Item* vars;                 // fixed rooted slab
+    IcEntry* ic_entries;        // fixed non-shared slab
+    ...namespace/instance state...
+};
+```
+
+`EvalContext` indexes `ContextModuleState*` by frozen module id. Module instantiation allocates
+both slabs once and registers Item ranges before execution. Generated code loads this state only
+for functions that use it; all repeated mutation stays within the context-owned structure.
 
 ---
 
@@ -247,24 +446,26 @@ sweep; the named rows are the load-bearing ones. Anything not listed follows its
 | `__thread List* current_vargs` | lambda-eval.cpp:5445 | **R** → `rt_state` (it is live across JIT calls — verify no JIT-baked address; it's accessed via helpers, safe) |
 | lambda-stack guard family | lambda-stack.cpp:42–59 | **T** stays |
 | side-stack regions | side_stack.c:29–30 | **T** stays (donation contract, RG10) |
-| `__thread SysinfoCache* g_cache` | sysinfo.cpp:88 | R → capsule (cheap) or D |
+| `__thread SysinfoCache* g_cache` | sysinfo.cpp:88 | R → context capsule; cached returned Items/allocations must follow the owning heap |
 | `tls_parser` | runner.cpp:310 | C → `Runtime` |
 
 ### 4.2 Lambda core runtime (tag R unless noted)
 
 | Variable(s) | Where | Target |
 |---|---|---|
-| `Context* _lambda_rt` | mir.c:21 | RG4 — derived register; delete global in option B |
-| `g_lambda_shape_epoch` | lambda-data-runtime.cpp:2271 | `rt_state` (shape identity epoch — pairs with heap ownership) |
+| `Context* _lambda_rt` | mir.c:21 | RG4 — hidden context argument; delete after generated and native users migrate |
+| `g_lambda_shape_epoch` | lambda-data-runtime.cpp:2271 | context/module-instance generation; remove per-probe shared epoch after IC slabs bulk-clear on heap replacement |
+| MIR member/store IC BSS cells | transpile-mir.cpp:7546 | dense per-context `ContextModuleState::ic_entries` slab (RG13/§5.5) |
+| decimal contexts + lazy-init flags | lambda-decimal.cpp:23,1253 | immutable templates (I) + per-context live copies (R); no shared mutable `mpd_context_t` |
 | render_map statics (`s_render_map`, `s_source_doc_root` — a rooted Item!, reverse map, recorder) | render_map.cpp:18–68 | `rt_state` / render capsule |
 | template state map | template_state.cpp:16 | `rt_state` |
 | edit bridge (`s_editor`, `s_editor_input`) | edit_bridge.cpp:19–20 | `rt_state` |
 | concurrency attach points (`attached_scheduler`, promise fn hooks, `task_handle_brand`) | concurrency.cpp:164–168 | scheduler already per-context (`EvalContext::scheduler`); hooks are set-once → I; `attached_scheduler` → R merge into context |
 | `g_dry_run` | lambda-proc.cpp:26 | duplicate of `Runtime::dry_run` — merge (C) |
 | `g_safety_analyzer` | safety_analyzer.cpp:19 | C → `Runtime` |
-| runner profile arrays + mutexes | runner.cpp:136–143 | D (env-gated profiling) |
-| `scripts_mutex`, `registry_map` | runner.cpp:321, module_registry.cpp:36 | C → `Runtime` |
-| COW profile counters | lambda-eval.cpp:6158–6188 | D |
+| runner profile arrays + mutexes | runner.cpp:136–143 | per-context/thread D counters; merge under a reporting-boundary lock |
+| `scripts_mutex`, `registry_map` | runner.cpp:321, module_registry.cpp:36 | lock/index → `Runtime`; instantiated namespace Items/loading state → context module capsule (RG12) |
+| COW profile counters | lambda-eval.cpp:6158–6188 | per-context/thread D counters; no atomic increments in the evaluated path |
 | `g_page_size` | pack.cpp:22 | I (cached syscall) |
 | gc scalar tag counters | gc_heap.c:53 | D |
 | ascii char table | lambda-mem.cpp:217–219 | I |
@@ -276,7 +477,8 @@ struct at [js_runtime_state.hpp:177](../lambda/js/js_runtime_state.hpp)) — exc
 `current_this`/`new_target`/super stacks, pending call args, module_vars[], regexp last-match,
 intrinsic prototype roots, the whole eval bridge (source/bridge/local, ~600 rooted Items).
 **This is the single biggest win**: it is one struct, one extern, and a macro layer already
-fronts it. Phase 1 moves it wholesale to `context->js_state` via the RG3 pivot.
+fronts it. The JS-state phase moves it wholesale to the canonical `context->js_state` via the
+checked RG3 pivot.
 `js_with_stack_state` (extern in the same header, backing slots in js_globals.cpp:15906) moves
 with it — note the header comment says dispatch reads it as a *load not a call*; keep that
 property: `context->js_state->with_stack.depth` is still one load chain, measure per §6.
@@ -293,16 +495,16 @@ Declaration counts from the sweep (mutable file-scope only, functions excluded):
 | js_event_loop.cpp | 38 | rings, timer table, clocks, mock scheduler, shutdown flags → `js_loop` (RG8) |
 | js_stream.cpp | 47 | interned key Items + protos + hwm defaults → `js_host` (keys are per-heap Items — must be per-context; hwm defaults are I) |
 | js_assert.cpp | 23 | assert namespaces/instances, node:test hooks/queues/counters → `js_host` |
-| js_mir_eval_lowering.cpp | 21 | dynfunc cache + stats, eval template counter, preamble entries → cache/counter split: cache → C (`Runtime`), stats → D |
+| js_mir_eval_lowering.cpp | 21 | dynfunc cache + stats, eval template counter, preamble entries → cache → per-context eval/module capsule; stats → per-context D merged at report; preamble compile state → C |
 | js_mir_entrypoints_require.cpp | 20 | preamble flags (C), CJS module stack/objects + roots gc (R → `js_modules`), phase timing (D) |
 | js_typed_array.cpp | 15 | markers (I), TA-set stats (D), atomics waiters (§5.3) |
 | js_net / js_tls / js_crypto / js_fs / js_http(s) / js_dns / js_fetch / js_readline / js_clipboard | ~70 total | namespace/proto Items, response tables, pending work, `g_fetch_base_dir` → `js_host`; fetch/net pending queues belong to `js_loop` lifetime |
 | js_dom_events.cpp | 14 + 3 TLS | propagation flags, listener tables → `js_dom` |
 | js_dom_observers.cpp | 4 | observers[] + delivery flag → `js_dom` |
-| js_permission.cpp | 8 | permission model flags/grants — per-process *policy* set at startup from CLI → **I** (written once pre-run), unless dynamic permission API lands |
+| js_permission.cpp | 8 | process policy may be I only if frozen/safely published and intentionally identical for every context; per-isolate grants or dynamic permission state → `js_host` |
 | js_globals.cpp perf TLS (`js_performance_*`) | 7 TLS | → `js_loop` (clock state) |
 | js_history.cpp | 2 TLS | → `js_dom` |
-| js_scope.cpp / js_exec_profile.cpp | 27 | counters → D |
+| js_scope.cpp / js_exec_profile.cpp | 27 | counters → per-context/thread D, merged only at report |
 | js_runtime_state.cpp root-range registry | 2 | → `js_state` (RG5) |
 | js_runtime_value / js_property_attrs / js_class etc. | ~15 | small caches → `js_state` |
 
@@ -310,7 +512,7 @@ Declaration counts from the sweep (mutable file-scope only, functions excluded):
 
 | File | Notes |
 |---|---|
-| jube_registry.cpp (21) | catalog/index/manifest scan → I (locked); node runtime sessions, async work, MIR cursor/state slots, `jube_active_guest_execution` TLS → R (`Runtime` or context capsule — sessions span evaluations, so `Runtime`) |
+| jube_registry.cpp (21) | frozen catalog/index → I; compile cursor/lowering state → per-compilation/Runtime; node sessions, async work, state tokens, active guest execution → context guest capsule even when they span evaluations |
 | py_runtime.cpp (9 TLS + 9), py_async | → `py_state` capsule (RG9) |
 | bash_runtime.cpp (67), bash_builtins, bash_redir | → `bash_state` capsule |
 | module/node_core/* (~30 total) | namespace/proto caches → `js_host`-style capsule per module set |
@@ -332,30 +534,50 @@ Declaration counts from the sweep (mutable file-scope only, functions excluded):
 ## 5. Hard cases
 
 ### 5.1 `_lambda_rt` (RG4)
-Covered above. Implementation order: land B behind a flag, A/B diff on Result-suite (the extra
-entry call is the only cost), then delete the global + every `prev_lambda_rt` save/restore.
+Covered above. Implementation order:
+
+1. establish canonical context entry/exit (`EvalContextScope`) and audit every native/JIT entry;
+2. add the hidden-context ABI to direct calls, closures, methods, dynamic dispatch, and host
+   invoke adapters behind a flag; A/C diff correctness, code size, and release performance;
+3. migrate hot native `_lambda_rt` users to explicit context parameters and cold boundary users
+   to `EvalContextScope`;
+4. delete the MIR Direct import/global and every `prev_lambda_rt` save/restore.
+
+A retained function pointer or async callback installs its owner context once at the boundary
+and passes that context through the hidden argument. Generated callees never rediscover it from
+TLS.
 
 ### 5.2 Rooted Items moving home
 Every `static Item`/`Item[]` that moves must (a) land in never-reallocated capsule storage,
-(b) register through `JsRootRange` against `context->heap->gc`, (c) drop its private
-`*_roots_epoch` once capsule lifetime subsumes it. Do NOT move a rooted static and keep it
+(b) register through `JsRootRange` against an explicitly supplied owning collector, (c) retain
+a collector identity/generation token across heap replacement, and (d) unregister or invalidate
+that registration before collector destruction. Do NOT move a rooted static and keep it
 registered against a stale registry — the forced-GC sweep (`test/mir` P3 harness) is the gate
 for every phase below.
+
+Reset ordering is part of the contract: close callback admission and advance generation →
+drain/cancel async owners → clear heap-bound Items → unregister native ranges → tear down the
+collector → attach/register the replacement → reopen admission. A root helper that silently
+consults TLS cannot prove this ordering and is not an acceptable end-state API.
+All range registration/re-registration occurs in this lifecycle path or module-instance
+construction, not in the repeated operation that writes the rooted slot.
 
 ### 5.3 Deliberately cross-thread state
 `js_atomics_waiters` + agent slots and the test262 agent report queue implement *cross-agent*
 semantics (Atomics.wait/notify across workers). Per-context is wrong for them. They become a
-shared `JsAgentCluster` object referenced by each participating context, with the lock they
-already implicitly assume. Same for any future SharedArrayBuffer registry.
+shared `JsAgentCluster` object referenced by each participating context, with explicit lifetime,
+membership, locking, and wakeup/shutdown rules. Same for any future SharedArrayBuffer registry.
+Shared semantic state is allowed because its sharing is language-visible and intentional, not
+because it is convenient process storage.
 
 ### 5.4 Per-document vs per-context
 The js_dom caches are keyed by document, cleared on document swap. Under RC2, context↔page is
 1:1, so hanging them off `EvalContext` (in `js_dom`) is equivalent and simpler than per-DomDocument
 storage — but keep sub-struct boundaries so a later per-document split is mechanical.
 
-### 5.5 The multi-threaded MIR contract (MIR-resident data; survives P6)
+### 5.5 The multi-threaded MIR contract after `_lambda_rt` removal
 
-Removing `_lambda_rt` cleans the *import* channel — after P6 the resolver serves only immutable
+Removing `_lambda_rt` cleans the *import* channel — afterward the resolver serves only immutable
 native function addresses. What remains is the data hard-linked into generated code through
 non-import channels. The migration's MT goals fix how each is resolved:
 
@@ -365,37 +587,61 @@ non-import channels. The migration's MT goals fix how each is resolved:
   enabler notes only).
 
 **The MT2 contract: no context-dependent value may live at a code-baked address.** An address
-baked into shared code may hold only data that is immutable or *identical for every context*
-(making races value-idempotent and benign). Anything whose value differs per context is reached
-through `rt` (the `Context*` each function holds after P6). Applied:
+baked into shared code may hold only immutable data that has been safely published. Shared
+mutable execution caches are prohibited even when their payload is context-independent: making
+them atomic/locked would add coherence traffic to repeated paths. Anything mutable or
+context-dependent is reached through `rt` (the `Context*` each function holds after
+`_lambda_rt` removal) and is owned by that context.
+
+- **Module publication is synchronized once, never on execution.** The Runtime module registry
+  reserves/builds a module privately, assigns its id, initializes immutable BSS, links/generates,
+  seals it, then publishes READY under the module lock. A context resolves/pins that sealed
+  module when its module instance is created and stores a direct pointer/id in its context-local
+  module table. Function calls, variable access, and IC probes never consult the Runtime registry,
+  test READY, increment a shared refcount, or take the module lock. Invalidation publishes a new
+  sealed version; old code remains alive until contexts using it are torn down or explicitly
+  rebound at a quiescent boundary.
 
 - **`_gvar_*` module variables → per-context slabs.** Today one 2×Item BSS cell per top-level
   binding ([transpile-mir.cpp:14673](../lambda/runtime/transpile-mir.cpp)), GC-rooted by walking
   all modules against the current heap ([mir.c:492](../lambda/runtime/mir.c)), zeroed-then-
   re-rooted on batch reuse ([transpile-mir.cpp:16159](../lambda/runtime/transpile-mir.cpp)).
-  New shape: `rt->module_vars[mod_id][slot]`. `slot` is a baked constant — derived from the
-  module's own source, so MIR-module-cache replay-stable. `mod_id` is **not** baked (a baked
-  `Script->index` would go stale in cached modules): it lives in one init-once per-module
-  `_mod_id` cell written at registration — every context writes the same value → benign
-  idempotent race, replay-stable. Cross-module `pub` access = symbolic import of the exporter's
-  `_mod_id` cell + baked slot. Slabs are context-owned, registered as root ranges against their
-  own heap → `walk_bss_gc_roots` and the reset dance are deleted. Note the naive fix — a
+  New shape: `rt->module_states[mod_id]->vars[slot]`. `slot` is a baked constant — derived from
+  the module's own source, so MIR-module-cache replay-stable. `mod_id` is **not** baked (a baked
+  `Script->index` would go stale in cached modules): the Runtime module registry assigns it once
+  while the module is private, initializes the module's `_mod_id` cell, seals the module, and
+  publishes it. Executing contexts only read the frozen cell. A generated function that uses
+  module variables or ICs resolves and hoists its `ContextModuleState*` once; functions that use
+  neither pay no module-state load. Variable operations then use baked offsets and ordinary
+  loads/stores. Cross-module `pub` access uses the exporter's frozen `_mod_id` and
+  baked slot. Slabs are context-owned, registered as root ranges against their own heap →
+  `walk_bss_gc_roots` and the reset dance are deleted. `JsFunction::module_vars` and
+  saved-module records remain fast direct pointers because those function objects/records are
+  context-owned and cannot cross contexts; cross-context transfer clones/serializes values
+  rather than sharing heap objects. Note the naive fix — a
   `_mod_vars_ptr` cell holding "the" slab pointer — *violates* the contract (different value
-  per context). Cost: two extra loads, amortized by hoisting the slab pointer per function
-  (same pattern as consts).
-- **`_mod_consts_ptr` / `_mod_type_list_ptr` — legal as-is.** Per-Script compile artifacts:
-  identical value for every context of a Runtime; concurrent re-init is value-idempotent.
-- **IC cells — shared, restricted to Runtime-owned facts.** Member/store ICs
-  ([transpile-mir.cpp:7546](../lambda/runtime/transpile-mir.cpp)) and compiled patterns are
-  `script_pool`-owned, addresses baked as immediates. They may cache only context-independent
-  facts: compile-time `TypeMap*` identities, shape entries, slot offsets — meanings shared by
-  every context of the Runtime. They must **never** cache context-owned pointers (heap Items,
-  runtime-grown shapes) — cross-context that is a foreign/dangling deref. Publication
-  discipline: pack entries into a single word, or write-payload-then-publish-key with
-  re-validate-after-read (seqlock-lite); a lost update is a miss, not a bug. Audit each IC kind
-  against this rule; any kind that needs context-owned values loses that caching or moves to a
-  per-context IC slab via the same `rt->` indirection. Compiled patterns are immutable after
-  compile — fine.
+  per context).
+- **`_mod_consts_ptr` / `_mod_type_list_ptr` — legal only after ownership proof.** The pointed-to
+  artifacts must be Runtime-owned, immutable for the executable lifetime, and initialized
+  before module publication. Contexts never reinitialize these cells. Any type/const entry
+  allocated from a replaceable context pool moves to a per-context slab or to Runtime-owned
+  immutable storage first.
+- **All mutable IC cells are per-context.** During compilation, each member/store/call IC site
+  receives a dense module-local `site_id`; the sealed module records `ic_site_count` and the
+  entry layout. Context module instantiation allocates one fixed `IcEntry[ic_site_count]` slab
+  beside the module-variable slab. The generated function prologue already hoists
+  `ContextModuleState*`; each IC probe/update addresses `module_state->ic_entries[site_id]`
+  using a baked offset and ordinary loads/stores. There is no lock, atomic, TLS lookup, helper
+  call, shared epoch, or publication check in the IC path.
+
+  Because the slab belongs to one context/heap generation, it may safely cache that context's
+  `TypeMap*`, shape entries, offsets, and other non-Item pointers whose lifetime is bounded by
+  the context. Heap replacement or module-instance reset bulk-clears/rebuilds the slab outside
+  execution, eliminating cross-run shared epoch checks. Shape/version guards required by IC
+  semantics remain ordinary owner-thread comparisons; they are not synchronization. Facts that
+  are truly immutable compile metadata are baked/read directly and do not use a mutable IC.
+  Measure the extra per-context memory and module-state prologue load; recover the load by
+  sharing the already-hoisted module-state pointer with module-variable access.
 - **Codegen never mutates a *shared* `MIR_context`.** Shared module contexts are sealed after
   the eager pipeline: `MIR_link(…, MIR_set_gen_interface, …)` + `MIR_gen()` then
   `MIR_gen_finish` ([mir.c:403–475](../lambda/runtime/mir.c)) — all machine code exists before
@@ -406,17 +652,21 @@ through `rt` (the `Context*` each function holds after P6). Applied:
   compiles into a fresh private `MIR_context`
   ([js_mir_eval_lowering.cpp:1729](../lambda/js/js_mir_eval_lowering.cpp)), reaching outward
   only through immutable channels (resolver-served helper addresses, sealed JIT function
-  addresses). Eval contexts are transient — never module-cache-serialized — so eval codegen may
-  bake `mod_id` immediates; replay-stability doesn't apply to it. Consequences under MT2:
+  addresses). Private eval MIR contexts are transient — never module-cache-serialized — so
+  eval codegen may bake context-local module identity only while the generated code cannot
+  escape that context; escaped closures retain the owning canonical context/module identity.
+  Consequences under MT2:
   the dynfunc source→function cache
-  ([js_mir_eval_lowering.cpp:102](../lambda/js/js_mir_eval_lowering.cpp)) becomes per-Runtime
-  under a lock (compiled code is context-independent; sharing is correct) or per-context if
-  contended; the `jm_defer_mir_cleanup` list is per-EvalContext (tag R — eval-context lifetime
-  is closure-escape-sensitive). **Dynamic `import()` is the one new case**: it compiles a
+  ([js_mir_eval_lowering.cpp:102](../lambda/js/js_mir_eval_lowering.cpp)) is per-context so
+  eval/`new Function` cache lookup and mutation need no shared lock. The
+  `jm_defer_mir_cleanup` list is per-EvalContext (tag R — eval-context lifetime is
+  closure-escape-sensitive). **Dynamic `import()` is the one new case**: it compiles a
   module destined for Runtime-shared tables (`module_mir_contexts[]`), so it follows
   compile-private-then-publish-under-lock — lower and link in a thread-owned context, seal,
-  then register; other threads only ever observe sealed modules (the same publish pattern MT3
-  would use).
+  then register under the module lock; each context caches the resulting immutable module
+  pointer in its own module table. A repeated dynamic import first checks that owner-thread
+  context table with ordinary access; only a true module miss enters Runtime publication.
+  Execution of the imported module never revisits the shared lock or publication state.
 
 **MT1 — interpretation.** The MIR interpreter *mutates* `MIR_context` state (frame arenas, FFI
 shims): one `MIR_context` = one interpreting thread. Multi-thread interpretation is achieved by
@@ -424,75 +674,140 @@ shims): one `MIR_context` = one interpreting thread. Multi-thread interpretation
 serialized module (the L1 module-cache `MIR_write`/`MIR_read` path already exercises this).
 The MT2 data contract is what makes clones semantically transparent — today, cloning would
 fork `_gvar_` BSS state silently; after the migration no mutable state lives in the module to
-fork. Each clone's `_mod_id` cell is written with the Runtime-wide id at clone load.
+fork. Each private clone's `_mod_id` cell is initialized before that clone is published to its
+interpreting thread.
 
 **MT3 — parallel lowering (KIV).** Half the shape exists: JS already gives each module its own
 `MIR_context` (`module_mir_contexts[]`). Blockers are exactly the RG12 tag-C globals (active-
 transpiler pointers, preamble flags → thread-confined per-transpiler objects) plus shared
-compile pools (name_pool, type arenas need per-worker ownership or locks). Fan out lowering one
-module per worker; `MIR_link` + cross-module resolution join on the owner thread. Not scheduled;
-RG12 is designed so this becomes additive.
+compile pools, which get per-worker ownership rather than locks in lowering hot paths. Fan out
+lowering one module per worker; `MIR_link` + cross-module resolution join and publish once on the
+owner thread. Not scheduled; RG12 is designed so this becomes additive.
 
 ### 5.6 Crash/timeout cleanup paths
 Recovery code (batch handler, watchdog) today reads `g_active_mir_ctx` etc. to clean up. After
 RG12 it must reach the same via `context->runtime` — which the handler can do, since handlers
 run on the executing thread and `context` is TLS. Where a handler can run with `context == NULL`
-(early init), it must already do nothing — audit each.
+(early init), it must already do nothing — audit each. The signal handler itself performs only
+the async-signal-safe recovery transfer; object cleanup and capsule mutation occur after control
+returns to the normal recovery boundary.
+
+### 5.7 Decimal contexts
+
+`mpd_context_t` is operational state, not merely a precision configuration: status and trap
+fields may be updated by decimal calls, and the current lazy-init booleans are process races.
+Process init may build immutable configuration templates once. Each `EvalContext` copies the
+fixed/unlimited/bigint template into context-owned decimal state (or each operation takes a
+local copy) and passes only that private object to mpdecimal. Tests run fixed and bigint
+operations concurrently and verify both results and status isolation.
 
 ---
 
 ## 6. Performance notes
 
-- A process-global read is one absolute-address load. A capsule read is TLS-load + 2 chained
-  loads. On the hot paths that matter (exception poll, `current_this`, with-depth, module_vars
-  base) the mitigation is the standard one: **hoist the capsule pointer into a local** at
-  function/loop entry — same shape as the emission-time exception-state tracker already planned
-  (online-exception design). The JIT side is unaffected: generated code reaches state via `rt`
-  (Context fields) which it already holds in a reg.
-- `module_vars` is the JS hot path most exposed: today `js_active_module_vars` is a global
-  pointer swapped per module. It becomes a `js_state` field — one extra indirection at swap
-  sites only, since executing code already goes through the pointer.
-- Gate: Result-suite geo means (MIR + LJS) within noise (±2%) per phase; any regression >2%
-  gets a hoist fix before the phase merges.
+- **No synchronization in steady-state execution.** Generated calls pass the hidden context
+  argument; ICs/module variables use context-module slabs; queues/registers/caches are
+  owner-thread fields. Inspect generated MIR/machine code to ensure no lock, atomic RMW,
+  publication-state load, refcount update, or TLS helper call appears in these paths.
+- **Hoist once, reuse often.** A generated function resolves
+  `ContextModuleState* module_state = rt->module_states[mod_id]` in its prologue only when it
+  contains module-variable or IC operations. Those operations share that pointer and baked
+  offsets; functions needing neither pay nothing. Native loops similarly hoist the capsule
+  pointer. Checked accessors, root registration, and lazy allocation run only at host/module
+  boundaries.
+- **Preserve direct context-local pointers.** JS function objects, closures, saved module
+  records, promise/timer records, and DOM wrappers are context-owned; they may retain direct
+  pointers into their context where lifetime permits. Do not replace those with global ids,
+  locked maps, or atomic handles on invocation.
+- **Exploit cleanup opportunities.** Per-context slabs remove shared `_gvar_*` root walks,
+  process-global IC cache-line bouncing, save/restore dances, and global cache reset protocols.
+  Heap replacement bulk-clears module/IC state outside execution instead of adding an epoch or
+  synchronization check to every probe.
+- **Measure cold and hot costs separately.** One-time module publication, context-module slab
+  allocation, and invalidation may take a lock and are reported as startup/import costs. They
+  are excluded from steady-state loops only after dedicated cold-start numbers confirm they
+  remain reasonable. Track per-context slab memory as well as time.
+- **Non-regression gate.** Use release builds only. Repeated Result-suite geo means plus focused
+  function-entry, call-dispatch, exception-poll, module-variable, monomorphic/polymorphic IC, and
+  event-loop benchmarks must show no statistically reproducible slowdown. A neutral aggregate
+  cannot hide a hot-path regression; any confirmed regression blocks the phase until the
+  ownership-preserving layout/codegen is improved.
 
 ## 7. Migration phases
 
 Each phase: green `make test-lambda-baseline` + `make test-radiant-baseline`, js-test-batch,
 `make node-baseline` no-regress, forced-GC sweep, Result-suite perf gate (§6).
 
-- **P0 — Contract + lint.** Add `EvalContext` capsule pointers (all NULL), `Runtime` back-pointer,
-  the `// global-ok: <tag>` annotation convention, and a lint rule (extend `make lint`) that
-  fails on any *new* untagged file-scope mutable in runtime dirs. Stops the bleeding.
-- **P1 — JsRuntimeState pivot.** Move the capsule to `context->js_state` via RG3 macro pivot;
-  root-range registry moves with it; hot-context reset switches to capsule reset. (Biggest
-  value/effort ratio in the plan.)
-- **P2 — Event loop.** `JsEventLoop` capsule: uv loop + rings + timers + clocks (RG8, K3). Do
-  the drain-guard conversion with it (Js_Thread P2.2 alignment).
-- **P3 — JS file-local sweeps.** File-capsule structs per §4.4, in order: js_runtime.cpp,
+- **P0 — Contract, ownership ledger, lint.** Land this goal/taxonomy, enumerate canonical versus
+  borrowed/temporary context construction sites, add the `// global-ok: <tag>` convention, and
+  extend `make lint` to reject any new untagged file-scope mutable in runtime directories. The
+  allow comment records a reviewed owner and freeze/race contract; it is not a generic waiver.
+  Add a hot-path synchronization audit/allowlist: new locks, atomic RMWs, TLS context lookups,
+  and publication-state checks in IC/call/module-var/event-loop paths fail review.
+- **P1 — Canonical context + root lifecycle.** Add `Runtime` back-pointer, context
+  init/reset/replace-heap/destroy APIs, `EvalContextScope`, owner generation, and explicit-owner
+  root registration. Split Runtime's retained run/heap fields into context ownership; convert
+  `Runner`, cleanup temporaries, timers, and guest/module activation scaffolding so initialized
+  contexts are never copied or raw-`memset`. Add alternating-context, heap-replacement, and
+  stale-callback tests before moving global state.
+- **P2 — JsRuntimeState pivot.** Add checked JS entry-boundary setup, allocate the capsule there,
+  move the root-range registry with it, and switch hot-context reset to the lifecycle API.
+  Compile/init use sites are separated before the macro pivot; compatibility macros perform a
+  direct dereference, and native hot loops/functions hoist or receive the state pointer
+  explicitly. (Biggest value/effort ratio after P1.)
+- **P3 — Event loop.** `JsEventLoop` capsule: explicit-instance `lib/uv_loop` API + rings +
+  timers + clocks (RG8, K3). Timer/request records retain canonical owner+generation. Do the
+  drain-guard conversion with it (Js_Thread P2.2 alignment).
+- **P4 — JS file-local sweeps.** File-capsule structs per §4.4, in order: js_runtime.cpp,
   js_globals.cpp, js_dom.cpp (+TLS caches), js_modules cluster, js_host cluster (assert/stream/
-  buffer/net/fs/…), observers/events. Mostly mechanical; §5.2 discipline throughout. Agent/
-  atomics state → `JsAgentCluster` (§5.3).
-- **P4 — Lambda core sweeps.** §4.2 rows; merge `persistent_last_error` into
+  buffer/net/fs/…), observers/events. Move JS mutable ICs/dynfunc caches and diagnostics to
+  context-owned slabs/fields with ordinary accesses. Mostly mechanical; §5.2 discipline
+  throughout. Agent/atomics state → `JsAgentCluster` (§5.3).
+- **P5 — Lambda core sweeps.** §4.2 rows; merge `persistent_last_error` into
   `EvalContext::last_error`; `current_vargs`; render/template/edit bridges; `input_context`
-  fold (RG1).
-- **P5 — Compile-side to Runtime.** RG12 set: active-transpiler pointers, module MIR contexts,
-  preamble state, dynamic_import_map, registry_map, parser. Independent of P1–P4; can run in
-  parallel with P3/P4.
-- **P6 — `_lambda_rt` option B.** Entry-call codegen for Lambda MIR + JS MIR, delete the
-  global and every save/restore. This is the phase that makes N concurrent executors *possible*;
-  RC2 sequencing consumes it.
-- **P7 — Guests.** py/bash capsules (RG9). Low risk, do opportunistically.
+  fold (RG1); per-context decimal copies (RG6/§5.7). Replace MIR IC BSS with dense per-context
+  module IC slabs and bulk invalidation; remove shared shape-epoch checks from probes.
+- **P6 — Compile/module split.** RG12 set: active-transpiler pointers, sealed module MIR
+  contexts, preamble state, dynamic-import build state, parser. Split Runtime-owned compiled
+  module metadata from context-owned namespace/module instances, variable/IC slabs, and roots.
+  Publish each sealed module once under the Runtime module lock; context instantiation caches a
+  direct module pointer so execution never revisits publication state. This can proceed in
+  parallel with late P4/P5 work after P1 contracts exist.
+- **P7 — `_lambda_rt` hidden-context ABI.** Thread the context argument through Lambda MIR, JS
+  MIR, direct calls, closures, methods, dynamic dispatch, and host adapters; migrate hot native
+  users to explicit context parameters. Delete the MIR Direct global/import and every
+  save/restore. Run a controlled two-owner-thread concurrency test against the same sealed
+  generated code and enforce the function-entry/call-dispatch performance gate.
+- **P8 — Guests.** py/bash/rb capsules and Jube execution sessions (RG9), using the same
+  canonical-context and explicit-root contracts.
 
-Exit criteria: the §2 grep invariant holds; `lambda.exe` (main.cpp + cmdedit + log) is the only
-untagged-global holder; two `EvalContext`s can be created and run alternately (not yet
-concurrently) with zero cross-talk — add a gtest that interleaves two contexts and diffs
-results against solo runs.
+Exit criteria:
+
+- the §2 lint invariant holds and no declaration tagged R or C remains file-scope;
+- every I declaration has a freeze/publication argument, every D declaration is race-safe and
+  absent from semantic branches, and every T declaration contains infrastructure only;
+- initialized `EvalContext` objects are created/reset/destroyed only through lifecycle APIs;
+- root registration always names an owner collector and survives repeated heap replacement;
+- module publication is the only synchronization on ordinary module execution: generated and
+  native hot paths contain no migration-added locks, atomic RMWs, READY checks, shared refcounts,
+  or TLS context helper calls;
+- every mutable IC and module-variable slot is context-owned and uses ordinary owner-thread
+  loads/stores; module/heap reset invalidates them in bulk outside execution;
+- two contexts run alternately with forced GC, async callbacks, closures, dynamic import, DOM
+  swaps, and guest execution with zero cross-talk;
+- after P7, two owner threads run separate contexts concurrently against shared sealed code and
+  match solo results; run ThreadSanitizer or the platform race checker where supported;
+- release Result-suite and focused hot-path benchmarks show no reproducible regression versus
+  the pre-migration baseline; report cold module-publication time and per-context slab memory
+  separately.
 
 ## 8. Out of scope
 
-- Actually running two executors concurrently (RC2) — this doc removes the state blocker only;
-  scheduling, signals-per-thread (JT4/JT5), and loop affinity (JT6) are Js_Thread's program.
+- Product scheduling of concurrent executors (RC2) — this doc includes a controlled concurrent
+  correctness test, but scheduler integration, signals-per-thread (JT4/JT5), and production
+  loop affinity (JT6) remain Js_Thread's program.
 - Radiant/UI globals (`radiant/`) — separate audit; the UiContext/document side has its own
-  ownership doc trail.
-- Rewriting the C transpiler path (frozen per CLAUDE rule 14) — `transpile.cpp`'s emitted
-  `extern Context* _lambda_rt` stays as-is; only MIR Direct evolves.
+  ownership doc trail. The JS/Radiant bridge state named in this inventory remains in scope.
+- Rewriting the C2MIR transpiler path (frozen per repository rule 14). Its compatibility
+  `_lambda_rt` channel remains explicitly single-executor and unsupported for this concurrency
+  contract; MIR Direct and native runtime paths must not read that compatibility slot.

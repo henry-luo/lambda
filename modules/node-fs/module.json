@@ -18,5 +18,5 @@
   "library_linux": "node-fs.so",
   "library_windows": "node-fs.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "f0dcbbcbd00be114b8052136935b4cace996d5ba52e58735e124755abc3cb32a"
+  "sha256_macos": "35bf97df9ee6b83c025e3826da1987fd31a7154260511575cb960191037a73d8"
 }

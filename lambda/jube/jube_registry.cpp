@@ -5562,6 +5562,16 @@ void jube_modules_runtime_attach(void) {
     if (session->generation == 0) session->generation = ++jube_node_runtime_generation;
     session->live = true;
     jube_active_node_runtime_session = session;
+
+    // a lazy module may activate while the previous session is absent; attach
+    // it again here because activation could not publish session-owned state.
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        JubeStaticModuleEntry* entry = &jube_static_modules[i];
+        if (entry->activation_state == JUBE_MODULE_ACTIVE &&
+                entry->attached_generation != session->generation) {
+            jube_attach_module_to_active_runtime(entry);
+        }
+    }
 }
 
 void jube_modules_runtime_detach(void) {
