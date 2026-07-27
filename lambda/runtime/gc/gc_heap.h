@@ -324,7 +324,7 @@ void gc_heap_set_node_release_hook(void (*fn)(void* node));
 
 /**
  * Allocate memory from the GC heap with a prepended GCHeader.
- * Uses the object zone (size-class free list) for objects up to 256 bytes.
+ * Uses the object zone (size-class free list) for objects up to 384 bytes.
  * Falls back to pool_alloc for larger objects.
  * @param gc     heap to allocate from
  * @param size   user data size in bytes
@@ -348,7 +348,7 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag);
  * @param gc       heap to allocate from
  * @param size     user data size in bytes
  * @param type_tag TypeId for tracking
- * @param cls      pre-computed size class index (0-6)
+ * @param cls      pre-computed size class index (0-7)
  * @return pointer to zeroed user data, or NULL on failure
  */
 void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls);
@@ -363,7 +363,7 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
  * @param slot_size     total slot size (sizeof(gc_header_t) + SIZE_CLASSES[cls])
  * @param alloc_size    original user data size (stored in header for class lookup)
  * @param type_tag      TypeId for tracking
- * @param cls           pre-computed size class index (0-6)
+ * @param cls           pre-computed size class index (0-7)
  * @return pointer to zeroed user data, or NULL on failure
  */
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,

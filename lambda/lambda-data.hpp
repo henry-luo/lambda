@@ -302,6 +302,9 @@ typedef struct TypeMap : Type {
     // Tune12 P1b: true when an array companion map contains numeric own shape
     // entries. Pure named companions can still use direct dense element writes.
     bool has_array_index_shape;
+    // Lazily allocated only for shared JS shapes; non-JS/private shapes should
+    // not pay for prototype-walk metadata they never use.
+    struct JsProtoEntryCache* js_proto_entry_cache;
 } TypeMap;
 
 typedef struct TypeMapTransition {

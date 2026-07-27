@@ -294,6 +294,54 @@ TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
     EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)ptr + 8));
 }
 
+TEST_F(GCHeapTest, BumpAllocationBitmapMarksOnlyExactAllocatedSlots) {
+    int small_cls = gc_object_zone_class_index(32);
+    int large_cls = gc_object_zone_class_index(GC_LARGE_OBJECT_THRESHOLD);
+    ASSERT_GE(small_cls, 0);
+    ASSERT_GE(large_cls, 0);
+
+    size_t small_slot_size =
+        sizeof(gc_header_t) + gc_object_zone_class_size(small_cls);
+    size_t large_slot_size =
+        sizeof(gc_header_t) + gc_object_zone_class_size(large_cls);
+    void* first = gc_heap_bump_alloc(gc, small_slot_size, 32,
+        LMD_TYPE_STRING, small_cls);
+    void* second = gc_heap_bump_alloc(gc, large_slot_size,
+        GC_LARGE_OBJECT_THRESHOLD, LMD_TYPE_STRING, large_cls);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(gc->bump_blocks);
+    ASSERT_TRUE(gc->bump_blocks->alloc_bits);
+
+    gc_header_t* first_header = gc_get_header(first);
+    gc_header_t* second_header = gc_get_header(second);
+    ASSERT_TRUE(first_header->gc_flags & GC_FLAG_BUMP);
+    ASSERT_TRUE(second_header->gc_flags & GC_FLAG_BUMP);
+
+    gc_mark_item(gc, string_item(first));
+    EXPECT_EQ(first_header->marked, 1);
+    EXPECT_EQ(second_header->marked, 0);
+    first_header->marked = 0;
+
+    gc_mark_item(gc, string_item(second));
+    EXPECT_EQ(first_header->marked, 0);
+    EXPECT_EQ(second_header->marked, 1);
+    second_header->marked = 0;
+
+    // Range membership is insufficient: arbitrary data words can point into a
+    // bump block, so marking must accept only bitmap-recorded user addresses.
+    gc_mark_item(gc, string_item((uint8_t*)first + GC_BUMP_GRANULE));
+    EXPECT_EQ(first_header->marked, 0);
+    EXPECT_EQ(second_header->marked, 0);
+
+    uint8_t* unused_user = gc->bump_cursor + sizeof(gc_header_t);
+    ASSERT_LT(unused_user, gc->bump_end);
+    gc_mark_item(gc, string_item(unused_user));
+    EXPECT_EQ(first_header->marked, 0);
+    EXPECT_EQ(second_header->marked, 0);
+    EXPECT_FALSE(gc_is_managed(gc, unused_user));
+}
+
 TEST_F(GCHeapTest, LargeObjectSetSurvivesGrowthAndBackwardShiftDeletion) {
     const int object_count = 512;
     void** objects = (void**)calloc((size_t)object_count, sizeof(void*));

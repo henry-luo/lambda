@@ -275,6 +275,7 @@ typedef enum JubeValueKind {
     JUBE_VALUE_OBJECT = 7,
     JUBE_VALUE_FUNCTION = 8,
     JUBE_VALUE_SYMBOL = 9,
+    JUBE_VALUE_BIGINT = 10,
 } JubeValueKind;
 
 typedef enum JubeTypeFlags {
@@ -569,6 +570,9 @@ struct JubeHostScriptAPI {
     // Parses decimal text into the engine's BigInt representation without
     // exposing its allocation layout to hosted Node compatibility modules.
     Item (*bigint_from_decimal)(const char* text, size_t length);
+    // Narrows only exact in-range BigInts; modules must not infer overflow
+    // from the legacy clamping extractor used inside the engine.
+    bool (*bigint_to_int64_exact)(Item value, int64_t* out_value);
 };
 
 struct JubeHostDomAPI {
