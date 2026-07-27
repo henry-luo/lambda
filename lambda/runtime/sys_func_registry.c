@@ -19,6 +19,7 @@
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
 #include "concurrency.h"
+#include "runtime-state.h"
 #include "side_stack.h"
 #include "../js/js_test262_fast_paths.h"
 
@@ -1065,6 +1066,15 @@ extern Item fn_call_boxed_5_into(Context* runtime, void* fp, Item a, Item b, Ite
 extern Item fn_call_boxed_6_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
 extern Item fn_call_boxed_7_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
 extern Item fn_call_boxed_8_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
+extern Item js_call_export_0_into(Context* runtime, Function* function, uint64_t* result_home);
+extern Item js_call_export_1_into(Context* runtime, Function* function, Item a, uint64_t* result_home);
+extern Item js_call_export_2_into(Context* runtime, Function* function, Item a, Item b, uint64_t* result_home);
+extern Item js_call_export_3_into(Context* runtime, Function* function, Item a, Item b, Item c, uint64_t* result_home);
+extern Item js_call_export_4_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, uint64_t* result_home);
+extern Item js_call_export_5_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
+extern Item js_call_export_6_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
+extern Item js_call_export_7_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
+extern Item js_call_export_8_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
 extern Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
 extern Item fn_call0_into(Function* fn, uint64_t* result_home);
 extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
@@ -2892,6 +2902,15 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6_into", FPTR(fn_call_boxed_6_into)},
     {"fn_call_boxed_7_into", FPTR(fn_call_boxed_7_into)},
     {"fn_call_boxed_8_into", FPTR(fn_call_boxed_8_into)},
+    {"js_call_export_0_into", FPTR(js_call_export_0_into)},
+    {"js_call_export_1_into", FPTR(js_call_export_1_into)},
+    {"js_call_export_2_into", FPTR(js_call_export_2_into)},
+    {"js_call_export_3_into", FPTR(js_call_export_3_into)},
+    {"js_call_export_4_into", FPTR(js_call_export_4_into)},
+    {"js_call_export_5_into", FPTR(js_call_export_5_into)},
+    {"js_call_export_6_into", FPTR(js_call_export_6_into)},
+    {"js_call_export_7_into", FPTR(js_call_export_7_into)},
+    {"js_call_export_8_into", FPTR(js_call_export_8_into)},
     {"fn_call_into", FPTR(fn_call_into)},
     {"fn_call0_into", FPTR(fn_call0_into)},
     {"fn_call1_into", FPTR(fn_call1_into)},

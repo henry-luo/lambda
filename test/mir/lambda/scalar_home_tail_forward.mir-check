@@ -5,7 +5,7 @@
     {
       "in_func": "_accumulate_#",
       "expect": [
-        ":\tfunc\ti64, i64:_n, i64:_acc, p:_scalar_home"
+        ":\tfunc\ti64, p:runtime, i64:_n, i64:_acc, p:_scalar_home"
       ],
       "expect_seq": [
         { "pattern": ", _scalar_home" },

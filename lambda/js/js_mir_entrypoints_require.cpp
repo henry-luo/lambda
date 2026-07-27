@@ -1194,12 +1194,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     if (!reusing_context) {
         jm_cleanup_deferred_mir();
     }
+    // Clear recovery ownership while this compilation's JS realm is still
+    // bound.  Clearing after the TLS unbind leaves the completed transpiler
+    // recorded in the context capsule, so runtime teardown destroys it again.
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    jm_clear_active_js_transpile(NULL, NULL, owned_source);
     context = old_context;
     js_runtime_state_bind_context(old_context);
-    jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
-
-    jm_clear_active_js_transpile(NULL, NULL, owned_source);
     mem_free(owned_source);
     g_last_js_mir_phase_timing.cleanup_us = js_mir_phase_now_us() - phase_start;
     g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;

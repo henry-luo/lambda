@@ -214,7 +214,10 @@ static void js_array_runtime_items_free_map_if_empty(void) {
 
 static bool js_array_runtime_items_forget(Item* items, Array** owner_out) {
     if (owner_out) *owner_out = NULL;
-    if (!g_js_array_runtime_items || !items) return false;
+    // Lambda heap finalization visits every Array, including arrays created
+    // outside a JS realm.  The registry is context-owned, so it is absent
+    // when a pure-Lambda context tears down and must not be dereferenced.
+    if (!js_active_runtime_state || !g_js_array_runtime_items || !items) return false;
     JsArrayRuntimeItemsEntry probe = {items, NULL};
     const JsArrayRuntimeItemsEntry* found =
         (const JsArrayRuntimeItemsEntry*)hashmap_get(g_js_array_runtime_items, &probe);
@@ -14598,6 +14601,63 @@ extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_v
     return js_call_via_entry(func_item, this_val, args, arg_count,
         result_home, true);
 }
+
+static Item js_call_export_into(Context* runtime, Function* function, Item* args,
+        int arg_count, uint64_t* result_home) {
+    if (!runtime || !function || !result_home) return ItemError;
+    EvalContext* owner = (EvalContext*)runtime;
+    EvalContext* previous_context = context;
+    JsRuntimeState* previous_state = js_active_runtime_state;
+    bool needs_bind = previous_context != owner || previous_state != owner->js_state;
+    if (needs_bind) {
+        // A Lambda-to-JS call enters through a raw MIR import, bypassing the
+        // JS dispatcher that normally installs the export's owner capsule.
+        // Bind only at this language boundary so function bodies retain their
+        // direct TLS state loads and never consult process-global state.
+        context = owner;
+        if (!js_runtime_state_bind_context(owner)) {
+            context = previous_context;
+            js_active_runtime_state = previous_state;
+            return ItemError;
+        }
+    }
+    Item callable = {.function = function};
+    Item result = js_call_function_into(callable, make_js_undefined(), args,
+        arg_count, result_home);
+    if (result.item == ItemError.item && js_check_exception()) {
+        log_error("js-export-bridge: %s", js_get_exception_message());
+    }
+    if (needs_bind) {
+        context = previous_context;
+        js_active_runtime_state = previous_state;
+    }
+    return result;
+}
+
+extern "C" Item js_call_export_0_into(Context* runtime, Function* function,
+        uint64_t* result_home) {
+    return js_call_export_into(runtime, function, NULL, 0, result_home);
+}
+
+#define JS_EXPORT_CALL_PARAMS(...) __VA_ARGS__
+#define DEFINE_JS_EXPORT_CALL_INTO(count, params, values) \
+    extern "C" Item js_call_export_##count##_into(Context* runtime, \
+            Function* function, JS_EXPORT_CALL_PARAMS params, uint64_t* result_home) { \
+        Item args[] = {JS_EXPORT_CALL_PARAMS values}; \
+        return js_call_export_into(runtime, function, args, count, result_home); \
+    }
+
+DEFINE_JS_EXPORT_CALL_INTO(1, (Item a), (a))
+DEFINE_JS_EXPORT_CALL_INTO(2, (Item a, Item b), (a, b))
+DEFINE_JS_EXPORT_CALL_INTO(3, (Item a, Item b, Item c), (a, b, c))
+DEFINE_JS_EXPORT_CALL_INTO(4, (Item a, Item b, Item c, Item d), (a, b, c, d))
+DEFINE_JS_EXPORT_CALL_INTO(5, (Item a, Item b, Item c, Item d, Item e), (a, b, c, d, e))
+DEFINE_JS_EXPORT_CALL_INTO(6, (Item a, Item b, Item c, Item d, Item e, Item f), (a, b, c, d, e, f))
+DEFINE_JS_EXPORT_CALL_INTO(7, (Item a, Item b, Item c, Item d, Item e, Item f, Item g), (a, b, c, d, e, f, g))
+DEFINE_JS_EXPORT_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h), (a, b, c, d, e, f, g, h))
+
+#undef DEFINE_JS_EXPORT_CALL_INTO
+#undef JS_EXPORT_CALL_PARAMS
 
 // Function.prototype.apply(thisArg, argsArray)
 static Item js_apply_function_impl(Item func_item, Item this_val, Item args_array,

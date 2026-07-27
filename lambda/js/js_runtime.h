@@ -273,6 +273,26 @@ Item js_call_function_into(Item func_item, Item this_val, Item* args,
 Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
                                           Item* args, int arg_count,
                                           uint64_t* result_home);
+Item js_call_export_0_into(Context* runtime, Function* function,
+                           uint64_t* result_home);
+Item js_call_export_1_into(Context* runtime, Function* function, Item a,
+                           uint64_t* result_home);
+Item js_call_export_2_into(Context* runtime, Function* function, Item a, Item b,
+                           uint64_t* result_home);
+Item js_call_export_3_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, uint64_t* result_home);
+Item js_call_export_4_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, Item d, uint64_t* result_home);
+Item js_call_export_5_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, Item d, Item e, uint64_t* result_home);
+Item js_call_export_6_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, Item d, Item e, Item f, uint64_t* result_home);
+Item js_call_export_7_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, Item d, Item e, Item f, Item g,
+                           uint64_t* result_home);
+Item js_call_export_8_into(Context* runtime, Function* function, Item a, Item b,
+                           Item c, Item d, Item e, Item f, Item g, Item h,
+                           uint64_t* result_home);
 void js_call_stats_dump(void);
 void js_array_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);

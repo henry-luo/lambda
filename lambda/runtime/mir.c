@@ -20,6 +20,8 @@
 // generated code never calls it from a variable or inline-cache path.
 extern bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
                                         uint32_t var_count, uint32_t member_ic_count);
+extern bool lambda_module_state_bind_static(Context* runtime, uint32_t module_id,
+                                            void* consts, void* type_list);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
@@ -484,7 +486,8 @@ void jit_cleanup(MIR_context_t ctx) {
     MIR_finish(ctx);
 }
 
-bool prepare_context_module_state(Context* runtime, void* mir_ctx) {
+bool prepare_context_module_state(Context* runtime, void* mir_ctx,
+        void* consts, void* type_list) {
     if (!runtime || !mir_ctx) return false;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
@@ -494,13 +497,16 @@ bool prepare_context_module_state(Context* runtime, void* mir_ctx) {
             if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr ||
                     strcmp(item->u.bss->name, "_mod_layout") != 0) continue;
             LambdaModuleLayout* layout = (LambdaModuleLayout*)item->addr;
-            return lambda_module_state_prepare(runtime, layout->module_id,
-                layout->var_count, layout->member_ic_count);
+            if (!lambda_module_state_prepare(runtime, layout->module_id,
+                    layout->var_count, layout->member_ic_count)) return false;
+            return lambda_module_state_bind_static(runtime, layout->module_id,
+                consts, type_list);
         }
     }
     log_error("module-state: sealed MIR module has no layout descriptor");
     return false;
 }
+
 
 // ============================================================================
 // Debug Info Table for Native Stack Walking

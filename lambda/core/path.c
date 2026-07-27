@@ -463,6 +463,12 @@ static Path* path_append_segment_typed(Pool* pool, Path* parent, const char* seg
         log_error("path_append_segment_typed: NULL parent");
         return NULL;
     }
+    if (!pool) {
+        // Every new segment must use its caller's owning context pool; a
+        // missing owner used to dereference NULL after a batch context reset.
+        log_error("path_append_segment_typed: NULL pool");
+        return NULL;
+    }
 
     Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
     new_path->type_id = LMD_TYPE_PATH;
@@ -493,8 +499,22 @@ static Path* path_append_segment_typed(Pool* pool, Path* parent, const char* seg
  * This returns the root path for the scheme.
  */
 Path* path_new(Pool* pool, int scheme) {
-    (void)pool;  // pool not needed for root paths
-    return path_get_root((PathScheme)scheme);
+    if (!pool) {
+        log_error("path_new: NULL pool");
+        return NULL;
+    }
+    if (scheme < 0 || scheme >= PATH_SCHEME_COUNT) {
+        log_error("path_new: invalid scheme %d", scheme);
+        return NULL;
+    }
+    // Compiled paths receive the owning pool explicitly.  Do not route them
+    // through cached process-global roots, which may belong to a prior batch.
+    Path* root = (Path*)pool_calloc(pool, sizeof(Path));
+    if (!root) return NULL;
+    root->type_id = LMD_TYPE_PATH;
+    root->name = scheme_names[scheme];
+    root->parent = &ROOT_SENTINEL;
+    return root;
 }
 
 /**

@@ -1016,8 +1016,14 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
+#ifdef __cplusplus
+extern "C" {
+#endif
 void lambda_function_mark_mir_public_abi(Function* fn);
 void lambda_function_mark_mir_context_abi(Function* fn, struct Context* runtime);
+#ifdef __cplusplus
+}
+#endif
 
 // Memory allocation for closure environments
 typedef struct Context Context;

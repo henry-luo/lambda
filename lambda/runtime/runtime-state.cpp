@@ -91,6 +91,17 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
     return true;
 }
 
+extern "C" bool lambda_module_state_bind_static(Context* runtime,
+        uint32_t module_id, void* consts, void* type_list) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || module_id >= owner->module_state_capacity) return false;
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (!state) return false;
+    state->consts = consts;
+    state->type_list = type_list;
+    return true;
+}
+
 extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         Item item) {
     LambdaModuleState* state = (LambdaModuleState*)module_state;

@@ -281,6 +281,9 @@ static Item js_new_method_function_with_context(Context* runtime, void* func_ptr
     fn_root.set((Item){.function = (Function*)fn});
     fn->func_ptr = func_ptr;
     fn->runtime_context = runtime;
+    // Compiled method wrappers always require their owner Context*. Mark this
+    // once at construction so dynamic calls need no hot-path ABI inference.
+    fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI | JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     fn->param_count = param_count;
     fn->formal_length = -1;
     fn->env = NULL;

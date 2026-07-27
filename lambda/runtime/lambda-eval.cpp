@@ -3481,6 +3481,12 @@ Item fn_member(Item item, Item key) {
                         method->arity,
                         (void*)(uintptr_t)item.item,  // boxed self as closure_env
                         method->compiled_name);
+                    // Object method tables retain ABI wrappers rather than GC
+                    // Function values.  Restore the wrapper's context ABI on
+                    // each bound function so dynamic dispatch supplies the
+                    // runtime before its boxed self argument.
+                    lambda_function_mark_mir_public_abi(bound);
+                    lambda_function_mark_mir_context_abi(bound, (Context*)context);
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -3496,6 +3502,11 @@ Item fn_member(Item item, Item key) {
                             bmethod->arity,
                             (void*)(uintptr_t)item.item,
                             bmethod->compiled_name);
+                        // Inherited methods use the same raw ABI wrapper
+                        // storage as direct methods and need the same context
+                        // binding before fn_call dispatches them.
+                        lambda_function_mark_mir_public_abi(bound);
+                        lambda_function_mark_mir_context_abi(bound, (Context*)context);
                         return {.item = (uint64_t)(uintptr_t)bound};
                     }
                     bmethod = bmethod->next;

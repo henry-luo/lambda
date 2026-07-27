@@ -15738,6 +15738,14 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Atomics", 7))}, js_get_atomics_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
+        // Lambda-to-JS modules run in the same Node-compatible realm as the
+        // built-in modules. Publish Buffer during one-time realm setup so an
+        // exported function never depends on whichever module happened to
+        // require("buffer") first.
+        extern Item js_get_buffer_namespace(void);
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("Buffer", 6))},
+            js_get_buffer_namespace());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
         // install lazy slots before attaching modules: an active module may

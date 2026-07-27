@@ -888,9 +888,21 @@ static inline int em_add_const(MirEmitter* em, void* ptr) {
 }
 static inline MIR_reg_t em_load_const(MirEmitter* em, int const_index,
                                       MIR_type_t as_type) {
+    // A MIR virtual register holding the constant-pool base cannot cross an
+    // arbitrary runtime call: lowering may reuse its physical register.  Load
+    // this immutable module BSS pointer at the literal use instead of relying
+    // on a long-lived cached register.
+    MIR_reg_t bss_addr = em_new_reg(em, "mod_consts_bss", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, bss_addr),
+        MIR_new_ref_op(em->ctx, em->consts_bss)));
+    MIR_reg_t consts = em_new_reg(em, "consts", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, consts),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, bss_addr, 0, 1)));
     MIR_reg_t ptr = em_new_reg(em, "cptr", MIR_T_P);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, ptr),
-        MIR_new_mem_op(em->ctx, as_type, const_index * 8, em->consts_reg, 0, 1)));
+        MIR_new_mem_op(em->ctx, as_type, const_index * 8, consts, 0, 1)));
     return ptr;
 }
 static inline MIR_reg_t em_load_consts_from_bss(MirEmitter* em) {

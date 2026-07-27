@@ -1503,11 +1503,16 @@ void runner_setup_context(Runner* runner) {
         // imports were compiled. Move the JS capsule before freeing the shell;
         // otherwise callbacks would retain semantic state in dead stack-like
         // bootstrap storage.
-        if (!ctx->js_state) {
+        if (rt->js_bootstrap_context != ctx && !ctx->js_state) {
             ctx->js_state = rt->js_bootstrap_context->js_state;
             rt->js_bootstrap_context->js_state = NULL;
         }
-        mem_free(rt->js_bootstrap_context);
+        // JS import setup can already be using Runtime's canonical context.
+        // That owner survives until runtime_cleanup, so freeing this alias here
+        // left runner setup dereferencing a released EvalContext.
+        if (rt->js_bootstrap_context != ctx) {
+            mem_free(rt->js_bootstrap_context);
+        }
         rt->js_bootstrap_context = NULL;
     }
     if (ctx->js_state) js_runtime_state_bind_context(ctx);
@@ -1525,7 +1530,8 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 
 // Module-state instantiation from mir.c. It runs before execution and owns
 // the one-time slab allocation/root publication for a sealed module.
-extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx);
+extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx,
+                                              void* consts, void* type_list);
 
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
@@ -1571,7 +1577,9 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // Establish the script's context-owned global and IC slabs.
     if (runner->script->jit_context) {
         if (!prepare_context_module_state((Context*)ctx,
-                (void*)runner->script->jit_context)) return nullptr;
+                (void*)runner->script->jit_context,
+                runner->script->const_list ? runner->script->const_list->data : nullptr,
+                runner->script->type_list)) return nullptr;
     }
 
     // set the run_main flag in the execution context
@@ -1769,6 +1777,13 @@ void runtime_reset_heap(Runtime* runtime) {
         cleanup_context->scheduler = runtime->scheduler;
         EvalContext* previous_context = eval_context_bind(cleanup_context);
         if (cleanup_context->js_state) js_runtime_state_bind_context(cleanup_context);
+        if (cleanup_context->last_error) {
+            // Diagnostics can own allocations from the retiring heap. Clear
+            // them before teardown so the next batch never frees a stale
+            // context-owned error while setting up its fresh heap.
+            err_free(cleanup_context->last_error);
+            cleanup_context->last_error = NULL;
+        }
         // The editor may retain document Items allocated by this heap. Tear it
         // down while its owning context is still bound.
         edit_bridge_destroy();
