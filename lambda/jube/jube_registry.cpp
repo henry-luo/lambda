@@ -10,6 +10,10 @@
 #include "../format/format.h"
 #include "../input/css/dom_element.hpp"
 #include "../js/js_class.h"
+#include "../js/js_permission.h"
+#include "../js/js_typed_array.h"
+#include "../js/js_state_guards.h"
+#include "../core/lambda-decimal.hpp"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/side_stack.h"
 #include "../../lib/file.h"
@@ -20,8 +24,13 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/atomic.h"
+#include "../../lib/uv_loop.h"
 #include "../runtime/gc/gc_heap.h"
 #include <string.h>
+#include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <mir.h>
@@ -36,6 +45,9 @@
 #define JUBE_STATIC_MODULE_CAPACITY 64
 #define JUBE_MANIFEST_DEPENDENCY_CAPACITY 32
 #define JUBE_MANIFEST_PATH_CAPACITY 1024
+#define JUBE_SPECIFIER_NAME_CAPACITY 256
+#define JUBE_SPECIFIER_MODULE_NAME_CAPACITY 128
+#define JUBE_SPECIFIER_CATALOG_CAPACITY 256
 #define JUBE_GUEST_EXECUTION_MAGIC 0x4A474558u
 #define JUBE_MIR_CURSOR_INDEX_BITS 16u
 #define JUBE_MIR_CURSOR_INDEX_MASK ((uintptr_t)((1u << JUBE_MIR_CURSOR_INDEX_BITS) - 1u))
@@ -51,8 +63,40 @@ static int jube_static_modules_count = 0;
 static bool jube_dynamic_modules_from_env_loaded = false;
 static bool jube_manifest_paths_scanned = false;
 static char jube_host_module_root[1024];
+// -1 means no bundle profile has been selected yet; 0/1 are immutable for the
+// process so repeated registration sites never rescan the module directory.
+static int jube_node_core_module_set_enabled = -1;
 static char jube_manifest_loading_paths[JUBE_MANIFEST_DEPENDENCY_CAPACITY][JUBE_MANIFEST_PATH_CAPACITY];
 static int jube_manifest_loading_depth = 0;
+
+typedef enum JubeSpecifierOwnerState {
+    JUBE_SPECIFIER_OWNER_STATIC = 0,
+    JUBE_SPECIFIER_OWNER_CATALOGED = 1,
+    JUBE_SPECIFIER_OWNER_ACTIVATING = 2,
+    JUBE_SPECIFIER_OWNER_ACTIVE = 3,
+    JUBE_SPECIFIER_OWNER_FAILED = 4,
+} JubeSpecifierOwnerState;
+
+typedef struct JubeSpecifierEntry {
+    char normalized[JUBE_SPECIFIER_NAME_CAPACITY];
+    char module_name[JUBE_SPECIFIER_MODULE_NAME_CAPACITY];
+    char manifest_path[JUBE_MANIFEST_PATH_CAPACITY];
+    const JubeModuleDef* module;
+    int32_t namespace_index;
+    uint32_t state;
+} JubeSpecifierEntry;
+
+static HashMap* jube_specifier_index = NULL;
+// 0 = not built, 1 = built.  The lock protects HashMap construction while
+// parallel lowering threads perform read-only catalog queries.
+static atomic_int32 jube_specifier_catalog_state = {};
+static atomic_int32 jube_specifier_catalog_lock = {};
+static bool jube_specifier_catalog_failed = false;
+
+static int jube_specifier_index_module(const JubeModuleDef* module);
+static bool jube_specifier_catalog_ensure(void);
+static int jube_load_manifest_path_internal(const char* manifest_path, const char* selector,
+                                            const char* expected_name);
 
 struct JubeMirCursorSlot {
     MirEmitter* emitter;
@@ -97,6 +141,31 @@ static ArrayList* jube_mir_cursor_slots = NULL;
 static ArrayList* jube_mir_module_slots = NULL;
 static ArrayList* jube_mir_state_tokens = NULL;
 static uintptr_t jube_mir_state_token_next = 1;
+
+struct JubeNodeRuntimeSession {
+    uint64_t generation;
+    bool live;
+    bool detaching;
+};
+
+// Keep retired tokens until process cleanup so a stale module-held opaque
+// pointer can never become a newly attached runtime by allocator reuse.
+static ArrayList* jube_node_runtime_sessions = NULL;
+static JubeNodeRuntimeSession* jube_active_node_runtime_session = NULL;
+static uint64_t jube_node_runtime_generation = 0;
+
+struct JubeNodeAsyncWork {
+    uv_work_t request;
+    void* session;
+    JubeAsyncWorkCallback work;
+    JubeAsyncCompletionCallback complete;
+    JubeAsyncDestroyCallback destroy;
+    void* user;
+    uint32_t request_id;
+};
+
+static ArrayList* jube_node_async_work = NULL;
+static uint32_t jube_node_async_work_next_id = 0;
 
 // Context identities remain raw host-owned values until every compatibility
 // service can be moved to the same tagged registry without changing teardown.
@@ -526,6 +595,134 @@ static void jube_host_opaque_root_frame_end(JubeRootFrame* frame) {
 }
 
 static int jube_host_opaque_persistent_root_register(void* session, uint64_t* slot);
+static int jube_host_opaque_persistent_root_unregister(void* session, uint64_t* slot);
+static void* jube_host_node_current_session(void);
+static bool jube_host_node_session_is_live(void* session);
+static Item jube_host_node_session_global_this(void* session);
+static Item jube_host_node_session_process(void* session);
+static Item jube_host_node_current_this(void* session);
+static Item jube_host_node_session_active_resources_info(void* session);
+static Item jube_host_node_session_active_handles(void* session);
+static int jube_host_node_resolve_namespace(void* session, const char* specifier,
+                                            Item* out_namespace);
+static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
+                                                 Item* out_namespace);
+extern "C" Item js_get_fs_namespace(void);
+extern "C" Item js_get_fs_promises_namespace(void);
+extern "C" Item js_get_internal_fs_promises_namespace(void);
+extern "C" Item js_get_internal_fs_utils_namespace(void);
+extern "C" Item js_get_child_process_namespace(void);
+extern "C" Item js_get_crypto_namespace(void);
+extern "C" Item js_get_dns_namespace(void);
+extern "C" Item js_get_dns_promises_namespace(void);
+extern "C" Item js_get_net_namespace(void);
+extern "C" Item js_get_internal_net_namespace(void);
+extern "C" Item js_get_internal_js_stream_socket_constructor(void);
+extern "C" Item js_get_tls_namespace(void);
+extern "C" Item js_get_http_namespace(void);
+extern "C" Item js_get_https_namespace(void);
+extern "C" Item js_get_internal_errors_namespace(void);
+extern "C" Item js_get_internal_assert_myers_diff_namespace(void);
+extern "C" Item js_get_internal_async_hooks_namespace(void);
+extern "C" Item js_get_internal_async_context_frame_namespace(void);
+extern "C" Item js_get_internal_stream_add_abort_signal_namespace(void);
+extern "C" Item js_get_internal_stream_end_of_stream_namespace(void);
+extern "C" Item js_get_internal_stream_state_namespace(void);
+extern "C" Item js_get_internal_crypto_util_namespace(void);
+extern "C" Item js_get_internal_util_namespace(void);
+extern "C" Item js_get_internal_util_inspect_namespace(void);
+extern "C" Item js_get_internal_repl_namespace(void);
+extern "C" Item js_get_internal_test_binding_namespace(void);
+extern "C" Item js_get_node_module_namespace(void);
+extern "C" Item js_get_vm_namespace(void);
+extern "C" Item js_get_async_hooks_namespace(void);
+extern "C" Item js_get_trace_events_namespace(void);
+extern "C" Item js_get_domain_namespace(void);
+extern "C" Item js_get_cluster_namespace(void);
+extern "C" Item js_get_readline_namespace(void);
+extern "C" Item js_get_readline_promises_namespace(void);
+extern "C" Item js_get_node_test_namespace(void);
+extern "C" Item js_get_buffer_namespace(void);
+extern "C" Item js_get_util_namespace(void);
+extern "C" Item js_get_assert_namespace(void);
+extern "C" Item js_get_stream_namespace(void);
+extern "C" Item js_get_stream_promises_namespace(void);
+extern "C" Item js_get_stream_web_namespace(void);
+extern "C" Item js_get_stream_iter_namespace(void);
+extern "C" Item js_get_repl_namespace(void);
+extern "C" Item js_get_diagnostics_channel_namespace(void);
+extern "C" Item js_get_zlib_namespace(void);
+extern "C" Item js_net_get_active_resources_info(void);
+extern "C" Item js_net_get_active_handles(void);
+extern "C" Item js_zlib_throw_error_status(const char* method, int status);
+static Item jube_host_node_throw_type_error_code(void* session, const char* code,
+                                                  const char* message);
+static Item jube_host_node_throw_range_error_code(void* session, const char* code,
+                                                   const char* message);
+static Item jube_host_node_throw_zlib_error(void* session, const char* method, int status);
+static Item jube_host_node_throw_system_error(void* session, const char* syscall,
+                                              int error_number);
+static Item jube_host_node_throw_error_code(void* session, const char* code,
+                                            const char* message);
+extern "C" Item js_node_throw_system_error(const char* syscall, int error_number);
+extern "C" Item js_throw_error_with_code(const char* code, const char* message);
+static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
+                                      JubeAsyncCompletionCallback complete,
+                                      JubeAsyncDestroyCallback destroy, void* user,
+                                      uint32_t* out_request_id);
+static int jube_host_node_work_cancel(void* session, uint32_t request_id);
+static void jube_host_node_next_tick_callback(void* session, Item callback, Item error, Item result);
+static Item jube_host_node_emit_callback(Item env_item);
+static bool jube_host_node_is_typed_array(Item value);
+static uint8_t* jube_host_node_typed_array_data(Item value);
+static int jube_host_node_typed_array_length(Item value);
+static Item jube_host_node_buffer_from_bytes(const uint8_t* data, int length);
+static Item jube_host_node_buffer_alloc(int length);
+static uint8_t* jube_host_node_buffer_prepare_write(Item value);
+static bool jube_host_node_is_buffer(Item value);
+static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_view);
+static Item jube_host_node_buffer_view(Item array_buffer, int byte_offset, int byte_length);
+static Item jube_host_node_events_als_capture_context(void);
+static Item jube_host_node_events_als_context_call(Item context, Item callback, Item this_val,
+                                                    Item arg1, int64_t has_arg);
+static int jube_host_node_events_domain_emit_current_error(Item error);
+static Item jube_host_node_events_process_emit_warning(Item warning, Item type_item,
+                                                        Item code_item);
+static bool jube_host_node_events_is_error_like(Item value);
+static Item jube_host_node_events_domain_current(void);
+static Item jube_host_node_events_domain_call(Item domain, Item callback, Item this_val,
+                                              Item* args, int arg_count);
+static bool jube_host_node_permission_has_fs_read(const char* path);
+static bool jube_host_node_permission_has_fs_write(const char* path);
+static Item jube_host_node_permission_check_fs_read(const char* path);
+static Item jube_host_node_permission_check_fs_write(const char* path);
+extern "C" Item js_domain_get_current(void);
+extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val,
+                                         Item* args, int arg_count);
+extern "C" Item js_message_channel_new(void);
+extern "C" Item js_message_port_new(void);
+extern "C" Item js_message_port_move_to_context(Item port, Item context);
+extern "C" Item js_message_port_receive_message_on_port(Item port);
+extern "C" Item js_worker_mark_as_untransferable(Item value);
+extern "C" Item js_worker_is_marked_as_untransferable(Item value);
+static Item jube_host_value_array_set(Item array, int64_t index, Item value);
+static Item jube_host_script_current_this(void);
+static Item jube_host_script_strict_equal(Item left, Item right);
+static bool jube_host_script_class_stamp(Item object, int class_id);
+static bool jube_host_script_class_is(Item object, int class_id);
+static int jube_host_value_kind(Item value);
+static bool jube_host_value_string_copy(Item value, char* out, size_t out_size,
+                                        size_t* out_length);
+static Item jube_host_value_string_from_utf8_n(const char* text, size_t length);
+static size_t jube_host_value_string_length(Item value);
+static const uint8_t* jube_host_value_string_bytes(Item value);
+static bool jube_host_value_number_to_int64_exact(Item value, int64_t* out_value);
+static Item jube_host_value_native_object_new(const JubeTypeDef* type, void* payload);
+static void* jube_host_value_native_object_data(Item object, const JubeTypeDef* type);
+static Item jube_host_value_property_set_own(Item object, Item key, Item value);
+static bool jube_host_value_property_has_own(Item object, Item key);
+static bool jube_host_value_property_get_own_data(Item object, Item key, Item* out_value);
+static bool jube_host_value_is_array(Item value);
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
@@ -534,18 +731,29 @@ extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_has_own_property(Item object, Item key);
+extern "C" Item js_map_get_fast_ext(Map* map, const char* key, int key_length, bool* out_found);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" Item js_make_string_len(const char* str, int len);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_get_global_this(void);
 extern "C" Item js_get_global_property(Item key);
+extern "C" Item js_get_current_this(void);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
+extern "C" Item js_throw_type_error_code(const char* code, const char* message);
+extern "C" Item js_throw_range_error_code(const char* code, const char* message);
+extern "C" Item js_throw_uri_error_code(const char* code, const char* message);
 extern "C" void js_throw_value(Item error);
 extern "C" Item js_reflect_own_keys(Item obj);
+extern "C" Item js_object_keys(Item obj);
 extern "C" Item js_reflect_delete_property(Item obj, Item key);
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 extern "C" int js_check_exception(void);
+extern "C" Item js_clear_exception(void);
+extern "C" void js_mark_non_writable(Item object, Item name);
+extern "C" Item js_object_freeze(Item obj);
 extern "C" bool js_is_truthy(Item value);
 extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_make_number(double value);
@@ -553,6 +761,25 @@ double js_get_number(Item value);
 extern "C" Item js_date_new_from(Item value);
 extern "C" Item js_date_method(Item date, int method_id);
 extern "C" Item js_to_string(Item value);
+extern "C" Item js_typeof(Item value);
+extern "C" Item js_object_create(Item prototype);
+extern "C" Item* js_alloc_env(int count);
+extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
+extern "C" Item js_get_prototype(Item object);
+extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" Item js_promise_with_resolvers(void);
+extern "C" void js_next_tick_enqueue(Item callback);
+extern "C" Item js_als_capture_context(void);
+extern "C" Item js_als_context_call(Item context, Item callback, Item this_val,
+                                     Item arg1, int64_t has_arg);
+extern "C" int js_domain_emit_current_error(Item error);
+extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_item);
+extern "C" void js_mark_own_proto_property(Item object);
+
+static Item jube_host_script_bigint_from_decimal(const char* text, size_t length) {
+    if (!text || length > (size_t)INT_MAX) return ItemError;
+    return bigint_from_string(text, (int)length);
+}
 
 static int jube_script_class_id(Item value) {
     return (int)js_class_id(value);
@@ -762,6 +989,20 @@ extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, voi
 extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
                                                 void* parent, const char* attribute_name,
                                                 const char* old_value);
+extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options);
+extern "C" Item js_setImmediate_promise(Item value, Item options);
+extern "C" Item js_setInterval(Item callback, Item delay);
+extern "C" Item js_scheduler_wait(Item delay, Item options);
+extern "C" Item js_scheduler_yield(void);
+extern "C" Item js_setTimeout(Item callback, Item delay);
+extern "C" void js_clearTimeout(Item timer);
+extern "C" void js_clearInterval(Item timer);
+extern "C" Item js_setImmediate(Item callback);
+extern "C" void js_timer_install_promisify_custom(Item function);
+extern "C" Item js_fs_createReadStream(Item path, Item options);
+extern "C" Item js_fs_createWriteStream(Item path, Item options);
+extern "C" Item js_util_promisify_custom_symbol(void);
+extern "C" Item js_util_custom_promisify_args_symbol(void);
 
 static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
     js_dom_notify_mutation((DomJsMutationKind)kind, target, parent);
@@ -772,6 +1013,37 @@ static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* p
                                                   const char* old_value) {
     js_dom_notify_mutation_detail((DomJsMutationKind)kind, target, parent,
                                   attribute_name, old_value);
+}
+
+static void jube_host_node_function_install_promisify_custom(Item function, void* func_ptr,
+                                                              int parameter_count) {
+    if (!func_ptr) return;
+    Item custom = js_new_function(func_ptr, parameter_count);
+    js_property_set(function, js_util_promisify_custom_symbol(), custom);
+}
+
+static void jube_host_node_function_install_promisify_args(Item function, const char* first,
+                                                            const char* second) {
+    if (!first) return;
+    JubeRootFrame frame = {};
+    if (!jube_host_opaque_root_frame_begin(&frame, 3)) return;
+    uint64_t* function_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* names_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* symbol_root = jube_host_opaque_root_frame_take_slot(&frame);
+    if (!function_root || !names_root || !symbol_root) {
+        jube_host_opaque_root_frame_end(&frame);
+        return;
+    }
+    *function_root = function.item;
+    Item names = js_array_new(0);
+    *names_root = names.item;
+    js_array_push((Item){.item = *names_root}, js_make_string_len(first, (int)strlen(first)));
+    if (second) js_array_push((Item){.item = *names_root}, js_make_string_len(second, (int)strlen(second)));
+    Item symbol = js_util_custom_promisify_args_symbol();
+    *symbol_root = symbol.item;
+    js_property_set((Item){.item = *function_root}, (Item){.item = *symbol_root},
+                    (Item){.item = *names_root});
+    jube_host_opaque_root_frame_end(&frame);
 }
 
 static const JubeHostGcAPI jube_host_gc_api = {
@@ -791,6 +1063,119 @@ static const JubeHostRootAPI jube_host_root_api = {
     jube_host_opaque_root_frame_take_slot,
     jube_host_opaque_root_frame_end,
     jube_host_opaque_persistent_root_register,
+    jube_host_opaque_persistent_root_unregister,
+};
+
+static const JubeHostRuntimeAPI jube_host_node_runtime_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostRuntimeAPI),
+    jube_host_node_current_session,
+    jube_host_node_session_is_live,
+    jube_host_node_session_global_this,
+    jube_host_node_session_process,
+    jube_host_node_current_this,
+    jube_host_node_resolve_namespace,
+    jube_host_node_resolve_host_namespace,
+    jube_host_node_session_active_resources_info,
+    jube_host_node_session_active_handles,
+};
+
+static const JubeHostNodeErrorAPI jube_host_node_error_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodeErrorAPI),
+    jube_host_node_throw_type_error_code,
+    jube_host_node_throw_range_error_code,
+    jube_host_node_throw_zlib_error,
+    jube_host_node_throw_system_error,
+    jube_host_node_throw_error_code,
+};
+
+static const JubeHostAsyncAPI jube_host_node_async_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostAsyncAPI),
+    jube_host_node_work_submit,
+    jube_host_node_work_cancel,
+    js_setTimeout_promise,
+    js_setImmediate_promise,
+    js_setInterval,
+    js_scheduler_wait,
+    js_scheduler_yield,
+    js_setTimeout,
+    js_clearTimeout,
+    js_clearInterval,
+    js_setImmediate,
+    js_timer_install_promisify_custom,
+    jube_host_node_function_install_promisify_custom,
+    jube_host_node_function_install_promisify_args,
+    jube_host_node_next_tick_callback,
+};
+
+static const JubeHostBinaryAPI jube_host_node_binary_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostBinaryAPI),
+    jube_host_node_is_typed_array,
+    jube_host_node_typed_array_data,
+    jube_host_node_typed_array_length,
+    jube_host_node_buffer_from_bytes,
+    jube_host_node_buffer_alloc,
+    jube_host_node_buffer_prepare_write,
+    jube_host_node_is_buffer,
+    jube_host_node_describe_binary_view,
+    jube_host_node_buffer_view,
+};
+
+static const JubeHostNodeEventsAPI jube_host_node_events_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodeEventsAPI),
+    jube_host_node_events_als_capture_context,
+    jube_host_node_events_als_context_call,
+    jube_host_node_events_domain_emit_current_error,
+    jube_host_node_events_process_emit_warning,
+    jube_host_node_events_is_error_like,
+    jube_host_node_events_domain_current,
+    jube_host_node_events_domain_call,
+};
+
+static const JubeHostNodePermissionAPI jube_host_node_permission_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodePermissionAPI),
+    jube_host_node_permission_has_fs_read,
+    jube_host_node_permission_has_fs_write,
+    jube_host_node_permission_check_fs_read,
+    jube_host_node_permission_check_fs_write,
+};
+
+static const JubeHostWorkerAPI jube_host_node_worker_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostWorkerAPI),
+    js_message_channel_new,
+    js_message_port_new,
+    js_message_port_move_to_context,
+    js_message_port_receive_message_on_port,
+    js_worker_mark_as_untransferable,
+    js_worker_is_marked_as_untransferable,
+};
+
+static const JubeHostStreamAPI jube_host_node_stream_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostStreamAPI),
+    js_fs_createReadStream,
+    js_fs_createWriteStream,
+};
+
+static const JubeHostNodeAPI jube_host_node_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostNodeAPI),
+    JUBE_HOST_CAP_NODE_RUNTIME,
+    &jube_host_node_runtime_api,
+    &jube_host_root_api,
+    &jube_host_node_error_api,
+    &jube_host_node_async_api,
+    &jube_host_node_binary_api,
+    &jube_host_node_events_api,
+    &jube_host_node_worker_api,
+    &jube_host_node_permission_api,
+    &jube_host_node_stream_api,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -800,8 +1185,21 @@ static const JubeHostValueAPI jube_host_value_api = {
     js_array_push,
     js_array_length,
     js_array_get_int,
+    jube_host_value_array_set,
     js_property_get,
     js_property_set,
+    jube_host_value_property_set_own,
+    jube_host_value_property_has_own,
+    jube_host_value_property_get_own_data,
+    jube_host_value_is_array,
+    jube_host_value_kind,
+    jube_host_value_string_copy,
+    jube_host_value_string_from_utf8_n,
+    jube_host_value_string_length,
+    jube_host_value_string_bytes,
+    jube_host_value_number_to_int64_exact,
+    jube_host_value_native_object_new,
+    jube_host_value_native_object_data,
 };
 
 static const JubeHostScriptAPI jube_host_script_api = {
@@ -814,6 +1212,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_new_error_with_name,
     js_throw_value,
     js_reflect_own_keys,
+    js_object_keys,
     js_reflect_delete_property,
     js_call_function,
     js_check_exception,
@@ -825,6 +1224,23 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_date_method,
     jube_script_class_id,
     js_to_string,
+    js_throw_type_error_code,
+    js_object_create,
+    js_throw_uri_error_code,
+    js_clear_exception,
+    js_mark_non_writable,
+    js_object_freeze,
+    jube_host_script_current_this,
+    jube_host_script_strict_equal,
+    jube_host_script_class_stamp,
+    jube_host_script_class_is,
+    js_typeof,
+    js_alloc_env,
+    js_new_closure,
+    js_get_prototype,
+    js_set_prototype,
+    js_promise_with_resolvers,
+    jube_host_script_bigint_from_decimal,
 };
 
 static const JubeHostDomAPI jube_host_dom_api = {
@@ -2353,11 +2769,601 @@ static Input* jube_host_data_input(void* session) {
 }
 
 static int jube_host_opaque_persistent_root_register(void* session, uint64_t* slot) {
-    if (!jube_host_data_input(session) || !slot) return -1;
+    if ((!jube_host_data_input(session) && !jube_host_node_session_is_live(session)) || !slot) {
+        return -1;
+    }
     // TLS storage is outside the side-root stack, so register its exact Item
     // slot with the active guest heap rather than exposing that heap to a module.
     heap_register_gc_root(slot);
     return 0;
+}
+
+static int jube_host_opaque_persistent_root_unregister(void* session, uint64_t* slot) {
+    if ((!jube_host_data_input(session) && !jube_host_node_session_is_live(session)) || !slot) {
+        return -1;
+    }
+    heap_unregister_gc_root(slot);
+    return 0;
+}
+
+static void* jube_host_node_current_session(void) {
+    return jube_active_node_runtime_session;
+}
+
+static bool jube_host_node_session_is_live(void* session) {
+    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    return node_session && node_session == jube_active_node_runtime_session &&
+        node_session->live;
+}
+
+static Item jube_host_node_session_global_this(void* session) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    return js_get_global_this();
+}
+
+static Item jube_host_node_session_process(void* session) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    return js_get_global_property((Item){.item = s2it(heap_create_name("process", 7))});
+}
+
+static Item jube_host_node_current_this(void* session) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    return js_get_current_this();
+}
+
+static Item jube_host_node_session_active_resources_info(void* session) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    return js_net_get_active_resources_info();
+}
+
+static Item jube_host_node_session_active_handles(void* session) {
+    if (!jube_host_node_session_is_live(session)) return ItemNull;
+    return js_net_get_active_handles();
+}
+
+static bool jube_host_node_is_typed_array(Item value) {
+    return js_is_typed_array(value);
+}
+
+static uint8_t* jube_host_node_typed_array_data(Item value) {
+    return (uint8_t*)js_typed_array_current_data_ptr(value);
+}
+
+static int jube_host_node_typed_array_length(Item value) {
+    return js_typed_array_byte_length(value);
+}
+
+static Item jube_host_node_buffer_from_bytes(const uint8_t* data, int length) {
+    if (length < 0 || (length > 0 && !data)) return ItemNull;
+    return js_buffer_from_bytes((const char*)data, length);
+}
+
+static Item jube_host_node_buffer_alloc(int length) {
+    return length < 0 ? ItemNull : js_buffer_from_bytes(NULL, length);
+}
+
+static uint8_t* jube_host_node_buffer_prepare_write(Item value) {
+    return (uint8_t*)js_typed_array_prepare_write_ptr(value);
+}
+
+static bool jube_host_node_is_buffer(Item value) {
+    if (!js_is_typed_array(value)) return false;
+    JsTypedArray* typed_array = js_get_typed_array_ptr(value.map);
+    return typed_array && typed_array->is_buffer;
+}
+
+static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_view) {
+    if (!out_view) return JUBE_BINARY_VIEW_NOT_VIEW;
+    *out_view = {};
+    if (js_is_arraybuffer(value)) {
+        JsArrayBuffer* array_buffer = js_get_arraybuffer_ptr_item(value);
+        if (!array_buffer || js_arraybuffer_detached(array_buffer)) {
+            return JUBE_BINARY_VIEW_DETACHED;
+        }
+        out_view->array_buffer = value;
+        out_view->byte_length = js_arraybuffer_length(array_buffer);
+        return JUBE_BINARY_VIEW_OK;
+    }
+    if (js_is_typed_array(value)) {
+        JsTypedArray* typed_array = js_get_typed_array_ptr(value.map);
+        if (!typed_array || !typed_array->buffer || js_arraybuffer_detached(typed_array->buffer)) {
+            return JUBE_BINARY_VIEW_DETACHED;
+        }
+        int byte_length = js_typed_array_byte_length(value);
+        int byte_offset = js_typed_array_byte_offset(value);
+        int backing_length = js_arraybuffer_length(typed_array->buffer);
+        if (byte_length < 0 || byte_offset < 0 || byte_offset > backing_length ||
+                byte_length > backing_length - byte_offset) {
+            return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
+        }
+        out_view->array_buffer = typed_array->buffer_item
+            ? (Item){.item = typed_array->buffer_item}
+            : js_arraybuffer_wrap(typed_array->buffer);
+        if (!js_is_arraybuffer(out_view->array_buffer)) return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
+        out_view->byte_offset = byte_offset;
+        out_view->byte_length = byte_length;
+        return JUBE_BINARY_VIEW_OK;
+    }
+    if (js_is_dataview(value)) {
+        JsDataView* data_view = js_get_dataview_ptr(value);
+        if (!data_view || !data_view->buffer || js_arraybuffer_detached(data_view->buffer)) {
+            return JUBE_BINARY_VIEW_DETACHED;
+        }
+        int backing_length = js_arraybuffer_length(data_view->buffer);
+        int byte_length = data_view->length_tracking
+            ? backing_length - data_view->byte_offset : data_view->byte_length;
+        if (data_view->byte_offset < 0 || byte_length < 0 ||
+                data_view->byte_offset > backing_length ||
+                (!data_view->length_tracking &&
+                 data_view->byte_length > backing_length - data_view->byte_offset)) {
+            return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
+        }
+        out_view->array_buffer = data_view->buffer_item
+            ? (Item){.item = data_view->buffer_item}
+            : js_arraybuffer_wrap(data_view->buffer);
+        if (!js_is_arraybuffer(out_view->array_buffer)) return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
+        out_view->byte_offset = data_view->byte_offset;
+        out_view->byte_length = byte_length;
+        return JUBE_BINARY_VIEW_OK;
+    }
+    return JUBE_BINARY_VIEW_NOT_VIEW;
+}
+
+static Item jube_host_node_buffer_view(Item array_buffer, int byte_offset, int byte_length) {
+    JsArrayBuffer* backing = js_get_arraybuffer_ptr_item(array_buffer);
+    if (!backing || js_arraybuffer_detached(backing) || byte_offset < 0 || byte_length < 0 ||
+            byte_offset > js_arraybuffer_length(backing) ||
+            byte_length > js_arraybuffer_length(backing) - byte_offset) {
+        return ItemNull;
+    }
+    Item result = js_typed_array_new_from_buffer(JS_TYPED_UINT8, array_buffer, byte_offset,
+                                                  byte_length);
+    JsTypedArray* typed_array = js_is_typed_array(result) ?
+        js_get_typed_array_ptr(result.map) : NULL;
+    if (!typed_array) return ItemNull;
+    typed_array->is_buffer = true;
+    return result;
+}
+
+static int jube_host_value_kind(Item value) {
+    switch (get_type_id(value)) {
+        case LMD_TYPE_UNDEFINED: return JUBE_VALUE_UNDEFINED;
+        case LMD_TYPE_NULL: return JUBE_VALUE_NULL;
+        case LMD_TYPE_BOOL: return JUBE_VALUE_BOOLEAN;
+        case LMD_TYPE_INT:
+        case LMD_TYPE_INT64:
+        case LMD_TYPE_FLOAT: return JUBE_VALUE_NUMBER;
+        case LMD_TYPE_STRING: return JUBE_VALUE_STRING;
+        case LMD_TYPE_ARRAY: return JUBE_VALUE_ARRAY;
+        case LMD_TYPE_MAP:
+        case LMD_TYPE_VMAP: return JUBE_VALUE_OBJECT;
+        case LMD_TYPE_FUNC: return JUBE_VALUE_FUNCTION;
+        case LMD_TYPE_SYMBOL: return JUBE_VALUE_SYMBOL;
+        default: return JUBE_VALUE_OTHER;
+    }
+}
+
+static bool jube_host_value_number_to_int64_exact(Item value, int64_t* out_value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        if (out_value) *out_value = it2i(value);
+        return true;
+    }
+    if (type != LMD_TYPE_FLOAT) return false;
+    double number = it2d(value);
+    // JavaScript numeric literals commonly arrive as doubles; reject only
+    // fractional or out-of-range values instead of losing valid integer APIs.
+    if (!isfinite(number) || number < (double)INT64_MIN || number >= (double)INT64_MAX ||
+            (double)(int64_t)number != number) {
+        return false;
+    }
+    if (out_value) *out_value = (int64_t)number;
+    return true;
+}
+
+static Item jube_host_value_native_object_new(const JubeTypeDef* type, void* payload) {
+    if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return ItemNull;
+    Item object = vmap_new();
+    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap) return ItemNull;
+    // Only the host writes VMap metadata: modules receive a branded wrapper
+    // without coupling their ABI to its moving-GC object layout.
+    object.vmap->host_type = (const void*)type;
+    object.vmap->host_data = payload;
+    return object;
+}
+
+static void* jube_host_value_native_object_data(Item object, const JubeTypeDef* type) {
+    if (!type || get_type_id(object) != LMD_TYPE_VMAP || !object.vmap ||
+            object.vmap->host_type != (const void*)type) return NULL;
+    return object.vmap->host_data;
+}
+
+static bool jube_host_value_string_copy(Item value, char* out, size_t out_size,
+                                        size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!out || out_size == 0 || get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* string = it2s(value);
+    if (!string || string->len >= out_size) return false;
+    memcpy(out, string->chars, string->len);
+    out[string->len] = '\0';
+    if (out_length) *out_length = string->len;
+    return true;
+}
+
+static Item jube_host_value_string_from_utf8_n(const char* text, size_t length) {
+    if (!text || length > INT32_MAX) return ItemNull;
+    // Namespace keys may use interned names, but observable path results must
+    // retain ordinary JS string semantics (including Win32 separators).
+    return js_make_string_len(text, (int)length);
+}
+
+static size_t jube_host_value_string_length(Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return 0;
+    String* string = it2s(value);
+    return string && string->len > 0 ? (size_t)string->len : 0;
+}
+
+static const uint8_t* jube_host_value_string_bytes(Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
+    String* string = it2s(value);
+    return string ? (const uint8_t*)string->chars : NULL;
+}
+
+static Item jube_host_value_property_set_own(Item object, Item key, Item value) {
+    // Null-prototype dictionaries must retain an own "__proto__" key instead
+    // of re-entering the engine's inherited accessor path.
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* text = it2s(key);
+        if (text && text->len == 9 && memcmp(text->chars, "__proto__", 9) == 0) {
+            // Preserve Object.create(null)'s prototype sentinel before the
+            // dictionary gains its observable own __proto__ data field.
+            js_mark_own_proto_property(object);
+            js_mark_non_enumerable(object,
+                (Item){.item = s2it(heap_create_name("__internal_proto__", 18))});
+        }
+    }
+    ScopedSkipAccessorDispatch skip_accessor_dispatch;
+    return js_property_set(object, key, value);
+}
+
+static bool jube_host_value_property_has_own(Item object, Item key) {
+    return it2b(js_has_own_property(object, key));
+}
+
+static bool jube_host_value_property_get_own_data(Item object, Item key, Item* out_value) {
+    if (out_value) *out_value = ItemNull;
+    TypeId object_type = get_type_id(object);
+    if ((object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_VMAP) ||
+            get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* text = it2s(key);
+    if (!text) return false;
+    bool found = false;
+    Item value = js_map_get_fast_ext(object.map, text->chars, (int)text->len, &found);
+    if (found && out_value) *out_value = value;
+    return found;
+}
+
+static bool jube_host_value_is_array(Item value) {
+    return get_type_id(value) == LMD_TYPE_ARRAY;
+}
+
+static Item jube_host_value_array_set(Item array, int64_t index, Item value) {
+    return js_array_set_int(array, index, value);
+}
+
+static Item jube_host_script_current_this(void) {
+    return js_get_current_this();
+}
+
+static Item jube_host_script_strict_equal(Item left, Item right) {
+    return js_strict_equal(left, right);
+}
+
+static bool jube_host_script_class_stamp(Item object, int class_id) {
+    JsClass host_class = JS_CLASS_NONE;
+    switch (class_id) {
+        case JUBE_SCRIPT_CLASS_URL: host_class = JS_CLASS_URL; break;
+        case JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS:
+            host_class = JS_CLASS_URL_SEARCH_PARAMS;
+            break;
+        case JUBE_SCRIPT_CLASS_BLOB: host_class = JS_CLASS_BLOB; break;
+        case JUBE_SCRIPT_CLASS_EVENT_EMITTER: host_class = JS_CLASS_EVENT_EMITTER; break;
+        default: return false;
+    }
+    js_class_stamp(object, host_class);
+    return true;
+}
+
+static bool jube_host_script_class_is(Item object, int class_id) {
+    JsClass host_class = JS_CLASS_NONE;
+    switch (class_id) {
+        case JUBE_SCRIPT_CLASS_URL: host_class = JS_CLASS_URL; break;
+        case JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS:
+            host_class = JS_CLASS_URL_SEARCH_PARAMS;
+            break;
+        case JUBE_SCRIPT_CLASS_BLOB: host_class = JS_CLASS_BLOB; break;
+        case JUBE_SCRIPT_CLASS_EVENT_EMITTER: host_class = JS_CLASS_EVENT_EMITTER; break;
+        default: return false;
+    }
+    return js_class_id(object) == host_class;
+}
+
+static Item jube_host_node_events_als_capture_context(void) {
+    return js_als_capture_context();
+}
+
+static Item jube_host_node_events_als_context_call(Item context, Item callback, Item this_val,
+                                                    Item arg1, int64_t has_arg) {
+    return js_als_context_call(context, callback, this_val, arg1, has_arg);
+}
+
+static int jube_host_node_events_domain_emit_current_error(Item error) {
+    return js_domain_emit_current_error(error);
+}
+
+static Item jube_host_node_events_process_emit_warning(Item warning, Item type_item,
+                                                        Item code_item) {
+    return js_process_emitWarning(warning, type_item, code_item);
+}
+
+static bool jube_host_node_events_is_error_like(Item value) {
+    JsClass cls = js_class_id(value);
+    return js_class_is_error_like(cls) || cls == JS_CLASS_DOM_EXCEPTION;
+}
+
+static Item jube_host_node_events_domain_current(void) {
+    return js_domain_get_current();
+}
+
+static Item jube_host_node_events_domain_call(Item domain, Item callback, Item this_val,
+                                              Item* args, int arg_count) {
+    return js_domain_call_function(domain, callback, this_val, args, arg_count);
+}
+
+static bool jube_host_node_permission_has_fs_read(const char* path) {
+    return path && js_permission_has_fs_read(path) != 0;
+}
+
+static bool jube_host_node_permission_has_fs_write(const char* path) {
+    return path && js_permission_has_fs_write(path) != 0;
+}
+
+static Item jube_host_node_permission_check_fs_read(const char* path) {
+    if (!path) return ItemNull;
+    return js_permission_check_fs_read(path);
+}
+
+static Item jube_host_node_permission_check_fs_write(const char* path) {
+    if (!path) return ItemNull;
+    return js_permission_check_fs_write(path);
+}
+
+static Item jube_host_node_throw_type_error_code(void* session, const char* code,
+                                                  const char* message) {
+    if (!jube_host_node_session_is_live(session) || !code || !message) return ItemNull;
+    return js_throw_type_error_code(code, message);
+}
+
+static Item jube_host_node_throw_range_error_code(void* session, const char* code,
+                                                   const char* message) {
+    if (!jube_host_node_session_is_live(session) || !code || !message) return ItemNull;
+    return js_throw_range_error_code(code, message);
+}
+
+static Item jube_host_node_throw_zlib_error(void* session, const char* method, int status) {
+    if (!jube_host_node_session_is_live(session) || !method) return ItemNull;
+    return js_zlib_throw_error_status(method, status);
+}
+
+static Item jube_host_node_throw_system_error(void* session, const char* syscall,
+                                              int error_number) {
+    if (!jube_host_node_session_is_live(session) || !syscall) return ItemNull;
+    return js_node_throw_system_error(syscall, error_number);
+}
+
+static Item jube_host_node_throw_error_code(void* session, const char* code,
+                                            const char* message) {
+    if (!jube_host_node_session_is_live(session) || !code || !message) return ItemNull;
+    return js_throw_error_with_code(code, message);
+}
+
+static Item jube_host_node_emit_callback(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || get_type_id(env[0]) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (env[1].item != ItemNull.item) {
+        js_call_function(env[0], (Item){.item = ITEM_JS_UNDEFINED}, &env[1], 1);
+    } else {
+        Item args[2] = {ItemNull, env[2]};
+        js_call_function(env[0], (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static void jube_host_node_next_tick_callback(void* session, Item callback, Item error, Item result) {
+    if (!jube_host_node_session_is_live(session) || get_type_id(callback) != LMD_TYPE_FUNC) return;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> callback_root(roots, callback);
+    Rooted<Item> error_root(roots, error);
+    Rooted<Item> result_root(roots, result);
+    Item* env = js_alloc_env(3);
+    if (!env) return;
+    // js_alloc_env may compact the heap, so store the refreshed rooted values in the queued closure.
+    env[0] = callback_root.get();
+    env[1] = error_root.get();
+    env[2] = result_root.get();
+    js_next_tick_enqueue(js_new_closure((void*)jube_host_node_emit_callback, 0, env, 3));
+}
+
+static void jube_node_async_work_remove(JubeNodeAsyncWork* job) {
+    if (!job || !jube_node_async_work) return;
+    for (int i = 0; i < jube_node_async_work->length; i++) {
+        if (jube_node_async_work->data[i] == job) {
+            arraylist_remove(jube_node_async_work, i);
+            return;
+        }
+    }
+}
+
+static void jube_host_node_work_execute(uv_work_t* request) {
+    JubeNodeAsyncWork* job = request ? (JubeNodeAsyncWork*)request->data : NULL;
+    if (job && job->work) job->work(job->user);
+}
+
+static void jube_host_node_work_complete(uv_work_t* request, int status) {
+    JubeNodeAsyncWork* job = request ? (JubeNodeAsyncWork*)request->data : NULL;
+    if (!job) return;
+    jube_node_async_work_remove(job);
+    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)job->session;
+    // Detached heaps must never receive a late completion; release only the
+    // module-owned POD payload after libuv has returned ownership to the host.
+    if (session && !session->detaching && jube_host_node_session_is_live(session) &&
+            job->complete) {
+        job->complete(job->user, status);
+    }
+    if (job->destroy) job->destroy(job->user);
+    mem_free(job);
+}
+
+static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
+                                      JubeAsyncCompletionCallback complete,
+                                      JubeAsyncDestroyCallback destroy, void* user,
+                                      uint32_t* out_request_id) {
+    if (out_request_id) *out_request_id = 0;
+    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    if (!jube_host_node_session_is_live(session) || node_session->detaching || !work ||
+            !destroy || !lambda_uv_loop()) return -1;
+    if (!jube_node_async_work) {
+        jube_node_async_work = arraylist_new(8);
+        if (!jube_node_async_work) return -1;
+    }
+    JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)mem_calloc(1, sizeof(JubeNodeAsyncWork),
+        MEM_CAT_SYSTEM);
+    if (!job) return -1;
+    uint32_t request_id = ++jube_node_async_work_next_id;
+    if (request_id == 0) request_id = ++jube_node_async_work_next_id;
+    job->session = session;
+    job->work = work;
+    job->complete = complete;
+    job->destroy = destroy;
+    job->user = user;
+    job->request_id = request_id;
+    job->request.data = job;
+    if (!arraylist_append(jube_node_async_work, job)) {
+        mem_free(job);
+        return -1;
+    }
+    int status = uv_queue_work(lambda_uv_loop(), &job->request, jube_host_node_work_execute,
+        jube_host_node_work_complete);
+    if (status != 0) {
+        jube_node_async_work_remove(job);
+        mem_free(job);
+        return status;
+    }
+    if (out_request_id) *out_request_id = request_id;
+    return 0;
+}
+
+static int jube_host_node_work_cancel(void* session, uint32_t request_id) {
+    if (!jube_host_node_session_is_live(session) || request_id == 0 || !jube_node_async_work) {
+        return -1;
+    }
+    for (int i = 0; i < jube_node_async_work->length; i++) {
+        JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)jube_node_async_work->data[i];
+        if (job && job->session == session && job->request_id == request_id) {
+            return uv_cancel((uv_req_t*)&job->request);
+        }
+    }
+    return -1;
+}
+
+static void jube_node_async_cancel_session(void* session) {
+    if (!session || !jube_node_async_work) return;
+    for (int i = 0; i < jube_node_async_work->length; i++) {
+        JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)jube_node_async_work->data[i];
+        if (job && job->session == session) {
+            (void)uv_cancel((uv_req_t*)&job->request);
+        }
+    }
+}
+
+static int jube_host_node_resolve_namespace(void* session, const char* specifier,
+                                             Item* out_namespace) {
+    if (out_namespace) *out_namespace = ItemNull;
+    if (!jube_host_node_session_is_live(session) || !specifier || !out_namespace) return -1;
+    return jube_specifier_resolve(specifier, out_namespace) == JUBE_SPECIFIER_RESOLVED ? 0 : -1;
+}
+
+static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
+                                                  Item* out_namespace) {
+    if (out_namespace) *out_namespace = ItemNull;
+    if (!jube_host_node_session_is_live(session) || !specifier || !out_namespace) return -1;
+    typedef Item (*JubeHostNamespaceFactory)(void);
+    typedef struct JubeHostNamespaceEntry {
+        const char* specifier;
+        JubeHostNamespaceFactory factory;
+    } JubeHostNamespaceEntry;
+    // The table is the single host-resident compatibility boundary. Jube
+    // descriptors, rather than js_runtime's legacy dispatcher, decide which
+    // profiles expose these names while their implementations migrate.
+    static const JubeHostNamespaceEntry entries[] = {
+        {"fs", js_get_fs_namespace},
+        {"fs/promises", js_get_fs_promises_namespace},
+        {"internal/fs/promises", js_get_internal_fs_promises_namespace},
+        {"internal/fs/utils", js_get_internal_fs_utils_namespace},
+        {"child_process", js_get_child_process_namespace},
+        {"crypto", js_get_crypto_namespace},
+        {"dns", js_get_dns_namespace},
+        {"dns/promises", js_get_dns_promises_namespace},
+        {"net", js_get_net_namespace},
+        {"internal/net", js_get_internal_net_namespace},
+        {"internal/js_stream_socket", js_get_internal_js_stream_socket_constructor},
+        {"tls", js_get_tls_namespace},
+        {"http", js_get_http_namespace},
+        {"_http_agent", js_get_http_namespace},
+        {"_http_common", js_get_http_namespace},
+        {"_http_server", js_get_http_namespace},
+        {"_http_outgoing", js_get_http_namespace},
+        {"https", js_get_https_namespace},
+        {"internal/errors", js_get_internal_errors_namespace},
+        {"internal/assert/myers_diff", js_get_internal_assert_myers_diff_namespace},
+        {"internal/async_hooks", js_get_internal_async_hooks_namespace},
+        {"internal/async_context_frame", js_get_internal_async_context_frame_namespace},
+        {"internal/streams/add-abort-signal", js_get_internal_stream_add_abort_signal_namespace},
+        {"internal/streams/end-of-stream", js_get_internal_stream_end_of_stream_namespace},
+        {"internal/streams/state", js_get_internal_stream_state_namespace},
+        {"internal/crypto/util", js_get_internal_crypto_util_namespace},
+        {"internal/util", js_get_internal_util_namespace},
+        {"internal/util/inspect", js_get_internal_util_inspect_namespace},
+        {"internal/repl", js_get_internal_repl_namespace},
+        {"internal/test/binding", js_get_internal_test_binding_namespace},
+        {"buffer", js_get_buffer_namespace},
+        {"util", js_get_util_namespace},
+        {"assert", js_get_assert_namespace},
+        {"stream", js_get_stream_namespace},
+        {"stream/consumers", js_get_stream_namespace},
+        {"stream/promises", js_get_stream_promises_namespace},
+        {"stream/web", js_get_stream_web_namespace},
+        {"stream/iter", js_get_stream_iter_namespace},
+        {"repl", js_get_repl_namespace},
+        {"diagnostics_channel", js_get_diagnostics_channel_namespace},
+        {"zlib", js_get_zlib_namespace},
+        {"module", js_get_node_module_namespace},
+        {"vm", js_get_vm_namespace},
+        {"async_hooks", js_get_async_hooks_namespace},
+        {"trace_events", js_get_trace_events_namespace},
+        {"domain", js_get_domain_namespace},
+        {"cluster", js_get_cluster_namespace},
+        {"readline", js_get_readline_namespace},
+        {"readline/promises", js_get_readline_promises_namespace},
+        {"test", js_get_node_test_namespace},
+    };
+    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
+        if (strcmp(specifier, entries[i].specifier) == 0) {
+            *out_namespace = entries[i].factory();
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static Item jube_host_data_name_from_utf8(void* session, const char* text) {
@@ -2726,7 +3732,8 @@ static JubeHostAPI jube_host_api = {
         JUBE_HOST_CAP_NEUTRAL_DATA |
         JUBE_HOST_CAP_RUNTIME_CATALOG |
         JUBE_HOST_CAP_MODULE_GRAPH |
-        JUBE_HOST_CAP_GUEST_EXECUTION,
+        JUBE_HOST_CAP_GUEST_EXECUTION |
+        JUBE_HOST_CAP_NODE_RUNTIME,
     JUBE_HOST_BUILD_ID,
     &jube_host_lang_api,
     &jube_host_gc_api,
@@ -2735,6 +3742,7 @@ static JubeHostAPI jube_host_api = {
     &jube_host_dom_api,
     &jube_host_runtime_catalog_api,
     &jube_host_data_api,
+    &jube_host_node_api,
 };
 
 extern "C" const JubeHostAPI* jube_internal_host_api(void) {
@@ -2750,6 +3758,59 @@ static bool jube_module_has_field(const JubeModuleDef* module, size_t field_end)
 extern "C" const char* jube_module_interface_decl(const JubeModuleDef* module) {
     size_t end = offsetof(JubeModuleDef, interface_decl) + sizeof(module->interface_decl);
     return jube_module_has_field(module, end) ? module->interface_decl : NULL;
+}
+
+static const JubeModuleRequirements* jube_module_requirements(const JubeModuleDef* module) {
+    size_t end = offsetof(JubeModuleDef, requirements) + sizeof(module->requirements);
+    return jube_module_has_field(module, end) ? module->requirements : NULL;
+}
+
+const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count) {
+    if (count) *count = 0;
+    size_t end = offsetof(JubeModuleDef, global_count) + sizeof(module->global_count);
+    if (!jube_module_has_field(module, end)) return NULL;
+    if (count) *count = module->global_count;
+    return module->globals;
+}
+
+static bool jube_module_requirements_are_supported(const JubeModuleDef* module) {
+    const JubeModuleRequirements* requirements = jube_module_requirements(module);
+    if (!requirements) return true;
+    if (requirements->struct_size < JUBE_MODULE_REQUIREMENTS_V1_SIZE) {
+        log_error("JUBE_REG: module '%s' has a truncated requirements record", module->name);
+        return false;
+    }
+    size_t node_requirements_end = offsetof(JubeModuleRequirements, min_node_api_size) +
+        sizeof(requirements->min_node_api_size);
+    if (requirements->struct_size >= node_requirements_end &&
+            (!jube_host_api.node ||
+             requirements->min_node_api_version > jube_host_api.node->api_version ||
+             requirements->min_node_api_size > jube_host_api.node->struct_size)) {
+        log_error("JUBE_REG: module '%s' Node requirements are not provided by this host",
+                  module->name);
+        return false;
+    }
+    size_t table_requirements_end = offsetof(JubeModuleRequirements, min_root_api_size) +
+        sizeof(requirements->min_root_api_size);
+    if (requirements->struct_size >= table_requirements_end &&
+            (!jube_host_api.value || !jube_host_api.script || !jube_host_api.node ||
+             !jube_host_api.node->roots ||
+             requirements->min_value_api_size > sizeof(JubeHostValueAPI) ||
+             requirements->min_script_api_size > sizeof(JubeHostScriptAPI) ||
+             requirements->min_root_api_size > jube_host_api.node->roots->struct_size)) {
+        log_error("JUBE_REG: module '%s' table requirements are not provided by this host",
+                  module->name);
+        return false;
+    }
+    if (requirements->min_host_api_version > jube_host_api.api_version ||
+            requirements->min_host_api_size > jube_host_api.struct_size ||
+            (requirements->required_host_capabilities & ~jube_host_api.capabilities) != 0) {
+        // This invariant protects init from seeing a partially compatible host
+        // and is therefore checked before any module callback can run.
+        log_error("JUBE_REG: module '%s' requirements are not provided by this host", module->name);
+        return false;
+    }
+    return true;
 }
 
 extern "C" const JubeTypeBinding* jube_module_type_bindings(const JubeModuleDef* module,
@@ -2808,6 +3869,250 @@ static void jube_close_dynamic_handle(void* handle) {
 #endif
 }
 
+static bool jube_specifier_normalize(const char* name, char* out, size_t out_size) {
+    if (!name || !*name || !out || out_size == 0) return false;
+    const char* cursor = name;
+    // node:test is prefix-only in the current compatibility dispatcher; do
+    // not make a bare `test` package resolve as a builtin while migrating it.
+    if (strncmp(cursor, "node:", 5) == 0 && strcmp(cursor, "node:test") != 0) {
+        cursor += 5;
+    }
+    size_t length = strlen(cursor);
+    if (length > 3 && memcmp(cursor + length - 3, ".js", 3) == 0) length -= 3;
+    if (length == 0 || length >= out_size) return false;
+    memcpy(out, cursor, length);
+    out[length] = '\0';
+    return true;
+}
+
+static uint64_t jube_specifier_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JubeSpecifierEntry* entry = (const JubeSpecifierEntry*)item;
+    return hashmap_sip(entry->normalized, strlen(entry->normalized), seed0, seed1);
+}
+
+static int jube_specifier_entry_compare(const void* left, const void* right, void* user) {
+    (void)user;
+    const JubeSpecifierEntry* a = (const JubeSpecifierEntry*)left;
+    const JubeSpecifierEntry* b = (const JubeSpecifierEntry*)right;
+    return strcmp(a->normalized, b->normalized);
+}
+
+static bool jube_specifier_index_init(void) {
+    if (jube_specifier_index) return true;
+    jube_specifier_index = hashmap_new(sizeof(JubeSpecifierEntry), 64,
+        0x4a5542455f535045ULL, 0x4349464945525f31ULL,
+        jube_specifier_entry_hash, jube_specifier_entry_compare, NULL, NULL);
+    if (!jube_specifier_index) {
+        log_error("JUBE_SPEC: failed to allocate specifier index");
+        return false;
+    }
+    return true;
+}
+
+static bool jube_specifier_entry_upsert(const char* specifier, const char* module_name,
+                                        const char* manifest_path,
+                                        const JubeModuleDef* module,
+                                        int namespace_index, uint32_t state) {
+    if (!specifier || !module_name || !*module_name || !jube_specifier_index_init()) return false;
+    JubeSpecifierEntry entry = {};
+    if (!jube_specifier_normalize(specifier, entry.normalized, sizeof(entry.normalized)) ||
+            strlen(module_name) >= sizeof(entry.module_name) ||
+            (manifest_path && strlen(manifest_path) >= sizeof(entry.manifest_path))) {
+        log_error("JUBE_SPEC: invalid provider '%s' for specifier '%s'", module_name,
+                  specifier ? specifier : "(null)");
+        return false;
+    }
+    strcpy(entry.module_name, module_name);
+    if (manifest_path) strcpy(entry.manifest_path, manifest_path);
+    entry.module = module;
+    entry.namespace_index = namespace_index;
+    entry.state = state;
+
+    const JubeSpecifierEntry* existing =
+        (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, &entry);
+    if (existing) {
+        if (strcmp(existing->module_name, entry.module_name) != 0) {
+            log_error("JUBE_SPEC: duplicate provider '%s' for '%s' conflicts with '%s'",
+                      entry.module_name, entry.normalized, existing->module_name);
+            jube_specifier_catalog_failed = true;
+            return false;
+        }
+        // The manifest is module-level metadata. A descriptor must later pin
+        // every normalized alias to one namespace builder.
+        if (existing->namespace_index >= 0 && namespace_index >= 0 &&
+                existing->namespace_index != namespace_index) {
+            log_error("JUBE_SPEC: module '%s' maps '%s' to multiple namespaces",
+                      entry.module_name, entry.normalized);
+            jube_specifier_catalog_failed = true;
+            return false;
+        }
+        if (!entry.manifest_path[0] && existing->manifest_path[0]) {
+            strcpy(entry.manifest_path, existing->manifest_path);
+        }
+        if (!entry.module && existing->module) entry.module = existing->module;
+        if (entry.namespace_index < 0) entry.namespace_index = existing->namespace_index;
+        if (entry.state < existing->state) entry.state = existing->state;
+    }
+    hashmap_set(jube_specifier_index, &entry);
+    if (hashmap_oom(jube_specifier_index)) {
+        log_error("JUBE_SPEC: failed to record provider '%s' for '%s'", entry.module_name,
+                  entry.normalized);
+        return false;
+    }
+    return true;
+}
+
+static int jube_specifier_index_module(const JubeModuleDef* module) {
+    if (!module || !module->name) return -1;
+    if (!module->namespaces || module->namespace_count <= 0) return 0;
+    for (int i = 0; i < module->namespace_count; i++) {
+        const JubeNamespaceDef* ns = &module->namespaces[i];
+        if (!ns || !ns->specifiers || ns->specifier_count <= 0) continue;
+        for (int j = 0; j < ns->specifier_count; j++) {
+            if (!ns->specifiers[j] || !ns->specifiers[j][0]) continue;
+            if (!jube_specifier_entry_upsert(ns->specifiers[j], module->name, NULL,
+                    module, i, JUBE_SPECIFIER_OWNER_ACTIVE)) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int jube_specifier_descriptor_namespace(const JubeModuleDef* module,
+                                               const char* normalized) {
+    int found_index = -1;
+    if (!module || !normalized || !module->namespaces) return -1;
+    for (int i = 0; i < module->namespace_count; i++) {
+        const JubeNamespaceDef* ns = &module->namespaces[i];
+        if (!ns || !ns->specifiers) continue;
+        for (int j = 0; j < ns->specifier_count; j++) {
+            char candidate[JUBE_SPECIFIER_NAME_CAPACITY];
+            if (!jube_specifier_normalize(ns->specifiers[j], candidate, sizeof(candidate)) ||
+                    strcmp(candidate, normalized) != 0) {
+                continue;
+            }
+            if (found_index >= 0 && found_index != i) return -2;
+            found_index = i;
+        }
+    }
+    return found_index;
+}
+
+static bool jube_specifier_descriptor_matches_catalog(const JubeModuleDef* module) {
+    if (!module || !module->name || !jube_specifier_index) return true;
+    bool has_manifest_provider = false;
+    size_t cursor = 0;
+    void* item = NULL;
+    while (hashmap_iter(jube_specifier_index, &cursor, &item)) {
+        const JubeSpecifierEntry* entry = (const JubeSpecifierEntry*)item;
+        if (!entry || strcmp(entry->module_name, module->name) != 0 ||
+                !entry->manifest_path[0]) {
+            continue;
+        }
+        has_manifest_provider = true;
+        int namespace_index = jube_specifier_descriptor_namespace(module, entry->normalized);
+        if (namespace_index < 0) {
+            log_error("JUBE_SPEC: descriptor '%s' does not attest manifest provider '%s'",
+                      module->name, entry->normalized);
+            return false;
+        }
+    }
+    if (!has_manifest_provider) return true;
+    for (int i = 0; i < module->namespace_count; i++) {
+        const JubeNamespaceDef* ns = &module->namespaces[i];
+        if (!ns || !ns->specifiers) continue;
+        for (int j = 0; j < ns->specifier_count; j++) {
+            JubeSpecifierEntry key = {};
+            if (!jube_specifier_normalize(ns->specifiers[j], key.normalized,
+                                          sizeof(key.normalized))) {
+                return false;
+            }
+            const JubeSpecifierEntry* entry =
+                (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, &key);
+            if (!entry || strcmp(entry->module_name, module->name) != 0 ||
+                    !entry->manifest_path[0]) {
+                log_error("JUBE_SPEC: descriptor '%s' exposes undeclared specifier '%s'",
+                          module->name, key.normalized);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool jube_specifier_catalog_contains(const char* name) {
+    if (!name || !*name || !jube_specifier_catalog_ensure() || !jube_specifier_index) return false;
+    JubeSpecifierEntry key = {};
+    if (!jube_specifier_normalize(name, key.normalized, sizeof(key.normalized))) return false;
+    return hashmap_get(jube_specifier_index, &key) != NULL;
+}
+
+bool jube_specifier_is_builtin(const char* name) {
+    return jube_specifier_catalog_contains(name);
+}
+
+static const JubeSpecifierEntry* jube_specifier_lookup(const char* name,
+                                                       JubeSpecifierEntry* key) {
+    if (!name || !*name || !jube_specifier_catalog_ensure() || !jube_specifier_index ||
+            !key || !jube_specifier_normalize(name, key->normalized, sizeof(key->normalized))) {
+        return NULL;
+    }
+    return (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, key);
+}
+
+JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace) {
+    if (out_namespace) *out_namespace = ItemNull;
+    JubeSpecifierEntry key = {};
+    const JubeSpecifierEntry* found =
+        jube_specifier_lookup(name, &key);
+    if (!found) return JUBE_SPECIFIER_UNKNOWN;
+    JubeSpecifierEntry entry = *found;
+    if (!entry.module) return JUBE_SPECIFIER_UNAVAILABLE;
+    if (entry.namespace_index < 0 || entry.namespace_index >= entry.module->namespace_count) {
+        return JUBE_SPECIFIER_ACTIVATION_FAILED;
+    }
+    const JubeNamespaceDef* ns = &entry.module->namespaces[entry.namespace_index];
+    if (!ns || !ns->build) return JUBE_SPECIFIER_ACTIVATION_FAILED;
+    Item result = ns->build();
+    if (out_namespace) *out_namespace = result;
+    return get_type_id(result) == LMD_TYPE_NULL ?
+        JUBE_SPECIFIER_ACTIVATION_FAILED : JUBE_SPECIFIER_RESOLVED;
+}
+
+JubeSpecifierResolveStatus jube_specifier_resolve(const char* name, Item* out_namespace) {
+    if (out_namespace) *out_namespace = ItemNull;
+    JubeSpecifierResolveStatus active = jube_specifier_resolve_active(name, out_namespace);
+    if (active != JUBE_SPECIFIER_UNAVAILABLE) return active;
+
+    JubeSpecifierEntry key = {};
+    const JubeSpecifierEntry* found = jube_specifier_lookup(name, &key);
+    if (!found) return JUBE_SPECIFIER_UNKNOWN;
+    JubeSpecifierEntry entry = *found;
+    if (entry.manifest_path[0]) {
+        if (jube_load_manifest_path_internal(entry.manifest_path, NULL, entry.module_name) != 1) {
+            log_error("JUBE_SPEC: module '%s' for '%s' is unavailable", entry.module_name,
+                      entry.normalized);
+            return JUBE_SPECIFIER_UNAVAILABLE;
+        }
+        found = (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, &key);
+        if (!found || !found->module) return JUBE_SPECIFIER_ACTIVATION_FAILED;
+        entry = *found;
+    }
+    return jube_specifier_resolve_active(name, out_namespace);
+}
+
+bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user) {
+    if (!callback || !jube_specifier_catalog_ensure() || !jube_specifier_index) return false;
+    size_t cursor = 0;
+    void* item = NULL;
+    while (hashmap_iter(jube_specifier_index, &cursor, &item)) {
+        const JubeSpecifierEntry* entry = (const JubeSpecifierEntry*)item;
+        if (!entry || !callback(entry->normalized, user)) return false;
+    }
+    return true;
+}
+
 // release strips log_info arguments, so keep diagnostic-only helpers out of NDEBUG builds.
 #if !defined(NDEBUG)
 static int jube_host_ops_count(const JubeHostObjectOps* ops) {
@@ -2840,6 +4145,45 @@ static void jube_log_module_type_ops(const JubeModuleDef* module) {
     }
 }
 #endif
+
+static void jube_install_module_globals(const JubeModuleDef* module, void* session) {
+    if (!module || !session || !jube_host_node_session_is_live(session) ||
+            !jube_host_api.node || !jube_host_api.node->roots || !jube_host_api.value ||
+            !jube_host_api.script || !jube_host_api.node->roots->root_frame_begin ||
+            !jube_host_api.node->roots->root_frame_take_slot ||
+            !jube_host_api.node->roots->root_frame_end ||
+            !jube_host_api.value->string_from_utf8_n || !jube_host_api.value->property_set ||
+            !jube_host_api.script->mark_non_enumerable) {
+        return;
+    }
+    int32_t global_count = 0;
+    const JubeGlobalDef* globals = jube_module_globals(module, &global_count);
+    if (!globals || global_count <= 0) return;
+    JubeRootFrame frame = {};
+    if (!jube_host_api.node->roots->root_frame_begin(&frame, 3)) return;
+    uint64_t* global_root = jube_host_api.node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = jube_host_api.node->roots->root_frame_take_slot(&frame);
+    uint64_t* value_root = jube_host_api.node->roots->root_frame_take_slot(&frame);
+    if (!global_root || !key_root || !value_root) {
+        jube_host_api.node->roots->root_frame_end(&frame);
+        return;
+    }
+    *global_root = jube_host_node_session_global_this(session).item;
+    for (int i = 0; i < global_count; i++) {
+        const JubeGlobalDef* global_def = &globals[i];
+        if (!global_def || !global_def->name || !global_def->name[0] || !global_def->build) continue;
+        Item key = jube_host_api.value->string_from_utf8_n(global_def->name,
+            strlen(global_def->name));
+        *key_root = key.item;
+        // The builder may allocate before its value is published on globalThis.
+        *value_root = global_def->build(session).item;
+        jube_host_api.value->property_set((Item){.item = *global_root},
+            (Item){.item = *key_root}, (Item){.item = *value_root});
+        jube_host_api.script->mark_non_enumerable((Item){.item = *global_root},
+            (Item){.item = *key_root});
+    }
+    jube_host_api.node->roots->root_frame_end(&frame);
+}
 
 static int jube_register_module_descriptor(const JubeModuleDef* module, void* dynamic_handle,
                                            const char* source_label) {
@@ -2876,6 +4220,16 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     // Duplicate module registration is idempotent; validate language aliases
     // only for a descriptor that will become newly visible to the registry.
     if (jube_language_validate_registration(module) != 0) {
+        jube_close_dynamic_handle(dynamic_handle);
+        return -1;
+    }
+    if (!jube_module_requirements_are_supported(module)) {
+        jube_close_dynamic_handle(dynamic_handle);
+        return -1;
+    }
+    if (!jube_specifier_descriptor_matches_catalog(module)) {
+        // Manifest ownership is checked before init so an impersonating image
+        // cannot execute callbacks merely by sharing a module name.
         jube_close_dynamic_handle(dynamic_handle);
         return -1;
     }
@@ -2925,6 +4279,21 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
         return -1;
     }
 
+    if (jube_specifier_index_module(module) != 0) {
+        // A descriptor is not visible until every namespace alias has one
+        // unambiguous provider in the import catalog.
+        log_error("JUBE_SPEC: %s module '%s' has an invalid specifier set",
+                  source_label ? source_label : "Jube", module->name);
+        if (module->shutdown) module->shutdown();
+        jube_interface_remove_module(module);
+        jube_static_modules_count--;
+        jube_static_modules[slot].module = NULL;
+        jube_static_modules[slot].initialized = false;
+        jube_static_modules[slot].dynamic_handle = NULL;
+        jube_close_dynamic_handle(dynamic_handle);
+        return -1;
+    }
+
     log_info("JUBE_REG: registered %s module '%s' version '%s'",
              source_label ? source_label : "Jube", module->name,
              module->version ? module->version : "(none)");
@@ -2934,6 +4303,17 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     // A descriptor without init() is still an active module. Lifecycle hooks
     // such as heap_cleanup must run for it after successful registration.
     jube_static_modules[slot].initialized = true;
+    if (jube_active_node_runtime_session && jube_active_node_runtime_session->live &&
+            !jube_active_node_runtime_session->detaching &&
+            jube_module_has_field(module, offsetof(JubeModuleDef, runtime_attach) +
+                sizeof(((JubeModuleDef*)NULL)->runtime_attach)) && module->runtime_attach) {
+        // Dynamic activation can occur after JS startup; attach immediately so
+        // namespace builders never observe an otherwise-live session as null.
+        module->runtime_attach(jube_active_node_runtime_session);
+        // Startup installs static-module globals in js_globals.cpp. A module
+        // activated later must publish its explicit globals in the same session.
+        jube_install_module_globals(module, jube_active_node_runtime_session);
+    }
     return 0;
 }
 
@@ -3510,6 +4890,159 @@ static bool jube_manifest_path_matches_selector(const char* manifest_path,
     return selected;
 }
 
+static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
+    char* text = NULL;
+    if (!jube_manifest_read_file(manifest_path, &text)) return true;
+
+    char module_name[JUBE_SPECIFIER_MODULE_NAME_CAPACITY];
+    char kind[128];
+    char engine[128];
+    char language[128];
+    char provides[JUBE_SPECIFIER_CATALOG_CAPACITY][128];
+    int provide_count = 0;
+    bool has_name = jube_manifest_string(text, "name", module_name, sizeof(module_name));
+    bool has_provides = jube_manifest_string_array(text, "provides", provides,
+        JUBE_SPECIFIER_CATALOG_CAPACITY, &provide_count);
+    bool has_language = jube_manifest_string(text, "language", language, sizeof(language));
+    bool ok = has_name && has_provides;
+    if (ok && provide_count > 0) {
+        ok = jube_manifest_string(text, "kind", kind, sizeof(kind)) &&
+            jube_manifest_string(text, "engine", engine, sizeof(engine)) &&
+            jube_manifest_value_ascii_equal(kind, strlen(kind), "runtime-library") &&
+            jube_manifest_value_ascii_equal(engine, strlen(engine), "js");
+    }
+    if (ok && !has_language && provide_count == 0) {
+        log_error("JUBE_SPEC: manifest '%s' declares neither language nor provides", manifest_path);
+        ok = false;
+    }
+    if (!ok) {
+        log_error("JUBE_SPEC: invalid catalog manifest '%s'", manifest_path);
+        free(text);
+        jube_specifier_catalog_failed = true;
+        return false;
+    }
+    for (int i = 0; i < provide_count; i++) {
+        char normalized[JUBE_SPECIFIER_NAME_CAPACITY];
+        if (!jube_specifier_normalize(provides[i], normalized, sizeof(normalized)) ||
+                strcmp(provides[i], normalized) != 0 ||
+                !jube_specifier_entry_upsert(provides[i], module_name, manifest_path, NULL,
+                                             -1, JUBE_SPECIFIER_OWNER_CATALOGED)) {
+            log_error("JUBE_SPEC: invalid provided specifier '%s' in '%s'", provides[i],
+                      manifest_path);
+            free(text);
+            jube_specifier_catalog_failed = true;
+            return false;
+        }
+    }
+    free(text);
+    return true;
+}
+
+static int jube_specifier_catalog_path_compare(const void* left, const void* right) {
+    const char* a = (const char*)left;
+    const char* b = (const char*)right;
+    return strcmp(a, b);
+}
+
+static bool jube_specifier_catalog_scan_root(const char* root) {
+    if (!root || !*root) return true;
+    char manifest_path[JUBE_MANIFEST_PATH_CAPACITY];
+    int written = snprintf(manifest_path, sizeof(manifest_path), "%s/module.json", root);
+    if (written > 0 && (size_t)written < sizeof(manifest_path) &&
+            !jube_specifier_catalog_manifest_path(manifest_path)) {
+        return false;
+    }
+
+    char paths[JUBE_SPECIFIER_CATALOG_CAPACITY][JUBE_MANIFEST_PATH_CAPACITY];
+    int path_count = 0;
+#if defined(_WIN32)
+    char search_path[JUBE_MANIFEST_PATH_CAPACITY];
+    written = snprintf(search_path, sizeof(search_path), "%s\\*", root);
+    if (written <= 0 || (size_t)written >= sizeof(search_path)) return true;
+    WIN32_FIND_DATAA entry;
+    HANDLE find_handle = FindFirstFileA(search_path, &entry);
+    if (find_handle == INVALID_HANDLE_VALUE) return true;
+    do {
+        if (entry.cFileName[0] == '.' || !(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                path_count >= JUBE_SPECIFIER_CATALOG_CAPACITY) continue;
+        written = snprintf(paths[path_count], sizeof(paths[path_count]), "%s/%s/module.json",
+                           root, entry.cFileName);
+        if (written > 0 && (size_t)written < sizeof(paths[path_count])) path_count++;
+    } while (FindNextFileA(find_handle, &entry));
+    FindClose(find_handle);
+#else
+    DIR* dir = opendir(root);
+    if (!dir) return true;
+    struct dirent* entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' || path_count >= JUBE_SPECIFIER_CATALOG_CAPACITY) continue;
+        written = snprintf(paths[path_count], sizeof(paths[path_count]), "%s/%s/module.json",
+                           root, entry->d_name);
+        if (written > 0 && (size_t)written < sizeof(paths[path_count])) path_count++;
+    }
+    closedir(dir);
+#endif
+    qsort(paths, (size_t)path_count, sizeof(paths[0]), jube_specifier_catalog_path_compare);
+    for (int i = 0; i < path_count; i++) {
+        if (!jube_specifier_catalog_manifest_path(paths[i])) return false;
+    }
+    return true;
+}
+
+static bool jube_specifier_catalog_build(void) {
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        if (jube_specifier_index_module(jube_static_modules[i].module) != 0) {
+            jube_specifier_catalog_failed = true;
+            return false;
+        }
+    }
+    const char* configured_paths = getenv("JUBE_MODULE_PATH");
+    if (configured_paths && *configured_paths) {
+        const char* cursor = configured_paths;
+        while (*cursor) {
+#if defined(_WIN32)
+            const char* end = strchr(cursor, ';');
+#else
+            const char* end = strchr(cursor, ':');
+#endif
+            size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
+            char root[JUBE_MANIFEST_PATH_CAPACITY];
+            if (length > 0 && length < sizeof(root)) {
+                memcpy(root, cursor, length);
+                root[length] = '\0';
+                if (!jube_specifier_catalog_scan_root(root)) return false;
+            }
+            if (!end) break;
+            cursor = end + 1;
+        }
+    }
+    if (!jube_specifier_catalog_scan_root(jube_host_module_root) ||
+            !jube_specifier_catalog_scan_root("modules")) {
+        return false;
+    }
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        if (!jube_specifier_descriptor_matches_catalog(jube_static_modules[i].module)) {
+            jube_specifier_catalog_failed = true;
+            return false;
+        }
+    }
+    return !jube_specifier_catalog_failed;
+}
+
+static bool jube_specifier_catalog_ensure(void) {
+    if (atomic_load32(&jube_specifier_catalog_state) != 0) {
+        return !jube_specifier_catalog_failed;
+    }
+    while (__atomic_exchange_n(&jube_specifier_catalog_lock.v, 1, __ATOMIC_ACQUIRE) != 0) {
+    }
+    if (atomic_load32(&jube_specifier_catalog_state) == 0) {
+        jube_specifier_catalog_build();
+        atomic_store32(&jube_specifier_catalog_state, 1);
+    }
+    __atomic_store_n(&jube_specifier_catalog_lock.v, 0, __ATOMIC_RELEASE);
+    return !jube_specifier_catalog_failed;
+}
+
 static bool jube_scan_manifest_root(const char* root, const char* selector) {
     if (!root || !*root) return false;
     char manifest_path[1024];
@@ -3607,6 +5140,72 @@ static void jube_load_dynamic_modules_from_env(void) {
     }
 }
 
+static bool jube_module_set_read_node_module(const char* root, const char* module_name,
+                                             bool* found) {
+    if (found) *found = false;
+    if (!root || !*root || !module_name || !*module_name) return false;
+    char path[JUBE_MANIFEST_PATH_CAPACITY];
+    int written = snprintf(path, sizeof(path), "%s/module-set.json", root);
+    if (written <= 0 || (size_t)written >= sizeof(path)) return false;
+    char* text = NULL;
+    if (!jube_manifest_read_file(path, &text)) return false;
+    if (found) *found = true;
+    bool enabled = jube_manifest_array_contains(text, "modules", module_name);
+    free(text);
+    return enabled;
+}
+
+bool jube_node_module_enabled(const char* module_name) {
+    if (!module_name || !*module_name) return false;
+    const char* configured_paths = getenv("JUBE_MODULE_PATH");
+    if (configured_paths && *configured_paths) {
+        bool configured_root_seen = false;
+        const char* cursor = configured_paths;
+        while (*cursor) {
+#if defined(_WIN32)
+            const char* end = strchr(cursor, ';');
+#else
+            const char* end = strchr(cursor, ':');
+#endif
+            size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
+            char root[JUBE_MANIFEST_PATH_CAPACITY];
+            if (length > 0 && length < sizeof(root)) {
+                configured_root_seen = true;
+                memcpy(root, cursor, length);
+                root[length] = '\0';
+                bool found = false;
+                bool enabled = jube_module_set_read_node_module(root, module_name, &found);
+                if (found) {
+                    return enabled;
+                }
+            }
+            if (!end) break;
+            cursor = end + 1;
+        }
+        if (configured_root_seen) {
+            // An explicit module path owns profile selection. Falling back to
+            // the source-tree module set would silently reactivate static
+            // node-core and make isolated dynamic probes exercise the host.
+            return false;
+        }
+    }
+    bool found = false;
+    bool enabled = jube_module_set_read_node_module(jube_host_module_root, module_name, &found);
+    if (!found) enabled = jube_module_set_read_node_module("modules", module_name, &found);
+    // An absent module set is the minimal bundle: no Node descriptor becomes
+    // active and no Node globals or namespace caches are installed.
+    return enabled;
+}
+
+bool jube_node_core_module_enabled(void) {
+    if (jube_node_core_module_set_enabled >= 0) {
+        return jube_node_core_module_set_enabled != 0;
+    }
+    bool enabled = jube_node_module_enabled("node-core");
+    jube_node_core_module_set_enabled = enabled ? 1 : 0;
+    return enabled;
+}
+
 void jube_register_builtin_modules(void) {
     radiant_jube_register_static();
     // Phase-7 validation must let the dlopen copy win name registration over the static demo.
@@ -3626,20 +5225,110 @@ const JubeModuleDef* jube_static_module_at(int index) {
 }
 
 void jube_modules_runtime_reset(void) {
+    void* session = jube_host_node_current_session();
+    size_t session_reset_end = offsetof(JubeModuleDef, runtime_reset_session) +
+        sizeof(((JubeModuleDef*)NULL)->runtime_reset_session);
+    for (int i = 0; session && i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (jube_static_modules[i].initialized &&
+                jube_module_has_field(module, session_reset_end) && module->runtime_reset_session) {
+            module->runtime_reset_session(session);
+        }
+    }
     size_t end = offsetof(JubeModuleDef, runtime_reset) +
         sizeof(((JubeModuleDef*)NULL)->runtime_reset);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (jube_module_has_field(module, end) && module->runtime_reset) {
+        if (jube_static_modules[i].initialized &&
+                jube_module_has_field(module, end) && module->runtime_reset) {
             module->runtime_reset();
         }
     }
+}
+
+void jube_modules_runtime_attach(void) {
+    if (jube_active_node_runtime_session) return;
+    if (!jube_node_runtime_sessions) {
+        jube_node_runtime_sessions = arraylist_new(4);
+        if (!jube_node_runtime_sessions) return;
+    }
+    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)mem_calloc(1,
+        sizeof(JubeNodeRuntimeSession), MEM_CAT_SYSTEM);
+    if (!session) return;
+    if (!arraylist_append(jube_node_runtime_sessions, session)) {
+        mem_free(session);
+        return;
+    }
+    session->generation = ++jube_node_runtime_generation;
+    if (session->generation == 0) session->generation = ++jube_node_runtime_generation;
+    session->live = true;
+    jube_active_node_runtime_session = session;
+    size_t attach_end = offsetof(JubeModuleDef, runtime_attach) +
+        sizeof(((JubeModuleDef*)NULL)->runtime_attach);
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (jube_static_modules[i].initialized &&
+                jube_module_has_field(module, attach_end) && module->runtime_attach) {
+            module->runtime_attach(session);
+        }
+    }
+}
+
+void jube_modules_runtime_detach(void) {
+    void* session = jube_host_node_current_session();
+    if (!session) return;
+    // Reject new work before module teardown but keep roots usable until every
+    // runtime_detach hook has released its session-bound persistent roots.
+    jube_active_node_runtime_session->detaching = true;
+    size_t detach_end = offsetof(JubeModuleDef, runtime_detach) +
+        sizeof(((JubeModuleDef*)NULL)->runtime_detach);
+    for (int i = 0; i < jube_static_modules_count; i++) {
+        const JubeModuleDef* module = jube_static_modules[i].module;
+        if (jube_static_modules[i].initialized &&
+                jube_module_has_field(module, detach_end) && module->runtime_detach) {
+            module->runtime_detach(session);
+        }
+    }
+    jube_node_async_cancel_session(session);
+    // Invalidate before the next attach so stale module tokens cannot resolve
+    // namespaces against a replacement JS heap.
+    jube_active_node_runtime_session->live = false;
+    jube_active_node_runtime_session = NULL;
 }
 
 void jube_registry_cleanup(void) {
     // Retired cursor slots are process-lifetime metadata, but must be released
     // before memtrack shutdown after their emitters have been destroyed.
     jube_host_mir_cursor_slots_cleanup();
+    if (jube_specifier_index) {
+        hashmap_free(jube_specifier_index);
+        jube_specifier_index = NULL;
+    }
+    if (jube_node_runtime_sessions) {
+        for (int i = 0; i < jube_node_runtime_sessions->length; i++) {
+            mem_free(jube_node_runtime_sessions->data[i]);
+        }
+        arraylist_free(jube_node_runtime_sessions);
+        jube_node_runtime_sessions = NULL;
+    }
+    if (jube_node_async_work) {
+        // Cleanup runs after runtime teardown.  Requests must already have
+        // completed or been canceled; retaining an unsafe uv_work_t would be
+        // worse than surfacing the ownership bug during development.
+        if (jube_node_async_work->length != 0) {
+            log_error("JUBE_ASYNC: %d work requests survived registry cleanup",
+                jube_node_async_work->length);
+        } else {
+            arraylist_free(jube_node_async_work);
+            jube_node_async_work = NULL;
+        }
+    }
+    jube_node_async_work_next_id = 0;
+    jube_active_node_runtime_session = NULL;
+    jube_node_runtime_generation = 0;
+    jube_specifier_catalog_failed = false;
+    atomic_store32(&jube_specifier_catalog_state, 0);
+    jube_node_core_module_set_enabled = -1;
 }
 
 const JubeModuleDef* jube_find_static_module(const char* name) {

@@ -12,6 +12,7 @@
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
+#include "../jube/jube_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
@@ -27,10 +28,21 @@ static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
-extern "C" Item js_blob_url_resolve(Item id_item);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern Item js_make_number(double d);
 void* heap_alloc(int size, TypeId type_id);
+
+static Item js_buffer_resolve_object_url(Item id_item) {
+    Item url_namespace = ItemNull;
+    if (jube_specifier_resolve("url", &url_namespace) != JUBE_SPECIFIER_RESOLVED) {
+        return make_js_undefined();
+    }
+    Item url_ctor = js_property_get(url_namespace, make_string_item("URL"));
+    Item resolver = js_property_get(url_ctor, make_string_item("resolveObjectURL"));
+    if (get_type_id(resolver) != LMD_TYPE_FUNC) return make_js_undefined();
+    Item args[1] = {id_item};
+    return js_call_function(resolver, url_ctor, args, 1);
+}
 
 static Item make_buffer_content_string_item(const char* str, int len,
                                             bool ascii_known, bool is_ascii) {
@@ -159,18 +171,6 @@ static Item create_buffer(int size) {
         if (ta) ta->is_buffer = true;
     }
     return buffer;
-}
-
-extern "C" Item js_buffer_from_bytes(const char* data, int len) {
-    if (len < 0) len = 0;
-    Item buf = create_buffer(len);
-    int buf_len = 0;
-    uint8_t* dst = buffer_data_write(buf, &buf_len);
-    if (dst && data && len > 0) {
-        int copy_len = len < buf_len ? len : buf_len;
-        memcpy(dst, data, (size_t)copy_len);
-    }
-    return buf;
 }
 
 static uint32_t buffer_next_utf8_codepoint(const char* str, int len, int* index) {
@@ -3115,9 +3115,9 @@ extern "C" Item js_get_buffer_namespace(void) {
         js_set_function_name(blob_ctor, make_string_item("Blob"));
         js_property_set(buffer_namespace, make_string_item("Blob"), blob_ctor);
     }
-    // buffer.resolveObjectURL reads URL.createObjectURL's process-local Blob
-    // registry; without the shared resolver the Buffer and URL surfaces diverge.
-    buf_set_method(buffer_namespace, "resolveObjectURL", (void*)js_blob_url_resolve, 1);
+    // Resolve through the registry so the host never imports a node-core
+    // implementation symbol after the URL leaf moves behind Jube.
+    buf_set_method(buffer_namespace, "resolveObjectURL", (void*)js_buffer_resolve_object_url, 1);
 
     // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
     {

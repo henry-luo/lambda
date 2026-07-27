@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "../../lib/file.h"
 #include "../runtime/lambda-error.h"
+#include "../jube/jube_registry.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
 
@@ -1927,31 +1928,7 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
         // skip node: builtins (handled by js_module_get)
         bool has_node_prefix = (spec_len >= 5 && strncmp(specifier, "node:", 5) == 0);
 
-        // skip known built-in module names (prefer engine built-ins over npm polyfills)
-        static const char* builtin_names[] = {
-            "fs", "fs/promises", "child_process", "path", "path/posix", "path/win32",
-            "os", "url", "util", "util/types",
-            "process", "querystring", "events", "buffer",
-            "crypto", "dns", "dns/promises", "zlib", "readline", "readline/promises",
-            "stream", "stream/promises", "stream/web", "stream/consumers", "stream/iter",
-            "net", "tls", "http", "https",
-            "string_decoder", "assert", "assert/strict",
-            "timers", "timers/promises", "console", "module",
-            "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
-            "diagnostics_channel", "async_hooks", "domain",
-            "internal/util", "internal/util/inspect", "internal/async_hooks", "internal/async_context_frame",
-            "internal/test/binding", "internal/js_stream_socket", "internal/streams/add-abort-signal",
-            "internal/streams/end-of-stream", "internal/streams/state", NULL
-        };
-        bool is_builtin = has_node_prefix;
-        if (!is_builtin) {
-            for (int i = 0; builtin_names[i]; i++) {
-                if (strcmp(spec_buf, builtin_names[i]) == 0) {
-                    is_builtin = true;
-                    break;
-                }
-            }
-        }
+        bool is_builtin = has_node_prefix || jube_specifier_is_builtin(spec_buf);
 
         if (!is_builtin) {
             // get the directory of the importing file

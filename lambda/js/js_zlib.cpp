@@ -12,6 +12,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../module/node_zlib/node_zlib_codec.hpp"
 
 #include <climits>
 #include <cstdio>
@@ -118,375 +119,66 @@ static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
 
 // create Uint8Array result from raw bytes
 static Item make_buffer_result(const uint8_t* data, int len) {
-    Item result = js_typed_array_new(JS_TYPED_UINT8, len);
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> result_root(roots, js_typed_array_new(JS_TYPED_UINT8, len));
+    Item result = result_root.get();
     JsTypedArray* ta = js_get_typed_array_ptr(result.map);
     if (ta) {
         ta->is_buffer = true;
-        uint8_t* dst = (uint8_t*)js_typed_array_prepare_write_ptr(result);
+        // prepare_write may allocate a writable backing store; retain the view until it owns that store.
+        uint8_t* dst = (uint8_t*)js_typed_array_prepare_write_ptr(result_root.get());
         if (dst) memcpy(dst, data, (size_t)len);
     }
-    return result;
+    return result_root.get();
 }
 
-// =============================================================================
-// gzipSync(buffer) — compress with gzip
-// =============================================================================
+typedef bool (*NodeZlibSyncCodec)(const uint8_t* data, int length, NodeZlibBytes* out_bytes);
+
+static Item js_zlib_sync_codec(Item input_item, NodeZlibSyncCodec codec, const char* method) {
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> input_root(roots, input_item);
+    const uint8_t* input_data = NULL;
+    int input_length = 0;
+    if (!codec || !get_input_buffer(input_root.get(), &input_data, &input_length)) {
+        log_error("zlib: %sSync: invalid input", method);
+        return ItemNull;
+    }
+    NodeZlibBytes output = {};
+    if (!codec(input_data, input_length, &output)) {
+        log_error("zlib: %sSync: shared codec failed with %d", method, output.status);
+        return throw_zlib_error(method, output.status, NULL);
+    }
+    Item result = make_buffer_result(output.data, output.length);
+    node_zlib_bytes_free(&output);
+    return result;
+}
 
 extern "C" Item js_zlib_gzipSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) {
-        log_error("zlib: gzipSync: invalid input");
-        return ItemNull;
-    }
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    // windowBits = 15 + 16 for gzip encoding
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-        log_error("zlib: gzipSync: deflateInit2 failed");
-        return ItemNull;
-    }
-
-    size_t out_cap = compressBound((uLong)in_len) + 32;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-    strm.next_out = out_buf;
-    strm.avail_out = (uInt)out_cap;
-
-    int ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        log_error("zlib: gzipSync: deflate failed with %d", ret);
-        deflateEnd(&strm);
-        mem_free(out_buf);
-        return throw_zlib_error("gzip", ret, NULL);
-    }
-    deflateEnd(&strm);
-
-    int out_len = (int)strm.total_out;
-    Item result = make_buffer_result(out_buf, out_len);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_gzip_encode, "gzip");
 }
-
-// =============================================================================
-// gunzipSync(buffer) — decompress gzip
-// =============================================================================
 
 extern "C" Item js_zlib_gunzipSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) {
-        log_error("zlib: gunzipSync: invalid input");
-        return ItemNull;
-    }
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    // windowBits = 15 + 16 for gzip decoding
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) {
-        log_error("zlib: gunzipSync: inflateInit2 failed");
-        return ItemNull;
-    }
-
-    size_t out_cap = (size_t)in_len * 4;
-    if (out_cap < 4096) out_cap = 4096;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-
-    size_t total_out = 0;
-    int ret;
-    while (true) {
-        if (total_out >= out_cap) {
-            out_cap *= 2;
-            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        size_t out_space = out_cap - total_out;
-        strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)out_space;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        total_out += out_space - strm.avail_out;
-        if (ret == Z_STREAM_END) {
-            if (strm.avail_in > 0) {
-                Bytef* next_in = strm.next_in;
-                uInt avail_in = strm.avail_in;
-                ret = inflateReset2(&strm, 15 + 16);
-                if (ret != Z_OK) break;
-                strm.next_in = next_in;
-                strm.avail_in = avail_in;
-                continue;
-            }
-            break;
-        }
-        if (ret != Z_OK) break;
-    }
-
-    char detail[128];
-    detail[0] = '\0';
-    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
-    inflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) {
-        log_error("zlib: gunzipSync: inflate failed with %d", ret);
-        mem_free(out_buf);
-        return throw_zlib_error("gunzip", ret, detail);
-    }
-
-    Item result = make_buffer_result(out_buf, (int)total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_gunzip_decode, "gunzip");
 }
-
-// =============================================================================
-// unzipSync(buffer) — auto-detect gzip or zlib-wrapped deflate
-// =============================================================================
 
 extern "C" Item js_zlib_unzipSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) {
-        log_error("zlib: unzipSync: invalid input");
-        return ItemNull;
-    }
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    // windowBits = 15 + 32 asks zlib to auto-detect gzip or zlib headers.
-    if (inflateInit2(&strm, 15 + 32) != Z_OK) {
-        log_error("zlib: unzipSync: inflateInit2 failed");
-        return ItemNull;
-    }
-
-    size_t out_cap = (size_t)in_len * 4;
-    if (out_cap < 4096) out_cap = 4096;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-
-    size_t total_out = 0;
-    int ret;
-    while (true) {
-        if (total_out >= out_cap) {
-            out_cap *= 2;
-            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        size_t out_space = out_cap - total_out;
-        strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)out_space;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        total_out += out_space - strm.avail_out;
-        if (ret == Z_STREAM_END) {
-            if (strm.avail_in > 0 &&
-                zlib_bytes_start_gzip_member((const uint8_t*)strm.next_in, (int)strm.avail_in)) {
-                Bytef* next_in = strm.next_in;
-                uInt avail_in = strm.avail_in;
-                ret = inflateReset2(&strm, 15 + 32);
-                if (ret != Z_OK) break;
-                strm.next_in = next_in;
-                strm.avail_in = avail_in;
-                continue;
-            }
-            break;
-        }
-        if (ret != Z_OK) break;
-    }
-
-    char detail[128];
-    detail[0] = '\0';
-    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
-    inflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) {
-        log_error("zlib: unzipSync: inflate failed with %d", ret);
-        mem_free(out_buf);
-        return throw_zlib_error("unzip", ret, detail);
-    }
-
-    Item result = make_buffer_result(out_buf, (int)total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_unzip_decode, "unzip");
 }
-
-// =============================================================================
-// deflateSync(buffer) — raw deflate (no gzip header)
-// =============================================================================
 
 extern "C" Item js_zlib_deflateSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) {
-        log_error("zlib: deflateSync: invalid input");
-        return ItemNull;
-    }
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    if (deflateInit(&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
-        log_error("zlib: deflateSync: deflateInit failed");
-        return ItemNull;
-    }
-
-    size_t out_cap = compressBound((uLong)in_len) + 32;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-    strm.next_out = out_buf;
-    strm.avail_out = (uInt)out_cap;
-
-    int ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        deflateEnd(&strm);
-        mem_free(out_buf);
-        return throw_zlib_error("deflate", ret, NULL);
-    }
-    deflateEnd(&strm);
-
-    Item result = make_buffer_result(out_buf, (int)strm.total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_deflate_encode, "deflate");
 }
-
-// =============================================================================
-// inflateSync(buffer) — raw inflate
-// =============================================================================
 
 extern "C" Item js_zlib_inflateSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) {
-        log_error("zlib: inflateSync: invalid input");
-        return ItemNull;
-    }
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    if (inflateInit(&strm) != Z_OK) {
-        log_error("zlib: inflateSync: inflateInit failed");
-        return ItemNull;
-    }
-
-    size_t out_cap = (size_t)in_len * 4;
-    if (out_cap < 4096) out_cap = 4096;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-
-    size_t total_out = 0;
-    int ret;
-    do {
-        if (total_out >= out_cap) {
-            out_cap *= 2;
-            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)(out_cap - total_out);
-        ret = inflate(&strm, Z_NO_FLUSH);
-        total_out = strm.total_out;
-    } while (ret == Z_OK);
-
-    char detail[128];
-    detail[0] = '\0';
-    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
-    inflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) {
-        mem_free(out_buf);
-        return throw_zlib_error("inflate", ret, detail);
-    }
-
-    Item result = make_buffer_result(out_buf, (int)total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_inflate_decode, "inflate");
 }
-
-// =============================================================================
-// deflateRawSync(buffer) — raw deflate with windowBits = -15
-// =============================================================================
 
 extern "C" Item js_zlib_deflateRawSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) return ItemNull;
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK)
-        return ItemNull;
-
-    size_t out_cap = compressBound((uLong)in_len) + 32;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-    strm.next_out = out_buf;
-    strm.avail_out = (uInt)out_cap;
-
-    int ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        deflateEnd(&strm);
-        mem_free(out_buf);
-        return throw_zlib_error("deflateRaw", ret, NULL);
-    }
-    deflateEnd(&strm);
-
-    Item result = make_buffer_result(out_buf, (int)strm.total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_deflate_raw_encode, "deflateRaw");
 }
 
-// =============================================================================
-// inflateRawSync(buffer) — raw inflate with windowBits = -15
-// =============================================================================
-
 extern "C" Item js_zlib_inflateRawSync(Item input_item) {
-    const uint8_t* in_data;
-    int in_len;
-    if (!get_input_buffer(input_item, &in_data, &in_len)) return ItemNull;
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    if (inflateInit2(&strm, -15) != Z_OK) return ItemNull;
-
-    size_t out_cap = (size_t)in_len * 4;
-    if (out_cap < 4096) out_cap = 4096;
-    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
-
-    strm.next_in = (Bytef*)in_data;
-    strm.avail_in = (uInt)in_len;
-
-    size_t total_out = 0;
-    int ret;
-    do {
-        if (total_out >= out_cap) {
-            out_cap *= 2;
-            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)(out_cap - total_out);
-        ret = inflate(&strm, Z_NO_FLUSH);
-        total_out = strm.total_out;
-    } while (ret == Z_OK);
-
-    char detail[128];
-    detail[0] = '\0';
-    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
-    inflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) {
-        mem_free(out_buf);
-        return throw_zlib_error("inflateRaw", ret, detail);
-    }
-
-    Item result = make_buffer_result(out_buf, (int)total_out);
-    mem_free(out_buf);
-    return result;
+    return js_zlib_sync_codec(input_item, node_zlib_inflate_raw_decode, "inflateRaw");
 }
 
 // =============================================================================
@@ -523,6 +215,10 @@ static Item make_zlib_error(const char* method, int zret, const char* detail) {
 static Item throw_zlib_error(const char* method, int zret, const char* detail) {
     js_throw_value(make_zlib_error(method, zret, detail));
     return ItemNull;
+}
+
+extern "C" Item js_zlib_throw_error_status(const char* method, int status) {
+    return throw_zlib_error(method, status, NULL);
 }
 
 static Item js_zlib_emit_callback(Item env_item) {
@@ -1240,9 +936,7 @@ extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
     if (!get_input_buffer(data_item, &data, &data_len)) {
         return js_throw_invalid_arg_type("data", "string, Buffer, TypedArray, or DataView", data_item);
     }
-    static const uint8_t empty_crc_data = 0;
-    if (data_len == 0 && !data) data = &empty_crc_data;
-    crc_val = (uint32_t)crc32((uLong)crc_val, (const Bytef*)data, (uInt)data_len);
+    crc_val = node_zlib_crc32_bytes(data, data_len, crc_val);
 
     // return as an unsigned 32-bit value represented by Lambda's signed int slot.
     return (Item){.item = i2it((int64_t)crc_val)};

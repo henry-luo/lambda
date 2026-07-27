@@ -101,20 +101,37 @@ static JsTypedArray* gc_typed_array_from_map(Map* map) {
     return NULL;
 }
 
+static JsDataView* gc_dataview_from_map(Map* map) {
+    if (!map) return NULL;
+    if (map->data_cap == 0) {
+        return (JsDataView*)map->data;
+    }
+    bool found = false;
+    Item dv_val = js_map_get_fast_ext(map, "__dv__", 6, &found);
+    if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
+    return NULL;
+}
+
 static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
     js_generator_map_gc_trace(map, gc);
     js_collection_map_gc_trace(map, gc);
     js_iterator_map_gc_trace(map, gc);
-    if (map->type_id != LMD_TYPE_MAP || map->map_kind != MAP_KIND_TYPED_ARRAY) return;
-
-    JsTypedArray* ta = gc_typed_array_from_map(map);
-    if (ta && ta->buffer_item) {
-        gc_mark_item(gc, ta->buffer_item);
-    }
-    if (ta && ta->view) {
-        gc_mark_object_ptr(gc, ta->view);
+    if (map->type_id != LMD_TYPE_MAP) return;
+    if (map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        JsTypedArray* ta = gc_typed_array_from_map(map);
+        if (ta && ta->buffer_item) {
+            gc_mark_item(gc, ta->buffer_item);
+        }
+        if (ta && ta->view) {
+            gc_mark_object_ptr(gc, ta->view);
+        }
+    } else if (map->map_kind == MAP_KIND_DATAVIEW) {
+        JsDataView* dv = gc_dataview_from_map(map);
+        // DataView keeps its ArrayBuffer only in native metadata, so trace the
+        // Item explicitly or a collection can free its live backing store.
+        if (dv && dv->buffer_item) gc_mark_item(gc, dv->buffer_item);
     }
 }
 
@@ -158,14 +175,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         break;
     }
     case MAP_KIND_DATAVIEW: {
-        JsDataView* dv = NULL;
-        if (map->data_cap == 0) {
-            dv = (JsDataView*)map->data;
-        } else {
-            bool found = false;
-            Item dv_val = js_map_get_fast_ext(map, "__dv__", 6, &found);
-            if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
-        }
+        JsDataView* dv = gc_dataview_from_map(map);
         if (dv && !gc_native_seen_seen_or_add(seen_native, dv)) mem_free(dv);
         map->data = NULL;
         break;

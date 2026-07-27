@@ -5,6 +5,7 @@
  * Registered as built-in module 'child_process' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_host_hooks.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
@@ -42,7 +43,6 @@ extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
 extern "C" Item js_clear_exception(void);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
@@ -52,6 +52,8 @@ extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream);
 extern "C" void js_net_complete_transferred_connection_account(void* account);
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" void heap_register_gc_root(uint64_t* slot);
+
+static void js_child_process_emit_or_queue_cluster_online(Item obj);
 
 // =============================================================================
 // Helpers
@@ -957,7 +959,7 @@ static void spawn_flush_cluster_online(Item obj) {
     spawn_schedule_cluster_online(obj);
 }
 
-extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj) {
+static void js_child_process_emit_or_queue_cluster_online(Item obj) {
     spawn_emit_or_queue_cluster_online(obj);
 }
 
@@ -2963,6 +2965,9 @@ static bool validate_fork_args(Item rest_args) {
 }
 
 extern "C" Item js_cp_fork(Item rest_args) {
+    // Cluster invokes this host entry before it can hand the returned child to
+    // the online queue, so install the optional leaf hook before spawning.
+    js_host_hooks_set_cluster_online_hook(js_child_process_emit_or_queue_cluster_online);
     if (!validate_fork_args(rest_args)) return ItemNull;
     int64_t argc = js_array_length(rest_args);
     Item module_path = js_array_get_int(rest_args, 0);
@@ -3752,4 +3757,5 @@ extern "C" Item js_get_child_process_namespace(void) {
 extern "C" void js_child_process_reset(void) {
     cp_namespace = (Item){0};
     cp_namespace_roots_epoch = 0;
+    js_host_hooks_set_cluster_online_hook(NULL);
 }

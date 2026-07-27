@@ -1,0 +1,3 @@
+true true
+function function function
+object

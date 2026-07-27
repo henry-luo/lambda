@@ -10,6 +10,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "js_class.h"
+#include "js_typed_array.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/url.h"
@@ -28,7 +29,6 @@ extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item);
 extern "C" Item js_tls_connect(Item options_item);
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
-extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_get_this(void);
 extern "C" void js_microtask_flush(void);
 extern "C" Item js_http_Agent(Item);

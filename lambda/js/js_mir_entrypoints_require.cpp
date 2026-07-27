@@ -41,6 +41,18 @@ extern "C" bool js_event_loop_has_refed_handles(void);
 extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
+static Item js_require_module_not_found(const char* specifier) {
+    const char* name = specifier ? specifier : "";
+    char message[640];
+    snprintf(message, sizeof(message), "Cannot find module '%s'", name);
+    Item error = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
+    js_property_set(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
+    // Returning null without a pending exception turns require('missing') into
+    // an unrelated property error; preserve Node's module-resolution failure.
+    js_throw_value(error);
+    return ItemNull;
+}
+
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 static JsMirPhaseTiming g_document_js_mir_phase_timing;
 static bool g_document_js_mir_phase_timing_active = false;
@@ -1886,6 +1898,8 @@ extern "C" Item js_require(Item specifier) {
 
     char path_buf[512];
     snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
+    char requested_specifier[sizeof(path_buf)];
+    snprintf(requested_specifier, sizeof(requested_specifier), "%s", path_buf);
 
     // Read the source file using Node-style file and directory fallbacks.
     char* source = js_require_read_resolved_path(path_buf, (int)sizeof(path_buf));
@@ -1896,7 +1910,7 @@ extern "C" Item js_require(Item specifier) {
             (spec->len > 9 && memcmp(spec->chars, "internal/", 9) == 0)) {
             return js_new_object();
         }
-        return ItemNull;
+        return js_require_module_not_found(requested_specifier);
     }
     jm_track_active_js_transpile(NULL, NULL, source);
 

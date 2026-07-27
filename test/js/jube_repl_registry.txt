@@ -1,0 +1,3 @@
+true
+function function function
+sloppy strict

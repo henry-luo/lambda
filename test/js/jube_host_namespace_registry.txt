@@ -1,0 +1,35 @@
+fs object
+fs/promises object
+internal/fs/promises object
+internal/fs/utils object
+child_process object
+crypto object
+dns object
+dns/promises object
+net object
+internal/net object
+internal/js_stream_socket function
+tls object
+http object
+_http_agent object
+_http_common object
+_http_server object
+_http_outgoing object
+https object
+internal/errors object
+internal/assert/myers_diff object
+internal/async_hooks object
+internal/async_context_frame object
+internal/streams/add-abort-signal object
+internal/streams/end-of-stream object
+internal/streams/state object
+internal/crypto/util object
+internal/util object
+internal/util/inspect object
+internal/repl object
+internal/test/binding object
+true
+true
+true
+true true true
+true true true

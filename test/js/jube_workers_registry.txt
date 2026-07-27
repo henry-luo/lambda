@@ -1,0 +1,5 @@
+true true
+true 0 true
+function function
+function function
+true

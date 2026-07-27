@@ -21,6 +21,8 @@
 #include "../../lib/mem.h"
 #include <cmath>
 
+extern __thread EvalContext* context;
+
 #ifdef _WIN32
 #include <direct.h>
 #include <fcntl.h>
@@ -1541,10 +1543,17 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
 }
 
 static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
-    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))});
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(buffer_item, proto);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> buffer_root(roots, buffer_item);
+    Rooted<Item> ctor_root(roots, js_get_constructor(
+        (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
+    Rooted<Item> proto_root(roots, ItemNull);
+    if (get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
+    proto_root.set(js_property_get(ctor_root.get(),
+        (Item){.item = s2it(heap_create_name("prototype"))}));
+    if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+        js_set_prototype(buffer_root.get(), proto_root.get());
+    }
 }
 
 extern "C" Item js_arraybuffer_new(int byte_length) {
@@ -1559,9 +1568,10 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     m->data = ab;
     m->data_cap = 0;
 
-    Item result = (Item){.map = m};
-    js_arraybuffer_link_prototype(result, js_arraybuffer_shared(ab));
-    return result;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> result_root(roots, (Item){.map = m});
+    js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
+    return result_root.get();
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -1634,9 +1644,10 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-    Item result = (Item){.map = m};
-    js_arraybuffer_link_prototype(result, js_arraybuffer_shared(ab));
-    return result;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> result_root(roots, (Item){.map = m});
+    js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
+    return result_root.get();
 }
 
 extern "C" int js_arraybuffer_byte_length(Item val) {
@@ -2114,17 +2125,22 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    Item buffer_item = js_arraybuffer_wrap(ab);
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
+    Rooted<Item> view_root(roots, ItemNull);
+    if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
 
     JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
+    if (!ta) return ItemNull;
     ta->element_type = arr_type;
     ta->buffer = ab;
-    ta->buffer_item = buffer_item.item;
+    ta->buffer_item = ItemNull.item;
     ta->length_tracking = false;
     ta->is_buffer = false;
-    ta->view = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
-        js_typed_array_elem_type(arr_type), 0, length, true);
-    js_typed_array_refresh_arraynum_view(ta);
+    view_root.set((Item){.array_num = array_num_new_buffer_view(
+        (Container*)buffer_root.get().map, &ab->handle,
+        js_typed_array_elem_type(arr_type), 0, length, true)});
+    if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -2132,8 +2148,28 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     m->type = (void*)&js_typed_array_type_marker;
     m->data = ta;
     m->data_cap = 0;
+    // The backing ArrayBuffer may move while its view is allocated; store the
+    // refreshed rooted Item only after the final typed-array Map allocation.
+    ta->view = view_root.get().array_num;
+    js_typed_array_refresh_arraynum_view(ta);
+    ta->buffer_item = buffer_root.get().item;
 
     return (Item){.map = m};
+}
+
+extern "C" Item js_buffer_from_bytes(const char* data, int len) {
+    if (len < 0) len = 0;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> buffer_root(roots, js_typed_array_new(JS_TYPED_UINT8, len));
+    if (!js_is_typed_array(buffer_root.get())) return ItemNull;
+    JsTypedArray* typed_array = js_get_typed_array_ptr(buffer_root.get().map);
+    if (!typed_array) return ItemNull;
+    // Host transports need Buffer identity even when node-core is not linked;
+    // the namespace module only supplies Buffer's JS-facing methods.
+    typed_array->is_buffer = true;
+    uint8_t* dst = (uint8_t*)js_typed_array_prepare_write_ptr(buffer_root.get());
+    if (dst && data && len > 0) memcpy(dst, data, (size_t)len);
+    return buffer_root.get();
 }
 
 extern "C" Item js_typed_array_from_binary(Binary* bin) {
@@ -2217,6 +2253,10 @@ extern "C" Item binary_from_dataview(JsDataView* dv) {
 
 // Create a typed array as a view over an ArrayBuffer
 extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> buffer_root(roots, buffer_item);
+    Rooted<Item> view_root(roots, ItemNull);
+    buffer_item = buffer_root.get();
     if (!js_is_arraybuffer(buffer_item)) {
         log_error("js_typed_array_new_from_buffer: argument is not an ArrayBuffer");
         return js_throw_type_error("TypedArray buffer argument must be an ArrayBuffer");
@@ -2262,13 +2302,20 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     }
 
     JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
+    // Native view setup and the wrapper-map allocation can collect before the
+    // map trace owns this edge, so keep both transient GC values exact-rooted.
+    buffer_item = buffer_root.get();
+    ab = js_get_arraybuffer_ptr(buffer_item.map);
+    if (!ab) return ItemNull;
     ta->element_type = arr_type;
     ta->buffer = ab;
     ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
     ta->length_tracking = length_tracking;
     ta->is_buffer = false;
-    ta->view = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
-        js_typed_array_elem_type(arr_type), byte_offset, length, true);
+    view_root.set((Item){.array_num = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
+        js_typed_array_elem_type(arr_type), byte_offset, length, true)});
+    if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
+    ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
@@ -2278,6 +2325,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     m->data = ta;
     m->data_cap = 0;
 
+    ta->buffer_item = buffer_root.get().item;
     return (Item){.map = m};
 }
 
@@ -3095,6 +3143,9 @@ extern "C" JsDataView* js_get_dataview_ptr(Item val) {
 }
 
 extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> buffer_root(roots, buffer);
+    buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {
         js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
         return ItemNull;
@@ -3134,6 +3185,11 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     }
 
     JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);
+    // mem_alloc can collect; refresh the rooted backing Item before storing
+    // the native references that must remain coherent with the GC owner.
+    buffer = buffer_root.get();
+    ab = js_get_arraybuffer_ptr(buffer.map);
+    if (!ab) return ItemNull;
     dv->buffer = ab;
     dv->byte_offset = byte_offset;
     dv->byte_length = byte_length;
@@ -3146,10 +3202,12 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     m->type = (void*)&js_dataview_type_marker;
     m->data = dv;
     m->data_cap = 0;
-    Item view = (Item){.map = m};
-    js_class_stamp(view, JS_CLASS_DATA_VIEW);
-    js_dataview_link_prototype(view);
-    return view;
+    Rooted<Item> view_root(roots, (Item){.map = m});
+    // Class stamping and prototype linking allocate; without this root a
+    // forced collection could reclaim the newly allocated native-backed map.
+    js_class_stamp(view_root.get(), JS_CLASS_DATA_VIEW);
+    js_dataview_link_prototype(view_root.get());
+    return view_root.get();
 }
 
 // Js54 P2: current byte_length honoring length-tracking views over resizable

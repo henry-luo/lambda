@@ -1,0 +1,21 @@
+{
+  "name": "node-zlib",
+  "version": "0.1.0",
+  "base_abi_version": 2,
+  "hosted_api_version": 1,
+  "host_build_id": "lambda-hosted-lang-20260727-h9b37",
+  "kind": "runtime-library",
+  "engine": "js",
+  "provides": [
+    "zlib"
+  ],
+  "dependencies": [
+    "node-core"
+  ],
+  "resources": [],
+  "library_macos": "node-zlib.dylib",
+  "library_linux": "node-zlib.so",
+  "library_windows": "node-zlib.dll",
+  "entry_symbol": "jube_module",
+  "sha256_macos": "438925c87af37cd7c349facf592eadd0ab3077001e864336bc0c34cf75091a68"
+}

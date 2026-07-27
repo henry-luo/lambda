@@ -670,9 +670,7 @@ extern "C" Item js_array_get_custom_proto(Item arr);
 // forward declarations for module namespace cache resets
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
-extern "C" void js_path_reset();
-extern "C" void js_os_reset();
-extern "C" void js_url_module_reset();
+extern "C" void js_fs_runtime_detach();
 extern "C" void js_util_reset();
 extern "C" void js_reset_template_registry(void);
 extern "C" void js_iterator_proto_cache_reset(void);
@@ -738,13 +736,19 @@ extern "C" void js_batch_reset() {
     // next preamble's js_batch_reset_to takes a fresh snapshot.
     extern void js_proto_snapshot_invalidate(void);
     js_proto_snapshot_invalidate();
+    // fs async requests release session-bound roots before Jube invalidates
+    // their token; late libuv callbacks are then explicitly delivery-suppressed.
+    js_fs_runtime_detach();
+    // Reset Jube session caches while globalThis/process and the owning heap
+    // still exist; module hooks may release precise roots during this phase.
+    jube_modules_runtime_reset();
+    jube_modules_runtime_detach();
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
-    jube_modules_runtime_reset();
     // reset legacy RegExp static properties ($1-$9, input, etc.)
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset regex compilation cache — AST pointers from previous test are stale
@@ -760,15 +764,8 @@ extern "C" void js_batch_reset() {
     // reset module namespace caches (pool-allocated function wrappers become dangling)
     js_child_process_reset();
     js_fs_reset();
-    js_path_reset();
-    js_os_reset();
-    js_url_module_reset();
     js_util_reset();
-    // reset new Phase 1 modules
-    extern void js_reset_querystring_module(void);
-    js_reset_querystring_module();
-    extern void js_reset_events_module(void);
-    js_reset_events_module();
+    // node-core owns EventEmitter's session cache and resets it through Jube.
     extern void js_reset_buffer_module(void);
     js_reset_buffer_module();
     // reset Phase 4 modules
@@ -794,8 +791,6 @@ extern "C" void js_batch_reset() {
     // read them later; batch cleanup must release the table before memtrack.
     js_fetch_reset();
     js_history_reset();
-    extern void js_string_decoder_reset(void);
-    js_string_decoder_reset();
     extern void js_assert_reset(void);
     js_assert_reset();
     extern void js_node_test_reset(void);
@@ -880,13 +875,19 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
+    // fs async requests release session-bound roots before Jube invalidates
+    // their token; late libuv callbacks are then explicitly delivery-suppressed.
+    js_fs_runtime_detach();
+    // Reset Jube session caches while globalThis/process and the owning heap
+    // still exist; module hooks may release precise roots during this phase.
+    jube_modules_runtime_reset();
+    jube_modules_runtime_detach();
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
-    jube_modules_runtime_reset();
     // reset microtask queue and timers — callbacks referencing old heap
     extern void js_event_loop_init(void);
     js_event_loop_init();
@@ -900,14 +901,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset module namespace caches (epoch-cached objects may be stale after test mutations)
     js_child_process_reset();
     js_fs_reset();
-    js_path_reset();
-    js_os_reset();
-    js_url_module_reset();
     js_util_reset();
-    extern void js_reset_querystring_module(void);
-    js_reset_querystring_module();
-    extern void js_reset_events_module(void);
-    js_reset_events_module();
     extern void js_reset_buffer_module(void);
     js_reset_buffer_module();
     extern void js_crypto_reset(void);
@@ -932,8 +926,6 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // read them later; batch cleanup must release the table before memtrack.
     js_fetch_reset();
     js_history_reset();
-    extern void js_string_decoder_reset(void);
-    js_string_decoder_reset();
     extern void js_assert_reset(void);
     js_assert_reset();
     extern void js_node_test_reset(void);

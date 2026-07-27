@@ -37,6 +37,8 @@
     "lambda/js",
     "lambda/module/radiant",
     "lambda/module/hostobj_demo",
+    "lambda/module/node_core",
+    "lambda/module/node_fs",
     "lambda/ts",
     "lambda/npm",
     "lambda/network",
@@ -44,6 +46,7 @@
   ],
   "source_files": [
     "lib/sqlite/sqlite3.c",
+    "lambda/module/node_zlib/node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
@@ -64,7 +67,9 @@
   ],
   "defines": [
     "SQLITE_THREADSAFE=0",
-    "SQLITE_OMIT_LOAD_EXTENSION"
+    "SQLITE_OMIT_LOAD_EXTENSION",
+    "LAMBDA_NODE_CORE_STATIC_LINKED=1",
+    "LAMBDA_NODE_FS_STATIC_LINKED=1"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -300,6 +305,66 @@
       "link": "static"
     }
   ],
+  "node_module_template": {
+    "lang": "c++17",
+    "link": "dynamic",
+    "target_prefix": "",
+    "pic": true,
+    "single_project": true,
+    "link_options_macos": [
+      "-Wl,-undefined,dynamic_lookup"
+    ],
+    "link_options_linux": [
+      "-Wl,--allow-shlib-undefined"
+    ]
+  },
+  "node_modules": [
+    {
+      "name": "node-core",
+      "description": "External Node compatibility core Jube module",
+      "defines": [
+        "LAMBDA_NODE_CORE_DYNAMIC_MODULE"
+      ],
+      "source_files": [
+        "lambda/module/node_core/node_constants.cpp",
+        "lambda/module/node_core/node_core_module.cpp",
+        "lambda/module/node_core/node_events.cpp",
+        "lambda/module/node_core/node_os.cpp",
+        "lambda/module/node_core/node_perf_hooks.cpp",
+        "lambda/module/node_core/node_path.cpp",
+        "lambda/module/node_core/node_process.cpp",
+        "lambda/module/node_core/node_punycode.cpp",
+        "lambda/module/node_core/node_querystring.cpp",
+        "lambda/module/node_core/node_string_decoder.cpp",
+        "lambda/module/node_core/node_timers.cpp",
+        "lambda/module/node_core/node_tty.cpp",
+        "lambda/module/node_core/node_url.cpp",
+        "lambda/module/node_core/node_v8.cpp",
+        "lambda/module/node_core/node_workers.cpp"
+      ]
+    },
+    {
+      "name": "node-fs",
+      "description": "External Node fs callback Jube module",
+      "defines": [
+        "LAMBDA_NODE_FS_DYNAMIC_MODULE"
+      ],
+      "source_files": [
+        "lambda/module/node_fs/node_fs_module.cpp"
+      ]
+    },
+    {
+      "name": "node-zlib",
+      "description": "External Node zlib Jube module",
+      "libraries": [
+        "zlib"
+      ],
+      "source_files": [
+        "lambda/module/node_zlib/node_zlib_codec.cpp",
+        "lambda/module/node_zlib/node_zlib_module.cpp"
+      ]
+    }
+  ],
   "targets": [
     {
       "name": "lang-python",
@@ -523,6 +588,7 @@
         "lambda/runtime/headless_stubs.cpp"
       ],
       "source_files": [
+        "lambda/module/node_zlib/node_zlib_codec.cpp",
         "lambda/runtime/parse.c",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
@@ -662,7 +728,11 @@
       "single_project": true,
       "validation_source_target": "radiant",
       "link_options_macos": [
-        "-mmacosx-version-min=15.7"
+        "-mmacosx-version-min=15.7",
+        "-Wl,-undefined,dynamic_lookup"
+      ],
+      "link_options_linux": [
+        "-Wl,--allow-shlib-undefined"
       ],
       "link": "dynamic"
     },
@@ -672,7 +742,23 @@
       "lang": "c++17",
       "source_files": [
         "lambda/main.cpp",
-        "lambda/main-repl.cpp"
+        "lambda/main-repl.cpp",
+        "lambda/module/node_core/node_constants.cpp",
+        "lambda/module/node_core/node_core_module.cpp",
+        "lambda/module/node_core/node_events.cpp",
+        "lambda/module/node_core/node_os.cpp",
+        "lambda/module/node_core/node_path.cpp",
+        "lambda/module/node_core/node_perf_hooks.cpp",
+        "lambda/module/node_core/node_process.cpp",
+        "lambda/module/node_core/node_punycode.cpp",
+        "lambda/module/node_core/node_querystring.cpp",
+        "lambda/module/node_core/node_string_decoder.cpp",
+        "lambda/module/node_core/node_timers.cpp",
+        "lambda/module/node_core/node_tty.cpp",
+        "lambda/module/node_core/node_url.cpp",
+        "lambda/module/node_core/node_v8.cpp",
+        "lambda/module/node_core/node_workers.cpp",
+        "lambda/module/node_fs/node_fs_module.cpp"
       ],
       "libraries": [
         "radiant",

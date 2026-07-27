@@ -360,7 +360,6 @@ Item js_get_css_object_value(void);
 // =============================================================================
 
 Item js_process_stdout_write(Item str_item);
-Item js_process_hrtime_bigint(void);
 void js_store_process_argv(int argc, const char** argv);
 void js_set_process_argv(int argc, const char** argv);
 void js_store_process_exec_argv(int argc, const char** argv);

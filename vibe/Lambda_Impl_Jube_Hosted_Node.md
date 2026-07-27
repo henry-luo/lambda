@@ -1,6 +1,277 @@
 # Jube Hosted Node — Detailed Implementation Plan
 
-> **Status:** plan, drafted 2026-07-26; implementation not started
+> **Status:** implementation underway. N0 architecture tooling and the N1
+> registry/catalog foundation are landed; N2 has the additive requirements and
+> session lifecycle boundary plus complete static `node-core/path` and
+> `node-core/string_decoder` and `node-core/querystring` moves. The
+> focused locked Node path slice (13/13) and forced-GC smoke now pass through
+> the Jube boundary, including `matchesGlob`, Win32 parsing, and namespace
+> cache lifetime. `string_decoder` now consumes only Jube value, binary, root,
+> and session services; its bare/node aliases and forced-GC namespace-cache
+> lifetime probe pass. `querystring` now relies on opaque string byte access,
+> host coercion/object creation, and session roots; normal and forced-GC
+> parsing/stringifying coverage passes through the registry.
+> `node-core/os` is also now statically registered through the same boundary,
+> including its explicit compatibility global and session-owned namespace
+> cache; its focused normal and forced-GC gates pass. Its locked upstream slice
+> still exposes the legacy native-function string-coercion incompatibility
+> (the old `js_os_set_method` used the identical constructor), so that baseline
+> issue remains isolated rather than being attributed to the Jube move.
+> `node-core/url` now uses only opaque Jube value/script/root services,
+> session-owned persistent Blob URL roots, and registry-mediated Buffer
+> resolution; its focused normal and forced-GC tests pass. Legacy `Url`
+> construction and `url.parse(..., true)` now build the Node-compatible fixed
+> field shape and null-prototype query dictionary entirely through those
+> services; legacy rooted/non-rooted relative path resolution is also covered
+> by the forced-GC leaf gate. The locked URL slice still contains
+> runtime-semantics gaps (for
+> example, a Symbol argument reaches native-call ABI as a number and NaN
+> strict-assert behavior), tracked separately from the move.
+> `node-core/events` is now also registry-owned and uses explicit Jube event
+> services for async-local context, domains, process warnings, closures,
+> prototypes, and promise capabilities; normal registry coverage and selected
+> upstream EventEmitter contracts pass. Its listener-registration and callback
+> path now pass the forced-GC/poisoned-freed sweep; the move also fixed the
+> host direct-array append invariant that had left a relocated destination
+> array live across growth. Buffer migration preparation is also landed: raw
+> transport-to-Buffer construction now belongs to the host typed-array layer,
+> and the additive binary service exposes Buffer allocation, writable byte
+> access, and Buffer identity without making host transports depend on the
+> Buffer namespace. The Buffer namespace and its coercion/ArrayBuffer/BigInt
+> implementation remain host-resident until that full Jube conversion is
+> complete. The service-table changes bumped the exact-build contract to
+> `lambda-hosted-lang-20260726-h9b24` and
+> regenerated the dynamic `lang-python` manifest so stale module images are
+> rejected before initialization. The resolver-only `node-core/punycode`
+> compatibility stub is now also a rooted Jube namespace with bare, `.js`,
+> and `node:` resolution covered under normal and forced-GC execution.
+> `node:console` and `node:process` now resolve through explicit node-core
+> descriptors to their existing session globals, preserving object identity
+> while removing their legacy dispatcher branches. The Buffer service now also
+> has a validated opaque byte-view descriptor for ArrayBuffer, typed-array,
+> and DataView inputs plus a shared-storage Buffer-view constructor; detached
+> and out-of-bounds states remain host-validated. This is preparation for the
+> Buffer implementation move, not a claim that the namespace is migrated.
+> The N3.3 process inventory is now committed under
+> `test/benchmark/hosted_node/`: host-core retains startup, queue, lifecycle,
+> signal, IPC, and resource-table surfaces, while `node-core` installs the
+> self-contained `memoryUsage`, `cpuUsage`, memory-capacity, `umask`,
+> `setSourceMapsEnabled`, `cwd`/`chdir`/`uptime`/`hrtime`/`abort`/`kill`, POSIX credential methods, active resource/handle queries, capture-callback state, and read-only POSIX identity
+> platform queries during
+> `runtime_attach`. These moved extensions no longer exist in `js_globals.cpp`;
+> the live process object is rooted while their names and callback wrappers are
+> allocated. `_getActiveHandles` remains host-owned until node-net replaces its
+> current net-list implementation with the session rid table.
+> `node:timers` and `node:timers/promises` are now rooted node-core leaves as
+> well: a narrow additive timer service leaves event-loop ownership in the host
+> while the Jube facades supply classic timer/cancellation methods, promise
+> timers, scheduler helpers, default identity, and the
+> `require('timers').promises` bridge. Their regular and forced-GC gate passes.
+> Node-core registration is deliberately performed by the full static
+> executable after it selects the module profile, rather than by the shared
+> registry library, so source-closure validation DSOs do not gain an invalid
+> dependency on optional node-core objects.
+> `node:constants` is now a rooted Jube leaf too. It builds the public,
+> null-prototype frozen constant object through opaque value services, resolving
+> only the still-host-resident `fs` source through the explicit host-namespace
+> bridge while it awaits the fs extraction. Bare/node identity, exported
+> constants, immutability, and forced-GC behavior are covered.
+> `node:v8` is also a rooted Jube leaf, including its compatibility
+> `promiseHooks`, heap-statistics, startup-snapshot, and default surfaces.
+> The bounded `node:perf_hooks` compatibility namespace now follows it through
+> the same registry path: it exposes the host-owned global `performance` and
+> `PerformanceObserver` only through opaque Jube services, while keeping its
+> Node-only histogram/entry constructors module-owned. Bare/node identity and
+> static, forced-GC, and isolated dynamic-image probes are covered.
+> `node:worker_threads` is likewise now a rooted node-core leaf. Its namespace
+> and constructor exports are module-owned; host-owned MessagePort queues and
+> transfer invariants cross the boundary only through the additive worker
+> service table. Normal MessagePort lifecycle plus static/dynamic forced-GC
+> namespace probes pass. This table tail advances the exact host build
+> contract to `lambda-hosted-lang-20260727-h9b25`.
+> `node:tty` is now a rooted node-core leaf too: its exports and constructors
+> are module-owned, while its temporary `net.Socket` inheritance uses the
+> explicit host-namespace bridge until node-net is extracted. Its regular and
+> forced-GC static/dynamic registry probes pass. That probe also repaired the
+> host net cache's constructor-graph rooting invariant, so `net.Socket` and
+> both tty inheritance links now survive poisoned forced collection pending
+> the N5 ownership move.
+> The runtime-owned `node:module`, `node:vm`, `node:async_hooks`, and
+> `node:trace_events` public specifiers now also route through explicit
+> node-core namespace definitions. Their implementations remain host services
+> where they own require/cache lifecycle, execution contexts, async-resource
+> state, or runtime-global tracing. Static and isolated dynamic-image probes
+> cover bare/node identity and forced-GC construction. The async-hooks probe
+> additionally fixed constructor-graph rooting: both exported class/prototype
+> graphs remain rooted until the namespace owns them.
+> Host-runtime hubs with process/event-loop ownership now also use the same
+> explicit node-core adapter pattern for `node:domain`, `node:cluster`,
+> `node:readline`, `node:readline/promises`, and prefix-only `node:test`.
+> The registry deliberately preserves `node:test` as prefix-only, so an
+> unrelated bare `test` package is never promoted to a builtin. Each adapter
+> has static/dynamic bare-or-node identity coverage and a poisoned forced-GC
+> probe.
+> The current reduced-node/minimal package verifier is green on a release
+> build: the reduced profile resolves node-core's `path`, while the same host
+> binary in the minimal profile runs plain JS and reports `MODULE_NOT_FOUND`
+> for `path`.
+> The static executable target now declares the complete node-core source set
+> explicitly. This keeps the separately generated test/release launcher from
+> losing moved providers that remain referenced by host JS and Radiant code.
+> `Buffer` has now joined `os` as an explicit node-core global definition:
+> the active compatibility profile observes the same `Buffer` identity as
+> `require('buffer').Buffer`, while an empty module-set forced through
+> `JUBE_MODULE_PATH` exposes neither `Buffer`, `path`, nor `os`.
+> The `buffer` and `node:buffer` specifiers now route through the same
+> node-core descriptor (with the typed-array implementation still intentionally
+> host-resident for this staged move), and static/dynamic poisoned-GC probes
+> cover the bare/node/global identity invariant.
+> `util`, its legacy `sys` alias, `util/types`, and the Browserify-era
+> `inherits` entry point now take the explicit node-core descriptor path as
+> well. Their forced-GC probe found and repaired a host Date-construction
+> invariant: the new object, constructor, and prototype must remain rooted
+> while property-key allocation and prototype installation compact the heap.
+> `assert` and `assert/strict` now use the same descriptor path. Their
+> forced-GC test repaired the strict-instance construction invariant: the
+> namespace is permanently rooted, and fresh strict method wrappers remain
+> rooted until the instance publishes them.
+> The public `stream`, `stream/promises`, `stream/web`, `stream/consumers`,
+> and `stream/iter` specifiers now also enter through explicit node-core
+> descriptors while the large Node/WHATWG implementation split remains open.
+> Their static and isolated dynamic probes uncovered and fixed the shared
+> stream namespace cache invariant: each cached namespace must be registered
+> as a GC root before a sibling surface can allocate.
+> The host-owned `repl` implementation is likewise now reached only through
+> a node-core descriptor; its regular and forced-GC static/dynamic probes
+> cover its constructor, modes, and default namespace identity.
+> `diagnostics_channel` is now registry-owned as well. Its forced-GC probe
+> found the channel-construction invariant: both a new channel and its name
+> must stay rooted while property keys and callbacks are allocated before the
+> persistent channel cache publishes them.
+> N4's first dynamic delivery proof is now present as `node-zlib`: its own
+> Jube image, manifest hash, dependency on dynamically activated `node-core`,
+> and isolated normal/forced-GC gzip round-trip gate are all verified. The
+> raw gzip/gunzip, deflate/inflate, raw-deflate/raw-inflate, and auto-detect
+> unzip codecs now share one dispatcher compiled into the static checkpoint and
+> dynamic image; the node-zlib image owns all seven synchronous and callback
+> wrappers through the Jube binary and next-tick callback services. Remaining stream
+> constructors are still host-resident, so this is not the N4 source-migration
+> flip.
+> The Node module build contract is now generated from one JSON template with
+> explicit `node-core` and `node-zlib` instances, avoiding per-module linker
+> flag drift. The shared loader-negative harness also covers `node-zlib`'s
+> missing-image, tampered-image, and wrong-base-ABI cases, including the
+> registry diagnostic naming the unavailable module.
+> A two-artifact zlib parity gate now compares the host-resident static
+> checkpoint against copied dynamic `node-core` + `node-zlib` images under
+> normal and poisoned forced-GC execution. It establishes the comparison
+> harness required for the later source-removal flip; it does not claim that
+> host source has already been removed.
+> The reduced-node and minimal package profiles now ship only the `node-zlib`
+> manifest (never its image), so both produce `MODULE_NOT_FOUND` instead of
+> reviving the legacy host implementation. The compatibility package remains
+> the profile that carries the verified dynamic image.
+> N0.5's link audit confirms zlib must remain in the host independently of the
+> Node surface: PDF post-processing/decompression, npm tarball extraction, and
+> font decompression include it. mbedTLS likewise remains host-linked for the
+> serve TLS handler and the existing JS TLS/crypto and digest paths. N4/N6 may
+> remove those libraries from a Node module's implementation boundary, but
+> cannot claim that either dependency drops from the host binary.
+> `node-zlib` now owns its first observable codec operation: `crc32` is built
+> by the dynamic image, reads strings and binary views only through the Jube
+> value/binary tables, preserves unsigned seed validation through the Node
+> error table, and caches its patched namespace in a session-owned persistent
+> root. The static checkpoint and hosted image share the raw CRC primitive, so
+> there is no divergent duplicate implementation. The seven synchronous
+> compression/decompression operations and callback wrappers are module-owned
+> through the shared raw dispatcher; stream constructors stay in the host pending
+> their larger stateful service conversion.
+> The `crc32` boundary now also covers DataView under poisoned forced-GC in
+> both the static checkpoint and dynamic image. That probe repaired the shared
+> runtime ownership invariant: a native DataView must trace its backing
+> ArrayBuffer, and a typed-array view must root its backing Item and ArrayNum
+> descriptor until its wrapper map owns those edges. Generic property reads
+> likewise root a receiver while an inherited accessor can allocate. The prior
+> host build stamp `lambda-hosted-lang-20260727-h9b35` covered the added opaque
+> string-byte, coded-range-error, Node-compatible zlib-error, and next-tick
+> callback-post service tails, decimal-to-BigInt construction for the
+> node-core `hrtime.bigint` migration, Node-shaped platform syscall errors,
+> generic coded compatibility errors, and session-scoped active-resource/handle inventory.
+> N3.4 now has its first host hook inversion: the cluster-worker disconnect
+> path invokes a typed, absent-default shutdown registry instead of importing
+> node-net's server-close symbol; net registers the participant only while its
+> namespace is live and clears it on reset. Static and isolated dynamic
+> node-core gates cover the transition.
+> The same absent-default registry now owns process-IPC TCP-handle acceptance:
+> `js_globals.cpp` no longer imports net directly, while host net registers its
+> opaque pipe adapter until the node-child-process/rid migration replaces it.
+> Cluster's online-event queue now follows the same inversion: runtime cluster
+> code emits through an absent-default child-process hook, and `js_cp_fork`
+> installs that hook before returning the child so `worker.on('online')` keeps
+> its queued next-turn behavior. Reset clears the hook; static and isolated
+> dynamic node-core fork probes cover the ordering.
+> Console formatting is now the third N3.4 absent-default seam: node-core
+> activation resolves the host util namespace only to register its formatter,
+> so active Node profiles preserve `%` substitution while a profile-less
+> console deliberately uses generic rendering. Reset clears the hook; static,
+> dynamic-after-`require('console')`, and minimal-profile probes cover both
+> sides without activating a dynamic module merely because `console` exists.
+> The legacy Node builtin dispatcher is now catalog-first for every node-core
+> surface: fs, child-process, crypto, DNS, net/TLS/HTTP, and the internal
+> compatibility shims are explicit node-core descriptors whose implementations
+> remain behind one typed host-namespace table. `module.builtinModules`,
+> `module.isBuiltin`, and static-literal module lowering now consult that same
+> normalized Jube index; their duplicated name lists are gone. Static and
+> isolated dynamic-image normal/forced-GC probes cover every transitional
+> descriptor. The sole temporary dispatcher fallback is `zlib`, retained only
+> for N4's intentionally catalog-free static parity checkpoint; N4.4 removes
+> it together with the host zlib source.
+> The v8 static and isolated dynamic-module probes run under forced GC. Those
+> probes exposed and fixed three host ownership invariants shared by all Node
+> leaves: `Object.keys` roots both collection arrays across key allocation,
+> typed-array construction roots its backing ArrayBuffer and ArrayNum view
+> until the owning map is installed, and every platform's `os.cpus()` graph is
+> assembled through rooted Jube values. Buffer construction, querystring,
+> legacy URL parsing, and the node-core leaf suite now pass the poisoned
+> forced-GC gate rather than relying on stale pointer luck.
+> The current static node-core descriptor also builds as a separately verified
+> `modules/node-core/node-core.dylib`: an isolated no-module-set root activates
+> that image through its manifest under normal and forced-GC execution, while
+> its unresolved import table has no direct JS-runtime or static-registration
+> symbols. Late dynamic activation now attaches the image to the already-live
+> runtime session and publishes its explicit globals through rooted registry
+> helpers, rather than accidentally falling back to the static descriptor.
+> This is the static-to-dynamic parity foundation; packaging/profile ownership
+> remains to be completed before the final N7 flip.
+> Reduced/minimal release-profile smokes also prove the same
+> host binary activates `node-core` only when its module set is present; `vm`
+> is now an explicit active-profile global alongside `Buffer` and `os`, so
+> the minimal profile exposes none of those Node globals. N2's
+> async work-table and the fs callback pilot's session-bound persistent roots
+> are now landed. `fs.readFile` and `fs.writeFile` now run their native
+> open/stat/read-or-write sequence through that session-owned work table,
+> suppressing late completion after detach; the remaining fs operations and
+> general rid table remain open.
+> `node-fs` now owns the public `fs` and `fs/promises` descriptors. Its
+> callback `readFile`/`writeFile`/`appendFile` plus
+> `open`/`close`/`read`/`write`/`readv`/`writev`/`access`/`chmod`/`fchmod`/`lchmod`/`copyFile`/`truncate`/`rm`/`realpath`/`mkdtemp`/`link`/`symlink`/`mkdir`/`readdir`/`rename`/`unlink`/`rmdir`/`watch`/`watchFile`/`unwatchFile`/`utimes`/`statfs`/`readlink`/`chown`/`lchown`/`fchown`/
+> `stat`/`lstat`/`fstat`, their `fs/promises` counterparts, and the text
+> `readFileSync`/write/append/exists/unlink/mkdir/rmdir/rename/readdir plus
+> descriptor open/close/read/write/readv/writev/access/chmod/fchmod/lchmod/copyFile/truncate/rm/realpath/mkdtemp/link/symlink/chown/lchown/fchown plus `utimesSync`/`opendirSync`/`statfsSync`/`readlinkSync`/`_toUnixTimestamp`, `exists` custom promisify behavior, and module-built `fs.constants` perform platform file I/O in
+> module code and uses only Jube permission, domain, precise-root, async-work,
+> value, and promise/closure services; the promise entry points adapt that same
+> completion path. Static and isolated dynamic normal/poisoned-GC probes cover
+> both APIs. `fs/promises.open` now returns the module-owned branded
+> `FileHandle` with `fd`, `close`, `read`, and `readFile`, plus branded, full-shape
+> `Stats` for synchronous, callback, and promise stat calls. The four stream
+> constructors are module-owned wrappers over the host stream-factory service
+> while generic Node streams await their N3.2 extraction. The copied-image loader
+> negative matrix now covers missing,
+> tampered, and ABI-incompatible `node-fs` images. The permission/domain and
+> branded-native-object service tails advance the exact host build contract to
+> `lambda-hosted-lang-20260727-h9b40`.
+> The async/fs pilot, remaining module migrations, dynamic delivery, profiles,
+> and web tail remain open.
 >
 > **Design authority:** `vibe/Lambda_Design_Jube_Node_Hosting.md` (JN1–JN14,
 > stages N0–N7) as governed by the architecture ADRs in
@@ -8,6 +279,8 @@
 > the ADRs win; the two supersessions that affect this plan (WebCrypto →
 > `web-crypto` module; `stream/web` → `web-streams` re-export) are folded into
 > the stages below rather than treated as amendments.
+> N8 is the formerly deferrable web-platform tail split out of Node closure so
+> the WPT dependency cannot make N7 internally contradictory.
 >
 > **Template:** `vibe/Lambda_Impl_Hosted_Python.md` (H0–H10). This plan reuses
 > its stage anatomy (Goal / Tasks / Exit gate), its checkpoint discipline
@@ -43,10 +316,19 @@ modules/
 ```
 
 The migration is behavior-preserving: `make node-baseline` is the arbiter at
-every stage, and the standard bundle (host + `node-core` + manifest-only leaf
-descriptors) is observably identical to today's monolith. Only the minimal
-profile — host with no node modules — changes what scripts can see, and that
-is its purpose.
+every stage, and the **standard compatibility bundle** contains every
+extracted module needed to remain observably identical to today's monolith.
+Two explicitly reduced profiles are additional products, not substitutes for
+the compatibility bundle: **reduced-node** contains `node-core` plus
+manifest-only leaf descriptors, and **minimal** contains the host only. The
+full Jube bundle contains the compatibility set plus optional hosted-language
+and other Jube modules.
+
+This profile definition corrects an ambiguity in JN12: manifest-only
+descriptors improve diagnostics but cannot preserve the behavior of a
+previously built-in `fs`, `net`, `http`, or crypto implementation. N0 updates
+the governing design document with this clarification before product changes
+start.
 
 ## 2. Non-negotiable implementation constraints
 
@@ -62,8 +344,10 @@ These are release gates, not preferences:
    GC, or JIT-generated paths. MIR emission for existing scripts is unchanged
    — the `test/mir` ratchet (`test/mir/mir_budgets.json`) stays green with no
    budget lifts attributable to this work (JN13).
-3. **Absent module = zero cost + Node-shaped failure.** A bundle without a
-   node module pays no initialization, mapping, or allocation for it;
+3. **Absent module = no module activation cost + Node-shaped failure.** A
+   bundle without a node module pays no initialization, mapping, module-state
+   allocation, or global-accessor installation for it; the generic registry
+   may perform its one catalog-presence check on the first module request;
    `require('x')` produces `Cannot find module 'x'` with
    `code: 'MODULE_NOT_FOUND'` plus one host `log_*` line naming the missing
    Jube module. Never a link failure. A host with no node modules still runs
@@ -80,7 +364,7 @@ These are release gates, not preferences:
 6. **Modules see only `jube.h`** (P3, JA5). No `js_runtime.h`,
    `js_runtime_state.hpp`, `Context` layout, GC internals — and no libuv:
    `uv_*` is on the banned-symbol list (JN8, JA7). The architecture checker
-   (§16) enforces this in CI from N2 onward.
+   (§17) enforces this in CI from N2 onward.
 7. **Errors return, exceptions pend** (P6). No C++ unwinding across the
    boundary; `throw_value`/`check_exception`
    (`JubeHostScriptAPI`, `lambda/jube/jube.h:423`) and status codes only.
@@ -89,7 +373,7 @@ These are release gates, not preferences:
    (`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`, the
    `test-gc-rooting-python` pattern at `Makefile:1096`) before it may flip to
    dynamic.
-9. **Release performance protocol** (§18): no statistically significant
+9. **Release performance protocol** (§19): no statistically significant
    Lambda/JS/Node regression; measurements on `make release` builds only
    (CLAUDE rule 10).
 10. **C2MIR stays frozen** (CLAUDE rule 14). No `transpile.cpp` work; MIR
@@ -99,9 +383,10 @@ These are release gates, not preferences:
 12. **Finalizer rules** (P8, native-module design §6.3): `heap_cleanup`, vmap
     `destroy`, and anything on the marking path never allocate and never
     re-enter script.
-13. **No cross-module symbol imports** (JA8). Inter-module needs are manifest
-    `dependencies` (already parsed, `jube_registry.cpp:3414`) or script-level
-    re-export; never a dylib-to-dylib symbol.
+13. **No cross-module symbol imports** (JA8). Manifest `dependencies` establish
+    activation order only. Inter-module behavior uses the host-mediated
+    namespace resolver or a named host operation; never a dylib-to-dylib
+    symbol.
 14. **Additive-only ABI evolution** (JA11): new tables/fields append behind
     `struct_size` gates, following the `JubeHostAPI.data` tail precedent
     (`jube.h:976`).
@@ -114,25 +399,32 @@ These are release gates, not preferences:
 
 ### 3.1 In scope
 
-- Manifest `kind`/`engine`/`provides` support and the registry **specifier
-  index** replacing the builtin memcmp chain and all four name lists.
-- The `JubeHostNodeAPI` composed service tables (async micro-kernel + socket/
-  process/signal tier, binary, promise, Node-error) and their host
-  implementations (rid resource table, work pool, thread-safe completion
-  post).
+- Manifest `kind`/`engine`/`provides` support, a two-phase catalog/activation
+  registry, and the **specifier index** replacing the builtin memcmp chain and
+  all four name lists.
+- A separate `JubeGlobalDef` descriptor and generic bundle activation list;
+  namespace specifiers never implicitly become global properties.
+- The `JubeHostNodeAPI` composed service tables (runtime/session, opaque roots,
+  async micro-kernel + socket/process/signal tier, binary, promise,
+  Node-error) and their host implementations (rid resource table, work pool,
+  thread-safe completion post).
+- Pre-init capability/size negotiation through an additive
+  `JubeModuleRequirements` descriptor.
 - Migration of the 21 builtins plus the embedded core pieces (process
   extensions, `internalBinding`, stubs, error helpers) into the module set of
   §1, static → dynamic each.
-- The §10 hook inversions (console formatter, shutdown, IPC handoff, globals
-  installation including lazy installation for dynamic modules).
+- The §10 hook inversions (console formatter, shutdown, IPC handoff, and
+  profile-activated explicit globals whose objects build lazily).
 - Rooting conversion of every migrated file to Jube GC services, gated by
   forced-GC sweeps.
 - The `web-crypto` and `web-streams` modules to the extent the JN14/JA1
   supersessions require (three-way crypto split; `stream/web` re-export) —
   with an explicitly legal transitional state if their WPT gates are not yet
-  wired (§13.4).
-- Packaging: standard = host + `node-core` (+ manifest-only leaf
-  descriptors); full = all; minimal = host only.
+  wired (N8).
+- Packaging: standard compatibility = host + every extracted replacement for
+  today's monolith; full Jube = compatibility + optional Jube modules;
+  reduced-node = host + `node-core` + manifest-only leaf descriptors;
+  minimal = host only.
 - The `check_node_module_architecture.py` checker family with synthetic
   self-tests.
 
@@ -147,13 +439,13 @@ These are release gates, not preferences:
   `console` core, `process` core, the JS module cache, the npm resolver
   (revisit after N5), or `node:vm` out of the host (JN6).
 - The JA16 central IO API design (open item 8 there). This plan's banned
-  `uv_*` checker list is JA16's first enforcement instance, and the §14 op
+  `uv_*` checker list is JA16's first enforcement instance, and the §15 op
   families are input to that design, but the IO-policy layer is not built
   here.
 - Sandboxing/trust-tier work (JA10 T2/T3), hot unload, Windows CI bring-up
-  beyond keeping the export surface auditable (§20 risk 7).
-- The WPT harness *decision* (JA9 / architecture open item 3) — N6c/N6d
-  depend on it; a default is proposed (§13.4) but deciding it is its own
+  beyond keeping the export surface auditable (§21 risk 7).
+- The WPT harness *decision* (JA9 / architecture open item 3) — N8 depends on
+  it; a default is proposed there but deciding it is its own
   review.
 
 ## 4. Verified starting point (2026-07-26)
@@ -162,15 +454,15 @@ These are release gates, not preferences:
 
 | Facility | Anchor | Notes |
 |---|---|---|
-| `JubeModuleDef` (namespaces/types/functions, `init`, `shutdown`; additive tail: `interface_decl`, `type_bindings`, `runtime_reset`, `heap_cleanup`, `language`) | `lambda/jube/jube.h:1120`; `JUBE_MODULE_DEF_V1_SIZE` | node modules use `namespaces` + `types` + the two lifecycle hooks; `language` stays NULL (JN1) |
-| `JubeNamespaceDef` = `specifiers[]` + `specifier_count` + `Item (*build)(void)` + optional `JubeFuncDef` table | `jube.h:277` | exactly the shape a converted `js_get_<x>_namespace()` adapts to |
+| `JubeModuleDef` (namespaces/types/functions, `init`, `shutdown`; additive tail: `interface_decl`, `type_bindings`, `runtime_reset`, `heap_cleanup`, `language`) | `lambda/jube/jube.h:1120`; `JUBE_MODULE_DEF_V1_SIZE` | N2 appends requirements, explicit globals, and session lifecycle without changing this released prefix; `language` stays NULL (JN1) |
+| `JubeNamespaceDef` = `specifiers[]` + `specifier_count` + `Item (*build)(void)` + optional `JubeFuncDef` table | `jube.h:277` | suitable only for specifiers that return the same namespace object; distinct results such as `path/win32` require distinct definitions |
 | `JubeTypeBinding`/`JubeMemberBind` + `interface_decl` (DOM3 dispatch) | `jube.h:296/:310` | for class-shaped surfaces (Socket, Server, Hash, FileHandle, …) |
 | `JubeHostAPI` (`hosted_language`, `gc`, `value`, `script`, `dom`, `runtime_catalog`; additive tail `data`) | `jube.h:976` | the new `node` parent appends after `data`, size-gated |
-| `JubeHostGcAPI` (`register_root`, `unregister_root`, `root_frame_begin/take_slot/end`, additive `register_weak`/`unregister_weak`) | `jube.h:355` | JN9 target for conversions |
-| `JubeHostRootAPI` (opaque `JubeRootFrame`, `persistent_root_register(session, slot)`) | `jube.h:~370` | hosted-language tail; N2 decides which frame flavor node modules standardize on (§15) |
+| `JubeHostGcAPI` (`register_root`, `unregister_root`, legacy concrete root frames, weak roots) | `jube.h:355` | retained for ABI compatibility; node modules do not use its concrete `LambdaRootFrame` surface |
+| `JubeHostRootAPI` (opaque `JubeRootFrame`, session-bound persistent roots) | `jube.h:~370` | N2 extends it additively with unregister and exposes it through the node parent |
 | `JubeHostScriptAPI` (`new_function`, `throw_value`, `check_exception`, `call_function`, `new_error_with_name`, `global_this`, …) | `jube.h:423` | value mechanics stay here (the `js_native_api.h` half) |
 | Static registration + enumeration | `jube_register_static_module` `jube_registry.cpp:2957`; registration site `:3611` (radiant, hostobj_demo); `jube_static_module_count/_at` `:3619/:3623` | in-tree static module sources live under `lambda/module/<name>/` (`radiant_module.cpp:1534`, `hostobj_demo_module.cpp:266`) — node modules follow this convention |
-| Manifest scan + verification | scan `jube_registry.cpp:3217–3250`, `:3516–3546`; per-OS `library_*`/`sha256_*` keys `:3303–3319`; SHA-256 verify `:3323`; fields parsed today: `language`/`aliases`/`extensions` (`:3296–3300`), `entry_symbol`, `host_build_id`, `base_abi_version`, `hosted_api_version` (`:3392–3403`), **`dependencies` (`:3414`)**, `resources` (`:3423`) | `dependencies` and the loading-path cycle/depth guard (`jube_manifest_loading_paths`, `:54`) already exist — JN2's inter-module deps need no new machinery |
+| Manifest scan + verification | scan `jube_registry.cpp:3217–3250`, `:3516–3546`; per-OS `library_*`/`sha256_*` keys `:3303–3319`; SHA-256 verify `:3323`; fields parsed today: `language`/`aliases`/`extensions` (`:3296–3300`), `entry_symbol`, `host_build_id`, `base_abi_version`, `hosted_api_version` (`:3392–3403`), **`dependencies` (`:3414`)**, `resources` (`:3423`) | dependency loading/rollback is reused, but N1 must split today's select-and-load scan into a read-only catalog phase and a later activation phase |
 | Loader + rollback | `jube_load_dynamic_module_checked` `:2963` (entry symbol default `"jube_module"`, `:2973`) | transactional registration reused unchanged |
 | Module root override | `JUBE_MODULE_PATH` env (`:3573`) | used by integrity/parity tests |
 | Scan-on-first-need pattern | `jube_discover_hosted_language` `:3564` | the specifier index copies this trigger discipline |
@@ -178,30 +470,37 @@ These are release gates, not preferences:
 | Build/package targets | `build-lang-python` `Makefile:772`, `release-lang-python` `:783`, `package-standard` `:795` (manifest-only descriptor precedent), `package-jube` `:803`, `verify-jube-package` `:810` (shasum + `cmp -s` + absent/full smokes), `release-jube` `:849` | node analogs cloned in N4/N7 |
 | Manifest stamping | `utils/update_jube_manifest_integrity.py <module dir>` | reused verbatim |
 | Loader negative/integrity/dispatch matrices | `test-jube-module-loader-negative` `Makefile:836` (`utils/test_jube_module_loader_negative.py`), `test-jube-module-integrity` `:822` | parameterized/extended for node modules |
-| Architecture-checker methodology | `utils/check_hosted_python_architecture.py` (path-anchored source rules + binary `nm` mode via `--require-module-binary`; "checks added only after their owning stage lands" philosophy), self-test `utils/test_hosted_python_architecture_checker.py`, `check-hosted-python-architecture` `Makefile:2362`, coupling-inventory target `:2367` | template for §16 |
+| Architecture-checker methodology | `utils/check_hosted_python_architecture.py` (path-anchored source rules + binary `nm` mode via `--require-module-binary`; "checks added only after their owning stage lands" philosophy), self-test `utils/test_hosted_python_architecture_checker.py`, `check-hosted-python-architecture` `Makefile:2362`, coupling-inventory target `:2367` | template for §17 |
 | node-baseline harness | `node-baseline` `Makefile:1217` → `./test/test_node_gtest.exe --baseline-only` over `ref/node/test/parallel/` with shims from `lambda/js/test_shim/` (`node-shim` `:1154`); locked set `test/node/official_baseline.txt`; report `test/node/node_official_report.py` (`:1237`); adjacent `node-regression-gate`/`node-full`/`node-update-baseline` | the continuous gate |
-| Forced-GC gate mechanics | `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` + golden diff (`test-gc-rooting-python`, `Makefile:1096`); corpus sweep exe precedent `test/test_mir_gc_stress_gtest.exe` (`test-mir-gc-stress` `:1091`) | §17.3 |
-| Async substrate + precedents | loop accessor `lambda_uv_loop()` and drain hooks `lambda_uv_set_microtask_drain`/`lambda_uv_set_task_drain` (`lib/uv_loop.h`); in-tree `uv_queue_work` pools: `lambda/network/network_thread_pool.cpp`, `lambda/serve/worker_pool.cpp`, `js_fetch.cpp:546`; `uv_async_init` post: `lambda/runtime/concurrency.cpp:580` | the §14 micro-kernel is assembled from these, host-side |
+| Forced-GC gate mechanics | `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` + golden diff (`test-gc-rooting-python`, `Makefile:1096`); corpus sweep exe precedent `test/test_mir_gc_stress_gtest.exe` (`test-mir-gc-stress` `:1091`) | §18.3 |
+| Async substrate + precedents | loop accessor `lambda_uv_loop()` and drain hooks `lambda_uv_set_microtask_drain`/`lambda_uv_set_task_drain` (`lib/uv_loop.h`); in-tree `uv_queue_work` pools: `lambda/network/network_thread_pool.cpp`, `lambda/serve/worker_pool.cpp`, `js_fetch.cpp:546`; `uv_async_init` post: `lambda/runtime/concurrency.cpp:580` | the §15 micro-kernel is assembled from these, host-side |
 
 ### 4.2 What does not exist yet (built by this plan)
 
 - Manifest `kind`, `engine`, `provides` parsing (confirmed absent from
-  `jube_registry.cpp`) and the two-index registry (language index + specifier
-  index) — N1.
+  `jube_registry.cpp`), the two-index registry (language index + specifier
+  index), and the catalog/activation split — N1.
 - Any specifier→module mapping: today nothing connects `require("x")` to the
   Jube registry — N1.
-- Dynamic-module namespace/global installation: `js_install_jube_global_namespaces`
-  (`lambda/js/js_globals.cpp:~74`) iterates **static modules only** and
-  installs **eagerly** (`ns->build()` at global setup). Lazy accessor
-  installation and dynamic-module coverage — N3.
-- `JubeHostNodeAPI` and all four child tables, the rid resource table, the
+- A distinct global descriptor: `js_install_jube_global_namespaces`
+  (`lambda/js/js_globals.cpp:~74`) currently installs every namespace's first
+  specifier eagerly, which would incorrectly create globals such as `path`.
+  `JubeGlobalDef`, profile activation, and lazy object accessors — N2/N3.
+- A per-JS-runtime session/attach lifecycle. `JubeModuleDef.init` is
+  process-level and may run before a JS heap/global/process object exists; it
+  cannot perform the process extension described by the original N3 draft —
+  N2.
+- Pre-init module requirement negotiation. The current registry invokes
+  `module->init(&jube_host_api)` directly after base descriptor validation —
+  N2.
+- `JubeHostNodeAPI` and its six child tables, the rid resource table, the
   shared blocking-work pool as a host API, thread-safe completion post as a
   module-facing service — N2.
 - `utils/check_node_module_architecture.py` + self-test — N0.
 - A node coupling-inventory generator (the hosted-python one at
   `Makefile:2367` is Python-specific) — N0.
 - Require-latency / namespace-build microbenches (none exist) — N0.
-- WPT harness for module slices (JA9) — prerequisite for N6c/N6d only.
+- WPT harness for module slices (JA9) — prerequisite for N8 only.
 
 ### 4.3 The migration population
 
@@ -233,18 +532,20 @@ drift corrections against the 2026-07-25 design pass:
 | Stage | Deliverable | Primary gate | Rough size |
 |---|---|---|---|
 | N0 | evidence baseline, coupling inventory, checker + self-test, microbenches | tooling green; inventory fully classified | small (tooling only) |
-| N1 | manifest `kind`/`provides`, specifier index, compile-time consumers rewired, `path` static module | node-baseline + MIR budgets unchanged; `path` registry-served | small–medium |
-| N2 | `JubeHostNodeAPI` v1 (4 tables), rid table, work pool, completion post; fs pilot conversion in place; checker in CI | pilot green under forced GC; negative descriptor tests | medium |
+| N1 | manifest catalog/activation split, `kind`/`provides`, specifier index in shadow mode, compile-time consumers index-first | node-baseline + MIR budgets unchanged; no dlopen from catalog queries | medium |
+| N2 | runtime/session + requirement contracts; completed `jube.h` value-boundary inventory; `path` as a true static Jube module; Node async/service tables and fs pilot | `path` has no forbidden imports; pilot green under forced GC; negative descriptor tests | medium–large |
 | N3 | `node-core` static; process split; hook inversions; chain + 4 lists deleted | node-baseline; chains gone; checker green on `lambda/module/node_core` | large (~30k lines move) |
 | N4 | `node-zlib` first dynamic module; delivery chain cloned; absent-module negatives | dynamic load macOS+Linux; static/dynamic parity | small |
 | N5 | `node-fs` → `node-net` → `node-child-process`, static→dynamic each | per-module: baseline, forced-GC, zero `uv_*`, negatives | large |
-| N6 | `node-http` → `node-tls` → crypto three-way split (+`web-crypto`) → `web-streams` flip | as N5 + crypto/tls/http optional at runtime | large |
-| N7 | `node-core` dynamic; packaging matrix; docs; allowlist burn-down; perf closeout | byte-identical host ×3 bundles; minimal profile green; perf vs N0 | medium |
+| N6 | `node-http` → `node-tls` → shared crypto primitives + `node-crypto`; web implementations remain behind transitional host providers | as N5 + crypto/tls/http optional at runtime | large |
+| N7 | Node closure: `node-core` dynamic; four-profile packaging; docs; allowlist burn-down; perf closeout | byte-identical host ×4 bundles; compatibility and minimal profiles green; perf vs N0 | medium |
+| N8 | WPT-gated `web-crypto` and `web-streams` extraction and compatibility-package update | WPT slices green; standard behavior unchanged | medium, independently gated |
 
 ```text
-N0 ──► N1 ──► N2 ──► N3 ──► N4 ──► N5a fs ──► N5b net ──► N5c child_process
-                                        └───────────────────────► N6a http ──► N6b tls ──► N6c crypto split ──► N7
-                                                                     (N6d web-streams joins N6c; both WPT-gated, deferrable past N7)
+N0 ──► N1 catalog ──► N2 ABI/session/path ──► N3 node-core ──► N4 zlib
+      └──────────────────────────────────────────────────────────► N5a fs ──► N5b net ──► N5c child_process
+                                                                   └────────► N6a http ──► N6b tls ──► N6c node-crypto ──► N7 Node closure
+                                                                                                                   └──────► N8 web modules
 ```
 
 Stages are independently shippable checkpoints; each holds constraints §2 in
@@ -269,191 +570,288 @@ gate all later stages — before any shared code moves.
   node-baseline wall time. Record revision, compiler, platform, commands
   (template §20 method).
 - [ ] **N0.2** Write the require/namespace microbench: a JS script timing
-  (a) first `require` of each builtin (cold namespace build) and (b) 10⁵
-  cached requires, run via the harness with 7+ repetitions; store runner +
-  results under `test/benchmark/hosted_node/`. This is the perf yardstick for
-  the registry rewiring (N1) and the N7 closeout.
+  (a) first `require` of each builtin in a fresh process/bundle (separating
+  catalog scan, integrity/dependency activation, dynamic load, and namespace
+  build where instrumentation permits) and (b) 10⁵ cached requires, run via
+  the harness with 7+ repetitions; store runner + results under
+  `test/benchmark/hosted_node/`. This is the perf yardstick for the registry
+  rewiring (N1) and the N7 closeout.
 - [ ] **N0.3** Write `utils/hosted_node_coupling_inventory.py` + make target
   `hosted-node-coupling-inventory` (pattern: `Makefile:2367`). Deterministic
-  JSON records over the §4.3 population: every `uv_*` call site;
-  `heap_register_gc_root(_range)` externs; `RootFrame`/`Rooted` uses;
-  `js_heap_epoch` reads; `js_runtime_state.hpp`/`js_runtime.h` includers;
-  JS-queue externs (`js_next_tick_enqueue`, `js_setTimeout`, …); the §10
-  backward-call edges; inter-builtin externs. Each record carries a
-  classification — `microkernel-op` / `tier2-op` / `hook` / `rooting` /
-  `moves-with-file` / `stays-host` / `delete` — and an owning stage. Zero
-  unclassified records is the gate (template H0.4/H0.5 discipline).
-- [ ] **N0.4** Write `utils/check_node_module_architecture.py` per §16 with
+  JSON records over the §4.3 population: every non-system include and every
+  undefined external symbol from a per-file object build, not only the
+  previously known couplings; every `uv_*` call site;
+  `heap_register_gc_root(_range)` extern; `RootFrame`/`Rooted` use;
+  `js_heap_epoch` read; `js_runtime_state.hpp`/`js_runtime.h` includer;
+  JS-queue extern (`js_next_tick_enqueue`, `js_setTimeout`, …); the §10
+  backward-call edges; and every inter-builtin extern. Each record carries a
+  classification — `existing-jube-api` / `new-additive-api` /
+  `microkernel-op` / `tier2-op` / `host-namespace-resolve` / `hook` /
+  `rooting` / `moves-with-file` / `stays-host` / `delete` — and an owning
+  stage. The generated report includes a per-module future `nm -u` allowlist.
+  Zero unclassified includes or symbols is the gate (template H0.4/H0.5
+  discipline).
+- [ ] **N0.4** Write `utils/check_node_module_architecture.py` per §17 with
   its synthetic self-test `utils/test_node_module_architecture_checker.py`
   (the checker must prove it rejects injected violations, not merely pass on
   a clean tree — `Makefile:846` precedent). Make targets
   `check-node-module-architecture` / `test-node-module-architecture-checker`.
   Until N2 it runs in report mode against the future module dirs (empty) and
-  the inventory; from N2 it enforces (§16.3).
-- [ ] **N0.5** Confirm and record the two audit questions that shape N4/N6:
+  the inventory; from N2 it enforces the allowed-import rules in item 3 of
+  §17.
+- [x] **N0.5** Confirm and record the two audit questions that shape N4/N6:
   who else links zlib (host link stays if e.g. PNG/PDF paths need it) and who
   else links mbedTLS (`lambda-lib` per the native-module doc). The answers
   decide whether N4/N6 can drop them from the host link or only from the
   Node surface.
+- [ ] **N0.6** Amend the JN12 profile table in
+  `vibe/Lambda_Design_Jube_Node_Hosting.md`: compatibility/standard contains
+  every module replacing a currently built-in observable; reduced-node is the
+  intentionally smaller `node-core` profile; minimal is host-only; full Jube
+  adds optional Jube modules. Record that a manifest-only descriptor is a
+  diagnostic aid, never a behavior-preserving replacement.
 
 ### Exit gate
 
-- Evidence directory populated; inventory has zero unclassified entries;
-  checker self-test green; all baselines green and archived.
+- Evidence directory populated; include/symbol inventory has zero unclassified
+  entries; generated future-import allowlists are complete; checker self-test
+  green; profile clarification landed; all baselines green and archived.
 - No product behavior change of any kind.
 
-## 7. Stage N1 — Registry specifier index + `path` pipe-cleaner
+## 7. Stage N1 — Two-phase registry and specifier index
 
 ### Goal
 
-The resolution spine: manifests can declare runtime-library modules, one
-specifier index answers "is this a builtin and who owns it", and the smallest
-zero-dependency builtin (`path`) proves the whole static path end to end.
+The resolution spine lands without moving a builtin yet: manifests can
+declare runtime-library modules, a read-only catalog answers "is this a
+builtin and who owns it" without loading code, and activation remains a
+separate transactional operation. Existing builtin rows remain the behavioral
+fallback until N2's `path` boundary proof.
 
 ### Tasks
 
-- [ ] **N1.1** Manifest schema (JN3): parse `"kind"`
+- [ ] **N1.1** Split today's selected-manifest path into two explicit phases:
+  **catalog** reads and validates manifest metadata without checking/loading
+  the library; **activation** verifies the library hash, activates
+  dependencies, loads the image, negotiates requirements, registers the
+  descriptor, and rolls back transactionally. The catalog records all
+  manifests in all roots in stable order; it does not stop at the first
+  selector match or reuse a one-bit “paths scanned” state that can starve the
+  language or specifier index. Compile-time queries call only catalog
+  functions. Tests prove that catalog construction executes neither `dlopen`
+  nor module `init`.
+- [ ] **N1.2** Manifest schema (JN3): parse `"kind"`
   (`"runtime-library"` | absent=language), `"engine"` (`"js"`), and
   `"provides"` (string array; reuse `jube_manifest_string_array`, the
   `dependencies` parser at `jube_registry.cpp:3414` is the model). Scan-time
   validation: a manifest with neither `language` nor `provides` is rejected
   with a logged reason. Builtin-ness must be decidable from manifests alone —
-  no dlopen at scan (JN3).
-- [ ] **N1.2** Specifier index: a registry-owned `HashMap` (`lib/hashmap.h`)
-  from normalized specifier → module slot, populated from (a) every scanned
-  manifest's `provides` and (b) every static module's
+  no dlopen at scan (JN3). `provides` is owner metadata, not an instruction to
+  create globals.
+- [ ] **N1.3** Specifier catalog: a registry-owned `HashMap`
+  (`lib/hashmap.h`) from normalized specifier → stable owner record. An owner
+  record stores module identity, manifest path, catalog state
+  (`known-unavailable` / `cataloged` / `activating` / `active` / `failed`),
+  and the active descriptor slot when available. Populate it from every
+  scanned manifest's `provides` and every static module's
   `JubeNamespaceDef.specifiers`. Normalization at insert *and* lookup: strip
-  `node:` prefix except for prefix-only names (`node:test`, …, enumerated
-  from the chain during this stage); strip a trailing `.js`. New API surface
-  (registry header, host-internal): `jube_specifier_lookup(name)` (may
-  trigger lazy dlopen of the owning module, JN5 semantics on failure),
-  `jube_specifier_is_builtin(name)` (manifest-index query, never loads),
-  `jube_specifier_index_names(cb)` (for `builtinModules`). Index construction
-  is lazy on first miss, copying the `jube_discover_hosted_language` trigger
-  discipline (`:3564`) so non-Node runs never scan.
-- [ ] **N1.3** Route `js_module_get_builtin` (`js_runtime.cpp:38891`)
-  **registry-first**: normalized lookup → registered namespace `build()` (or
-  cached Item); on miss, fall through to the existing chain unchanged.
-  Namespace Items keep flowing into the existing `js_modules[]` cache — the
-  registry supplies namespaces, the engine owns caching (JN6).
-- [ ] **N1.4** Rewire the three compile-time/introspection consumers to ask
+  `node:` except for prefix-only names (`node:test`, …, enumerated from the
+  chain during this stage); strip the same trailing `.js` aliases the current
+  chain accepts.
+- [ ] **N1.4** Define collision and attestation rules: different owners
+  providing the same normalized specifier are a deterministic hard error;
+  a static descriptor plus its same-name manifest reconcile to one owner;
+  immediately after the dynamic entry returns—and before requirements
+  negotiation or `init`—the canonical union of descriptor namespace
+  specifiers must equal the manifest's `provides` set; every provided
+  specifier must map to exactly one namespace builder. A mismatch closes the
+  image without executing module callbacks.
+- [ ] **N1.5** New host-internal API:
+  `jube_specifier_catalog_contains(name)` (never loads),
+  `jube_specifier_resolve(name, out_namespace)` (structured status; may
+  activate), and `jube_specifier_index_names(cb)`. Structured statuses
+  distinguish unknown, known-but-unavailable, activation failure, and success.
+  The resolver owns the single top-level JN5 log line; lower loader errors are
+  attached detail rather than duplicate user-facing missing-module logs.
+- [ ] **N1.6** Make catalog construction thread-safe and immutable for
+  parallel lowering readers: a host-owned once/lock builds it before batch
+  workers query it; activation state changes remain JS-thread-owned. Relative
+  and absolute source imports bypass the catalog entirely; its first scan is
+  triggered only by a bare/`node:` module query or a present
+  `module-set.json`, so ordinary non-module JS does not scan. Add concurrent
+  catalog-query stress under the project's thread sanitizer.
+- [ ] **N1.7** Route `js_module_get_builtin` (`js_runtime.cpp:38891`)
+  registry-first only for already active/static providers; otherwise fall
+  through to the existing chain unchanged. Namespace Items keep flowing into
+  the existing `js_modules[]` cache — the registry supplies namespaces, the
+  engine owns caching (JN6).
+- [ ] **N1.8** Rewire the three compile-time/introspection consumers to ask
   the index first, list second (the lists shrink stage by stage until N3
   deletes them): the lowering skip list
   (`js_mir_module_batch_lowering.cpp:1931`), `js_module_is_builtin`
   (`js_runtime.cpp:39856`), and `builtinModules`
   (`:39237` — becomes index-derived ∪ residual list so reflection matches
   reality per bundle from day one).
-- [ ] **N1.5** Convert `path`: move `lambda/js/js_path.cpp` →
-  `lambda/module/node_core/js_path.cpp` (it ends up in `node-core`; the
-  directory starts existing now), add
-  `lambda/module/node_core/node_core_module.cpp` with a static
-  `JubeModuleDef` whose first `JubeNamespaceDef` wraps
-  `js_get_path_namespace` (`build()` callback), specifiers = exactly the
-  set the chain serves today (`path`, `path/posix`, `path/win32`, plus alias
-  forms — enumerate from the chain before deleting). Register beside radiant
-  at `jube_registry.cpp:3611`. Keep the file compiling into the host target
-  (static stage) via `build_lambda_config.json` source-list update.
-- [ ] **N1.6** Delete `path`'s rows from the chain and all remaining lists.
-  From this stage on, a specifier must live in exactly one place.
-- [ ] **N1.7** Tests: registry unit tests (normalization incl. `node:path`
-  and `path.js`, unknown specifier, prefix-only names, static-provides
-  lookup, index enumeration); `require('path')`/`import` smoke through both
-  CJS and ESM paths; N0.2 microbench re-run (require latency must not
-  regress beyond noise — one hash lookup replaces ≤3 memcmps per chain
-  entry).
+- [ ] **N1.9** Tests: catalog/activation separation; collision and
+  manifest/descriptor mismatch; normalization including `node:path`,
+  `path.js`, unknown specifiers and prefix-only names; stable enumeration;
+  known-but-unavailable status; concurrent read-only queries; hosted-language
+  discovery before Node lookup and the reverse order. Re-run N0.2 for the
+  active/static registry path.
 
 ### Exit gate
 
 - node-baseline unchanged; `test/mir` ratchet green (resolution rewiring must
   not change emission — the literal-`require` intercept at
   `js_mir_expression_lowering.cpp:6862` still emits the same call, JN13).
-- `path` served via registry; its list rows gone; the four lists still
-  mutually consistent for everything else.
+- No builtin row has moved yet; the chain and four lists remain behaviorally
+  authoritative fallbacks and mutually consistent.
+- Catalog queries never load code; activation errors are structured and
+  provider collisions cannot depend on directory iteration order.
 - Lambda + Test262 baselines green.
 
-## 8. Stage N2 — `JubeHostNodeAPI` v1 and the async micro-kernel
+## 8. Stage N2 — Runtime boundary, `path`, and `JubeHostNodeAPI` v1
 
 ### Goal
 
-The runtime-services half of the ABI (the `node_api.h` analog): one additive
-parent on `JubeHostAPI` composing async, binary, promise, and error tables —
-extracted from real call sites, exercised by a real conversion, enforced by
-the checker.
+Make the module boundary real before the large move: add pre-init requirement
+negotiation and a per-JS-runtime session lifecycle, close the generic
+value/script API gaps found by N0, convert `path` so its object has no
+forbidden host imports, then land the async/binary/promise/error services and
+exercise them through the fs pilot.
 
 ### Tasks
 
-- [ ] **N2.1** Freeze the v1 op inventory from N0.3's ledger: map every
-  `uv_*`/JS-queue call site in fs/net/child_process/dns (plus the §20-risk-8
+- [ ] **N2.1** Freeze two inventories from N0.3's ledger:
+  - the generic value/script operations required to convert `path` and the
+    later namespace builders (`string_from_utf8_n`, current `this`,
+    undefined, property attributes/prototypes, exception clear/take,
+    closures/environments, type/string access, and any other empirically
+    named gap);
+  - the Node op set: map every
+  `uv_*`/JS-queue call site in fs/net/child_process/dns (plus the §21-risk-8
   edges: `fs.watch`, tty raw mode, IPC descriptor passing, `uv_tcp_open`-style
-  fd adoption) onto §14's micro-kernel or Tier-2 ops. Every op cites ≥1 call
+  fd adoption) onto §15's micro-kernel or Tier-2 ops. Every op cites ≥1 call
   site (P5); every call site maps to exactly one op or to `moves-with-file`
   (plain syscalls a module may make directly, e.g. tty `termios`). The
-  worksheet lands in this document's §14 as the signed-off v1 surface.
-- [ ] **N2.2** ABI: append `const JubeHostNodeAPI* node;` after `data` on
-  `JubeHostAPI` (`jube.h:976`), size-gated; define the parent + four child
-  tables in `jube.h` per §14, each with `api_version`/`struct_size` first
-  (the `JubeHostRootAPI`/`JubeHostDataAPI` precedent). Table names are
-  engine-generic (`JubeHostAsyncAPI`, `JubeHostBinaryAPI`,
-  `JubeHostPromiseAPI`, `JubeHostNodeErrorAPI`) because JA7 makes the async
-  micro-kernel architecture-wide; only the error table and the parent are
-  Node-flavored.
-- [ ] **N2.3** Host implementation, new files:
+  worksheet lands in this document's §15 as the signed-off v1 surface. No API
+  entry lands without a ledger call site.
+- [ ] **N2.2** Additive lifecycle/requirements ABI:
+  - append `const JubeModuleRequirements* requirements`,
+    `const JubeGlobalDef* globals` + count, and
+    `runtime_attach(session)` / `runtime_reset_session(session)` /
+    `runtime_detach(session)` to the `JubeModuleDef` tail, all
+    `struct_size`-gated; legacy no-argument `runtime_reset` remains for
+    existing modules;
+  - `JubeModuleRequirements` declares required host/node capability bits and
+    minimum parent/child table versions and sizes. The registry validates it
+    before `module->init`; failure executes no module callback;
+  - `module->init` is process-lifetime only: validate/store tables and create
+    no `Item`, root, global, process extension, rid, timer, or JS callback;
+  - `runtime_attach` runs with an opaque live JS session after the global and
+    host-core `process` objects exist; `runtime_detach` runs before that
+    session's heap is destroyed and must not allocate or re-enter script.
+- [ ] **N2.3** Append `const JubeHostNodeAPI* node;` after `data` on
+  `JubeHostAPI` (`jube.h:976`), size-gated. The parent composes six versioned
+  children: `runtime`, `roots`, `async_ops`, `binary`, `promise`, and `error`.
+  `JubeHostRuntimeAPI` exposes current/valid session, current global/process,
+  `resolve_namespace(session, specifier, out)` for module-to-module
+  script-level composition, and ledger-backed `resolve_host_namespace` for
+  thin node-core adapters whose implementations deliberately remain in the
+  host (`node:vm`, module-loader core, process core). These are the only legal
+  namespace bridges. Re-expose the opaque `JubeHostRootAPI`
+  through the parent and append session-bound
+  `persistent_root_unregister`; node modules never use the concrete
+  `LambdaRootFrame` entries of legacy `JubeHostGcAPI`.
+- [ ] **N2.4** Separate globals from namespaces. `JubeGlobalDef` contains a
+  global name, flags, and `build(session)` callback. Only globals from an
+  **active** descriptor receive lazy object-building accessors; namespace
+  specifiers are never installed on `globalThis`. A generic
+  `modules/module-set.json` lists modules that a bundle activates before JS
+  global construction. Reduced-node lists `node-core`; compatibility lists
+  every module that owns a formerly eager global; minimal has no activation
+  file and performs no module scan or accessor allocation during JS startup.
+- [ ] **N2.5** Convert `path` completely:
+  move `lambda/js/js_path.cpp` to `lambda/module/node_core/`, replace its
+  engine includes and direct `js_*`/heap/error calls with stored `jube.h`
+  table calls, and make its cache session-owned and precisely rooted.
+  Register two namespace equivalence classes: the default/POSIX result
+  (`path`, `path/posix`, accepted aliases) and the distinct Win32 result
+  (`path/win32`, accepted aliases). Declare no `JubeGlobalDef` for `path`.
+  Delete its chain/list rows only after CJS and ESM resolve through the
+  registry. Compile its object independently and require its undefined-symbol
+  set to be `jube.h` callbacks plus approved platform/lib symbols only.
+- [ ] **N2.6** Host async implementation, new files:
   - `lambda/js/js_async_services.cpp` — micro-kernel over the existing
     substrate: `work_submit` on `uv_queue_work(lambda_uv_loop(), …)`
     (pool precedents: `network_thread_pool.cpp`, `serve/worker_pool.cpp`);
     `post_completion` on a host-owned `uv_async_t` + locked queue
-    (`concurrency.cpp:580` precedent), draining nextTick/microtasks after
-    each completion batch through the same path
+    (`concurrency.cpp:580` precedent), running the existing
+    nextTick/microtask checkpoint after **each completion callback** through
+    the same path
     `lambda_uv_set_microtask_drain` already services (`js_event_loop.cpp:1720`)
-    — the MakeCallback discipline, host-owned;
+    — not once per arbitrary batch;
     scheduling entries delegate to `js_next_tick_enqueue`
     (`js_event_loop.cpp:163`), the microtask queue, and the existing timer
-    wheel; `register_shutdown` keeps an ordered host list.
+    wheel; `register_shutdown(session, …)` keeps an ordered per-session host
+    list removed during detach.
   - `lambda/js/js_resource_table.cpp` — the rid table: slot array +
-    generation bits packed into `uint32_t` rid; entries carry kind tag, an
-    opaque host pointer, `close_fn`, and a ref flag; `rid_ref`/`rid_unref`
+    generation bits packed into `uint32_t` rid; entries carry their owning
+    JS session, kind tag, opaque host pointer, `close_fn`, pending-request
+    links, and a ref flag; `rid_ref`/`rid_unref`
     forward to `uv_ref`/`uv_unref` on the backing handle (or a loop-liveness
     counter for non-handle resources) so "active handles keep the process
     alive" (`lambda_uv_run` semantics, `lib/uv_loop.h`) is preserved;
-    `rid_close` cancels in-flight requests with canceled-status completions
-    (§14 contract); host-side enumeration API for `_getActiveHandles` (JN10).
+    `rid_close` cancels its linked in-flight requests with canceled-status
+    completions while the session is live (§15 contract); runtime detach
+    closes/cancels every rid/request owned by that session without delivering
+    script callbacks; host-side enumeration for `_getActiveHandles` filters by
+    the calling session (JN10).
   - `lambda/jube/jube_node_host.cpp` — table assembly + version plumbing.
-- [ ] **N2.4** Tier-2 ops (stream/process/signal families, §14) implemented
+- [ ] **N2.7** Tier-2 ops (stream/process/signal families, §15) implemented
   host-side over the existing libuv usage patterns lifted from
   js_net/js_child_process — implementation moves behind the API now, the
   *callers* convert in N5. Payload copy-on-submit for writes (v1 contract);
   op-specific completion structs defined in `jube.h` (valid only during the
-  callback).
-- [ ] **N2.5** Pilot conversion (the design's "fs picked next"): convert
+  callback). Every submit/start entry takes an owning session; completion is
+  suppressed once detach starts.
+- [ ] **N2.8** Pilot conversion (the design's "fs picked next"): convert
   `js_fs.cpp`'s async `uv_fs_*` sites (`:717–750` region) **in place** to
   `work_submit` + completion, and its promise construction to the promise
   table. This proves the tables against a real consumer before any module
-  move; the converted file rides into N5a unchanged.
-- [ ] **N2.6** Rooting conversion guide: land §15 of this document as the
+  move; the converted file rides into N5a unchanged. Preserve its existing
+  callback and microtask ordering exactly; semantic improvements are separate
+  work.
+- [ ] **N2.9** Rooting conversion guide: land §16 of this document as the
   reviewed pattern reference; convert the fs pilot's rooting as its first
   application (`js_fs.cpp:1989` in-function extern, `:2529` RootFrame).
-- [ ] **N2.7** Negative descriptor tests: extend the loader-negative matrix
+- [ ] **N2.10** Negative descriptor tests: extend the loader-negative matrix
   with undersized/missing `node` tables, wrong `api_version`, and a module
   requesting the node capability from a host without it (clean refusal
-  before init — `Makefile:836` matrix style).
-- [ ] **N2.8** Checker goes to enforcement for `lambda/module/node_*/`
-  sources (currently just `node_core` with `js_path.cpp` + the module def) —
-  `uv_*`, engine internals, GC externs on the banned list; wire
+  before init — a synthetic init callback sets a sentinel and the test proves
+  it remains untouched). Add attach-before-global, cross-session root/rid,
+  completion-after-detach, and double-detach negatives.
+- [ ] **N2.11** Checker goes to enforcement for
+  `lambda/module/node_*/` sources (currently `node_core` with the converted
+  `js_path.cpp` + module def): `uv_*`, engine internals, GC externs and every
+  N0-unclassified/forbidden host symbol on the banned list. Wire
   `check-node-module-architecture` into `build-test` CI.
-- [ ] **N2.9** Decide and record in §14: which rooting frame flavor node
-  modules use (recommendation: `JubeHostGcAPI` frames per design §9.5, with
-  `JubeHostRootAPI`'s opaque frames as the documented alternative if layout
-  hiding proves necessary); where the `ERR_*` implementation lives
-  (recommendation: host-side behind `JubeHostNodeErrorAPI` so host compat
-  paths share it — design §9.4 leaves this to N2).
+- [ ] **N2.12** Node modules standardize on the opaque, session-bound root
+  table. The `ERR_*` implementation stays host-side behind
+  `JubeHostNodeErrorAPI` so host compat paths share it; node-core registers
+  only the Node-visible constructors/properties that use those services.
 
 ### Exit gate
 
+- `path`, `path/posix`, and `path/win32` return the correct distinct objects;
+  no `globalThis.path` is introduced; the path object has no forbidden
+  imports and its legacy rows are gone.
 - fs pilot: full fs slice of node-baseline + `test/node` corpus green, and
-  green under the forced-GC gate (§17.3).
-- Table unit tests + negative descriptor tests green; checker enforcing in
-  CI; MIR budgets untouched.
-- v1 op worksheet (§14) updated to match what landed — no unused ops, no
+  green under the forced-GC gate (§18.3).
+- Requirement checks run before init; runtime/session/root/rid tests and
+  negative descriptor tests are green; checker enforcing in CI; MIR budgets
+  untouched.
+- v1 op worksheet (§15) updated to match what landed — no unused ops, no
   call site left mapping to a banned symbol.
 
 ## 9. Stage N3 — `node-core` (static)
@@ -470,27 +868,39 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
   (+`node:test`), readline, permission glue, `timers/promises`, the stub
   namespaces, `internalBinding` (+ constant tables, incl. the test-only
   `internal/test/binding`, `js_runtime.cpp:39728`), and the Node error-code
-  helpers' *registration* (implementation per N2.9). Move order within the
+  helpers' *registration* (implementation per N2.12). Move order within the
   stage: leaves first (querystring, string_decoder, os, url), hub files last
   (events → buffer → util → assert), stream last of all (N3.2). One review
-  unit per file or coherent pair (§22).
+  unit per file or coherent pair (§22). A move is complete only when every
+  N0 include/symbol row for that unit is converted to `jube.h`, module-local
+  code, the host namespace resolver, or an approved platform library; source
+  relocation alone is not a checkpoint.
+  Public specifiers whose implementation deliberately stays in the host
+  (`node:vm`, module-loader/process core, and any other N0-classified survivor)
+  still receive thin node-core namespace definitions that call the named
+  `resolve_host_namespace` provider. Thus deleting the chain does not expose
+  them in minimal and does not require a direct host symbol import.
 - [ ] **N3.2** Split `js_stream.cpp` (10,111 lines): Node half →
   `lambda/module/node_core/js_stream_node.cpp`; the WHATWG half
   (ReadableStream/WritableStream class implementations — re-enumerate their
   exact extent at stage start) stays host-side in a new
-  `lambda/js/js_web_streams.cpp` pending N6d. `stream/web` (and
+  `lambda/js/js_web_streams.cpp` pending N8. `stream/web` (and
   `stream/consumers` where it touches web streams) is served from
-  `node-core` as a re-export over a transitional host hook. Sequencing rule
+  `node-core` as a re-export over a transitional host namespace provider.
+  N8 replaces that provider with
+  `runtime->resolve_namespace("web-streams")`. Sequencing rule
   from design §13.1: if a stream-coverage campaign is active, land stream
   last within N3 or after it.
 - [ ] **N3.3** Process split (design §6.4 rule: engine-called stays, only
   Node-observable moves): enumerate the `js_globals.cpp:2700–4470` members
   into host-core vs node-core lists (the enumeration is a committed artifact
   in `test/benchmark/hosted_node/`); `node-core` extends the host `process`
-  at init (memoryUsage, signals, `_getActiveHandles` via the rid-table
-  enumeration, nextTick *binding* stays host). Risk 3 applies: test harnesses
+  during `runtime_attach` (memoryUsage, signals, `_getActiveHandles` via the
+  rid-table enumeration; nextTick *binding* stays host). Risk 3 applies: test harnesses
   reading Node-only members (e.g. `process.memoryUsage` in the shims) are
-  part of the enumeration.
+  part of the enumeration. The extension occurs in `runtime_attach`, never
+  process-level module `init`; detach drops every session-owned cached member
+  without allocating.
 - [ ] **N3.4** Invert the §10 backward calls as init-time hook registrations
   with absent defaults, via a small host-side hook registry
   (`lambda/js/js_host_hooks.h/.cpp`, typed setters, one absent-default each):
@@ -502,12 +912,13 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
   `js_globals.cpp:138` — lands with node-net/child-process in N5 but the hook
   point is created here); cluster-online queue (`js_runtime.cpp:62`) moves
   wholesale to node-child-process's hook (N5c).
-- [ ] **N3.5** Globals: extend the `JubeNamespaceDef` install path
-  (`js_install_jube_global_namespaces`, `js_globals.cpp:~74`) to (a) cover
-  registry (dynamic) modules, and (b) install **lazy accessors** — a global
-  slot that builds on first touch and memoizes — replacing today's eager
-  static-only walk. `Buffer`, `process` extensions, and the `os`/`vm`
-  module-side globals ride this; the unconditional install block
+- [ ] **N3.5** Globals: delete the implicit
+  `JubeNamespaceDef.specifiers[0] → globalThis` behavior. During
+  `runtime_attach`, install lazy object-building accessors only for the active
+  module's explicit `JubeGlobalDef` rows. `Buffer` and the intentionally
+  retained `os`/`vm` compatibility globals use explicit rows; process
+  extensions attach to the existing host-core object and are not separate
+  globals. The unconditional install block
   (`js_globals.cpp:16009+`) shrinks to host-core globals only. Absent
   `node-core` ⇒ `typeof Buffer === 'undefined'` (the minimal profile's
   defining observable).
@@ -518,11 +929,13 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
   `js_mir_entrypoints_require.cpp:1581` and
   `js_mir_module_batch_lowering.cpp` in favor of index normalization.
 - [ ] **N3.7** Per-epoch namespace caching moves from ad-hoc `js_heap_epoch`
-  checks inside getters to the descriptor's `runtime_reset` + `heap_cleanup`
-  hooks (JN11) — the registry already invokes these for interface caches
-  (`jube_interface_runtime_reset`).
-- [ ] **N3.8** Rooting conversion for every moved file per §15, forced-GC
-  gate per file batch (§17.3).
+  checks inside getters to session-keyed module cache records.
+  `runtime_attach` creates/registers them; `runtime_reset_session` drops
+  borrowed cache values for that session; `runtime_detach` unregisters
+  persistent roots and destroys the record before `heap_cleanup`. No module
+  reads a heap pointer or epoch.
+- [ ] **N3.8** Rooting conversion for every moved file per §16, forced-GC
+  gate per file batch (§18.3).
 
 ### Exit gate
 
@@ -530,10 +943,11 @@ builtin name knowledge is deleted; core→builtin edges become hooks.
   `js_module_get_builtin` chain remnant.
 - node-baseline unchanged; `test/node` corpus green; forced-GC slice green
   on converted files; checker green over `lambda/module/node_core/`
-  (allowlist entries counted and burned down to the transitional set).
+  (no direct engine-symbol allowance; platform imports match the N0 ledger).
 - Minimal-profile smoke (host built without node_core registration in a test
   configuration): non-Node JS runs; `require('fs')` produces the JN5 error;
-  console works via the absent-default formatter.
+  console works via the absent-default formatter; no `path`, `Buffer`, `os`,
+  or `vm` property is accidentally installed from namespace metadata.
 - Lambda + Test262 + MIR budgets green.
 
 ## 10. Stage N4 — `node-zlib`: first dynamic module
@@ -549,18 +963,23 @@ flips.
 - [ ] **N4.1** Sources: `lambda/js/js_zlib.cpp` →
   `lambda/module/node_zlib/js_zlib.cpp` + `node_zlib_module.cpp`
   (`JubeModuleDef`, specifiers `zlib`/`node:zlib` normalized, buffer coupling
-  through `JubeHostBinaryAPI` only, async surface through `work_submit`).
-  Static checkpoint first (P7).
-- [ ] **N4.2** Build target: add a module-target generator step
-  (`utils/generate_premake.py` input) so each node module's
-  `build_lambda_config.json` entry is emitted from one template (name,
+  through `JubeHostBinaryAPI` only, stream coupling through
+  `runtime->resolve_namespace`). Preserve today's callback scheduling during
+  the migration: if the current implementation computes synchronously and
+  posts nextTick, do not silently change it to work-pool completion. An
+  off-thread semantic improvement is separate work. Static checkpoint first
+  (P7).
+- [x] **N4.2** Build target: add a module-target generator step
+  by extending `build_lambda_config.json` with one node-module template plus
+  instance data consumed by `utils/generate_premake.py` (the JSON remains the
+  source of truth; no generated `.lua` is edited). Each instance supplies name,
   `link: dynamic`, `pic`, `target_dir: modules/node-zlib`,
   `-Wl,-undefined,dynamic_lookup` on macOS + the linux equivalent, explicit
   `source_files`) — clone of `build_lambda_config.json:305`, not copy-paste
   ×8 (rule 13). Make targets `build-node-zlib` / `release-node-zlib`
   mirroring `Makefile:772/:783` incl. the
   `update_jube_manifest_integrity.py modules/node-zlib` stamping step.
-- [ ] **N4.3** `modules/node-zlib/module.json` per design §6.2 (kind
+- [x] **N4.3** `modules/node-zlib/module.json` per design §6.2 (kind
   `runtime-library`, engine `js`, `provides`, `dependencies: ["node-core"]`,
   per-OS library + sha256, `entry_symbol: "jube_module"`). Dependency
   activation exercises the existing `dependencies` machinery
@@ -569,10 +988,12 @@ flips.
 - [ ] **N4.4** Flip dynamic: remove `node_zlib` sources from the host target;
   zlib leaves the host link **iff** the N0.5 audit cleared it (otherwise the
   host keeps its own zlib user and the module still links its own copy —
-  record which). Static/dynamic parity: run the zlib slice (in-tree +
-  official) in both modes via `JUBE_MODULE_PATH` bundle copies
-  (`Makefile:822` isolation pattern) and diff.
-- [ ] **N4.5** Absent-module negatives: bundle copy without the dylib →
+  record which). Static/dynamic parity uses two explicit test artifacts:
+  a disposable static-checkpoint host and a production-shaped host with the
+  source absent plus the dylib. `JUBE_MODULE_PATH` isolates the latter's
+  bundle; it is not claimed to switch a statically linked module off. Run the
+  zlib slice (in-tree + official) in both and diff.
+- [x] **N4.5** Absent-module negatives: bundle copy without the dylib →
   `require('zlib')` yields `MODULE_NOT_FOUND` + host log naming `node-zlib`
   (manifest-only descriptor upgrades the log to "known, not installed" —
   `package-standard` precedent at `Makefile:795`); tampered-library and
@@ -590,18 +1011,20 @@ flips.
 
 Each sub-stage follows one shared recipe (a checklist committed once in
 `lambda/module/README.md` and referenced, not restated — rule 13):
-move sources → convert every `uv_*`/JS-queue call to §14 ops → rooting per
-§15 → static parity → checker zero-`uv_*` → manifest/build target from the
-N4 generator → dynamic flip → absent negatives → inventory ledger rows
-burned to zero for that file set.
+move sources → burn every N0 include/symbol row to a named `jube.h` service,
+module-local implementation, namespace resolution, or approved platform
+library → rooting per §16 → static parity → checker/import audit →
+manifest/build target from the N4 generator → dynamic flip → absent negatives.
 
 - [ ] **N5a — `node-fs`** (3.9k lines; fs, fs/promises, FileHandle as
-  `JubeTypeBinding`). The N2.5 pilot already converted the async core;
+  `JubeTypeBinding`). The N2.8 pilot already converted the async core;
   remaining: sync surface (direct syscalls, module-local — allowed),
-  `fs.watch` per the N2.1 decision (Tier-2 `fs_event` ops or documented
-  deferral if baseline-cold), promises via the promise table,
+  `fs.watch` per the N2.1 decision (Tier-2 `fs_event` ops or an exact
+  preservation of today's stub behavior; baseline-cold status alone never
+  authorizes dropping an observable), promises via the promise table,
   `js_next_tick_enqueue` extern (`js_fs.cpp:3127`) → scheduling ops,
-  permission glue via node-core.
+  permission checks through the named host service selected by the N0 ledger
+  (manifest dependency activation alone is not callable permission logic).
 - [ ] **N5b — `node-net`** (7.9k lines; net + dns + cares_wrap shim). First
   real consumer of the Tier-2 stream ops (connect/listen/accept/read/write/
   shutdown/opts/fd-adoption → rids); the raw socket/server pool arrays with
@@ -623,58 +1046,51 @@ burned to zero for that file set.
   `lambda/module/node_*/`; absent negatives green; static/dynamic parity
   diffed; `js_runtime_state.hpp` includer count for migrated files = 0.
 
-## 12. Stage N6 — protocol leaves and the JA1 web modules
+## 12. Stage N6 — protocol leaves and Node crypto
 
 - [ ] **N6a — `node-http`** (6.9k lines; http + https; depends node-core +
   node-net). The HTTP/1.1 parser is module-local; raw libuv accept
   (`js_http.cpp:3357` region) converts to stream-op accept→rid; the 10-root
-  `RootFrame` at `:5955` converts per §15. Profile against N0's throughput
-  numbers before/after — this is the copy-on-submit stress case (§20 risk 8);
+  `RootFrame` at `:5955` converts per §16. Profile against N0's throughput
+  numbers before/after — this is the copy-on-submit stress case (§21 risk 8);
   if profiles demand it, spec the pinned zero-copy additive entry then, not
   preemptively.
 - [ ] **N6b — `node-tls`** (3.1k lines; mbedTLS + the OpenSSL dlopen
   soft-dep for PFX stays module-side; depends node-net).
-- [ ] **N6c — the three-way crypto split** (JN14 as superseded by JA1).
+- [ ] **N6c — prepare the three-way crypto split and extract Node crypto**
+  (JN14 as superseded by JA1).
   Sub-task order: (1) extract a shared mbedTLS primitive layer
   (`lambda/module/crypto_primitives/`, compiled *into each* consumer —
   source-level sharing, no cross-module symbols per JA8; it may also serve
   the host's existing `lib/digest.h` users — audit); (2) `node-crypto`
-  module (the node:crypto surface, ≈6–7k lines after the split); (3)
-  `web-crypto` module (kind 2a) owning `globalThis.crypto` via the lazy
-  globals path, WPT-slice gated (§13.4); `node:crypto`'s `webcrypto`
-  property re-exports it. Re-enumerate the WebCrypto extent inside
+  module (the node:crypto surface, ≈6–7k lines after the split); (3) leave
+  WebCrypto host-side behind the transitional namespace provider.
+  `node:crypto.webcrypto` resolves that provider through the host runtime
+  table. Re-enumerate the WebCrypto extent inside
   `js_crypto.cpp`/`js_globals.cpp` at sub-stage start (budget it as surgery,
   not a file move — design §13.2). mbedTLS drops from the minimal host link
-  iff the N0.5 audit clears `lambda-lib`'s use.
-- [ ] **N6d — `web-streams`** (kind 2a): `lambda/js/js_web_streams.cpp`
-  (created in N3.2) becomes the module; the transitional host hook flips to
-  a `node-core` script-level re-export of the module (`stream/web` mirrors
-  how Node layers over WHATWG); `ReadableStream` globals
-  (`js_globals.cpp:16143`) move to the module's lazy globals. WPT streams
-  slice gated (§13.4).
+  iff the N0.5 audit clears `lambda-lib`'s use. Actual `web-crypto`
+  extraction is N8 and cannot block Node closure.
 
 ### Exit gate
 
 - node-baseline unchanged; `crypto`/`tls`/`http` individually absent at
   runtime produce clean JN5 errors (the native-module doc's POC 2 exit
   criterion); minimal-host link audit results recorded (zlib/mbedTLS);
-  N6c/N6d WPT slices green *or* the deferral is recorded per §13.4 with the
-  transitional state intact.
+  WebCrypto and WHATWG streams remain behaviorally neutral behind
+  transitional host providers pending N8.
 
-### §13.4 WPT gating and the legal transitional state
+### WPT gating and the legal transitional state
 
 JA9 forbids landing a web-platform module without its WPT slice. The harness
 choice (reuse Radiant WPT infra vs a js262-style runner; architecture open
-item 3) is not this plan's decision. Therefore: **N6c(3) and N6d may trail
-the rest of N6 indefinitely** — the transitional state (WebCrypto host-side
-as today; WHATWG streams host-side in `js_web_streams.cpp` with the
-`node-core` re-export hook) is explicitly legal and observable-behavior-
-neutral. What is *not* legal is shipping `web-crypto`/`web-streams` modules
-without their slices. When the harness decision lands, the default proposal
-is a js262-style runner over vendored `WebCryptoAPI/` and `streams/` slices,
-shipped and updated with the module (JA9 table).
+item 3) is not this plan's decision. Therefore N7 closes Node hosting with
+WebCrypto host-side as today and WHATWG streams host-side in
+`js_web_streams.cpp`; node modules use host-mediated namespace providers.
+N8 waits indefinitely if necessary. What is not legal is shipping either web
+module without its slice.
 
-## 13. Stage N7 — Closure
+## 13. Stage N7 — Node closure
 
 ### Tasks
 
@@ -682,23 +1098,29 @@ shipped and updated with the module (JA9 table).
   stage's parity machinery exists by now). The static registration path for
   node modules is then removed entirely (template H10 discipline: static was
   a checkpoint, not a product form — JA2).
-- [ ] **N7.2** Packaging: `package-standard` adds `node-core` (module, not
-  just manifest) + manifest-only descriptors for the leaves; `package-jube`
-  (full) adds all node + web modules; a new minimal-profile packaging target
-  ships host only. `verify-jube-package` (`Makefile:810`) extends to: host
-  byte-identity across all three bundles; standard-bundle smoke (Node script
-  using fs/path via node-core… noting leaves absent → JN5 errors); full
-  smoke; minimal smoke (`typeof Buffer === 'undefined'`, non-Node JS green).
+- [ ] **N7.2** Packaging produces four bundles from one host:
+  - compatibility/standard: all extracted Node modules, preserving today's
+    Node-visible behavior;
+  - full Jube: the compatibility set plus optional Jube modules such as
+    `lang-python`;
+  - reduced-node: `node-core` plus manifest-only leaf descriptors, with
+    deliberate JN5 failures for `fs`/`net`/…;
+  - minimal: host only.
+  `modules/module-set.json` activates only eager-global owners. Extend
+  `verify-jube-package` (`Makefile:810`) with host byte-identity across all
+  four; a packaged node-baseline smoke against compatibility; expected
+  reduced failures; and minimal smoke (`typeof Buffer === 'undefined'`,
+  non-Node JS green).
 - [ ] **N7.3** Docs: `doc/Lambda_Jube_Runtime.md` gains the node-module
   bundle section; `vibe/Lambda_Design_Jube_Node_Hosting.md` status flips to
   implemented-with-deltas; the native-module doc's POC 2 marked delivered;
   memory/ledger docs updated.
-- [ ] **N7.4** Checker closure: transitional allowlist burned to the
-  permanent set (each survivor named and justified in the checker source);
+- [ ] **N7.4** Checker closure: the platform-library allowlist is burned down
+  to the permanent set (each survivor named and justified in checker source);
   `--require-module-binary` mode (nm import audit) mandatory for all node
   module dylibs in CI — do not inherit Python's open H8 laxity (design §4.5
   caveat; shared burn-down with JA open item 5).
-- [ ] **N7.5** Perf closeout vs N0 evidence (§18): require microbench,
+- [ ] **N7.5** Perf closeout vs N0 evidence (§19): require microbench,
   node-baseline wall time, host + bundle sizes, minimal-profile startup,
   http/fs throughput spot-checks. Any significant regression stops closure
   (template §20.3 rule).
@@ -710,10 +1132,36 @@ shipped and updated with the module (JA9 table).
   runtime with clean errors; minimal host runs non-Node JS suites.
 - node-baseline ≥ N0 ledger; Lambda/Test262/MIR budgets green; forced-GC
   gates green per module; checker green with final allowlist.
-- Byte-identical host across minimal/standard/full; release perf within
+- Byte-identical host across minimal/reduced-node/compatibility/full; release perf within
   noise of N0.
 
-## 14. The service surface — v1 worksheet (JN7/JN8)
+## 14. Stage N8 — WPT-gated web modules
+
+### Goal and tasks
+
+- [ ] **N8.1** Land the selected WPT harness and vendored, version-recorded
+  `WebCryptoAPI/` and `streams/` slices before moving either implementation.
+- [ ] **N8.2** Extract `web-crypto` with explicit `JubeGlobalDef` rows for
+  `crypto`; `node:crypto.webcrypto` resolves its namespace through
+  `JubeHostRuntimeAPI`. Run its WPT slice, Test262, Node crypto slice,
+  forced-GC and static/dynamic parity gates.
+- [ ] **N8.3** Extract `web-streams` from `lambda/js/js_web_streams.cpp` with
+  explicit global rows for the WHATWG constructors. Replace node-core's
+  transitional provider with host-mediated namespace resolution for
+  `stream/web` and related consumers. Run its WPT slice plus Node stream,
+  forced-GC and parity gates.
+- [ ] **N8.4** Add both modules to compatibility/standard and full Jube
+  packaging because they replace globals visible in today's monolith. Do not
+  add them to reduced-node or minimal. Re-run host byte-identity and profile
+  global-surface tests.
+
+### Exit gate
+
+- Both WPT slices are green; compatibility/standard remains observably
+  equivalent to the pre-extraction global and Node surfaces; reduced and
+  minimal profiles expose only their documented globals.
+
+## 15. The service surface — v1 worksheet (JN7/JN8)
 
 Signed off in N2.1; this section then becomes the record of the landed v1.
 House rules: `api_version` + `struct_size` first on every table; status-code
@@ -725,6 +1173,8 @@ module-side.
 ```c
 struct JubeHostNodeAPI {
     uint32_t api_version; uint32_t struct_size; uint64_t capabilities;
+    const JubeHostRuntimeAPI*   runtime;
+    const JubeHostRootAPI*      roots;
     const JubeHostAsyncAPI*     async_ops;   // Tier 1 + Tier 2
     const JubeHostBinaryAPI*    binary;
     const JubeHostPromiseAPI*   promise;
@@ -732,16 +1182,30 @@ struct JubeHostNodeAPI {
 };
 ```
 
+`JubeHostRuntimeAPI` defines the JS session boundary:
+`current_session`, `session_is_live`, `global_this`, `process_object`, and
+`resolve_namespace`. Namespace resolution returns a structured status and a
+borrowed `Item`; callers root it before any allocating/re-entrant call.
+`JubeHostRootAPI` uses only opaque `JubeRootFrame` storage and session-bound
+persistent register/unregister. A root registered for session A cannot be
+used or removed through session B.
+
+`JubeModuleRequirements` is descriptor metadata inspected before `init`; it
+contains required capability bits and minimum size/version records for every
+table the module consumes. `JubeGlobalDef` is independent of
+`JubeNamespaceDef`; globals are installed only for an already active module
+during runtime attach.
+
 **Tier 1 — micro-kernel (~15 entries, five concepts; sufficient for
 node-zlib, node-fs (minus watch), dns, node-crypto):**
 
 | Concept | Entries | Host backing (verified precedent) |
 |---|---|---|
 | scheduling | `next_tick`, `enqueue_microtask`, `timer_start`, `timer_clear` | `js_next_tick_enqueue` (`js_event_loop.cpp:163`), microtask queue, existing timer wheel |
-| completion post | `post_completion(cb, user)` — any thread → JS thread, loop order, host drains nextTick/microtasks per batch | `uv_async_t` (`concurrency.cpp:580` pattern) + the `lambda_uv_set_microtask_drain` drain path (`js_event_loop.cpp:1720`) |
-| blocking work | `work_submit(fn, complete, user)`, `work_cancel` | `uv_queue_work` (`network_thread_pool.cpp`, `js_fetch.cpp:546` patterns); pool sizing policy + long-op hygiene rule documented here at N2 (risk 8) |
-| resource table | `rid_add(ptr, close_fn)`, `rid_get`, `rid_close`, `rid_ref`, `rid_unref` | new `js_resource_table.cpp`; slot+generation uint32; ref/unref → `uv_ref`/`uv_unref` liveness |
-| lifecycle | `register_shutdown` | ordered host list; replaces the shutdown backward call |
+| completion post | `post_completion(session, cb, user)` — any thread → owning JS thread, loop order, host runs the existing nextTick/microtask checkpoint after each callback | `uv_async_t` (`concurrency.cpp:580` pattern) + the `lambda_uv_set_microtask_drain` drain path (`js_event_loop.cpp:1720`) |
+| blocking work | `work_submit(session, fn, complete, user)`, `work_cancel` | `uv_queue_work` (`network_thread_pool.cpp`, `js_fetch.cpp:546` patterns); pool sizing policy + long-op hygiene rule documented here at N2 (risk 8) |
+| resource table | `rid_add(session, ptr, close_fn)`, `rid_get`, `rid_close`, `rid_ref`, `rid_unref` | new `js_resource_table.cpp`; slot+generation uint32; owner-session validation; ref/unref → `uv_ref`/`uv_unref` liveness |
+| lifecycle | `register_shutdown(session, cb, user)` / unregister | ordered per-session host list; detach unregisters it; replaces the shutdown backward call |
 
 **Tier 2 — dedicated ops, host-owned machinery only (~15–18 entries):**
 
@@ -756,35 +1220,41 @@ v1 contracts (design §9.1, restated as implementable rules): write payloads
 copied at submit (pinned zero-copy = marked additive extension, adopted only
 on N6a profile evidence); completion callbacks may submit but never block or
 nest a drain; `rid_close` cancels in-flight requests → canceled-status
-completions; no loop pointer, no `uv_*` type, no escape hatch — ever.
+completions while the session is live; detach cancels all session-owned
+requests without script delivery and prevents later callbacks from entering a
+dead runtime; no loop pointer, no `uv_*` type, no escape hatch — ever.
+`work_submit` copies or takes explicit ownership of native/POD inputs before
+returning; its worker callback cannot access an `Item`, root, JS session, or
+any Jube host service. Only the JS-thread completion callback may turn the
+native result back into rooted Items.
 
 `JubeHostBinaryAPI` (buffer_alloc/from_copy/bytes, arraybuffer_alloc,
 typed_array_view, is_buffer; marked extension: `buffer_adopt`),
 `JubeHostPromiseAPI` (promise_new withResolvers-shape, resolve, reject,
 is_promise), and `JubeHostNodeErrorAPI` (error_with_code, errno_error —
-implementation host-side per N2.9, throw via `script->throw_value`) land as
+implementation host-side per N2.12, throw via `script->throw_value`) land as
 sketched in design §9.2–9.4 with signatures frozen at N2.1.
 
-## 15. Rooting conversion guide (JN9)
+## 16. Rooting conversion guide (JN9)
 
-Landed as the reviewed reference in N2.6; every conversion is reviewed per
+Landed as the reviewed reference in N2.9; every conversion is reviewed per
 site — this population is exactly where unrooted `Item` locals across
 allocating calls were found (107/244 scripts diverging under forced GC).
 
 | Today | Becomes | Notes |
 |---|---|---|
-| file-local `extern heap_register_gc_root(_range)` (js_net.cpp:34, js_dns.cpp:28, js_os.cpp:21, js_tls.cpp:33, js_child_process.cpp:54, js_fs.cpp:1989 in-function) | `host->gc->register_root` per slot, or rid-table ownership when the value's lifetime is the resource's | delete the extern; range registration of raw arrays (js_net.cpp:120) is replaced by rid entries + per-slot roots |
-| `RootFrame`/`Rooted` stack scopes (js_fs.cpp:2529, js_http.cpp:5955, js_child_process.cpp:3731) | `gc->root_frame_begin` / `root_frame_take_slot` / `root_frame_end` (flavor per N2.9) | slot counts audited against the live values, not copied |
-| `js_heap_epoch`-keyed namespace caches (js_runtime.cpp:39204 pattern) | descriptor `runtime_reset` (drop caches) + `heap_cleanup` (per-heap teardown) | JN11; registry already drives these hooks |
+| file-local `extern heap_register_gc_root(_range)` (js_net.cpp:34, js_dns.cpp:28, js_os.cpp:21, js_tls.cpp:33, js_child_process.cpp:54, js_fs.cpp:1989 in-function) | `host->node->roots->persistent_root_register(session, slot)` or rid-table ownership when the value's lifetime is the resource's | delete the extern; range registration of raw arrays (js_net.cpp:120) is replaced by rid entries + per-slot roots; unregister during detach |
+| `RootFrame`/`Rooted` stack scopes (js_fs.cpp:2529, js_http.cpp:5955, js_child_process.cpp:3731) | opaque `roots->root_frame_begin` / `root_frame_take_slot` / `root_frame_end` | slot counts audited against the live values; never use `LambdaRootFrame` |
+| `js_heap_epoch`-keyed namespace caches (js_runtime.cpp:39204 pattern) | session-keyed cache created at `runtime_attach`, cleared/reset for that session, unrooted at `runtime_detach` | no heap/epoch identity leaks into a module |
 | direct `Context`/heap field access (js_net.cpp:4591) | eliminate; needed values arrive via host APIs | checker-banned |
-| `heap_calloc`/`heap_create_name`/`s2it` inline uses | allowed transitionally via the counted allowlist; burn down toward value/script/data tables | full elimination is N7.4's allowlist closure, not a per-stage blocker |
+| `heap_calloc`/`heap_create_name`/`s2it` inline uses | additive value/script/data table calls named by the N0 ledger | elimination is required before the file counts as moved into a module; no dynamic checkpoint may import them |
 
 Review rule per converted function: every `Item` local that lives across any
 allocating or re-entrant call is in a root slot; every completion callback
-re-roots what it holds before building Items. Gate: the §17.3 forced-GC run
+re-roots what it holds before building Items. Gate: the §18.3 forced-GC run
 on the module's slice, plus goldens byte-identical.
 
-## 16. Architecture checker spec (`check_node_module_architecture.py`)
+## 17. Architecture checker spec (`check_node_module_architecture.py`)
 
 Model: the hosted-Python checker (path-anchored source rules; binary `nm`
 mode; self-test with synthetic violations; "checks land with their owning
@@ -796,21 +1266,27 @@ stage" philosophy — see its header comment).
    `js_runtime_state.hpp`, `Context` layout access; `heap_register_gc_root*`
    externs; engine `RootFrame`/`Rooted` types; `js_heap_epoch`;
    `dlopen`/`dlsym`; direct POSIX socket/spawn calls in files whose ops are
-   Tier-2-owned (per-module rule rows); cross-module symbol imports.
+   Tier-2-owned (per-module rule rows); cross-module symbol imports; and every
+   direct host symbol not classified in the N0 ledger. Namespace builders
+   cannot appear in `JubeGlobalDef` unless the global is explicitly intended.
 3. **Allowed:** `jube.h`; libc/platform calls in `moves-with-file` classes
    (tty ioctl, sync fs syscalls, mbedTLS in tls/crypto, zlib in node_zlib);
-   module-local symbols; a **counted transitional allowlist** seeded from the
-   N0.3 inventory, shrinking monotonically — a new entry fails review.
-4. **Binary mode:** dynamic import table ⊆ allowlisted host exports (the
-   Jube surface) + platform libs; runs with `--require-module-binary` from
-   the first dynamic flip (N4) and is mandatory in CI at N7.4.
+   module-local symbols; and a counted platform-library allowlist seeded from
+   the N0.3 inventory. Engine-symbol exceptions are not transitional module
+   allowances: an unconverted file remains outside the module directory until
+   its rows are burned down.
+4. **Binary mode:** dynamic import table ⊆ the module entry point/runtime
+   loader allowance + approved platform libraries. Calls into the host occur
+   through stored Jube table pointers, not undefined engine imports. Run
+   `--require-module-binary` from the first dynamic flip (N4); it is mandatory
+   in CI at N7.4.
 5. **Self-test:** injects a `uv_tcp_init` call, a `js_runtime_state.hpp`
    include, a `heap_register_gc_root` extern, and a fresh allowlist entry
-   into scratch copies and must see all four rejected.
+   into scratch copies under `./temp/` and must see all four rejected.
 
-## 17. Test and verification matrix
+## 18. Test and verification matrix
 
-### 17.1 Required on every stage
+### 18.1 Required on every stage
 
 ```sh
 make build
@@ -821,18 +1297,29 @@ make check-node-module-architecture
 git diff --check
 ```
 
-### 17.2 Per converted module (N3 onward)
+### 18.2 Per converted module (N2 onward)
 
-- Its node-baseline slice + in-tree corpus slice in **static** mode, then
-  **dynamic** mode (isolated bundle copy via `JUBE_MODULE_PATH`,
-  `Makefile:822` pattern), diffed against each other and the pre-move run.
+- Its node-baseline slice + in-tree corpus slice in a disposable
+  **static-checkpoint host**, then a production-shaped **dynamic host** whose
+  target excludes the module sources (isolated bundle copy via
+  `JUBE_MODULE_PATH`, `Makefile:822` pattern), diffed against each other and
+  the pre-move run. A path override alone is never treated as switching off a
+  statically linked copy.
 - Absent-module negatives (missing dylib, tampered library, wrong ABI/build
   id, missing dependency → rollback observed) through the parameterized
   loader-negative matrix.
 - Descriptor negatives for any new table the module consumes (undersized,
   version-mismatch — clean refusal before `init`).
+- Runtime lifecycle negatives: attach only after global/process creation;
+  cross-session root/rid rejection; reset/detach idempotence;
+  completion-after-detach suppression; no roots/rids/requests surviving heap
+  cleanup.
+- Global-surface snapshots (`Reflect.ownKeys(globalThis)` plus property
+  descriptors): compatibility equals the pre-move snapshot; reduced/minimal
+  differ only by their documented explicit-global rows; namespace-only
+  providers such as `path` never appear.
 
-### 17.3 Forced-GC gate
+### 18.3 Forced-GC gate
 
 Per converted file batch, before its dynamic flip:
 
@@ -847,28 +1334,31 @@ from the module's baseline slice). New make target `node-gc-gate` wraps this
 (`test-gc-rooting-python` at `Makefile:1096` is the template; corpus-sweep
 precedent `test-mir-gc-stress` `:1091`).
 
-### 17.4 MIR budgets
+### 18.4 MIR budgets
 
 `test/mir` ratchet green at every stage; any diff in emission for existing
 scripts is a defect of the rewiring (the resolution changes are runtime-side
 by construction — the lowering intercepts still emit identical calls).
 
-### 17.5 Sanitizers / stress
+### 18.5 Sanitizers / stress
 
 Reuse the project's sanitizer configuration for: rid-table
 lifetime/generation reuse, completion-after-close, work-pool
-submit/cancel races, repeated `runtime_reset`/`heap_cleanup` cycles,
+submit/cancel races, repeated attach/reset-session/detach/heap-cleanup cycles,
 shutdown with active rids, module init failure rollback. No leak,
 use-after-free, stale rid acceptance, or unbalanced root frame.
 
-## 18. Release performance protocol
+## 19. Release performance protocol
 
 Method verbatim from the Python plan §20.2 (release builds, ≥7 reps,
 medians + dispersion, alternate before/after, archive raw samples in
 `test/benchmark/hosted_node/`). Protected measurements:
 
-- require-latency + namespace-build microbench (N0.2) — the registry path
-  must beat or match the memcmp chain;
+- cached require-latency + namespace-build microbench (N0.2) — steady-state
+  cached resolution must not regress significantly;
+- cold catalog scan, integrity verification, dependency activation and
+  `dlopen` reported separately against an explicit activation budget; cold
+  dynamic activation is not required to equal an in-binary memcmp dispatch;
 - node-baseline wall time;
 - Lambda and non-Node JS startup (minimal profile) — must show zero node
   cost when absent;
@@ -877,11 +1367,11 @@ medians + dispersion, alternate before/after, archive raw samples in
 - N6a http and N5a fs throughput spot-checks vs N0 (the copy-on-submit
   decision input).
 
-Acceptance: no statistically significant regression on any protected
-measurement; a regression stops the stage pending root cause (never absorbed
-as "migration overhead").
+Acceptance: no statistically significant regression on steady-state protected
+measurements; cold activation stays within its recorded budget. A regression
+stops the stage pending root cause (never absorbed as "migration overhead").
 
-## 19. Review checkpoints requiring explicit attention
+## 20. Review checkpoints requiring explicit attention
 
 Implementation pauses for review if any of these becomes necessary:
 
@@ -896,10 +1386,14 @@ Implementation pauses for review if any of these becomes necessary:
    tables (would imply a new GC API — separate design);
 8. baseline growth work colliding with a module move (stream risk) —
    resequence rather than merge;
-9. the WPT harness decision being pre-empted by module code (N6c/N6d wait);
+9. the WPT harness decision being pre-empted by module code (N8 waits);
 10. any manifest/ABI field changing meaning rather than appending (JA11).
+11. any attempt to use a manifest dependency as though it were a callable
+    interface rather than activation ordering;
+12. any namespace becoming a global without an explicit `JubeGlobalDef`;
+13. any module `init` allocating or touching a JS runtime object.
 
-## 20. Risk register
+## 21. Risk register
 
 | # | Risk (design §13 ↔ here) | Stage | Mitigation/gate |
 |---|---|---|---|
@@ -909,35 +1403,42 @@ Implementation pauses for review if any of these becomes necessary:
 | 4 | console degradation without node-core | N3.4 | absent-default formatter written + tested in N3, not later |
 | 5 | npm resolver placement | post-N5 | explicitly deferred; revisit note in N7.3 docs |
 | 6 | `node:vm` stays host | — | documented exception (JN6); no work here |
-| 7 | Windows loader parity | N4+ | keep export surface = Jube tables only (JN8 helps); Windows CI is out of scope but the export audit (§16.4) keeps the door open |
+| 7 | Windows loader parity | N4+ | keep export surface = Jube tables only (JN8 helps); Windows CI is out of scope but the export audit (§17.4) keeps the door open |
 | 8 | request-API coverage/cost: fs.watch, IPC fd passing, fd adoption; pool starvation; copy-on-submit cost | N2.1/N5/N6a | edge inventory before v1 freeze; pool sizing + hygiene rule documented; zero-copy only on N6a profile evidence |
-| 9 | worker_threads futures vs process-lifetime modules | — | note in N7.3; `runtime_reset`/`heap_cleanup` likely suffice (verify then) |
-| 10 | Python H8 laxity inherited | N2.8/N7.4 | binary-mode checker mandatory from first dynamic flip; shared burn-down with JA open item 5 |
+| 9 | worker_threads futures vs process-lifetime modules | — | note in N7.3; every future isolate needs its own session attach/reset/detach and rid/root ownership audit |
+| 10 | Python H8 laxity inherited | N2.11/N7.4 | binary-mode checker mandatory from first dynamic flip; shared burn-down with JA open item 5 |
 | 11 | zlib/mbedTLS host-link entanglement blocks "drops out of host" claims | N0.5/N4/N6 | audit first; claims scoped to audit results |
-| 12 | official-suite forced-GC runtime | N3+ | committed per-module subsets (§17.3), not full-suite sweeps |
+| 12 | official-suite forced-GC runtime | N3+ | committed per-module subsets (§18.3), not full-suite sweeps |
 | 13 | eight hand-edited build targets/manifests drift | N4.2 | one generator template for module targets + manifests (rule 13) |
+| 14 | namespace/global conflation leaks globals (`path`) or builds the wrong sub-namespace (`path/win32`) | N2/N3 | separate descriptors; equivalence-class mapping tests; global-surface snapshots |
+| 15 | process-level module init runs before a JS heap/global exists | N2/N3 | process-only init + session attach/detach contract; negative lifecycle tests |
+| 16 | async completion or persistent roots outlive their JS runtime | N2+ | owner session on every request/rid/root; cancel/unregister at detach; sanitizer stress |
+| 17 | manifest dependency is mistaken for an inter-module ABI | N0/N2+ | complete symbol ledger + host-mediated namespace resolver; binary import rejection |
+| 18 | reduced-node packaging is misrepresented as behavior preserving | N0/N7 | four named profiles; packaged compatibility node-baseline; explicit reduced negatives |
 
-## 21. Recommended landing series (review units)
+## 22. Recommended landing series (review units)
 
-1. N0 tooling: evidence dir + inventory generator + checker + self-test;
-2. N1 manifest fields + specifier index (no consumer);
-3. N1 registry-first `js_module_get_builtin` + compile-time consumers;
-4. N1 `path` module + row deletions;
-5. N2 ABI tables in `jube.h` + host impls (async/rid/binary/promise/error),
-   unit + negative tests;
-6. N2 fs pilot conversion (+ rooting guide application);
-7. N3 per-file moves (one unit per file/pair, leaves → hub → stream);
-8. N3 hook inversions + lazy globals;
-9. N3 chain/list deletion + `builtinModules` from index;
-10. N4 module-target generator + node-zlib static;
-11. N4 node-zlib dynamic + negatives;
-12–14. N5a/N5b/N5c (each: convert → parity → flip);
-15–17. N6a/N6b/N6c(1–2);
-18. N6c(3)/N6d when WPT harness lands;
-19. N7 node-core flip + packaging + verify extension;
-20. N7 docs + allowlist closure + perf closeout.
+1. N0 evidence + complete include/undefined-symbol inventory;
+2. N0 checker/self-test + governing profile clarification;
+3. N1 read-only manifest catalog and structured owner records;
+4. N1 collision/attestation rules + index-first compile-time consumers;
+5. N2 requirements, runtime session, opaque roots, and explicit global
+   descriptor ABI;
+6. N2 generic value/script API gap closure + fully converted static `path`;
+7. N2 async/rid/binary/promise/error host services + lifecycle negatives;
+8. N2 fs pilot conversion (+ rooting guide application);
+9. N3 per-file node-core moves (one unit per file/pair, leaves → hub → stream);
+10. N3 process attach, hook inversions, and explicit globals;
+11. N3 chain/list deletion + `builtinModules` from index;
+12. N4 JSON-backed module-target generator + node-zlib static;
+13. N4 production-shaped node-zlib dynamic artifact + negatives;
+14–16. N5a/N5b/N5c (each: convert → two-artifact parity → flip);
+17–19. N6a/N6b/N6c Node modules;
+20. N7 node-core flip + four-profile packaging/verification;
+21. N7 docs + import-allowlist closure + perf closeout;
+22–23. N8 web-crypto/web-streams only after their WPT harness/slices land.
 
-Each unit carries its focused tests, checker delta, and the §17.1 gates;
+Each unit carries its focused tests, checker delta, and the §18.1 gates;
 units touching shared engine paths carry release perf evidence.
 
 ## Appendix A — `module.json` template (node-zlib shown)
@@ -965,24 +1466,46 @@ units touching shared engine paths carry release perf evidence.
 Notes: `provides` lists canonical (normalized) specifiers; prefixed-only
 surfaces (`node:test`) are written prefixed. `host_build_id`/`sha256_*` are
 stamped by `utils/update_jube_manifest_integrity.py`, never hand-edited.
+`dependencies` controls activation order only. At activation the registry
+attests that the descriptor's canonical namespace-specifier union equals
+`provides`; it does not infer globals or a callable native dependency ABI.
 
-## Appendix B — name-list deletion checklist (all gone by N3.6)
+## Appendix B — bundle activation template
+
+Only modules owning formerly eager globals appear here; ordinary builtin
+providers remain lazy until `require`/`import`. Example reduced-node profile:
+
+```json
+{
+  "profile": "reduced-node",
+  "activate": ["node-core"]
+}
+```
+
+The compatibility profile adds `web-crypto` and `web-streams` after N8
+because they replace currently eager globals. Leaf Node modules need to be
+present in compatibility packaging but do not need eager activation. Minimal
+ships no `module-set.json`; full Jube extends compatibility with optional
+non-compatibility modules.
+
+## Appendix C — name-list deletion checklist (all gone by N3.6)
 
 | List | Anchor (2026-07-26) | Deleted at |
 |---|---|---|
-| `js_module_get_builtin` memcmp chain + inline externs | `js_runtime.cpp:38891` | rows per module N1–N3; body N3.6 |
-| `builtinModules` for `node:module` | `js_runtime.cpp:39237` | index-derived from N1.4; residual list gone N3.6 |
-| `js_module_is_builtin` | `js_runtime.cpp:39856` | thin index query from N1.4; list gone N3.6 |
-| batch-lowering `builtin_names[]` | `js_mir_module_batch_lowering.cpp:1931` | index-first from N1.4; list gone N3.6 |
+| `js_module_get_builtin` memcmp chain + inline externs | `js_runtime.cpp:38891` | `path` rows at N2.5; remaining rows N3; body N3.6 |
+| `builtinModules` for `node:module` | `js_runtime.cpp:39237` | index-derived + residual from N1.8; residual list gone N3.6 |
+| `js_module_is_builtin` | `js_runtime.cpp:39856` | index-first from N1.8; residual list gone N3.6 |
+| batch-lowering `builtin_names[]` | `js_mir_module_batch_lowering.cpp:1931` | index-first from N1.8; residual list gone N3.6 |
 | `node:` prefix special cases | `js_mir_entrypoints_require.cpp:1581`; `js_mir_module_batch_lowering.cpp` | N3.6 (normalization owns aliasing) |
 
-## Appendix C — relationship to prior decisions
+## Appendix D — relationship to prior decisions
 
 | Prior decision | Effect here |
 |---|---|
-| Design JN1–JN13, §11 N0–N7 | executed as written; this plan adds only sequencing detail, verified anchors, and tooling |
-| JA1/JA3 supersessions (JN14, `stream/web`) | folded as N3.2 split + N6c three-way split + N6d, with the §13.4 transitional rule |
-| JA9 gates | node modules: node-baseline; web modules: WPT slices (blocking N6c(3)/N6d only) |
-| JA16 | the banned `uv_*` checker list is its first enforcement instance; §14 op families feed its future surface |
+| Design JN1–JN13, §11 N0–N7 | implemented with the explicit lifecycle, namespace/global, registry-attestation, profile, and N8 amendments recorded in this plan and synchronized back to the design at N0 |
+| JA1/JA3 supersessions (JN14, `stream/web`) | folded as the N3.2 transitional split, N6c Node-crypto extraction, and independent WPT-gated N8 web modules |
+| JA9 gates | node modules: node-baseline; N8 web modules: mandatory WPT slices |
+| JA16 | the banned `uv_*` checker list is its first enforcement instance; §15 op families feed its future surface |
+| JN12 profile ambiguity | clarified before implementation: compatibility/standard contains all extracted replacements; reduced-node is the intentionally smaller node-core bundle |
 | CLAUDE rules 13/14/15 | one generator for targets/manifests; no C2MIR work; precise rooting only, forced-GC gated |
 | Hosted-Python plan H0–H10 | stage anatomy, checkpoint discipline, checker/self-test pattern, packaging identity checks, perf protocol reused; compiler-service stages replaced by N2 |

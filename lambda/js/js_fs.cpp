@@ -12,6 +12,7 @@
 #include "js_permission.h"
 #include "js_class.h"
 #include "js_property_attrs.h"
+#include "../jube/jube_interface.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
@@ -479,6 +480,7 @@ static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
 // Stats prototype — provides isFile(), isDirectory(), etc. methods
 // =============================================================================
 static Item stats_proto = {0};
+static bool stats_proto_rooted = false;
 
 // Stats method: checks mode bits via js_get_this().__mode
 extern "C" Item js_get_this(void);
@@ -613,6 +615,13 @@ extern "C" Item js_stats_isSocket() {
 
 static Item get_stats_proto() {
     if (stats_proto.item != 0) return stats_proto;
+    if (!stats_proto_rooted) {
+        // Stats methods are installed through allocating property writes; keep
+        // the cache slot registered before the first write so dynamic fs
+        // activation cannot leave a relocated prototype behind under GC.
+        heap_register_gc_root(&stats_proto.item);
+        stats_proto_rooted = true;
+    }
     stats_proto = js_new_object();
     js_property_set(stats_proto, make_string_item("isFile"), js_new_function((void*)js_stats_isFile, 0));
     js_property_set(stats_proto, make_string_item("isDirectory"), js_new_function((void*)js_stats_isDirectory, 0));
@@ -654,25 +663,28 @@ static bool fs_options_bigint(Item options_item);
 
 // Helper: build a Stats object from uv_stat_t
 static Item make_stats_object(const uv_stat_t* st, bool bigint) {
-    Item obj = js_new_object();
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> obj_root(roots, js_new_object());
+    // Every Stats field installation allocates keys and may compact. The
+    // result object must remain rooted until its property graph is complete.
     
     // Store mode for isFile/isDirectory/etc methods
-    js_property_set(obj, make_string_item("__mode"), (Item){.item = i2it((int64_t)st->st_mode)});
+    js_property_set(obj_root.get(), make_string_item("__mode"), (Item){.item = i2it((int64_t)st->st_mode)});
     // stats fields have an explicit Node API face: numbers by default, BigInt only when requested.
-    js_property_set(obj, make_string_item("mode"), fs_stats_uint64_value((uint64_t)st->st_mode, bigint));
-    js_property_set(obj, make_string_item("size"), fs_stats_int64_value((int64_t)st->st_size, bigint));
-    js_property_set(obj, make_string_item("uid"), fs_stats_uint64_value((uint64_t)st->st_uid, bigint));
-    js_property_set(obj, make_string_item("gid"), fs_stats_uint64_value((uint64_t)st->st_gid, bigint));
-    js_property_set(obj, make_string_item("nlink"), fs_stats_uint64_value((uint64_t)st->st_nlink, bigint));
-    js_property_set(obj, make_string_item("ino"), fs_stats_uint64_value((uint64_t)st->st_ino, bigint));
-    js_property_set(obj, make_string_item("dev"), fs_stats_uint64_value((uint64_t)st->st_dev, bigint));
-    js_property_set(obj, make_string_item("rdev"), fs_stats_uint64_value((uint64_t)st->st_rdev, bigint));
-    js_property_set(obj, make_string_item("blksize"), fs_stats_uint64_value((uint64_t)st->st_blksize, bigint));
-    js_property_set(obj, make_string_item("blocks"), fs_stats_int64_value((int64_t)st->st_blocks, bigint));
+    js_property_set(obj_root.get(), make_string_item("mode"), fs_stats_uint64_value((uint64_t)st->st_mode, bigint));
+    js_property_set(obj_root.get(), make_string_item("size"), fs_stats_int64_value((int64_t)st->st_size, bigint));
+    js_property_set(obj_root.get(), make_string_item("uid"), fs_stats_uint64_value((uint64_t)st->st_uid, bigint));
+    js_property_set(obj_root.get(), make_string_item("gid"), fs_stats_uint64_value((uint64_t)st->st_gid, bigint));
+    js_property_set(obj_root.get(), make_string_item("nlink"), fs_stats_uint64_value((uint64_t)st->st_nlink, bigint));
+    js_property_set(obj_root.get(), make_string_item("ino"), fs_stats_uint64_value((uint64_t)st->st_ino, bigint));
+    js_property_set(obj_root.get(), make_string_item("dev"), fs_stats_uint64_value((uint64_t)st->st_dev, bigint));
+    js_property_set(obj_root.get(), make_string_item("rdev"), fs_stats_uint64_value((uint64_t)st->st_rdev, bigint));
+    js_property_set(obj_root.get(), make_string_item("blksize"), fs_stats_uint64_value((uint64_t)st->st_blksize, bigint));
+    js_property_set(obj_root.get(), make_string_item("blocks"), fs_stats_int64_value((int64_t)st->st_blocks, bigint));
 
     // Time properties in milliseconds
     auto set_time = [&](const char* name, const uv_timespec_t& ts) {
-        js_property_set(obj, make_string_item(name), fs_stats_time_ms_value(ts, bigint));
+        js_property_set(obj_root.get(), make_string_item(name), fs_stats_time_ms_value(ts, bigint));
     };
     set_time("atimeMs", st->st_atim);
     set_time("mtimeMs", st->st_mtim);
@@ -683,7 +695,7 @@ static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     auto set_date = [&](const char* name, const uv_timespec_t& ts) {
         double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
         Item ms_item = push_d(ms);
-        js_property_set(obj, make_string_item(name), js_date_new_from(ms_item));
+        js_property_set(obj_root.get(), make_string_item(name), js_date_new_from(ms_item));
     };
     set_date("atime", st->st_atim);
     set_date("mtime", st->st_mtim);
@@ -691,9 +703,9 @@ static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     set_date("birthtime", st->st_birthtim);
 
     // Set __proto__ so methods resolve via prototype chain lookup
-    js_property_set(obj, make_string_item("__proto__"), get_stats_proto());
+    js_property_set(obj_root.get(), make_string_item("__proto__"), get_stats_proto());
     
-    return obj;
+    return obj_root.get();
 }
 
 // =============================================================================
@@ -907,40 +919,48 @@ static Item js_fs_readstream_close(Item callback_item) {
 }
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
-    if (!fs_validate_encoding_options(options_item)) return ItemNull;
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> path_root(roots, path_item);
+    Rooted<Item> options_root(roots, options_item);
+    Rooted<Item> stream_root(roots, ItemNull);
+    Rooted<Item> chunk_root(roots, ItemNull);
+    Rooted<Item> error_root(roots, ItemNull);
+    if (!fs_validate_encoding_options(options_root.get())) return ItemNull;
     char path_buf[1024];
-    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    const char* path = fs_path_to_cstr(path_root.get(), "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
     if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
 
-    if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
+        Item auto_close = js_property_get(options_root.get(), make_string_item("autoClose"));
         if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) {
-            js_property_set(options_item, make_string_item("autoDestroy"), (Item){.item = b2it(false)});
+            js_property_set(options_root.get(), make_string_item("autoDestroy"), (Item){.item = b2it(false)});
         }
     }
 
-    Item stream = js_readable_new(options_item);
-    if (stream.item == 0) return ItemNull;
-    js_property_set(stream, make_string_item("__readstream_path__"), path_item);
-    js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 1));
+    stream_root.set(js_readable_new(options_root.get()));
+    if (stream_root.get().item == 0) return ItemNull;
+    // The factory publishes methods and buffered content after constructing the
+    // Readable; keep it rooted because each property allocation may compact.
+    js_property_set(stream_root.get(), make_string_item("__readstream_path__"), path_root.get());
+    js_property_set(stream_root.get(), make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
+    js_property_set(stream_root.get(), make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 1));
     // keep Readable.on() intact so late 'data' listeners switch buffered
     // fs streams into flowing mode; the fs-only drain path missed data-only consumers.
-    js_property_set(stream, make_string_item("pipe"), js_new_function((void*)js_fs_readstream_pipe, 1));
+    js_property_set(stream_root.get(), make_string_item("pipe"), js_new_function((void*)js_fs_readstream_pipe, 1));
 
-    Item chunk = js_fs_read_file_buffer(path);
+    chunk_root.set(js_fs_read_file_buffer(path));
     if (js_check_exception()) {
-        Item err = js_clear_exception();
-        js_stream_destroy(stream, err);
-        return stream;
+        error_root.set(js_clear_exception());
+        js_stream_destroy(stream_root.get(), error_root.get());
+        return stream_root.get();
     }
 
     // Buffer the whole fixture now; generic Readable listeners must own the
     // later data flow so pause/resume and data-only consumers see the chunk.
-    js_readable_push(stream, chunk);
-    js_readable_push(stream, ItemNull);
-    return stream;
+    js_readable_push(stream_root.get(), chunk_root.get());
+    js_readable_push(stream_root.get(), ItemNull);
+    return stream_root.get();
 }
 
 static bool fs_item_bytes(Item item, const char** data, int* len) {
@@ -1236,85 +1256,93 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
 }
 
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
-    if (!fs_validate_encoding_options(options_item)) return ItemNull;
-    Item stream = js_new_object();
-    js_property_set(stream, make_string_item("__writestream_path__"), path_item);
-    js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
-    js_property_set(stream, make_string_item("__writestream_opened__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("__writestream_high_water_mark__"), (Item){.item = i2it(16384)});
-    js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("bytesWritten"), js_make_number(0.0));
-    js_property_set(stream, make_string_item("fd"), ItemNull);
+    RootFrame roots((Context*)context, 6);
+    Rooted<Item> path_root(roots, path_item);
+    Rooted<Item> options_root(roots, options_item);
+    Rooted<Item> stream_root(roots, ItemNull);
+    Rooted<Item> flags_root(roots, ItemNull);
+    Rooted<Item> mode_root(roots, make_js_undefined());
+    Rooted<Item> fd_root(roots, ItemNull);
+    if (!fs_validate_encoding_options(options_root.get())) return ItemNull;
+    stream_root.set(js_new_object());
+    // A write stream receives many own properties before it escapes. Keep the
+    // object rooted because property and function creation can compact the heap.
+    js_property_set(stream_root.get(), make_string_item("__writestream_path__"), path_root.get());
+    js_property_set(stream_root.get(), make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
+    js_property_set(stream_root.get(), make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
+    js_property_set(stream_root.get(), make_string_item("__writestream_opened__"), (Item){.item = b2it(false)});
+    js_property_set(stream_root.get(), make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
+    js_property_set(stream_root.get(), make_string_item("__writestream_high_water_mark__"), (Item){.item = i2it(16384)});
+    js_property_set(stream_root.get(), make_string_item("closed"), (Item){.item = b2it(false)});
+    js_property_set(stream_root.get(), make_string_item("bytesWritten"), js_make_number(0.0));
+    js_property_set(stream_root.get(), make_string_item("fd"), ItemNull);
 
-    Item flags = make_string_item("w");
-    Item mode = make_js_undefined();
-    if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        Item flags_opt = js_property_get(options_item, make_string_item("flags"));
+    flags_root.set(make_string_item("w"));
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
+        Item flags_opt = js_property_get(options_root.get(), make_string_item("flags"));
         if (get_type_id(flags_opt) == LMD_TYPE_STRING || get_type_id(flags_opt) == LMD_TYPE_INT) {
-            flags = flags_opt;
+            flags_root.set(flags_opt);
         }
-        Item mode_opt = js_property_get(options_item, make_string_item("mode"));
+        Item mode_opt = js_property_get(options_root.get(), make_string_item("mode"));
         if (!fs_is_nullish(mode_opt)) {
             uint32_t parsed_mode = 0;
             if (!fs_validate_mode(mode_opt, &parsed_mode)) return ItemNull;
-            mode = (Item){.item = i2it((int64_t)parsed_mode)};
+            mode_root.set((Item){.item = i2it((int64_t)parsed_mode)});
         }
-        Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
+        Item auto_close = js_property_get(options_root.get(), make_string_item("autoClose"));
         if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
-            js_property_set(stream, make_string_item("__writestream_auto_close__"), auto_close);
+            js_property_set(stream_root.get(), make_string_item("__writestream_auto_close__"), auto_close);
         }
-        Item hwm = js_property_get(options_item, make_string_item("highWaterMark"));
+        Item hwm = js_property_get(options_root.get(), make_string_item("highWaterMark"));
         if (!fs_is_nullish(hwm)) {
             int64_t parsed_hwm = 0;
             // JS numeric literals are float-backed Numbers; fs internals keep HWM as an integral counter.
             if (!fs_validate_int_range(hwm, "options.highWaterMark", 0, 9223372036854775807LL, &parsed_hwm)) return ItemNull;
-            js_property_set(stream, make_string_item("__writestream_high_water_mark__"),
+            js_property_set(stream_root.get(), make_string_item("__writestream_high_water_mark__"),
                             (Item){.item = i2it(parsed_hwm)});
         }
-        Item hooks = js_property_get(options_item, make_string_item("fs"));
+        Item hooks = js_property_get(options_root.get(), make_string_item("fs"));
         if (get_type_id(hooks) == LMD_TYPE_MAP) {
-            js_property_set(stream, make_string_item("__writestream_fs_hooks__"), hooks);
+            js_property_set(stream_root.get(), make_string_item("__writestream_fs_hooks__"), hooks);
         }
-        Item fd_opt = js_property_get(options_item, make_string_item("fd"));
+        Item fd_opt = js_property_get(options_root.get(), make_string_item("fd"));
         if (!fs_is_nullish(fd_opt)) {
             int parsed_fd = 0;
             if (!fs_validate_fd(fd_opt, &parsed_fd)) return ItemNull;
-            js_property_set(stream, make_string_item("fd"), (Item){.item = i2it(parsed_fd)});
+            js_property_set(stream_root.get(), make_string_item("fd"), (Item){.item = i2it(parsed_fd)});
         }
-        Item start_opt = js_property_get(options_item, make_string_item("start"));
+        Item start_opt = js_property_get(options_root.get(), make_string_item("start"));
         if (!fs_is_nullish(start_opt)) {
             int64_t parsed_start = 0;
             if (!fs_validate_int_range(start_opt, "options.start", 0, 9223372036854775807LL, &parsed_start)) return ItemNull;
-            js_property_set(stream, make_string_item("__writestream_position__"),
+            js_property_set(stream_root.get(), make_string_item("__writestream_position__"),
                             (Item){.item = i2it(parsed_start)});
         }
     }
 
-    Item fd_item = js_property_get(stream, make_string_item("fd"));
-    if (get_type_id(fd_item) != LMD_TYPE_INT) {
+    fd_root.set(js_property_get(stream_root.get(), make_string_item("fd")));
+    if (get_type_id(fd_root.get()) != LMD_TYPE_INT) {
         char path_buf[1024];
-        const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+        const char* path = fs_path_to_cstr(path_root.get(), "path", path_buf, sizeof(path_buf));
         if (!path) return ItemNull;
         if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
-        fd_item = js_fs_openSync(path_item, flags, mode);
-        if (get_type_id(fd_item) == LMD_TYPE_INT) {
-            js_property_set(stream, make_string_item("fd"), fd_item);
+        fd_root.set(js_fs_openSync(path_root.get(), flags_root.get(), mode_root.get()));
+        if (get_type_id(fd_root.get()) == LMD_TYPE_INT) {
+            js_property_set(stream_root.get(), make_string_item("fd"), fd_root.get());
         }
     }
-    js_fs_writestream_call_open_hook(stream, path_item, flags, mode);
-    if (get_type_id(js_property_get(stream, make_string_item("fd"))) == LMD_TYPE_INT) {
-        js_fs_writestream_schedule_open(stream);
+    js_fs_writestream_call_open_hook(stream_root.get(), path_root.get(), flags_root.get(), mode_root.get());
+    if (get_type_id(js_property_get(stream_root.get(), make_string_item("fd"))) == LMD_TYPE_INT) {
+        js_fs_writestream_schedule_open(stream_root.get());
     }
 
-    js_property_set(stream, make_string_item("write"),
+    js_property_set(stream_root.get(), make_string_item("write"),
                     js_new_function((void*)js_fs_writestream_write, 2));
-    js_property_set(stream, make_string_item("end"),
+    js_property_set(stream_root.get(), make_string_item("end"),
                     js_new_function((void*)js_fs_writestream_end, 1));
-    js_property_set(stream, make_string_item("on"),
+    js_property_set(stream_root.get(), make_string_item("on"),
                     js_new_function((void*)js_fs_writestream_on, 2));
-    return stream;
+    return stream_root.get();
 }
 
 // fs.writeFileSync(path, data)
@@ -1603,16 +1631,19 @@ static Item fs_statfs_number(uint64_t value, bool bigint) {
 static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
                                uint64_t blocks, uint64_t bfree, uint64_t bavail,
                                uint64_t files, uint64_t ffree, bool bigint) {
-    Item obj = js_new_object();
-    js_property_set(obj, make_string_item("type"), fs_statfs_number(type, bigint));
-    js_property_set(obj, make_string_item("bsize"), fs_statfs_number(bsize, bigint));
-    js_property_set(obj, make_string_item("frsize"), fs_statfs_number(frsize, bigint));
-    js_property_set(obj, make_string_item("blocks"), fs_statfs_number(blocks, bigint));
-    js_property_set(obj, make_string_item("bfree"), fs_statfs_number(bfree, bigint));
-    js_property_set(obj, make_string_item("bavail"), fs_statfs_number(bavail, bigint));
-    js_property_set(obj, make_string_item("files"), fs_statfs_number(files, bigint));
-    js_property_set(obj, make_string_item("ffree"), fs_statfs_number(ffree, bigint));
-    return obj;
+    RootFrame roots((Context*)context, 1);
+    // statfs fields are created one at a time; root the result across each
+    // key/value allocation so forced collection cannot publish a stale map.
+    Rooted<Item> obj_root(roots, js_new_object());
+    js_property_set(obj_root.get(), make_string_item("type"), fs_statfs_number(type, bigint));
+    js_property_set(obj_root.get(), make_string_item("bsize"), fs_statfs_number(bsize, bigint));
+    js_property_set(obj_root.get(), make_string_item("frsize"), fs_statfs_number(frsize, bigint));
+    js_property_set(obj_root.get(), make_string_item("blocks"), fs_statfs_number(blocks, bigint));
+    js_property_set(obj_root.get(), make_string_item("bfree"), fs_statfs_number(bfree, bigint));
+    js_property_set(obj_root.get(), make_string_item("bavail"), fs_statfs_number(bavail, bigint));
+    js_property_set(obj_root.get(), make_string_item("files"), fs_statfs_number(files, bigint));
+    js_property_set(obj_root.get(), make_string_item("ffree"), fs_statfs_number(ffree, bigint));
+    return obj_root.get();
 }
 
 // fs.statfsSync(path[, options])
@@ -1981,114 +2012,147 @@ typedef struct JsFsReq {
     size_t buffer_size;
     int fd;               // file descriptor
     char path[1024];      // file path (for multi-step operations)
+    void* jube_session;   // opaque owner for precise persistent roots
+    uint32_t work_request_id;
+    bool uses_jube_work;
     bool roots_registered;
+    bool detached;
+    struct JsFsReq* next_pending;
 } JsFsReq;
 
-static void fs_req_register_roots(JsFsReq* fsreq) {
-    if (!fsreq || fsreq->roots_registered) return;
-    extern void heap_register_gc_root(uint64_t* slot);
-    heap_register_gc_root(&fsreq->callback.item);
-    heap_register_gc_root(&fsreq->domain.item);
+static JsFsReq* fs_pending_read_requests = NULL;
+
+static void fs_req_add_pending(JsFsReq* fsreq) {
+    if (!fsreq) return;
+    fsreq->next_pending = fs_pending_read_requests;
+    fs_pending_read_requests = fsreq;
+}
+
+static void fs_req_remove_pending(JsFsReq* fsreq) {
+    if (!fsreq) return;
+    JsFsReq** link = &fs_pending_read_requests;
+    while (*link) {
+        if (*link == fsreq) {
+            *link = fsreq->next_pending;
+            fsreq->next_pending = NULL;
+            return;
+        }
+        link = &(*link)->next_pending;
+    }
+}
+
+static bool fs_req_register_roots(JsFsReq* fsreq) {
+    if (!fsreq || fsreq->roots_registered) return fsreq != NULL;
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (!host || !host->node || !host->node->runtime || !host->node->roots ||
+            !host->node->runtime->current_session ||
+            !host->node->roots->persistent_root_register ||
+            !host->node->roots->persistent_root_unregister) return false;
+    fsreq->jube_session = host->node->runtime->current_session();
+    if (!fsreq->jube_session || host->node->roots->persistent_root_register(
+            fsreq->jube_session, &fsreq->callback.item) != 0) {
+        fsreq->jube_session = NULL;
+        return false;
+    }
+    if (host->node->roots->persistent_root_register(fsreq->jube_session,
+            &fsreq->domain.item) != 0) {
+        host->node->roots->persistent_root_unregister(fsreq->jube_session,
+            &fsreq->callback.item);
+        fsreq->jube_session = NULL;
+        return false;
+    }
     fsreq->roots_registered = true;
+    return true;
 }
 
 static void fs_req_unregister_roots(JsFsReq* fsreq) {
     if (!fsreq || !fsreq->roots_registered) return;
-    extern void heap_unregister_gc_root(uint64_t* slot);
-    heap_unregister_gc_root(&fsreq->callback.item);
-    heap_unregister_gc_root(&fsreq->domain.item);
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (host && host->node && host->node->roots &&
+            host->node->roots->persistent_root_unregister && fsreq->jube_session) {
+        host->node->roots->persistent_root_unregister(fsreq->jube_session,
+            &fsreq->callback.item);
+        host->node->roots->persistent_root_unregister(fsreq->jube_session,
+            &fsreq->domain.item);
+    }
     fsreq->roots_registered = false;
+    fsreq->jube_session = NULL;
 }
 
 static void fs_req_free(JsFsReq* fsreq) {
     if (!fsreq) return;
+    fs_req_remove_pending(fsreq);
     fs_req_unregister_roots(fsreq);
     mem_free(fsreq);
 }
 
 static Item fs_req_call_callback(JsFsReq* fsreq, Item* args, int arg_count) {
-    if (!fsreq || get_type_id(fsreq->callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!fsreq || fsreq->detached || get_type_id(fsreq->callback) != LMD_TYPE_FUNC) {
+        return make_js_undefined();
+    }
     return js_domain_call_function(fsreq->domain, fsreq->callback, ItemNull, args, arg_count);
 }
 
-static void on_fs_read_complete(uv_fs_t* req) {
-    JsFsReq* fsreq = (JsFsReq*)req->data;
-    int result = (int)req->result;
-
-    // close the file
-    uv_fs_t close_req;
-    uv_fs_close(lambda_uv_loop(), &close_req, fsreq->fd, NULL);
-    uv_fs_req_cleanup(&close_req);
-
-    if (result < 0) {
-        if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(result, fsreq->path);
-            Item args[2] = {err, ItemNull};
-            fs_req_call_callback(fsreq, args, 2);
-        }
-    } else {
-        if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item data = make_string_item(fsreq->buffer, result);
-            Item args[2] = {ItemNull, data};
-            fs_req_call_callback(fsreq, args, 2);
-        }
-    }
-
+static void fs_req_destroy(JsFsReq* fsreq) {
+    if (!fsreq) return;
     if (fsreq->buffer) mem_free(fsreq->buffer);
-    uv_fs_req_cleanup(req);
+    fsreq->buffer = NULL;
     fs_req_free(fsreq);
 }
 
-static void on_fs_open_for_read(uv_fs_t* req) {
-    JsFsReq* fsreq = (JsFsReq*)req->data;
-    int fd = (int)req->result;
-    uv_fs_req_cleanup(req);
-
+static void fs_read_file_work(void* user) {
+    JsFsReq* fsreq = (JsFsReq*)user;
+    if (!fsreq) return;
+    uv_fs_t request;
+    int fd = uv_fs_open(NULL, &request, fsreq->path, UV_FS_O_RDONLY, 0, NULL);
+    uv_fs_req_cleanup(&request);
     if (fd < 0) {
-        if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(fd, fsreq->path);
-            Item args[2] = {err, ItemNull};
-            fs_req_call_callback(fsreq, args, 2);
-        }
-        fs_req_free(fsreq);
+        fsreq->fd = fd;
         return;
     }
-
     fsreq->fd = fd;
-
-    // stat to get file size
-    uv_fs_t stat_req;
-    int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
-    if (r < 0) {
-        uv_fs_req_cleanup(&stat_req);
-        uv_fs_t close_req;
-        uv_fs_close(lambda_uv_loop(), &close_req, fd, NULL);
-        uv_fs_req_cleanup(&close_req);
-        if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_string_item(uv_strerror(r));
-            Item args[2] = {err, ItemNull};
-            fs_req_call_callback(fsreq, args, 2);
-        }
-        fs_req_free(fsreq);
+    int status = uv_fs_fstat(NULL, &request, fd, NULL);
+    if (status < 0) {
+        uv_fs_req_cleanup(&request);
+        uv_fs_close(NULL, &request, fd, NULL);
+        uv_fs_req_cleanup(&request);
+        fsreq->fd = status;
         return;
     }
-
-    size_t file_size = (size_t)stat_req.statbuf.st_size;
-    uv_fs_req_cleanup(&stat_req);
-
-    fsreq->buffer = (char*)mem_alloc(file_size + 1, MEM_CAT_JS_RUNTIME);
-    fsreq->buffer_size = file_size;
+    size_t size = (size_t)request.statbuf.st_size;
+    uv_fs_req_cleanup(&request);
+    fsreq->buffer = (char*)mem_alloc(size > 0 ? size : 1, MEM_CAT_JS_RUNTIME);
+    fsreq->buffer_size = size;
     if (!fsreq->buffer) {
-        uv_fs_t close_req;
-        uv_fs_close(lambda_uv_loop(), &close_req, fd, NULL);
-        uv_fs_req_cleanup(&close_req);
-        fs_req_free(fsreq);
+        uv_fs_close(NULL, &request, fd, NULL);
+        uv_fs_req_cleanup(&request);
+        fsreq->fd = UV_ENOMEM;
         return;
     }
+    uv_buf_t buffer = uv_buf_init(fsreq->buffer, (unsigned int)size);
+    status = (int)uv_fs_read(NULL, &request, fd, &buffer, 1, 0, NULL);
+    uv_fs_req_cleanup(&request);
+    uv_fs_close(NULL, &request, fd, NULL);
+    uv_fs_req_cleanup(&request);
+    fsreq->fd = status;
+}
 
-    uv_buf_t buf = uv_buf_init(fsreq->buffer, (unsigned int)file_size);
-    fsreq->req.data = fsreq;
-    uv_fs_read(lambda_uv_loop(), &fsreq->req, fd, &buf, 1, 0, on_fs_read_complete);
+static void fs_read_file_complete(void* user, int status) {
+    JsFsReq* fsreq = (JsFsReq*)user;
+    if (!fsreq) return;
+    if (status < 0 || fsreq->fd < 0) {
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item args[2] = {err, ItemNull};
+        fs_req_call_callback(fsreq, args, 2);
+        return;
+    }
+    Item data = make_string_item(fsreq->buffer, fsreq->fd);
+    Item args[2] = {ItemNull, data};
+    fs_req_call_callback(fsreq, args, 2);
+}
+
+static void fs_read_file_destroy(void* user) {
+    fs_req_destroy((JsFsReq*)user);
 }
 
 // fs.readFile(path[, options], callback)
@@ -2113,57 +2177,77 @@ extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback
     fsreq->callback = callback;
     fsreq->domain = js_domain_get_current();
     snprintf(fsreq->path, sizeof(fsreq->path), "%s", path);
-    fsreq->req.data = fsreq;
-    fs_req_register_roots(fsreq);
-
-    uv_fs_open(lambda_uv_loop(), &fsreq->req, path, UV_FS_O_RDONLY, 0, on_fs_open_for_read);
+    if (!fs_req_register_roots(fsreq)) {
+        // Async callbacks must have precise roots before libuv can re-enter JS.
+        fs_req_free(fsreq);
+        return ItemNull;
+    }
+    fs_req_add_pending(fsreq);
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (!host || !host->node || !host->node->async_ops ||
+            !host->node->async_ops->work_submit ||
+            host->node->async_ops->work_submit(fsreq->jube_session, fs_read_file_work,
+                fs_read_file_complete, fs_read_file_destroy, fsreq,
+                &fsreq->work_request_id) != 0) {
+        fs_req_destroy(fsreq);
+        return ItemNull;
+    }
+    fsreq->uses_jube_work = true;
     return make_js_undefined();
 }
 
-static void on_fs_write_complete(uv_fs_t* req) {
-    JsFsReq* fsreq = (JsFsReq*)req->data;
-
-    // close the file
-    uv_fs_t close_req;
-    uv_fs_close(lambda_uv_loop(), &close_req, fsreq->fd, NULL);
-    uv_fs_req_cleanup(&close_req);
-
-    if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-        if (req->result < 0) {
-            Item err = make_string_item(uv_strerror((int)req->result));
-            Item args[1] = {err};
-            js_call_function(fsreq->callback, ItemNull, args, 1);
+extern "C" void js_fs_runtime_detach(void) {
+    for (JsFsReq* fsreq = fs_pending_read_requests; fsreq; fsreq = fsreq->next_pending) {
+        // A libuv callback may still arrive after teardown, but it must not
+        // retain roots into a destroyed heap or invoke user JS in that runtime.
+        fsreq->detached = true;
+        void* session = fsreq->jube_session;
+        fs_req_unregister_roots(fsreq);
+        const JubeHostAPI* host = jube_internal_host_api();
+        if (fsreq->uses_jube_work && host && host->node && host->node->async_ops &&
+                host->node->async_ops->work_cancel) {
+            (void)host->node->async_ops->work_cancel(session,
+                fsreq->work_request_id);
         } else {
-            Item args[1] = {ItemNull};
-            js_call_function(fsreq->callback, ItemNull, args, 1);
+            (void)uv_cancel((uv_req_t*)&fsreq->req);
         }
     }
-
-    if (fsreq->buffer) mem_free(fsreq->buffer);
-    uv_fs_req_cleanup(req);
-    mem_free(fsreq);
 }
 
-static void on_fs_open_for_write(uv_fs_t* req) {
-    JsFsReq* fsreq = (JsFsReq*)req->data;
-    int fd = (int)req->result;
-    uv_fs_req_cleanup(req);
-
+static void fs_write_file_work(void* user) {
+    JsFsReq* fsreq = (JsFsReq*)user;
+    if (!fsreq) return;
+    uv_fs_t request;
+    int fd = uv_fs_open(NULL, &request, fsreq->path,
+        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC, 0644, NULL);
+    uv_fs_req_cleanup(&request);
     if (fd < 0) {
-        if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_string_item(uv_strerror(fd));
-            Item args[1] = {err};
-            js_call_function(fsreq->callback, ItemNull, args, 1);
-        }
-        if (fsreq->buffer) mem_free(fsreq->buffer);
-        mem_free(fsreq);
+        fsreq->fd = fd;
         return;
     }
+    uv_buf_t buffer = uv_buf_init(fsreq->buffer, (unsigned int)fsreq->buffer_size);
+    int status = (int)uv_fs_write(NULL, &request, fd, &buffer, 1, 0, NULL);
+    uv_fs_req_cleanup(&request);
+    uv_fs_close(NULL, &request, fd, NULL);
+    uv_fs_req_cleanup(&request);
+    fsreq->fd = status;
+}
 
-    fsreq->fd = fd;
-    uv_buf_t buf = uv_buf_init(fsreq->buffer, (unsigned int)fsreq->buffer_size);
-    fsreq->req.data = fsreq;
-    uv_fs_write(lambda_uv_loop(), &fsreq->req, fd, &buf, 1, 0, on_fs_write_complete);
+static void fs_write_file_complete(void* user, int status) {
+    JsFsReq* fsreq = (JsFsReq*)user;
+    if (!fsreq) return;
+    if (status < 0 || fsreq->fd < 0) {
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item args[1] = {err};
+        fs_req_call_callback(fsreq, args, 1);
+        return;
+    }
+    Item args[1] = {ItemNull};
+    fs_req_call_callback(fsreq, args, 1);
+}
+
+static void fs_write_file_destroy(void* user) {
+    fs_req_destroy((JsFsReq*)user);
 }
 
 // fs.writeFile(path, data[, options], callback)
@@ -2195,10 +2279,23 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item options_or_
     memcpy(fsreq->buffer, str->chars, str->len);
     fsreq->buffer_size = str->len;
     fsreq->callback = callback;
-    fsreq->req.data = fsreq;
-
-    uv_fs_open(lambda_uv_loop(), &fsreq->req, path,
-        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC, 0644, on_fs_open_for_write);
+    fsreq->domain = js_domain_get_current();
+    snprintf(fsreq->path, sizeof(fsreq->path), "%s", path);
+    if (!fs_req_register_roots(fsreq)) {
+        fs_req_destroy(fsreq);
+        return ItemNull;
+    }
+    fs_req_add_pending(fsreq);
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (!host || !host->node || !host->node->async_ops ||
+            !host->node->async_ops->work_submit ||
+            host->node->async_ops->work_submit(fsreq->jube_session, fs_write_file_work,
+                fs_write_file_complete, fs_write_file_destroy, fsreq,
+                &fsreq->work_request_id) != 0) {
+        fs_req_destroy(fsreq);
+        return ItemNull;
+    }
+    fsreq->uses_jube_work = true;
     return make_js_undefined();
 }
 
