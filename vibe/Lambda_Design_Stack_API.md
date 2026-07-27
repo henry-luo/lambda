@@ -1996,7 +1996,7 @@ weakening the rooting invariants.
 form 2026-07-25 (see the §17.1 outcome note — the transitional `js_args_*`
 reimplementation described in the original decision was measured and removed).
 The execution record and verification gates are in
-`Lambda_Impl_Merge_Stack.md`.
+`Lambda_Impl_Stack_Marge (done).md`.
 
 Three merges are decided, one per kind of duplication:
 
@@ -2084,7 +2084,7 @@ frame-relative slots and clear them on normal completion, and exceptional
 routing clears all active scopes. Suspending (generator/async) argument lists
 keep the heap-env spill path. Measured 10–15% faster than Result12 on
 `fib`/`fibfp`/`cpstak`; `lambda_side_root_alloc_n` survives as the native-side
-primitive under `LambdaRootFrame`. Full record: `Lambda_Impl_Merge_Stack.md`
+primitive under `LambdaRootFrame`. Full record: `Lambda_Impl_Stack_Marge (done).md`
 Merge A Phase 4.
 
 **Boundary of Merge A:** it covers only the transient call-argument stack —
