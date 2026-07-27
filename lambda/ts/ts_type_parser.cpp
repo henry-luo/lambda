@@ -44,6 +44,7 @@ struct TsTypeParser {
     String* make_string(const char* src, int slen) {
         String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + slen + 1);
         s->len = slen;
+        s->flags = 0;
         s->is_ascii = 1;
         memcpy(s->chars, src, slen);
         s->chars[slen] = '\0';

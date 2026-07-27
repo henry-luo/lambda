@@ -54,7 +54,7 @@ Caveat: Lizard's rate counts tokens inside any detected duplicate window, so dat
 | transpile-mir.cpp | 987 | emit-call families (§6.4 MirEmitter remainder) |
 | js/js_globals.cpp | 876 | builtin registration blocks |
 | module/radiant/radiant_dom_bridge.cpp | 381 | DOM strcmp chains (→ `vibe/Lambda_Jube_DOM3.md` tables) |
-| py/transpile_py_mir.cpp + rb/transpile_rb_mir.cpp | 292 + 284 | guest transpilers cloning the MIR emitter (→ Unified AST plan) |
+| module/py/transpile_py_mir.cpp + module/rb/transpile_rb_mir.cpp | 292 + 284 | guest transpilers cloning the MIR emitter (→ Unified AST plan) |
 
 Reading: **the duplication is concentrated, not smeared** — a dozen files account for the bulk of both trees' duplicate mass, and every one of them already has a designed remedy (radiant phases 0–7; the §6.4/§6.6 ledger items; the Jube DOM3 property tables; the Unified-AST MirEmitter unification). The problem is not "where", it's *keeping it from regrowing* — which is what the rest of this doc is about.
 

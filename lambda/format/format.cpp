@@ -100,6 +100,7 @@ String* format_mark(Pool* pool, Item root_item) {
     String* result = (String*)pool_alloc(pool, sizeof(String) + sb->length + 1);
     if (result) {
         result->len = (uint32_t)sb->length;
+        result->flags = 0;
         result->is_ascii = str_is_ascii(sb->str, sb->length) ? 1 : 0;
         memcpy(result->chars, sb->str, sb->length + 1);
     }

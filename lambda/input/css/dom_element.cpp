@@ -114,6 +114,7 @@ static String* dom_create_mutation_string(MarkBuilder* builder, const char* cont
     String* s = (String*)arena_alloc(builder->arena(), sizeof(String) + 1);
     if (!s) return nullptr;
     s->len = 0;
+    s->flags = 0;
     s->is_ascii = 1;
     s->chars[0] = '\0';
     return s;
@@ -2449,6 +2450,7 @@ String* dom_document_create_string(DomDocument* doc, const char* text, size_t le
     String* string = (String*)pool_alloc(doc->document_pool, sizeof(String) + len + 1);
     if (!string) return nullptr;
     string->len = (uint32_t)len;
+    string->flags = 0;
     string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
     if (len > 0) memcpy(string->chars, text, len);
     string->chars[len] = '\0';
@@ -2486,6 +2488,7 @@ DomText* DomText::create_detached_copy(DomDocument* doc,
     DomText* text_node = create_in(doc->node_arena, len);
     if (!text_node) return nullptr;
     String* string = dom_text_to_string(text_node);
+    string->flags = 0;
     string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
     if (len) memcpy(string->chars, text, len);
     string->chars[len] = '\0';

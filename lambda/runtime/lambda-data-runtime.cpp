@@ -2086,6 +2086,30 @@ Map* map_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
+// A non-null region capability is passed only by a direct call site whose
+// producer summary proves every map field is null or another region map.
+Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
+        void* type_list_ptr) {
+    if (!region) return map_with_tl(type_index, type_list_ptr);
+    ArrayList* type_list = (ArrayList*)type_list_ptr;
+    if (!type_list || type_index < 0 || type_index >= type_list->length) return NULL;
+    TypeMap* map_type = (TypeMap*)type_list->data[type_index];
+    if (!map_type) return NULL;
+    int64_t byte_size = map_type->byte_size;
+    if (byte_size < 0) return NULL;
+    size_t total_size = sizeof(Map) + (size_t)byte_size;
+    Map* m = (Map*)lambda_region_calloc(region, total_size, LMD_TYPE_MAP);
+    if (!m) return NULL;
+    m->type_id = LMD_TYPE_MAP;
+    m->is_heap = 1;
+    m->type = map_type;
+    if (byte_size > 0) {
+        m->data = (char*)m + sizeof(Map);
+        m->data_cap = (int)byte_size;
+    }
+    return m;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
@@ -2367,6 +2391,7 @@ Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     DomText* dt = DomText::create_in(arena, src->len);
     if (!dt) return ItemNull;
     String* dst = dom_text_to_string(dt);
+    dst->flags = 0;
     dst->is_ascii = src->is_ascii;
     memcpy(dst->chars, src->chars, src->len + 1);
     return {.item = s2it(dst)};
@@ -2379,6 +2404,7 @@ Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
     DomText* dt = DomText::create_in(arena, new_len);
     if (!dt) return ItemNull;
     String* merged = dom_text_to_string(dt);
+    merged->flags = 0;
     merged->is_ascii = prev->is_ascii && next->is_ascii;
     memcpy(merged->chars, prev->chars, prev->len);
     memcpy(merged->chars + prev->len, next->chars, next->len);

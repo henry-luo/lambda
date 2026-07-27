@@ -80,7 +80,7 @@
 | 18 | `lambda/runner.cpp` | Import graph, paths, Script structs |
 | 18 | `lambda/js/transpile_js_mir.cpp` | Transpiler structs, import graph |
 | 17 | `lambda/input/markup/inline/inline_format_specific.cpp` | Temp string buffers |
-| 14 | `lambda/py/py_builtins.cpp` | String operation buffers |
+| 14 | `lambda/module/py/py_builtins.cpp` | String operation buffers |
 | 14 | `lambda/js/js_globals.cpp` | String operation buffers |
 | 13 | `lambda/bash/bash_runtime.cpp` | Command/env buffers |
 | 12 | `lambda/transpile-mir.cpp` | MIR transpiler allocations |

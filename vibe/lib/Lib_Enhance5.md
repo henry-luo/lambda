@@ -86,7 +86,7 @@ High-density areas:
 | `lambda/input/css/**` | `css_font_face`, tokenizer, selector matcher, `dom_element` | Repeated whitespace/comment/delimiter scans; multiple bounded and unbounded styles |
 | `radiant/**` | `css_animation`, `render_svg_inline`, `render_clip`, `cmd_layout`, `surface` | CSS/SVG attribute mini-parsers repeat skip/scan code |
 | `lambda/serve/**` | router, schema validator, OpenAPI, cookies, ASGI bridge | Small JSON/header/router scanners with duplicated quote and delimiter walking |
-| `lambda/npm/semver.cpp`, `lib/url_parser.c`, `lib/log.c` | numeric and token scans | Smaller but central primitives still apply |
+| `lambda/module/npm/semver.cpp`, `lib/url_parser.c`, `lib/log.c` | numeric and token scans | Smaller but central primitives still apply |
 
 Excluded from sweep:
 
@@ -319,7 +319,7 @@ Target smaller but recurring patterns:
 - `lambda/serve/router.cpp`
 - `lambda/serve/openapi.cpp`
 - `lambda/serve/asgi_bridge.cpp`
-- `lambda/npm/semver.cpp`
+- `lambda/module/npm/semver.cpp`
 - `lib/url_parser.c`
 - `lib/log.c`
 

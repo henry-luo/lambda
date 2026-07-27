@@ -644,7 +644,7 @@ Python is the first additional language added beyond Lambda and JS, validating t
 
 #### Test coverage
 
-- `test/lambda/py_helper.py` — Python module exporting `add(a,b)`, `multiply(a,b)`, `square(x)`
+- `test/lambda/module/py_helper.py` — Python module exporting `add(a,b)`, `multiply(a,b)`, `square(x)`
 - `test/lambda/import_py.ls` — Lambda script importing Python module: `import .py_helper`
 - Expected output verified: `add(3,4)=7`, `multiply(5,6)=30`, `square(8)=64`
 - All 684/684 tests pass (241/241 Lambda Runtime tests)

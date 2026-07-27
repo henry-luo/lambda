@@ -5155,6 +5155,7 @@ extern "C" uint64_t js_get_heap_epoch();
 static inline Item js_uri_make_four_byte_string(char* decoded) {
     String* result = (String*)heap_alloc(sizeof(String) + 5, LMD_TYPE_STRING);
     result->len = 4;
+    result->flags = 0;
     result->is_ascii = false;
     memcpy(result->chars, decoded, 4);
     result->chars[4] = '\0';
@@ -5196,6 +5197,7 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     }
     String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->flags = 0;
     result->is_ascii = is_ascii;
     memcpy(result->chars, chars, len);
     result->chars[len] = '\0';
@@ -10791,6 +10793,7 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     int64_t left_len = left->len;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
     result->len = left_len + 3;
+    result->flags = 0;
     result->is_ascii = left->is_ascii;
     memcpy(result->chars, left->chars, left_len);
     result->chars[left_len] = '%';

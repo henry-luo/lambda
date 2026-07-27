@@ -673,7 +673,7 @@ lambda/
 
 Add to `source_dirs`:
 ```json
-"lambda/py"
+"lambda/module/py"
 ```
 
 Add to `includes`:

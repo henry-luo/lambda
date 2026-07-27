@@ -515,6 +515,7 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
 static String* make_heap_string(const char* src, size_t len) {
     String* s = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     s->len = (uint32_t)len;
+    s->flags = 0;
     s->is_ascii = 1;
     for (size_t i = 0; i < len; i++) {
         if ((unsigned char)src[i] >= 128) { s->is_ascii = 0; break; }
@@ -720,6 +721,7 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
     // after the safepoint instead of retaining a raw nursery interior pointer.
     const char* src = rooted_source.get().get_chars() + offset;
     value->len = (uint32_t)len;
+    value->flags = 0;
     value->is_ascii = 1;
     for (size_t i = 0; i < len; i++) {
         if ((unsigned char)src[i] >= 128) { value->is_ascii = 0; break; }

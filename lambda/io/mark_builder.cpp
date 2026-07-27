@@ -144,6 +144,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     // Empty strings are values in Phase 3, so content producers must not collapse them to null.
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
     s->len = len;
+    s->flags = 0;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';
@@ -180,6 +181,7 @@ String* MarkBuilder::createDomTextString(const char* str, size_t len) {
     DomText* dt = DomText::create_in(arena_, len);
     if (!dt) return nullptr;
     String* s = dom_text_to_string(dt);
+    s->flags = 0;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';

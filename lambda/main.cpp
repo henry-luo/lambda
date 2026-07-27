@@ -14,8 +14,8 @@
 #include "../lib/arena.h"   // For arena allocator
 #include "../lib/file.h"    // For file_exists, file_delete, file_getcwd
 #include "../lib/shell.h"   // For shell_getenv
-#include "npm/npm_installer.h"  // For npm install/uninstall
-#include "npm/npm_package_json.h"  // For npm_package_json_parse
+#include "module/npm/npm_installer.h"  // For npm install/uninstall
+#include "module/npm/npm_package_json.h"  // For npm_package_json_parse
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
@@ -62,7 +62,7 @@
 #endif
 #include "ts/ts_transpiler.hpp"      // TypeScript transpiler
 #ifdef LAMBDA_RUBY
-#include "rb/rb_transpiler.hpp"      // Ruby transpiler
+#include "module/rb/rb_transpiler.hpp"      // Ruby transpiler
 #endif
 
 // Network module includes

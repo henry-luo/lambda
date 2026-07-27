@@ -3,7 +3,7 @@
 // Two shapes:
 //   1. insertion_sort - good for small N (< ~32) and nearly-sorted arrays.
 //      Replaces the hand-written insertion / bubble sorts scattered in
-//      lambda/py/py_builtins.cpp and lambda/lambda-vector.cpp.
+//      lambda/module/py/py_builtins.cpp and lambda/lambda-vector.cpp.
 //   2. SORT_BY_KEY - generic macro for sorting an array by a derived integer
 //      or float key without writing a comparator.
 //

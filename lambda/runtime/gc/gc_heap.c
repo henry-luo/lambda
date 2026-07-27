@@ -618,7 +618,7 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
-static inline int gc_maybe_force_collect(gc_heap_t* gc, const char* site) {
+int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     if (!gc || gc->collecting || gc->defer_collection_depth > 0 || !gc->collect_callback ||
             (gc->force_collect_interval == 0 &&
              gc->force_random_one_in == 0)) {
@@ -658,7 +658,7 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_maybe_force_collect(gc, "gc_heap_alloc");
+    gc_heap_maybe_force_collect(gc, "gc_heap_alloc");
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
@@ -711,7 +711,7 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_maybe_force_collect(gc, "gc_heap_calloc_class");
+    gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class");
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
@@ -731,7 +731,7 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_bump_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_maybe_force_collect(gc, "gc_heap_bump_alloc");
+    gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc");
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
     if (free_hdr) {
@@ -836,7 +836,7 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
 
     // Forced stress and threshold collection share this legal pre-allocation
     // safepoint; never invoke the callback twice for one allocation.
-    int forced = gc_maybe_force_collect(gc, "gc_data_alloc");
+    int forced = gc_heap_maybe_force_collect(gc, "gc_data_alloc");
     if (!forced && !gc->collecting && gc->defer_collection_depth == 0 && gc->collect_callback) {
         size_t used = gc_data_zone_used(gc->data_zone);
         if (used >= gc->gc_threshold) {

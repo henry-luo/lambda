@@ -13,6 +13,7 @@ static Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     DomText* text = DomText::create_in(arena, src->len);
     if (!text) return ItemNull;
     String* dst = dom_text_to_string(text);
+    dst->flags = 0;
     dst->is_ascii = src->is_ascii;
     memcpy(dst->chars, src->chars, src->len + 1);
     return {.item = s2it(dst)};
@@ -23,6 +24,7 @@ static Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) 
     DomText* text = DomText::create_in(arena, new_len);
     if (!text) return ItemNull;
     String* merged = dom_text_to_string(text);
+    merged->flags = 0;
     merged->is_ascii = prev->is_ascii && next->is_ascii;
     memcpy(merged->chars, prev->chars, prev->len);
     memcpy(merged->chars + prev->len, next->chars, next->len);
@@ -102,6 +104,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
             memcpy(merged->chars + previous->len, next->chars, next->len);
             merged->chars[new_len] = '\0';
             merged->len = new_len;
+            merged->flags = 0;
             merged->is_ascii = previous->is_ascii && next->is_ascii;
             list->items[list->length - 1] = {.item = s2it(merged)};
             return;

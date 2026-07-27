@@ -72,6 +72,12 @@ struct VarEntry {
     bool cow_marked;
     bool cow_children_may_be_shared;
     bool cow_owned;
+    // A String buffer may be appended in place only by this local binding.
+    // Any ordinary read clears this state before the value can become an alias.
+    bool string_buffer_owned;
+    // A local initialized by an exact integer zero literal can safely serve as
+    // the counted accumulator of a compiler-proven positive-step loop.
+    bool compact_int_known_zero;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };

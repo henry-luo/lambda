@@ -1,7 +1,7 @@
 // test_npm_semver_gtest.cpp — Unit tests for npm semver parser and range matcher
 
 #include <gtest/gtest.h>
-#include "../lambda/npm/semver.h"
+#include "../lambda/module/npm/semver.h"
 #include <cstring>
 
 // ---------------------------------------------------------------------------

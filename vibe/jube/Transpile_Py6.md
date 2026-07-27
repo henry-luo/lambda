@@ -568,10 +568,10 @@ This makes even the **untyped** `for i in range(n)` path ~10× faster by avoidin
 
 | File | Changes |
 |------|---------|
-| `lambda/py/transpile_py_mir.cpp` | Type inference, native arithmetic/comparison emission, range-for optimization, shaped slot emission, direct method dispatch |
-| `lambda/py/py_runtime.cpp` | Fix `py_le`/`py_ge`, add `py_range_iterator_next`, add `py_get_shaped_slot`/`py_set_shaped_slot`, add `py_constructor_create_shaped` |
-| `lambda/py/py_class.cpp` | Shaped instance creation support |
-| `lambda/py/py_runtime.h` | Declarations for new runtime functions |
+| `lambda/module/py/transpile_py_mir.cpp` | Type inference, native arithmetic/comparison emission, range-for optimization, shaped slot emission, direct method dispatch |
+| `lambda/module/py/py_runtime.cpp` | Fix `py_le`/`py_ge`, add `py_range_iterator_next`, add `py_get_shaped_slot`/`py_set_shaped_slot`, add `py_constructor_create_shaped` |
+| `lambda/module/py/py_class.cpp` | Shaped instance creation support |
+| `lambda/module/py/py_runtime.h` | Declarations for new runtime functions |
 
 ---
 

@@ -8,7 +8,7 @@ before counting. Multi-line log calls are consumed as a unit.
 
 Usage:
     ./utils/loc_report.py                # full report
-    ./utils/loc_report.py lambda/py lib  # count only the given sub-dirs (repo-relative)
+    ./utils/loc_report.py lambda/module/py lib  # count only the given sub-dirs (repo-relative)
     ./utils/loc_report.py --raw          # also show raw physical line counts
     ./utils/loc_report.py --json         # machine-readable output
     ./utils/loc_report.py --unclassified # list files that fell into "other"
@@ -215,8 +215,8 @@ MODULES = OrderedDict([
         ('output formatters', [('output formatters', under('lambda/format'))]),
         ('js runtime', JS_SUBMODULES),
         ('bash runtime', [('bash runtime', under('lambda/bash'))]),
-        ('python runtime', [('python runtime', under('lambda/py'))]),
-        ('ruby runtime', [('ruby runtime', under('lambda/rb'))]),
+        ('python runtime', [('python runtime', under('lambda/module/py'))]),
+        ('ruby runtime', [('ruby runtime', under('lambda/module/rb'))]),
         ('typescript runtime', [('typescript runtime', under('lambda/ts'))]),
         ('lambda runtime', [('lambda runtime', under('lambda'))]),
     ]),
@@ -263,7 +263,7 @@ def main():
                     help='list files that landed in an "other" bucket')
     ap.add_argument('paths', nargs='*', metavar='DIR',
                     help='restrict counting to these repo-relative sub-dirs '
-                         '(e.g. lambda/py lib); default: whole repo')
+                         '(e.g. lambda/module/py lib); default: whole repo')
     args = ap.parse_args()
 
     # normalize sub-dir filters to clean repo-relative prefixes

@@ -212,7 +212,7 @@ Node code embedded in core files (**≈3.7k lines**): the `process` object
 stub namespaces (`js_runtime.cpp:38863–39812`, ≈950), `internalBinding` and its
 constant tables (`js_runtime.cpp:38328–38594`), `node:vm`
 (`js_runtime.cpp:33777+`), and the `ERR_*` error-code helpers
-(`js_runtime.cpp:23279–23450`). Adjacent: `lambda/npm/` (3,056 lines, bare
+(`js_runtime.cpp:23279–23450`). Adjacent: `lambda/module/npm/` (3,056 lines, bare
 specifier resolution/install) and `lib/uv_loop.c` (138 lines, the process-global
 loop). Rough split of `lambda/js/`: Node-specific ≈26%, core engine ≈57%,
 browser/DOM ≈12%.
@@ -470,7 +470,7 @@ the module and reason. Registration remains transactional (existing rollback).
   formatting without `node-core`.
 - **The JS module cache** (`js_modules[]`) and CJS/ESM semantics — engine
   behavior. The registry only supplies namespace objects to cache.
-- **npm resolver** (`lambda/npm/`) — initially host (it is wired into
+- **npm resolver** (`lambda/module/npm/`) — initially host (it is wired into
   compile-time module-batch resolution). Revisit after N5; it is only
   meaningful with Node semantics, so `node-core` is its natural later home.
 - **`node:vm`** — implemented against engine internals

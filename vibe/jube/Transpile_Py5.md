@@ -153,7 +153,7 @@ This indicates a lambda function used in a method argument fails to resolve beca
 
 ### A1. Implementation
 
-In `lambda/py/py_stdlib.cpp`, add `perf_counter_ns` alongside the existing `perf_counter`:
+In `lambda/module/py/py_stdlib.cpp`, add `perf_counter_ns` alongside the existing `perf_counter`:
 
 ```c
 // time.perf_counter_ns() — returns nanoseconds as integer

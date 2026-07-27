@@ -2,7 +2,7 @@
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Node.js compatibility layer: how a module specifier becomes a namespace object (built-in dispatch, `node:`/bare/relative resolution, conditional `exports`), the embedded npm client (package.json parse, semver, BFS dependency resolution, pnpm-style symlink install, `lambda-node.lock`), and the per-module implementations with their actual backing and gaps.
 >
-> **Primary sources:** `lambda/js/js_runtime.cpp` (`js_module_get`, `js_module_register`, the `JsModule` cache, inline stub modules), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`), `lambda/js/js_mir_module_batch_lowering.cpp` (`jm_resolve_module_path`), `lambda/npm/` (`npm_resolve_module.cpp`, `npm_resolver.cpp`, `npm_installer.cpp`, `npm_registry.cpp`, `npm_lockfile.cpp`, `npm_package_json.cpp`, `semver.cpp`), and the per-module files `js_fs.cpp` … `js_assert.cpp`.
+> **Primary sources:** `lambda/js/js_runtime.cpp` (`js_module_get`, `js_module_register`, the `JsModule` cache, inline stub modules), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`), `lambda/js/js_mir_module_batch_lowering.cpp` (`jm_resolve_module_path`), `lambda/module/npm/` (`npm_resolve_module.cpp`, `npm_resolver.cpp`, `npm_installer.cpp`, `npm_registry.cpp`, `npm_lockfile.cpp`, `npm_package_json.cpp`, `semver.cpp`), and the per-module files `js_fs.cpp` … `js_assert.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names. The Promise/microtask/event-loop *mechanism* and the require-time compilation pipeline are owned by [JS_09 — Async, Promises & Modules](JS_09_Async_Modules.md); this doc owns only the Node.js surface layered on top.
 
 ---
@@ -65,7 +65,7 @@ User modules loaded from disk are registered in a fixed-size array `js_modules[J
 
 <img alt="npm install pipeline" src="diagram/d14_npm_install.svg" width="610">
 
-The npm client in `lambda/npm/` performs registry-backed installation entirely in C/C++. The pipeline is: parse the manifest, resolve the dependency tree (consulting the lock file), download and extract tarballs into a flat store, wire up symlinks, and write the lock file.
+The npm client in `lambda/module/npm/` performs registry-backed installation entirely in C/C++. The pipeline is: parse the manifest, resolve the dependency tree (consulting the lock file), download and extract tarballs into a flat store, wire up symlinks, and write the lock file.
 
 ### 5.1 package.json parsing & semver
 
@@ -170,12 +170,12 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 | `lambda/js/js_runtime.cpp` | `js_module_get` dispatch chain, inline stub modules, `JsModule` cache + `js_module_register`, `js_get_vm_namespace`, `js_internal_binding`. |
 | `lambda/js/js_mir_entrypoints_require.cpp` | `js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`. |
 | `lambda/js/js_mir_module_batch_lowering.cpp` | `jm_resolve_module_path`, built-in priority list, condition order, `js_module_register` call sites. |
-| `lambda/npm/npm_resolve_module.cpp` | Node resolution algorithm (relative/bare, `node_modules` walk, `try_directory`). |
-| `lambda/npm/npm_package_json.{cpp,h}` | Manifest parse, `npm_resolve_exports`, `NpmPackageJson`. |
-| `lambda/npm/npm_resolver.cpp` | BFS dependency resolution, lock-file pinning. |
-| `lambda/npm/npm_installer.cpp` | pnpm-style store + symlinks, install/uninstall. |
-| `lambda/npm/npm_registry.cpp`, `npm_tarball.cpp` | Registry HTTP client, `.tgz` extraction. |
-| `lambda/npm/npm_lockfile.cpp`, `semver.cpp` | `lambda-node.lock` read/write; semver range engine. |
+| `lambda/module/npm/npm_resolve_module.cpp` | Node resolution algorithm (relative/bare, `node_modules` walk, `try_directory`). |
+| `lambda/module/npm/npm_package_json.{cpp,h}` | Manifest parse, `npm_resolve_exports`, `NpmPackageJson`. |
+| `lambda/module/npm/npm_resolver.cpp` | BFS dependency resolution, lock-file pinning. |
+| `lambda/module/npm/npm_installer.cpp` | pnpm-style store + symlinks, install/uninstall. |
+| `lambda/module/npm/npm_registry.cpp`, `npm_tarball.cpp` | Registry HTTP client, `.tgz` extraction. |
+| `lambda/module/npm/npm_lockfile.cpp`, `semver.cpp` | `lambda-node.lock` read/write; semver range engine. |
 | `lambda/js/js_fs.cpp` … `js_assert.cpp` | Per-module native implementations ([§6](#6-core-module-coverage)). |
 | `lambda/js/test_shim/` | Node test-suite `common`/`fixtures`/`tmpdir` shims (JS). |
 

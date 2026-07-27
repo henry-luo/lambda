@@ -14,7 +14,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON_DIR = ROOT / "lambda" / "py"
+PYTHON_DIR = ROOT / "lambda" / "module" / "py"
 MAIN = ROOT / "lambda" / "main.cpp"
 CORE_JIT_CATALOG = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
 # Core sources moved under runtime; keep the architecture gate anchored to the
@@ -179,7 +179,7 @@ def check_python_uses_neutral_data_membrane() -> None:
                 fail(f"{path.relative_to(ROOT)} bypasses hosted root/data service via {token}")
     source = text(PYTHON_JUBE_ADAPTER)
     if "py_set_hosted_data_api" not in source or "host->data" not in source:
-        fail("lambda/py/python_jube_module.cpp does not negotiate JubeHostDataAPI")
+        fail("lambda/module/py/python_jube_module.cpp does not negotiate JubeHostDataAPI")
 
 
 def check_python_uses_opaque_hosted_roots() -> None:
@@ -197,7 +197,7 @@ def check_python_uses_opaque_hosted_roots() -> None:
     adapter = text(PYTHON_JUBE_ADAPTER)
     for token in ("hosted_language->roots", "py_set_hosted_root_api"):
         if token not in adapter:
-            fail("lambda/py/python_jube_module.cpp does not negotiate JubeHostRootAPI")
+            fail("lambda/module/py/python_jube_module.cpp does not negotiate JubeHostRootAPI")
 
 
 def check_main_has_no_python_branch() -> None:
@@ -260,7 +260,7 @@ def check_python_adapter_uses_hosted_services() -> None:
     )
     for token in forbidden_includes:
         if token in source:
-            fail(f"lambda/py/python_jube_module.cpp bypasses hosted service {token}")
+            fail(f"lambda/module/py/python_jube_module.cpp bypasses hosted service {token}")
     required = (
         "source_read",
         "source_release",
@@ -293,57 +293,57 @@ def check_python_adapter_uses_hosted_services() -> None:
     )
     for token in required:
         if token not in source:
-            fail(f"lambda/py/python_jube_module.cpp no longer uses hosted service {token}")
+            fail(f"lambda/module/py/python_jube_module.cpp no longer uses hosted service {token}")
     for token in ("Runtime runtime", "(Runtime*)", "runtime_init(", "runtime_cleanup("):
         if token in source:
-            fail(f"lambda/py/python_jube_module.cpp retains direct runtime lifecycle token {token}")
+            fail(f"lambda/module/py/python_jube_module.cpp retains direct runtime lifecycle token {token}")
     for token in ("runtime_catalog", "register_imports"):
         if token not in source:
-            fail(f"lambda/py/python_jube_module.cpp no longer negotiates Jube runtime catalog {token}")
+            fail(f"lambda/module/py/python_jube_module.cpp no longer negotiates Jube runtime catalog {token}")
 
 
 def check_python_runtime_catalog_uses_jube_api() -> None:
     source = text(PYTHON_RUNTIME_IMPORTS)
-    for token in ('"../sys_func_registry.h"', "JitImport", "jit_register_module_imports"):
+    for token in ('"../../../runtime/sys_func_registry.h"', "JitImport", "jit_register_module_imports"):
         if token in source:
-            fail(f"lambda/py/python_runtime_imports.cpp bypasses Jube runtime catalog via {token}")
+            fail(f"lambda/module/py/python_runtime_imports.cpp bypasses Jube runtime catalog via {token}")
     for token in ("JubeRuntimeImport", "JubeRuntimeCatalogAPI", "register_imports"):
         if token not in source:
-            fail(f"lambda/py/python_runtime_imports.cpp no longer uses Jube runtime catalog {token}")
+            fail(f"lambda/module/py/python_runtime_imports.cpp no longer uses Jube runtime catalog {token}")
 
 
 def check_python_frontend_has_no_monolithic_transpiler_header() -> None:
     source = text(PYTHON_DIR / "py_transpiler.hpp")
-    if '"../transpiler.hpp"' in source:
-        fail("lambda/py/py_transpiler.hpp retains the monolithic core transpiler header")
+    if '"../../../runtime/transpiler.hpp"' in source:
+        fail("lambda/module/py/py_transpiler.hpp retains the monolithic core transpiler header")
 
 
 def check_python_mir_dump_uses_hosted_service() -> None:
     source = text(PYTHON_MIR_LOWERING)
-    for token in ('"../runtime/mir_dump.h"', "mir_dump_instrumentation_enabled(",
+    for token in ('"../../../runtime/mir_dump.h"', "mir_dump_instrumentation_enabled(",
                   "mir_dump_write_context("):
         if token in source:
-            fail(f"lambda/py/transpile_py_mir.cpp bypasses hosted MIR debug service via {token}")
+            fail(f"lambda/module/py/transpile_py_mir.cpp bypasses hosted MIR debug service via {token}")
     if "mir_debug_dump_if_enabled" not in source:
-        fail("lambda/py/transpile_py_mir.cpp does not use hosted MIR debug service")
+        fail("lambda/module/py/transpile_py_mir.cpp does not use hosted MIR debug service")
 
 
 def check_python_mir_lowering_uses_hosted_name_service() -> None:
     source = text(PYTHON_MIR_LOWERING)
-    for token in ('"../runtime/heap_api.h"', '"../runtime/transpiler.hpp"',
+    for token in ('"../../../runtime/heap_api.h"', '"../../../runtime/transpiler.hpp"',
                   "<mir-gen.h>", "heap_create_name("):
         if token in source:
-            fail(f"lambda/py/transpile_py_mir.cpp bypasses hosted name service via {token}")
+            fail(f"lambda/module/py/transpile_py_mir.cpp bypasses hosted name service via {token}")
     for token in ("pm_hosted_name_from_utf8_n", "py_data_name_from_utf8_n"):
         if token not in source:
-            fail(f"lambda/py/transpile_py_mir.cpp does not use length-aware hosted name service {token}")
+            fail(f"lambda/module/py/transpile_py_mir.cpp does not use length-aware hosted name service {token}")
 
 
 def check_python_import_lowering_uses_module_graph() -> None:
     source = text(PYTHON_MIR_LOWERING)
     legacy_loader = "// Load Python module for cross-language import"
     if legacy_loader not in source:
-        fail("lambda/py/transpile_py_mir.cpp lost its isolated legacy loader marker")
+        fail("lambda/module/py/transpile_py_mir.cpp lost its isolated legacy loader marker")
     lowering, legacy = source.split(legacy_loader, 1)
     forbidden = (
         "module_is_loading",

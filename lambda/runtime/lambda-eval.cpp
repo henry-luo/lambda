@@ -2,6 +2,7 @@
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "heap_api.h"
+#include "gc/gc_heap.h"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "concurrency.h"
@@ -199,30 +200,88 @@ Item v2it(List* list) {
     return {.array = list};
 }
 
-String *fn_strcat(String *left, String *right) {
-    if (!left || !right) {
-        log_error("null pointer in fn_strcat: left=%p, right=%p", left, right);
-        return &STR_ERROR;
-    }
-    int left_len = left->len, right_len = right->len;
-    // Destination allocation may collect converted strings that exist only in
-    // this native call chain, so keep both copy sources exact-rooted.
+static bool string_is_owned_buffer(String* str, gc_header_t** out_header) {
+    if (out_header) *out_header = NULL;
+    if (!str || !str->is_buffer) return false;
+    // is_buffer is set only by string_buffer_copy_join after the constructor
+    // audit has cleared every non-GC String's flags. Avoiding a heap-wide
+    // ownership lookup keeps the append fast path proportional to the copy.
+    gc_header_t* header = gc_get_header(str);
+    if (!header || header->type_tag != LMD_TYPE_STRING ||
+            header->alloc_size < sizeof(String) + 1) return false;
+    if (out_header) *out_header = header;
+    return true;
+}
+
+static String* string_buffer_copy_join(String* left, String* right, size_t capacity) {
+    if (!left || !right || capacity > UINT32_MAX ||
+            left->len > capacity || right->len > capacity - left->len) return NULL;
+    size_t bytes = sizeof(String) + capacity + 1;
+    if (bytes > (size_t)INT_MAX) return NULL;
+
+    // Allocation may relocate both sources. Their exact roots remain valid
+    // until the new buffer has copied both halves of the concatenation.
     RootFrame roots((Context*)context, 2);
     Rooted<String*> rooted_left(roots, left);
     Rooted<String*> rooted_right(roots, right);
-    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
-    if (!result) {
-        log_error("failed to allocate memory for fn_strcat result");
-        return NULL;
-    }
+    String* result = (String*)heap_alloc((int)bytes, LMD_TYPE_STRING);
+    if (!result) return NULL;
     left = rooted_left.get();
     right = rooted_right.get();
-    result->len = left_len + right_len;
+    size_t left_len = left->len;
+    size_t right_len = right->len;
+    result->len = (uint32_t)(left_len + right_len);
+    result->flags = 0;
     result->is_ascii = left->is_ascii && right->is_ascii;
+    result->is_buffer = 1;
     memcpy(result->chars, left->chars, left_len);
-    // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
     return result;
+}
+
+String *fn_strcat(String *left, String *right) {
+    if (!left || !right || left->len > UINT32_MAX - right->len) {
+        log_error("fn_strcat: invalid concat operands");
+        return &STR_ERROR;
+    }
+    size_t required = (size_t)left->len + right->len;
+    gc_header_t* left_header = NULL;
+    if (left != right && string_is_owned_buffer(left, &left_header)) {
+        size_t capacity = (size_t)left_header->alloc_size - sizeof(String) - 1;
+        if (required <= capacity) {
+            // MIR publishes a buffer only while its binding is exclusive; a
+            // generic join freezes first, so this in-place append cannot alter
+            // an alias that observes the prior immutable value.
+            size_t old_len = left->len;
+            memcpy(left->chars + old_len, right->chars, (size_t)right->len + 1);
+            left->len = (uint32_t)required;
+            left->is_ascii = left->is_ascii && right->is_ascii;
+            return left;
+        }
+        size_t grown = capacity < 64 ? 64 : capacity;
+        while (grown < required) {
+            if (grown > UINT32_MAX / 2) {
+                grown = required;
+                break;
+            }
+            grown *= 2;
+        }
+        return string_buffer_copy_join(left, right, grown);
+    }
+
+    // A fresh concat starts at its exact size. This keeps ordinary short-lived
+    // concatenations compact; only a proven builder pays geometric spare space
+    // when its next append actually requires growth.
+    return string_buffer_copy_join(left, right, required);
+}
+
+String *fn_string_freeze(String *str) {
+    if (str && str->is_buffer) {
+        // The MIR owner is about to publish this value through an ordinary
+        // read, so later concatenation must allocate rather than alter an alias.
+        str->is_buffer = 0;
+    }
+    return str;
 }
 
 static String* fn_concat_string_items(Item left, Item right) {
@@ -232,7 +291,11 @@ static String* fn_concat_string_items(Item left, Item right) {
     Rooted<String*> left_str(roots, fn_string(left));
     Rooted<String*> right_str(roots, (String*)NULL);
     right_str.set(fn_string(right));
-    return fn_strcat(left_str.get(), right_str.get());
+    String* result = fn_strcat(left_str.get(), right_str.get());
+    // Generic fn_join has no MIR ownership proof. Its result may immediately
+    // escape through a container, call, or alias, so it is immutable on return.
+    if (result && result != &STR_ERROR) result->is_buffer = 0;
+    return result;
 }
 
 Item fn_join(Item left, Item right) {
@@ -415,6 +478,7 @@ String *str_repeat(String *str, int64_t times) {
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         if (!result) return NULL;
         result->len = 0;
+        result->flags = 0;
         result->is_ascii = 1;
         result->chars[0] = '\0';
         return result;
@@ -430,6 +494,7 @@ String *str_repeat(String *str, int64_t times) {
     String *result = (String *)heap_alloc((int)(sizeof(String) + total_len + 1), LMD_TYPE_STRING);
     if (!result) return NULL;
     result->len = total_len;
+    result->flags = 0;
     result->is_ascii = str->is_ascii;
 
     for (long i = 0; i < times; i++) {
@@ -483,6 +548,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     // Create new string with normalized content
     String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
     result->len = normalized_len;
+    result->flags = 0;
     result->is_ascii = str_is_ascii((const char*)normalized, normalized_len) ? 1 : 0;
     memcpy(result->chars, normalized, normalized_len);
     result->chars[normalized_len] = '\0';
@@ -3130,6 +3196,7 @@ String* fn_format2(Item item, Item type) {
         size_t len = buf->length;
         String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
         result->len = len;
+        result->flags = 0;
         result->is_ascii = 1;  // datetime format strings are always ASCII
         memcpy(result->chars, buf->str, len);
         result->chars[len] = '\0';
@@ -3713,6 +3780,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
             if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
             String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
             empty->len = 0;
+            empty->flags = 0;
             empty->is_ascii = 1;
             empty->chars[0] = '\0';
             return {.item = s2it(empty)};
@@ -3721,6 +3789,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         if (is_symbol) return {.item = y2it(heap_create_symbol(chars + start, result_len))};
         String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
         result->len = result_len;
+        result->flags = 0;
         result->is_ascii = 1;
         memcpy(result->chars, chars + start, result_len);
         result->chars[result_len] = '\0';
@@ -3739,6 +3808,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
+        empty->flags = 0;
         empty->is_ascii = 1;
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
@@ -3752,6 +3822,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
         empty->len = 0;
+        empty->flags = 0;
         empty->is_ascii = 1;
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
@@ -3761,6 +3832,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     if (is_symbol) return {.item = y2it(heap_create_symbol(chars + byte_start, result_len))};
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->flags = 0;
     result->is_ascii = 0;  // UTF-8 path — not necessarily ASCII
     memcpy(result->chars, chars + byte_start, result_len);
     result->chars[result_len] = '\0';
@@ -4131,6 +4203,7 @@ Item fn_trim(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->flags = 0;
     result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
     memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
@@ -4179,6 +4252,7 @@ Item fn_trim_start(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
+    result->flags = 0;
     result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
     memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
@@ -4227,6 +4301,7 @@ Item fn_trim_end(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + end + 1, LMD_TYPE_STRING);
     result->len = end;
+    result->flags = 0;
     result->is_ascii = str_is_ascii(chars, end) ? 1 : 0;
     memcpy(result->chars, chars, end);
     result->chars[end] = '\0';
@@ -4280,6 +4355,7 @@ Item fn_lower(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->flags = 0;
     String* src = str_item.get_safe_string();
     result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
@@ -4337,6 +4413,7 @@ Item fn_upper(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->flags = 0;
     String* src = str_item.get_safe_string();
     result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
@@ -4393,6 +4470,7 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     uint32_t len = (uint32_t)strlen(href);
     String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
+    result->flags = 0;
     result->is_ascii = 1;  // URLs are ASCII
     memcpy(result->chars, href, len);
     result->chars[len] = '\0';
@@ -4408,6 +4486,7 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     // character address from the exact root before examining or copying it.
     const char* chars = rooted_source.get().get_chars() + offset;
     part->len = (uint32_t)len;
+    part->flags = 0;
     part->is_ascii = str_is_ascii(chars, len) ? 1 : 0;
     memcpy(part->chars, chars, len);
     part->chars[len] = '\0';
@@ -4785,6 +4864,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     sep_item = rooted_sep.get();
     sep_chars = is_text_type_id(sep_type) ? sep_item.get_chars() : nullptr;
     result->len = total_len;
+    result->flags = 0;
     result->is_ascii = 0;  // safe default for join
 
     // build result
@@ -5058,6 +5138,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         // Preserve is_ascii when both source and replacement are ASCII; otherwise byte-indexing callers may fall back to UTF-8 scans.
         bool src_ascii = item_string_is_ascii(str_item, str_type);
         bool repl_ascii = new_is_null || item_string_is_ascii(new_item, new_type);
+        result->flags = 0;
         result->is_ascii = (src_ascii && repl_ascii) ? 1 : 0;
         dest = result->chars;
     }

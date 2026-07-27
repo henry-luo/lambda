@@ -269,7 +269,7 @@ typedef struct JubeLanguageDef {
 } JubeLanguageDef;
 ```
 
-This is a formalization of what `lambda/py|rb|bash/` already are: Tree-sitter front-end → typed AST → MIR lowering into the shared context. `JubeCompileCtx` (part of the host API) exposes the MIR context, `register_dynamic_import`, and the name pool — the things `transpile_py_mir.cpp` reaches into today.
+This is a formalization of what `lambda/module/py|lambda/module/rb|lambda/bash/` already are: Tree-sitter front-end → typed AST → MIR lowering into the shared context. `JubeCompileCtx` (part of the host API) exposes the MIR context, `register_dynamic_import`, and the name pool — the things `transpile_py_mir.cpp` reaches into today.
 
 **`JubeFormatDef` — input parsers / output formatters**:
 

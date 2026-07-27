@@ -8194,6 +8194,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         }
         String* result = (String*)heap_alloc(sizeof(String) + (int)rlen + 1, LMD_TYPE_STRING);
         result->len = (int)rlen;
+        result->flags = 0;
         result->is_ascii = 1;
         memcpy(result->chars, s->chars + start, (int)rlen);
         result->chars[rlen] = '\0';

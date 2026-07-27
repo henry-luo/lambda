@@ -450,7 +450,7 @@ The current host contains Python-specific compile-time knowledge:
   Python modules;
 - `lambda/sys_func_registry.c` includes Python headers and publishes Python
   runtime helpers;
-- `build_lambda_config.json` adds `lambda/py`, its parser, and
+- `build_lambda_config.json` adds `lambda/module/py`, its parser, and
   `LAMBDA_PYTHON` to the monolithic Jube executable;
 - `Makefile` and `test/test_py_gtest.cpp` assume `lambda-jube.exe`.
 
@@ -569,7 +569,7 @@ test/
   benchmark/hosted_python/        release comparison definitions/results
 ```
 
-The existing `lambda/py/` source directory does not itself violate isolation.
+The existing `lambda/module/py/` source directory does not itself violate isolation.
 The decisive boundary is the generated build target and allowed dependencies:
 the host must compile and run without those sources, and the module must compile
 against approved Jube headers rather than internal host layouts.
@@ -615,7 +615,7 @@ items before changing shared code.
   - Jube registry/loader tests;
   - Python closure/generator GC-rooting tests.
 - [ ] **H0.4** Create a machine-readable Python coupling inventory containing:
-  - includes outside `lambda/py`;
+  - includes outside `lambda/module/py`;
   - internal host types/globals referenced by Python;
   - `js_*` calls from Python;
   - `py_*` references outside Python;
@@ -672,7 +672,7 @@ Make architectural regressions mechanically visible before moving code.
 - [ ] **H1.1** Add an architecture check that reports:
   - Python headers or `py_*` symbols in shared core files;
   - `LAMBDA_PYTHON` outside transitional build/adapter allowlists;
-  - `js_*` symbols or JS runtime headers used by `lambda/py`;
+  - `js_*` symbols or JS runtime headers used by `lambda/module/py`;
   - forbidden internal headers included by the eventual module target;
   - raw host globals accessed by the module;
   - shared structs acquiring Python-only fields or enum cases.
@@ -801,7 +801,7 @@ statically linked. This isolates dispatch changes from dynamic-library issues.
 ### Required invariants
 
 - The Python adapter may temporarily call old Python internals, but only inside
-  `lambda/py`; it may not create a new host-facing Python API.
+  `lambda/module/py`; it may not create a new host-facing Python API.
 - Static and future dynamic registration use the same descriptor and callback
   implementation.
 - `lambda app.ls` and `lambda.exe js ...` do not query the language registry
@@ -1603,7 +1603,7 @@ architecture gates, and `git diff --check`.
 - [ ] Reuse shared return funnels, recovery, rooting, and scalar-home machinery
   established by the Python stack-frame plan.
 - [ ] Keep Python lowering decisions and Python runtime helper selection in
-  `lambda/py`.
+  `lambda/module/py`.
 - [ ] Add negative tests for stale handle, wrong owner, use after finalize,
   missing capability, incompatible build ID, and invalid construction order.
 - [ ] Compare representative generated MIR/call metadata before and after,

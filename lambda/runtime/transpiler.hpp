@@ -7,10 +7,18 @@
 
 #include "ast.hpp"
 
+typedef struct LambdaRegion LambdaRegion;
+typedef struct LambdaRegionBlock LambdaRegionBlock;
+
 typedef struct Heap {
     Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
     struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
     uint64_t result_root;  // stable GC root slot for the current script result
+    // Per-runtime caches for compiler-proven temporary-object regions.  These
+    // blocks never enter gc->all_objects and are recycled only after a region
+    // ends, so an ordinary heap object can never retain a region pointer.
+    LambdaRegion* region_free;
+    LambdaRegionBlock* region_free_blocks;
 } Heap;
 
 void heap_init();
@@ -24,6 +32,9 @@ extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
 extern "C" void heap_unregister_gc_root_range(uint64_t* base);  // unregister env array root range by base
+LambdaRegion* lambda_region_begin(void);
+void lambda_region_end(LambdaRegion* region);
+void* lambda_region_calloc(LambdaRegion* region, size_t size, TypeId type_id);
 String* heap_create_name(const char* name, size_t len);
 String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);

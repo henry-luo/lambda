@@ -71,9 +71,9 @@ Originally 4+ hand-rolled copies. Now centralised:
 - Each macro emits `<name>_hash`, `<name>_cmp`, `<name>_new(cap)`, `<name>_new_with_free(cap, fn)`.
 - ✅ **36 cmp/hash function pairs eliminated** across:
   - [lambda/transpile-mir.cpp:247](../lambda/transpile-mir.cpp) — 6 entries (5 STRKEY + 1 PTRKEY)
-  - [lambda/py/transpile_py_mir.cpp:218](../lambda/py/transpile_py_mir.cpp) — 4 entries
+  - [lambda/module/py/transpile_py_mir.cpp:218](../lambda/module/py/transpile_py_mir.cpp) — 4 entries
   - [lambda/bash/transpile_bash_mir.cpp:49](../lambda/bash/transpile_bash_mir.cpp) — 3 entries
-  - [lambda/rb/transpile_rb_mir.cpp:154](../lambda/rb/transpile_rb_mir.cpp) — 3 entries
+  - [lambda/module/rb/transpile_rb_mir.cpp:154](../lambda/module/rb/transpile_rb_mir.cpp) — 3 entries
   - [lambda/ts/ts_type_builder.cpp:280](../lambda/ts/ts_type_builder.cpp) — 1 entry
   - [lambda/js/js_early_errors.cpp:393](../lambda/js/js_early_errors.cpp) — 1 entry
   - [lambda/js/js_globals.cpp:16145](../lambda/js/js_globals.cpp) — 1 entry
@@ -114,7 +114,7 @@ After deeper review, view_pool / shape_pool / tile_pool are domain-shaped enough
 - ✅ `lib/sort.h` shipped — `insertion_sort`, `sort_ptrs_by_int_key`, `sort_ptrs_by_double_key`, **and a suite of stock qsort-compatible comparators**: `sort_cmp_int_asc/desc`, `sort_cmp_int64_asc/desc`, `sort_cmp_uint64_asc`, `sort_cmp_double_asc/desc`, `sort_cmp_float_asc`, `sort_cmp_cstr_asc`, `sort_cmp_cstr_ci_asc`. Plus a `SORT_CMP_AS_R(name)` macro for adapting to `insertion_sort`'s 3-arg signature.
 - ✅ Replaced 4 hand-written bubble sorts in [lambda/lambda-vector.cpp](../lambda/lambda-vector.cpp) with `insertion_sort` (median, sort1 float/int/mixed branches).
 - ✅ Migrated [lambda/input/input-latex-tables.cpp:94](../lambda/input/input-latex-tables.cpp) — removed local `cmp_str_ptr`, both `qsort` and `bsearch` call sites now use `sort_cmp_cstr_asc`.
-- ❌ 3 hand-written insertion sorts in [lambda/py/py_builtins.cpp:345, 357, 1535](../lambda/py/py_builtins.cpp) — still open. Easy migration; ~30 min.
+- ❌ 3 hand-written insertion sorts in [lambda/module/py/py_builtins.cpp:345, 357, 1535](../lambda/module/py/py_builtins.cpp) — still open. Easy migration; ~30 min.
 - ⛔ Remaining 7 `qsort` callers use struct-specific comparators (`compare_debug_info`, `compare_suggestions`, `js_idx_pair_cmp`, `compare_indexed_rules`, `NodeWithBarycenter`) that don't map to stock comparators without record-key extraction. Left as-is.
 
 16 gtest cases cover the module.
@@ -229,7 +229,7 @@ dedup threshold; pulling mbedtls into lib for it would be net negative.
 - ✅ `lib/time_util.h` shipped — `time_now_ns/us/ms`, `time_now_seconds`, `time_elapsed_ms_since`
 - ✅ Migrated:
   - [lib/lru_cache.c:41](../lib/lru_cache.c) — internal `lru_now_ms` collapsed to macro
-  - [py_stdlib.cpp:854, 879](../lambda/py/py_stdlib.cpp) — Python `time.monotonic` and `time.perf_counter_ns`
+  - [py_stdlib.cpp:854, 879](../lambda/module/py/py_stdlib.cpp) — Python `time.monotonic` and `time.perf_counter_ns`
   - [network_resource_manager.cpp:41](../lambda/network/network_resource_manager.cpp) — `get_time_seconds`
   - [network_integration.cpp:58](../lambda/network/network_integration.cpp) — `doc->load_start_time`
 
@@ -639,7 +639,7 @@ static inline void sort_quick(void* base, size_t count, size_t stride,
 **Sites that would benefit (rerun the comparator):**
 
 - [lambda/lambda-vector.cpp](../lambda/lambda-vector.cpp) `fn_sort1`, `fn_math_median` — currently insertion_sort
-- [lambda/py/py_builtins.cpp](../lambda/py/py_builtins.cpp) `sorted()` / `arr.sort()` — currently insertion_sort
+- [lambda/module/py/py_builtins.cpp](../lambda/module/py/py_builtins.cpp) `sorted()` / `arr.sort()` — currently insertion_sort
 - Any future general-purpose user sort
 
 **Scope estimate:** 1 day for the algorithm + tests, or 2 hours for a

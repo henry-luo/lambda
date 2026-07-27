@@ -192,7 +192,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "../bash/bash_heredoc.h"
 #endif
 #ifdef LAMBDA_RUBY
-#include "../rb/rb_runtime.h"
+#include "../module/rb/rb_runtime.h"
 #endif
 #include "../js/js_dom.h"
 #include "../js/js_typed_array.h"
@@ -1316,6 +1316,7 @@ JitImport jit_runtime_imports[] = {
     {"map", FPTR(map)},
     {"map_with_data", FPTR(map_with_data)},
     {"map_with_tl", FPTR(map_with_tl)},
+    {"map_with_region_tl", FPTR(map_with_region_tl)},
     {"map_fill", FPTR(map_fill)},
     {"map_get", FPTR(map_get)},
     {"elmt", FPTR(elmt)},
@@ -1560,6 +1561,7 @@ JitImport jit_runtime_imports[] = {
     // String operations (non-sys-func entries)
     // ========================================================================
     {"fn_strcat", FPTR(fn_strcat)},
+    {"fn_string_freeze", FPTR(fn_string_freeze)},
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
     {"fn_join", FPTR(fn_join)},
@@ -1593,6 +1595,8 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"heap_calloc", FPTR(heap_calloc)},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
+    {"lambda_region_begin", FPTR(lambda_region_begin)},
+    {"lambda_region_end", FPTR(lambda_region_end)},
     {"heap_gc_root_slot_new", FPTR(heap_gc_root_slot_new)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},

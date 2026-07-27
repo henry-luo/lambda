@@ -19,7 +19,13 @@ extern "C" {
 #ifndef STRING_STRUCT_DEFINED
 typedef struct String {
     uint32_t len;             // byte length of the string
-    uint8_t is_ascii;         // 1 if all bytes < 0x80, 0 otherwise
+    union {
+        uint8_t flags;
+        struct {
+            uint8_t is_ascii:1;
+            uint8_t is_buffer:1;
+        };
+    };
     char chars[];             // flexible array member
 } String;
 #define STRING_STRUCT_DEFINED

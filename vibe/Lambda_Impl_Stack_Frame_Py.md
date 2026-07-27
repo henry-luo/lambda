@@ -52,7 +52,7 @@ The Stack API (`Lambda_Design_Stack_API.md`) landed between v1 and now. Every cl
 This doc now carries both Python upgrade programs, because they edit the same file and gate on the same corpus:
 
 - **Track F — stack frames, rooting, ownership** (stages F0–F4; v1's P0–P4 renamed): make Python-generated code a well-behaved citizen of the SF/rooting architecture. Reuses the JS phase's machinery, which after the Stack API is *shared emitter machinery*.
-- **Track A — unified AST port** (stages A0–A6; the absorbed doc's P0–P6 renamed): retarget `lambda/py/` onto the unified AST and compiler spine per `Lambda_Design_Unified_AST.md` Phase 6. Decision points PY1–PY10 keep their names (§12).
+- **Track A — unified AST port** (stages A0–A6; the absorbed doc's P0–P6 renamed): retarget `lambda/module/py/` onto the unified AST and compiler spine per `Lambda_Design_Unified_AST.md` Phase 6. Decision points PY1–PY10 keep their names (§12).
 
 **Interlock and sequencing:**
 
@@ -139,7 +139,7 @@ Python is the smallest SF port of the three front-ends (design doc §2): no Date
 
 ### 4.1 Goal and scope
 
-Retarget the Python guest runtime (`lambda/py/`) onto the unified AST and compiler spine, per Phase 6 of `Lambda_Design_Unified_AST.md`. Python is the **first guest port and the acceptance test of the whole unified-AST design** — the empirical check on the ≥80%-core-coverage target (§2.4) and on the claim that a guest language collapses to *grammar + builder + LangProfile + runtime library*.
+Retarget the Python guest runtime (`lambda/module/py/`) onto the unified AST and compiler spine, per Phase 6 of `Lambda_Design_Unified_AST.md`. Python is the **first guest port and the acceptance test of the whole unified-AST design** — the empirical check on the ≥80%-core-coverage target (§2.4) and on the claim that a guest language collapses to *grammar + builder + LangProfile + runtime library*.
 
 | Component | Today | Target |
 |---|---|---|

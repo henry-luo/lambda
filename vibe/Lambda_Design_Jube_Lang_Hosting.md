@@ -762,7 +762,7 @@ aliases:    py
 extensions: .py
 ```
 
-The source can remain under `lambda/py/` during migration to avoid a
+The source can remain under `lambda/module/py/` during migration to avoid a
 non-functional mass move. Build isolation matters more than directory spelling.
 The module should become its own build target and library before dynamic loading
 is attempted.
@@ -910,7 +910,7 @@ Automated checks should enforce:
 
 ### Core rules
 
-- Core runtime/compiler files do not include `lambda/py/**`.
+- Core runtime/compiler files do not include `lambda/module/py/**`.
 - Core sources do not reference `py_*`, `Py*`, `.py`, or Python parser symbols,
   except generic manifest/test data where explicitly allowed.
 - `lambda.exe` links no Python grammar or Python runtime symbols when the module

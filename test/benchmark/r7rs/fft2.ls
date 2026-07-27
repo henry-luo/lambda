@@ -18,10 +18,10 @@ pn four1(data: float[], n: int) {
             data[i + 1] = data[j + 1]
             data[j + 1] = temp
         }
-        var m: int = n / 2
+        var m: int = n div 2
         while (m >= 2 and j >= m) {
             j = j - m
-            m = m / 2
+            m = m div 2
         }
         j = j + m
         i = i + 2
