@@ -21,10 +21,6 @@ bigint pow huge identity: 1
 bigint asIntN bits bigint: TypeError
 bigint mix add: TypeError
 bigint unsigned shift: TypeError
-buffer biguint64: bigint ffffffffffffffff
-buffer bigint64: bigint -1
-buffer bigint64 min: bigint -9223372036854775808
-buffer bigint64 string: TypeError
 dataview biguint64: bigint ffffffffffffffff
 dataview bigint64: bigint -1
 dataview bigint64 min: bigint -9223372036854775808

@@ -58,20 +58,6 @@ try {
 } catch (e) {
   console.log("bigint unsigned shift:", e.name);
 }
-const bufferUint64 = Buffer.alloc(8);
-bufferUint64.writeBigUInt64BE(18446744073709551615n, 0);
-console.log("buffer biguint64:", typeof bufferUint64.readBigUInt64BE(0), bufferUint64.readBigUInt64BE(0).toString(16));
-const bufferInt64 = Buffer.alloc(8);
-bufferInt64.writeBigInt64BE(-1n, 0);
-console.log("buffer bigint64:", typeof bufferInt64.readBigInt64BE(0), bufferInt64.readBigInt64BE(0).toString());
-bufferInt64.writeBigInt64BE(-(1n << 63n), 0);
-console.log("buffer bigint64 min:", typeof bufferInt64.readBigInt64BE(0), bufferInt64.readBigInt64BE(0).toString());
-try {
-  Buffer.alloc(8).writeBigInt64BE("1", 0);
-  console.log("buffer bigint64 string: no throw");
-} catch (e) {
-  console.log("buffer bigint64 string:", e.name);
-}
 const dataView64 = new DataView(new ArrayBuffer(8));
 dataView64.setBigUint64(0, 18446744073709551615n);
 console.log("dataview biguint64:", typeof dataView64.getBigUint64(0), dataView64.getBigUint64(0).toString(16));

@@ -1,5 +1,5 @@
 const cluster = require('cluster');
-const script = typeof __filename === 'string' ? __filename : 'test/js/jube_cluster_online_hook.js';
+const script = typeof __filename === 'string' ? __filename : 'test/node/jube_cluster_online_hook.js';
 
 if (cluster.isPrimary) {
   const worker = cluster.fork();

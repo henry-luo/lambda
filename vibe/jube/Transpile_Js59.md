@@ -46,7 +46,7 @@ Landed on 2026-06-17, with post-P6 cleanup on 2026-06-18:
 - `instanceof`, `Object.prototype.toString`, implicit prototype synthesis, prototype method dispatch, util/assert predicates, and EventEmitter error handling now use enum identity or explicit prototype links instead of marker reads/string duck-typing.
 - `Function.prototype[@@hasInstance]` now treats constructor-like class MAPs as callable constructors and delegates to ordinary prototype-chain identity instead of rejecting them before `instanceof` can run its class-map path.
 - Class constructor maps synthesize `Function.prototype` through implicit-prototype lookup, and map shape rebuilds preserve `TypeMap::js_class` so wrapper prototypes keep their brand after delete/redefine operations.
-- Added `test/js/props/metadata_class_identity.{js,txt}` and documented it in `test/js/props/README.md`.
+- Added `test/node/metadata_class_identity.{js,txt}` and documented it in `test/js/props/README.md`.
 - P5 deleted/tombstone centralization is implemented.
 - Added `js_own_shape_slot_status`, returning `ABSENT`, `DELETED`, `DATA`, or `ACCESSOR` for MAP storage, FUNC `properties_map` storage, and ARRAY companion-map storage.
 - Ordinary get/has/descriptor/enumeration/propertyIsEnumerable, array companion-map sparse/index reads, descriptor application, and ordinary delete paths now use `JSPD_DELETED` through one shape-slot status model. Retained raw hole values are recognized only for dense-array compatibility/defensive reads.
@@ -83,7 +83,7 @@ make build-test
 ./test/test_js_gtest.exe --gtest_brief=1
 ./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/js59_p3_regressions.txt --jobs=1 --batch-chunk-size=1 --async-chunk-size=1 --write-failures=temp/js59_p3_regressions_failures.tsv
 make test262-baseline
-./lambda.exe js test/js/props/metadata_class_identity.js --no-log
+./lambda.exe js test/node/metadata_class_identity.js --no-log
 make build-test
 ./lambda.exe js test/js/props/metadata_delete_shape_status.js --no-log
 ./test/test_js_gtest.exe '--gtest_filter=*metadata_delete_shape_status*' --gtest_brief=1

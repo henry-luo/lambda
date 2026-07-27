@@ -919,7 +919,7 @@ verify-jube-package: package-jube
 	@cd release-standard && ./lambda js -e "let z = require('zlib'); console.log(z.gunzipSync(z.gzipSync(Buffer.from('jube'))).toString())" --no-log | rg -x "jube"
 	@cd release-standard && ./lambda js -e "console.log(require('zlib').crc32(Buffer.from('jube')))" --no-log | rg -x "1308032562"
 	@cd release-standard && ./lambda js -e "console.log(require('buffer').Buffer === Buffer)" --no-log | rg -x "true"
-	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/js/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
+	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/node/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'), typeof require('dns').lookup)" --no-log | rg -x "4 function"
 	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
 
@@ -969,75 +969,81 @@ test-node-module-architecture-checker:
 	@python3 utils/test_node_module_architecture_checker.py
 	@python3 utils/check_node_module_architecture.py --require-module-binary
 
+# Node module coverage must stay independent from JavaScript runtime coverage.
+.PHONY: test-js-node-test-separation
+test-js-node-test-separation:
+	@python3 utils/check_js_node_test_separation.py
+
 # N2 fs-pilot gate: readFile/writeFile must keep their session-owned Jube work
 # completion behavior both normally and under the forced-GC lifetime probe.
-test-jube-node-fs-async-work: build
-	@./lambda.exe js test/js/fs_basic.js --no-log | diff -u test/js/fs_basic.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/fs_basic.js --no-log | diff -u test/js/fs_basic.txt -
-	@./lambda.exe js test/js/jube_fs_async_work.js --no-log | diff -u test/js/jube_fs_async_work.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_async_work.js --no-log | diff -u test/js/jube_fs_async_work.txt -
-	@./lambda.exe js test/js/jube_fs_permission_registry.js --permission --no-log | diff -u test/js/jube_fs_permission_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_permission_registry.js --permission --no-log | diff -u test/js/jube_fs_permission_registry.txt -
-	@./lambda.exe js test/js/jube_fs_async_write_work.js --no-log | diff -u test/js/jube_fs_async_write_work.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_async_write_work.js --no-log | diff -u test/js/jube_fs_async_write_work.txt -
-	@./lambda.exe js test/js/jube_fs_append_registry.js --no-log | diff -u test/js/jube_fs_append_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_append_registry.js --no-log | diff -u test/js/jube_fs_append_registry.txt -
-	@./lambda.exe js test/js/jube_fs_promises_registry.js --no-log | diff -u test/js/jube_fs_promises_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_promises_registry.js --no-log | diff -u test/js/jube_fs_promises_registry.txt -
-	@./lambda.exe js test/js/jube_fs_directory_registry.js --no-log | diff -u test/js/jube_fs_directory_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_registry.js --no-log | diff -u test/js/jube_fs_directory_registry.txt -
-	@./lambda.exe js test/js/jube_fs_filehandle_registry.js --no-log | diff -u test/js/jube_fs_filehandle_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_filehandle_registry.js --no-log | diff -u test/js/jube_fs_filehandle_registry.txt -
-	@./lambda.exe js test/js/jube_fs_stats_registry.js --no-log | diff -u test/js/jube_fs_stats_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_stats_registry.js --no-log | diff -u test/js/jube_fs_stats_registry.txt -
-	@./lambda.exe js test/js/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_callback_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_callback_registry.txt -
-	@./lambda.exe js test/js/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_io_callback_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_io_callback_registry.txt -
-	@./lambda.exe js test/js/jube_fs_directory_callback_registry.js --no-log | diff -u test/js/jube_fs_directory_callback_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_callback_registry.js --no-log | diff -u test/js/jube_fs_directory_callback_registry.txt -
-	@./lambda.exe js test/js/jube_fs_directory_promises_registry.js --no-log | diff -u test/js/jube_fs_directory_promises_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_promises_registry.js --no-log | diff -u test/js/jube_fs_directory_promises_registry.txt -
-	@./lambda.exe js test/js/jube_fs_access_registry.js --no-log | diff -u test/js/jube_fs_access_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_access_registry.js --no-log | diff -u test/js/jube_fs_access_registry.txt -
-	@./lambda.exe js test/js/jube_fs_chmod_registry.js --no-log | diff -u test/js/jube_fs_chmod_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_chmod_registry.js --no-log | diff -u test/js/jube_fs_chmod_registry.txt -
-	@./lambda.exe js test/js/jube_fs_copy_file_registry.js --no-log | diff -u test/js/jube_fs_copy_file_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_copy_file_registry.js --no-log | diff -u test/js/jube_fs_copy_file_registry.txt -
-	@./lambda.exe js test/js/jube_fs_truncate_registry.js --no-log | diff -u test/js/jube_fs_truncate_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_truncate_registry.js --no-log | diff -u test/js/jube_fs_truncate_registry.txt -
-	@./lambda.exe js test/js/jube_fs_rm_registry.js --no-log | diff -u test/js/jube_fs_rm_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_rm_registry.js --no-log | diff -u test/js/jube_fs_rm_registry.txt -
-	@./lambda.exe js test/js/jube_fs_realpath_registry.js --no-log | diff -u test/js/jube_fs_realpath_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_realpath_registry.js --no-log | diff -u test/js/jube_fs_realpath_registry.txt -
-	@./lambda.exe js test/js/jube_fs_mkdtemp_registry.js --no-log | diff -u test/js/jube_fs_mkdtemp_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_mkdtemp_registry.js --no-log | diff -u test/js/jube_fs_mkdtemp_registry.txt -
-	@./lambda.exe js test/js/jube_fs_link_registry.js --no-log | diff -u test/js/jube_fs_link_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_link_registry.js --no-log | diff -u test/js/jube_fs_link_registry.txt -
-	@./lambda.exe js test/js/jube_fs_vector_registry.js --no-log | diff -u test/js/jube_fs_vector_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_vector_registry.js --no-log | diff -u test/js/jube_fs_vector_registry.txt -
-	@./lambda.exe js test/js/jube_fs_symlink_registry.js --no-log | diff -u test/js/jube_fs_symlink_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_symlink_registry.js --no-log | diff -u test/js/jube_fs_symlink_registry.txt -
-	@./lambda.exe js test/js/jube_fs_watch_stub_registry.js --no-log | diff -u test/js/jube_fs_watch_stub_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_watch_stub_registry.js --no-log | diff -u test/js/jube_fs_watch_stub_registry.txt -
-	@./lambda.exe js test/js/jube_fs_legacy_stub_registry.js --no-log | diff -u test/js/jube_fs_legacy_stub_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_legacy_stub_registry.js --no-log | diff -u test/js/jube_fs_legacy_stub_registry.txt -
-	@./lambda.exe js test/js/jube_fs_statfs_registry.js --no-log | diff -u test/js/jube_fs_statfs_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_statfs_registry.js --no-log | diff -u test/js/jube_fs_statfs_registry.txt -
-	@./lambda.exe js test/js/jube_fs_readlink_registry.js --no-log | diff -u test/js/jube_fs_readlink_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_readlink_registry.js --no-log | diff -u test/js/jube_fs_readlink_registry.txt -
-	@./lambda.exe js test/js/jube_fs_chown_registry.js --no-log | diff -u test/js/jube_fs_chown_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_chown_registry.js --no-log | diff -u test/js/jube_fs_chown_registry.txt -
-	@./lambda.exe js test/js/jube_fs_exists_registry.js --no-log | diff -u test/js/jube_fs_exists_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_exists_registry.js --no-log | diff -u test/js/jube_fs_exists_registry.txt -
-	@./lambda.exe js test/js/jube_fs_constants_registry.js --no-log | diff -u test/js/jube_fs_constants_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_constants_registry.js --no-log | diff -u test/js/jube_fs_constants_registry.txt -
-	@./lambda.exe js test/js/jube_fs_timestamp_registry.js --no-log | diff -u test/js/jube_fs_timestamp_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_timestamp_registry.js --no-log | diff -u test/js/jube_fs_timestamp_registry.txt -
-	@./lambda.exe js test/js/jube_fs_promisify_args_registry.js --no-log | diff -u test/js/jube_fs_promisify_args_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_promisify_args_registry.js --no-log | diff -u test/js/jube_fs_promisify_args_registry.txt -
-	@./lambda.exe js test/js/jube_fs_stream_factory_registry.js --no-log | diff -u test/js/jube_fs_stream_factory_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_stream_factory_registry.js --no-log | diff -u test/js/jube_fs_stream_factory_registry.txt -
+# node-fs is external, so a rebuilt host must not reuse a stale module image.
+test-jube-node-fs-async-work: build build-node-fs build-node-core
+	@./lambda.exe js test/node/fs_basic.js --no-log | diff -u test/node/fs_basic.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/fs_basic.js --no-log | diff -u test/node/fs_basic.txt -
+	@./lambda.exe js test/node/jube_fs_async_work.js --no-log | diff -u test/node/jube_fs_async_work.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_async_work.js --no-log | diff -u test/node/jube_fs_async_work.txt -
+	@./lambda.exe js test/node/jube_fs_permission_registry.js --permission --no-log | diff -u test/node/jube_fs_permission_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_permission_registry.js --permission --no-log | diff -u test/node/jube_fs_permission_registry.txt -
+	@./lambda.exe js test/node/jube_fs_async_write_work.js --no-log | diff -u test/node/jube_fs_async_write_work.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_async_write_work.js --no-log | diff -u test/node/jube_fs_async_write_work.txt -
+	@./lambda.exe js test/node/jube_fs_append_registry.js --no-log | diff -u test/node/jube_fs_append_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_append_registry.js --no-log | diff -u test/node/jube_fs_append_registry.txt -
+	@./lambda.exe js test/node/jube_fs_promises_registry.js --no-log | diff -u test/node/jube_fs_promises_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_promises_registry.js --no-log | diff -u test/node/jube_fs_promises_registry.txt -
+	@./lambda.exe js test/node/jube_fs_directory_registry.js --no-log | diff -u test/node/jube_fs_directory_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_registry.js --no-log | diff -u test/node/jube_fs_directory_registry.txt -
+	@./lambda.exe js test/node/jube_fs_filehandle_registry.js --no-log | diff -u test/node/jube_fs_filehandle_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_filehandle_registry.js --no-log | diff -u test/node/jube_fs_filehandle_registry.txt -
+	@./lambda.exe js test/node/jube_fs_stats_registry.js --no-log | diff -u test/node/jube_fs_stats_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_stats_registry.js --no-log | diff -u test/node/jube_fs_stats_registry.txt -
+	@./lambda.exe js test/node/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_callback_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_callback_registry.txt -
+	@./lambda.exe js test/node/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_io_callback_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_io_callback_registry.txt -
+	@./lambda.exe js test/node/jube_fs_directory_callback_registry.js --no-log | diff -u test/node/jube_fs_directory_callback_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_callback_registry.js --no-log | diff -u test/node/jube_fs_directory_callback_registry.txt -
+	@./lambda.exe js test/node/jube_fs_directory_promises_registry.js --no-log | diff -u test/node/jube_fs_directory_promises_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_promises_registry.js --no-log | diff -u test/node/jube_fs_directory_promises_registry.txt -
+	@./lambda.exe js test/node/jube_fs_access_registry.js --no-log | diff -u test/node/jube_fs_access_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_access_registry.js --no-log | diff -u test/node/jube_fs_access_registry.txt -
+	@./lambda.exe js test/node/jube_fs_chmod_registry.js --no-log | diff -u test/node/jube_fs_chmod_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_chmod_registry.js --no-log | diff -u test/node/jube_fs_chmod_registry.txt -
+	@./lambda.exe js test/node/jube_fs_copy_file_registry.js --no-log | diff -u test/node/jube_fs_copy_file_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_copy_file_registry.js --no-log | diff -u test/node/jube_fs_copy_file_registry.txt -
+	@./lambda.exe js test/node/jube_fs_truncate_registry.js --no-log | diff -u test/node/jube_fs_truncate_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_truncate_registry.js --no-log | diff -u test/node/jube_fs_truncate_registry.txt -
+	@./lambda.exe js test/node/jube_fs_rm_registry.js --no-log | diff -u test/node/jube_fs_rm_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_rm_registry.js --no-log | diff -u test/node/jube_fs_rm_registry.txt -
+	@./lambda.exe js test/node/jube_fs_realpath_registry.js --no-log | diff -u test/node/jube_fs_realpath_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_realpath_registry.js --no-log | diff -u test/node/jube_fs_realpath_registry.txt -
+	@./lambda.exe js test/node/jube_fs_mkdtemp_registry.js --no-log | diff -u test/node/jube_fs_mkdtemp_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_mkdtemp_registry.js --no-log | diff -u test/node/jube_fs_mkdtemp_registry.txt -
+	@./lambda.exe js test/node/jube_fs_link_registry.js --no-log | diff -u test/node/jube_fs_link_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_link_registry.js --no-log | diff -u test/node/jube_fs_link_registry.txt -
+	@./lambda.exe js test/node/jube_fs_vector_registry.js --no-log | diff -u test/node/jube_fs_vector_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_vector_registry.js --no-log | diff -u test/node/jube_fs_vector_registry.txt -
+	@./lambda.exe js test/node/jube_fs_symlink_registry.js --no-log | diff -u test/node/jube_fs_symlink_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_symlink_registry.js --no-log | diff -u test/node/jube_fs_symlink_registry.txt -
+	@./lambda.exe js test/node/jube_fs_watch_stub_registry.js --no-log | diff -u test/node/jube_fs_watch_stub_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_watch_stub_registry.js --no-log | diff -u test/node/jube_fs_watch_stub_registry.txt -
+	@./lambda.exe js test/node/jube_fs_legacy_stub_registry.js --no-log | diff -u test/node/jube_fs_legacy_stub_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_legacy_stub_registry.js --no-log | diff -u test/node/jube_fs_legacy_stub_registry.txt -
+	@./lambda.exe js test/node/jube_fs_statfs_registry.js --no-log | diff -u test/node/jube_fs_statfs_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_statfs_registry.js --no-log | diff -u test/node/jube_fs_statfs_registry.txt -
+	@./lambda.exe js test/node/jube_fs_readlink_registry.js --no-log | diff -u test/node/jube_fs_readlink_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_readlink_registry.js --no-log | diff -u test/node/jube_fs_readlink_registry.txt -
+	@./lambda.exe js test/node/jube_fs_chown_registry.js --no-log | diff -u test/node/jube_fs_chown_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_chown_registry.js --no-log | diff -u test/node/jube_fs_chown_registry.txt -
+	@./lambda.exe js test/node/jube_fs_exists_registry.js --no-log | diff -u test/node/jube_fs_exists_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_exists_registry.js --no-log | diff -u test/node/jube_fs_exists_registry.txt -
+	@./lambda.exe js test/node/jube_fs_constants_registry.js --no-log | diff -u test/node/jube_fs_constants_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_constants_registry.js --no-log | diff -u test/node/jube_fs_constants_registry.txt -
+	@./lambda.exe js test/node/jube_fs_timestamp_registry.js --no-log | diff -u test/node/jube_fs_timestamp_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_timestamp_registry.js --no-log | diff -u test/node/jube_fs_timestamp_registry.txt -
+	@./lambda.exe js test/node/jube_fs_promisify_args_registry.js --no-log | diff -u test/node/jube_fs_promisify_args_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_promisify_args_registry.js --no-log | diff -u test/node/jube_fs_promisify_args_registry.txt -
+	@./lambda.exe js test/node/jube_fs_stream_factory_registry.js --no-log | diff -u test/node/jube_fs_stream_factory_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_stream_factory_registry.js --no-log | diff -u test/node/jube_fs_stream_factory_registry.txt -
 
 # node-fs owns callback read/write behavior through the permission, domain,
 # root, and work services in both static and isolated dynamic profiles.
@@ -1047,39 +1053,39 @@ test-jube-node-fs-dynamic: build-node-fs build-node-core
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-fs-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-fs/module.json temp/node-fs-dynamic/node-fs/module.json
 	@cp modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll temp/node-fs-dynamic/node-fs/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/fs_basic.js --no-log | diff -u test/js/fs_basic.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic ./lambda.exe js test/js/jube_fs_async_work.js --no-log | diff -u test/js/jube_fs_async_work.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_permission_registry.js --permission --no-log | diff -u test/js/jube_fs_permission_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_async_write_work.js --no-log | diff -u test/js/jube_fs_async_write_work.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_append_registry.js --no-log | diff -u test/js/jube_fs_append_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_promises_registry.js --no-log | diff -u test/js/jube_fs_promises_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_registry.js --no-log | diff -u test/js/jube_fs_directory_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_filehandle_registry.js --no-log | diff -u test/js/jube_fs_filehandle_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_stats_registry.js --no-log | diff -u test/js/jube_fs_stats_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_callback_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/js/jube_fs_descriptor_io_callback_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_callback_registry.js --no-log | diff -u test/js/jube_fs_directory_callback_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_directory_promises_registry.js --no-log | diff -u test/js/jube_fs_directory_promises_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_access_registry.js --no-log | diff -u test/js/jube_fs_access_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_chmod_registry.js --no-log | diff -u test/js/jube_fs_chmod_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_copy_file_registry.js --no-log | diff -u test/js/jube_fs_copy_file_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_truncate_registry.js --no-log | diff -u test/js/jube_fs_truncate_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_rm_registry.js --no-log | diff -u test/js/jube_fs_rm_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_realpath_registry.js --no-log | diff -u test/js/jube_fs_realpath_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_mkdtemp_registry.js --no-log | diff -u test/js/jube_fs_mkdtemp_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_link_registry.js --no-log | diff -u test/js/jube_fs_link_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_vector_registry.js --no-log | diff -u test/js/jube_fs_vector_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_symlink_registry.js --no-log | diff -u test/js/jube_fs_symlink_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_watch_stub_registry.js --no-log | diff -u test/js/jube_fs_watch_stub_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_legacy_stub_registry.js --no-log | diff -u test/js/jube_fs_legacy_stub_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_statfs_registry.js --no-log | diff -u test/js/jube_fs_statfs_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_readlink_registry.js --no-log | diff -u test/js/jube_fs_readlink_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_chown_registry.js --no-log | diff -u test/js/jube_fs_chown_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_exists_registry.js --no-log | diff -u test/js/jube_fs_exists_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_constants_registry.js --no-log | diff -u test/js/jube_fs_constants_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_timestamp_registry.js --no-log | diff -u test/js/jube_fs_timestamp_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_promisify_args_registry.js --no-log | diff -u test/js/jube_fs_promisify_args_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_fs_stream_factory_registry.js --no-log | diff -u test/js/jube_fs_stream_factory_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/fs_basic.js --no-log | diff -u test/node/fs_basic.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic ./lambda.exe js test/node/jube_fs_async_work.js --no-log | diff -u test/node/jube_fs_async_work.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_permission_registry.js --permission --no-log | diff -u test/node/jube_fs_permission_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_async_write_work.js --no-log | diff -u test/node/jube_fs_async_write_work.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_append_registry.js --no-log | diff -u test/node/jube_fs_append_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_promises_registry.js --no-log | diff -u test/node/jube_fs_promises_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_registry.js --no-log | diff -u test/node/jube_fs_directory_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_filehandle_registry.js --no-log | diff -u test/node/jube_fs_filehandle_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_stats_registry.js --no-log | diff -u test/node/jube_fs_stats_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_descriptor_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_callback_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_descriptor_io_callback_registry.js --no-log | diff -u test/node/jube_fs_descriptor_io_callback_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_callback_registry.js --no-log | diff -u test/node/jube_fs_directory_callback_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_directory_promises_registry.js --no-log | diff -u test/node/jube_fs_directory_promises_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_access_registry.js --no-log | diff -u test/node/jube_fs_access_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_chmod_registry.js --no-log | diff -u test/node/jube_fs_chmod_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_copy_file_registry.js --no-log | diff -u test/node/jube_fs_copy_file_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_truncate_registry.js --no-log | diff -u test/node/jube_fs_truncate_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_rm_registry.js --no-log | diff -u test/node/jube_fs_rm_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_realpath_registry.js --no-log | diff -u test/node/jube_fs_realpath_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_mkdtemp_registry.js --no-log | diff -u test/node/jube_fs_mkdtemp_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_link_registry.js --no-log | diff -u test/node/jube_fs_link_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_vector_registry.js --no-log | diff -u test/node/jube_fs_vector_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_symlink_registry.js --no-log | diff -u test/node/jube_fs_symlink_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_watch_stub_registry.js --no-log | diff -u test/node/jube_fs_watch_stub_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_legacy_stub_registry.js --no-log | diff -u test/node/jube_fs_legacy_stub_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_statfs_registry.js --no-log | diff -u test/node/jube_fs_statfs_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_readlink_registry.js --no-log | diff -u test/node/jube_fs_readlink_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_chown_registry.js --no-log | diff -u test/node/jube_fs_chown_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_exists_registry.js --no-log | diff -u test/node/jube_fs_exists_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_constants_registry.js --no-log | diff -u test/node/jube_fs_constants_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_timestamp_registry.js --no-log | diff -u test/node/jube_fs_timestamp_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_promisify_args_registry.js --no-log | diff -u test/node/jube_fs_promisify_args_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-fs-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_fs_stream_factory_registry.js --no-log | diff -u test/node/jube_fs_stream_factory_registry.txt -
 
 test-jube-node-fs-negative: build-node-fs build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-fs --runtime-specifier fs
@@ -1090,68 +1096,68 @@ test-jube-node-net-negative: build-node-net build-node-core
 # N3 leaf gate: normal decoding plus the forced-GC namespace/constructor
 # lifetime probe after each node-core leaf moves behind Jube tables.
 test-jube-node-core-leaves: build
-	@./lambda.exe js test/js/jube_string_decoder_registry.js --no-log | diff -u test/js/jube_string_decoder_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_string_decoder_gc_namespace.js --no-log | diff -u test/js/jube_string_decoder_gc_namespace.txt -
-	@./lambda.exe js test/js/jube_querystring_registry.js --no-log | diff -u test/js/jube_querystring_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_querystring_registry.js --no-log | diff -u test/js/jube_querystring_registry.txt -
-	@./lambda.exe js test/js/jube_os_registry.js --no-log | diff -u test/js/jube_os_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_os_registry.js --no-log | diff -u test/js/jube_os_registry.txt -
-	@./lambda.exe js test/js/jube_url_registry.js --no-log | diff -u test/js/jube_url_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_url_registry.js --no-log | diff -u test/js/jube_url_registry.txt -
-	@./lambda.exe js test/js/jube_events_registry.js --no-log | diff -u test/js/jube_events_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_events_gc_registry.js --no-log | diff -u test/js/jube_events_gc_registry.txt -
-	@./lambda.exe js test/js/jube_punycode_registry.js --no-log | diff -u test/js/jube_punycode_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_punycode_registry.js --no-log | diff -u test/js/jube_punycode_registry.txt -
-	@./lambda.exe js test/js/jube_timers_promises_registry.js --no-log | diff -u test/js/jube_timers_promises_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_timers_promises_registry.js --no-log | diff -u test/js/jube_timers_promises_registry.txt -
-	@./lambda.exe js test/js/jube_constants_registry.js --no-log | diff -u test/js/jube_constants_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_constants_registry.js --no-log | diff -u test/js/jube_constants_registry.txt -
-	@./lambda.exe js test/js/jube_v8_registry.js --no-log | diff -u test/js/jube_v8_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_v8_registry.js --no-log | diff -u test/js/jube_v8_registry.txt -
-	@./lambda.exe js test/js/jube_perf_hooks_registry.js --no-log | diff -u test/js/jube_perf_hooks_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_perf_hooks_registry.js --no-log | diff -u test/js/jube_perf_hooks_registry.txt -
-	@./lambda.exe js test/js/jube_workers_registry.js --no-log | diff -u test/js/jube_workers_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_workers_registry.js --no-log | diff -u test/js/jube_workers_registry.txt -
+	@./lambda.exe js test/node/jube_string_decoder_registry.js --no-log | diff -u test/node/jube_string_decoder_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_string_decoder_gc_namespace.js --no-log | diff -u test/node/jube_string_decoder_gc_namespace.txt -
+	@./lambda.exe js test/node/jube_querystring_registry.js --no-log | diff -u test/node/jube_querystring_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_querystring_registry.js --no-log | diff -u test/node/jube_querystring_registry.txt -
+	@./lambda.exe js test/node/jube_os_registry.js --no-log | diff -u test/node/jube_os_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_os_registry.js --no-log | diff -u test/node/jube_os_registry.txt -
+	@./lambda.exe js test/node/jube_url_registry.js --no-log | diff -u test/node/jube_url_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_url_registry.js --no-log | diff -u test/node/jube_url_registry.txt -
+	@./lambda.exe js test/node/jube_events_registry.js --no-log | diff -u test/node/jube_events_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_events_gc_registry.js --no-log | diff -u test/node/jube_events_gc_registry.txt -
+	@./lambda.exe js test/node/jube_punycode_registry.js --no-log | diff -u test/node/jube_punycode_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_punycode_registry.js --no-log | diff -u test/node/jube_punycode_registry.txt -
+	@./lambda.exe js test/node/jube_timers_promises_registry.js --no-log | diff -u test/node/jube_timers_promises_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_timers_promises_registry.js --no-log | diff -u test/node/jube_timers_promises_registry.txt -
+	@./lambda.exe js test/node/jube_constants_registry.js --no-log | diff -u test/node/jube_constants_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_constants_registry.js --no-log | diff -u test/node/jube_constants_registry.txt -
+	@./lambda.exe js test/node/jube_v8_registry.js --no-log | diff -u test/node/jube_v8_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_v8_registry.js --no-log | diff -u test/node/jube_v8_registry.txt -
+	@./lambda.exe js test/node/jube_perf_hooks_registry.js --no-log | diff -u test/node/jube_perf_hooks_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_perf_hooks_registry.js --no-log | diff -u test/node/jube_perf_hooks_registry.txt -
+	@./lambda.exe js test/node/jube_workers_registry.js --no-log | diff -u test/node/jube_workers_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_workers_registry.js --no-log | diff -u test/node/jube_workers_registry.txt -
 	@./lambda.exe js test/node/worker_message_port_lifecycle.js --no-log | diff -u test/node/worker_message_port_lifecycle.txt -
-	@./lambda.exe js test/js/jube_tty_registry.js --no-log | diff -u test/js/jube_tty_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_tty_registry.js --no-log | diff -u test/js/jube_tty_registry.txt -
-	@./lambda.exe js test/js/jube_module_registry.js --no-log | diff -u test/js/jube_module_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_module_registry.js --no-log | diff -u test/js/jube_module_registry.txt -
-	@./lambda.exe js test/js/jube_vm_registry.js --no-log | diff -u test/js/jube_vm_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_vm_registry.js --no-log | diff -u test/js/jube_vm_registry.txt -
-	@./lambda.exe js test/js/jube_runtime_services_registry.js --no-log | diff -u test/js/jube_runtime_services_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_runtime_services_registry.js --no-log | diff -u test/js/jube_runtime_services_registry.txt -
-	@./lambda.exe js test/js/jube_domain_registry.js --no-log | diff -u test/js/jube_domain_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_domain_registry.js --no-log | diff -u test/js/jube_domain_registry.txt -
-	@./lambda.exe js test/js/jube_cluster_registry.js --no-log | diff -u test/js/jube_cluster_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_cluster_registry.js --no-log | diff -u test/js/jube_cluster_registry.txt -
-	@./lambda.exe js test/js/jube_readline_test_registry.js --no-log | diff -u test/js/jube_readline_test_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_readline_test_registry.js --no-log | diff -u test/js/jube_readline_test_registry.txt -
-	@./lambda.exe js test/js/jube_buffer_registry.js --no-log | diff -u test/js/jube_buffer_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_buffer_registry.js --no-log | diff -u test/js/jube_buffer_registry.txt -
-	@./lambda.exe js test/js/jube_util_registry.js --no-log | diff -u test/js/jube_util_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_util_registry.js --no-log | diff -u test/js/jube_util_registry.txt -
-	@./lambda.exe js test/js/jube_assert_registry.js --no-log | diff -u test/js/jube_assert_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_assert_registry.js --no-log | diff -u test/js/jube_assert_registry.txt -
-	@./lambda.exe js test/js/jube_stream_registry.js --no-log | diff -u test/js/jube_stream_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_stream_registry.js --no-log | diff -u test/js/jube_stream_registry.txt -
-	@./lambda.exe js test/js/jube_repl_registry.js --no-log | diff -u test/js/jube_repl_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_repl_registry.js --no-log | diff -u test/js/jube_repl_registry.txt -
-	@./lambda.exe js test/js/jube_diagnostics_channel_registry.js --no-log | diff -u test/js/jube_diagnostics_channel_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_diagnostics_channel_registry.js --no-log | diff -u test/js/jube_diagnostics_channel_registry.txt -
-	@./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
-	@./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
-	@./lambda.exe js test/js/jube_net_resource_registry.js --no-log | diff -u test/js/jube_net_resource_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_resource_registry.js --no-log | diff -u test/js/jube_net_resource_registry.txt -
-	@./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
-	@./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
-	@./lambda.exe js test/js/jube_cluster_online_hook.js --no-log | diff -u test/js/jube_cluster_online_hook.txt -
-	@./lambda.exe js test/js/jube_console_formatter_hook.js --no-log | diff -u test/js/jube_console_formatter_hook.txt -
-	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/js/jube_console_minimal_formatter.js --no-log | diff -u test/js/jube_console_minimal_formatter.txt -
+	@./lambda.exe js test/node/jube_tty_registry.js --no-log | diff -u test/node/jube_tty_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_tty_registry.js --no-log | diff -u test/node/jube_tty_registry.txt -
+	@./lambda.exe js test/node/jube_module_registry.js --no-log | diff -u test/node/jube_module_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_module_registry.js --no-log | diff -u test/node/jube_module_registry.txt -
+	@./lambda.exe js test/node/jube_vm_registry.js --no-log | diff -u test/node/jube_vm_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_vm_registry.js --no-log | diff -u test/node/jube_vm_registry.txt -
+	@./lambda.exe js test/node/jube_runtime_services_registry.js --no-log | diff -u test/node/jube_runtime_services_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_runtime_services_registry.js --no-log | diff -u test/node/jube_runtime_services_registry.txt -
+	@./lambda.exe js test/node/jube_domain_registry.js --no-log | diff -u test/node/jube_domain_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_domain_registry.js --no-log | diff -u test/node/jube_domain_registry.txt -
+	@./lambda.exe js test/node/jube_cluster_registry.js --no-log | diff -u test/node/jube_cluster_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_cluster_registry.js --no-log | diff -u test/node/jube_cluster_registry.txt -
+	@./lambda.exe js test/node/jube_readline_test_registry.js --no-log | diff -u test/node/jube_readline_test_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_readline_test_registry.js --no-log | diff -u test/node/jube_readline_test_registry.txt -
+	@./lambda.exe js test/node/jube_buffer_registry.js --no-log | diff -u test/node/jube_buffer_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_buffer_registry.js --no-log | diff -u test/node/jube_buffer_registry.txt -
+	@./lambda.exe js test/node/jube_util_registry.js --no-log | diff -u test/node/jube_util_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_util_registry.js --no-log | diff -u test/node/jube_util_registry.txt -
+	@./lambda.exe js test/node/jube_assert_registry.js --no-log | diff -u test/node/jube_assert_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_assert_registry.js --no-log | diff -u test/node/jube_assert_registry.txt -
+	@./lambda.exe js test/node/jube_stream_registry.js --no-log | diff -u test/node/jube_stream_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_stream_registry.js --no-log | diff -u test/node/jube_stream_registry.txt -
+	@./lambda.exe js test/node/jube_repl_registry.js --no-log | diff -u test/node/jube_repl_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_repl_registry.js --no-log | diff -u test/node/jube_repl_registry.txt -
+	@./lambda.exe js test/node/jube_diagnostics_channel_registry.js --no-log | diff -u test/node/jube_diagnostics_channel_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_diagnostics_channel_registry.js --no-log | diff -u test/node/jube_diagnostics_channel_registry.txt -
+	@./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
+	@./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
+	@./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
+	@./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
+	@./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
+	@./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
+	@./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
+	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/node/jube_console_minimal_formatter.js --no-log | diff -u test/node/jube_console_minimal_formatter.txt -
 
 # Static-to-dynamic parity gate. The isolated root deliberately has no
 # module-set file, so node-core cannot be registered from the executable.
@@ -1165,50 +1171,50 @@ test-jube-node-core-dynamic: build-node-core build-node-fs build-node-net
 	@cp modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll temp/node-core-dynamic/node-fs/ 2>/dev/null || true
 	@cp modules/node-net/module.json temp/node-core-dynamic/node-net/module.json
 	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-core-dynamic/node-net/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_constants_registry.js --no-log | diff -u test/js/jube_constants_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_timers_promises_registry.js --no-log | diff -u test/js/jube_timers_promises_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_v8_registry.js --no-log | diff -u test/js/jube_v8_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_v8_registry.js --no-log | diff -u test/js/jube_v8_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_perf_hooks_registry.js --no-log | diff -u test/js/jube_perf_hooks_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_perf_hooks_registry.js --no-log | diff -u test/js/jube_perf_hooks_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_workers_registry.js --no-log | diff -u test/js/jube_workers_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_workers_registry.js --no-log | diff -u test/js/jube_workers_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_tty_registry.js --no-log | diff -u test/js/jube_tty_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_tty_registry.js --no-log | diff -u test/js/jube_tty_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_module_registry.js --no-log | diff -u test/js/jube_module_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_module_registry.js --no-log | diff -u test/js/jube_module_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_vm_registry.js --no-log | diff -u test/js/jube_vm_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_vm_registry.js --no-log | diff -u test/js/jube_vm_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_runtime_services_registry.js --no-log | diff -u test/js/jube_runtime_services_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_runtime_services_registry.js --no-log | diff -u test/js/jube_runtime_services_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_domain_registry.js --no-log | diff -u test/js/jube_domain_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_domain_registry.js --no-log | diff -u test/js/jube_domain_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_cluster_registry.js --no-log | diff -u test/js/jube_cluster_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_cluster_registry.js --no-log | diff -u test/js/jube_cluster_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_readline_test_registry.js --no-log | diff -u test/js/jube_readline_test_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_readline_test_registry.js --no-log | diff -u test/js/jube_readline_test_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_buffer_registry.js --no-log | diff -u test/js/jube_buffer_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_buffer_registry.js --no-log | diff -u test/js/jube_buffer_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_util_registry.js --no-log | diff -u test/js/jube_util_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_util_registry.js --no-log | diff -u test/js/jube_util_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_assert_registry.js --no-log | diff -u test/js/jube_assert_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_assert_registry.js --no-log | diff -u test/js/jube_assert_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_stream_registry.js --no-log | diff -u test/js/jube_stream_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_stream_registry.js --no-log | diff -u test/js/jube_stream_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_repl_registry.js --no-log | diff -u test/js/jube_repl_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_repl_registry.js --no-log | diff -u test/js/jube_repl_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_diagnostics_channel_registry.js --no-log | diff -u test/js/jube_diagnostics_channel_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_diagnostics_channel_registry.js --no-log | diff -u test/js/jube_diagnostics_channel_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_cluster_online_hook.js --no-log | diff -u test/js/jube_cluster_online_hook.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_console_formatter_hook.js --no-log | diff -u test/js/jube_console_formatter_hook.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_constants_registry.js --no-log | diff -u test/node/jube_constants_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_timers_promises_registry.js --no-log | diff -u test/node/jube_timers_promises_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_v8_registry.js --no-log | diff -u test/node/jube_v8_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_v8_registry.js --no-log | diff -u test/node/jube_v8_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_perf_hooks_registry.js --no-log | diff -u test/node/jube_perf_hooks_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_perf_hooks_registry.js --no-log | diff -u test/node/jube_perf_hooks_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_workers_registry.js --no-log | diff -u test/node/jube_workers_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_workers_registry.js --no-log | diff -u test/node/jube_workers_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_tty_registry.js --no-log | diff -u test/node/jube_tty_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_tty_registry.js --no-log | diff -u test/node/jube_tty_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_module_registry.js --no-log | diff -u test/node/jube_module_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_module_registry.js --no-log | diff -u test/node/jube_module_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_vm_registry.js --no-log | diff -u test/node/jube_vm_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_vm_registry.js --no-log | diff -u test/node/jube_vm_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_runtime_services_registry.js --no-log | diff -u test/node/jube_runtime_services_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_runtime_services_registry.js --no-log | diff -u test/node/jube_runtime_services_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_domain_registry.js --no-log | diff -u test/node/jube_domain_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_domain_registry.js --no-log | diff -u test/node/jube_domain_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_cluster_registry.js --no-log | diff -u test/node/jube_cluster_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_cluster_registry.js --no-log | diff -u test/node/jube_cluster_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_readline_test_registry.js --no-log | diff -u test/node/jube_readline_test_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_readline_test_registry.js --no-log | diff -u test/node/jube_readline_test_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_buffer_registry.js --no-log | diff -u test/node/jube_buffer_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_buffer_registry.js --no-log | diff -u test/node/jube_buffer_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_util_registry.js --no-log | diff -u test/node/jube_util_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_util_registry.js --no-log | diff -u test/node/jube_util_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_assert_registry.js --no-log | diff -u test/node/jube_assert_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_assert_registry.js --no-log | diff -u test/node/jube_assert_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_stream_registry.js --no-log | diff -u test/node/jube_stream_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_stream_registry.js --no-log | diff -u test/node/jube_stream_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_repl_registry.js --no-log | diff -u test/node/jube_repl_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_repl_registry.js --no-log | diff -u test/node/jube_repl_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_diagnostics_channel_registry.js --no-log | diff -u test/node/jube_diagnostics_channel_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_diagnostics_channel_registry.js --no-log | diff -u test/node/jube_diagnostics_channel_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 
 # N4 delivery proof: a no-module-set root activates node-zlib and its node-core
 # dependency in dependency order; neither provider is statically registered.
@@ -1218,8 +1224,8 @@ test-jube-node-zlib-dynamic: build-node-zlib build-node-core
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/js/jube_zlib_dynamic_registry.js --no-log | diff -u test/js/jube_zlib_dynamic_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_zlib_dynamic_registry.js --no-log | diff -u test/js/jube_zlib_dynamic_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
 
 test-jube-node-zlib-negative: build-node-zlib build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-zlib --runtime-specifier zlib
@@ -1234,13 +1240,13 @@ test-jube-node-zlib-parity: build-node-zlib build-node-core
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing ./lambda.exe js ../../test/js/jube_zlib_parity_registry.js --no-log > static.out
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/js/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
-	@diff -u test/js/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static.out
+	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static.out
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
+	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static.out
 	@diff -u temp/node-zlib-static-checkpoint/static.out temp/node-zlib-dynamic/dynamic.out
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js ../../test/js/jube_zlib_parity_registry.js --no-log > static-forced.out
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic-forced.out
-	@diff -u test/js/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static-forced.out
+	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static-forced.out
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic-forced.out
+	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static-forced.out
 	@diff -u temp/node-zlib-static-checkpoint/static-forced.out temp/node-zlib-dynamic/dynamic-forced.out
 
 release-jube: package-jube

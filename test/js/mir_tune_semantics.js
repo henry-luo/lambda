@@ -35,14 +35,6 @@ let keyOrder = 0;
 const computedRecord = {[++keyOrder]: ++keyOrder};
 if (keyOrder !== 2 || computedRecord[1] !== 2) throw new Error("computed key order");
 
-const tuneBuffer = Buffer.allocUnsafe(10);
-const tuneNestedSlices = [2].map(function(size) {
-    return tuneBuffer.slice(0, size);
-});
-if (!Buffer.isBuffer(tuneNestedSlices[0]) || tuneNestedSlices[0].length !== 2) {
-    throw new Error("nested Array builtin must not change Buffer species");
-}
-
 function tuneMetadata(first, second = 2) { return first + second; }
 if (tuneMetadata.length !== 1 || tuneMetadata.name !== "tuneMetadata" ||
     !Function.prototype.toString.call(tuneMetadata).includes("tuneMetadata")) {

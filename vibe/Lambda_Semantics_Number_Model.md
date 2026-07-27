@@ -360,7 +360,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 ### 9.1 Verification snapshot (2026-07-10)
 
 - `make build` — pass.
-- Focused fixtures — pass: `test/js/v9_number_json.js`, `test/js/fs_basic.js`, `proc_sized_array_widening.ls`, `type_occurrence.ls`.
+- Focused fixtures — pass: `test/js/v9_number_json.js`, `test/node/fs_basic.js`, `proc_sized_array_widening.ls`, `type_occurrence.ls`.
 - Focused gtests — pass: `JavaScriptTests/JsFileTest.Run/v9_number_json`, `JavaScriptTests/JsFileTest.Run/fs_basic`.
 - Focused Node official fs/http set — pass: `test-file-write-stream.js`, `test-http-max-sockets.js`, `test-http-client-race.js`, `test-http-default-encoding.js`, `test-http-write-callbacks.js`.
 - `make test-lambda-baseline` — pass: 3282/3282.

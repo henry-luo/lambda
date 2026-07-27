@@ -1191,7 +1191,7 @@ semantics.
 | Phase | Test File | Scenarios |
 |:-----:|-----------|-----------|
 | 3 | `test/js/timer_uv.js` | Timer precision, many concurrent timers (>256), zero-delay ordering |
-| 4 | `test/js/fs_basic.js` | `readFile` callback, `writeFile` + verify, `stat`, error handling |
+| 4 | `test/node/fs_basic.js` | `readFile` callback, `writeFile` + verify, `stat`, error handling |
 | 4 | `test/js/fs_promises.js` | `await fs.promises.readFile()`, error rejection |
 | 5 | `test/js/fetch_basic.js` | GET request, POST with body, error handling, response.json() |
 | 6 | `test/js/child_process.js` | `exec("echo hello")`, exit code, stderr capture |
@@ -1242,7 +1242,7 @@ semantics.
 | `lib/serve/tls_uv.c` | ~300 | TLS handler on libuv + mbedTLS (replaces tls_handler.c) |
 | `lib/serve/llhttp.h` | ~200 | Vendored HTTP parser (header) |
 | `lib/serve/llhttp.c` | ~4,000 | Vendored HTTP parser (implementation) |
-| `test/js/fs_basic.js` | ~50 | File I/O tests |
+| `test/node/fs_basic.js` | ~50 | File I/O tests |
 | `test/js/fetch_basic.js` | ~50 | HTTP fetch tests |
 | `test/js/microtask_order.js` | ~30 | Microtask ordering tests |
 | `test/js/generator_basic.js` | ~60 | Generator tests |

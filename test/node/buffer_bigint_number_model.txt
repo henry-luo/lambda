@@ -1,0 +1,4 @@
+buffer biguint64: bigint ffffffffffffffff
+buffer bigint64: bigint -1
+buffer bigint64 min: bigint -9223372036854775808
+buffer bigint64 string: TypeError
