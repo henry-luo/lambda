@@ -89,7 +89,7 @@ historical bug classes demonstrate three distinct blind spots:
 | Lambda | always unless `--no-log` | `temp/mir_dump.txt`; `LAMBDA_MIR_DUMP_PATH` overrides | after emitter/frame finalization, before `MIR_finish_func` | `#ifndef NDEBUG` — `lambda/transpile-mir.cpp:14430` |
 | JS | `JS_MIR_DUMP=1` | fixed `temp/js_mir_dump.txt` | after `transpile_js_mir_ast`, which has already called `MIR_finish_func`/`MIR_finish_module` | `#ifndef NDEBUG` — `lambda/js/js_mir_entrypoints_require.cpp:766` |
 | TS | `JS_MIR_DUMP=1` | fixed `temp/ts_mir_dump.txt` | likewise post-finish | same file `:275` |
-| Python / Bash / Ruby | always in debug | `temp/py_mir_dump.txt` etc. | frontend-specific | `lambda/py/transpile_py_mir.cpp:7820` and siblings |
+| Python / Bash / Ruby | always in debug | `temp/py_mir_dump.txt` etc. | frontend-specific | `lambda/module/py/transpile_py_mir.cpp:7820` and siblings |
 
 Facts that shape the design:
 

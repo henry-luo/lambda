@@ -59,7 +59,7 @@ families:
 | P1.1 | Lambda public wrapper epilogue — `transpile-mir.cpp:12214` | boxed-ABI caller donated no home; wrapper restores its watermark on exit |
 | P1.2 | JS frame epilogue without incoming home — `js_mir_hashmap_scope_utils.cpp:431` | same (public entries only; internal calls take the `incoming_scalar_home` branch) |
 | P1.3 | JS public wrapper lowering — `js_mir_function_class_lowering.cpp:636` | same |
-| P1.4 | Python public wrapper — `py/transpile_py_mir.cpp:611` | same |
+| P1.4 | Python public wrapper — `module/py/transpile_py_mir.cpp:611` | same |
 | P1.5 | `js_throw_value` — `js_runtime_state.cpp:379` | exception slot outlives the throwing frame |
 | P1.6 | `bind()` `bound_this` — `js_runtime.cpp:13555, 13653` | bound function object outlives all frames |
 | P1.7 | Jube host-data API — `jube_registry.cpp:1128` (`jube_host_data_item_heap_rehome`) | convenience "make safe to hold" entry exposed to native modules |
@@ -76,8 +76,8 @@ families:
 | `js/js_fs.cpp` (stat times) | 2 |
 | `js/js_mir_entrypoints_require.cpp` | 2 |
 | `js/js_canvas.cpp` (TextMetrics) | 1 |
-| `py/py_builtins.cpp` | 4 |
-| `py/py_bigint.cpp` | 1 |
+| `module/py/py_builtins.cpp` | 4 |
+| `module/py/py_bigint.cpp` | 1 |
 | `module/radiant/radiant_module.cpp` | 1 (`heap_calloc`) |
 
 Since `lambda_float_ptr_to_item` returns the inline encoding for every normal

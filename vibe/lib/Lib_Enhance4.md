@@ -171,7 +171,7 @@ void str_skip_to_line_end(const char** s, size_t* len);
 - **`%02x` hex logging** — cosmetic; `lib/hex.h` already covers the algorithmic
   need.
 - **weak `rand()` Math.random** ([js_runtime.cpp](../../lambda/js/js_runtime.cpp),
-  [rb_runtime.cpp](../../lambda/rb/rb_runtime.cpp)) — intentionally a separate
+  [rb_runtime.cpp](../../lambda/module/rb/rb_runtime.cpp)) — intentionally a separate
   quality tier from `crypto_random_bytes`; do not conflate.
 
 ---

@@ -191,7 +191,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "../bash/bash_heredoc.h"
 #endif
 #ifdef LAMBDA_RUBY
-#include "../rb/rb_runtime.h"
+#include "../module/rb/rb_runtime.h"
 #endif
 #include "../js/js_dom.h"
 #include "../js/js_typed_array.h"

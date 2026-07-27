@@ -525,7 +525,7 @@ let result = ruby_utils.compute(42)
 regression tests pass (758/759 lambda, 32/32 radiant — 1 pre-existing test262 failure).
 
 - [x] Set up `tree-sitter-ruby` grammar and build static library
-- [x] Create `lambda/rb/` directory with initial files
+- [x] Create `lambda/module/rb/` directory with initial files
 - [x] `rb_ast.hpp` — AST node type enum and struct definitions (420 LOC)
 - [x] `rb_transpiler.hpp` — transpiler context struct (112 LOC)
 - [x] `build_rb_ast.cpp` — CST-to-AST builder for core expressions and statements (1,783 LOC)
@@ -533,7 +533,7 @@ regression tests pass (758/759 lambda, 32/32 radiant — 1 pre-existing test262 
 - [x] `rb_runtime.cpp` — arithmetic, comparison, truthiness, `puts`/`p`/`print` (814 LOC)
 - [x] `rb_scope.cpp` — scope management (local, global, constant) (230 LOC)
 - [x] CLI integration in `main.cpp` — `./lambda.exe rb script.rb`
-- [x] Build system: add `lambda/rb` to `build_lambda_config.json` source_dirs
+- [x] Build system: add `lambda/module/rb` to `build_lambda_config.json` source_dirs
 - [x] Build system: add `tree-sitter-ruby` to libraries
 - [x] Register `rb_*` runtime functions in `sys_func_registry.c` (60+ JitImport entries)
 - [x] `rb_print.cpp` — Ruby-specific output formatting (596 LOC)
@@ -701,7 +701,7 @@ Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 
 ## 7. File Map
 
-### New Files (in `lambda/rb/`)
+### New Files (in `lambda/module/rb/`)
 
 | File | Est. LOC | Actual LOC | Status | Purpose |
 |------|---------|-----------|--------|---------|
@@ -721,8 +721,8 @@ Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 
 | File | Changes | Status |
 |------|--------|--------|
-| `build_lambda_config.json` | Add `lambda/rb` to `source_dirs`, add `tree-sitter-ruby` library | ✅ Done |
-| `lambda/main.cpp` | Add `rb` CLI command, `#include "rb/rb_transpiler.hpp"` | ✅ Done |
+| `build_lambda_config.json` | Add `lambda/module/rb` to `source_dirs`, add `tree-sitter-ruby` library | ✅ Done |
+| `lambda/main.cpp` | Add `rb` CLI command, `#include "module/rb/rb_transpiler.hpp"` | ✅ Done |
 | `lambda/sys_func_registry.c` | Register 102 `rb_*` runtime functions for MIR import resolution | ✅ Done |
 | `lambda/module_registry.cpp` | Add `"ruby"` as recognized `source_lang`; add `rb_build_namespace` | Phase 2 |
 | `lambda/module_registry.h` | Declare `rb_build_namespace` | Phase 2 |
@@ -746,7 +746,7 @@ tree-sitter grammars (`grammar.js`, `src/parser.c`, `bindings/c/`, etc.).
 {
     "source_dirs": [
         // ... existing ...
-        "lambda/rb"                              // NEW
+        "lambda/module/rb"                              // NEW
     ],
     "includes": [
         // ... existing ...

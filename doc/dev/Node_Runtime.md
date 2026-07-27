@@ -297,7 +297,7 @@ For nested `require()` calls, `js_save_module_vars()` / `js_restore_module_vars(
 
 ## 5. NPM Client
 
-The NPM client is implemented in `lambda/npm/` as a set of C files providing package installation, dependency resolution, and registry access.
+The NPM client is implemented in `lambda/module/npm/` as a set of C files providing package installation, dependency resolution, and registry access.
 
 ### 5.1 Architecture
 
@@ -455,7 +455,7 @@ When running a package binary (like `npx`):
 | `js_readline.cpp` | ~130 | Readline interface |
 | `js_string_decoder.cpp` | ~150 | String decoder |
 
-### NPM Client (`lambda/npm/`)
+### NPM Client (`lambda/module/npm/`)
 
 | File | Purpose |
 |------|---------|

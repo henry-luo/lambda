@@ -685,7 +685,7 @@ lambda/js/                           # Phase 1 — all ✅
 ├── polyfills/
 │   └── events.js           ✅       # EventEmitter (pure JS)
 │
-lambda/npm/                          # Phase 2-3 — all ✅
+lambda/module/npm/                          # Phase 2-3 — all ✅
 ├── npm_registry.cpp        ✅       # HTTP client for registry API
 ├── npm_resolver.cpp        ✅       # Dependency resolution (semver)
 ├── npm_installer.cpp       ✅       # Download, extract, link
@@ -843,8 +843,8 @@ test/lambda/node_path.js       # const path = require('path'); assert(path.join(
 test/lambda/node_os.js         # import os from 'node:os'; assert(os.platform() !== undefined)
 test/lambda/node_fs_ext.js     # fs.realpathSync, fs.accessSync, fs.rmSync
 test/lambda/node_buffer.js     # Buffer.from('hello').toString('hex') === '68656c6c6f'
-test/lambda/npm_install.js     # Install lodash, require it, verify it works
-test/lambda/npm_resolve.js     # Package resolution with exports field
+test/lambda/module/npm_install.js     # Install lodash, require it, verify it works
+test/lambda/module/npm_resolve.js     # Package resolution with exports field
 ```
 
 ### Compatibility Testing

@@ -54,7 +54,7 @@ The table lists every **high-severity** finding plus the most consequential medi
 | 6 | **High** | PDF stream decompressors have **no output-size cap** (decompression bomb) + `compressed_len * 4` / `buffer_size *= 2` overflow | `lambda/input/pdf_decompress.cpp:32,70` | untrusted-input |
 | 7 | **High** | HTTP response serializer: 64KB **stack buffer** with unclamped `snprintf(buf+pos, sizeof-pos, …)` — headers >64KB wrap `size_t-int` → OOB stack write | `lambda/js/js_http.cpp:1660` | mem-safety |
 | 8 | **High** | HTTP **header-value injection**: only `undefined` rejected, no CRLF/control-char check → response splitting via `res.setHeader(name, userValue)` | `lambda/js/js_http.cpp:1055` | security |
-| 9 | **High** | Python function with **>16 params**: fill loop capped at 16 but `mir_param_count` / `varargs_param_offset` uncapped → uninitialized read, then OOB write past `params[20]` (stack corruption) | `lambda/py/transpile_py_mir.cpp:6784` | mem-safety |
+| 9 | **High** | Python function with **>16 params**: fill loop capped at 16 but `mir_param_count` / `varargs_param_offset` uncapped → uninitialized read, then OOB write past `params[20]` (stack corruption) | `lambda/module/py/transpile_py_mir.cpp:6784` | mem-safety |
 | 10 | **High** | Thread-local `context` left **dangling to a dead stack frame** after every script run; REPL/Radiant do work in that window | `lambda/runner.cpp:1609,1636` | mem-safety |
 | 11 | **High** | `LAMBDA_ALLOCA` bound is **assert-only** (vanishes in release) + 2 raw bash `alloca` on user-sized input → stack-clash on large scripts | `lib/lambda_alloca.h:43`, `bash/transpile_bash_mir.cpp:1634` | mem-safety |
 | 12 | **High** | `resolve_css_property` is a **single 5,978-line function** (262 property cases, inlined shorthand parsers) | `radiant/resolve_css_style.cpp:5777` | structure |
@@ -71,7 +71,7 @@ The table lists every **high-severity** finding plus the most consequential medi
 | 23 | Med | ~35 fallible-but-`void` APIs (all strbuf/stringbuf appends, GC root registration) silently swallow OOM | `lib/strbuf.c`, `gc_heap.c` | api-design |
 | 24 | Med | Signed `cap * 2` growth guards rely on **UB overflow wrap** the compiler may delete; GC growth sites unguarded | `lib/mem_grow.hpp:17`, `gc_heap.c:100` | UB |
 | 25 | Med | GC traces Lambda objects via **hard-coded byte offsets** with no `static_assert` tying them to the real structs | `lib/gc/gc_heap.c:1067` | UB |
-| 26 | Med | py/bash AST builders & transpilers recurse with **no depth guard** (Lambda's frontend has one) → Jube DoS | `lambda/py/build_py_ast.cpp:438` | untrusted-input |
+| 26 | Med | py/bash AST builders & transpilers recurse with **no depth guard** (Lambda's frontend has one) → Jube DoS | `lambda/module/py/build_py_ast.cpp:438` | untrusted-input |
 | 27 | Med | Tagged-downcast checks (`view_require*`, `dom_require*`) are `assert` — **compile out in release** → silent type confusion | `lib/tagged.hpp:45` | error-handling |
 | 28 | Med | HTML output formatter recursion ignores its own `depth` counter → stack overflow at format time | `lambda/format/format-html.cpp:323` | untrusted-input |
 | 29 | Med | State-name intern table silently breaks pointer-identity keys after 64 names; overflow path stores a caller-owned (dangling) pointer | `radiant/state_store.cpp:124` | mem-safety |

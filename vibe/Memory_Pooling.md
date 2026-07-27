@@ -99,10 +99,10 @@ The rpmalloc integration is **well-designed**:
 | `lambda/lambda-proc.cpp:395` | `pool_create()` | Temp pool for procedure formatting | No — bulk `pool_destroy()` |
 | `lambda/validator/doc_validator.cpp:62` | `pool_create()` | Transpiler, NamePool, validation structs | No |
 | `lambda/validator/ast_validate.cpp:213` | `pool_create()` | Temp pool for AST validation | No |
-| `lambda/rb/rb_scope.cpp:165` | `pool_create()` | `tp->ast_pool` backing `ast_arena` for Ruby AST nodes | No — ✅ **Migrated to arena** |
-| `lambda/rb/build_rb_ast.cpp` | `tp->ast_arena` | RbAstNode allocations | No — ✅ **Migrated to arena** |
-| `lambda/py/py_scope.cpp:180` | `pool_create()` | `tp->ast_pool` backing `ast_arena` for Python AST nodes | No — ✅ **Migrated to arena** |
-| `lambda/py/build_py_ast.cpp` | `tp->ast_arena` | PyAstNode allocations | No — ✅ **Migrated to arena** |
+| `lambda/module/rb/rb_scope.cpp:165` | `pool_create()` | `tp->ast_pool` backing `ast_arena` for Ruby AST nodes | No — ✅ **Migrated to arena** |
+| `lambda/module/rb/build_rb_ast.cpp` | `tp->ast_arena` | RbAstNode allocations | No — ✅ **Migrated to arena** |
+| `lambda/module/py/py_scope.cpp:180` | `pool_create()` | `tp->ast_pool` backing `ast_arena` for Python AST nodes | No — ✅ **Migrated to arena** |
+| `lambda/module/py/build_py_ast.cpp` | `tp->ast_arena` | PyAstNode allocations | No — ✅ **Migrated to arena** |
 | `lambda/js/transpile_js_mir.cpp` | `pool_create()` | JS transpiler context, Input | No |
 
 #### Radiant
@@ -205,8 +205,8 @@ These sites use Pool with **zero individual `pool_free()` calls** — they only 
 
 | File | Current Pattern | Rationale | Status |
 |------|----------------|-----------|--------|
-| **`lambda/rb/build_rb_ast.cpp`** + **`rb_scope.cpp`** | `tp->ast_pool = pool_create()` → many `pool_alloc()` → `pool_destroy()` | AST nodes are never individually freed. Pure bump-allocate pattern. | ✅ **Migrated** — `ast_arena` added alongside `ast_pool` |
-| **`lambda/py/build_py_ast.cpp`** + **`py_scope.cpp`** | `tp->ast_pool = pool_create()` → many `pool_alloc()` → `pool_destroy()` | Identical pattern to Ruby. | ✅ **Migrated** — same arena pattern |
+| **`lambda/module/rb/build_rb_ast.cpp`** + **`rb_scope.cpp`** | `tp->ast_pool = pool_create()` → many `pool_alloc()` → `pool_destroy()` | AST nodes are never individually freed. Pure bump-allocate pattern. | ✅ **Migrated** — `ast_arena` added alongside `ast_pool` |
+| **`lambda/module/py/build_py_ast.cpp`** + **`py_scope.cpp`** | `tp->ast_pool = pool_create()` → many `pool_alloc()` → `pool_destroy()` | Identical pattern to Ruby. | ✅ **Migrated** — same arena pattern |
 | **`radiant/pdf/pdf_to_view.cpp`** | `Pool* view_pool = pool_create()` → ~25 `pool_calloc()` calls → `pool_destroy()` | View tree construction never individually frees. | ✅ **Migrated** — All 14 static functions changed from `Pool*` to `Arena*`. 23 `pool_calloc` → `arena_calloc`. 3 external API calls use `arena_pool()` accessor. |
 | **`radiant/render_dvi.cpp`** | 4 separate `pool_create()` → allocations → `pool_destroy()` per function | Short-lived rendering pools with no individual frees. | ⏭️ **Already optimal** — uses Arena from Pool internally |
 | **`radiant/event.cpp`** (temp pools) | `Pool* tp = pool_create()` → temp processing → `pool_destroy()` | Very short-lived event processing. | ⏭️ **Already optimal** — uses Arena from Pool internally |
@@ -363,8 +363,8 @@ This gives O(1) bump allocation for all AST nodes instead of rpmalloc per-object
 #### Convert short-lived temp pools to arenas — ✅ DONE (3/9 migrated, 6 assessed)
 
 **Migrated to arena:**
-- `lambda/rb/build_rb_ast.cpp` + `rb_scope.cpp` — AST arena
-- `lambda/py/build_py_ast.cpp` + `py_scope.cpp` — AST arena
+- `lambda/module/rb/build_rb_ast.cpp` + `rb_scope.cpp` — AST arena
+- `lambda/module/py/build_py_ast.cpp` + `py_scope.cpp` — AST arena
 - `radiant/pdf/pdf_to_view.cpp` — ViewTree arena (23 pool_calloc → arena_calloc, `arena_pool()` accessor for 3 external API calls)
 
 **Already optimal (no change needed):**

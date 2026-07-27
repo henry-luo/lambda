@@ -78,9 +78,9 @@ Split the current monolithic `build_lambda_config.json` into two distinct build 
 **Everything in Lambda, plus:**
 
 **Additional language runtimes:**
-- Python (`lambda/py/` — 17 files)
+- Python (`lambda/module/py/` — 17 files)
 - Bash (`lambda/bash/` — 8 files)
-- Ruby (`lambda/rb/` — 10 files)
+- Ruby (`lambda/module/rb/` — 10 files)
 
 **Additional tree-sitter parsers (3):**
 
@@ -106,7 +106,7 @@ Add compile-time guards for Python, Bash, and Ruby (Ruby already has `LAMBDA_RUB
 
 | Flag | Guards |
 |------|--------|
-| `LAMBDA_PYTHON` | `lambda/py/` includes, `backend_python.cpp`, Python CLI handler |
+| `LAMBDA_PYTHON` | `lambda/module/py/` includes, `backend_python.cpp`, Python CLI handler |
 | `LAMBDA_BASH` | `lambda/bash/` includes, `backend_bash.cpp`, Bash CLI handler |
 | `LAMBDA_RUBY` | Already exists — no changes needed |
 | `LAMBDA_JUBE` | Master flag: implies all three above |
@@ -116,7 +116,7 @@ Apply the existing `LAMBDA_RUBY` pattern to Python and Bash:
 ```cpp
 // main.cpp
 #ifdef LAMBDA_PYTHON
-#include "py/py_transpiler.hpp"
+#include "module/py/py_transpiler.hpp"
 #endif
 
 #ifdef LAMBDA_BASH
@@ -152,9 +152,9 @@ Extend `build_lambda_config.json` with a new `jube` platform variant, similar to
             "output": "lambda-jube.exe",
             "source_dirs": [
                 // inherit all from top-level, explicitly include:
-                "lambda/py",
+                "lambda/module/py",
                 "lambda/bash",
-                "lambda/rb"
+                "lambda/module/rb"
             ],
             "defines": [
                 "LAMBDA_JUBE",
@@ -182,7 +182,7 @@ Extend `build_lambda_config.json` with a new `jube` platform variant, similar to
 
 Then modify the **top-level** config to be the focused Lambda build:
 
-1. Remove from top-level `source_dirs`: `lambda/py`, `lambda/bash`, `lambda/rb`
+1. Remove from top-level `source_dirs`: `lambda/module/py`, `lambda/bash`, `lambda/module/rb`
 2. Remove from top-level `defines`: `LAMBDA_RUBY`
 3. Remove from top-level `libraries`: `tree-sitter-python`, `tree-sitter-ruby`, `tree-sitter-bash`
 4. Remove from top-level `includes`: the Python/Ruby/Bash tree-sitter binding paths
@@ -255,15 +255,15 @@ The existing `cli` platform already excludes Python/Bash/Ruby/TS. Ensure consist
 
 **Python runtime (17 files):**
 ```
-lambda/py/py_transpiler.cpp      lambda/py/py_transpiler.hpp
-lambda/py/py_ast_builder.cpp     lambda/py/py_ast_builder.hpp
-lambda/py/py_builtins.cpp        lambda/py/py_builtins.hpp
-lambda/py/py_class.cpp           lambda/py/py_class.hpp
-lambda/py/py_scope.cpp           lambda/py/py_scope.hpp
-lambda/py/py_stdlib.cpp          lambda/py/py_stdlib.hpp
-lambda/py/py_print.cpp           lambda/py/py_print.hpp
-lambda/py/py_async.cpp           lambda/py/py_bigint.cpp
-lambda/py/py_bigint.hpp
+lambda/module/py/py_transpiler.cpp      lambda/module/py/py_transpiler.hpp
+lambda/module/py/py_ast_builder.cpp     lambda/module/py/py_ast_builder.hpp
+lambda/module/py/py_builtins.cpp        lambda/module/py/py_builtins.hpp
+lambda/module/py/py_class.cpp           lambda/module/py/py_class.hpp
+lambda/module/py/py_scope.cpp           lambda/module/py/py_scope.hpp
+lambda/module/py/py_stdlib.cpp          lambda/module/py/py_stdlib.hpp
+lambda/module/py/py_print.cpp           lambda/module/py/py_print.hpp
+lambda/module/py/py_async.cpp           lambda/module/py/py_bigint.cpp
+lambda/module/py/py_bigint.hpp
 ```
 
 **Bash runtime (8 files):**
@@ -277,12 +277,12 @@ lambda/bash/bash_scope.cpp       lambda/bash/bash_scope.hpp
 
 **Ruby runtime (10 files):**
 ```
-lambda/rb/rb_transpiler.cpp      lambda/rb/rb_transpiler.hpp
-lambda/rb/rb_ast_builder.cpp     lambda/rb/rb_ast_builder.hpp
-lambda/rb/rb_builtins.cpp        lambda/rb/rb_builtins.hpp
-lambda/rb/rb_class.cpp           lambda/rb/rb_class.hpp
-lambda/rb/rb_scope.cpp           lambda/rb/rb_scope.hpp
-lambda/rb/rb_print.cpp
+lambda/module/rb/rb_transpiler.cpp      lambda/module/rb/rb_transpiler.hpp
+lambda/module/rb/rb_ast_builder.cpp     lambda/module/rb/rb_ast_builder.hpp
+lambda/module/rb/rb_builtins.cpp        lambda/module/rb/rb_builtins.hpp
+lambda/module/rb/rb_class.cpp           lambda/module/rb/rb_class.hpp
+lambda/module/rb/rb_scope.cpp           lambda/module/rb/rb_scope.hpp
+lambda/module/rb/rb_print.cpp
 ```
 
 **Additional tree-sitter parsers (3 libraries):**
@@ -321,7 +321,7 @@ lambda/serve/wsgi_bridge.py
 - [ ] Guard Python/Bash includes and CLI handlers in `main.cpp`
 - [ ] Guard language-specific registrations in `sys_func_registry.c`
 - [ ] Guard serve backends with feature flags
-- [ ] Remove `lambda/py`, `lambda/bash`, `lambda/rb` from top-level `source_dirs`
+- [ ] Remove `lambda/module/py`, `lambda/bash`, `lambda/module/rb` from top-level `source_dirs`
 - [ ] Remove `LAMBDA_RUBY` from top-level `defines`
 - [ ] Remove Python/Ruby/Bash tree-sitter from top-level `libraries` and `includes`
 - [ ] Add `jube` platform variant to `build_lambda_config.json`
@@ -441,8 +441,8 @@ These files contain AST/debug print functions that have **no external callers**.
 
 | File | Functions | Guard |
 |------|-----------|-------|
-| `lambda/rb/rb_print.cpp` | `print_rb_ast_node()`, `print_rb_ast_root()` | Whole file wrapped in `#ifndef NDEBUG` |
-| `lambda/py/py_print.cpp` | `print_py_ast_node()`, `print_py_ast_root()` | Whole file wrapped in `#ifndef NDEBUG` |
+| `lambda/module/rb/rb_print.cpp` | `print_rb_ast_node()`, `print_rb_ast_root()` | Whole file wrapped in `#ifndef NDEBUG` |
+| `lambda/module/py/py_print.cpp` | `print_py_ast_node()`, `print_py_ast_root()` | Whole file wrapped in `#ifndef NDEBUG` |
 | `lambda/js/js_print.cpp` | `print_js_ast_node()`, `print_js_ast_root()` | Whole file wrapped in `#ifndef NDEBUG` |
 | `lambda/input/css/css_style_node.cpp` | `style_tree_print()`, `style_node_print_cascade()`, `css_specificity_print()` | Function bodies wrapped in `#ifndef NDEBUG` |
 
@@ -455,8 +455,8 @@ These files contain AST/debug print functions that have **no external callers**.
 | `lambda/transpile-mir.cpp` | ~11248 | `temp/mir_dump.txt` | — |
 | `lambda/js/transpile_js_mir.cpp` | ~18563 | `temp/ts_mir_dump.txt` | `JS_MIR_DUMP` env var |
 | `lambda/js/transpile_js_mir.cpp` | ~18788 | `temp/js_mir_dump.txt` | `JS_MIR_DUMP` env var |
-| `lambda/py/transpile_py_mir.cpp` | ~7525 | `temp/py_mir_dump.txt` | — |
-| `lambda/rb/transpile_rb_mir.cpp` | ~3663 | `temp/rb_mir_dump.txt` | — |
+| `lambda/module/py/transpile_py_mir.cpp` | ~7525 | `temp/py_mir_dump.txt` | — |
+| `lambda/module/rb/transpile_rb_mir.cpp` | ~3663 | `temp/rb_mir_dump.txt` | — |
 | `lambda/bash/transpile_bash_mir.cpp` | ~4964 | `temp/bash_mir_dump.txt` | — |
 
 **View tree dumps:**

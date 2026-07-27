@@ -217,7 +217,7 @@ The inline-double test must come **first** — before the tag-0 container branch
 
 ## 3.3 The raw high-byte reader tail
 
-Measured surface: ~24 `>> 56` extractions across 11 files (plus the packing macros in `lambda.h` and mask-only `& 0x00FF…` sites). Each must classify as: (a) already downstream of `get_type_id` normalization — fine; (b) comparing against specific tags — fine iff it can never see a float Item; (c) genuinely needs the inline-double test added. Same audit for the Jube guest runtimes (`lambda/py/`, etc.) and any private copies of the macros. Small but must be exhaustive — this is the S0 deliverable.
+Measured surface: ~24 `>> 56` extractions across 11 files (plus the packing macros in `lambda.h` and mask-only `& 0x00FF…` sites). Each must classify as: (a) already downstream of `get_type_id` normalization — fine; (b) comparing against specific tags — fine iff it can never see a float Item; (c) genuinely needs the inline-double test added. Same audit for the Jube guest runtimes (`lambda/module/py/`, etc.) and any private copies of the macros. Small but must be exhaustive — this is the S0 deliverable.
 
 ## 3.4 NaN as a value key — hashing, not canonicalization
 

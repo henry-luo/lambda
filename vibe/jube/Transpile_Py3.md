@@ -54,7 +54,7 @@ v3:  OOP and module system                             (this doc, target ~15K LO
 
 **Goal:** Enable `class Foo(Bar): ...` with `__init__`, instance methods, class attributes, inheritance, `super()`, `isinstance`, and the most common dunder methods.
 
-**Actual effort:** ~2,200 LOC. New files: `lambda/py/py_class.cpp`, `lambda/py/py_class.h`. Major additions to `py_runtime.cpp`, `transpile_py_mir.cpp`, `py_builtins.cpp`. Test: `test/py/test_py_classes.py` ✅ matches CPython output.
+**Actual effort:** ~2,200 LOC. New files: `lambda/module/py/py_class.cpp`, `lambda/module/py/py_class.h`. Major additions to `py_runtime.cpp`, `transpile_py_mir.cpp`, `py_builtins.cpp`. Test: `test/py/test_py_classes.py` ✅ matches CPython output.
 
 ### A1. Class Object Representation
 
@@ -67,10 +67,10 @@ Python class objects and instances are both `Map` values in Lambda. Two conventi
 
 No new `TypeId` is added. This keeps everything within the existing Map infrastructure and avoids changes to `lambda.h`.
 
-**New file: `lambda/py/py_class.cpp`** (~700 LOC) + **`lambda/py/py_class.h`** (~80 LOC):
+**New file: `lambda/module/py/py_class.cpp`** (~700 LOC) + **`lambda/module/py/py_class.h`** (~80 LOC):
 
 ```c
-// lambda/py/py_class.h (excerpt)
+// lambda/module/py/py_class.h (excerpt)
 Item py_class_new(Item name, Item bases, Item methods);
 Item py_compute_mro(Item cls);
 Item py_new_instance(Item cls);
@@ -825,10 +825,10 @@ Python's full import system (packages, `__init__.py`, `sys.path` search, circula
 
 ### E2. Module Cache
 
-**New file: `lambda/py/py_module.cpp`** (~450 LOC) + **`lambda/py/py_module.h`** (~60 LOC):
+**New file: `lambda/module/py/py_module.cpp`** (~450 LOC) + **`lambda/module/py/py_module.h`** (~60 LOC):
 
 ```c
-// lambda/py/py_module.h
+// lambda/module/py/py_module.h
 typedef struct PyModule {
     const char* name;        // module name (interned)
     const char* file_path;   // absolute path to .py file

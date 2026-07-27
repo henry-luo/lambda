@@ -279,7 +279,7 @@ General rule extracted from these: **path-disjoint polls cannot merge (await); d
 | Finally / iterator-close saved-exception protocol broken by generic guard conversion | OE8 value-producing test + protocol-specific control flow; no `force_emit` shortcut |
 | Generator/async resume injects rejection into CLEAN region | resume labels are plain labels → UNKNOWN by default |
 | Raw/unclassified call bypasses call-effect tracking | notify from both resolved and unclassified call paths; grep/audit raw MIR call construction |
-| `em_root_note_call_site` signature change ripples to lambda/py | mechanical, compiler-checked (E5) |
+| `em_root_note_call_site` signature change ripples to lambda/module/py | mechanical, compiler-checked (E5) |
 | Nested function compilation clobbers tracker state | `exc_track` added to every existing function/state-machine save/reset/restore set |
 | `jm_emit_label_with_state` overlooks a predecessor | restrict it to owned structured labels; debug predecessor registration/assertions; otherwise use plain UNKNOWN |
 | Argument-stack unwind is accidentally added to a local guard | unwind belongs to route only; E0 requires bit-identical MIR |

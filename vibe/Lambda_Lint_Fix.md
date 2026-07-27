@@ -221,15 +221,15 @@ The findings by file (Top 12, covering 96 % of the corpus):
 |---|---:|---|
 | `lambda/emit_sexpr.cpp` | 628 | Deliberate s-expression emitter to stdout — its job is to print. |
 | `lib/` (pdf_writer.c, hashmap.c test, file.c errors, etc.) | 118 | PDF byte writer, hash-map self-test, file.c error reporters. |
-| `lambda/rb/rb_print.cpp` + `rb_runtime.cpp` | 111 | Ruby `print`/`puts`/`p` builtin implementations. |
+| `lambda/module/rb/rb_print.cpp` + `rb_runtime.cpp` | 111 | Ruby `print`/`puts`/`p` builtin implementations. |
 | `radiant/webdriver/cmd_webdriver.cpp` | 45 | CLI subcommand handler — same family as `lambda/main.cpp` (already excluded). |
 | `lambda/main-repl.cpp` | 51 | REPL output. Same family as `lambda/cli/` and `lambda/repl/` already excluded. |
 | `lambda/bash/transpile_bash_mir.cpp` + `bash_runtime.cpp` | 68 | Bash `echo`/`printf` builtin implementations. |
-| `lambda/py/py_stdlib.cpp` | 60 | Python `print` builtin and stdlib output. |
+| `lambda/module/py/py_stdlib.cpp` | 60 | Python `print` builtin and stdlib output. |
 | `lambda/validator/ast_validate.cpp` | 55 | `lambda validate` CLI subcommand. |
 | `radiant/cmd_layout.cpp` | 14 | `lambda layout` CLI subcommand. |
 | `lambda/headless_stubs.cpp` | 11 | Headless build stubs (CLI-only build). |
-| `lambda/npm` | 10 | npm-compat CLI. |
+| `lambda/module/npm` | 10 | npm-compat CLI. |
 | `radiant/event_sim.cpp` + `render_img.cpp` + misc | ~30 | Test/sim drivers and CLI dump paths. |
 
 **Root cause:** the rule's exclusion list (lambda/cli/**, lambda/repl/**,
@@ -256,16 +256,16 @@ ignores:
   - "lambda/print.cpp"
   - "lambda/validator/ast_validate.cpp"   # `lambda validate` subcommand
   - "lambda/headless_stubs.cpp"           # CLI-only build stubs
-  - "lambda/npm/**"                       # npm-compat CLI
+  - "lambda/module/npm/**"                       # npm-compat CLI
   - "radiant/webdriver/**"                # `lambda webdriver` subcommand
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   # Source-language print/puts builtin implementations (these *are* the
   # stdout-writing side of the runtime, not debug prints).
-  - "lambda/rb/rb_print.cpp"
-  - "lambda/rb/rb_runtime.cpp"
+  - "lambda/module/rb/rb_print.cpp"
+  - "lambda/module/rb/rb_runtime.cpp"
   - "lambda/bash/transpile_bash_mir.cpp"
   - "lambda/bash/bash_runtime.cpp"
-  - "lambda/py/py_stdlib.cpp"
+  - "lambda/module/py/py_stdlib.cpp"
   # Lambda's own s-expression dumper (Racket bridge)
   - "lambda/emit_sexpr.cpp"
   # PDF byte writer is by definition I/O-producing
@@ -336,7 +336,7 @@ expand to the full enclosing block before tagging a finding.
 
 ### 3.3 `no-std-containers` (12 → 0 with one wrapper)
 
-All 12 are in [lambda/rb/rb_runtime.cpp](lambda/rb/rb_runtime.cpp) (10)
+All 12 are in [lambda/module/rb/rb_runtime.cpp](lambda/module/rb/rb_runtime.cpp) (10)
 and [lambda/re2_wrapper.cpp](lambda/re2_wrapper.cpp) (2). Every one
 constructs `std::string` to feed the RE2 C++ API:
 
@@ -357,7 +357,7 @@ no `std::string` allocation). Then:
   helper (zero findings, real perf win — no copies).
 - Or scope the `no-std-containers` rule's `files:` to exclude
   `**/re2_wrapper.{cpp,hpp}` only, accepting that std::string is
-  unavoidable at the RE2 boundary specifically. Then `lambda/rb/rb_runtime.cpp`
+  unavoidable at the RE2 boundary specifically. Then `lambda/module/rb/rb_runtime.cpp`
   routes through the wrapper and stops importing the dependency
   directly.
 
@@ -371,7 +371,7 @@ Five clusters, in decreasing scope-fix yield:
 
 | Cluster | Files | Count | Disposition |
 |---|---|---:|---|
-| **RE2 ownership glue** | `lambda/re2_wrapper.cpp`, `lambda/rb/rb_runtime.cpp`, `lambda/py/py_stdlib.cpp` | 31 | RE2's API is `new re2::RE2(...)`. → Either route through a `re2_wrapper.cpp` factory + `ignores:` that one file, or accept the `// NEW_DELETE_OK: RE2 C++ API` marker. The structural choice is the same as §3.3. |
+| **RE2 ownership glue** | `lambda/re2_wrapper.cpp`, `lambda/module/rb/rb_runtime.cpp`, `lambda/module/py/py_stdlib.cpp` | 31 | RE2's API is `new re2::RE2(...)`. → Either route through a `re2_wrapper.cpp` factory + `ignores:` that one file, or accept the `// NEW_DELETE_OK: RE2 C++ API` marker. The structural choice is the same as §3.3. |
 | **Placement-new patterns** | `lambda/lambda-data-runtime.cpp:44`, `radiant/graph_layout_types.hpp:42, 64`, `radiant/resolve_htm_style.cpp:1596,1637,1856,1963`, `radiant/layout_counters.cpp:35` | 9 | All `new (raw) Type(...)` — the placement form is the *correct* pattern (object lives in pool memory, only the constructor runs). → Refine rule to exclude `kind: new_expression` whose first child is a `parenthesized_expression` (placement-new). One YAML edit. |
 | **`radiant/text_control.cpp`, `lambda/mark_editor.cpp`, `lambda/edit_bridge.cpp`, `lambda/input/markup/markup_parser.cpp`, `lambda/input/input.cpp`, `radiant/event_sim.cpp`** | various | 21 | Real `new`/`delete` on long-lived objects (singletons, editor sessions, parsers). These should migrate to placement-new into pool/arena storage. Per-class migration; ≈one PR per cluster. |
 | **`radiant/layout_table.cpp`** | `TableMetadata` | 2 | Already uses `&lycon->scratch` as constructor arg, so the storage IS the scratch arena — but `new TableMetadata(&scratch, ...)` is still heap-`new`. → One placement-new conversion. |
@@ -395,7 +395,7 @@ limits.
 |---|---:|---|
 | `lambda/js/js_runtime.cpp` | 13 | `alloca(argc * sizeof(Item))` |
 | `lambda/js/js_mir_*_lowering.cpp` | 9 | `alloca(param_count * sizeof(MIR_var_t))` |
-| `lambda/rb/transpile_rb_mir.cpp` | 7 | same shape |
+| `lambda/module/rb/transpile_rb_mir.cpp` | 7 | same shape |
 | `lambda/transpile-mir.cpp` | 6 | same shape |
 | `lambda/bash/transpile_bash_mir.cpp` | 2 | `alloca(item_count * sizeof(MIR_label_t))` |
 | radiant gradient/font stops, shape pool, rb_class | 6 | `alloca(n * sizeof(stop_t))` — bounded by parser |
@@ -574,7 +574,7 @@ possible.
 | 16 | `no-unsafe-libc-str` snprintf swap + UNSAFE_LIBC_OK (§4) | ✅ done | -28 warnings. snprintf for sites where dst-cap is in scope (shell.c cmdline builder, js_clipboard, js_dom, js_globals, js_cssom partial, js_mir_entrypoints_require, js_mir_module_batch_lowering); 14 UNSAFE_LIBC_OK markers where dst was pool-alloc'd with `strlen(src) + 1` upstream. Decided against introducing a new `lam_strcpy` helper — snprintf is the standard portable shape. |
 | 17 | `unused-depth-param` guards (§4) | ✅ done | -6 warnings. 1 real recursion guard (`evaluate_calc_expression` got `kMaxCalcDepth = 32`). The other 5 turned out to be `depth = data-field` or `depth = loop-bound-stack-size` — UNUSED_DEPTH_OK markers. Marker placement matters: must be on a line *inside* the matched function span (suppression filter reads `.lines`), not on a preceding comment. |
 | 10a | `no-int-layout-decl` fix | ✅ done | 1 site (layout_flex.cpp:5174 `int old_size` → `float`). Wasn't its own row in the proposal but landed with §4. |
-| 13 | RE2 wrapper consolidation (§3.3, §3.4 row 1) | ⏳ deferred | Still 12 `no-std-containers` + ~31 `no-new-delete` warnings in `re2_wrapper.cpp` / `lambda/rb/rb_runtime.cpp` / `lambda/py/py_stdlib.cpp`. |
+| 13 | RE2 wrapper consolidation (§3.3, §3.4 row 1) | ⏳ deferred | Still 12 `no-std-containers` + ~31 `no-new-delete` warnings in `re2_wrapper.cpp` / `lambda/module/rb/rb_runtime.cpp` / `lambda/module/py/py_stdlib.cpp`. |
 | 15 | `ls-test-has-golden` rule extension + sweep (§3.5/4) | ⏳ deferred | Still 133 warnings. |
 | 18 | `large-stack-array` → scratch arena (§4) | ⏳ deferred | Still 36 info findings. |
 | 19 | Ship `unused-function` Stage 3 (§5.1) | ⏳ deferred | Still 173 lexical-only findings. |

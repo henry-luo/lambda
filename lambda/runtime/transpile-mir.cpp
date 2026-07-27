@@ -1366,6 +1366,20 @@ static bool mir_is_native_scalar_value_type(TypeId tid) {
         tid == LMD_TYPE_BOOL;
 }
 
+static Type* mir_array_occurrence_element(Type* type) {
+    if (!type || type->kind != TYPE_KIND_UNARY) return NULL;
+    TypeUnary* unary = (TypeUnary*)type;
+    // `?` is a nullable scalar, not a sequence. Only the bracket occurrence
+    // that backs T[] may enter the typed-array coercion path.
+    if (unary->op != OPERATOR_REPEAT) return NULL;
+
+    Type* operand = unary->operand;
+    if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+        operand = ((TypeType*)operand)->type;
+    }
+    return operand;
+}
+
 static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_param) {
     if (!param) return LMD_TYPE_ANY;
     TypeId tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
@@ -1378,22 +1392,17 @@ static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_p
     if (param->type && param->type->kind == TYPE_KIND_UNARY) {
         TypeParam* tp_cast = (TypeParam*)param->type;
         Type* full = tp_cast->full_type;
-        if (full && full->kind == TYPE_KIND_UNARY) {
-            TypeUnary* unary = (TypeUnary*)full;
-            Type* operand = unary->operand;
-            if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
-                operand = ((TypeType*)operand)->type;
-            }
-            if (operand) {
-                switch (operand->type_id) {
-                case LMD_TYPE_FLOAT:
-                case LMD_TYPE_INT:
-                case LMD_TYPE_INT64:
-                case LMD_TYPE_UINT64:
-                    tid = LMD_TYPE_ARRAY_NUM;
-                    break;
-                default: break;
-                }
+        Type* element = mir_array_occurrence_element(full);
+        if (element) {
+            switch (element->type_id) {
+            case LMD_TYPE_FLOAT:
+            case LMD_TYPE_INT:
+            case LMD_TYPE_INT64:
+            case LMD_TYPE_UINT64:
+                tid = LMD_TYPE_ARRAY_NUM;
+                break;
+            default:
+                break;
             }
         }
     }
@@ -6272,26 +6281,21 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 log_debug("mir: let/var '%s' declare_type=%d expr_tid=%d var_tid=%d",
                     name_buf, declare->type ? (int)declare->type->type_id : -1, expr_tid, var_tid);
 
-                // Runtime typed array coercion for occurrence annotations (int[], float[], etc.)
-                // When declared type is TypeUnary and RHS is dynamic or a mismatched typed array,
-                // call ensure_typed_array to convert at runtime.
-                if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
+                // Runtime typed array coercion for bracket annotations (int[], float[], etc.).
+                // Nullable occurrence types such as map? retain their scalar representation.
+                Type* typed_array_element_type = mir_array_occurrence_element(declare->type);
+                if (typed_array_element_type) {
+                    TypeId typed_array_element = typed_array_element_type->type_id;
                     bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
                                          expr_tid == LMD_TYPE_ARRAY ||
                                          expr_tid == LMD_TYPE_ARRAY_NUM);
                     if (needs_coerce) {
-                        // extract element type from TypeUnary operand
-                        TypeUnary* unary = (TypeUnary*)declare->type;
-                        Type* operand = unary->operand;
-                        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
-                            operand = ((TypeType*)operand)->type;
-                        }
-                        TypeId elem_tid = operand ? operand->type_id : LMD_TYPE_ANY;
                         // box the expression value to Item if not already boxed
                         MIR_reg_t boxed = emit_box(mt, val, expr_tid);
-                        if (elem_tid == LMD_TYPE_NUM_SIZED && operand) {
+                        if (typed_array_element == LMD_TYPE_NUM_SIZED) {
                             // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
-                            ArrayNumElemType et = num_sized_to_elem_type(type_num_sized_kind(operand));
+                            ArrayNumElemType et = num_sized_to_elem_type(
+                                type_num_sized_kind(typed_array_element_type));
                             val = emit_call_2(mt, "ensure_sized_array", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)et));
@@ -6301,7 +6305,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             // call ensure_typed_array(item, element_type_id) → void* (pointer)
                             val = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, typed_array_element));
                             // failed coercions must halt before a null pointer is stored as an array value.
                             emit_return_item_error_if_zero(mt, val);
                         }
@@ -14282,13 +14286,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 if (param->type && param->type->kind == TYPE_KIND_UNARY) {
                     TypeParam* tp_cast = (TypeParam*)param->type;
                     Type* full = tp_cast->full_type;
-                    if (full && full->kind == TYPE_KIND_UNARY) {
-                        TypeUnary* unary = (TypeUnary*)full;
-                        Type* operand = unary->operand;
-                        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE)
-                            operand = ((TypeType*)operand)->type;
-                        if (operand) param_elem_tid = operand->type_id;
-                    }
+                    Type* element = mir_array_occurrence_element(full);
+                    if (element) param_elem_tid = element->type_id;
                 }
                 final_reg = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),

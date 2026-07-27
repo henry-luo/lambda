@@ -67,7 +67,7 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 
 **Goal:** Enable generator functions (`def f(): yield x`), generator expressions `(x for x in ...)`, `yield from`, and `send()`/`throw()`/`close()` on generator objects.
 
-**Estimated effort:** ~900 LOC. New file: `lambda/py/py_generator.cpp`, `lambda/py/py_generator.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `sys_func_registry.c`.
+**Estimated effort:** ~900 LOC. New file: `lambda/module/py/py_generator.cpp`, `lambda/module/py/py_generator.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `sys_func_registry.c`.
 
 ### A0. Implementation Summary (completed)
 
@@ -101,7 +101,7 @@ MIR JIT compiles to native machine code — there is no native coroutine suspens
 A generator function is rewritten into a `switch`-based state machine at codegen time. Each `yield` point becomes a numbered case. All local variables that must survive across `yield` points are lifted into a heap-allocated generator frame (`PyGenFrame`).
 
 ```c
-// lambda/py/py_generator.h
+// lambda/module/py/py_generator.h
 typedef struct PyGenFrame {
     int state;          // current execution state (0 = not started, -1 = exhausted)
     Item sent_value;    // value passed via send()
@@ -490,7 +490,7 @@ print(http_error(502))  # server error
 **Approach:** Store Python bigints as `LMD_TYPE_DECIMAL` `Item` values with `Decimal::unlimited == PY_BIGINT_FLAG (2)`. Use a dedicated `mpd_context_t` with 4000-digit precision (~13,000 bits). Reused Lambda's mpdecimal heap allocation (`heap_alloc`, `Decimal` struct, `decimal_to_double`).
 
 **What was implemented:**
-- `lambda/py/py_bigint.h` / `py_bigint.cpp` — full bigint arithmetic: add, sub, mul, floordiv, mod, pow, neg, abs, lshift, rshift, cmp, and string/hex/oct/bin conversion.
+- `lambda/module/py/py_bigint.h` / `py_bigint.cpp` — full bigint arithmetic: add, sub, mul, floordiv, mod, pow, neg, abs, lshift, rshift, cmp, and string/hex/oct/bin conversion.
 - `py_runtime.cpp` — overflow detection in `py_add`, `py_sub`, `py_mul`, `py_power`, `py_lshift`, `py_rshift` promotes to bigint; `py_eq`/`py_lt` compare bigints via `py_bigint_cmp`; `py_negate` handles bigint negation; `py_to_str`/`py_to_int`/`py_is_truthy`/`py_get_number` dispatch on `py_is_bigint`.
 - `py_power` rewritten with `__builtin_mul_overflow` to correctly detect both `result*b` and `b*b` overflow at each step.
 - `py_ast.hpp` — `PyLiteralNode` extended with `is_bigint_literal` / `bigint_literal_str` for large integer literals in source.
@@ -506,7 +506,7 @@ print(http_error(502))  # server error
 
 **Goal:** Enable `import math`, `import os`, `import sys`, `import re`, `import json`, `import collections`, and other frequently used standard library modules via thin C-backed stubs.
 
-**Estimated effort:** ~1,300 LOC. Implemented in single file `lambda/py/py_stdlib.cpp` + `py_stdlib.h`.
+**Estimated effort:** ~1,300 LOC. Implemented in single file `lambda/module/py/py_stdlib.cpp` + `py_stdlib.h`.
 
 ### C0. Implementation Summary (completed)
 
@@ -515,8 +515,8 @@ print(http_error(502))  # server error
 **Bug fixed during implementation:** `js_map_get_fast` (in `lambda/js/js_runtime.cpp`) failed to fall back to a linear scan for named fields when the TypeMap hash table (capacity=32) missed — silently dropping any named property added beyond the 32nd slot. Fixed by adding a named-field linear scan in the hash-miss path, with last-writer-wins semantics. No regressions (691/691 baseline tests pass).
 
 **What was implemented:**
-- `lambda/py/py_stdlib.h` — declares 12 module init functions, `py_stdlib_find_builtin()`, and `PyBuiltinModuleInitFn` typedef.
-- `lambda/py/py_stdlib.cpp` — all modules in one file:
+- `lambda/module/py/py_stdlib.h` — declares 12 module init functions, `py_stdlib_find_builtin()`, and `PyBuiltinModuleInitFn` typedef.
+- `lambda/module/py/py_stdlib.cpp` — all modules in one file:
   - **math**: 24 functions directly reuse `fn_math_*` Lambda builtins; `floor/ceil/trunc/fsum/prod` reuse `fn_floor/fn_ceil/fn_trunc/fn_sum/fn_math_prod`; new: `factorial` (iterative), `gcd`/`lcm` (Euclidean), `isnan/isinf/isfinite/fabs/copysign/fmod/degrees/radians` (POSIX `<cmath>`). Constants: `pi`, `e`, `tau`, `inf`, `nan`.
   - **os**: POSIX `getcwd/opendir/readdir/getenv`; `os.path` submodule (join, exists, isfile, isdir, basename, dirname, abspath, splitext via POSIX `stat/realpath/strrchr`). Builtins: `sep="/"`, `linesep="\n"`, `name="posix"`.
   - **sys**: `exit` (`exit()`), `argv`, `version="3.12.0 (Lambda Python)"`, `platform="darwin"`, `maxsize=INT56_MAX`, `path`.
@@ -530,7 +530,7 @@ print(http_error(502))  # server error
   - **copy**: `py_copy_copy` (shallow: iterates list/dict fields); `py_copy_deepcopy` (recursive).
   - **asyncio**: already handled separately in `py_async.cpp`.
 - `transpile_py_mir.cpp` — `import X` handler calls `py_stdlib_find_builtin()`; `from X import Y` handler also calls it, then uses `js_property_get(ns, key)` for each imported name.
-- `sys_func_registry.c` — `#include "py/py_stdlib.h"` added.
+- `sys_func_registry.c` — `#include "module/py/py_stdlib.h"` added.
 - Tests: 11 test files, all PASS:
   - `test/py/test_py_stdlib_math.py` ✅
   - `test/py/test_py_stdlib_os.py` ✅
@@ -783,7 +783,7 @@ print(list(dq))   # [0, 1, 2, 3]
 
 **Goal:** Enable `async def`, `await`, and a minimal `asyncio` facade sufficient for practical async scripting.
 
-**Estimated effort:** ~1,100 LOC. New files: `lambda/py/py_async.cpp`, `lambda/py/py_async.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `build_py_ast.cpp`, `sys_func_registry.c`.
+**Estimated effort:** ~1,100 LOC. New files: `lambda/module/py/py_async.cpp`, `lambda/module/py/py_async.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `build_py_ast.cpp`, `sys_func_registry.c`.
 
 **Prerequisite:** Phase A (generators) must be complete. Python coroutines are a specialization of generator objects.
 
@@ -990,7 +990,7 @@ asyncio.run(main6())
 
 **Goal:** Enable `import pkg.submod`, `from pkg import name`, relative imports (`from . import x`, `from ..utils import y`), and correct handling of circular imports.
 
-**Estimated effort:** ~550 LOC. Extensions to `lambda/py/py_module.cpp`, `lambda/py/py_module.h`. Additions to `transpile_py_mir.cpp`.
+**Estimated effort:** ~550 LOC. Extensions to `lambda/module/py/py_module.cpp`, `lambda/module/py/py_module.h`. Additions to `transpile_py_mir.cpp`.
 
 **Prerequisite:** Phase C (stdlib module stubs) for completeness, but can be implemented independently.
 
@@ -1108,7 +1108,7 @@ print(helper())               # 42
 
 **Goal:** Complete the class system with `@property` setter/deleter, full descriptor protocol (`__get__`/`__set__`/`__delete__`), `__init_subclass__`, `__class_getitem__`, and basic metaclass support.
 
-**Estimated effort:** ~650 LOC. Extensions to `lambda/py/py_class.cpp`, `lambda/py/py_class.h`, `py_runtime.cpp`, `transpile_py_mir.cpp`.
+**Estimated effort:** ~650 LOC. Extensions to `lambda/module/py/py_class.cpp`, `lambda/module/py/py_class.h`, `py_runtime.cpp`, `transpile_py_mir.cpp`.
 
 ### F1. `@property` Setter and Deleter ✅ COMPLETE
 

@@ -23,7 +23,7 @@
 #include "../../lib/file.h"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/module_registry.h"
-#include "../npm/npm_resolve_module.h"
+#include "../module/npm/npm_resolve_module.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>
