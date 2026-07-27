@@ -232,6 +232,7 @@ static inline Item js_bool_item(bool value) {
 
 static void js_stream_set_flowing(Item self, bool flowing);
 static void js_stream_set_readable_buffer(Item self, Item buffer);
+static void js_stream_set_method(Item object, Item key, void* function, int parameter_count);
 static Item js_stream_pipe_data_noop(Item chunk);
 static bool js_stream_has_event_listeners(Item self, const char* event);
 static void js_stream_schedule_data_flush(Item self);
@@ -598,10 +599,13 @@ static Item js_stream_listener_context(Item value) {
 }
 
 static Item js_stream_make_listener_record(Item listener) {
-    Item record = js_new_object();
-    js_property_set(record, key_listener_fn, listener);
-    js_property_set(record, key_listener_context, js_als_capture_context());
-    return record;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> record_root(roots, js_new_object());
+    Rooted<Item> listener_root(roots, listener);
+    Rooted<Item> context_root(roots, js_als_capture_context());
+    js_property_set(record_root.get(), key_listener_fn, listener_root.get());
+    js_property_set(record_root.get(), key_listener_context, context_root.get());
+    return record_root.get();
 }
 
 static Item js_stream_pipe_data_noop(Item chunk) {
@@ -672,26 +676,33 @@ static bool js_state_get_bool(Item state, const char* name) {
 static Item js_writable_state_getBuffer(void);
 
 static Item js_create_readable_state(void) {
-    Item state = js_new_object();
-    js_state_set_bool(state, "ended", false);
-    js_state_set_bool(state, "endEmitted", false);
-    js_state_set_bool(state, "errorEmitted", false);
-    js_state_set_bool(state, "objectMode", false);
-    js_state_set_bool(state, "readableListening", false);
-    js_state_set_bool(state, "needReadable", false);
-    js_state_set_bool(state, "flowing", false);
-    js_state_set_bool(state, "emittedReadable", false);
-    js_state_set_bool(state, "resumeScheduled", false);
-    js_state_set_bool(state, "reading", false);
-    js_state_set_bool(state, "readingMore", false);
-    js_state_set_bool(state, "didRead", false);
-    js_state_set_item(state, "errored", ItemNull);
-    js_state_set_item(state, "awaitDrainWriters", ItemNull);
-    js_state_set_item(state, "pipes", js_array_new(0));
-    js_state_set_item(state, "length", (Item){.item = i2it(0)});
-    js_state_set_item(state, "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
-    js_property_set(state, make_string_item("encoding"), make_string_item("utf8"));
-    return state;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> state_root(roots, js_new_object());
+    Rooted<Item> pipes_root(roots, ItemNull);
+    Rooted<Item> encoding_root(roots, ItemNull);
+    // property allocation can collect while the state is only partially built;
+    // retain its map and compound fields until construction is complete.
+    js_state_set_bool(state_root.get(), "ended", false);
+    js_state_set_bool(state_root.get(), "endEmitted", false);
+    js_state_set_bool(state_root.get(), "errorEmitted", false);
+    js_state_set_bool(state_root.get(), "objectMode", false);
+    js_state_set_bool(state_root.get(), "readableListening", false);
+    js_state_set_bool(state_root.get(), "needReadable", false);
+    js_state_set_bool(state_root.get(), "flowing", false);
+    js_state_set_bool(state_root.get(), "emittedReadable", false);
+    js_state_set_bool(state_root.get(), "resumeScheduled", false);
+    js_state_set_bool(state_root.get(), "reading", false);
+    js_state_set_bool(state_root.get(), "readingMore", false);
+    js_state_set_bool(state_root.get(), "didRead", false);
+    js_state_set_item(state_root.get(), "errored", ItemNull);
+    js_state_set_item(state_root.get(), "awaitDrainWriters", ItemNull);
+    pipes_root.set(js_array_new(0));
+    js_state_set_item(state_root.get(), "pipes", pipes_root.get());
+    js_state_set_item(state_root.get(), "length", (Item){.item = i2it(0)});
+    js_state_set_item(state_root.get(), "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
+    encoding_root.set(make_string_item("utf8"));
+    js_property_set(state_root.get(), make_string_item("encoding"), encoding_root.get());
+    return state_root.get();
 }
 
 static Item js_create_writable_state(Item owner) {
@@ -2052,8 +2063,16 @@ static void js_stream_coalesce_readable_buffer_for_encoding(Item self, Item enco
 }
 
 static void js_stream_flush_buffered_data(Item self) {
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> buffer_root(roots, ItemNull);
+    Rooted<Item> chunk_root(roots, ItemNull);
+    Rooted<Item> next_buffer_root(roots, ItemNull);
+    Rooted<Item> emitted_root(roots, ItemNull);
+    self = self_root.get();
     for (;;) {
-        Item buf = js_property_get(self, key_buffer);
+        buffer_root.set(js_property_get(self, key_buffer));
+        Item buf = buffer_root.get();
         if (get_type_id(buf) != LMD_TYPE_ARRAY) return;
         int64_t blen = js_array_length(buf);
         if (blen <= 0) {
@@ -2070,14 +2089,17 @@ static void js_stream_flush_buffered_data(Item self) {
             return;
         }
 
-        Item chunk = js_array_get_int(buf, 0);
-        Item next_buf = js_array_new(0);
+        chunk_root.set(js_array_get_int(buf, 0));
+        Item chunk = chunk_root.get();
+        next_buffer_root.set(js_array_new(0));
+        Item next_buf = next_buffer_root.get();
         for (int64_t i = 1; i < blen; i++) {
             js_array_push(next_buf, js_array_get_int(buf, i));
         }
         js_stream_set_readable_buffer(self, next_buf);
 
-        Item emitted = js_stream_decode_readable_chunk(self, chunk);
+        emitted_root.set(js_stream_decode_readable_chunk(self, chunk_root.get()));
+        Item emitted = emitted_root.get();
         if (get_type_id(emitted) == LMD_TYPE_STRING) {
             String* str = it2s(emitted);
             if (!str || str->len == 0) continue;
@@ -2127,13 +2149,18 @@ static Item js_stream_flush_data_tick_closure(Item env_item) {
 }
 
 static void js_stream_schedule_data_flush(Item self) {
-    Item state = js_property_get(self, key_readable_state);
-    if (js_state_get_bool(state, "resumeScheduled")) return;
-    js_state_set_bool(state, "resumeScheduled", true);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> state_root(roots, js_property_get(self_root.get(), key_readable_state));
+    Rooted<Item> tick_root(roots, ItemNull);
+    if (js_state_get_bool(state_root.get(), "resumeScheduled")) return;
+    js_state_set_bool(state_root.get(), "resumeScheduled", true);
     Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_closure((void*)js_stream_flush_data_tick_closure, 0, env, 1);
-    js_next_tick_enqueue(tick);
+    env[0] = self_root.get();
+    // Enqueue may allocate and collect before it retains the task; keep the
+    // closure and its captured stream alive until queue ownership is installed.
+    tick_root.set(js_new_closure((void*)js_stream_flush_data_tick_closure, 0, env, 1));
+    js_next_tick_enqueue(tick_root.get());
 }
 
 static Item js_stream_resume_tick(Item self) {
@@ -2178,6 +2205,13 @@ extern "C" void js_stream_flush_data_if_flowing(Item self) {
 
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> event_root(roots, event_item);
+    Rooted<Item> listener_root(roots, listener);
+    self = self_root.get();
+    event_item = event_root.get();
+    listener = listener_root.get();
     ensure_keys();
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
 
@@ -2402,6 +2436,13 @@ extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1) {
 
 // push(chunk[, encoding]) — add data to readable stream
 static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> chunk_root(roots, chunk);
+    Rooted<Item> encoding_root(roots, encoding);
+    self = self_root.get();
+    chunk = chunk_root.get();
+    encoding = encoding_root.get();
     ensure_keys();
 
     // null signals end of stream
@@ -2475,6 +2516,8 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     }
 
     if (!js_stream_prepare_readable_chunk(self, &chunk, encoding)) return ItemNull;
+    chunk_root.set(chunk);
+    chunk = chunk_root.get();
     if (!js_stream_readable_is_object_mode(self) &&
         js_stream_is_empty_byte_chunk(chunk)) {
         if (!js_item_is_true(js_property_get(self, key_end_pending)) &&
@@ -6560,22 +6603,24 @@ static Item js_stream_inst_asyncIterator(void) {
 }
 
 static void js_stream_install_async_iterator(Item obj) {
-    Item iterator_fn = js_new_function((void*)js_stream_inst_asyncIterator, 0);
-    Item async_key = make_string_item("__sym_5");
-    Item iter_key = make_string_item("__sym_1");
-    js_property_set(obj, async_key, iterator_fn);
-    js_property_set(obj, iter_key, iterator_fn);
-    js_mark_non_enumerable(obj, async_key);
-    js_mark_non_enumerable(obj, iter_key);
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> iterator_root(roots, js_new_function((void*)js_stream_inst_asyncIterator, 0));
+    Rooted<Item> async_key_root(roots, make_string_item("__sym_5"));
+    Rooted<Item> iter_key_root(roots, make_string_item("__sym_1"));
+    js_property_set(object_root.get(), async_key_root.get(), iterator_root.get());
+    js_property_set(object_root.get(), iter_key_root.get(), iterator_root.get());
+    js_mark_non_enumerable(object_root.get(), async_key_root.get());
+    js_mark_non_enumerable(object_root.get(), iter_key_root.get());
 }
 
 static void js_stream_install_readable_helpers(Item obj) {
-    js_property_set(obj, make_string_item("toArray"), js_new_function((void*)js_readable_inst_toArray, 1));
-    js_property_set(obj, make_string_item("map"), js_new_function((void*)js_readable_inst_map, 2));
-    js_property_set(obj, make_string_item("filter"), js_new_function((void*)js_readable_inst_filter, 2));
-    js_property_set(obj, make_string_item("forEach"), js_new_function((void*)js_readable_inst_forEach, 2));
-    js_property_set(obj, make_string_item("reduce"), js_new_function((void*)js_readable_inst_reduce, 3));
-    js_property_set(obj, make_string_item("compose"), js_new_function((void*)js_readable_inst_compose, 2));
+    js_stream_set_method(obj, make_string_item("toArray"), (void*)js_readable_inst_toArray, 1);
+    js_stream_set_method(obj, make_string_item("map"), (void*)js_readable_inst_map, 2);
+    js_stream_set_method(obj, make_string_item("filter"), (void*)js_readable_inst_filter, 2);
+    js_stream_set_method(obj, make_string_item("forEach"), (void*)js_readable_inst_forEach, 2);
+    js_stream_set_method(obj, make_string_item("reduce"), (void*)js_readable_inst_reduce, 3);
+    js_stream_set_method(obj, make_string_item("compose"), (void*)js_readable_inst_compose, 2);
 }
 static Item js_writable_inst_write(Item chunk, Item encoding, Item callback) {
     return js_writable_write(js_get_this(), chunk, encoding, callback);
