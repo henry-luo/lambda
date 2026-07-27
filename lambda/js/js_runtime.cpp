@@ -28641,6 +28641,66 @@ static const int PROTO_KEY_LEN = 9;
 static const char INTERNAL_PROTO_KEY[] = "__internal_proto__";
 static const int INTERNAL_PROTO_KEY_LEN = 18;
 
+enum {
+    JS_PROTO_CACHE_INTERNAL = 1u << 0,
+    JS_PROTO_CACHE_PUBLIC = 1u << 1,
+    JS_PROTO_CACHE_JSON_OWN = 1u << 2,
+};
+
+typedef struct JsProtoEntryCache {
+    ShapeEntry* internal_proto;
+    ShapeEntry* public_proto;
+    ShapeEntry* json_own_proto;
+    uint8_t mask;
+} JsProtoEntryCache;
+
+static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
+        int name_len, uint8_t cache_bit) {
+    if (!tm || !name) return NULL;
+    if (!typemap_is_shared_shape(tm)) {
+        return typemap_hash_lookup(tm, name, name_len);
+    }
+    JsProtoEntryCache* cache = tm->js_proto_entry_cache;
+    if (!cache) {
+        if (!js_input || !js_input->pool) {
+            return typemap_hash_lookup(tm, name, name_len);
+        }
+        cache = (JsProtoEntryCache*)pool_calloc(
+            js_input->pool, sizeof(JsProtoEntryCache));
+        if (!cache) return typemap_hash_lookup(tm, name, name_len);
+        tm->js_proto_entry_cache = cache;
+    }
+    ShapeEntry** cache_slot = cache_bit == JS_PROTO_CACHE_INTERNAL
+        ? &cache->internal_proto
+        : (cache_bit == JS_PROTO_CACHE_PUBLIC
+            ? &cache->public_proto : &cache->json_own_proto);
+    if (cache->mask & cache_bit) return *cache_slot;
+    // Shared constructor/transition shapes detach before structural or
+    // descriptor mutation, so both positive and negative entry caches remain
+    // valid for the lifetime of this TypeMap.
+    *cache_slot = typemap_hash_lookup(tm, name, name_len);
+    cache->mask |= cache_bit;
+    return *cache_slot;
+}
+
+static JsShapeSlotStatus js_proto_shape_slot_status(Map* m, ShapeEntry* se,
+        Item* out_slot) {
+    if (out_slot) *out_slot = ItemNull;
+    if (!m || !se || !m->data || se->byte_offset < 0 ||
+            se->byte_offset > (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+        return JS_SHAPE_SLOT_ABSENT;
+    }
+    if (map_ctor_offset_is_reserved(m, se->byte_offset)) {
+        return JS_SHAPE_SLOT_ABSENT;
+    }
+    Item slot = _map_read_field(se, m->data);
+    if (out_slot) *out_slot = slot;
+    if (jspd_is_deleted(se) || js_is_deleted_sentinel(slot)) {
+        return JS_SHAPE_SLOT_DELETED;
+    }
+    return jspd_is_accessor(se) ? JS_SHAPE_SLOT_ACCESSOR : JS_SHAPE_SLOT_DATA;
+}
+
 // J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
 // object initializers. Spec: if propValue is Object or Null, perform
 // [[SetPrototypeOf]]; otherwise NO-OP (do NOT create an own property).
@@ -28999,14 +29059,24 @@ extern "C" Item js_get_prototype(Item object) {
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;
+    TypeMap* tm = m && typemap_ptr_is_plausible(m->type) ? (TypeMap*)m->type : NULL;
     Item internal_proto = ItemNull;
-    JsShapeSlotStatus internal_status = js_own_shape_slot_status(
-        object, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_proto, NULL);
+    ShapeEntry* internal_se = js_proto_shape_entry(tm,
+        INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, JS_PROTO_CACHE_INTERNAL);
+    JsShapeSlotStatus internal_status = js_proto_shape_slot_status(
+        m, internal_se, &internal_proto);
     if (internal_status == JS_SHAPE_SLOT_DATA || internal_status == JS_SHAPE_SLOT_ACCESSOR)
         return internal_proto;
-    bool json_own_proto = false;
-    Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
-    if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;
+    ShapeEntry* json_own_se = js_proto_shape_entry(tm,
+        "__json_own_proto__", 18, JS_PROTO_CACHE_JSON_OWN);
+    Item json_own_proto_val = ItemNull;
+    JsShapeSlotStatus json_own_status = js_proto_shape_slot_status(
+        m, json_own_se, &json_own_proto_val);
+    if ((json_own_status == JS_SHAPE_SLOT_DATA ||
+            json_own_status == JS_SHAPE_SLOT_ACCESSOR) &&
+            js_is_truthy(json_own_proto_val)) {
+        return ItemNull;
+    }
     // ES [[GetPrototypeOf]] is an internal slot — independent of any user-
     // defined __proto__ accessor on Object.prototype. If the own __proto__
     // slot has been redefined via Object.defineProperty as an accessor (e.g.
@@ -29015,7 +29085,8 @@ extern "C" Item js_get_prototype(Item object) {
     // prototype Item causes a bus error during chain walks. Detect this and
     // skip — the [[Prototype]] internal slot is conceptually unaffected by
     // the user's accessor redefinition. See test/js_props/proto_accessor_redef_safe.js.
-    ShapeEntry* proto_se = js_find_shape_entry(object, PROTO_KEY, PROTO_KEY_LEN);
+    ShapeEntry* proto_se = js_proto_shape_entry(tm,
+        PROTO_KEY, PROTO_KEY_LEN, JS_PROTO_CACHE_PUBLIC);
     if (proto_se && jspd_is_accessor(proto_se)) {
         // Accessor on __proto__ — internal [[Prototype]] is unknown via this
         // slot. For the special case of Object.prototype itself, the parent
@@ -29026,8 +29097,7 @@ extern "C" Item js_get_prototype(Item object) {
     }
     // P10f+P10d: direct first-match lookup with interned key
     Item proto = ItemNull;
-    JsShapeSlotStatus proto_status = js_own_shape_slot_status(
-        object, PROTO_KEY, PROTO_KEY_LEN, &proto, NULL);
+    JsShapeSlotStatus proto_status = js_proto_shape_slot_status(m, proto_se, &proto);
     if (proto_status == JS_SHAPE_SLOT_DELETED) return ItemNull;
     // TypedArray instances don't store __proto__; use per-type prototype
     if (proto.item == ITEM_NULL && m->map_kind == MAP_KIND_TYPED_ARRAY) {

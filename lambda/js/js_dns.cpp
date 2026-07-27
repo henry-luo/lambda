@@ -1526,47 +1526,6 @@ extern "C" Item js_dns_promises_lookupService(Item rest_args) {
 }
 
 // =============================================================================
-// dns.lookupSync(hostname) — synchronous, returns address string
-// Uses uv_getaddrinfo in blocking mode (NULL callback)
-// =============================================================================
-
-extern "C" Item js_dns_lookupSync(Item hostname_item) {
-    if (get_type_id(hostname_item) != LMD_TYPE_STRING) return ItemNull;
-
-    String* hostname = it2s(hostname_item);
-    char host_buf[256];
-    int len = (int)hostname->len < 255 ? (int)hostname->len : 255;
-    memcpy(host_buf, hostname->chars, (size_t)len);
-    host_buf[len] = '\0';
-
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-
-    struct addrinfo* res = NULL;
-    int r = getaddrinfo(host_buf, NULL, &hints, &res);
-    if (r != 0 || !res) {
-        if (res) freeaddrinfo(res);
-        return ItemNull;
-    }
-
-    char addr_str[INET6_ADDRSTRLEN];
-    if (res->ai_family == AF_INET) {
-        struct sockaddr_in* sa = (struct sockaddr_in*)res->ai_addr;
-        uv_ip4_name(sa, addr_str, sizeof(addr_str));
-    } else if (res->ai_family == AF_INET6) {
-        struct sockaddr_in6* sa = (struct sockaddr_in6*)res->ai_addr;
-        uv_ip6_name(sa, addr_str, sizeof(addr_str));
-    } else {
-        addr_str[0] = '\0';
-    }
-
-    freeaddrinfo(res);
-    return make_string_item(addr_str);
-}
-
-// =============================================================================
 // Resolver server list state
 // =============================================================================
 
@@ -1955,7 +1914,6 @@ extern "C" Item js_get_dns_namespace(void) {
 
     dns_set_method(dns_namespace, "lookup",     (void*)js_dns_lookup, -1);
     dns_set_method(dns_namespace, "lookupService", (void*)js_dns_lookupService, -1);
-    dns_set_method(dns_namespace, "lookupSync", (void*)js_dns_lookupSync, 1);
     dns_set_method(dns_namespace, "resolve",    (void*)js_dns_resolve, -1);
     dns_set_method(dns_namespace, "resolve4",   (void*)js_dns_resolve4, -1);
     dns_set_method(dns_namespace, "resolve6",   (void*)js_dns_resolve6, -1);

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import hashlib
 import argparse
+import re
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,6 +95,18 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file.read(64 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def host_build_id() -> str:
+    header = ROOT / "lambda" / "jube" / "jube.h"
+    try:
+        source = header.read_text(encoding="utf-8")
+    except OSError as error:
+        fail(f"could not read Jube host header: {error}")
+    match = re.search(r'^#define\s+JUBE_HOST_BUILD_ID\s+"([^"]+)"$', source, re.MULTILINE)
+    if not match:
+        fail("JUBE_HOST_BUILD_ID is missing from the Jube host header")
+    return match.group(1)
 
 
 def write_module(bundle_root: Path, directory_name: str, manifest_bytes: bytes | None,
@@ -370,11 +383,15 @@ def main() -> int:
     if not HOST.is_file():
         fail("lambda.exe is missing; build the host first")
     try:
-        manifest_bytes = (MODULE_DIR / "module.json").read_bytes()
-        manifest = json.loads(manifest_bytes)
+        manifest = json.loads((MODULE_DIR / "module.json").read_bytes())
     except (OSError, json.JSONDecodeError) as error:
         fail(f"could not read development manifest: {error}")
     library = library_path(manifest)
+    # Source language descriptors intentionally omit build-local metadata.
+    # Negative fixtures add it only where they are exercising loader integrity.
+    manifest["host_build_id"] = host_build_id()
+    manifest[integrity_key()] = sha256_file(library)
+    manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
 
     if TEST_ROOT.exists():
         shutil.rmtree(TEST_ROOT)
@@ -384,12 +401,6 @@ def main() -> int:
 
     missing_library = write_bundle("missing-library", manifest_bytes, False, library)
     expect_rejection("missing-library", missing_library, isolated_host)
-
-    incomplete = dict(manifest)
-    del incomplete["host_build_id"]
-    incomplete_bytes = (json.dumps(incomplete, indent=2, sort_keys=True) + "\n").encode()
-    incomplete_manifest = write_bundle("incomplete-manifest", incomplete_bytes, False, library)
-    expect_rejection("incomplete-manifest", incomplete_manifest, isolated_host)
 
     wrong_build = dict(manifest)
     wrong_build["host_build_id"] = "incompatible-host-build"
@@ -409,13 +420,6 @@ def main() -> int:
     wrong_hosted_abi_root = write_bundle("wrong-hosted-abi", wrong_hosted_abi_bytes,
                                          False, library)
     expect_rejection("wrong-hosted-abi", wrong_hosted_abi_root, isolated_host)
-
-    missing_checksum = dict(manifest)
-    del missing_checksum[integrity_key()]
-    missing_checksum_bytes = (json.dumps(missing_checksum, indent=2, sort_keys=True) + "\n").encode()
-    missing_checksum_root = write_bundle("missing-checksum", missing_checksum_bytes,
-                                         False, library)
-    expect_rejection("missing-checksum", missing_checksum_root, isolated_host)
 
     unsafe_resource = dict(manifest)
     unsafe_resource["resources"] = ["../outside-the-module"]

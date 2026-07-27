@@ -1490,6 +1490,18 @@ int64_t bigint_to_int64(Item bi) {
     return (int64_t)result;
 }
 
+bool bigint_to_int64_exact(Item bi, int64_t* out_value) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return false;
+    uint32_t status = 0;
+    mpd_ssize_t result = mpd_qget_ssize(m, &status);
+    // The ordinary extractor intentionally clamps overflow. Node offset APIs
+    // must distinguish an exact endpoint from an out-of-range BigInt.
+    if (status & MPD_Invalid_operation) return false;
+    if (out_value) *out_value = (int64_t)result;
+    return true;
+}
+
 double bigint_to_double(Item bi) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return 0.0;

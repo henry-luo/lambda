@@ -13,8 +13,15 @@ extern void heap_register_gc_root(uint64_t* slot);
 // Function object wrappers
 // =============================================================================
 
+#define JS_FUNCTION_SIZE_CLASS 7
+static_assert(sizeof(JsFunction) <= 384,
+              "JsFunction must fit its GC object-zone size class");
+
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    JsFunction* fn = (JsFunction*)heap_calloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    // JsFunction exceeds the old 256-byte ceiling; keeping it in a dedicated
+    // pooled class avoids a malloc/memset pair for every loop-created closure.
+    JsFunction* fn = (JsFunction*)heap_calloc_class(
+        sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
     fn->type_id = LMD_TYPE_FUNC;
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;

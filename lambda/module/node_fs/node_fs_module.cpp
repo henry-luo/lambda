@@ -2403,18 +2403,35 @@ static Item node_fs_fchmod_sync(Item descriptor_item, Item mode_item) {
     return node_fs_undefined();
 }
 
-static bool node_fs_vector_position(Item value, int64_t* out_position) {
+static bool node_fs_position_arg(Item value, int64_t minimum,
+                                 int64_t* out_position) {
     if (!out_position || !node_fs_host || !node_fs_host->value ||
-            !node_fs_host->value->number_to_int64_exact) return false;
+            !node_fs_host->value->number_to_int64_exact ||
+            !node_fs_host->script || !node_fs_host->node ||
+            !node_fs_host->node->error) return false;
     int kind = node_fs_host->value->kind(value);
     if (kind == JUBE_VALUE_UNDEFINED || kind == JUBE_VALUE_NULL) {
         *out_position = -1;
         return true;
     }
-    if (kind != JUBE_VALUE_NUMBER ||
-            !node_fs_host->value->number_to_int64_exact(value, out_position) || *out_position < 0) {
-        node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_VALUE",
-                                                    "position must be a non-negative integer");
+
+    bool exact = false;
+    if (kind == JUBE_VALUE_NUMBER) {
+        exact = node_fs_host->value->number_to_int64_exact(value, out_position);
+    } else if (kind == JUBE_VALUE_BIGINT &&
+            node_fs_host->script->bigint_to_int64_exact) {
+        exact = node_fs_host->script->bigint_to_int64_exact(value, out_position);
+    } else {
+        node_fs_host->script->throw_type_error_code(
+            "ERR_INVALID_ARG_TYPE", "position must be an integer or bigint");
+        return false;
+    }
+    // BigInt overflow was previously reported as a type error because the
+    // module accepted only the host's Number category. Preserve Node's -1
+    // current-position sentinel while range-checking before native narrowing.
+    if (!exact || *out_position < minimum) {
+        node_fs_host->node->error->throw_range_error_code(node_fs_session,
+            "ERR_OUT_OF_RANGE", "position is outside the supported range");
         return false;
     }
     return true;
@@ -2466,10 +2483,10 @@ static NodeFsVector* node_fs_vectors_from_array(Item buffers_item, int64_t* out_
 static Item node_fs_vector_io(Item descriptor_item, Item buffers_item, Item position_item, bool is_write) {
     int64_t descriptor = 0;
     int64_t position = -1;
-    if (!node_fs_number_arg(descriptor_item, 0, &descriptor) || descriptor < 0 ||
-            !node_fs_vector_position(position_item, &position)) {
+    if (!node_fs_number_arg(descriptor_item, 0, &descriptor) || descriptor < 0) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "fd must be a number");
     }
+    if (!node_fs_position_arg(position_item, 0, &position)) return ItemNull;
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 1)) return ItemNull;
     uint64_t* buffers_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -2533,9 +2550,10 @@ static Item node_fs_read_sync_export(Item descriptor_item, Item buffer_item, Ite
     if (!node_fs_number_arg(descriptor_item, 0, &descriptor) ||
             !node_fs_number_arg(offset_item, 0, &offset) ||
             !node_fs_number_arg(length_item, -1, &length) ||
-            !node_fs_number_arg(position_item, -1, &position) || descriptor < 0 || offset < 0) {
+            descriptor < 0 || offset < 0) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "invalid readSync arguments");
     }
+    if (!node_fs_position_arg(position_item, -1, &position)) return ItemNull;
     if (!node_fs_host->node || !node_fs_host->node->binary ||
             !node_fs_host->node->binary->is_typed_array(buffer_item) ||
             !node_fs_host->node->binary->typed_array_data) {
@@ -2566,9 +2584,10 @@ static Item node_fs_write_sync_export(Item descriptor_item, Item data_item, Item
     if (!node_fs_number_arg(descriptor_item, 0, &descriptor) ||
             !node_fs_number_arg(offset_item, 0, &offset) ||
             !node_fs_number_arg(length_item, -1, &length) ||
-            !node_fs_number_arg(position_item, -1, &position) || descriptor < 0 || offset < 0) {
+            descriptor < 0 || offset < 0) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "invalid writeSync arguments");
     }
+    if (!node_fs_position_arg(position_item, -1, &position)) return ItemNull;
     const uint8_t* bytes = NULL;
     size_t byte_count = 0;
     char* copied = NULL;
@@ -3383,6 +3402,7 @@ static int node_fs_init(const JubeHostAPI* host) {
             !host->script->new_function ||
             !host->script->to_string || !host->script->clear_exception ||
             !host->script->get_number || !host->script->is_truthy || !host->script->object_create ||
+            !host->script->bigint_to_int64_exact ||
             !host->node->runtime->current_this ||
             !host->value->number_to_int64_exact ||
             !host->script->promise_with_resolvers || !host->script->closure_env_new ||

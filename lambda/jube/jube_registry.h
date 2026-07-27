@@ -42,6 +42,14 @@ bool jube_node_core_module_enabled(void);
 // Tests and launchers select Node compatibility services through the same
 // module-set manifest. Optional static modules must not bypass that profile.
 bool jube_node_module_enabled(const char* module_name);
+// The registry owns generation-checked resource ids for hosted Node services.
+// With no registered resources, process inventory reports an empty array.
+uint32_t jube_node_resource_add(Item value, const char* kind);
+void jube_node_resource_remove(uint32_t resource_id);
+void jube_node_resource_clear(void);
+bool jube_node_resource_contains(uint32_t resource_id);
+Item jube_node_resource_active_handles(void);
+Item jube_node_resource_active_resources_info(void);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);

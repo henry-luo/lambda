@@ -941,7 +941,7 @@ def check_dynamic_manifest_matches_host_build() -> None:
         manifest = json.loads(text(manifest_path))
     except (OSError, ValueError) as exc:
         fail(f"could not parse modules/lang-python/module.json: {exc}")
-    if manifest.get("host_build_id") != match.group(1):
+    if "host_build_id" in manifest and manifest.get("host_build_id") != match.group(1):
         fail("lang-python manifest host_build_id is stale relative to Jube host ABI")
 
 

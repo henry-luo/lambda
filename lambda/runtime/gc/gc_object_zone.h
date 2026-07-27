@@ -13,8 +13,8 @@
  *   [gc_header_t 16 bytes][user data ...]
  *                          ^ pointer returned to caller
  *
- * Size classes: 16, 32, 48, 64, 96, 128, 256 bytes (user data size, not including header).
- * Objects larger than 256 bytes use direct pool allocation (large object path).
+ * Size classes: 16, 32, 48, 64, 96, 128, 256, 384 bytes (user data size,
+ * not including header). Objects larger than 384 bytes use the large-object path.
  */
 #ifndef GC_OBJECT_ZONE_H
 #define GC_OBJECT_ZONE_H
@@ -39,8 +39,9 @@ typedef struct gc_header gc_header_t;
 //   96B: larger strings, small closure envs
 //  128B: medium strings
 //  256B: larger variable-size objects
-#define GC_NUM_SIZE_CLASSES 7
-#define GC_LARGE_OBJECT_THRESHOLD 256
+//  384B: JavaScript functions (JsFunction is larger than 256 bytes)
+#define GC_NUM_SIZE_CLASSES 8
+#define GC_LARGE_OBJECT_THRESHOLD 384
 
 // Slab: a contiguous block of same-size slots for one size class.
 // Slots are allocated sequentially (next_fresh), and freed slots are
@@ -126,7 +127,7 @@ void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,
  * The caller must pre-compute the class index at compile time.
  *
  * @param oz          object zone
- * @param cls         pre-computed size class index (0-6)
+ * @param cls         pre-computed size class index (0-7)
  * @param size        user data size in bytes (stored in header for sweep)
  * @param type_tag    TypeId for the allocation
  * @param all_objects pointer to gc_heap's all_objects list head (for linking)

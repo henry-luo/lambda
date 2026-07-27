@@ -267,6 +267,7 @@ Item bigint_from_string(const char* str, int len);  // decimal string (no "n" su
 
 // Extraction
 int64_t bigint_to_int64(Item bi);             // truncates if too large
+bool    bigint_to_int64_exact(Item bi, int64_t* out_value);
 double  bigint_to_double(Item bi);            // may lose precision
 bool    bigint_is_zero(Item bi);
 bool    bigint_is_negative(Item bi);

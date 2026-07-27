@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_host_hooks.h"
+#include "../jube/jube_registry.h"
 #include "js_class.h"
 #include "js_permission.h"
 #include "js_typed_array.h"
@@ -107,70 +108,20 @@ typedef struct SocketAutoAttemptTimerReq SocketAutoAttemptTimerReq;
 typedef struct JsServer JsServer;
 typedef struct JsBoundSocket JsBoundSocket;
 
-#define NET_ACTIVE_SOCKET_MAX 512
-#define NET_ACTIVE_SERVER_MAX 128
-static Item net_active_sockets[NET_ACTIVE_SOCKET_MAX];
-static Item net_active_servers[NET_ACTIVE_SERVER_MAX];
-extern "C" uint64_t js_get_heap_epoch(void);
-static uint64_t net_active_roots_epoch = 0;
-
-static void net_active_register_roots(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (net_active_roots_epoch == epoch) return;
-    heap_register_gc_root_range((uint64_t*)net_active_sockets, NET_ACTIVE_SOCKET_MAX);
-    heap_register_gc_root_range((uint64_t*)net_active_servers, NET_ACTIVE_SERVER_MAX);
-    net_active_roots_epoch = epoch;
+static uint32_t net_active_add(Item obj, const char* kind) {
+    return jube_node_resource_add(obj, kind);
 }
 
-static void net_active_add(Item* list, int max, Item obj) {
-    if (!obj.item) return;
-    net_active_register_roots();
-    for (int i = 0; i < max; i++) {
-        if (list[i].item == obj.item) return;
-    }
-    for (int i = 0; i < max; i++) {
-        if (list[i].item == 0) {
-            list[i] = obj;
-            return;
-        }
-    }
-}
-
-static void net_active_remove(Item* list, int max, Item obj) {
-    if (!obj.item) return;
-    for (int i = 0; i < max; i++) {
-        if (list[i].item == obj.item) {
-            list[i] = (Item){0};
-            return;
-        }
-    }
-}
-
-extern "C" Item js_net_get_active_handles(void) {
-    Item arr = js_array_new(0);
-    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
-        if (net_active_servers[i].item) js_array_push(arr, net_active_servers[i]);
-    }
-    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
-        if (net_active_sockets[i].item) js_array_push(arr, net_active_sockets[i]);
-    }
-    return arr;
-}
-
-extern "C" Item js_net_get_active_resources_info(void) {
-    Item arr = js_array_new(0);
-    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
-        if (net_active_servers[i].item) js_array_push(arr, make_string_item("TCPServerWrap"));
-    }
-    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
-        if (net_active_sockets[i].item) js_array_push(arr, make_string_item("TCPSocketWrap"));
-    }
-    return arr;
+static void net_active_remove(uint32_t* resource_id) {
+    if (!resource_id || !*resource_id) return;
+    jube_node_resource_remove(*resource_id);
+    *resource_id = 0;
 }
 
 typedef struct JsSocket {
     uv_tcp_t tcp;
     Item      js_object;     // the JS object representing this socket
+    uint32_t  active_resource_id;
     bool      connected;
     bool      destroyed;
     bool      connect_pending;
@@ -1470,7 +1421,7 @@ static void socket_close_now(JsSocket* sock) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
                 bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
+                net_active_remove(&s->active_resource_id);
                 js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                 if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
                 socket_emit_close(s->js_object, false);
@@ -1502,7 +1453,7 @@ static void socket_close_reset_now(JsSocket* sock) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
                 bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
+                net_active_remove(&s->active_resource_id);
                 js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                 if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
                 socket_emit_close(s->js_object, false);
@@ -1519,7 +1470,7 @@ static void socket_close_reset_now(JsSocket* sock) {
                 JsSocket* s = (JsSocket*)handle->data;
                 if (s) {
                     bool notify_ipc_parent = s->ipc_received_socket;
-                    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
+                    net_active_remove(&s->active_resource_id);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                     if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
                     socket_emit_close(s->js_object, false);
@@ -1571,7 +1522,7 @@ extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error) {
     js_property_set(sock->js_object, make_string_item("__handle__"), ItemNull);
     js_property_set(sock->js_object, make_string_item("__tls_socket__"), make_undefined_item());
     socket_update_state_properties(sock);
-    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, sock->js_object);
+    net_active_remove(&sock->active_resource_id);
     socket_emit_close(sock->js_object, had_error);
     socket_note_closed(sock);
     mem_free(sock);
@@ -2037,114 +1988,119 @@ static NetBlockList* net_block_list_alloc(void) {
 }
 
 static Item make_socket_handle_object(JsSocket* sock) {
-    Item handle = js_new_object();
-    js_property_set(handle, make_string_item("__socket_handle__"),
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> handle_root(roots, js_new_object());
+    js_property_set(handle_root.get(), make_string_item("__socket_handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
-    js_property_set(handle, make_string_item("setKeepAlive"),
+    js_property_set(handle_root.get(), make_string_item("setKeepAlive"),
                     js_new_function((void*)js_socket_handle_setKeepAlive, 2));
-    js_property_set(handle, make_string_item("setNoDelay"),
+    js_property_set(handle_root.get(), make_string_item("setNoDelay"),
                     js_new_function((void*)js_socket_handle_setNoDelay, 1));
-    js_property_set(handle, make_string_item("close"),
+    js_property_set(handle_root.get(), make_string_item("close"),
                     js_new_function((void*)js_socket_handle_close, 0));
-    return handle;
+    return handle_root.get();
 }
 
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    Item obj = js_new_object();
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> hwm_root(roots, ItemNull);
+    Rooted<Item> readable_state_root(roots, ItemNull);
+    Rooted<Item> writable_state_root(roots, ItemNull);
     // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_SOCKET);  // A3-T3b
+    js_class_stamp(obj_root.get(), JS_CLASS_SOCKET);  // A3-T3b
     if (get_type_id(net_socket_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(obj, net_socket_prototype);
+        js_set_prototype(obj_root.get(), net_socket_prototype);
     }
-    js_property_set(obj, make_string_item("__handle__"),
+    js_property_set(obj_root.get(), make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
-    js_property_set(obj, make_string_item("on"),
+    js_property_set(obj_root.get(), make_string_item("on"),
                     js_new_function((void*)js_socket_on, 2));
-    js_property_set(obj, make_string_item("once"),
+    js_property_set(obj_root.get(), make_string_item("once"),
                     js_new_function((void*)js_socket_once, 2));
-    js_property_set(obj, make_string_item("listeners"),
+    js_property_set(obj_root.get(), make_string_item("listeners"),
                     js_new_function((void*)js_socket_listeners, 1));
-    js_property_set(obj, make_string_item("listenerCount"),
+    js_property_set(obj_root.get(), make_string_item("listenerCount"),
                     js_new_function((void*)js_socket_listenerCount, 1));
-    js_property_set(obj, make_string_item("removeListener"),
+    js_property_set(obj_root.get(), make_string_item("removeListener"),
                     js_new_function((void*)js_socket_removeListener, 2));
-    js_property_set(obj, make_string_item("off"),
+    js_property_set(obj_root.get(), make_string_item("off"),
                     js_new_function((void*)js_socket_removeListener, 2));
-    js_property_set(obj, make_string_item("removeAllListeners"),
+    js_property_set(obj_root.get(), make_string_item("removeAllListeners"),
                     js_new_function((void*)js_socket_removeAllListeners, 1));
-    js_property_set(obj, make_string_item("write"),
+    js_property_set(obj_root.get(), make_string_item("write"),
                     js_new_function((void*)js_socket_write, -1));
-    js_property_set(obj, make_string_item("end"),
+    js_property_set(obj_root.get(), make_string_item("end"),
                     js_new_function((void*)js_socket_end, -1));
-    js_property_set(obj, make_string_item("destroy"),
+    js_property_set(obj_root.get(), make_string_item("destroy"),
                     js_new_function((void*)js_socket_destroy, 1));
-    js_property_set(obj, make_string_item("resetAndDestroy"),
+    js_property_set(obj_root.get(), make_string_item("resetAndDestroy"),
                     js_new_function((void*)js_socket_resetAndDestroy, 1));
     // Additional Socket properties
-    js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-    js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
-    js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
-    js_property_set(obj, make_string_item("bytesRead"), js_make_number(0.0));
-    js_property_set(obj, make_string_item("bytesWritten"), js_make_number(0.0));
-    js_property_set(obj, make_string_item("bufferSize"), js_make_number(0.0));
-    js_property_set(obj, make_string_item("writableLength"), js_make_number(0.0));
-    Item hwm = js_make_number((double)sock->high_water_mark);
-    Item readable_state = js_new_object();
-    js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
-    Item writable_state = js_new_object();
-    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
-    js_property_set(obj, make_string_item("_readableState"), readable_state);
-    js_property_set(obj, make_string_item("_writableState"), writable_state);
-    js_property_set(obj, make_string_item("readableHighWaterMark"), hwm);
-    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
-    js_property_set(obj, make_string_item("connecting"), (Item){.item = ITEM_FALSE});
-    js_property_set(obj, make_string_item("_connecting"), (Item){.item = ITEM_FALSE});
-    js_property_set(obj, make_string_item("pending"), (Item){.item = ITEM_TRUE});
-    js_property_set(obj, make_string_item("readyState"), make_string_item("closed"));
+    js_property_set(obj_root.get(), make_string_item("readable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj_root.get(), make_string_item("writable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj_root.get(), make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj_root.get(), make_string_item("bytesRead"), js_make_number(0.0));
+    js_property_set(obj_root.get(), make_string_item("bytesWritten"), js_make_number(0.0));
+    js_property_set(obj_root.get(), make_string_item("bufferSize"), js_make_number(0.0));
+    js_property_set(obj_root.get(), make_string_item("writableLength"), js_make_number(0.0));
+    hwm_root.set(js_make_number((double)sock->high_water_mark));
+    readable_state_root.set(js_new_object());
+    js_property_set(readable_state_root.get(), make_string_item("highWaterMark"), hwm_root.get());
+    writable_state_root.set(js_new_object());
+    js_property_set(writable_state_root.get(), make_string_item("highWaterMark"), hwm_root.get());
+    js_property_set(obj_root.get(), make_string_item("_readableState"), readable_state_root.get());
+    js_property_set(obj_root.get(), make_string_item("_writableState"), writable_state_root.get());
+    js_property_set(obj_root.get(), make_string_item("readableHighWaterMark"), hwm_root.get());
+    js_property_set(obj_root.get(), make_string_item("writableHighWaterMark"), hwm_root.get());
+    js_property_set(obj_root.get(), make_string_item("connecting"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj_root.get(), make_string_item("_connecting"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj_root.get(), make_string_item("pending"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj_root.get(), make_string_item("readyState"), make_string_item("closed"));
     if (expose_handle) {
-        js_property_set(obj, make_string_item("_handle"), make_socket_handle_object(sock));
+        js_property_set(obj_root.get(), make_string_item("_handle"), make_socket_handle_object(sock));
         sock->handle_exposed = true;
     } else {
-        js_property_set(obj, make_string_item("_handle"), ItemNull);
+        js_property_set(obj_root.get(), make_string_item("_handle"), ItemNull);
         sock->handle_exposed = false;
     }
-    js_property_set(obj, make_string_item("allowHalfOpen"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj_root.get(), make_string_item("allowHalfOpen"), (Item){.item = ITEM_FALSE});
     // Additional Socket methods
-    js_property_set(obj, make_string_item("setTimeout"),
+    js_property_set(obj_root.get(), make_string_item("setTimeout"),
                     js_new_function((void*)js_socket_setTimeout, 2));
-    js_property_set(obj, make_string_item("connect"),
+    js_property_set(obj_root.get(), make_string_item("connect"),
                     js_new_function((void*)js_socket_connect, -1));
-    js_property_set(obj, make_string_item("setKeepAlive"),
+    js_property_set(obj_root.get(), make_string_item("setKeepAlive"),
                     js_new_function((void*)js_socket_setKeepAlive, -1));
-    js_property_set(obj, make_string_item("setNoDelay"),
+    js_property_set(obj_root.get(), make_string_item("setNoDelay"),
                     js_new_function((void*)js_socket_setNoDelay, 1));
-    js_property_set(obj, make_string_item("setEncoding"),
+    js_property_set(obj_root.get(), make_string_item("setEncoding"),
                     js_new_function((void*)js_socket_setEncoding, 1));
-    js_property_set(obj, make_string_item("setTypeOfService"),
+    js_property_set(obj_root.get(), make_string_item("setTypeOfService"),
                     js_new_function((void*)js_socket_setTypeOfService, 1));
-    js_property_set(obj, make_string_item("getTypeOfService"),
+    js_property_set(obj_root.get(), make_string_item("getTypeOfService"),
                     js_new_function((void*)js_socket_getTypeOfService, 0));
-    js_property_set(obj, make_string_item("pipe"),
+    js_property_set(obj_root.get(), make_string_item("pipe"),
                     js_new_function((void*)js_socket_pipe, 1));
-    js_property_set(obj, make_string_item("ref"),
+    js_property_set(obj_root.get(), make_string_item("ref"),
                     js_new_function((void*)js_socket_ref, 0));
-    js_property_set(obj, make_string_item("unref"),
+    js_property_set(obj_root.get(), make_string_item("unref"),
                     js_new_function((void*)js_socket_unref, 0));
-    js_property_set(obj, make_string_item("cork"),
+    js_property_set(obj_root.get(), make_string_item("cork"),
                     js_new_function((void*)js_socket_cork, 0));
-    js_property_set(obj, make_string_item("uncork"),
+    js_property_set(obj_root.get(), make_string_item("uncork"),
                     js_new_function((void*)js_socket_uncork, 0));
-    js_property_set(obj, make_string_item("resume"),
+    js_property_set(obj_root.get(), make_string_item("resume"),
                     js_new_function((void*)js_socket_resume, 0));
-    js_property_set(obj, make_string_item("pause"),
+    js_property_set(obj_root.get(), make_string_item("pause"),
                     js_new_function((void*)js_socket_pause, 0));
-    js_property_set(obj, make_string_item("address"),
+    js_property_set(obj_root.get(), make_string_item("address"),
                     js_new_function((void*)js_socket_address, 0));
-    sock->js_object = obj;
-    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
-    return obj;
+    sock->js_object = obj_root.get();
+    sock->active_resource_id = net_active_add(obj_root.get(), "TCPSocketWrap");
+    return obj_root.get();
 }
 
 static bool net_fd_is_listening_socket(int fd) {
@@ -2234,7 +2190,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     sock->ipc_received_socket = true;
     socket_update_state_properties(sock);
     socket_update_address_properties(sock);
-    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
+    sock->active_resource_id = net_active_add(obj, "TCPSocketWrap");
     // IPC-adopted sockets are delivered paused; eager uv_read_start can close
     // a delayed SCM_RIGHTS descriptor before userland performs the first write.
     return obj;
@@ -3997,7 +3953,7 @@ static JsSocket* socket_reattach_for_connect(Item self) {
     js_property_set(self, make_string_item("writable"), (Item){.item = ITEM_TRUE});
     socket_update_io_counters(sock);
     socket_update_state_properties(sock);
-    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, self);
+    sock->active_resource_id = net_active_add(self, "TCPSocketWrap");
     return sock;
 }
 
@@ -4079,6 +4035,7 @@ extern "C" Item js_net_createConnection(Item rest_args) {
 struct JsServer {
     uv_tcp_t tcp;
     Item     js_object;
+    uint32_t active_resource_id;
     Item     connection_handler;
     bool     closed;
     bool     listen_pending;
@@ -4184,7 +4141,7 @@ static void server_maybe_finish_close(JsServer* srv) {
     // the listening handle can close before accepted sockets finish closing.
     // keep JsServer alive until all owner_server links are detached, or socket
     // close callbacks can decrement connection_count through a freed pointer.
-    net_active_remove(net_active_servers, NET_ACTIVE_SERVER_MAX, srv->js_object);
+    net_active_remove(&srv->active_resource_id);
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
         js_property_set(srv->js_object, make_string_item("listening"), (Item){.item = ITEM_FALSE});
@@ -4510,20 +4467,14 @@ static JsServer* server_from_ipc_stream(uv_stream_t* stream) {
     if (!stream || stream->type != UV_TCP) return NULL;
     JsServer* srv = (JsServer*)stream->data;
     if (!srv || (uv_stream_t*)&srv->tcp != stream) return NULL;
-    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
-        if (net_active_servers[i].item == srv->js_object.item) return srv;
-    }
-    return NULL;
+    return jube_node_resource_contains(srv->active_resource_id) ? srv : NULL;
 }
 
 static JsSocket* socket_from_ipc_stream(uv_stream_t* stream) {
     if (!stream || stream->type != UV_TCP) return NULL;
     JsSocket* sock = (JsSocket*)stream->data;
     if (!sock || (uv_stream_t*)&sock->tcp != stream) return NULL;
-    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
-        if (net_active_sockets[i].item == sock->js_object.item) return sock;
-    }
-    return NULL;
+    return jube_node_resource_contains(sock->active_resource_id) ? sock : NULL;
 }
 
 extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream) {
@@ -4564,13 +4515,10 @@ extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream) {
 }
 
 extern "C" void js_net_close_all_active_servers(void) {
-    Item servers[NET_ACTIVE_SERVER_MAX];
-    int count = 0;
-    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
-        if (net_active_servers[i].item) servers[count++] = net_active_servers[i];
-    }
-    for (int i = 0; i < count; i++) {
-        JsServer* srv = server_from_object(servers[i]);
+    Item servers = jube_node_resource_active_handles();
+    int64_t count = js_array_length(servers);
+    for (int64_t i = 0; i < count; i++) {
+        JsServer* srv = server_from_object(js_array_get_int(servers, i));
         if (!srv) continue;
         // cluster worker disconnect drains server handles before IPC closes;
         // otherwise worker-owned listeners keep the child alive until watchdog.
@@ -4857,7 +4805,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
             server_close_after_listen_error(srv);
             return self;
         }
-        net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+        srv->active_resource_id = net_active_add(self, "TCPServerWrap");
         server_update_connection_key(self, srv, 0);
         js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
         server_schedule_listening(self, srv, callback);
@@ -4905,7 +4853,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
                 server_close_after_listen_error(srv);
                 return self;
             }
-            net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+            srv->active_resource_id = net_active_add(self, "TCPServerWrap");
             server_update_connection_key(self, srv, 0);
             js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
             server_schedule_listening(self, srv, callback);
@@ -5024,7 +4972,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         return self;
     }
 
-    net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+    srv->active_resource_id = net_active_add(self, "TCPServerWrap");
     js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
     server_schedule_listening(self, srv, callback);
     if (listen_signal_aborted) {
@@ -5257,55 +5205,58 @@ extern "C" Item js_net_createServer(Item rest_args) {
         }
     }
 
-    Item obj = js_new_object();
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> obj_root(roots, js_new_object());
     // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_SERVER);  // A3-T3b
+    js_class_stamp(obj_root.get(), JS_CLASS_SERVER);  // A3-T3b
     if (get_type_id(net_server_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(obj, net_server_prototype);
+        js_set_prototype(obj_root.get(), net_server_prototype);
     }
-    js_property_set(obj, make_string_item("__server__"),
+    js_property_set(obj_root.get(), make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
-    js_property_set(obj, make_string_item("_handle"), make_server_handle_object(srv));
-    js_property_set(obj, make_string_item("listen"),
+    js_property_set(obj_root.get(), make_string_item("_handle"), make_server_handle_object(srv));
+    js_property_set(obj_root.get(), make_string_item("listen"),
                     js_new_function((void*)js_server_listen, 3));
-    js_property_set(obj, make_string_item("close"),
+    js_property_set(obj_root.get(), make_string_item("close"),
                     js_new_function((void*)js_server_close, 1));
-    js_property_set(obj, make_string_item("on"),
+    js_property_set(obj_root.get(), make_string_item("on"),
                     js_new_function((void*)js_server_on, 2));
-    js_property_set(obj, make_string_item("once"),
+    js_property_set(obj_root.get(), make_string_item("once"),
                     js_new_function((void*)js_server_once, 2));
-    js_property_set(obj, make_string_item("listeners"),
+    js_property_set(obj_root.get(), make_string_item("listeners"),
                     js_new_function((void*)js_server_listeners, 1));
-    js_property_set(obj, make_string_item("removeListener"),
+    js_property_set(obj_root.get(), make_string_item("removeListener"),
                     js_new_function((void*)js_server_removeListener, 2));
-    js_property_set(obj, make_string_item("off"),
+    js_property_set(obj_root.get(), make_string_item("off"),
                     js_new_function((void*)js_server_removeListener, 2));
-    js_property_set(obj, make_string_item("address"),
+    js_property_set(obj_root.get(), make_string_item("address"),
                     js_new_function((void*)js_server_address, 0));
-    js_property_set(obj, make_string_item("ref"),
+    js_property_set(obj_root.get(), make_string_item("ref"),
                     js_new_function((void*)js_server_ref, 0));
-    js_property_set(obj, make_string_item("unref"),
+    js_property_set(obj_root.get(), make_string_item("unref"),
                     js_new_function((void*)js_server_unref, 0));
-    js_property_set(obj, make_string_item("getConnections"),
+    js_property_set(obj_root.get(), make_string_item("getConnections"),
                     js_new_function((void*)js_server_getConnections, 1));
-    js_property_set(obj, make_string_item("allowHalfOpen"),
+    js_property_set(obj_root.get(), make_string_item("allowHalfOpen"),
                     (Item){.item = b2it(srv->allow_half_open)});
-    js_property_set(obj, make_string_item("keepAlive"),
+    js_property_set(obj_root.get(), make_string_item("keepAlive"),
                     (Item){.item = b2it(srv->keep_alive)});
-    js_property_set(obj, make_string_item("keepAliveInitialDelay"),
+    js_property_set(obj_root.get(), make_string_item("keepAliveInitialDelay"),
                     (Item){.item = i2it(srv->keep_alive_initial_delay_ms)});
-    js_property_set(obj, make_string_item("noDelay"),
+    js_property_set(obj_root.get(), make_string_item("noDelay"),
                     (Item){.item = b2it(srv->no_delay)});
-    js_property_set(obj, make_string_item("pauseOnConnect"),
+    js_property_set(obj_root.get(), make_string_item("pauseOnConnect"),
                     (Item){.item = b2it(srv->pause_on_connect)});
-    js_property_set(obj, make_string_item("listening"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj_root.get(), make_string_item("listening"), (Item){.item = ITEM_FALSE});
     if (srv->has_block_list) {
-        js_property_set(obj, make_string_item("__block_list__"), srv->block_list);
+        js_property_set(obj_root.get(), make_string_item("__block_list__"), srv->block_list);
     }
 
-    srv->js_object = obj;
-    net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, obj);
-    return obj;
+    // A forced collection can run while installing methods; keep the object
+    // rooted until the session resource table takes ownership of its JS edge.
+    srv->js_object = obj_root.get();
+    srv->active_resource_id = net_active_add(obj_root.get(), "TCPServerWrap");
+    return obj_root.get();
 }
 
 static Item make_server_object_from_fd(uv_loop_t* loop, int fd) {
@@ -5333,50 +5284,6 @@ static Item make_server_object_from_fd(uv_loop_t* loop, int fd) {
     }
     js_property_set(obj, make_string_item("listening"), (Item){.item = ITEM_TRUE});
     return obj;
-}
-
-// =============================================================================
-// net.isIP(input) — returns 0, 4, or 6
-// =============================================================================
-
-extern "C" Item js_net_isIP(Item input_item) {
-    // Coerce to string (Node.js calls toString() on the input)
-    if (get_type_id(input_item) != LMD_TYPE_STRING) {
-        if (get_type_id(input_item) == LMD_TYPE_MAP || get_type_id(input_item) == LMD_TYPE_ELEMENT) {
-            input_item = js_to_string(input_item);
-            if (get_type_id(input_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
-        } else {
-            return (Item){.item = i2it(0)};
-        }
-    }
-    String* s = it2s(input_item);
-    char buf[256];
-    int len = (int)s->len < 255 ? (int)s->len : 255;
-    memcpy(buf, s->chars, (size_t)len);
-    buf[len] = '\0';
-
-    struct sockaddr_in addr4;
-    struct sockaddr_in6 addr6;
-    if (uv_ip4_addr(buf, 0, &addr4) == 0) return (Item){.item = i2it(4)};
-    // Reject zone IDs with invalid characters (Node.js is stricter than libuv)
-    char* pct = strchr(buf, '%');
-    if (pct) {
-        for (char* p = pct + 1; *p; p++) {
-            if (*p == '@' || *p == '[' || *p == ']' || *p == '/') return (Item){.item = i2it(0)};
-        }
-    }
-    if (uv_ip6_addr(buf, 0, &addr6) == 0) return (Item){.item = i2it(6)};
-    return (Item){.item = i2it(0)};
-}
-
-extern "C" Item js_net_isIPv4(Item input) {
-    Item r = js_net_isIP(input);
-    return (Item){.item = b2it(it2i(r) == 4)};
-}
-
-extern "C" Item js_net_isIPv6(Item input) {
-    Item r = js_net_isIP(input);
-    return (Item){.item = b2it(it2i(r) == 6)};
 }
 
 // =============================================================================
@@ -5747,78 +5654,22 @@ static Item net_constructor_prototype(Item ctor, JsClass cls) {
     return prototype_root.get();
 }
 
-static Item js_net_getDefaultAutoSelectFamilyAttemptTimeout(void) {
-    return (Item){.item = i2it(net_auto_select_family_timeout)};
+extern "C" bool js_net_default_auto_select_family_get(void) {
+    return net_default_auto_select_family;
 }
 
-static Item js_net_getDefaultAutoSelectFamily(void) {
-    return (Item){.item = b2it(net_default_auto_select_family)};
+extern "C" void js_net_default_auto_select_family_set(bool enabled) {
+    net_default_auto_select_family = enabled;
 }
 
-static Item js_net_setDefaultAutoSelectFamily(Item enabled_item) {
-    net_default_auto_select_family = js_is_truthy(enabled_item);
-    return (Item){.item = ITEM_UNDEFINED};
+extern "C" int js_net_default_auto_select_family_timeout_get(void) {
+    return net_auto_select_family_timeout;
 }
 
-static Item js_net_setDefaultAutoSelectFamilyAttemptTimeout(Item timeout_item) {
-    int parsed_timeout = 0;
-    if (!net_parse_auto_select_timeout(timeout_item,
-            "defaultAutoSelectFamilyAttemptTimeout", &parsed_timeout)) {
-        return ItemNull;
-    }
-    net_auto_select_family_timeout = parsed_timeout;
-    return (Item){.item = ITEM_UNDEFINED};
-}
-
-static Item js_net_normalizeArgs(Item input) {
-    Item result = js_array_new(0);
-    Item options = js_new_object();
-    Item callback = ItemNull;
-
-    if (get_type_id(input) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(input);
-        if (len > 0) {
-            Item first = js_array_get_int(input, 0);
-            if (get_type_id(first) == LMD_TYPE_MAP ||
-                get_type_id(first) == LMD_TYPE_OBJECT ||
-                get_type_id(first) == LMD_TYPE_VMAP) {
-                options = first;
-            } else if (!is_undefined_item(first) && first.item != ITEM_NULL) {
-                js_property_set(options, make_string_item("port"), first);
-            }
-        }
-        if (len > 1) {
-            Item second = js_array_get_int(input, 1);
-            if (is_callable(second)) {
-                callback = second;
-            } else if (!is_undefined_item(second) && second.item != ITEM_NULL &&
-                       get_type_id(options) == LMD_TYPE_MAP) {
-                js_property_set(options, make_string_item("host"), second);
-            }
-        }
-        if (len > 2) {
-            Item third = js_array_get_int(input, 2);
-            if (is_callable(third)) callback = third;
-        }
-    }
-
-    js_array_push(result, options);
-    js_array_push(result, callback);
-    js_property_set(result, net_normalized_args_key(), (Item){.item = ITEM_TRUE});
-    return result;
-}
-
-extern "C" Item js_get_internal_net_namespace(void) {
-    static Item internal_net_namespace = {0};
-    if (internal_net_namespace.item != 0) return internal_net_namespace;
-
-    internal_net_namespace = js_new_object();
-    heap_register_gc_root(&internal_net_namespace.item);
-    js_property_set(internal_net_namespace, make_string_item("normalizedArgsSymbol"),
-                    net_normalized_args_key());
-    js_property_set(internal_net_namespace, make_string_item("kReinitializeHandle"),
-                    make_string_item("kReinitializeHandle"));
-    return internal_net_namespace;
+extern "C" bool js_net_default_auto_select_family_timeout_set(int timeout_ms) {
+    if (timeout_ms < 1) return false;
+    net_auto_select_family_timeout = timeout_ms;
+    return true;
 }
 
 extern "C" Item js_get_net_namespace(void) {
@@ -5849,18 +5700,6 @@ extern "C" Item js_get_net_namespace(void) {
     bound_socket_root.set(net_set_method(namespace_root.get(), "BoundSocket", (void*)js_net_BoundSocket, 1));
     stream_root.set(net_set_method(namespace_root.get(), "Stream", (void*)js_net_Socket, 1)); // legacy alias
     server_root.set(net_set_method(namespace_root.get(), "Server", (void*)js_net_createServer, -1)); // alias
-    net_set_method(namespace_root.get(), "isIP",             (void*)js_net_isIP, 1);
-    net_set_method(namespace_root.get(), "isIPv4",           (void*)js_net_isIPv4, 1);
-    net_set_method(namespace_root.get(), "isIPv6",           (void*)js_net_isIPv6, 1);
-    net_set_method(namespace_root.get(), "getDefaultAutoSelectFamily",
-                   (void*)js_net_getDefaultAutoSelectFamily, 0);
-    net_set_method(namespace_root.get(), "setDefaultAutoSelectFamily",
-                   (void*)js_net_setDefaultAutoSelectFamily, 1);
-    net_set_method(namespace_root.get(), "getDefaultAutoSelectFamilyAttemptTimeout",
-                   (void*)js_net_getDefaultAutoSelectFamilyAttemptTimeout, 0);
-    net_set_method(namespace_root.get(), "setDefaultAutoSelectFamilyAttemptTimeout",
-                   (void*)js_net_setDefaultAutoSelectFamilyAttemptTimeout, 1);
-    net_set_method(namespace_root.get(), "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
     js_property_set(block_list_root.get(), make_string_item("isBlockList"),
                     js_new_function((void*)js_block_list_isBlockList, 1));
     net_constructor_prototype(bound_socket_root.get(), JS_CLASS_OBJECT);
@@ -5896,6 +5735,9 @@ extern "C" Item js_net_get_socket_prototype(void) {
 }
 
 extern "C" void js_net_reset(void) {
+    // Reset invalidates the old JS heap, so its resource roots must leave the
+    // session table before any replacement namespace can publish new handles.
+    jube_node_resource_clear();
     js_host_hooks_set_shutdown_participant(NULL);
     js_host_hooks_set_ipc_accept_hook(NULL);
     net_namespace = (Item){0};
@@ -5903,8 +5745,6 @@ extern "C" void js_net_reset(void) {
     net_socket_prototype = (Item){0};
     net_server_prototype = (Item){0};
     net_socket_connect_fn = (Item){0};
-    memset(net_active_sockets, 0, sizeof(net_active_sockets));
-    memset(net_active_servers, 0, sizeof(net_active_servers));
     net_default_auto_select_family = false;
     net_auto_select_family_timeout = 500;
     net_cli_options_applied = false;

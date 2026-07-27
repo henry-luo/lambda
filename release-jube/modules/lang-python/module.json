@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "base_abi_version": 2,
   "hosted_api_version": 1,
-  "host_build_id": "lambda-hosted-lang-20260727-h9b37",
   "language": "python",
   "aliases": [
     "py"
@@ -16,6 +15,5 @@
   "library_macos": "lang-python.dylib",
   "library_linux": "lang-python.so",
   "library_windows": "lang-python.dll",
-  "entry_symbol": "jube_module",
-  "sha256_macos": "a5b2ec159413d41287a7178efae76867ed53f5e0536fa7d64f4674966b761b19"
+  "entry_symbol": "jube_module"
 }
