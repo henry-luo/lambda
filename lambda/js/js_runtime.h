@@ -222,6 +222,7 @@ Item js_get_length_item(Item object);
 
 Item js_new_function(void* func_ptr, int param_count);
 Item js_new_function_context(Context* runtime, void* func_ptr, int param_count);
+Item js_new_distinct_function(void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
 Item js_new_method_function_context(Context* runtime, void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);

@@ -27,7 +27,6 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
 extern "C" Item js_util_isDeepEqual(Item a, Item b);
 extern "C" Item js_get_this(void);
-extern "C" Item js_new_method_function(void* func_ptr, int param_count);
 extern "C" Item js_process_set_exitCode(Item code_item);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_buffer_isBuffer(Item obj);
@@ -5242,7 +5241,7 @@ static void assert_set_method(Item ns, const char* name, void* func_ptr, int par
 
 static Item assert_set_fresh_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = assert_make_string(name);
-    Item fn = js_new_method_function(func_ptr, param_count);
+    Item fn = js_new_distinct_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
     return fn;
 }
@@ -5341,7 +5340,7 @@ static Item js_assert_create_instance(Item options) {
     // alias must remain rooted across a compacting collection.
     RootFrame roots((Context*)context, 7);
     Rooted<Item> options_root(roots, options);
-    Rooted<Item> instance_root(roots, js_new_method_function((void*)js_assert_ok, 2));
+    Rooted<Item> instance_root(roots, js_new_distinct_function((void*)js_assert_ok, 2));
     bool strict_mode = js_assert_options_strict(options_root.get());
 
     // copy all assert methods onto this instance without reusing the module

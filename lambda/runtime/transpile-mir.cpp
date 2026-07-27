@@ -2046,30 +2046,46 @@ static bool mir_is_container_field_type(TypeId type_id) {
 // publication state, TLS lookup, lock, or atomic operation is emitted here.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
-static MIR_reg_t emit_module_state_load(MirTranspiler* mt) {
+static void emit_module_state_load_insn(MirTranspiler* mt, MIR_insn_t* after,
+                                        MIR_insn_t insn) {
+    if (after && *after) {
+        MIR_insert_insn_after(mt->ctx, mt->em.func_item, *after, insn);
+        *after = insn;
+    } else {
+        emit_insn(mt, insn);
+    }
+}
+
+static MIR_reg_t emit_module_state_load_after(MirTranspiler* mt, MIR_insn_t after) {
     MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, table),
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
     MIR_reg_t layout_addr = new_reg(mt, "module_layout", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, layout_addr),
         MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
     MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, module_id),
         MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, layout_addr, 0, 1)));
     MIR_reg_t state = new_reg(mt, "module_state", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, state),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
     return state;
 }
 
+static MIR_reg_t emit_module_state_load(MirTranspiler* mt) {
+    return emit_module_state_load_after(mt, NULL);
+}
+
 static MIR_reg_t emit_module_state(MirTranspiler* mt) {
     if (mt->module_state_reg) return mt->module_state_reg;
-    mt->module_state_reg = emit_module_state_load(mt);
+    // A branch may be the first emitted user of the slab. Materialize the
+    // cached register at the entry label so every control-flow path defines it.
+    mt->module_state_reg = emit_module_state_load_after(mt, mt->em.frame.anchor);
     mt->member_ic_base_reg = new_reg(mt, "member_ic_base", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, mt->member_ic_base_reg),

@@ -60,6 +60,7 @@ struct Runtime {
     const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
+    void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // all executable Lambda paths use MIR Direct
 

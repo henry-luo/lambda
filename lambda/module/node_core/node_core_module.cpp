@@ -19,7 +19,14 @@ struct NodeCoreSessionState { void* session; };
 static NodeCoreSessionState* node_core_state(void) {
     return (NodeCoreSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_CORE);
 }
-#define node_core_session (node_core_state()->session)
+// Namespace resolution can run while a new JS context is being bootstrapped,
+// before node-core's attach hook has published its context-owned state.
+#define node_core_session (node_core_state() ? node_core_state()->session : NULL)
+
+static void node_core_session_set(void* session) {
+    NodeCoreSessionState* state = node_core_state();
+    if (state) state->session = session;
+}
 
 static Item node_core_path_namespace(void) {
     return node_path_namespace();
@@ -634,7 +641,7 @@ static void node_core_runtime_attach(void* session) {
     }
     if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_CORE,
             sizeof(NodeCoreSessionState))) return;
-    node_core_session = session;
+    node_core_session_set(session);
     node_path_runtime_attach(session);
     node_string_decoder_runtime_attach(session);
     node_querystring_runtime_attach(session);
@@ -683,7 +690,7 @@ static void node_core_runtime_detach(void* session) {
     node_workers_runtime_detach(session);
     node_tty_runtime_detach(session);
     node_process_runtime_detach(session);
-    if (session == node_core_session) node_core_session = NULL;
+    if (session == node_core_session) node_core_session_set(NULL);
 }
 
 static const JubeModuleDef node_core_module = {

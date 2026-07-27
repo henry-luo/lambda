@@ -64,7 +64,7 @@
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 4
+              "safepoints": 5
             },
             {
               "name": "main",
@@ -72,7 +72,7 @@
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 2
+              "safepoints": 3
             }
           ]
         }
@@ -85,10 +85,10 @@
       "description": "Boundary i64/u64 boxing cost through the number-stack boxers.",
       "budgets": {
         "default": {
-          "module_insns": 75,
+          "module_insns": 76,
           "functions": {
             "main": {
-              "insns": 75
+              "insns": 76
             }
           },
           "frames": [
@@ -98,7 +98,7 @@
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 9
+              "safepoints": 11
             }
           ]
         }
@@ -114,14 +114,14 @@
           "module_insns": 158,
           "functions": {
             "js_main": {
-              "insns": 98
+              "insns": 100
             }
           },
           "frames": [
             {
               "name": "js_main",
-              "roots": 4,
-              "root_stores": 13,
+              "roots": 5,
+              "root_stores": 14,
               "scalar_homes": 1,
               "number_scratch": 0,
               "safepoints": 18
@@ -140,14 +140,14 @@
           "module_insns": 305,
           "functions": {
             "js_main": {
-              "insns": 71
+              "insns": 73
             }
           },
           "frames": [
             {
               "name": "js_main",
-              "roots": 2,
-              "root_stores": 8,
+              "roots": 3,
+              "root_stores": 9,
               "scalar_homes": 2,
               "number_scratch": 0,
               "safepoints": 12
@@ -155,8 +155,8 @@
             {
               "name": "_js_anon1_#",
               "occurrence": 0,
-              "roots": 3,
-              "root_stores": 4,
+              "roots": 4,
+              "root_stores": 5,
               "scalar_homes": 1,
               "number_scratch": 0,
               "safepoints": 6
@@ -183,7 +183,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only.",
       "budgets": {
         "default": {
-          "module_insns": 897
+          "module_insns": 908
         }
       }
     },
@@ -262,7 +262,7 @@
               "root_stores": 0,
               "scalar_homes": 2,
               "number_scratch": 0,
-              "safepoints": 6
+              "safepoints": 7
             }
           ]
         }
@@ -315,7 +315,7 @@
           "module_insns": 7551,
           "functions": {
             "js_main": {
-              "insns": 3681
+              "insns": 3682
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 17
@@ -324,8 +324,8 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 11,
-              "root_stores": 846,
+              "roots": 12,
+              "root_stores": 847,
               "scalar_homes": 6,
               "number_scratch": 0,
               "safepoints": 1748

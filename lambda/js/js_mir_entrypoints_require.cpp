@@ -40,6 +40,7 @@ extern "C" void js_async_hooks_drain_destroy_queue(void);
 extern "C" bool js_event_loop_has_refed_handles(void);
 extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
+extern "C" Item js_get_global_this(void);
 
 static Item js_require_module_not_found(const char* specifier) {
     const char* name = specifier ? specifier : "";
@@ -713,6 +714,12 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     }
     context->runtime = runtime;
     js_runtime_state_bind_context(context);
+    if (runtime->dom_ui_context) {
+        // The stack worker binds a distinct execution realm. Carry the host's
+        // borrowed UI session into that realm before any DOM wrapper or task is
+        // created; rebinding it after execution leaves callbacks in a dead realm.
+        js_dom_set_ui_context(runtime->dom_ui_context);
+    }
     ArrayList* previous_debug_info = context->debug_info;
     const char* previous_current_file = context->current_file;
 
@@ -720,6 +727,11 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // Create Input context for JS runtime — must be before module loading
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
+
+    // Imports can resolve Node namespaces before generated main initializes
+    // globalThis. Establish the realm first so module attach hooks publish
+    // their context-owned session state before a namespace builder runs.
+    (void)js_get_global_this();
 
     // Pre-compile imported modules in parallel (macOS/Linux only).
     // Discovers dependency graph, compiles modules by depth level using thread pool,
@@ -1316,6 +1328,7 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     // Runtime-owned context directly instead of fabricating a stack context.
     context = runtime_context;
     js_runtime_state_bind_context(runtime_context);
+    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
 
     typedef Item (*js_main_func_t)(Context*);
@@ -1388,6 +1401,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     context = js_context;
     context->runtime = runtime;
     js_runtime_state_bind_context(context);
+    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->reuse_pool) {
         heap_init_with_pool(runtime->reuse_pool);
         runtime->reuse_pool = NULL;

@@ -227,7 +227,10 @@ static void js_batch_document_finish(Runtime* runtime, JsBatchDocument* job) {
         pool_destroy(job->pool);
         job->pool = nullptr;
     }
-    if (runtime) runtime->dom_doc = nullptr;
+    if (runtime) {
+        runtime->dom_doc = nullptr;
+        runtime->dom_ui_context = nullptr;
+    }
 }
 
 static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
@@ -252,6 +255,7 @@ static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
         return false;
     }
     runtime->dom_doc = (void*)job->document;
+    runtime->dom_ui_context = (void*)&job->session.uicon;
     return true;
 }
 
@@ -2460,6 +2464,7 @@ int main(int argc, char *argv[]) {
                     js_document_session_finish(&js_document_session);
                     return lambda_main_finish(1);
                 }
+                runtime.dom_ui_context = (void*)&js_document_session.uicon;
                 log_debug("Loaded HTML document for JS: %s", html_file);
             }
 
@@ -2568,6 +2573,15 @@ int main(int argc, char *argv[]) {
                 context = js_result_context;
                 js_runtime_state_bind_context(js_result_context);
             }
+            if (runtime.dom_doc && !js_check_exception()) {
+                // The document fast path executes without the CLI worker's
+                // post-script pump. Commit and drain while its UiContext is
+                // still bound so observer, timer, and transition callbacks
+                // see the same context-owned DOM realm as the script.
+                js_dom_commit_headless_layout();
+                js_event_loop_drain();
+                js_animation_frame_drain(64);
+            }
             if (input_type_module) {
                 const char* promise_state = js_promise_state_name(result);
                 if ((promise_state && strcmp(promise_state, "pending") == 0) ||
@@ -2615,6 +2629,7 @@ int main(int argc, char *argv[]) {
         }
 
         int final_js_exit_code = js_exit_code ? js_exit_code : (js_had_error ? 1 : js_process_current_exit_code());
+        runtime.dom_ui_context = nullptr;
         runtime_cleanup(&runtime);
         js_document_session_finish(&js_document_session);
         return lambda_main_finish(final_js_exit_code);

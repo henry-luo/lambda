@@ -1838,7 +1838,11 @@ void runtime_reset_heap(Runtime* runtime) {
         js_runtime_state_bind_context(previous_context);
     }
     if (runtime->js_bootstrap_context) {
-        mem_free(runtime->js_bootstrap_context);
+        // Cross-language imports can use the canonical EvalContext directly;
+        // freeing that alias here left the next batch binding a dead context.
+        if (runtime->js_bootstrap_context != runtime_get_eval_context(runtime)) {
+            mem_free(runtime->js_bootstrap_context);
+        }
         runtime->js_bootstrap_context = NULL;
     }
 }
@@ -1893,6 +1897,7 @@ void runtime_cleanup(Runtime* runtime) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
         }
+        runtime->dom_ui_context = NULL;
 
         // Intrinsic cache entries own native precise-root slots outside the GC
         // pool; release them while their heap is current and before leak accounting.
@@ -1932,6 +1937,7 @@ void runtime_cleanup(Runtime* runtime) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
         }
+        runtime->dom_ui_context = NULL;
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && runtime->eval_context->js_state) {

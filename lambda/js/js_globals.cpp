@@ -2262,6 +2262,12 @@ static bool js_process_ensure_roots(void) {
         js_root_range_ensure_registered(&js_runtime_state.process.roots);
 }
 
+static bool js_process_cache_is_empty(Item value) {
+    // Root-range cleanup clears expired realm cache slots to zero, while an
+    // explicit realm reset uses ItemNull; neither value is a JS object.
+    return value.item == 0 || value.item == ITEM_NULL;
+}
+
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
 //   24=setHours, 25=setMinutes, 26=setSeconds, 27=setMilliseconds,
@@ -2741,11 +2747,11 @@ extern "C" void js_set_process_exec_argv(int argc, const char** argv) {
 
 extern "C" Item js_get_process_argv(void) {
     // Lazy build: if raw argv was stored but Lambda array not yet built, build it now
-    if (js_process_argv_items.item == ITEM_NULL && js_process_argc_raw > 0) {
+    if (js_process_cache_is_empty(js_process_argv_items) && js_process_argc_raw > 0) {
         js_set_process_argv(js_process_argc_raw, js_process_argv_raw);
     }
     // Return an empty array if process.argv was never set (prevents null subscript crash)
-    if (js_process_argv_items.item == ITEM_NULL) {
+    if (js_process_cache_is_empty(js_process_argv_items)) {
         Array* arr = array();
         js_process_argv_items = array_end(arr);
     }
@@ -2753,10 +2759,10 @@ extern "C" Item js_get_process_argv(void) {
 }
 
 extern "C" Item js_get_process_exec_argv(void) {
-    if (js_process_exec_argv_items.item == ITEM_NULL && js_process_exec_argc_raw > 0) {
+    if (js_process_cache_is_empty(js_process_exec_argv_items) && js_process_exec_argc_raw > 0) {
         js_set_process_exec_argv(js_process_exec_argc_raw, js_process_exec_argv_raw);
     }
-    if (js_process_exec_argv_items.item == ITEM_NULL) {
+    if (js_process_cache_is_empty(js_process_exec_argv_items)) {
         Array* arr = array();
         js_process_exec_argv_items = array_end(arr);
     }
@@ -2764,7 +2770,8 @@ extern "C" Item js_get_process_exec_argv(void) {
 }
 
 extern "C" int js_is_process_object_value(Item object) {
-    return js_process_object.item != ITEM_NULL && object.item == js_process_object.item;
+    return !js_process_cache_is_empty(js_process_object) &&
+        object.item == js_process_object.item;
 }
 
 // process.exit([code])
@@ -2814,7 +2821,8 @@ extern "C" Item js_process_set_exitCode(Item code_item) {
 extern "C" int js_process_current_exit_code(void) {
     if (!js_active_runtime_state) return 0;
     int code = js_process_exit_code_value;
-    if (js_process_object.item != ITEM_NULL && context && context->name_pool) {
+    if (!js_process_cache_is_empty(js_process_object) &&
+        context && context->name_pool) {
         Item prop = js_property_get(js_process_object,
             (Item){.item = s2it(heap_create_name("exitCode", 8))});
         TypeId type = get_type_id(prop);
@@ -3490,7 +3498,7 @@ extern "C" void js_process_ipc_clear_force_ref(void) {
 }
 
 static void js_process_set_connected(bool connected) {
-    if (js_process_object.item == ITEM_NULL) return;
+    if (js_process_cache_is_empty(js_process_object)) return;
     js_property_set(js_process_object,
         (Item){.item = s2it(heap_create_name("connected", 9))},
         (Item){.item = b2it(connected)});
@@ -3733,6 +3741,12 @@ static void js_process_ipc_init_from_env(void) {
     if (fd < 0) return;
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
+        // process is constructed during global bootstrap, before normal script
+        // entry initializes libuv; inherited IPC must attach to that first loop.
+        js_event_loop_init();
+        loop = lambda_uv_loop();
+    }
+    if (!loop) {
         log_error("process_ipc: event loop not initialized");
         return;
     }
@@ -3833,7 +3847,7 @@ extern "C" Item js_process_disconnect(void) {
 }
 
 extern "C" Item js_get_process_object_value(void) {
-    if (js_process_object.item == ITEM_NULL) {
+    if (js_process_cache_is_empty(js_process_object)) {
         if (!js_process_ensure_roots()) return ItemNull;
         js_process_object = js_object_create(ItemNull);
 
@@ -4120,7 +4134,7 @@ extern "C" Item js_get_process_object_value(void) {
                 log_error("js_process: failed to activate node-core module");
             }
         } else if (jube_node_core_module_enabled()) {
-            // dynamic profiles discover node-core through the public process
+            // Dynamic profiles discover node-core through the public process
             // specifier; resolve it before the session attach hook runs. An
             // explicit minimal profile must not be widened by catalog discovery.
             Item process_namespace = ItemNull;
@@ -14776,10 +14790,8 @@ extern "C" void js_globals_batch_reset() {
     }
     js_process_ipc_len = 0;
     js_process_ipc_cap = 0;
-    js_process_argc_raw = 0;
-    js_process_exec_argc_raw = 0;
-    js_process_argv_raw = NULL;
-    js_process_exec_argv_raw = NULL;
+    // Preserve immutable CLI bootstrap inputs across realm teardown. Clearing
+    // them here made a newly created process object lose its script arguments.
     // reset with-statement scope stack — stale Items become dangling after heap reset
     extern void js_with_batch_reset(void);
     js_with_batch_reset();

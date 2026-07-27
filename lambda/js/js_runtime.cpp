@@ -7347,6 +7347,21 @@ static bool js_is_class_instance_prototype(Item proto) {
 }
 
 static Item js_super_lookup_base(Item receiver) {
+    if (js_current_private_home_class.item != 0 &&
+        js_current_private_home_class.item != ItemNull.item &&
+        get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        // `super` is lexical: a parent method inherited by a grandchild must
+        // begin at that method's home object, not at the receiver's prototype.
+        // Instance methods retain the class object as home, so traverse its
+        // prototype object; static methods traverse the class object itself.
+        Item home_object = js_current_private_home_class;
+        if (!js_is_class_object_item(receiver) && js_is_class_object_item(home_object)) {
+            home_object = js_property_get_str(home_object, "prototype", 9);
+        }
+        Item home_super = js_get_prototype_of(home_object);
+        if (home_super.item == ITEM_JS_UNDEFINED) return ItemNull;
+        if (home_super.item != ItemNull.item) return home_super;
+    }
     if (js_is_class_object_item(receiver)) {
         bool has_raw_static_proto = false;
         Item raw_static_proto = js_map_get_fast_ext(
@@ -14816,6 +14831,10 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     // new function owns every edge.
     bound_root.set((Item){.function = (Function*)bound});
     bound->func_ptr = orig->func_ptr;
+    // A bound wrapper preserves the target's MIR ABI; its direct-call entry
+    // must therefore retain the target context instead of falling back to a
+    // process-global runtime lookup.
+    bound->runtime_context = orig->runtime_context;
     bound->param_count = orig->param_count;
     bound->formal_length = orig->formal_length; // preserve formal_length from original
     bound->env = orig->env;
@@ -28005,12 +28024,19 @@ static bool js_runtime_namespaces_ensure_roots(void) {
         js_root_range_ensure_registered(&js_runtime_state.namespaces.roots);
 }
 
+static bool js_namespace_cache_is_empty(Item value) {
+    // Root-range cleanup clears the context-owned slots to zero. Treat that
+    // representation like ItemNull so a later realm rebuilds its namespace
+    // instead of dereferencing a null map as a cached object.
+    return value.item == 0 || value.item == ITEM_NULL;
+}
+
 void js_reset_math_object() {
     js_math_object = (Item){.item = ITEM_NULL};
 }
 
 static Item js_get_math_object() {
-    if (js_math_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_math_object)) {
         // Math inherits from Object.prototype per ES spec (not null prototype)
         js_runtime_namespaces_ensure_roots();
         js_math_object = js_new_object();
@@ -28063,7 +28089,7 @@ extern "C" Item js_get_math_object_value() {
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
-    if (js_json_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_json_object)) {
         // JSON inherits from Object.prototype per ES spec
         js_runtime_namespaces_ensure_roots();
         js_json_object = js_new_object();
@@ -28094,7 +28120,7 @@ extern "C" Item js_get_json_object_value() {
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
-    if (js_css_namespace_object.item != ITEM_NULL) {
+    if (!js_namespace_cache_is_empty(js_css_namespace_object)) {
         return js_css_namespace_object;
     }
 
@@ -28187,7 +28213,7 @@ extern "C" Item js_intl_segmenter_new(Item /*locale*/, Item /*opts*/) {
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
-    if (js_intl_object.item != ITEM_NULL) return js_intl_object;
+    if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_runtime_namespaces_ensure_roots();
     js_intl_object = js_object_create(ItemNull);
     js_property_set(js_intl_object,
@@ -28205,7 +28231,7 @@ extern "C" Item js_get_intl_object_value() {
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
-    if (js_console_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_console_object)) {
         js_runtime_namespaces_ensure_roots();
         js_console_object = js_object_create(ItemNull);
 
@@ -28440,7 +28466,7 @@ static Item js_262_agent_monotonic_now() {
 
 static Item js_262_get_agent_object() {
     js_262_agent_register_roots();
-    if (js_262_agent_object.item != ITEM_NULL) return js_262_agent_object;
+    if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
     js_262_agent_object = js_new_object();
     js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("start", 5))},
         js_new_function((void*)js_262_agent_start, 1));
@@ -28462,7 +28488,7 @@ static Item js_262_get_agent_object() {
 }
 
 extern "C" Item js_get_262_object_value() {
-    if (js_262_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_262_object)) {
         js_runtime_namespaces_ensure_roots();
         js_262_object = js_object_create(ItemNull);
         Item key = (Item){.item = s2it(heap_create_name("detachArrayBuffer", 17))};
@@ -28484,7 +28510,7 @@ extern "C" Item js_get_262_object_value() {
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
-    if (js_reflect_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_reflect_object)) {
         // Reflect inherits from Object.prototype per ES spec
         js_runtime_namespaces_ensure_roots();
         js_reflect_object = js_new_object();
@@ -28513,7 +28539,7 @@ extern "C" Item js_get_reflect_object_value() {
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {
-    if (js_atomics_object.item == ITEM_NULL) {
+    if (js_namespace_cache_is_empty(js_atomics_object)) {
         if (!js_atomics_runtime_state_ensure()) return ItemError;
         // spec: Atomics [[Prototype]] = %ObjectPrototype%
         js_runtime_namespaces_ensure_roots();
@@ -28539,7 +28565,7 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     if (!method) return ItemNull;
 
     // check the real MAP object first — user writes/deletes override builtins
-    if (js_math_object.item != ITEM_NULL) {
+    if (get_type_id(js_math_object) == LMD_TYPE_MAP) {
         bool found = false;
         Item val = js_map_get_fast(js_math_object.map, method->chars, (int)method->len, &found);
         if (found) {
@@ -28814,7 +28840,7 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
 
     log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);
     // fallback: resolve via prototype chain (Object.prototype methods like hasOwnProperty)
-    if (js_math_object.item != ITEM_NULL) {
+    if (get_type_id(js_math_object) == LMD_TYPE_MAP) {
         Item fn = js_property_access(js_math_object, method_name);
         if (fn.item != ITEM_NULL && get_type_id(fn) == LMD_TYPE_FUNC) {
             return js_call_function(fn, js_math_object, args, argc);
@@ -28848,7 +28874,7 @@ extern "C" Item js_math_property(Item prop_name) {
     if (!prop) return ItemNull;
 
     // check the real MAP object first — user writes/deletes override builtins
-    if (js_math_object.item != ITEM_NULL) {
+    if (get_type_id(js_math_object) == LMD_TYPE_MAP) {
         Map* m = js_math_object.map;
         bool found = false;
         Item val = js_map_get_fast(m, prop->chars, (int)prop->len, &found);
@@ -28893,7 +28919,7 @@ extern "C" Item js_math_property(Item prop_name) {
     }
 
     // fallback: resolve via prototype chain (Object.prototype properties)
-    if (js_math_object.item != ITEM_NULL) {
+    if (get_type_id(js_math_object) == LMD_TYPE_MAP) {
         Item result = js_property_access(js_math_object, prop_name);
         if (result.item != ITEM_NULL) return result;
     }

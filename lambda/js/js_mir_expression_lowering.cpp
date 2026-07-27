@@ -7264,23 +7264,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (found_method && found_method->fc && found_method->fc->func_item) {
                         MIR_reg_t this_val = jm_emit_current_this(mt);
                         jm_emit_exc_propagate_check(mt);
-                        MIR_reg_t fn_item;
-                        if (found_method->fc->capture_count > 0) {
-                            // Re-wrapping a captured parent method drops its
-                            // definition-time environment. Resolve the method
-                            // already installed on the parent prototype so
-                            // super calls retain captured module bindings.
-                            MIR_reg_t key_reg = jm_box_string_literal(mt,
-                                prop->name->chars, (int)prop->name->len);
-                            fn_item = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-                        } else {
-                            fn_item = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-                                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
-                                MIR_T_I64, MIR_new_ref_op(mt->ctx, found_method->fc->func_item),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, found_method->param_count));
-                        }
+                        // A freshly wrapped compiled method loses the installed
+                        // method's home class and finalized MIR ABI metadata.
+                        // Resolve the published parent method, which preserves
+                        // both metadata and avoids a per-super-call allocation.
+                        MIR_reg_t key_reg = jm_box_string_literal(mt,
+                            prop->name->chars, (int)prop->name->len);
+                        MIR_reg_t fn_item = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                         MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                         return jm_call_function_into(mt,
                             MIR_new_reg_op(mt->ctx, fn_item),
@@ -7363,10 +7355,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         if (found_method && found_method->fc && found_method->fc->func_item) {
                             MIR_reg_t this_val = jm_emit_current_this(mt);
                             jm_emit_exc_propagate_check(mt);
-                            MIR_reg_t fn_item = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-                                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
-                                MIR_T_I64, MIR_new_ref_op(mt->ctx, found_method->fc->func_item),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, found_method->param_count));
+                            MIR_reg_t key_val = jm_transpile_box_item(mt, m->property);
+                            // Computed super calls need the published method for
+                            // the same home-class and MIR-ABI invariant as named calls.
+                            MIR_reg_t fn_item = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_val));
                             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                             log_debug("js-mir: super[%.*s]() → parent method '%s'",
                                 (int)key_id_name->len, key_id_name->chars,

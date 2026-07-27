@@ -174,10 +174,6 @@ extern "C" const void* radiant_dom_foreign_document_host_type(void);
 static TypeMap js_computed_style_marker = {};
 static TypeMap js_inline_style_marker = {};
 
-// Sentinel used in Map::type to distinguish the document.implementation singleton.
-// Map::data is unused.
-static TypeMap js_dom_implementation_marker = {};
-
 // Cached JS wrappers are owned by the active EvalContext, not this translation
 // unit. The root range is registered while a context is bound, before any
 // allocation can publish one of these values.
@@ -238,7 +234,8 @@ static Item js_font_face_set_ready_then(Item callback) {
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_call_function(callback, make_js_undefined(), NULL, 0);
     }
-    return js_document_fonts_value.item != ITEM_NULL ? js_document_fonts_value : make_js_undefined();
+    return get_type_id(js_document_fonts_value) == LMD_TYPE_MAP
+        ? js_document_fonts_value : make_js_undefined();
 }
 
 static Item js_create_document_fonts_object(void) {
@@ -2829,19 +2826,19 @@ extern "C" void* js_get_foreign_doc(Item item) {
 extern "C" bool js_is_dom_implementation(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_dom_implementation_marker;
+    return js_dom_implementation_item.item != 0 &&
+        item.item == js_dom_implementation_item.item;
 }
 
 extern "C" Item js_get_document_object_value() {
     if (!dom_ensure_roots()) return ItemNull;
-    if (js_document_proxy_item.item != ITEM_NULL) {
-        TypeId proxy_type = get_type_id(js_document_proxy_item);
-        if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
-            (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-             js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
-            js_document_proxy_item.vmap->host_data = _js_main_document;
-        }
+    TypeId proxy_type = get_type_id(js_document_proxy_item);
+    if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
+        (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
+         js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
+        // Root-range cleanup clears an expired wrapper slot to zero; only a
+        // live document VMap may be reused by the next context.
+        js_document_proxy_item.vmap->host_data = _js_main_document;
         return js_document_proxy_item;
     }
     js_document_proxy_item = vmap_new();
@@ -3788,16 +3785,16 @@ static void js_dom_set_implementation_method(Item implementation, const char* na
 
 extern "C" Item js_get_dom_implementation(void) {
     if (!dom_ensure_roots()) return ItemNull;
-    if (js_dom_implementation_item.item != ITEM_NULL) {
+    if (get_type_id(js_dom_implementation_item) == LMD_TYPE_MAP &&
+        js_is_dom_implementation(js_dom_implementation_item)) {
         return js_dom_implementation_item;
     }
-    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_PLAIN;
-    wrapper->type = (void*)&js_dom_implementation_marker;
-    wrapper->data = nullptr;
-    wrapper->data_cap = 0;
-    js_dom_implementation_item = (Item){.map = wrapper};
+    // Root-range cleanup clears expired realm cache slots to zero; zero must
+    // rebuild this context-owned DOMImplementation instead of surfacing null.
+    // A marker-only Map has no shape storage, so compiled property probes
+    // dereference a null data pointer. Use a normal JS object and identify the
+    // context-owned singleton by its cache identity instead.
+    js_dom_implementation_item = js_new_object();
     // DOMImplementation is a plain sentinel map, so property reads cannot
     // reach the native method-call dispatcher unless callable members exist.
     js_dom_set_implementation_method(js_dom_implementation_item, "createHTMLDocument",
@@ -6232,7 +6229,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
 extern "C" Item js_dom_document_fonts_bridge(void) {
     if (!dom_ensure_roots()) return ItemNull;
-    if (js_document_fonts_value.item == ITEM_NULL) {
+    if (get_type_id(js_document_fonts_value) != LMD_TYPE_MAP) {
+        // Root-range cleanup clears expired realm cache slots to zero; rebuild
+        // the FontFaceSet instead of publishing that non-object as `fonts`.
         js_document_fonts_value = js_create_document_fonts_object();
     }
     return js_document_fonts_value;
@@ -13971,7 +13970,7 @@ static void _install_iface(Item global, const char* name) {
     }
     // Interface constructors share one native illegal-constructor callback but
     // must not share a cached JsFunction: each owns a distinct `.prototype`.
-    Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
+    Item ctor = js_new_distinct_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
     Item proto = js_new_object();
     _set_iface_to_string_tag(proto, name);
@@ -13987,7 +13986,7 @@ static Item _document_fragment_ctor(void) {
 }
 
 static void _install_document_fragment_iface(Item global) {
-    Item ctor = js_new_method_function((void*)_document_fragment_ctor, 0);
+    Item ctor = js_new_distinct_function((void*)_document_fragment_ctor, 0);
     js_set_function_name(ctor, js_string_key("DocumentFragment"));
     Item proto = js_new_object();
     _set_iface_to_string_tag(proto, "DocumentFragment");
@@ -14099,7 +14098,7 @@ static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
     js_property_set(result, js_string_key("__lambda_xpath_items"), matches);
     js_property_set(result, js_string_key("__lambda_xpath_index"),
                     (Item){.item = i2it(0)});
-    Item iterate_next = js_new_method_function((void*)_xpath_result_iterate_next, 0);
+    Item iterate_next = js_new_distinct_function((void*)_xpath_result_iterate_next, 0);
     js_set_function_name(iterate_next, js_string_key("iterateNext"));
     js_property_set(result, js_string_key("iterateNext"), iterate_next);
     return result;
@@ -14109,7 +14108,7 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
     Item compiled = js_new_object();
     js_property_set(compiled, js_string_key("__lambda_xpath_source"),
                     js_to_string(expression));
-    Item evaluate = js_new_method_function((void*)_xpath_expression_evaluate, 3);
+    Item evaluate = js_new_distinct_function((void*)_xpath_expression_evaluate, 3);
     js_set_function_name(evaluate, js_string_key("evaluate"));
     js_property_set(compiled, js_string_key("evaluate"), evaluate);
     return compiled;
@@ -14117,7 +14116,7 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
 
 static Item _xpath_evaluator_ctor(void) {
     Item evaluator = js_new_object();
-    Item create_expression = js_new_method_function(
+    Item create_expression = js_new_distinct_function(
         (void*)_xpath_evaluator_create_expression, 2);
     js_set_function_name(create_expression, js_string_key("createExpression"));
     js_property_set(evaluator, js_string_key("createExpression"), create_expression);
@@ -14130,7 +14129,7 @@ static Item _xpath_evaluator_ctor(void) {
 }
 
 static void _install_xpath_evaluator(Item global) {
-    Item ctor = js_new_method_function((void*)_xpath_evaluator_ctor, 0);
+    Item ctor = js_new_distinct_function((void*)_xpath_evaluator_ctor, 0);
     js_set_function_name(ctor, js_string_key("XPathEvaluator"));
     Item proto = js_new_object();
     js_property_set(proto, js_string_key("constructor"), ctor);
@@ -14139,7 +14138,7 @@ static void _install_xpath_evaluator(Item global) {
 }
 
 static void _install_node_iface(Item global) {
-    Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
+    Item ctor = js_new_distinct_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Node"))});
     Item proto = js_new_object();
     _set_iface_to_string_tag(proto, "Node");

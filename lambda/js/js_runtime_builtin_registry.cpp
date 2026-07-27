@@ -544,7 +544,10 @@ Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count)
         for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
         js_builtin_cache_init = true;
     }
-    if (js_builtin_cache[builtin_id].item != ItemNull.item) {
+    // Heap root cleanup zeroes slots after a batch teardown while the
+    // context-owned initialized flag remains set; zero is an empty cache slot.
+    if (js_builtin_cache[builtin_id].item != 0 &&
+            js_builtin_cache[builtin_id].item != ItemNull.item) {
         return js_builtin_cache[builtin_id];
     }
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
