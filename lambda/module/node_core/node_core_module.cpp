@@ -161,11 +161,6 @@ NODE_CORE_HOST_NAMESPACE(node_core_internal_fs_promises_namespace, "internal/fs/
 NODE_CORE_HOST_NAMESPACE(node_core_internal_fs_utils_namespace, "internal/fs/utils")
 NODE_CORE_HOST_NAMESPACE(node_core_child_process_namespace, "child_process")
 NODE_CORE_HOST_NAMESPACE(node_core_crypto_namespace, "crypto")
-NODE_CORE_HOST_NAMESPACE(node_core_dns_namespace, "dns")
-NODE_CORE_HOST_NAMESPACE(node_core_dns_promises_namespace, "dns/promises")
-NODE_CORE_HOST_NAMESPACE(node_core_net_namespace, "net")
-NODE_CORE_HOST_NAMESPACE(node_core_internal_net_namespace, "internal/net")
-NODE_CORE_HOST_NAMESPACE(node_core_internal_js_stream_socket_namespace, "internal/js_stream_socket")
 NODE_CORE_HOST_NAMESPACE(node_core_tls_namespace, "tls")
 NODE_CORE_HOST_NAMESPACE(node_core_http_namespace, "http")
 NODE_CORE_HOST_NAMESPACE(node_core_https_namespace, "https")
@@ -395,11 +390,6 @@ static const char* const node_core_internal_fs_promises_specifiers[] = { "intern
 static const char* const node_core_internal_fs_utils_specifiers[] = { "internal/fs/utils" };
 static const char* const node_core_child_process_specifiers[] = { "child_process" };
 static const char* const node_core_crypto_specifiers[] = { "crypto" };
-static const char* const node_core_dns_specifiers[] = { "dns" };
-static const char* const node_core_dns_promises_specifiers[] = { "dns/promises" };
-static const char* const node_core_net_specifiers[] = { "net" };
-static const char* const node_core_internal_net_specifiers[] = { "internal/net" };
-static const char* const node_core_internal_js_stream_socket_specifiers[] = { "internal/js_stream_socket" };
 static const char* const node_core_tls_specifiers[] = { "tls" };
 static const char* const node_core_http_specifiers[] = {
     "http", "_http_agent", "_http_common", "_http_server", "_http_outgoing",
@@ -470,11 +460,6 @@ static const JubeNamespaceDef node_core_namespaces[] = {
     {node_core_internal_fs_utils_specifiers, 1, node_core_internal_fs_utils_namespace, NULL, 0},
     {node_core_child_process_specifiers, 1, node_core_child_process_namespace, NULL, 0},
     {node_core_crypto_specifiers, 1, node_core_crypto_namespace, NULL, 0},
-    {node_core_dns_specifiers, 1, node_core_dns_namespace, NULL, 0},
-    {node_core_dns_promises_specifiers, 1, node_core_dns_promises_namespace, NULL, 0},
-    {node_core_net_specifiers, 1, node_core_net_namespace, NULL, 0},
-    {node_core_internal_net_specifiers, 1, node_core_internal_net_namespace, NULL, 0},
-    {node_core_internal_js_stream_socket_specifiers, 1, node_core_internal_js_stream_socket_namespace, NULL, 0},
     {node_core_tls_specifiers, 1, node_core_tls_namespace, NULL, 0},
     {node_core_http_specifiers, 5, node_core_http_namespace, NULL, 0},
     {node_core_https_specifiers, 1, node_core_https_namespace, NULL, 0},
@@ -744,7 +729,7 @@ static const JubeModuleDef node_core_module = {
     NULL,
     0,
     node_core_namespaces,
-    63,
+    58,
     node_core_init,
     node_core_shutdown,
     NULL,

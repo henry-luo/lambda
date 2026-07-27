@@ -60,8 +60,32 @@
 > platform queries during
 > `runtime_attach`. These moved extensions no longer exist in `js_globals.cpp`;
 > the live process object is rooted while their names and callback wrappers are
-> allocated. `_getActiveHandles` remains host-owned until node-net replaces its
-> current net-list implementation with the session rid table.
+> allocated. `_getActiveHandles` now reads the session-owned transitional
+> resource table: node-net has moved its socket/server GC roots and inventory
+> out of raw global arrays into session-owned, slot-and-generation `uint32_t`
+> rids. Server and Socket construction is now rooted across forced collections
+> until that table owns the JS edge. Tier-2 stream operations and the actual
+> node-net module extraction remain the next N5b extension.
+> The first node-net ownership slice is now registered as its own Jube module:
+> `net`, `internal/net`, `internal/js_stream_socket`, `dns`, and
+> `dns/promises` no longer belong to node-core's descriptor table. The module
+> presently delegates namespace implementation to the host while stream and
+> DNS work services are extracted; static and isolated dynamic parity cover
+> that boundary. `net.isIP`, `net.isIPv4`, and `net.isIPv6` are the first
+> concrete node-net exports: they now parse through the module's platform-only
+> implementation and opaque Jube value/script/root services under normal and
+> forced-GC static/dynamic gates. `net` now also owns the public default
+> auto-select-family policy getters/setters; a narrow host network-policy
+> service keeps the connection scheduler's state host-side while the module
+> validates Node's boolean and positive-timeout contract. The pure
+> `internal/net` namespace and `net._normalizeArgs` now build in node-net as
+> well, preserving the host parser's normalized-args marker. `dns.lookupSync`
+> is the first DNS operation with a module-local platform implementation
+> (`getaddrinfo` + `inet_ntop`); its host namespace registration is gone and
+> normal/forced-GC static/dynamic coverage exercises the moved paths.
+> The network service now also owns the permission decision and non-throwing
+> `ERR_ACCESS_DENIED` construction needed by the forthcoming `work_submit`
+> DNS lifecycle, so a module resolver cannot bypass policy through libc.
 > `node:timers` and `node:timers/promises` are now rooted node-core leaves as
 > well: a narrow additive timer service leaves event-loop ownership in the host
 > while the Jube facades supply classic timer/cancellation methods, promise
@@ -115,6 +139,12 @@
 > build: the reduced profile resolves node-core's `path`, while the same host
 > binary in the minimal profile runs plain JS and reports `MODULE_NOT_FOUND`
 > for `path`.
+> The isolated dynamic node-core parity gate now stages the separately owned
+> `node-fs` and `node-net` images as well: host-namespace parity exercises
+> `fs`, `net`, and DNS, and allowing those lookups to fall back to static
+> providers would hide a broken dynamic dependency closure. The standard
+> package now ships node-net and verifies net/DNS loading; the reduced profile
+> omits it and proves `MODULE_NOT_FOUND`.
 > The static executable target now declares the complete node-core source set
 > explicitly. This keeps the separately generated test/release launcher from
 > losing moved providers that remain referenced by host JS and Radiant code.
@@ -216,6 +246,11 @@
 > console deliberately uses generic rendering. Reset clears the hook; static,
 > dynamic-after-`require('console')`, and minimal-profile probes cover both
 > sides without activating a dynamic module merely because `console` exists.
+> The active-resource inventory now follows the same absent-default pattern:
+> the registry no longer imports node-net directly, and host net registers its
+> resource/handle callbacks only while its namespace is live. The empty default
+> preserves process inventory behavior before net activation while the rid
+> table supersedes net's current rooted arrays.
 > The legacy Node builtin dispatcher is now catalog-first for every node-core
 > surface: fs, child-process, crypto, DNS, net/TLS/HTTP, and the internal
 > compatibility shims are explicit node-core descriptors whose implementations
@@ -1027,9 +1062,10 @@ manifest/build target from the N4 generator → dynamic flip → absent negative
   (manifest dependency activation alone is not callable permission logic).
 - [ ] **N5b — `node-net`** (7.9k lines; net + dns + cares_wrap shim). First
   real consumer of the Tier-2 stream ops (connect/listen/accept/read/write/
-  shutdown/opts/fd-adoption → rids); the raw socket/server pool arrays with
-  their `heap_register_gc_root` registration (`js_net.cpp:34/:120`) become
-  rid-table entries + persistent roots; dns rides `work_submit`
+  shutdown/opts/fd-adoption → rids). The transitional host table already
+  replaced net's raw socket/server pools with session-owned,
+  generation-checked rid entries and persistent roots; this stage moves those
+  entries behind the stream service and module boundary. dns rides `work_submit`
   (getaddrinfo) exactly as libuv does internally; `_getActiveHandles`
   switches to rid-table enumeration (hook point from N3.4);
   direct `Context` access (`js_net.cpp:4591`) eliminated.

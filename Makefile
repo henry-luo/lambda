@@ -474,7 +474,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-zlib release-lang-python release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -795,6 +795,14 @@ build-node-fs: build
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-fs
 	@ls -lh modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll 2>/dev/null || true
 
+build-node-net: build
+	@echo "Building external node-net Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native node-net -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-net
+	@ls -lh modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll 2>/dev/null || true
+
 build-node-zlib: build
 	@echo "Building external node-zlib Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -803,15 +811,22 @@ build-node-zlib: build
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-zlib
 	@ls -lh modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll 2>/dev/null || true
 
-release-node-zlib: release
-	@echo "Building release node-zlib Jube module..."
+define release_node_module
+release-node-$(1): release
+	@echo "Building release node-$(1) Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=release_native node-zlib -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-zlib
-	@mkdir -p release/modules/node-zlib
-	@cp modules/node-zlib/module.json release/modules/node-zlib/module.json
-	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll release/modules/node-zlib/ 2>/dev/null || true
+	$(MAKE) -C build/premake config=release_native node-$(1) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-$(1)
+	@mkdir -p release/modules/node-$(1)
+	@cp modules/node-$(1)/module.json release/modules/node-$(1)/module.json
+	@cp modules/node-$(1)/node-$(1).dylib modules/node-$(1)/node-$(1).so modules/node-$(1)/node-$(1).dll release/modules/node-$(1)/ 2>/dev/null || true
+endef
+
+$(eval $(call release_node_module,core))
+$(eval $(call release_node_module,fs))
+$(eval $(call release_node_module,net))
+$(eval $(call release_node_module,zlib))
 
 # The release language module is built independently, then copied next to the
 # full distribution's unchanged host executable.  The standard bundle never
@@ -828,14 +843,32 @@ release-lang-python: release $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_P
 
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
-package-standard: release-node-zlib
+package-standard: release-node-core release-node-fs release-node-net release-node-zlib
 	@mkdir -p release-standard
 	@cp release/lambda release-standard/lambda
 	@mkdir -p release-standard/modules
 	@cp modules/module-set.json release-standard/modules/module-set.json
+	# The module set advertises node-core, node-fs, and node-net, so their images must ship
+	# with the compatibility bundle instead of falling back to host providers.
+	@mkdir -p release-standard/modules/node-core
+	@cp release/modules/node-core/module.json release-standard/modules/node-core/module.json
+	@cp release/modules/node-core/node-core.dylib release/modules/node-core/node-core.so release/modules/node-core/node-core.dll release-standard/modules/node-core/ 2>/dev/null || true
+	@mkdir -p release-standard/modules/node-fs
+	@cp release/modules/node-fs/module.json release-standard/modules/node-fs/module.json
+	@cp release/modules/node-fs/node-fs.dylib release/modules/node-fs/node-fs.so release/modules/node-fs/node-fs.dll release-standard/modules/node-fs/ 2>/dev/null || true
+	@mkdir -p release-standard/modules/node-net
+	@cp release/modules/node-net/module.json release-standard/modules/node-net/module.json
+	@cp release/modules/node-net/node-net.dylib release/modules/node-net/node-net.so release/modules/node-net/node-net.dll release-standard/modules/node-net/ 2>/dev/null || true
 	@mkdir -p release-standard/modules/node-zlib
 	@cp release/modules/node-zlib/module.json release-standard/modules/node-zlib/module.json
 	@cp release/modules/node-zlib/node-zlib.dylib release/modules/node-zlib/node-zlib.so release/modules/node-zlib/node-zlib.dll release-standard/modules/node-zlib/ 2>/dev/null || true
+	@for module in node-core node-fs node-net node-zlib; do \
+		if ! find "release-standard/modules/$$module" -maxdepth 1 -type f \
+			\( -name "$$module.dylib" -o -name "$$module.so" -o -name "$$module.dll" \) \
+			-print -quit | rg -q .; then \
+			echo "missing packaged $$module image"; exit 1; \
+		fi; \
+	done
 	# Keep a manifest-only descriptor so a missing optional language has a
 	# deterministic diagnostic without putting its grammar or native code in the host.
 	@mkdir -p release-standard/modules/lang-python
@@ -851,12 +884,22 @@ package-jube: package-standard release-lang-python
 # The first extraction leaves reduced-node equal to the compatibility host plus
 # node-core activation. Later leaf manifests extend this target without ever
 # recompiling the shared host binary.
-package-node-reduced: release
+package-node-reduced: release-node-core
 	@mkdir -p release-node-reduced/modules
 	@cp release/lambda release-node-reduced/lambda
-	@cp modules/module-set.json release-node-reduced/modules/module-set.json
+	@cp modules/module-set-reduced.json release-node-reduced/modules/module-set.json
+	@mkdir -p release-node-reduced/modules/node-core
+	@cp release/modules/node-core/module.json release-node-reduced/modules/node-core/module.json
+	@cp release/modules/node-core/node-core.dylib release/modules/node-core/node-core.so release/modules/node-core/node-core.dll release-node-reduced/modules/node-core/ 2>/dev/null || true
+	@if ! find release-node-reduced/modules/node-core -maxdepth 1 -type f \
+		\( -name 'node-core.dylib' -o -name 'node-core.so' -o -name 'node-core.dll' \) \
+		-print -quit | rg -q .; then \
+		echo "missing packaged node-core image"; exit 1; \
+	fi
 	# A cataloged but image-less leaf blocks legacy host fallback and reports the
 	# profile's deliberate absence through Node's normal MODULE_NOT_FOUND path.
+	@mkdir -p release-node-reduced/modules/node-fs
+	@cp modules/node-fs/module.json release-node-reduced/modules/node-fs/module.json
 	@mkdir -p release-node-reduced/modules/node-zlib
 	@cp modules/node-zlib/module.json release-node-reduced/modules/node-zlib/module.json
 
@@ -877,6 +920,9 @@ verify-jube-package: package-jube
 	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/hosted-python-package-check/standard.err
 	@cd release-standard && ./lambda js -e "let z = require('zlib'); console.log(z.gunzipSync(z.gzipSync(Buffer.from('jube'))).toString())" --no-log | rg -x "jube"
 	@cd release-standard && ./lambda js -e "console.log(require('zlib').crc32(Buffer.from('jube')))" --no-log | rg -x "1308032562"
+	@cd release-standard && ./lambda js -e "console.log(require('buffer').Buffer === Buffer)" --no-log | rg -x "true"
+	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/js/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
+	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'), typeof require('dns').lookup)" --no-log | rg -x "4 function"
 	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
 
 verify-node-profile-packages: package-node-reduced package-minimal
@@ -888,6 +934,7 @@ verify-node-profile-packages: package-node-reduced package-minimal
 	@cd release-minimal && ./lambda js -e "console.log(typeof vm)" --no-log | rg -x "undefined"
 	@cd release-minimal && ./lambda js -e "let moduleName = 'path'; try { require(moduleName) } catch (e) { console.log(e.code); console.log(e.message) }" --no-log | rg -x "MODULE_NOT_FOUND|Cannot find module 'path'"
 	@cd release-node-reduced && ./lambda js -e "try { require('zlib') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
+	@cd release-node-reduced && ./lambda js -e "try { require('net') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
 	@cd release-minimal && ./lambda js -e "try { require('zlib') } catch (e) { console.log(e.code) }" --no-log | rg -x "MODULE_NOT_FOUND"
 
 # The loader must reject bytes that no longer match the manifest digest before
@@ -1038,6 +1085,9 @@ test-jube-node-fs-dynamic: build-node-fs build-node-core
 test-jube-node-fs-negative: build-node-fs build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-fs --runtime-specifier fs
 
+test-jube-node-net-negative: build-node-net build-node-core
+	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-net --runtime-specifier net
+
 # N3 leaf gate: normal decoding plus the forced-GC namespace/constructor
 # lifetime probe after each node-core leaf moves behind Jube tables.
 test-jube-node-core-leaves: build
@@ -1094,6 +1144,10 @@ test-jube-node-core-leaves: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
 	@./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
+	@./lambda.exe js test/js/jube_net_resource_registry.js --no-log | diff -u test/js/jube_net_resource_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_resource_registry.js --no-log | diff -u test/js/jube_net_resource_registry.txt -
+	@./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
 	@./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
 	@./lambda.exe js test/js/jube_cluster_online_hook.js --no-log | diff -u test/js/jube_cluster_online_hook.txt -
@@ -1102,10 +1156,16 @@ test-jube-node-core-leaves: build
 
 # Static-to-dynamic parity gate. The isolated root deliberately has no
 # module-set file, so node-core cannot be registered from the executable.
-test-jube-node-core-dynamic: build-node-core
-	@mkdir -p temp/node-core-dynamic/node-core
+# Host-namespace parity imports fs, whose dynamic provider is node-fs; stage
+# the dependency so this isolated core image cannot silently fall back static.
+test-jube-node-core-dynamic: build-node-core build-node-fs build-node-net
+	@mkdir -p temp/node-core-dynamic/node-core temp/node-core-dynamic/node-fs temp/node-core-dynamic/node-net
 	@cp modules/node-core/module.json temp/node-core-dynamic/node-core/module.json
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-core-dynamic/node-core/ 2>/dev/null || true
+	@cp modules/node-fs/module.json temp/node-core-dynamic/node-fs/module.json
+	@cp modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll temp/node-core-dynamic/node-fs/ 2>/dev/null || true
+	@cp modules/node-net/module.json temp/node-core-dynamic/node-net/module.json
+	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-core-dynamic/node-net/ 2>/dev/null || true
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_constants_registry.js --no-log | diff -u test/js/jube_constants_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_timers_promises_registry.js --no-log | diff -u test/js/jube_timers_promises_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_v8_registry.js --no-log | diff -u test/js/jube_v8_registry.txt -
@@ -1144,6 +1204,8 @@ test-jube-node-core-dynamic: build-node-core
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_globals_registry.js --no-log | diff -u test/js/jube_host_globals_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_process_registry.js --no-log | diff -u test/js/jube_process_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_net_ip_registry.js --no-log | diff -u test/js/jube_net_ip_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/js/jube_host_namespace_registry.js --no-log | diff -u test/js/jube_host_namespace_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/js/jube_cluster_online_hook.js --no-log | diff -u test/js/jube_cluster_online_hook.txt -

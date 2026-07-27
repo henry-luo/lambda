@@ -15,6 +15,9 @@
 #if defined(LAMBDA_NODE_FS_STATIC_LINKED)
 #include "module/node_fs/node_fs_module.hpp"
 #endif
+#if defined(LAMBDA_NODE_NET_STATIC_LINKED)
+#include "module/node_net/node_net_module.hpp"
+#endif
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
@@ -1865,6 +1868,13 @@ int main(int argc, char *argv[]) {
         // node-fs depends on node-core's active profile but owns the fs
         // descriptor, so register it after the core compatibility module.
         node_fs_jube_register_static();
+    }
+#endif
+#if defined(LAMBDA_NODE_NET_STATIC_LINKED)
+    if (jube_node_module_enabled("node-net")) {
+        // node-net owns the public net/dns descriptors while its libuv
+        // implementation is progressively moved behind stream services.
+        node_net_jube_register_static();
     }
 #endif
 

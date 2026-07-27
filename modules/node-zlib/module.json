@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "base_abi_version": 2,
   "hosted_api_version": 1,
-  "host_build_id": "lambda-hosted-lang-20260727-h9b40",
+  "host_build_id": "lambda-hosted-lang-20260727-h9b42",
   "kind": "runtime-library",
   "engine": "js",
   "provides": [
@@ -17,5 +17,5 @@
   "library_linux": "node-zlib.so",
   "library_windows": "node-zlib.dll",
   "entry_symbol": "jube_module",
-  "sha256_macos": "1a45c47385cc2876bc1833afbcf8222fb597607e68a82bf1fcf7710e28a716cb"
+  "sha256_macos": "02c6ce5c3235c52c0b9f24e64b7a5fa872245812e7105f76026a659912a020fd"
 }

@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260727-h9b40"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260727-h9b42"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -54,6 +54,7 @@ typedef struct JubeHostNodeErrorAPI JubeHostNodeErrorAPI;
 typedef struct JubeHostAsyncAPI JubeHostAsyncAPI;
 typedef struct JubeHostBinaryAPI JubeHostBinaryAPI;
 typedef struct JubeHostStreamAPI JubeHostStreamAPI;
+typedef struct JubeHostNetworkAPI JubeHostNetworkAPI;
 typedef struct JubeBinaryView JubeBinaryView;
 
 // Native work callbacks operate only on module-owned POD state.  They never
@@ -1113,8 +1114,8 @@ struct JubeHostRuntimeAPI {
     Item (*current_this)(void* session);
     int (*resolve_namespace)(void* session, const char* specifier, Item* out_namespace);
     int (*resolve_host_namespace)(void* session, const char* specifier, Item* out_namespace);
-    // Host-owned resource inventory stays session-scoped until node-net owns
-    // rid enumeration; node-core only publishes this Node-visible method.
+    // Session-owned resource inventory stays in the host table; node-core
+    // only publishes these Node-visible methods.
     Item (*session_active_resources_info)(void* session);
     Item (*session_active_handles)(void* session);
 };
@@ -1265,6 +1266,22 @@ struct JubeHostStreamAPI {
     Item (*file_write_stream_new)(Item path, Item options);
 };
 
+// Network policy affects host-owned connect scheduling, while node-net owns
+// the public Node setters/getters. The module never observes libuv handles.
+struct JubeHostNetworkAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    bool (*default_auto_select_family_get)(void);
+    void (*default_auto_select_family_set)(bool enabled);
+    int (*default_auto_select_family_timeout_get)(void);
+    bool (*default_auto_select_family_timeout_set)(int timeout_ms);
+    // Network policy stays host-owned. DNS modules ask explicitly so a
+    // resolver cannot bypass the process permission boundary by using libc.
+    bool (*permission_has_net)(void);
+    Item (*permission_make_net_error)(void* session, const char* syscall,
+                                      const char* resource);
+};
+
 struct JubeHostNodeAPI {
     uint32_t api_version;
     uint32_t struct_size;
@@ -1280,6 +1297,8 @@ struct JubeHostNodeAPI {
     // Additive permission tail consumed by extracted filesystem services.
     const JubeHostNodePermissionAPI* permission;
     const JubeHostStreamAPI* streams;
+    // Additive network-policy tail consumed by node-net.
+    const JubeHostNetworkAPI* network;
 };
 
 struct JubeHostAPI {

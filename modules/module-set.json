@@ -2,6 +2,7 @@
   "schema_version": 1,
   "modules": [
     "node-core",
-    "node-fs"
+    "node-fs",
+    "node-net"
   ]
 }
