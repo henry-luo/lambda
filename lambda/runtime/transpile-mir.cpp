@@ -1377,7 +1377,10 @@ static bool mir_is_native_scalar_value_type(TypeId tid) {
 }
 
 static Type* mir_array_occurrence_element(Type* type) {
-    if (!type || type->kind != TYPE_KIND_UNARY) return NULL;
+    // Sized scalar Type objects also use `kind` for NumSizedType; NUM_INT16
+    // equals TYPE_KIND_UNARY, so inspecting one as TypeUnary reads past the
+    // static Type object and can crash MIR compilation.
+    if (!type || type->type_id != LMD_TYPE_TYPE || type->kind != TYPE_KIND_UNARY) return NULL;
     TypeUnary* unary = (TypeUnary*)type;
     // `?` is a nullable scalar, not a sequence. Only the bracket occurrence
     // that backs T[] may enter the typed-array coercion path.
