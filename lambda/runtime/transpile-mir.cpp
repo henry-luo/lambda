@@ -2203,20 +2203,23 @@ static bool parse_bool_literal(const char* source, TSNode node) {
 // ============================================================================
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
-    // Each literal resolves its immutable pool through the current context's
-    // module slab. JIT export linking can relocate BSS, while this owner-thread
-    // state is established once before entry and needs no synchronization.
-    MIR_reg_t state = emit_module_state_load(mt);
-    MIR_reg_t consts = new_reg(mt, "consts", MIR_T_P);
+    // Use a call boundary here: MIR may reuse a virtual register across an
+    // arbitrary preceding runtime call, while literal pool ownership is fixed
+    // per context/module instance. This path has no sharing or synchronization.
+    MIR_reg_t layout = new_reg(mt, "module_layout", MIR_T_P);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, consts),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, consts),
-            state, 0, 1)));
-    MIR_reg_t ptr = new_reg(mt, "cptr", MIR_T_P);
+        MIR_new_reg_op(mt->ctx, layout),
+        MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+    MIR_reg_t ptr = emit_call_3(mt, "lambda_module_const_at", MIR_T_P,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, layout),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, const_index));
+    if (as_type == MIR_T_P) return ptr;
+    MIR_reg_t value = new_reg(mt, "cptr", as_type);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, ptr),
-        MIR_new_mem_op(mt->ctx, as_type, const_index * 8, consts, 0, 1)));
-    return ptr;
+        MIR_new_reg_op(mt->ctx, value),
+        MIR_new_mem_op(mt->ctx, as_type, 0, ptr, 0, 1)));
+    return value;
 }
 
 static MIR_reg_t emit_load_module_type_list(MirTranspiler* mt) {

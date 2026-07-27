@@ -102,6 +102,17 @@ extern "C" bool lambda_module_state_bind_static(Context* runtime,
     return true;
 }
 
+extern "C" void* lambda_module_const_at(Context* runtime,
+        const LambdaModuleLayout* layout, uint32_t index) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || !layout || layout->module_id >= owner->module_state_capacity) return NULL;
+    LambdaModuleState* state = owner->module_states[layout->module_id];
+    if (!state || !state->consts) return NULL;
+    // A generated literal may follow an arbitrary call; resolve through the
+    // owning context here so MIR cannot retain a call-clobbered pool register.
+    return ((void**)state->consts)[index];
+}
+
 extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         Item item) {
     LambdaModuleState* state = (LambdaModuleState*)module_state;

@@ -47,6 +47,9 @@ bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
                                  uint32_t var_count, uint32_t member_ic_count);
 bool lambda_module_state_bind_static(Context* runtime, uint32_t module_id,
                                      void* consts, void* type_list);
+void* lambda_module_const_at(Context* runtime,
+                             const struct LambdaModuleLayout* layout,
+                             uint32_t index);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 void lambda_module_state_reset(Context* runtime);
 void lambda_module_state_destroy(Context* runtime);
