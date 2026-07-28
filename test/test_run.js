@@ -365,6 +365,10 @@ function getPreviousDurationMs(baseName) {
 }
 
 function formatDuration(ms) {
+    if (ms > 0 && ms < 1000) {
+        // keep positive sub-second runs visible instead of rounding them down to 0s.
+        return `${Math.max(0.1, ms / 1000).toFixed(1)}s`;
+    }
     const totalSeconds = Math.max(0, Math.round(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;

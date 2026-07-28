@@ -442,13 +442,51 @@ static bool mir_region_scalar_expr(AstNode* node) {
     }
 }
 
+static bool mir_region_immediate_value_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Map fields allocated in a region may only point at the region itself.  Keep
+// ordinary-GC values out of that graph by admitting only immediate scalars.
+static bool mir_region_map_scalar_value(AstNode* node) {
+    if (node && node->node_type == AST_NODE_PRIMARY &&
+            !((AstPrimaryNode*)node)->expr) {
+        return node->type && mir_region_immediate_value_type(node->type->type_id);
+    }
+    node = mir_unwrap_primary(node);
+    if (!node) return true;  // an omitted map value is null
+    if (node->node_type == AST_NODE_NULL) return true;
+    if (!node->type || !mir_region_immediate_value_type(node->type->type_id)) {
+        return false;
+    }
+    switch (node->node_type) {
+    case AST_NODE_LITERAL:
+    case AST_NODE_IDENT:
+        return true;
+    case AST_NODE_UNARY:
+        return mir_region_map_scalar_value(((AstUnaryNode*)node)->operand);
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return mir_region_map_scalar_value(binary->left) &&
+            mir_region_map_scalar_value(binary->right);
+    }
+    default:
+        return false;
+    }
+}
+
 static bool mir_region_map_value(AstNode* node, AstFuncNode* producer,
         bool* saw_recursive_call) {
     node = mir_unwrap_primary(node);
     if (!node) return true;  // an omitted map value is null
-    if (node->node_type == AST_NODE_NULL) return true;
-    if (node->node_type == AST_NODE_LITERAL &&
-            ((AstLiteralNode*)node)->literal_type == AST_LITERAL_NULL) return true;
+    if (mir_region_map_scalar_value(node)) return true;
     if (node->node_type != AST_NODE_CALL_EXPR ||
             !is_recursive_call((AstCallNode*)node, producer)) return false;
     AstNode* arg = ((AstCallNode*)node)->argument;
@@ -513,8 +551,81 @@ static bool mir_region_producer_candidate(AstFuncNode* producer) {
     return body_ok && saw_map && saw_recursive_call;
 }
 
+static bool mir_region_same_name(String* left, String* right) {
+    return left && right && left->len == right->len &&
+        memcmp(left->chars, right->chars, left->len) == 0;
+}
+
+static bool mir_region_scalar_field_node(AstNode* node, String* field_name,
+        bool* saw_field) {
+    node = mir_unwrap_primary(node);
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+    case AST_NODE_BLOCK: {
+        AstListNode* list = (AstListNode*)node;
+        for (AstNode* item = list->item; item; item = item->next) {
+            if (!mir_region_scalar_field_node(item, field_name, saw_field)) return false;
+        }
+        return true;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        return if_node->then &&
+            mir_region_scalar_field_node(if_node->then, field_name, saw_field) &&
+            (!if_node->otherwise || mir_region_scalar_field_node(if_node->otherwise,
+                field_name, saw_field));
+    }
+    case AST_NODE_RETURN_STAM:
+        return mir_region_scalar_field_node(((AstReturnNode*)node)->value,
+            field_name, saw_field);
+    case AST_NODE_MAP: {
+        AstMapNode* map = (AstMapNode*)node;
+        if (!map->item) return false;
+        for (AstNode* item = map->item; item; item = item->next) {
+            if (item->node_type != AST_NODE_KEY_EXPR) continue;
+            AstNamedNode* named = (AstNamedNode*)item;
+            if (!mir_region_same_name(named->name, field_name)) continue;
+            *saw_field = true;
+            if (!mir_region_map_scalar_value(named->as)) return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static bool mir_region_producer_scalar_field(AstFuncNode* producer,
+        String* field_name) {
+    bool saw_field = false;
+    return producer && producer->body && field_name &&
+        mir_region_scalar_field_node(producer->body, field_name, &saw_field) &&
+        saw_field;
+}
+
+static bool mir_region_consumer_scalar_member(AstNode* node,
+        AstFuncNode* consumer, AstFuncNode* producer) {
+    node = mir_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR || !consumer ||
+            !consumer->param) return false;
+    AstFieldNode* member = (AstFieldNode*)node;
+    AstNode* object = mir_unwrap_primary(member->object);
+    AstNode* field = mir_unwrap_primary(member->field);
+    if (!object || !field || field->next || object->node_type != AST_NODE_IDENT ||
+            field->node_type != AST_NODE_IDENT) return false;
+    AstIdentNode* object_ident = (AstIdentNode*)object;
+    AstIdentNode* field_ident = (AstIdentNode*)field;
+    // The call-site proof passes the fresh graph as the sole first argument.
+    // Restricting scalar reads to that parameter prevents an unrelated map from
+    // being mistaken for a region-backed value.
+    if (!mir_region_same_name(object_ident->name, consumer->param->name)) return false;
+    return mir_region_producer_scalar_field(producer, field_ident->name);
+}
+
 static bool mir_region_consumer_return(AstNode* node, AstFuncNode* consumer,
-        bool* saw_recursive_call) {
+        AstFuncNode* producer, bool* saw_recursive_call) {
     if (node && node->node_type == AST_NODE_PRIMARY &&
             !((AstPrimaryNode*)node)->expr) {
         return true;
@@ -527,11 +638,11 @@ static bool mir_region_consumer_return(AstNode* node, AstFuncNode* consumer,
         return true;
     case AST_NODE_UNARY:
         return mir_region_consumer_return(((AstUnaryNode*)node)->operand,
-            consumer, saw_recursive_call);
+            consumer, producer, saw_recursive_call);
     case AST_NODE_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        return mir_region_consumer_return(binary->left, consumer, saw_recursive_call) &&
-            mir_region_consumer_return(binary->right, consumer, saw_recursive_call);
+        return mir_region_consumer_return(binary->left, consumer, producer, saw_recursive_call) &&
+            mir_region_consumer_return(binary->right, consumer, producer, saw_recursive_call);
     }
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
@@ -544,9 +655,11 @@ static bool mir_region_consumer_return(AstNode* node, AstFuncNode* consumer,
         *saw_recursive_call = true;
         return true;
     }
+    case AST_NODE_MEMBER_EXPR:
+        return mir_region_consumer_scalar_member(node, consumer, producer);
     default:
-        // Returning a member or the producer parameter itself would let a
-        // region pointer escape; only scalar arithmetic/recursive results pass.
+        // Returning the producer parameter, a nested member, or an unknown
+        // field would let a region pointer escape.
         return false;
     }
 }
@@ -585,7 +698,7 @@ static bool mir_region_consumer_condition(AstNode* node,
 }
 
 static bool mir_region_consumer_node(AstNode* node, AstFuncNode* consumer,
-        bool* saw_recursive_call) {
+        AstFuncNode* producer, bool* saw_recursive_call) {
     node = mir_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
@@ -594,7 +707,7 @@ static bool mir_region_consumer_node(AstNode* node, AstFuncNode* consumer,
     case AST_NODE_BLOCK: {
         AstListNode* list = (AstListNode*)node;
         for (AstNode* item = list->item; item; item = item->next) {
-            if (!mir_region_consumer_node(item, consumer, saw_recursive_call)) return false;
+            if (!mir_region_consumer_node(item, consumer, producer, saw_recursive_call)) return false;
         }
         return true;
     }
@@ -603,24 +716,25 @@ static bool mir_region_consumer_node(AstNode* node, AstFuncNode* consumer,
         // Conditions may read the borrowed graph but cannot store it.
         return if_node->cond && mir_region_consumer_condition(if_node->cond, consumer) &&
             if_node->then &&
-            mir_region_consumer_node(if_node->then, consumer, saw_recursive_call) &&
+            mir_region_consumer_node(if_node->then, consumer, producer, saw_recursive_call) &&
             (!if_node->otherwise || mir_region_consumer_node(if_node->otherwise,
-                consumer, saw_recursive_call));
+                consumer, producer, saw_recursive_call));
     }
     case AST_NODE_RETURN_STAM:
         return mir_region_consumer_return(((AstReturnNode*)node)->value,
-            consumer, saw_recursive_call);
+            consumer, producer, saw_recursive_call);
     default:
         return false;
     }
 }
 
-static bool mir_region_consumer_candidate(AstFuncNode* consumer) {
+static bool mir_region_consumer_candidate(AstFuncNode* consumer,
+        AstFuncNode* producer) {
     if (!consumer || !consumer->body || consumer->captures ||
             ((AstNode*)consumer)->node_type != AST_NODE_PROC ||
             (consumer->analysis && consumer->analysis->may_await)) return false;
     bool saw_recursive_call = false;
-    bool body_ok = mir_region_consumer_node(consumer->body, consumer,
+    bool body_ok = mir_region_consumer_node(consumer->body, consumer, producer,
         &saw_recursive_call);
     return body_ok && saw_recursive_call;
 }
@@ -6554,7 +6668,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 }
 
                 // P4-3.2: Set elem_type for array variables with known nested type,
-                // ONLY when the variable is never index-mutated in the current scope.
+                // only when every later element store preserves that representation.
                 // This enables NATIVE return from FAST PATH 1b/1d array indexing.
                 // Must check after fill narrowing (which handles fill(n, bool) → BOOL).
                 if (var_tid == LMD_TYPE_ARRAY && fill_elem_type == LMD_TYPE_ANY) {
@@ -6567,12 +6681,16 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         TypeArray* arr_type = (TypeArray*)rhs_type;
                         if (arr_type->nested &&
                             (arr_type->nested->type_id == LMD_TYPE_INT ||
-                             arr_type->nested->type_id == LMD_TYPE_BOOL)) {
-                            // Check mutation: scan current scope for arr[i] = val
-                            if (mt->func_body && !has_elem_type_invalidation(name_buf, mt->func_body)) {
+                             arr_type->nested->type_id == LMD_TYPE_BOOL ||
+                             arr_type->nested->type_id == LMD_TYPE_FLOAT)) {
+                            TypeId elem_type = arr_type->nested->type_id;
+                            // Preserve the raw lane across representation-preserving
+                            // stores; a differing or unknown store must remain boxed.
+                            if (mt->func_body && !has_elem_type_invalidation(name_buf,
+                                    mt->func_body, elem_type)) {
                                 MirVarEntry* v = find_var(mt, name_buf);
                                 if (v && v->elem_type == LMD_TYPE_ANY) {
-                                    v->elem_type = arr_type->nested->type_id;
+                                    v->elem_type = elem_type;
                                 }
                             }
                         }
@@ -8421,6 +8539,32 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
     return result;
 }
 
+static TypeId mir_tracked_array_element_type(MirTranspiler* mt,
+        AstNode* object) {
+    AstNode* unwrapped = mir_unwrap_primary(object);
+    if (!unwrapped || unwrapped->node_type != AST_NODE_IDENT) return LMD_TYPE_ANY;
+    AstIdentNode* ident = (AstIdentNode*)unwrapped;
+    char name[128];
+    snprintf(name, sizeof(name), "%.*s", (int)ident->name->len, ident->name->chars);
+    MirVarEntry* var = find_var(mt, name);
+    return var ? var->elem_type : LMD_TYPE_ANY;
+}
+
+static MIR_reg_t emit_tracked_generic_float_array_load(MirTranspiler* mt,
+        AstFieldNode* field_node, MIR_reg_t idx_native) {
+    MIR_reg_t object_item = transpile_expr(mt, field_node->object);
+    MIR_reg_t array_ptr = emit_unbox_container(mt, object_item);
+    MIR_reg_t boxed_object = emit_box_container(mt, object_item);
+    MirIndexLoadPolicy policy = {
+        MIR_INDEX_STORAGE_ARRAY_FLOAT, MIR_T_D, 8,
+        MIR_INDEX_RESULT_NATIVE_FLOAT,
+        MIR_INDEX_GUARD_ELEM_TYPE, LMD_TYPE_ARRAY_NUM,
+        MIR_INDEX_OOB_FLOAT_ZERO, MIR_INDEX_SLOW_ITEM_AT,
+        (uint8_t)ELEM_FLOAT64,
+    };
+    return emit_checked_index_load(mt, array_ptr, boxed_object, idx_native, policy);
+}
+
 // ============================================================================
 // M1.3: native-int index expressions
 //
@@ -8845,6 +8989,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         Type* obj_type = field_node->object ? field_node->object->type : nullptr;
         bool nested_int = false;
         bool nested_bool = false;
+        TypeId tracked_elem_type = mir_tracked_array_element_type(mt, field_node->object);
         if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
             TypeArray* arr_type = (TypeArray*)obj_type;
             nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
@@ -8853,16 +8998,12 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         // P4-3.1: Check MirVarEntry elem_type (from fill() narrowing), unwrap PRIMARY
         if (!nested_bool) {
-            AstNode* obj_unwrapped = field_node->object;
-            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-                char oname[128];
-                snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
-                MirVarEntry* ov = find_var(mt, oname);
-                if (ov && ov->elem_type == LMD_TYPE_BOOL) nested_bool = true;
-            }
+            nested_bool = tracked_elem_type == LMD_TYPE_BOOL;
+        }
+
+        if (tracked_elem_type == LMD_TYPE_FLOAT) {
+            MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
+            return emit_tracked_generic_float_array_load(mt, field_node, idx_native);
         }
 
         if (nested_int) {
@@ -8933,6 +9074,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         Type* obj_type = field_node->object ? field_node->object->type : nullptr;
         bool nested_int = false;
         bool nested_bool = false;
+        TypeId tracked_elem_type = mir_tracked_array_element_type(mt, field_node->object);
         if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
             TypeArray* arr_type = (TypeArray*)obj_type;
             nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
@@ -8941,20 +9083,15 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         // P4-3.1: Check MirVarEntry elem_type (from fill() narrowing), unwrap PRIMARY
         if (!nested_bool) {
-            AstNode* obj_unwrapped = field_node->object;
-            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-                char oname[128];
-                snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
-                MirVarEntry* ov = find_var(mt, oname);
-                if (ov && ov->elem_type == LMD_TYPE_BOOL) nested_bool = true;
-            }
+            nested_bool = tracked_elem_type == LMD_TYPE_BOOL;
         }
 
         MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
         MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
+
+        if (tracked_elem_type == LMD_TYPE_FLOAT) {
+            return emit_tracked_generic_float_array_load(mt, field_node, idx_native);
+        }
 
         if (nested_int) {
             // P4-3.2: Likely ArrayInt — inline read with runtime type check.
@@ -10161,7 +10298,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 ? (AstCallNode*)mir_unwrap_primary(candidate_arg) : NULL;
             AstFuncNode* producer = mir_direct_call_function(producer_call);
             if (local_func && fn_def && producer_call &&
-                    mir_region_consumer_candidate(fn_def) &&
+                    mir_region_consumer_candidate(fn_def, producer) &&
                     mir_region_producer_candidate(producer)) {
                 region_callsite_reg = emit_call_0(mt, "lambda_region_begin", MIR_T_P);
                 mt->region_producer_call = producer_call;
@@ -14803,6 +14940,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 // coerce every later read. The runtime elem-type guards on the inline paths
 // cover the residue, so a mis-admitted store costs a fallback, never a bad read.
 static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
+    if (value && value->node_type == AST_NODE_PRIMARY &&
+            !((AstPrimaryNode*)value)->expr && value->type &&
+            value->type->type_id == LMD_TYPE_NULL) {
+        // Parser-built `null` is an empty primary rather than an AST_NODE_NULL.
+        return true;
+    }
+    AstNode* value_node = mir_unwrap_primary(value);
+    if (value_node && (value_node->node_type == AST_NODE_NULL ||
+            (value_node->node_type == AST_NODE_LITERAL &&
+             ((AstLiteralNode*)value_node)->literal_type == AST_LITERAL_NULL))) {
+        // An explicit null store converts every specialized array to boxed
+        // storage; unlike an unresolved AST type, it cannot preserve a raw lane.
+        return true;
+    }
     TypeId vt = value && value->type ? value->type->type_id : LMD_TYPE_ANY;
     // NULL is how the AST spells "no type resolved yet", not the null value
     if (vt == LMD_TYPE_ANY || vt == LMD_TYPE_NULL || vt == LMD_TYPE_ERROR) {

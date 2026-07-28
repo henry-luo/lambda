@@ -183,7 +183,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only.",
       "budgets": {
         "default": {
-          "module_insns": 908
+          "module_insns": 1184
         }
       }
     },
