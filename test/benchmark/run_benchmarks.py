@@ -67,13 +67,13 @@ ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
 # excluded per-engine, not per-row: the entry below is legitimately timed under
 # LambdaJS. Verify with test/benchmark goldens before adding or removing an entry.
 WRONG_OUTPUT_ROWS = {
-    ("awfy", "list", "mir"):
+    ("awfy", "list", "mir_typed"):
         'list2.ls prints "List: FAIL result=6"; golden awfy/list2.txt is "List: PASS". '
         "Completes in ~0.012 ms because it does almost no work, so timing it produces "
         "a spurious best-in-class row. Already on MIR_SKIP_TESTS in test_lambda_gtest.",
 }
 ENGINE_LABELS = {
-    "mir": "MIR", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
+    "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
     "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
 }
 
@@ -658,7 +658,19 @@ def time_run_awfy_python(bench_name, num_runs, timeout_s):
             detail)
 
 
-def time_run_single(b, engines, num_runs, timeout_s, results):
+def mir_script_variants(b):
+    """Return (untyped, typed-or-None) Lambda scripts for a benchmark."""
+    ls_path = b["ls_path"]
+    if ls_path.endswith("2.ls"):
+        typed_path = ls_path
+        untyped_path = ls_path[:-4] + ".ls"
+    else:
+        untyped_path = ls_path
+        typed_path = ls_path[:-3] + "2.ls"
+    return untyped_path, typed_path if os.path.exists(typed_path) else None
+
+
+def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=False):
     """Run one benchmark across selected engines in TIME mode. Updates results dict."""
     suite = b["suite"]
     name = b["name"]
@@ -678,8 +690,14 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
 
     # --- MIR Direct ---
     if "mir" in engines:
+        untyped_path, typed_path = mir_script_variants(b)
+        mir_path = untyped_path if include_typed else ls_path
         print(f"  MIR      ", end="", flush=True)
-        wrong = WRONG_OUTPUT_ROWS.get((suite, name, "mir"))
+        if mir_path == typed_path:
+            wrong_key = "mir_typed"
+        else:
+            wrong_key = "mir_untyped" if include_typed else "mir"
+        wrong = WRONG_OUTPUT_ROWS.get((suite, name, wrong_key))
         if wrong:
             # Exit code 0 does not mean the benchmark computed the right answer, and
             # the runner never diffs output — so a wrong-but-fast row would otherwise
@@ -689,9 +707,32 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
                                None, None, False, "wrong_output", wrong)
             print(" wrong_output (excluded)")
         else:
-            w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
+            w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {mir_path}", num_runs, timeout_s)
             record_time_result(results, row, suite, name, "mir", w, e, ok, status, detail)
             print(f" {fmt_ms(e if e is not None else w)}")
+
+        if include_typed:
+            if typed_path is None:
+                # Keep both report columns total when only an untyped source exists.
+                value = results[suite][name].get("mir")
+                results[suite][name]["mir_typed"] = value
+                row["mir_typed"] = value
+                record_status(results, suite, name, "mir_typed", "untyped_fallback",
+                              {"source": untyped_path})
+                print("  MIR typed  * untyped fallback")
+            else:
+                print(f"  MIR typed ", end="", flush=True)
+                wrong = WRONG_OUTPUT_ROWS.get((suite, name, "mir_typed"))
+                if wrong:
+                    record_time_result(results, row, suite, name, "mir_typed",
+                                       None, None, False, "wrong_output", wrong)
+                    print(" wrong_output (excluded)")
+                else:
+                    w, e, ok, status, detail = time_run_benchmark(
+                        f"{LAMBDA_EXE} run {typed_path}", num_runs, timeout_s)
+                    record_time_result(results, row, suite, name, "mir_typed",
+                                       w, e, ok, status, detail)
+                    print(f" {fmt_ms(e if e is not None else w)}")
 
     # --- C2MIR ---
     if "c2mir" in engines:
@@ -837,7 +878,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
     return row
 
 
-def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path, fresh, metadata):
+def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path, fresh,
+                  metadata, include_typed=False):
     """Execute TIME mode: measure execution time across engines."""
     # Load existing results (merge mode)
     if os.path.exists(output_path) and not fresh:
@@ -862,7 +904,7 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path
             print(f"    SKIPPED (file not found: {b['ls_path']})")
             continue
 
-        row = time_run_single(b, engines, num_runs, timeout_s, results)
+        row = time_run_single(b, engines, num_runs, timeout_s, results, include_typed)
         summary.append((b["suite"], b["name"], row))
 
     # Save
@@ -878,15 +920,18 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path
     print(f"\n{'=' * 80}")
     print(f"TIME SUMMARY (exec_ms, median of {num_runs} runs)")
     print(f"{'=' * 80}")
+    display_engines = list(engines)
+    if include_typed and "mir" in engines:
+        display_engines.insert(display_engines.index("mir") + 1, "mir_typed")
     hdr = f"  {'Suite/Bench':24s}"
-    for eng in engines:
+    for eng in display_engines:
         hdr += f" {ENGINE_LABELS[eng]:>8s}"
     print(hdr)
-    print(f"  {'-' * (24 + 9 * len(engines))}")
+    print(f"  {'-' * (24 + 9 * len(display_engines))}")
 
     for suite, name, row in summary:
         line = f"  {suite + '/' + name:24s}"
-        for eng in engines:
+        for eng in display_engines:
             val = row.get(eng)
             if val is None:
                 val = results.get(suite, {}).get(name, {}).get(eng)
@@ -1443,7 +1488,7 @@ Examples:
     parser.add_argument("-t", "--timeout", type=int, default=DEFAULT_TIMEOUT_S,
                         help=f"Timeout per single run in seconds (default: {DEFAULT_TIMEOUT_S})")
     parser.add_argument("--typed", action="store_true",
-                        help="Include typed R7RS variants (mir-vs-c mode only)")
+                        help="Time typed and untyped MIR variants; in mir-vs-c also include typed R7RS variants")
     parser.add_argument("--list", action="store_true",
                         help="List all available benchmarks and exit")
     parser.add_argument("--dry-run", action="store_true",
@@ -1519,8 +1564,10 @@ Examples:
         print(f"  Engines : {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
         print(f"  Timeout : {timeout_s}s per run")
         print(f"  Fresh   : {'yes' if args.fresh else 'no (merge mode)'}")
-        if mode == "mir-vs-c" and args.typed:
-            print(f"  Typed   : yes (R7RS typed variants included)")
+        if args.typed:
+            typed_text = ("R7RS typed variants included" if mode == "mir-vs-c"
+                          else "MIR typed + untyped variants included")
+            print(f"  Typed   : yes ({typed_text})")
         if mode == "time":
             print(f"  Output  : {results_output}")
         elif mode == "memory":
@@ -1565,7 +1612,9 @@ Examples:
 
     # --- Dispatch to mode ---
     if mode == "time":
-        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output, args.fresh, metadata)
+        metadata["typed_variants"] = args.typed
+        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output,
+                      args.fresh, metadata, args.typed)
     elif mode == "memory":
         run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
     elif mode == "mir-vs-c":

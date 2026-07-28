@@ -343,6 +343,17 @@ python3 test/benchmark/run_benchmarks.py -m mir-vs-c -s r7rs --typed
 
 Measures wall-clock time in microseconds. Only uses MIR and C2MIR engines.
 
+### Typed and untyped MIR timing
+
+```bash
+# Run both Lambda variants; typed columns fall back to untyped where no typed source exists
+python3 test/benchmark/run_benchmarks.py -e mir --typed
+```
+
+The time-mode result keeps untyped MIR under `mir` and records the typed or
+untyped-fallback result under `mir_typed`. The report generator renders the
+fallback value with `*`.
+
 ### Listing and dry-run
 
 ```bash
@@ -366,7 +377,7 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save
 | `-e, --engines` | Comma-separated engine filter: `mir,c2mir,lambdajs,quickjs,nodejs,python` |
 | `-n, --runs` | Number of runs per engine (default: 3 for time, 1 for memory) |
 | `-t, --timeout` | Timeout per run in seconds (default: 120) |
-| `--typed` | Include typed R7RS variants (mir-vs-c mode only) |
+| `--typed` | In time mode, run both MIR variants; in mir-vs-c mode, include typed R7RS variants |
 | `--list` | List all available benchmarks and exit |
 | `--dry-run` | Show what would run without executing |
 | `--no-save` | Don't write results to JSON/CSV |

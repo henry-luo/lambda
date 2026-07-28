@@ -170,6 +170,8 @@ def main():
     parser.add_argument("--report-output", default=None, help="optional Overall_ResultN.md output path")
     parser.add_argument("--report-title", default="Lambda Benchmark Results", help="optional report title")
     parser.add_argument("--merge", action="store_true", help="merge into an existing result JSON instead of starting fresh")
+    parser.add_argument("--typed", action="store_true",
+                        help="run both untyped and typed MIR variants in time mode")
     parser.add_argument("--log-dir", default=None, help="directory for build/benchmark/report logs")
     parser.add_argument("--dry-run", action="store_true", help="print the standardized workflow without executing it")
     args = parser.parse_args()
@@ -190,6 +192,8 @@ def main():
     ]
     if not args.merge:
         benchmark_cmd.append("--fresh")
+    if args.typed:
+        benchmark_cmd.append("--typed")
     report_cmd = None
     if args.report_output:
         report_cmd = [
