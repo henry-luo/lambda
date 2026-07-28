@@ -1940,7 +1940,8 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
         // Absolute path
         snprintf(out, out_size, "%.*s", spec_len, specifier);
     } else {
-        // Bare specifier — try npm_resolve_module for node_modules lookup
+        // Bare specifiers remain unchanged here; external package resolution
+        // is not part of the Lambda host link closure.
         char spec_buf[512];
         snprintf(spec_buf, sizeof(spec_buf), "%.*s", spec_len, specifier);
 
@@ -1949,26 +1950,8 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 
         bool is_builtin = has_node_prefix || jube_specifier_is_builtin(spec_buf);
 
-        if (!is_builtin) {
-            // get the directory of the importing file
-            char from_dir[512];
-            if (dir_len > 0) {
-                snprintf(from_dir, sizeof(from_dir), "%.*s", dir_len - 1, base_file); // strip trailing /
-            } else {
-                from_dir[0] = '.'; from_dir[1] = '\0';
-            }
-
-            const char* conditions[] = { "lambda", "node", "import", "default" };
-            NpmModuleResolution res = npm_resolve_module(spec_buf, from_dir, conditions, 4);
-            if (res.found && res.resolved_path) {
-                snprintf(out, out_size, "%s", res.resolved_path);
-                npm_module_resolution_free(&res);
-                return; // already fully resolved with extension
-            }
-            npm_module_resolution_free(&res);
-        }
-
-        // fallback: use as-is (will be checked as builtin by js_module_get)
+        // Built-ins are checked by js_module_get; non-built-in package names
+        // fall through to the normal file and directory probes below.
         snprintf(out, out_size, "%.*s", spec_len, specifier);
         if (is_builtin) return;  // builtins don't need .js extension
     }

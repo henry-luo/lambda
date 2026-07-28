@@ -4052,6 +4052,18 @@ static void jube_node_shared_primitives_detach(void* session) {
     jube_node_shared_primitives_attached = false;
 }
 
+bool jube_activate_node_shared_primitives(void) {
+    jube_modules_runtime_attach();
+    if (!jube_active_node_runtime_session || !jube_active_node_runtime_session->live ||
+            jube_node_shared_primitives_init() != 0) {
+        return false;
+    }
+    // URL and EventTarget are browser globals too; they must have their host
+    // tables before global constructors invoke the shared implementation.
+    jube_node_shared_primitives_attach(jube_active_node_runtime_session);
+    return jube_node_shared_primitives_attached;
+}
+
 // size-gated access to the DOM3 additive tail: a field exists only when the
 // module's declared struct_size covers it, so v1 descriptors read as "no tail"
 static bool jube_module_has_field(const JubeModuleDef* module, size_t field_end) {

@@ -11,7 +11,7 @@
 
 LambdaJS has no native thread of suspension — `js_main` runs straight through. Asynchrony is therefore layered on top of three cooperating pieces: a fixed pool of `JsPromise` records, a FIFO microtask/job queue, and a libuv event loop that owns timers and drains the queue at well-defined points. Async functions reuse the **generator state machine** (the lowering and resume-label infrastructure are owned by [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md); this document covers only the async-specific suspend/resume wiring). The module system sits above all of this: it compiles each module into its own MIR context, runs the body through `js_main`, and approximates top-level await by splitting the body at the first `await`.
 
-This document owns promises, the job/microtask queue, the event loop, async/await suspension, the ES-module load/link/eval pipeline, CommonJS `require`, and the module-variable lifecycle. **Module *resolution* (path lookup, Node `node_modules` walking) and the npm client are owned by [JS_14 — Node Compatibility](JS_14_Node_Compat.md)**; this doc treats the resolved path as an input. The compilation entry points (`transpile_js_module_to_mir`, the core pipeline) are catalogued in [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md); module-variable storage layout (`js_module_vars[]`) is in [JS_03 — Value Model](JS_03_Value_Model.md).
+This document owns promises, the job/microtask queue, the event loop, async/await suspension, the ES-module load/link/eval pipeline, CommonJS `require`, and the module-variable lifecycle. **Module *resolution* (path lookup and built-in classification) is owned by [JS_14 — Node Compatibility](JS_14_Node_Compat.md)**; this doc treats the resolved path as an input. External package installation and `node_modules` discovery are outside the `lambda.exe` host build. The compilation entry points (`transpile_js_module_to_mir`, the core pipeline) are catalogued in [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md); module-variable storage layout (`js_module_vars[]`) is in [JS_03 — Value Model](JS_03_Value_Model.md).
 
 ---
 
@@ -159,4 +159,4 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 - [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — `js_module_vars[]` storage, GC roots.
 - [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `JsClass` byte vs `__class_name__` migration.
 - [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — generator state machine reused by async functions; iterator protocol used by promise combinators.
-- [JS_14 — Node Compatibility](JS_14_Node_Compat.md) — module resolution algorithm, `node_modules` walk, npm client, Node built-in modules.
+- [JS_14 — Node Compatibility](JS_14_Node_Compat.md) — built-in module resolution, Node built-in modules, and the external package boundary.

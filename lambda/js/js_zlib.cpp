@@ -2,7 +2,7 @@
  * js_zlib.cpp — Node.js-style 'zlib' module for LambdaJS
  *
  * Provides synchronous gzip/gunzip/deflate/inflate operations.
- * Backed by zlib (already linked for npm tarball extraction).
+ * Backed by the zlib library used by the Node zlib module.
  * Registered as built-in module 'zlib' via js_module_get().
  */
 #include "js_runtime.h"

@@ -50,6 +50,7 @@ extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
 extern "C" Item js_xhr_new(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
+extern "C" Item js_global_url_search_params_new(Item init);
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
 extern "C" void js_intrinsic_note_prototype_mutation(Item object);
 extern double js_get_number(Item value);
@@ -15958,18 +15959,16 @@ extern "C" Item js_get_global_this() {
 
         // globalThis.URLSearchParams
         {
-            extern Item js_url_search_params_new(Item init);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("URLSearchParams", 15))},
-                js_new_function((void*)js_url_search_params_new, 1));
+                js_new_function((void*)js_global_url_search_params_new, 1));
         }
 
         // globalThis.URL constructor
         {
-            extern Item js_url_module_construct(Item input, Item base);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("URL", 3))},
-                js_new_function((void*)js_url_module_construct, 2));
+                js_new_function((void*)js_url_construct_with_base, 2));
         }
 
         // globalThis.DOMException constructor
@@ -18651,6 +18650,20 @@ extern "C" Item js_symbol_well_known(Item name) {
 
 extern "C" Item js_url_search_params_new(Item init);
 
+static bool js_activate_url_primitives(void) {
+    // URL globals are installed before node-core; initialize their shared host
+    // primitives without turning on the optional Node compatibility namespace.
+    return jube_activate_node_shared_primitives();
+}
+
+extern "C" Item js_global_url_search_params_new(Item init) {
+    if (!js_activate_url_primitives()) {
+        log_error("js_global_url_search_params_new: shared URL primitive initialization failed");
+        return ItemNull;
+    }
+    return js_url_search_params_new(init);
+}
+
 static char* js_url_string_to_cstr(String* s) {
     if (!s) return NULL;
     size_t cap = (size_t)s->len * 3 + 1;
@@ -18674,6 +18687,13 @@ static char* js_url_string_to_cstr(String* s) {
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
+        return ItemNull;
+    }
+    // Module activation may allocate, so complete it before this unrooted URL
+    // object is built and handed to the node URL search-params primitive.
+    if (!js_activate_url_primitives()) {
+        log_error("js_url_to_object: shared URL primitive initialization failed");
+        url_destroy(url);
         return ItemNull;
     }
     Item obj = js_new_object();

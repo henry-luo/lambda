@@ -38,7 +38,6 @@
     "lambda/module/radiant",
     "lambda/module/hostobj_demo",
     "lambda/ts",
-    "lambda/module/npm",
     "lambda/network",
     "radiant"
   ],
@@ -590,7 +589,6 @@
       "source_patterns": [
         "lambda/js/*.cpp",
         "lambda/jube/*.cpp",
-        "lambda/module/npm/*.cpp",
         "lambda/ts/*.cpp",
         "lambda/runtime/*.cpp",
         "lambda/runtime/gc/*.c",
