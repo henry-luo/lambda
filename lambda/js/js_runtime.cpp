@@ -4478,6 +4478,22 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
 
         if (!own_found && get_type_id(key) == LMD_TYPE_STRING &&
+                js_is_process_object_value(object)) {
+            Item process_namespace = ItemNull;
+            // The base process object is realm-local JS state. Its Node-owned
+            // methods are installed only when a script first asks for one, so
+            // Test262 realms do not create or reset a Jube session needlessly.
+            if (jube_specifier_resolve("process", &process_namespace) ==
+                    JUBE_SPECIFIER_RESOLVED) {
+                Item process_value = ItemNull;
+                if (js_ordinary_get_own(object, key, js_proxy_receiver, &process_value) ==
+                        JS_OWN_READY) {
+                    return process_value;
+                }
+            }
+        }
+
+        if (!own_found && get_type_id(key) == LMD_TYPE_STRING &&
             js_is_class_constructor_map(object) &&
             js_is_restricted_function_property_name(it2s(key))) {
             js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");

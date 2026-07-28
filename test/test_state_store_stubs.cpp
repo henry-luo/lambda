@@ -3,12 +3,31 @@
 #include <string.h>
 
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/template_registry.h"
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
 __thread EvalContext* context = NULL;
+
+EvalContext* eval_context_bind(EvalContext* next) {
+    EvalContext* previous = context;
+    context = next;
+    return previous;
+}
+
+void eval_context_restore(EvalContext* previous) {
+    context = previous;
+}
+
+EvalContext* runtime_get_eval_context(Runtime* runtime) {
+    (void)runtime;
+    // The standalone StateStore fixture has no owning Lambda or JS Runtime;
+    // returning null keeps semantic maps disabled while satisfying the
+    // production StateStore's runtime-context boundary.
+    return NULL;
+}
 
 static TemplateRegistry* test_template_registry = NULL;
 
