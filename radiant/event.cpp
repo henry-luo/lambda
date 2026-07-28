@@ -2026,7 +2026,10 @@ void radiant_register_event_hooks() {
  */
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr) {
-    if (!g_template_registry || g_template_registry->count == 0) {
+    // Plain HTML documents have no Lambda template Runtime.  Native input must
+    // skip template dispatch instead of reading the context-local registry with
+    // no document owner bound.
+    if (!context || !g_template_registry || g_template_registry->count == 0) {
         return false;
     }
 
@@ -6997,6 +7000,46 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 // Main Event Handler
 // ============================================================================
 
+// Native input delivery starts after the loader restored its caller context.
+// Keep the complete event turn inside the target document owner so template
+// lookup, DOM wrappers, and nested JS dispatch cannot borrow a null or
+// unrelated runtime capsule.
+struct EventDocumentScope {
+    EvalContext* saved_context;
+    bool active;
+
+    EventDocumentScope(UiContext* uicon, DomDocument* doc)
+        : saved_context(nullptr), active(false) {
+        Runtime* runtime = doc && doc->lambda_runtime
+            ? doc->lambda_runtime : (doc ? doc->js.runtime : nullptr);
+        if (!runtime) return;
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !runtime->heap || !runtime->name_pool) return;
+        owner->heap = runtime->heap;
+        owner->name_pool = runtime->name_pool;
+        owner->type_list = runtime->type_list;
+        owner->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+        saved_context = eval_context_bind(owner);
+        if (owner->js_state) {
+            js_runtime_state_bind_context(owner);
+            js_dom_set_ui_context(uicon);
+            js_dom_set_document(doc);
+        } else {
+            // Lambda template documents have their own runtime but do not own
+            // JS intrinsics; publishing them as a JS document would allocate
+            // constructors through a null JS input owner.
+            js_runtime_state_bind_context(nullptr);
+        }
+        active = true;
+    }
+
+    ~EventDocumentScope() {
+        if (!active) return;
+        eval_context_restore(saved_context);
+        js_runtime_state_bind_context(saved_context);
+    }
+};
+
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("HANDLE_EVENT: type=%d", event->type);
@@ -7017,6 +7060,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("PDF document - skipping DOM event handling");
         return;
     }
+    EventDocumentScope document_scope(uicon, doc);
     event_context_init(&evcon, uicon, event);
     DocState* cascade_state = (DocState*)doc->state;
     EventStateLog* cascade_log = cascade_state && cascade_state->active_event_log

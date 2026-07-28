@@ -232,7 +232,8 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
-    int viewport_width, int viewport_height, float pixel_ratio);
+    int viewport_width, int viewport_height, float pixel_ratio,
+    const DocumentJsHostConfig* js_host_config);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -3080,7 +3081,7 @@ struct HtmlLoadPhaseTiming {
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
-    DocumentScriptPhaseTiming* script_timing) {
+    DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -3239,6 +3240,14 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
         return nullptr;
+    }
+    if (js_host_config) {
+        // The document Runtime is not bound yet.  Keep these settings on the
+        // document until script_runner binds its owner context.
+        dom_doc->js.host_ui_context = js_host_config->ui_context;
+        dom_doc->js.host_driven_loop = js_host_config->host_driven_loop;
+        dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
+        dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
     }
     dom_doc->document_charset = detected_charset;
 
@@ -3542,7 +3551,15 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     bool track_source_lines = false, bool execute_scripts = true) {
     return load_lambda_html_doc_profiled(html_url, css_filename, viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr);
+                                         nullptr, nullptr, nullptr);
+}
+
+static DomDocument* load_lambda_html_doc_with_host_config(
+    Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
+    Pool* pool, const DocumentJsHostConfig* js_host_config) {
+    return load_lambda_html_doc_profiled(html_url, css_filename, viewport_width, viewport_height,
+                                         pool, nullptr, false, true, nullptr, nullptr,
+                                         js_host_config);
 }
 
 static char* escape_pdf_bridge_lambda_string(const char* value) {
@@ -3663,7 +3680,9 @@ static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
     return doc;
 }
 
-static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
+static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
+                                              int viewport_height, float pixel_ratio,
+                                              const DocumentJsHostConfig* js_host_config) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -3679,7 +3698,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
-        doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+        doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
+                                                    viewport_height, pool, js_host_config);
     } else {
     // Detect file type by extension (local files only)
     const char* ext = strrchr(doc_url, '.');
@@ -3729,7 +3749,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         doc = load_text_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
-        doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+        doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
+                                                    viewport_height, pool, js_host_config);
     }
     }
 
@@ -3741,7 +3762,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     return doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
+DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
+                           float pixel_ratio, const DocumentJsHostConfig* js_host_config) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -3749,7 +3771,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, pixel_ratio);
+            viewport_width, viewport_height, pixel_ratio, js_host_config);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -6564,7 +6586,8 @@ static bool layout_single_file(
                                                 viewport_height, pool, nullptr,
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
-                                                timing_file ? &document_script_timing : nullptr);
+                                                timing_file ? &document_script_timing : nullptr,
+                                                nullptr);
             if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
                 break;
             }
@@ -6766,12 +6789,11 @@ static bool layout_single_file(
             context = runtime_get_eval_context(render_runtime);
         }
         source_pos_bridge_reset();
-        render_map_destroy();
-        // Clean up retained JS state (MIR context, event registry, runtime heap)
-        // before destroying the document that owns the pointers.
-        script_runner_cleanup_js_state(doc);
-
+        // StateStore releases document-owned template and render maps while
+        // their semantic Runtime remains live; JS teardown clears that owner.
         radiant_document_destroy_state(doc);
+        render_map_destroy();
+        script_runner_cleanup_js_state(doc);
 
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);

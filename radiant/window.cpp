@@ -260,11 +260,12 @@ static DocFormat detect_doc_format(const char* filename) {
 }
 
 // Load document based on detected format
-static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
+static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height,
+                                       Pool* pool, const DocumentJsHostConfig* js_host_config) {
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
-        return load_html_doc(base_url, (char*)filename, width, height);
+        return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
     }
 
     DocFormat format = detect_doc_format(filename);
@@ -272,7 +273,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     switch (format) {
         case DOC_FORMAT_HTML:
             log_debug("Loading as HTML document");
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_MARKDOWN: {
             log_debug("Loading as Markdown document");
@@ -289,12 +290,12 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_debug("Loading as LaTeX document");
             // Use HTML conversion pipeline (LaTeX→HTML)
             log_info("Using LaTeX→HTML pipeline for LaTeX");
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
         }
 
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_RST:
             log_warn("RST format not yet implemented");
@@ -303,7 +304,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_LAMBDA_SCRIPT:
             log_debug("Loading as Lambda script document");
             // load_html_doc will detect .ls extension and route to load_lambda_script_doc
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_WIKI: {
             log_debug("Loading as Wiki document");
@@ -319,17 +320,17 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_PDF:
             log_debug("Loading as PDF document");
             // load_html_doc will detect .pdf extension and route to load_pdf_doc
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_SVG:
             log_debug("Loading as SVG document");
             // load_html_doc will detect .svg extension and route to load_svg_doc
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_IMAGE:
             log_debug("Loading as image document");
             // load_html_doc will detect image extensions and route to load_image_doc
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
 
         case DOC_FORMAT_TEXT:
             log_debug("Loading as text document (source view)");
@@ -1002,19 +1003,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     // Recreate surface with correct dimensions
     ui_context_create_surface(&ui_context, width, height);
 
-    // Expose this window's UiContext to the JS DOM layer BEFORE the document is
-    // loaded, because load-time inline scripts (e.g. the editor bootstrap) run
-    // synchronously inside load_doc_by_format() and may call geometry APIs
-    // (getBoundingClientRect/getClientRects). Those route through
-    // js_dom_has_committed_geometry_snapshot(); the UiContext associates those
-    // reads and pending mutations with this retained document. In the `view`
-    // path this thread-local was never set (only the headless `lambda.exe js`
-    // session set it), so pre-commit compatibility reads returned stale/zero
-    // rects. Every
-    // ui_context_cleanup() below is paired with a matching reset to null since
-    // ui_context is a stack local that must not outlive this frame.
-    js_dom_set_ui_context(&ui_context);
-
     // Mark this as a host-driven session ONLY when a loop will actually pump the
     // JS event loop after the first layout commits: an interactive GUI window
     // (!headless) or a headless event simulation (sim_ctx). In that mode geometry
@@ -1026,7 +1014,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     // stranding its timers. Cleared alongside the UiContext reset before each
     // ui_context_cleanup().
     bool host_driven_loop = (!headless || sim_ctx != nullptr);
-    js_dom_set_host_driven_loop(host_driven_loop);
 
     // Network resources (owned by this function, shared across document lifetime)
     NetworkThreadPool* thread_pool = nullptr;
@@ -1077,9 +1064,15 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_notice("view: loading document: %s", log_doc_href ? log_doc_href : file_to_load);
         if (log_doc_url) url_destroy(log_doc_url);
         log_mem_stage("before-load");
-        // Headless event fixtures own a synthetic browser clock from the first
-        // inline script onward, so load-time timers never capture wall time.
-        js_event_loop_set_virtual_clock(headless && sim_ctx != nullptr, 0.0);
+        // Loader-time browser settings are copied into the document before its
+        // Runtime is created.  They are then bound with that Runtime rather
+        // than leaking through an ambient process-global setup slot.
+        DocumentJsHostConfig js_host_config = {
+            &ui_context,
+            host_driven_loop,
+            headless && sim_ctx != nullptr,
+            0.0
+        };
         DomDocument* doc = nullptr;
         if (doc_source) {
             Url* script_url = url_parse_with_base(file_to_load, cwd);
@@ -1095,7 +1088,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             }
             doc = load_lambda_script_source_doc(script_url, doc_source, css_width, css_height, pool);
         } else {
-            doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
+            doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
+                                     &js_host_config);
         }
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);

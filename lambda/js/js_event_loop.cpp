@@ -862,16 +862,21 @@ static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
 }
 
 extern "C" void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms) {
+    // Host setup can run before a document Runtime exists.  There is no event
+    // loop owner in that phase, so never publish clock semantics globally.
+    if (!js_active_runtime_state) return;
     virtual_clock_enabled = enabled;
     virtual_clock_ms = monotonic_ms >= 0.0 ? monotonic_ms : 0.0;
     js_performance_virtual_clock_set(enabled, virtual_clock_ms);
 }
 
 extern "C" bool js_event_loop_virtual_clock_enabled(void) {
+    if (!js_active_runtime_state) return false;
     return virtual_clock_enabled;
 }
 
 extern "C" double js_event_loop_virtual_clock_now_ms(void) {
+    if (!js_active_runtime_state) return 0.0;
     return virtual_clock_ms;
 }
 
@@ -934,6 +939,7 @@ static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
 }
 
 extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps) {
+    if (!js_active_runtime_state) return 0;
     if (!virtual_clock_enabled) return 0;
     if (delta_ms < 0.0) delta_ms = 0.0;
 
@@ -1571,7 +1577,9 @@ extern "C" void js_clearInterval(Item timer_id) {
 }
 
 extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
-    if (!dom_doc) return;
+    // A timer queue is owned by its bound document Runtime.  Callers that no
+    // longer have that owner cannot safely inspect a different capsule.
+    if (!js_active_runtime_state || !dom_doc) return;
 
     for (int i = 0; i < timer_handle_count; i++) {
         JsTimerHandle *th = timer_handles[i];
@@ -1593,7 +1601,7 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
 }
 
 extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
-    if (!dom_doc) return;
+    if (!js_active_runtime_state || !dom_doc) return;
 
     bool found = false;
     for (int i = 0; i < timer_handle_count; i++) {
@@ -2016,6 +2024,9 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 // `selectionchange` dispatch) between simulated events, without spinning when a
 // callback re-schedules itself.
 extern "C" void js_event_loop_pump_nowait(void) {
+    // Static documents can be hosted without a JS Runtime.  Their native input
+    // loop may still request a pump, but no context-local queue exists to read.
+    if (!js_active_runtime_state) return;
     if (virtual_clock_enabled) {
         js_event_loop_advance_virtual_time(0.0, 0);
     }
@@ -2039,6 +2050,7 @@ static void event_loop_pump_wait_cap_cb(uv_timer_t* handle) {
 }
 
 extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
+    if (!js_active_runtime_state) return false;
     if (virtual_clock_enabled) {
         return js_event_loop_advance_virtual_time((double)(max_wait_ms > 0 ? max_wait_ms : 0), 0) > 0;
     }

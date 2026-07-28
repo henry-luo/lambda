@@ -46,6 +46,11 @@ void js_dom_set_ui_context(void* ui_context);
  */
 void* js_dom_get_ui_context(void);
 
+// Records whether the active document Runtime is owned by a host frame loop.
+// This setting is context-local and must be applied after binding that Runtime.
+void js_dom_set_host_driven_loop(bool enabled);
+bool js_dom_is_host_driven_loop(void);
+
 /**
  * Return whether the document has a committed geometry snapshot.
  * This predicate never performs style resolution or layout.

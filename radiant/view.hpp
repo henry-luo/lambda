@@ -2863,6 +2863,16 @@ typedef struct UiContext {
     void destroy();
 } UiContext;
 
+// Loader-time host settings.  They are copied into DomDocument::js before
+// script execution creates its Runtime, so parallel views never share browser
+// clock or host-loop semantics through process-global setup state.
+typedef struct DocumentJsHostConfig {
+    UiContext* ui_context;
+    bool host_driven_loop;
+    bool virtual_clock_enabled;
+    double virtual_clock_ms;
+} DocumentJsHostConfig;
+
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
@@ -2870,7 +2880,9 @@ extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 #endif // LAMBDA_HEADLESS
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
-DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio = 1.0f);
+DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
+                           float pixel_ratio = 1.0f,
+                           const DocumentJsHostConfig* js_host_config = nullptr);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 void free_document(DomDocument* doc);

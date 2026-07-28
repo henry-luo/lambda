@@ -16,9 +16,31 @@ extern __thread Context* input_context;
 Item ui_copy_string_to_arena(Arena* arena, Item str_item);
 Item ui_merge_strings_to_arena(Arena* arena, String* previous, String* next);
 
+static Arena* ui_collection_arena() {
+    // UI-mode elements are arena-owned and therefore cannot keep a GC data
+    // buffer alive. Every buffer reachable from one must use the same arena.
+    if (context && context->ui_mode && context->arena) {
+        return context->arena;
+    }
+    if (input_allocation_context && input_allocation_context->ui_mode &&
+            input_allocation_context->arena) {
+        return input_allocation_context->arena;
+    }
+    return nullptr;
+}
+
 void expand_list(List* list, Arena* arena) {
     if (!list) return;
     JS_WEAK_PROPERTY_SET_BRANCH("expand_list_total");
+    // Arena-owned UI elements are not GC roots. Keep their child buffers in
+    // the result arena so a collection cannot reclaim a live DOM child list.
+    if (!arena) {
+        arena = ui_collection_arena();
+    }
+    // Markup parsers build Input-owned lists outside an EvalContext.
+    if (!arena && input_allocation_context) {
+        arena = input_allocation_context->arena;
+    }
     int64_t previous_capacity = list->capacity;
     int64_t new_capacity = previous_capacity ? previous_capacity * 2 : 8;
     Item* old_items = list->items;
@@ -250,10 +272,10 @@ void list_push(List* list, Item item) {
     }
 
     if (type_id == LMD_TYPE_STRING) {
-        bool is_ui = input_allocation_context && input_allocation_context->ui_mode &&
-            input_allocation_context->arena;
+        Arena* ui_arena = ui_collection_arena();
+        bool is_ui = ui_arena != nullptr;
         if (is_ui && list->is_content) {
-            item = ui_copy_string_to_arena(input_allocation_context->arena, item);
+            item = ui_copy_string_to_arena(ui_arena, item);
         }
 
         bool should_merge = (input_context || input_allocation_context) &&
@@ -268,7 +290,7 @@ void list_push(List* list, Item item) {
                 if (previous && next) {
                     if (is_ui) {
                         list->items[list->length - 1] = ui_merge_strings_to_arena(
-                            input_allocation_context->arena, previous, next);
+                            ui_arena, previous, next);
                         return;
                     }
                     size_t new_length = previous->len + next->len;

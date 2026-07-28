@@ -2103,6 +2103,7 @@ typedef struct StateStore {
     Pool* pool;
     Arena* arena;
     struct DocState* doc_state;
+    EvalContext* semantic_context;  // document-owned context for template/render state
 
     bool init(DomDocument* document);
     void destroy();

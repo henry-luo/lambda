@@ -14,6 +14,9 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../lambda/js/js_event_loop.h"
+#include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/transpiler.hpp"
 
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
@@ -291,17 +294,45 @@ void free_document(DomDocument* doc) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
 
-    if (script_runner_js_batch_cleanup_unsafe()) {
-        js_event_loop_abandon_document_timers(doc);
-    } else {
-        js_event_loop_cancel_document_timers(doc);
+    Runtime* timer_runtime = doc->js.runtime;
+    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
+    EvalContext* previous_timer_context = nullptr;
+    if (timer_owner && timer_owner->js_state) {
+        // Timer handles live in the document capsule; teardown must not inspect
+        // another document's queue through an ambient host context.
+        previous_timer_context = eval_context_bind(timer_owner);
+        js_runtime_state_bind_context(timer_owner);
+    }
+    if (timer_owner && timer_owner->js_state) {
+        if (script_runner_js_batch_cleanup_unsafe()) {
+            js_event_loop_abandon_document_timers(doc);
+        } else {
+            js_event_loop_cancel_document_timers(doc);
+        }
+        eval_context_restore(previous_timer_context);
+        js_runtime_state_bind_context(previous_timer_context);
     }
 
-    // Clean up retained JS state (MIR context, event registry, runtime heap)
-    // before destroying the document that owns the pointers.
-    script_runner_cleanup_js_state(doc);
-
+    Runtime* state_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+    EvalContext* state_owner = state_runtime
+        ? runtime_get_eval_context(state_runtime) : nullptr;
+    EvalContext* previous_state_context = nullptr;
+    if (state_owner) {
+        // StateStore owns template/render maps attached to this runtime. Bind
+        // its canonical context until they are detached; otherwise teardown
+        // can consult a null TLS context after the JS heap is released.
+        previous_state_context = eval_context_bind(state_owner);
+        js_runtime_state_bind_context(state_owner->js_state ? state_owner : nullptr);
+    }
     radiant_document_destroy_state(doc);
+    if (state_owner) {
+        eval_context_restore(previous_state_context);
+        js_runtime_state_bind_context(previous_state_context);
+    }
+
+    // State teardown releases context-owned maps, so the retained JS runtime
+    // can be destroyed only after the document has detached those references.
+    script_runner_cleanup_js_state(doc);
 
     destroy_dom_owned_embed_images((DomNode*)doc->root);
 

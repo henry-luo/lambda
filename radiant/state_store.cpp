@@ -11,6 +11,8 @@
 #include "view.hpp"
 #include "render.hpp"
 #include "../lambda/runtime/ast.hpp"
+#include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 // str.h included via view.hpp
@@ -895,19 +897,6 @@ bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     // Initialize reflow scheduler arena
     reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
 
-    // Plain HTML documents have no Lambda Runtime. Their native state does
-    // not create template/render semantic maps; those maps are initialized
-    // only while a document-owned EvalContext is bound by Lambda execution.
-    if (context) {
-        tmpl_state_init();
-        template_state_map = tmpl_state_get_map();
-        render_map_init();
-        render_map = render_map_get_map();
-        // R7 step 3c — register the source-path recorder so apply() persists
-        // child-index paths into the editor bridge's path side-table.
-        render_map_set_path_recorder(&render_map_record_path);
-    }
-
     // Initialize animation scheduler
     animation_scheduler = animation_scheduler_create(pool);
 
@@ -987,6 +976,20 @@ bool StateStore::init(DomDocument* owner_document) {
     owner_document->state_store = this;
     owner_document->state = doc_state;
     doc_state->owner_store = this;
+    Runtime* semantic_runtime = owner_document->lambda_runtime
+        ? owner_document->lambda_runtime : owner_document->js.runtime;
+    semantic_context = semantic_runtime
+        ? runtime_get_eval_context(semantic_runtime) : nullptr;
+    if (semantic_context) {
+        // Template/render maps belong to the document Runtime, never an
+        // unrelated ambient context left by a completed script evaluation.
+        EvalContextScope semantic_scope(semantic_context);
+        tmpl_state_init();
+        doc_state->template_state_map = tmpl_state_get_map();
+        render_map_init();
+        doc_state->render_map = render_map_get_map();
+        render_map_set_path_recorder(&render_map_record_path);
+    }
     if (doc_state->lifecycle == DOC_LIFECYCLE_UNINITIALIZED) {
         doc_state_set_lifecycle(doc_state, DOC_LIFECYCLE_LOADING);
     }
@@ -1040,6 +1043,10 @@ void StateStore::destroy() {
     if (!state && owner_document && owner_document->state_store == this) {
         state = owner_document->state;
     }
+    EvalContext* previous_context = nullptr;
+    if (semantic_context) {
+        previous_context = eval_context_bind(semantic_context);
+    }
     if (state) {
         state_begin_batch(state);
         state_store_detach_selection_for_unload(state);
@@ -1073,6 +1080,10 @@ void StateStore::destroy() {
     doc_state = NULL;
     document = NULL;
     pool = NULL;
+    if (semantic_context) {
+        eval_context_restore(previous_context);
+        semantic_context = NULL;
+    }
 }
 
 void state_store_destroy(DomDocument* document) {

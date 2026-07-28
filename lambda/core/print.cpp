@@ -861,6 +861,9 @@ const char* format_type(Type *type) {
 }
 
 void log_item(Item item, const char* msg) {
+    // `--no-log` disables diagnostics entirely; traversing runtime values here
+    // can touch representation-specific storage even though the message is discarded.
+    if (log_is_disabled()) return;
     StrBuf *strbuf = strbuf_new();
     print_item(strbuf, item, 0, NULL);
     log_debug("%s: %s", msg, strbuf->str);

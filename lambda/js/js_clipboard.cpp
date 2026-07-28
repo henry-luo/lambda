@@ -1103,11 +1103,15 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
 // owned by the active context's exact root range.
 
 extern "C" void js_drag_session_begin(void) {
+    if (!js_active_runtime_state) return;
     if (!clipboard_ensure_roots()) return;
     g_drag_data_transfer = js_data_transfer_new();
 }
 
 extern "C" void js_drag_session_end(void) {
+    // Native drag state is valid without a JavaScript document; only a bound
+    // JS Runtime owns the DataTransfer root that this cleanup can clear.
+    if (!js_active_runtime_state) return;
     // keep the root registered; clearing to null makes GC ignore the slot.
     g_drag_data_transfer.item = ITEM_NULL;
 }
@@ -1119,6 +1123,7 @@ extern "C" void js_drag_session_end(void) {
 // canceled).
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
         const char* type, int client_x, int client_y) {
+    if (!js_active_runtime_state) return false;
     // The session DataTransfer must be allocated inside the JS runtime context
     // (js_new_object needs the active runtime heap), so open it here — the
     // caller enters the ctx scope before dispatching. dragstart always starts a

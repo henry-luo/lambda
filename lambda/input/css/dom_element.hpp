@@ -95,11 +95,19 @@ struct DomJsRuntime {
     int mutation_record_overflow;
     DomJsMutationRecord mutation_records[DOM_JS_MUTATION_RECORD_CAP];
     const char* ready_state;
+    // Host setup is copied into this document before its Runtime exists.  The
+    // script runner transfers it into the bound EvalContext before any JS can
+    // schedule timers or read DOM geometry.
+    void* host_ui_context;
+    bool host_driven_loop;
+    bool virtual_clock_enabled;
+    double virtual_clock_ms;
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
         mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
-        ready_state("complete") {}
+        ready_state("complete"), host_ui_context(nullptr), host_driven_loop(false),
+        virtual_clock_enabled(false), virtual_clock_ms(0.0) {}
 };
 
 // tier-1: document-owned viewport and render scale inputs

@@ -1489,6 +1489,10 @@ static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc) {
 
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;
+    // Native-only documents retain selection state but have no JS event-loop
+    // capsule.  Do not dereference context-local JS roots to synthesize an
+    // event that no document runtime can receive.
+    if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DocState* state = sel->state;
     // Coalesce before touching the document runtime. In tight DOM-only loops
@@ -1566,6 +1570,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
     FormControlProp* f = elem->form;
     if (!f) return;
+    if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
     JsDocRuntimeScope scope;

@@ -501,6 +501,10 @@ void render_map_set_map(struct hashmap* map) {
 
 bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
     if (!result_node.item || !out) return false;
+    // A plain DOM document has no template-render map.  Reverse lookup is an
+    // optional query for source mapping, so report no mapping rather than
+    // manufacturing or borrowing context-owned reconciliation state.
+    if (!context) return false;
     HashMap* rmap = ensure_reverse_map();
     ReverseMapEntry query;
     memset(&query, 0, sizeof(query));

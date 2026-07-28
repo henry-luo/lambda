@@ -1432,6 +1432,10 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     js_prepare_compiled_preamble_vars(cached->module_var_count);
     Input* js_input_context = Input::create(context->pool);
     js_runtime_set_input(js_input_context);
+    // Cached MIR is immutable, but its globals are document-local. Recreate
+    // globalThis after installing this realm's Input so document bindings do
+    // not resolve through the prior batch document's discarded global object.
+    (void)js_get_global_this();
     js_event_loop_init();
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
     js_set_active_module_vars(js_alloc_module_vars());

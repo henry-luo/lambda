@@ -44,8 +44,6 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/network/network_resource_manager.h"
 
-extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
-
 #include <cstring>
 #include <cstdlib>
 #include <signal.h>
@@ -2281,6 +2279,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         return;
     }
     runtime->dom_doc = (void*)dom_doc;
+    runtime->dom_ui_context = dom_doc->js.host_ui_context;
     // create fresh tracked mmap pool for this JS execution
     runtime->reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
                                                MEM_ROLE_RUNTIME_HEAP,
@@ -2301,11 +2300,18 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // frame reconstructed from the same heap.
     eval_context_bind(document_context);
     js_runtime_state_bind_context(document_context);
+    js_dom_set_ui_context(runtime->dom_ui_context);
+    js_dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
     js_xhr_set_base_url(base_url ? url_get_href(base_url) : nullptr);
     js_event_loop_init();
+    // A virtual clock is semantic state of this document's event-loop capsule.
+    // Configure it only after that capsule is bound, before the first script
+    // can create a timer.
+    js_event_loop_set_virtual_clock(dom_doc->js.virtual_clock_enabled,
+                                    dom_doc->js.virtual_clock_ms);
 
     // execute document scripts via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
