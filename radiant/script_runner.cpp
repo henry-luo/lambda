@@ -2307,6 +2307,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // rather than silently dropped. The loop is drained after script execution.
     js_xhr_set_base_url(base_url ? url_get_href(base_url) : nullptr);
     js_event_loop_init();
+    // auto-close belongs to the bound document Runtime; applying it before
+    // creation loses the setting and lets recursive page timers block layout.
+    js_event_loop_set_auto_close_mode(dom_doc->js.auto_close_event_loop);
     // A virtual clock is semantic state of this document's event-loop capsule.
     // Configure it only after that capsule is bound, before the first script
     // can create a timer.

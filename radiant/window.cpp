@@ -1070,6 +1070,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         DocumentJsHostConfig js_host_config = {
             &ui_context,
             host_driven_loop,
+            false,
             headless && sim_ctx != nullptr,
             0.0
         };

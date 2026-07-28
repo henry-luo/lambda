@@ -100,6 +100,7 @@ struct DomJsRuntime {
     // schedule timers or read DOM geometry.
     void* host_ui_context;
     bool host_driven_loop;
+    bool auto_close_event_loop;
     bool virtual_clock_enabled;
     double virtual_clock_ms;
 
@@ -107,6 +108,7 @@ struct DomJsRuntime {
         doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
         mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
         ready_state("complete"), host_ui_context(nullptr), host_driven_loop(false),
+        auto_close_event_loop(false),
         virtual_clock_enabled(false), virtual_clock_ms(0.0) {}
 };
 

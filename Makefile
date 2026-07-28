@@ -1757,9 +1757,10 @@ test-input-baseline: build-test ensure-yaml-submodule
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
-# The layout runner selects the recorded baseline through the requested category;
-# it has no --baseline-only CLI mode.
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js
+# The baseline target must select recorded entries before reporting aggregate
+# failures; otherwise untracked work-in-progress fixtures are misreported as
+# baseline regressions.
+LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only
 LAYOUT_BASELINE_RESULTS = temp/_layout_baseline_results.txt
 
 # Run the shared layout baseline inventory without building. Suites with a
