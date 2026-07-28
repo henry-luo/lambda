@@ -84,7 +84,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 | Doc | Covers |
 |---|---|
 | [JS_13 — Web Platform: DOM, CSSOM, Events & Fetch](JS_13_Web_DOM.md) | The sentinel DOM bridge over Radiant, element/document dispatch, lazy layout & metric queries, the 3-phase event system, CSSOM, canvas/`measureText`, XHR/fetch/FormData/clipboard, Selection. |
-| [JS_14 — Node.js Compatibility Layer](JS_14_Node_Compat.md) | Module dispatch & resolution, the npm client, per-module coverage (fs/path/os/buffer/crypto/stream/http/net/tls/child_process/…), `Buffer`, `EventEmitter`, the event-loop integration status. |
+| [JS_14 — Node.js Compatibility Layer](JS_14_Node_Compat.md) | Module dispatch & resolution, per-module coverage (fs/path/os/buffer/crypto/stream/http/net/tls/child_process/…), `Buffer`, `EventEmitter`, the event-loop integration status, and the external package boundary. |
 
 ### Part V — Cross-cutting
 

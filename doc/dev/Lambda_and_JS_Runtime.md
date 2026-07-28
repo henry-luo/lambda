@@ -53,7 +53,7 @@ Both front-ends lower their typed ASTs **directly to MIR IR** (vnmakarov/mir) an
 - **Functions & calls:** cached compiled wrappers are pool-allocated, while escaping closures/bound functions and their environments are GC-owned with precise trace callbacks. Call arguments use a single GC-rooted bump **args stack** (`js_args_push/save/restore`); top-level bindings live in indexed per-module root arrays; closures capture through traced env arrays with owned scalar tails ([JS_05](js/JS_05_Functions_Closures.md), [JS_03 §7–8](js/JS_03_Value_Model.md)). Static dispatch (direct `MIR_CALL`) fires for `function` declarations, const-bound functions, and provably-monomorphic class methods; everything else goes through `js_call_function`.
 - **Exceptions:** no C++ exceptions/longjmp — a thread-global pending flag (`js_throw_value`/`js_check_exception`) plus emitted check-and-branch after every throwing call; stack overflow alone uses a signal + `sigsetjmp` recovery ([JS_04 §9](js/JS_04_MIR_Lowering.md)).
 - **Semantics coverage:** ES2020-era language: classes, generators (state-machine transform, reused for async/await), Promises + microtask queue on libuv, ES modules + CommonJS `require`, Proxy/Reflect, BigInt, TypedArrays/Atomics, RegExp via RE2 with a backtracking fallback ([JS_07](js/JS_07_Classes.md)–[JS_12](js/JS_12_TypedArrays.md)).
-- **Host bridges:** DOM/CSSOM over Radiant ([JS_13](js/JS_13_Web_DOM.md)); Node.js compat layer (fs/path/http/Buffer/EventEmitter/npm client, [JS_14](js/JS_14_Node_Compat.md)).
+- **Host bridges:** DOM/CSSOM over Radiant ([JS_13](js/JS_13_Web_DOM.md)); Node.js compat layer (fs/path/http/Buffer/EventEmitter, [JS_14](js/JS_14_Node_Compat.md)).
 
 ---
 

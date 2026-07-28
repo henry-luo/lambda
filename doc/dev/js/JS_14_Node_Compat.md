@@ -1,8 +1,8 @@
 # LambdaJS — Node.js Compatibility Layer
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Node.js compatibility layer: how a module specifier becomes a namespace object (built-in dispatch, `node:`/bare/relative resolution, conditional `exports`), the embedded npm client (package.json parse, semver, BFS dependency resolution, pnpm-style symlink install, `lambda-node.lock`), and the per-module implementations with their actual backing and gaps.
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Node.js compatibility layer: how a module specifier becomes a namespace object (built-in dispatch and `node:`/bare/relative resolution), and the per-module implementations with their actual backing and gaps. The former embedded npm client is retained below as historical reference only; it is not linked into `lambda.exe`.
 >
-> **Primary sources:** `lambda/js/js_runtime.cpp` (`js_module_get`, `js_module_register`, the `JsModule` cache, inline stub modules), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`), `lambda/js/js_mir_module_batch_lowering.cpp` (`jm_resolve_module_path`), `lambda/module/npm/` (`npm_resolve_module.cpp`, `npm_resolver.cpp`, `npm_installer.cpp`, `npm_registry.cpp`, `npm_lockfile.cpp`, `npm_package_json.cpp`, `semver.cpp`), and the per-module files `js_fs.cpp` … `js_assert.cpp`.
+> **Primary sources:** `lambda/js/js_runtime.cpp` (`js_module_get`, `js_module_register`, the `JsModule` cache, inline stub modules), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`), `lambda/js/js_mir_module_batch_lowering.cpp` (`jm_resolve_module_path`), and the per-module files `js_fs.cpp` … `js_assert.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names. The Promise/microtask/event-loop *mechanism* and the require-time compilation pipeline are owned by [JS_09 — Async, Promises & Modules](JS_09_Async_Modules.md); this doc owns only the Node.js surface layered on top.
 
 ---
@@ -11,7 +11,7 @@
 
 LambdaJS runs Node-style JavaScript inside `lambda.exe` with no separate Node binary: every Node API is a native C/C++ function operating on Lambda `Item` values, the same runtime representation used by Lambda scripts ([JS_03 — Value Model](JS_03_Value_Model.md)). The layer has three moving parts — module *dispatch* (specifier → namespace object), module *resolution* (Node's path algorithm, used at transpile time), and an embedded *npm client* (`lambda node install` / `task` / `exec`, dispatched from `lambda/main.cpp:1318`). The CommonJS/ESM *loading and caching* mechanism (source wrapping, `transpile_js_module_to_mir`, dynamic-import promise wrapping) is described here only at the level needed to explain coverage; the compilation internals belong to [JS_09](JS_09_Async_Modules.md) and [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
 
-This document deliberately bases each module's "status" on what the code actually implements, not on the aspirational claims in the older `doc/dev/Node_Runtime.md`. Several subsystems are more complete than that doc suggests (a real libuv event loop, `uv_getaddrinfo`-backed DNS, `uv_spawn`-backed `child_process`); a few are less so. [§11](#11-known-issues--future-improvements) records the verified gaps.
+This document deliberately bases each module's "status" on what the code actually implements, not on the aspirational claims in the older `doc/dev/Node_Runtime.md`. Several subsystems are more complete than that doc suggests (a real libuv event loop, `uv_getaddrinfo`-backed DNS, `uv_spawn`-backed `child_process`); a few are less so. Package installation and external `node_modules` resolution are outside the host build. [§11](#11-known-issues--future-improvements) records the verified gaps.
 
 ---
 
@@ -22,7 +22,7 @@ This document deliberately bases each module's "status" on what the code actuall
 `js_module_get(specifier)` (`js_runtime.cpp:31550`) maps a string specifier to a namespace `Item`, returning `ItemNull` when nothing matches. It is the single runtime entry point for both `require()` and static/dynamic `import`. Its structure is a long, hand-written chain of `memcmp` comparisons — one `if` per built-in, each accepting **three spelling forms**: the bare name, the name with a `.js` suffix (which the resolver may append), and the `node:`-prefixed form. For example `fs`, `fs.js`, and `node:fs` all route to `js_get_fs_namespace` (`js_runtime.cpp:31555`).
 
 - **Sub-path specifiers** are matched explicitly where they exist: `path/posix` and `path/win32` route to `js_get_path_namespace` / `js_get_path_win32_namespace` (`:31575`, `:31582`); `stream/promises`, `stream/web`, `stream/consumers`, `stream/iter` all alias the single stream namespace (`:31688`+); `fs/promises` builds a wrapper namespace that exposes the `*Sync` functions under their async names (`:32108`); `util/types`, `assert/strict`, `dns/promises`, `readline/promises` likewise re-use a parent namespace.
-- **Built-in priority over npm.** Resolution (`jm_resolve_module_path`, [§4](#4-module-resolution-the-node-algorithm)) short-circuits any name in its `builtin_names[]` list *before* consulting `node_modules` (`js_mir_module_batch_lowering.cpp:762`), and the dispatch chain in `js_module_get` runs ahead of the user-module cache lookup — so an npm polyfill package named `events` or `buffer` can never shadow the engine built-in.
+- **Built-in priority.** Resolution (`jm_resolve_module_path`, [§4](#4-module-resolution-the-node-algorithm)) short-circuits any name in its `builtin_names[]` list, and the dispatch chain in `js_module_get` runs ahead of the user-module cache lookup — so a user file cannot shadow the engine built-in.
 - **User-module fallback.** After every built-in and stub `if`, the function loops over the `js_modules[]` registry (`:32255`) and returns a matching previously-registered namespace; otherwise `ItemNull`.
 
 ### 2.1 Epoch-based namespace singletons
@@ -51,21 +51,25 @@ User modules loaded from disk are registered in a fixed-size array `js_modules[J
 
 - **Relative / absolute** (`./`, `../`, `/`) — joined against the importing file's directory; later the helper appends `.js` if the result lacks a recognized extension (`.js`, `.mjs`, `.cjs`, `.json`, `.ls`, `:809`).
 - **Built-in** — a `node:` prefix, or a literal match against the inline `builtin_names[]` table, short-circuits with no extension added and no filesystem probe (`:762`); dispatch is left to `js_module_get`.
-- **Bare** — handed to `npm_resolve_module` (`npm_resolve_module.cpp:198`), which splits the specifier into package name + subpath (`@scope/pkg/util` → `@scope/pkg` + `util`; `lodash/fp` → `lodash` + `fp`) and walks up parent directories looking for `node_modules/<pkg_name>` (`:273`), accepting either a real directory or a symlink. A subpath resolves via `resolve_package_subpath` (exports map, then a direct file probe, `:150`); a bare package root resolves via `try_directory`.
+- **Bare** — kept as the requested path after built-in classification; the host does not walk external `node_modules` directories.
 
-`try_directory` (`npm_resolve_module.cpp:32`) encodes the package-entry precedence: `package.json` `exports` (modern, condition-aware) → `module` field (ESM) → `main` field (CJS, extension-probed) → `index.js`/`index.mjs`/`index.cjs`/`index.json`. ESM-vs-CJS for the resolved file is decided by `is_esm_file` (`:109`) — `.mjs` ⇒ ESM, `.cjs` ⇒ CJS, otherwise the nearest `package.json` `"type": "module"` walking up directories.
+The remaining file and directory probes are handled by the LambdaJS loader itself; package `exports` and external `node_modules` walks are intentionally not part of this host build.
 
-### 4.1 Conditional `exports`
+### 4.1 Historical conditional `exports`
+
+This subsection documents the former embedded npm resolver for migration reference; it is not active in `lambda.exe`.
 
 `npm_resolve_exports` (`npm_package_json.cpp:226`) implements Node's `exports` field. A string maps the root directly; a map is either a *subpath map* (keys begin with `.`, e.g. `"."` / `"./feature"`) or a *root-level conditions* object. Condition objects are matched in caller-supplied priority order by `resolve_exports_target` (`:190`), recursing into nested objects and trying array fallbacks in order. The condition priority passed by `jm_resolve_module_path` is **`["lambda", "node", "import", "default"]`** (`js_mir_module_batch_lowering.cpp:794`) — the leading `lambda` condition lets a package ship a LambdaJS-specific entry point, falling back to the Node entry, then the ESM entry, then the catch-all. Note the absence of `require` in this list: the resolver always prefers the `import` condition for dual packages.
 
 ---
 
-## 5. The npm client
+## 5. Historical npm client (not linked into `lambda.exe`)
 
 <img alt="npm install pipeline" src="diagram/d14_npm_install.svg" width="610">
 
-The npm client in `lambda/module/npm/` performs registry-backed installation entirely in C/C++. The pipeline is: parse the manifest, resolve the dependency tree (consulting the lock file), download and extract tarballs into a flat store, wire up symlinks, and write the lock file.
+The former npm client in `lambda/module/npm/` performed registry-backed
+installation entirely in C/C++. It is retained as historical design material,
+but is not linked into `lambda.exe`.
 
 ### 5.1 package.json parsing & semver
 
@@ -159,7 +163,9 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 6. **`vm` shares the global scope.** The `vm` namespace (`js_runtime.cpp:31456`) wires `createContext`/`runInContext`/`runInNewContext`/`Script`, but contexts are not isolated — code executes against the same global/lexical bindings as the host (no separate realm), so `vm`'s sandboxing guarantee does not hold.
 7. **`child_process.fork()` is unimplemented.** Only `exec`/`execSync`/`spawn`/`spawnSync` exist (`js_child_process.cpp`); there is no IPC-channel child-process spawn.
 8. **Hand-written `memcmp` dispatch chain.** `js_module_get` is a long linear `if`/`memcmp` ladder (`js_runtime.cpp:31550`+) with three spelling variants per module — adding a module means editing both this chain and `jm_resolve_module_path`'s `builtin_names[]` table, and the two lists can drift out of sync.
-9. **npm client gaps.** First-wins conflict resolution rather than true SAT/deduping (`npm_resolver.cpp:113`); no workspaces, optional dependencies, or lifecycle (pre/post-install) scripts; `npm_install_package` does not edit an existing `package.json` (only logs the line to add, `npm_installer.cpp:405`); `npm_uninstall` leaves the store and manifest untouched (`:424`). The `exports` condition list omits `require`, always preferring `import` for dual packages (`js_mir_module_batch_lowering.cpp:794`).
+9. **External package support.** Installed external packages and `node_modules`
+   resolution are outside the `lambda.exe` host build. The historical npm
+   client details remain in §5 for migration reference.
 
 ---
 
@@ -170,7 +176,7 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 | `lambda/js/js_runtime.cpp` | `js_module_get` dispatch chain, inline stub modules, `JsModule` cache + `js_module_register`, `js_get_vm_namespace`, `js_internal_binding`. |
 | `lambda/js/js_mir_entrypoints_require.cpp` | `js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`. |
 | `lambda/js/js_mir_module_batch_lowering.cpp` | `jm_resolve_module_path`, built-in priority list, condition order, `js_module_register` call sites. |
-| `lambda/module/npm/npm_resolve_module.cpp` | Node resolution algorithm (relative/bare, `node_modules` walk, `try_directory`). |
+| `lambda/module/npm/npm_resolve_module.cpp` | Historical Node resolution algorithm; not linked into `lambda.exe`. |
 | `lambda/module/npm/npm_package_json.{cpp,h}` | Manifest parse, `npm_resolve_exports`, `NpmPackageJson`. |
 | `lambda/module/npm/npm_resolver.cpp` | BFS dependency resolution, lock-file pinning. |
 | `lambda/module/npm/npm_installer.cpp` | pnpm-style store + symlinks, install/uninstall. |

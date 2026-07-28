@@ -6,7 +6,7 @@ Lambda includes a Node.js compatibility layer that enables running Node.js-style
 
 1. **Built-in modules** — Native C++ implementations of 25+ Node.js core modules (`fs`, `path`, `crypto`, `os`, `http`, etc.)
 2. **Module system** — CommonJS `require()` and ES Module `import` with Node.js resolution semantics
-3. **NPM client** — Package installation, dependency resolution, and script execution (`lambda node install`, `lambda node task`)
+3. **Package boundary** — Package installation and script execution are outside the `lambda.exe` host build.
 
 All Node.js APIs are implemented as native C++ functions that operate on Lambda `Item` values — the same runtime representation used by JavaScript and Lambda scripts. There is no separate Node.js binary; everything runs inside `lambda.exe`.
 
@@ -25,20 +25,9 @@ All Node.js APIs are implemented as native C++ functions that operate on Lambda 
 
 The `js` command detects `.js` files, compiles them via `transpile_js_to_mir()`, and executes the resulting native code. `process.argv` is populated from CLI arguments.
 
-### Package Manager
-
-```bash
-./lambda.exe node install                # install all from package.json
-./lambda.exe node install lodash         # install a specific package
-./lambda.exe node install lodash@^4.0    # install with version range
-./lambda.exe node install -D jest        # install as dev dependency
-./lambda.exe node uninstall lodash       # remove a package
-./lambda.exe node task test              # run a package.json script
-./lambda.exe node task test -- --verbose # run script with extra args
-./lambda.exe node exec cowsay hello      # run a package binary (like npx)
-```
-
-Options: `--production` (skip devDependencies), `--dry-run`, `--verbose`.
+The embedded package-manager CLI is not part of `lambda.exe`. Use an external
+package manager before launching LambdaJS when a program needs installed
+packages.
 
 ---
 
@@ -295,9 +284,11 @@ For nested `require()` calls, `js_save_module_vars()` / `js_restore_module_vars(
 
 ---
 
-## 5. NPM Client
+## 5. Historical embedded NPM client
 
-The NPM client is implemented in `lambda/module/npm/` as a set of C files providing package installation, dependency resolution, and registry access.
+The following design is retained as historical reference. Its C++ sources are
+not linked into `lambda.exe`; only the standalone semver unit test uses one of
+those sources.
 
 ### 5.1 Architecture
 
