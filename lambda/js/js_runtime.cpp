@@ -455,6 +455,7 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
 
 #define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings.keys)
 #define js_global_var_module_binding_indices (js_runtime_state.global_var_module_bindings.indices)
+#define js_global_var_module_binding_state_ids (js_runtime_state.global_var_module_bindings.module_state_ids)
 #define js_global_var_module_binding_count (js_runtime_state.global_var_module_bindings.count)
 #define js_global_var_module_binding_epoch (js_runtime_state.global_var_module_bindings.epoch)
 #define js_global_var_module_binding_global (js_runtime_state.global_var_module_bindings.global)
@@ -488,15 +489,18 @@ static void js_global_var_binding_refresh(void) {
 extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
     js_global_var_binding_refresh();
     if (get_type_id(key) != LMD_TYPE_STRING || index < 0) return;
+    uint32_t module_state_id = js_get_active_module_state_id();
     for (int i = 0; i < js_global_var_module_binding_count; i++) {
         if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
             js_global_var_module_binding_indices[i] = (int)index;
+            js_global_var_module_binding_state_ids[i] = module_state_id;
             return;
         }
     }
     if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
     js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
     js_global_var_module_binding_indices[js_global_var_module_binding_count] = (int)index;
+    js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
     js_global_var_module_binding_count++;
 }
 
@@ -504,6 +508,7 @@ extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         const int* indices, int count) {
     js_global_var_binding_refresh();
     if (!keys || !indices || count <= 0) return;
+    uint32_t module_state_id = js_get_active_module_state_id();
     for (int i = 0; i < count; i++) {
         Item key = keys[i];
         int index = indices[i];
@@ -512,6 +517,7 @@ extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         for (int j = 0; j < js_global_var_module_binding_count; j++) {
             if (js_global_var_binding_key_same(js_global_var_module_binding_keys[j], key)) {
                 js_global_var_module_binding_indices[j] = index;
+                js_global_var_module_binding_state_ids[j] = module_state_id;
                 updated = true;
                 break;
             }
@@ -520,6 +526,7 @@ extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
         js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
         js_global_var_module_binding_indices[js_global_var_module_binding_count] = index;
+        js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
         js_global_var_module_binding_count++;
     }
 }
@@ -535,7 +542,17 @@ static void js_sync_global_var_module_binding(Item object, Item key, Item value)
             // Global `var` bindings are backed by the global object. When code
             // writes through `this.x`/`globalThis.x`, keep the optimized module
             // slot coherent without making every identifier read a property get.
+            // The writer may be an indirect-eval function in another slab, so
+            // update the binding's owner rather than its currently active slab.
+            uint32_t owner_state_id = js_global_var_module_binding_state_ids[i];
+            uint32_t previous_state_id = js_get_active_module_state_id();
+            bool switched_state = owner_state_id != UINT32_MAX &&
+                owner_state_id != previous_state_id;
+            if (switched_state && !js_set_active_module_state_id(owner_state_id)) return;
             js_set_module_var(js_global_var_module_binding_indices[i], value);
+            if (switched_state && previous_state_id != UINT32_MAX) {
+                js_set_active_module_state_id(previous_state_id);
+            }
             return;
         }
     }

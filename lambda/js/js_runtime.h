@@ -703,6 +703,10 @@ bool js_ensure_active_module_var_capacity(uint32_t required_var_count);
 uint32_t js_get_active_module_state_id(void);
 bool js_set_active_module_state_id(uint32_t module_state_id);
 bool js_module_state_is_available(uint32_t module_state_id);
+uint32_t js_get_batch_preamble_var_count(void);
+bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
+                                     uint32_t destination_module_state_id,
+                                     uint32_t count);
 void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
 void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);

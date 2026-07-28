@@ -1786,18 +1786,43 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             js_transpiler_destroy(tp);
             return ItemNull;
         }
-        mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
+        // This lowering mode describes eval's global var environment. Indirect
+        // eval is global-scope too, so Annex-B declaration lowering must keep
+        // its eval export path even though it never inherits caller lexicals.
+        mt->is_eval_direct = is_global_scope;
         // Tagged-template identity is realm-observable. Use the bound
         // context's monotonic counter so concurrent evals never share a
         // process-global site sequence.
         mt->template_site_salt = ++js_runtime_state.dynamic_func_counter;
 
-        // Direct eval inherits its caller's lexical preamble. A node:vm global
-        // script deliberately does not: it resolves through globalThis instead.
-        if (!is_vm_global_context && g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
-            mt->preamble_entries = g_eval_preamble_entries;
-            mt->preamble_entry_count = g_eval_preamble_entry_count;
-            mt->preamble_var_count = g_eval_preamble_var_count;
+        if (!is_vm_global_context && g_eval_preamble_entries &&
+                g_eval_preamble_entry_count > 0) {
+            if (is_direct_eval) {
+                // Direct eval uses its caller's full lexical environment.
+                mt->preamble_entries = g_eval_preamble_entries;
+                mt->preamble_entry_count = g_eval_preamble_entry_count;
+                mt->preamble_var_count = g_eval_preamble_var_count;
+            } else {
+                // Indirect eval shares a realm, not a lexical environment. In
+                // batch mode globalThis is recreated between tests, so retain
+                // only the harness prefix; caller declarations must resolve
+                // through the global object rather than caller module slots.
+                uint32_t harness_var_count = js_get_batch_preamble_var_count();
+                JsModuleConstEntry* global_entries = (JsModuleConstEntry*)pool_calloc(
+                    tp->ast_pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
+                if (global_entries) {
+                    int global_entry_count = 0;
+                    for (int i = 0; i < g_eval_preamble_entry_count; i++) {
+                        JsModuleConstEntry* entry = &g_eval_preamble_entries[i];
+                        if (entry->const_type != MCONST_MODVAR || entry->int_val < 0 ||
+                                (uint64_t)entry->int_val >= harness_var_count) continue;
+                        global_entries[global_entry_count++] = *entry;
+                    }
+                    mt->preamble_entries = global_entries;
+                    mt->preamble_entry_count = global_entry_count;
+                    mt->preamble_var_count = (int)harness_var_count;
+                }
+            }
         }
 
         char module_name[48];
@@ -1850,11 +1875,19 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // read the wrong slot for its own name). Functions capture a module-state
         // id at creation and js_call_function activates it per call, so cross-unit
         // invocation still resolves against the defining unit's slab.
-        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0;
+        // VM scripts and indirect eval each compile a separate global script.
+        // Their own slots begin after the retained harness prefix, preventing
+        // either unit from aliasing caller module bindings.
+        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
         uint32_t js_eval_prev_module_state_id = UINT32_MAX;
         if (js_eval_fresh_module_scope) {
             js_eval_prev_module_state_id = js_get_active_module_state_id();
             if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+                return ItemError;
+            }
+            if (!is_direct_eval && mt->preamble_var_count > 0 &&
+                    !js_copy_module_state_var_prefix(js_eval_prev_module_state_id,
+                        js_get_active_module_state_id(), (uint32_t)mt->preamble_var_count)) {
                 return ItemError;
             }
         } else if (!js_ensure_active_module_var_capacity(

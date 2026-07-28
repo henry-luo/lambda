@@ -447,6 +447,7 @@ struct JsGlobalVarModuleBindingState {
     Item global = {};
     Item keys[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
     int indices[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
+    uint32_t module_state_ids[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
     int count = 0;
     uint64_t epoch = 0;
     JsRootRange roots = {};
@@ -1033,6 +1034,7 @@ struct JsRuntimeState {
     // never process-global, because harness closures retain their owner slab.
     uint32_t batch_test_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_module_state_id = UINT32_MAX;
+    uint32_t batch_preamble_var_count = 0;
     uint64_t heap_epoch = 1;
 
     JsRegexpLastMatch regexp_last_match = {};

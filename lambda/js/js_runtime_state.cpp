@@ -55,6 +55,7 @@ bool js_runtime_state_bind_context(EvalContext* runtime_context) {
         runtime_context->js_state->heap_epoch = 1;
         runtime_context->js_state->batch_test_module_state_id = UINT32_MAX;
         runtime_context->js_state->batch_preamble_module_state_id = UINT32_MAX;
+        runtime_context->js_state->batch_preamble_var_count = 0;
         // This capsule is raw-allocated for C-compatible runtime ownership,
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
@@ -821,6 +822,28 @@ extern "C" bool js_module_state_is_available(uint32_t module_state_id) {
         context->module_states[module_state_id]->vars;
 }
 
+extern "C" uint32_t js_get_batch_preamble_var_count(void) {
+    return js_runtime_state.batch_preamble_var_count;
+}
+
+extern "C" bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
+        uint32_t destination_module_state_id, uint32_t count) {
+    if (!context || source_module_state_id == UINT32_MAX ||
+            destination_module_state_id == UINT32_MAX ||
+            source_module_state_id >= context->module_state_capacity ||
+            destination_module_state_id >= context->module_state_capacity) {
+        return false;
+    }
+    LambdaModuleState* source = context->module_states[source_module_state_id];
+    LambdaModuleState* destination = context->module_states[destination_module_state_id];
+    if (!source || !destination || !source->vars || !destination->vars ||
+            count > source->var_count || count > destination->var_count) {
+        return false;
+    }
+    if (count > 0) memcpy(destination->vars, source->vars, (size_t)count * sizeof(Item));
+    return true;
+}
+
 // =============================================================================
 // Exception Handling State
 // =============================================================================
@@ -958,6 +981,7 @@ extern "C" void js_batch_reset() {
     // The next preamble creates a fresh pair of context-owned module slabs.
     js_runtime_state.batch_test_module_state_id = UINT32_MAX;
     js_runtime_state.batch_preamble_module_state_id = UINT32_MAX;
+    js_runtime_state.batch_preamble_var_count = 0;
     // reset module variable table and active pointer
     js_reset_module_vars();
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
@@ -1105,6 +1129,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         log_error("js-batch-state: preamble checkpoint exceeds its module slab");
         return;
     }
+    js_runtime_state.batch_preamble_var_count = (uint32_t)checkpoint_var_count;
 
     uint32_t test_state_id = js_runtime_state.batch_test_module_state_id;
     if (js_runtime_state.batch_preamble_module_state_id != preamble_state_id ||
