@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
@@ -737,12 +738,14 @@ extern "C" Item js_to_property_key(Item key) {
 // js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
 extern "C" void js_set_module_var(int index, Item value) {
+    js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_SET);
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
         js_active_module_vars[index] = value;
     }
 }
 
 extern "C" Item js_get_module_var(int index) {
+    js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_GET);
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
         return js_active_module_vars[index];
     }
