@@ -341,7 +341,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     // execute
     log_debug("js-mir-ast: executing JIT compiled code");
-    js_set_active_module_vars(js_alloc_module_vars());
+    if (!js_activate_module_state((uint32_t)mt->module_var_count)) return (Item){.item = ITEM_ERROR};
     Item result = js_main((Context*)context);
     log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
@@ -985,14 +985,22 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
 
     // Execute
     log_debug("js-mir: executing JIT compiled code");
-    if (!g_jm_preamble_compile_only && !g_jm_preamble_in) {
+    if (!g_jm_preamble_compile_only && g_jm_preamble_in) {
+        // A test inherits the harness slab, but its own top-level declarations
+        // can add fixed MIR slots beyond the harness layout. Grow before js_main
+        // runs so generated module-var stores cannot address past that slab.
+        if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
+            log_error("js-mir: failed to grow inherited preamble module state");
+            return (Item){.item = ITEM_ERROR};
+        }
+    } else if (!g_jm_preamble_compile_only) {
         // Normal/preamble mode: allocate per-module vars for this top-level module
-        js_set_active_module_vars(js_alloc_module_vars());
+        if (!js_activate_module_state((uint32_t)mt->module_var_count)) return (Item){.item = ITEM_ERROR};
     }
 
     // Save module_consts as eval preamble BEFORE execution so that
     // eval()/new Function() called during js_main can resolve outer-scope
-    // var declarations via the shared static js_module_vars[] array.
+    // var declarations via the active context-owned module slab.
     if (mt->module_consts && !g_jm_preamble_mode) {
         mem_free(g_eval_preamble_entries);
         int ecount = (int)hashmap_count(mt->module_consts);
@@ -1262,6 +1270,11 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     g_js_mir_optimize_level = 3;
     Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
                                                 result_home);
+    if (out_state && result.item != ITEM_ERROR) {
+        // The preamble's declarations and function closures are valid only in
+        // the slab initialized by this js_main invocation.
+        out_state->module_state_id = js_get_active_module_state_id();
+    }
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
@@ -1352,6 +1365,11 @@ Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, 
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home) {
+    if (!preamble || !js_module_state_is_available(preamble->module_state_id) ||
+            js_get_active_module_state_id() == preamble->module_state_id) {
+        log_error("js-mir: preamble module slab is not active in this realm");
+        return ItemError;
+    }
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = preamble;
@@ -1370,6 +1388,7 @@ bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out
     out_state->source_buffer = source->source_buffer;
     out_state->entry_func = source->entry_func;
     out_state->module_var_count = source->module_var_count;
+    out_state->module_state_id = UINT32_MAX;
     out_state->entry_count = source->entry_count;
     out_state->owns_compiled_state = false;
     if (source->entry_count > 0) {
@@ -1438,7 +1457,8 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     (void)js_get_global_this();
     js_event_loop_init();
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
-    js_set_active_module_vars(js_alloc_module_vars());
+    if (!js_activate_module_state((uint32_t)cached->module_var_count)) return (Item){.item = ITEM_ERROR};
+    out_state->module_state_id = js_get_active_module_state_id();
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)cached->entry_func;
@@ -1503,6 +1523,7 @@ void preamble_state_destroy(JsPreambleState* state) {
     state->entries = NULL;
     state->entry_count = 0;
     state->module_var_count = 0;
+    state->module_state_id = UINT32_MAX;
     state->entry_func = NULL;
     state->owns_compiled_state = false;
 }

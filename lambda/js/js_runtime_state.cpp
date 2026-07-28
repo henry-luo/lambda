@@ -1,6 +1,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
+#include "../runtime/runtime-state.h"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
 
@@ -52,8 +53,8 @@ bool js_runtime_state_bind_context(EvalContext* runtime_context) {
         }
         memset(runtime_context->js_state, 0, sizeof(JsRuntimeState));
         runtime_context->js_state->heap_epoch = 1;
-        runtime_context->js_state->active_module_vars =
-            runtime_context->js_state->module_vars;
+        runtime_context->js_state->batch_test_module_state_id = UINT32_MAX;
+        runtime_context->js_state->batch_preamble_module_state_id = UINT32_MAX;
         // This capsule is raw-allocated for C-compatible runtime ownership,
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
@@ -618,11 +619,29 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     return result;
 }
 
-static void js_ensure_module_vars_gc_rooted() {
-    if (!context || !context->heap || !context->heap->gc) return;
-    if (js_runtime_state.module_vars_rooted_gc == context->heap->gc) return;
-    heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
-    js_runtime_state.module_vars_rooted_gc = context->heap->gc;
+extern "C" Item* js_ensure_active_module_vars(void) {
+    if (context && context->active_js_module_state) {
+        return context->active_js_module_state->vars;
+    }
+    uint32_t module_id = 0;
+    if (!context || !lambda_module_state_reserve((Context*)context,
+            JS_MAX_MODULE_VARS, 0, &module_id)) {
+        log_error("js-module-vars: failed to reserve fallback module state");
+        return NULL;
+    }
+    LambdaModuleState* state = context->module_states[module_id];
+    if (!state || !state->vars) {
+        log_error("js-module-vars: reserved module state has no variable slab");
+        return NULL;
+    }
+    context->active_js_module_state = state;
+    return state->vars;
+}
+
+extern "C" Item** js_active_module_vars_slot(void) {
+    if (!context || !context->active_js_module_state) js_ensure_active_module_vars();
+    if (!context || !context->active_js_module_state) return NULL;
+    return &context->active_js_module_state->vars;
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -739,54 +758,67 @@ extern "C" Item js_to_property_key(Item key) {
 
 extern "C" void js_set_module_var(int index, Item value) {
     js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_SET);
-    if (index >= 0 && index < JS_MAX_MODULE_VARS) {
+    if (index >= 0 && context && context->active_js_module_state &&
+            index < (int)context->active_js_module_state->var_count) {
         js_active_module_vars[index] = value;
     }
 }
 
 extern "C" Item js_get_module_var(int index) {
     js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_GET);
-    if (index >= 0 && index < JS_MAX_MODULE_VARS) {
+    if (index >= 0 && context && context->active_js_module_state &&
+            index < (int)context->active_js_module_state->var_count) {
         return js_active_module_vars[index];
     }
     return ItemNull;
 }
 
 extern "C" void js_reset_module_vars() {
-    js_ensure_module_vars_gc_rooted();
-    memset(js_module_vars, 0, sizeof(js_module_vars));
+    Item* vars = js_ensure_active_module_vars();
+    if (!vars) return;
+    memset(vars, 0, context->active_js_module_state->var_count * sizeof(Item));
     js_module_var_count = 0;
 }
 
-// Save/restore module vars for nested require() — prevents inner module
-// from clobbering the outer module's live variables via js_reset_module_vars().
-extern "C" Item* js_save_module_vars(int* out_count) {
-    *out_count = JS_MAX_MODULE_VARS;
-    Item* saved = (Item*)mem_alloc(JS_MAX_MODULE_VARS * sizeof(Item), MEM_CAT_TEMP);
-    memcpy(saved, js_module_vars, JS_MAX_MODULE_VARS * sizeof(Item));
-    return saved;
+// Allocate a sealed, context-owned slab before entering a JS compilation unit.
+extern "C" uint32_t js_alloc_module_state(uint32_t var_count) {
+    uint32_t module_id = 0;
+    if (var_count == 0) var_count = 1;
+    if (!context || !lambda_module_state_reserve((Context*)context,
+            var_count, 0, &module_id)) return UINT32_MAX;
+    return module_id;
 }
 
-extern "C" void js_restore_module_vars(Item* saved, int count) {
-    if (!saved) return;
-    memcpy(js_module_vars, saved, count * sizeof(Item));
-    mem_free(saved);
+extern "C" bool js_activate_module_state(uint32_t var_count) {
+    uint32_t module_id = js_alloc_module_state(var_count);
+    return module_id != UINT32_MAX && js_set_active_module_state_id(module_id);
 }
 
-// Allocate a per-module variable array (used by CJS modules)
-extern "C" Item* js_alloc_module_vars(void) {
-    Item* vars = (Item*)pool_calloc(js_input->pool, JS_MAX_MODULE_VARS * sizeof(Item));
-    heap_register_gc_root_range((uint64_t*)vars, JS_MAX_MODULE_VARS);
-    return vars;
+extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count) {
+    if (!context || !context->active_js_module_state) return false;
+    return lambda_active_js_module_state_ensure_vars((Context*)context,
+        required_var_count);
 }
 
-// Get/set the active module vars pointer
-extern "C" Item* js_get_active_module_vars(void) {
-    return js_active_module_vars;
+extern "C" uint32_t js_get_active_module_state_id(void) {
+    if (!context || !context->active_js_module_state) return UINT32_MAX;
+    return context->active_js_module_state->module_id;
 }
 
-extern "C" void js_set_active_module_vars(Item* vars) {
-    js_active_module_vars = vars ? vars : js_module_vars;
+extern "C" bool js_set_active_module_state_id(uint32_t module_state_id) {
+    if (!context || module_state_id == UINT32_MAX ||
+            module_state_id >= context->module_state_capacity) return false;
+    LambdaModuleState* state = context->module_states[module_state_id];
+    if (!state || !state->vars) return false;
+    context->active_js_module_state = state;
+    return true;
+}
+
+extern "C" bool js_module_state_is_available(uint32_t module_state_id) {
+    return context && module_state_id != UINT32_MAX &&
+        module_state_id < context->module_state_capacity &&
+        context->module_states[module_state_id] &&
+        context->module_states[module_state_id]->vars;
 }
 
 // =============================================================================
@@ -922,9 +954,12 @@ extern "C" void js_batch_reset() {
     if (!js_active_runtime_state) return;
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
+    // A full heap reset invalidates every retained harness/test relationship.
+    // The next preamble creates a fresh pair of context-owned module slabs.
+    js_runtime_state.batch_test_module_state_id = UINT32_MAX;
+    js_runtime_state.batch_preamble_module_state_id = UINT32_MAX;
     // reset module variable table and active pointer
     js_reset_module_vars();
-    js_active_module_vars = js_module_vars;
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
     module_registry_cleanup();
     // clear JS module cache (specifier String* pointers become dangling after heap reset)
@@ -1047,7 +1082,6 @@ extern "C" int js_get_module_var_count() {
 
 extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
     js_reset_module_vars();
-    js_active_module_vars = js_module_vars;
     if (declaration_count < 0) declaration_count = 0;
     if (declaration_count > JS_MAX_MODULE_VARS) declaration_count = JS_MAX_MODULE_VARS;
     // Compile-only preambles retain declarations but no heap-backed values;
@@ -1059,21 +1093,42 @@ extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
 // but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
 // to avoid re-initializing the harness between tests.
 extern "C" void js_batch_reset_to(int checkpoint_var_count) {
-    js_ensure_module_vars_gc_rooted();
-    // If preamble ran with a pool-allocated module vars array, copy preamble vars
-    // [0..checkpoint) into the static js_module_vars so tests can access them via
-    // js_get_module_var(). Tests skip re-including preamble files (e.g.
-    // nativeFunctionMatcher.js), so those module vars would otherwise stay zero.
-    if (js_active_module_vars != js_module_vars && checkpoint_var_count > 0) {
-        memcpy(js_module_vars, js_active_module_vars,
-               (size_t)checkpoint_var_count * sizeof(Item));
+    // The active slab is the retained harness.  Test code must not execute in
+    // it: harness closures intentionally keep that owner, while the old batch
+    // path copied this prefix into a separate static test slab before each
+    // script. Keep the same isolation using a reusable context-owned slab.
+    LambdaModuleState* preamble_state = context ? context->active_js_module_state : NULL;
+    uint32_t preamble_state_id = js_get_active_module_state_id();
+    if (!preamble_state || preamble_state_id == UINT32_MAX) return;
+    if (checkpoint_var_count < 0) checkpoint_var_count = 0;
+    if (checkpoint_var_count > (int)preamble_state->var_count) {
+        log_error("js-batch-state: preamble checkpoint exceeds its module slab");
+        return;
     }
-    // zero out module vars beyond the checkpoint
-    for (int i = checkpoint_var_count; i < JS_MAX_MODULE_VARS; i++) {
-        js_module_vars[i] = (Item){0};
+
+    uint32_t test_state_id = js_runtime_state.batch_test_module_state_id;
+    if (js_runtime_state.batch_preamble_module_state_id != preamble_state_id ||
+            !js_module_state_is_available(test_state_id)) {
+        if (!js_activate_module_state((uint32_t)checkpoint_var_count)) return;
+        test_state_id = js_get_active_module_state_id();
+        js_runtime_state.batch_test_module_state_id = test_state_id;
+        js_runtime_state.batch_preamble_module_state_id = preamble_state_id;
+    } else if (!js_set_active_module_state_id(test_state_id)) {
+        return;
+    }
+    if (!js_ensure_active_module_var_capacity((uint32_t)checkpoint_var_count)) return;
+
+    Item* vars = js_ensure_active_module_vars();
+    if (!vars) return;
+    if (checkpoint_var_count > 0) {
+        memcpy(vars, preamble_state->vars, (size_t)checkpoint_var_count * sizeof(Item));
+    }
+    // zero out test-owned bindings beyond the copied harness prefix
+    int active_count = (int)context->active_js_module_state->var_count;
+    for (int i = checkpoint_var_count; i < active_count; i++) {
+        vars[i] = (Item){0};
     }
     js_module_var_count = checkpoint_var_count;
-    js_active_module_vars = js_module_vars; // reset to static fallback
     // reset strict mode — prevents strict-mode test from poisoning subsequent non-strict tests
     js_strict_mode = false;
     // clear module registry (frees strdup/calloc per registered module)
@@ -1662,6 +1717,9 @@ void js_reset_transient_call_state() {
     js_pending_args_is_strict = 0;
     js_pending_args_callee = (Item){0};
     js_array_method_real_this = (Item){0};
+    // Array-vs-TypedArray dispatch is scoped to one builtin invocation; an
+    // exceptional nested call must not select Array semantics for the next test.
+    js_dispatch_as_array_method = false;
     js_eval_state_reset(&js_runtime_state.eval);
 }
 
@@ -1733,6 +1791,10 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left array method receiver item=%lld",
             name, (long long)js_array_method_real_this.item);
+    }
+    if (js_dispatch_as_array_method) {
+        leak_count++;
+        log_error("js-batch-state: %s left Array method dispatch enabled", name);
     }
 
     if (include_heap_bound) {

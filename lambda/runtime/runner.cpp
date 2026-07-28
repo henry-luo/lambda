@@ -1714,6 +1714,7 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     if (!runtime || !runtime->scripts || !script) return;
     arraylist_append(runtime->scripts, script);
     script->index = runtime->scripts->length - 1;
+    script->module_state_id = runtime->next_module_state_id++;
     runtime_script_index_put(runtime, script);
 }
 
@@ -1906,7 +1907,6 @@ void runtime_cleanup(Runtime* runtime) {
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.
         jube_notify_heap_cleanup(runtime->heap);
-        lambda_module_state_destroy((Context*)cleanup_context);
 
         print_heap_entries();
         check_memory_leak();
@@ -1924,6 +1924,16 @@ void runtime_cleanup(Runtime* runtime) {
         }
 
         js_runtime_state_release_heap_resources(cleanup_context);
+        if (cleanup_context->js_state) {
+            // Full JS capsule destruction can release function-owned module
+            // bindings, so keep both the JS realm and its slabs alive until it
+            // has completed while the owning heap is still valid.
+            js_runtime_state_bind_context(cleanup_context);
+            js_runtime_state_destroy_context(cleanup_context);
+        }
+        // DOM and JS cleanup can dispose callbacks that still activate their
+        // defining module slab; destroy those slabs only after that cleanup.
+        lambda_module_state_destroy((Context*)cleanup_context);
         heap_destroy();
         runtime->heap = NULL;
         cleanup_context->heap = NULL;

@@ -382,6 +382,7 @@ struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
     const char* directory;      // directory containing this script (for relative imports)
     int index;                  // index of the script in the runtime scripts list
+    uint32_t module_state_id;   // stable shared module-state identity, independent of list position
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
     bool cache_retain;          // true when an imported module may survive per-script teardown

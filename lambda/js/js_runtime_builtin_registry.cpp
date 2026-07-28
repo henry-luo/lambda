@@ -247,6 +247,7 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
         return js_get_or_create_builtin(spec->builtin_id, display_name, spec->param_count);
     }
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->param_count = spec->param_count;
     fn->formal_length = -1;
@@ -551,6 +552,7 @@ Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count)
         return js_builtin_cache[builtin_id];
     }
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = NULL;  // not needed, dispatch uses builtin_id
     fn->param_count = param_count;
@@ -665,6 +667,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // get %TypedArray%.prototype[@@toStringTag]
     {
         JsFunction* tag_getter = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+        js_function_init_native_module_scope(tag_getter);
         tag_getter->type_id = LMD_TYPE_FUNC;
         tag_getter->name = heap_create_name("get [Symbol.toStringTag]", 24);
         tag_getter->param_count = 0;

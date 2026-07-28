@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "description": "A hoisted inner function declaration inside an IIFE stores through to its module-var slot right after the function object is created, so a nested closure resolving it through the module var sees the real callable (Stage 4C LambdaJS bug #4).",
+  "description": "A hoisted inner function declaration inside an IIFE stores through to its context-owned module slab right after the function object is created, so a nested closure resolving the live slot sees the real callable (Stage 4C LambdaJS bug #4).",
   "checks": [
     {
       "in_func": "_js_anon1_#_body",
       "expect_seq": [
         { "pattern": "call\tjs_new_function_context_p" },
-        { "pattern": "call\tjs_set_module_var_p" }
+        { "pattern": "mov\ti64:16(active_js_module_vars_" }
       ],
       "expect": [
         ", _js_helper_"
       ],
       "count": {
-        "call\tjs_set_module_var_p": { "min": 1 }
+        "mov\ti64:16(active_js_module_vars_": { "min": 1 }
       }
     }
   ]

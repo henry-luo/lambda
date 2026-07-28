@@ -706,7 +706,7 @@ struct JsModule {
     int post_await_pending = 0;
     int body_state = 0;
     int async_eval_order = -1;
-    Item* saved_module_vars = NULL;
+    uint32_t saved_module_state_id = UINT32_MAX;
 };
 
 struct JsModuleRuntimeState {
@@ -1027,9 +1027,12 @@ struct JsRuntimeState {
     Item async_iterator_proto_cache = {};
     int dynamic_func_counter = 0;
 
-    Item module_vars[JS_MAX_MODULE_VARS] = {};
-    Item* active_module_vars = module_vars;
     int module_var_count = 0;
+    // Test262 keeps its harness in one module slab while each script needs an
+    // isolated copy of that binding prefix. These ids are per-runtime state,
+    // never process-global, because harness closures retain their owner slab.
+    uint32_t batch_test_module_state_id = UINT32_MAX;
+    uint32_t batch_preamble_module_state_id = UINT32_MAX;
     uint64_t heap_epoch = 1;
 
     JsRegexpLastMatch regexp_last_match = {};
@@ -1083,7 +1086,6 @@ struct JsRuntimeState {
     // them. A heap replacement in one runtime must never touch another.
     JsRootRange* root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX] = {};
     int root_range_registry_count = 0;
-    void* module_vars_rooted_gc = NULL;
     void* event_loop_rooted_gc = NULL;
 };
 
@@ -1098,6 +1100,9 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_runtime_state (*js_active_runtime_state)
 
+extern "C" Item* js_ensure_active_module_vars(void);
+extern "C" Item** js_active_module_vars_slot(void);
+
 // The caller's `with`-scope depth is a per-call dispatch input. The state is
 // owner-local, so dispatch keeps the old direct-load cost without a call,
 // lock, atomic, or shared-cache probe.
@@ -1105,10 +1110,7 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 static inline int js_with_stack_depth_now(void) { return js_with_stack_state.depth; }
 
 static inline Item*& js_active_module_vars_ref() {
-    if (!js_runtime_state.active_module_vars) {
-        js_runtime_state.active_module_vars = js_runtime_state.module_vars;
-    }
-    return js_runtime_state.active_module_vars;
+    return *js_active_module_vars_slot();
 }
 
 #define js_input (js_runtime_state.input)
@@ -1118,7 +1120,7 @@ static inline Item*& js_active_module_vars_ref() {
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
 #define g_array_proto_push_ever_set (js_intrinsic_state.array_proto_push_ever_set)
 #define g_array_writable_methods_ever_set (js_intrinsic_state.array_writable_methods_ever_set)
-#define js_module_vars (js_runtime_state.module_vars)
+#define js_module_vars (js_active_module_vars)
 #define js_active_module_vars (js_active_module_vars_ref())
 #define js_module_var_count (js_runtime_state.module_var_count)
 #define js_heap_epoch (js_runtime_state.heap_epoch)

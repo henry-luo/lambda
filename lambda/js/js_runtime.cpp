@@ -13669,7 +13669,10 @@ static void js_call_stats_note(Item func_item, int arg_count, bool generated_arg
         if (js_function_has_vm_stack_source(fn)) mask |= JS_CALL_STAT_VM_SOURCE;
         if (fn->eval_initializer_context) mask |= JS_CALL_STAT_EVAL_INITIALIZER;
         if (fn->env && fn->env_size > 0) mask |= JS_CALL_STAT_CLOSURE_ENV;
-        if (fn->module_vars && fn->module_vars != js_active_module_vars) mask |= JS_CALL_STAT_MODULE_SWITCH;
+        if (fn->module_state_id != UINT32_MAX &&
+                fn->module_state_id != js_get_active_module_state_id()) {
+            mask |= JS_CALL_STAT_MODULE_SWITCH;
+        }
         Item current_global = js_get_global_this();
         if (fn->home_global.item != 0 && fn->home_global.item != current_global.item) {
             mask |= JS_CALL_STAT_FOREIGN_REALM;
@@ -14130,9 +14133,11 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
             // construct handshake so it cannot leak into a following call.
             js_has_pending_new_target = false;
         }
-        Item* prev_modvars = js_active_module_vars;
-        if (fn->module_vars && fn->module_vars != js_active_module_vars)
-            js_active_module_vars = fn->module_vars;
+        uint32_t prev_module_state_id = js_get_active_module_state_id();
+        if (fn->module_state_id != UINT32_MAX &&
+                fn->module_state_id != prev_module_state_id) {
+            js_set_active_module_state_id(fn->module_state_id);
+        }
         Item prev_global = ItemNull;
         Item caller_global = js_get_global_this();
         bool switched_global = fn->home_global.item != 0 &&
@@ -14180,7 +14185,9 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
             js_with_set_stack(saved_with_stack, saved_with_depth);
         }
         if (switched_global) js_vm_swap_global_this(prev_global);
-        js_active_module_vars = prev_modvars;
+        if (prev_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(prev_module_state_id);
+        }
         if (install_this) js_current_this = prev_this;
         if (install_new_target) js_new_target = prev_nt;
         js_eval_initializer_context = prev_eval_initializer_context;
@@ -14230,9 +14237,10 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_has_pending_new_target = false;
     }
     // Switch to callee's module vars if it belongs to a different module
-    Item* prev_modvars = js_active_module_vars;
-    if (fn->module_vars && fn->module_vars != js_active_module_vars)
-        js_active_module_vars = fn->module_vars;
+    uint32_t prev_module_state_id = js_get_active_module_state_id();
+    if (fn->module_state_id != UINT32_MAX && fn->module_state_id != prev_module_state_id) {
+        js_set_active_module_state_id(fn->module_state_id);
+    }
     Item prev_global = ItemNull;
     Item caller_global = js_get_global_this();
     bool switched_global = fn->home_global.item != 0 &&
@@ -14283,13 +14291,16 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_with_set_stack(saved_with_stack, saved_with_depth);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
-    js_active_module_vars = prev_modvars;
+    if (prev_module_state_id != UINT32_MAX) {
+        js_set_active_module_state_id(prev_module_state_id);
+    }
     if (install_this) js_current_this = prev_this;
     if (install_new_target) js_new_target = prev_nt;
     js_eval_initializer_context = prev_eval_initializer_context;
     if (common_lane && js_call_lane_check_enabled() &&
         (js_current_this.item != prev_this.item || js_new_target.item != prev_nt.item ||
-         js_active_module_vars != prev_modvars || js_get_global_this().item != lane_entry_global.item)) {
+         js_get_active_module_state_id() != prev_module_state_id ||
+         js_get_global_this().item != lane_entry_global.item)) {
         log_error("js-call-lane: ordinary lane leaked dispatcher state");
         abort();
     }
@@ -14499,9 +14510,9 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
         js_has_pending_new_target = false;
     }
 
-    Item* prev_modvars = js_active_module_vars;
-    if (fn->module_vars && fn->module_vars != js_active_module_vars) {
-        js_active_module_vars = fn->module_vars;
+    uint32_t prev_module_state_id = js_get_active_module_state_id();
+    if (fn->module_state_id != UINT32_MAX && fn->module_state_id != prev_module_state_id) {
+        js_set_active_module_state_id(fn->module_state_id);
     }
     Item prev_global = ItemNull;
     bool switched_global = fn->home_global.item != 0 &&
@@ -14533,7 +14544,9 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
         js_current_private_home_class_index = prev_private_home_class_index;
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
-    js_active_module_vars = prev_modvars;
+    if (prev_module_state_id != UINT32_MAX) {
+        js_set_active_module_state_id(prev_module_state_id);
+    }
     if (install_this) js_current_this = prev_this;
     if (install_new_target) js_new_target = prev_nt;
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
@@ -14858,7 +14871,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->env_size = orig->env_size;
     bound->with_env = orig->with_env;
     bound->with_env_depth = orig->with_env_depth;
-    bound->module_vars = orig->module_vars;
+    bound->module_state_id = orig->module_state_id;
     bound->home_global = orig->home_global;
     if (bound->home_global.item != 0) {
         js_function_root_item_if_needed(bound, &bound->home_global);
@@ -29859,6 +29872,7 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 static Item js_create_uncached_builtin_function(int builtin_id, const char* name, int param_count) {
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->param_count = param_count;
     fn->formal_length = -1;
@@ -30703,6 +30717,7 @@ static Item js_get_iterator_proto() {
     // complete, so construction needs exact temporary ownership.
     Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = NULL;
     fn->param_count = 0;
@@ -34222,7 +34237,7 @@ static Item js_promise_all_settled_iterable(Item iterable) {
     int     post_await_pending;            // 1 between pre-await emit and post-await drain
     int     body_state;                    // P7d-C body-split dispatch: 0=initial, 1=post-await
     int     async_eval_order;              // P7d AEO assignment (-1 = not yet async-eligible)
-    Item*   saved_module_vars;             // P7d module-vars slot pointer (saved at transpile time)
+    uint32_t saved_module_state_id;        // P7d context-owned module-state identity
 };
 */
 
@@ -34338,8 +34353,8 @@ extern "C" void js_tla_enter_module(void) {
 
 // Forward declarations for module-vars/namespace state accessors defined in
 // js_runtime_state.cpp. Avoids including js_mir_internal.hpp here.
-extern "C" Item* js_get_active_module_vars(void);
-extern "C" void  js_set_active_module_vars(Item* vars);
+extern "C" uint32_t js_get_active_module_state_id(void);
+extern "C" bool js_set_active_module_state_id(uint32_t module_state_id);
 
 extern "C" void js_tla_exit_module(void) {
     if (g_tla_module_depth > 0) g_tla_module_depth--;
@@ -34399,11 +34414,15 @@ extern "C" void js_tla_exit_module(void) {
         // Restore the module's evaluation context (module-vars and namespace)
         // so the re-entered js_main sees the same state it had during the pre-
         // await phase.
-        Item* prev_vars = js_get_active_module_vars();
+        uint32_t prev_module_state_id = js_get_active_module_state_id();
         Item prev_ns = js_set_active_module_namespace(m->namespace_obj);
-        if (m->saved_module_vars) js_set_active_module_vars(m->saved_module_vars);
+        if (m->saved_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(m->saved_module_state_id);
+        }
         main_fn(context);
-        js_set_active_module_vars(prev_vars);
+        if (prev_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(prev_module_state_id);
+        }
         js_set_active_module_namespace(prev_ns);
         Item spec = (Item){.item = s2it(m->specifier)};
         js_module_complete_tla_body(spec);
@@ -34474,7 +34493,7 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     m->post_await_pending = 0;
     m->body_state = 0;
     m->async_eval_order = -1;
-    m->saved_module_vars = NULL;
+    m->saved_module_state_id = UINT32_MAX;
 }
 
 // Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
@@ -34580,15 +34599,15 @@ extern "C" int js_module_get_has_tla(Item specifier) {
     return m ? m->has_tla : 0;
 }
 
-extern "C" void js_module_save_context(Item specifier, Item* module_vars) {
+extern "C" void js_module_save_context(Item specifier, uint32_t module_state_id) {
     JsModule* m = js_module_find(specifier);
     if (!m) return;
-    m->saved_module_vars = module_vars;
+    m->saved_module_state_id = module_state_id;
 }
 
-extern "C" Item* js_module_get_saved_module_vars(Item specifier) {
+extern "C" uint32_t js_module_get_saved_module_state_id(Item specifier) {
     JsModule* m = js_module_find(specifier);
-    return m ? m->saved_module_vars : NULL;
+    return m ? m->saved_module_state_id : UINT32_MAX;
 }
 
 // Returns 1 if the module needs deferral — either it has TLA itself OR its
@@ -34769,9 +34788,11 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
         // Restore the module's evaluation context (module-vars and namespace)
         // so the deferred body sees its own state, not the
         // drain caller's.
-        Item* prev_vars = js_get_active_module_vars();
+        uint32_t prev_module_state_id = js_get_active_module_state_id();
         Item prev_ns = js_set_active_module_namespace(par->namespace_obj);
-        if (par->saved_module_vars) js_set_active_module_vars(par->saved_module_vars);
+        if (par->saved_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(par->saved_module_state_id);
+        }
         main_fn(context);
         // Drain microtasks scheduled by the deferred body before propagating
         // completion. Without this, Promise.then handlers queued by the body
@@ -34780,7 +34801,9 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
         if (js_dynamic_import_suppress_module_drain <= 0) {
             js_event_loop_drain();
         }
-        js_set_active_module_vars(prev_vars);
+        if (prev_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(prev_module_state_id);
+        }
         js_set_active_module_namespace(prev_ns);
         // After the parent's body returns, mark it complete unless its own
         // TLA pre-await split scheduled a post-await continuation.

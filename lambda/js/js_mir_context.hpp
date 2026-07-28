@@ -108,6 +108,7 @@ struct JsImportGraphNode {
     int depth;             // topological depth (-1 = uncomputed)
     MIR_context_t mir_ctx;
     void* js_main_func;    // typed as js_main_func_t at call sites
+    uint32_t module_var_count;
     bool compiled;
 };
 

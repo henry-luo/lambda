@@ -972,6 +972,21 @@ void heap_destroy() {
     }
 }
 
+void heap_discard_unfinalized() {
+    if (!context || !context->heap) return;
+    // Signal recovery can leave native finalizers with interrupted allocator
+    // state. Release the pool generation without traversing those finalizers;
+    // the short-lived batch worker reclaims their external payloads on exit.
+    gc_heap_t* gc = context->heap->gc;
+    if (gc) {
+        gc->external_destroy = NULL;
+        gc_heap_destroy(gc);
+    }
+    // The Heap record itself is mem_alloc-owned. Do not re-enter that allocator
+    // after siglongjmp; it is a tiny process-lifetime recovery leak.
+    context->heap = NULL;
+}
+
 void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
                               bool reusing_context) {
     if (!reusing_context && context) {

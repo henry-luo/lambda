@@ -9,9 +9,11 @@
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
 extern "C" void js_reset_module_vars();
-extern "C" Item* js_alloc_module_vars(void);
-extern "C" Item* js_get_active_module_vars(void);
-extern "C" void js_set_active_module_vars(Item* vars);
+extern "C" uint32_t js_alloc_module_state(uint32_t var_count);
+extern "C" bool js_activate_module_state(uint32_t var_count);
+extern "C" uint32_t js_get_active_module_state_id(void);
+extern "C" bool js_set_active_module_state_id(uint32_t module_state_id);
+extern "C" bool js_module_state_is_available(uint32_t module_state_id);
 extern void js_double_to_string(double d, char* out, int out_size);
 extern "C" void js_process_emit_before_exit(int code);
 extern "C" void js_process_emit_exit(int code);
@@ -249,8 +251,12 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
 JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name);
 JsMirImportEntry* jm_ensure_import_i_i(JsMirTranspiler* mt, const char* name);
 JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name);
+MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1);
+void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2);
 #define jm_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, true)
-#define jm_call_1(mt, fn, ret, ...) em_call_1(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_1(mt, fn, ret, ...) jm_call_1_or_inline(mt, fn, ret, __VA_ARGS__)
 #define jm_call_2(mt, fn, ret, ...) em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, true)
 #define jm_call_3(mt, fn, ret, ...) em_call_3(&(mt)->em, fn, ret, __VA_ARGS__, true)
 #define jm_call_4(mt, fn, ret, ...) em_call_4(&(mt)->em, fn, ret, __VA_ARGS__, true)
@@ -275,7 +281,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_0(mt, fn) em_call_void_0(&(mt)->em, fn, true)
 #define jm_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, true)
-#define jm_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_2(mt, fn, ...) jm_call_void_2_or_inline(mt, fn, __VA_ARGS__)
 #define jm_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true)
 #define jm_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true)
 #define jm_call_void_5(mt, fn, ...) em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true)

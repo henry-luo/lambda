@@ -7904,6 +7904,7 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         MIR_finish(ctx);
         return false;
     }
+    node->module_var_count = (uint32_t)mt->module_var_count;
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-parallel: NULL labels detected for '%s'", node->path);
@@ -8057,10 +8058,10 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
             typedef Item (*js_main_func_t)(Context*);
             js_main_func_t js_main = (js_main_func_t)nodes[idx].js_main_func;
 
-            Item* prev_mv = js_get_active_module_vars();
-            js_set_active_module_vars(js_alloc_module_vars());
+            uint32_t prev_module_state_id = js_get_active_module_state_id();
+            if (!js_activate_module_state(nodes[idx].module_var_count)) continue;
             Item namespace_obj = js_main((Context*)context);
-            js_set_active_module_vars(prev_mv);
+            js_set_active_module_state_id(prev_module_state_id);
 
             // register in module cache
             String* spec_str = heap_create_name(nodes[idx].path, strlen(nodes[idx].path));
@@ -8271,18 +8272,17 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     js_runtime_set_input(module_input);
 
     // Allocate per-module variable storage and switch to it.
-    Item* prev_module_vars = js_get_active_module_vars();
+    uint32_t prev_module_state_id = js_get_active_module_state_id();
     Item prev_namespace = js_set_active_module_namespace(namespace_obj);
-    Item* module_vars = js_alloc_module_vars();
-    js_set_active_module_vars(module_vars);
+    if (!js_activate_module_state((uint32_t)mt->module_var_count)) return ItemNull;
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
-    // Js57 P7d: save the module's evaluation context (module_vars pointer +
+    // Js57 P7d: save the module's evaluation context (module-state id +
     // namespace already on JsModule) and stash js_main as the deferred entry.
     // Used by the AEO drain to re-enter js_main with the same module-level
     // state when a deferred body / post-await chunk runs.
-    js_module_save_context(spec_item, module_vars);
+    js_module_save_context(spec_item, js_get_active_module_state_id());
     js_module_set_deferred_main_ptr(spec_item, (void*)js_main);
     // Modules that already have TLA-transitive deps were registered as async
     // parents during jm_load_imports; their bodies must wait for those deps
@@ -8310,7 +8310,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
-    js_set_active_module_vars(prev_module_vars);
+    js_set_active_module_state_id(prev_module_state_id);
     js_set_active_module_namespace(prev_namespace);
     // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
     // chunks. Sits AFTER the namespace/module-vars restore so
@@ -8483,4 +8483,4 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
 
 // eval() preamble: snapshot of the outer script's module_consts so that
 // dynamically compiled code (eval / new Function) can resolve outer-scope
-// var declarations via the shared static js_module_vars[] array.
+// var declarations via the active context-owned module slab.
