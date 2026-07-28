@@ -1251,6 +1251,6 @@ bool item_deep_equal(Item a, Item b) {
         }
         default:
             // for other types (map, function, etc.), fall back to pointer equality
-            return false;test_validator_input_gtest
+            return false;
     }
 }
