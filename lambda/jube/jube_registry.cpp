@@ -4372,6 +4372,12 @@ JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item*
     if (!found) return JUBE_SPECIFIER_UNKNOWN;
     JubeSpecifierEntry entry = *found;
     if (!entry.module) return JUBE_SPECIFIER_UNAVAILABLE;
+    // A namespace request is the first observable Jube use in this realm.
+    // Do not create the session while ordinary JS globals are being built.
+    jube_modules_runtime_attach();
+    if (!jube_active_node_runtime_session || !jube_active_node_runtime_session->live) {
+        return JUBE_SPECIFIER_ACTIVATION_FAILED;
+    }
     if (!jube_activate_module_descriptor(entry.module)) {
         return JUBE_SPECIFIER_ACTIVATION_FAILED;
     }
@@ -4704,8 +4710,7 @@ bool jube_activate_module(const JubeModuleDef* module) {
 
 bool jube_resolve_global(const char* name, size_t name_length, Item* out_value) {
     if (out_value) *out_value = ItemNull;
-    if (!name || name_length == 0 || !jube_active_node_runtime_session ||
-            !jube_active_node_runtime_session->live) {
+    if (!name || name_length == 0) {
         return false;
     }
     for (int i = 0; i < jube_static_modules_count; i++) {
@@ -4717,6 +4722,12 @@ bool jube_resolve_global(const char* name, size_t name_length, Item* out_value) 
             if (!global_def->name || strlen(global_def->name) != name_length ||
                     memcmp(global_def->name, name, name_length) != 0) {
                 continue;
+            }
+            // The lazy global slot proves that this realm requested Jube.
+            // Avoid session creation for realms that never read a Jube global.
+            jube_modules_runtime_attach();
+            if (!jube_active_node_runtime_session || !jube_active_node_runtime_session->live) {
+                return false;
             }
             if (!jube_activate_module_descriptor(module)) return false;
             Item key = jube_host_api.value->string_from_utf8_n(name, name_length);
@@ -5943,9 +5954,12 @@ const JubeModuleDef* jube_static_module_at(int index) {
 
 void jube_modules_runtime_reset(void) {
     JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    // Most short-lived JS realms never use Jube. Scanning the module registry
+    // here used to make their heap reset pay the Node lifecycle cost anyway.
+    if (!session || !session->live || session->detaching) return;
     size_t session_reset_end = offsetof(JubeModuleDef, runtime_reset_session) +
         sizeof(((JubeModuleDef*)NULL)->runtime_reset_session);
-    for (int i = 0; session && i < jube_static_modules_count; i++) {
+    for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
         if (jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
                 jube_module_is_attached_to_session(&jube_static_modules[i], session) &&
@@ -5957,14 +5971,13 @@ void jube_modules_runtime_reset(void) {
         sizeof(((JubeModuleDef*)NULL)->runtime_reset);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (session &&
-                jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
+        if (jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
                 jube_module_is_attached_to_session(&jube_static_modules[i], session) &&
                 jube_module_has_field(module, end) && module->runtime_reset) {
             module->runtime_reset();
         }
     }
-    if (session) jube_node_shared_primitives_reset(session);
+    jube_node_shared_primitives_reset(session);
 }
 
 void jube_modules_runtime_attach(void) {
@@ -6006,31 +6019,34 @@ void jube_modules_runtime_attach(void) {
 }
 
 void jube_modules_runtime_detach(void) {
-    void* session = jube_host_node_current_session();
-    if (!session) return;
+    JubeNodeRuntimeSession* active_session = jube_active_node_runtime_session;
+    // Keep ordinary JS realm teardown out of the Jube host bridge until a
+    // lazy global or namespace request has actually attached a session.
+    if (!active_session || !active_session->live || active_session->detaching) return;
+    void* session = active_session;
     // Reject new work before module teardown but keep roots usable until every
     // runtime_detach hook has released its session-bound persistent roots.
-    jube_active_node_runtime_session->detaching = true;
+    active_session->detaching = true;
     size_t detach_end = offsetof(JubeModuleDef, runtime_detach) +
         sizeof(((JubeModuleDef*)NULL)->runtime_detach);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
         if (jube_static_modules[i].activation_state == JUBE_MODULE_ACTIVE &&
                 jube_module_is_attached_to_session(&jube_static_modules[i],
-                    jube_active_node_runtime_session) &&
+                    active_session) &&
                 jube_module_has_field(module, detach_end) && module->runtime_detach) {
             module->runtime_detach(session);
         }
         jube_module_detach_session(&jube_static_modules[i],
-            jube_active_node_runtime_session);
+            active_session);
     }
     jube_node_shared_primitives_detach(session);
     jube_node_async_cancel_session(session);
-    jube_node_resource_cleanup(jube_active_node_runtime_session);
-    jube_node_session_module_states_destroy(jube_active_node_runtime_session);
+    jube_node_resource_cleanup(active_session);
+    jube_node_session_module_states_destroy(active_session);
     // Invalidate before the next attach so stale module tokens cannot resolve
     // namespaces against a replacement JS heap.
-    jube_active_node_runtime_session->live = false;
+    active_session->live = false;
     jube_active_node_runtime_session_set(NULL);
 }
 
