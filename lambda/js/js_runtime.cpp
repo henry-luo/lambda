@@ -39324,9 +39324,9 @@ static Item js_vm_SourceTextModule_constructor(Item source, Item options) {
     }
     Item identifier = js_property_get(module, js_vm_stm_key("identifier"));
     if (get_type_id(identifier) != LMD_TYPE_STRING) {
-        static int stm_identifier_counter = 0;
         char buf[64];
-        int len = snprintf(buf, sizeof(buf), "vm:module(%d)", stm_identifier_counter++);
+        int len = snprintf(buf, sizeof(buf), "vm:module(%d)",
+            js_runtime_state.vm.source_text_identifier_counter++);
         js_property_set(module, js_vm_stm_key("identifier"), js_vm_stm_string(buf, len));
     }
     js_vm_stm_set_status(module, "unlinked");
@@ -39338,8 +39338,8 @@ static Item js_vm_SourceTextModule_constructor(Item source, Item options) {
 }
 
 extern "C" Item js_get_vm_namespace(void) {
-    static Item vm_ns = {0};
-    static uint64_t vm_epoch = (uint64_t)-1;
+    Item& vm_ns = js_runtime_state.vm.namespace_object;
+    uint64_t& vm_epoch = js_runtime_state.vm.namespace_epoch;
     if (vm_ns.item == 0 || vm_epoch != js_heap_epoch) {
         vm_epoch = js_heap_epoch;
         vm_ns = js_new_object();

@@ -3246,6 +3246,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // document until script_runner binds its owner context.
         dom_doc->js.host_ui_context = js_host_config->ui_context;
         dom_doc->js.host_driven_loop = js_host_config->host_driven_loop;
+        dom_doc->js.auto_close_event_loop = js_host_config->auto_close_event_loop;
         dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
     }
@@ -6476,8 +6477,15 @@ static bool layout_single_file(
     }
     js_mir_begin_document_phase_timing();
 
-    bool previous_auto_close_mode = js_event_loop_auto_close_mode();
-    js_event_loop_set_auto_close_mode(auto_close);
+    // The document Runtime does not exist at this point. Carry auto-close with
+    // the document so script setup cannot silently lose it before binding.
+    DocumentJsHostConfig js_host_config = {
+        ui_context,
+        false,
+        auto_close,
+        false,
+        0.0
+    };
 
     Url* input_url = url_parse_with_base(input_file, cwd);
     EventStateLog* event_log = nullptr;
@@ -6534,7 +6542,6 @@ static bool layout_single_file(
                 radiant_state_dump_close(state_dump);
                 state_dump = nullptr;
             }
-            js_event_loop_set_auto_close_mode(previous_auto_close_mode);
             pool_destroy(pool);
             return false;
         }
@@ -6587,7 +6594,7 @@ static bool layout_single_file(
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
                                                 timing_file ? &document_script_timing : nullptr,
-                                                nullptr);
+                                                &js_host_config);
             if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
                 break;
             }
@@ -6614,13 +6621,10 @@ static bool layout_single_file(
             if (!pool) {
                 log_error("Failed to create memory pool for redirected document: %s",
                           next_href ? next_href : "(null)");
-                js_event_loop_set_auto_close_mode(previous_auto_close_mode);
                 break;
             }
         }
     }
-    js_event_loop_set_auto_close_mode(previous_auto_close_mode);
-
     if (!doc) {
         load_end = std::chrono::high_resolution_clock::now();
         js_mir_end_document_phase_timing(&document_js_timing);

@@ -2869,6 +2869,7 @@ typedef struct UiContext {
 typedef struct DocumentJsHostConfig {
     UiContext* ui_context;
     bool host_driven_loop;
+    bool auto_close_event_loop;
     bool virtual_clock_enabled;
     double virtual_clock_ms;
 } DocumentJsHostConfig;
