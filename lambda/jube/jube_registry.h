@@ -78,6 +78,9 @@ void jube_modules_runtime_reset(void);
 // is live. The opaque session becomes invalid immediately after detach.
 void jube_modules_runtime_attach(void);
 void jube_modules_runtime_detach(void);
+// Browser-standard URL/Event globals use these host-owned primitives without
+// requiring the optional node-core compatibility namespace.
+bool jube_activate_node_shared_primitives(void);
 
 typedef enum JubeNodeModuleStateSlot {
     JUBE_NODE_MODULE_STATE_EVENTS = 0,
