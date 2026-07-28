@@ -27,7 +27,8 @@ SUITE_LABELS = {
     "jetstream": "JetStream",
 }
 ENGINE_LABELS = {
-    "mir": "MIR",
+    "mir": "MIR (untyped)",
+    "mir_typed": "MIR (typed)",
     "c2mir": "C2MIR",
     "lambdajs": "LambdaJS",
     "quickjs": "QuickJS",
@@ -94,6 +95,29 @@ def status_of(bench_data, engine):
     if status:
         return status
     return "ok" if value_of(bench_data.get(engine)) is not None else "not_recorded"
+
+
+def report_engines(data, requested):
+    """Expand MIR into untyped and typed columns when typed data is present."""
+    has_typed_mir = any(
+        "mir_typed" in bench_data
+        for suite in SUITE_ORDER
+        for bench_data in data.get(suite, {}).values()
+    )
+    expanded = []
+    for engine in requested:
+        expanded.append(engine)
+        if engine == "mir" and has_typed_mir:
+            expanded.append("mir_typed")
+    return expanded
+
+
+def display_ms(bench_data, engine):
+    """Format a timing and mark typed cells that reuse an untyped result."""
+    value = fmt_ms(value_of(bench_data.get(engine)))
+    if engine == "mir_typed" and status_of(bench_data, engine) == "untyped_fallback":
+        return value + "*" if value != "---" else value
+    return value
 
 
 def collect_notables(data, engines):
@@ -190,7 +214,8 @@ def write_historical_comparisons(w, metadata):
 
 
 def write_report(args, data):
-    engines = [e.strip() for e in args.engines.split(",") if e.strip()]
+    requested_engines = [e.strip() for e in args.engines.split(",") if e.strip()]
+    engines = report_engines(data, requested_engines)
     metadata = data.get("_metadata", {})
     date = args.date or (metadata.get("started_at", "")[:10] if metadata.get("started_at") else None) or datetime.datetime.now().strftime("%Y-%m-%d")
     commit = args.commit or metadata.get("lambda_commit") or read_cmd(["git", "rev-parse", "HEAD"])
@@ -220,6 +245,8 @@ def write_report(args, data):
     w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     w(f"- **Results source:** `{args.input}`")
+    if "mir_typed" in engines:
+        w("- **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists")
     w()
     w("JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop over the detected benchmark function. They do not use per-file `Benchmark.runIteration()` counts, because those counts drift across JetStream files.")
     w()
@@ -227,8 +254,12 @@ def write_report(args, data):
     w()
     w("## Summary")
     w()
-    w("| Suite | Total | Timed MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |")
-    w("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    ratio_engines = [e for e in engines if e != NODE_ENGINE]
+    summary_columns = ["Suite", "Total"]
+    summary_columns.extend(f"Timed {ENGINE_LABELS.get(e, e)}" for e in engines)
+    summary_columns.extend(f"{ENGINE_LABELS.get(e, e)}/Node geo" for e in ratio_engines)
+    w("| " + " | ".join(summary_columns) + " |")
+    w("|---|---:" + "|---:" * (len(summary_columns) - 2) + "|")
 
     overall_ratios = {e: [] for e in engines if e != NODE_ENGINE}
     overall_counts = {e: 0 for e in engines}
@@ -254,34 +285,22 @@ def write_report(args, data):
                         suite_ratios[engine].append(r)
                         overall_ratios[engine].append(r)
 
-        w(
-            f"| {SUITE_LABELS.get(suite, suite)} | {len(benches)} | "
-            f"{suite_counts.get('mir', 0)} | {suite_counts.get('lambdajs', 0)} | "
-            f"{suite_counts.get('quickjs', 0)} | {suite_counts.get('nodejs', 0)} | "
-            f"{fmt_ratio(geo_mean(suite_ratios.get('mir', [])))} | "
-            f"{fmt_ratio(geo_mean(suite_ratios.get('lambdajs', [])))} | "
-            f"{fmt_ratio(geo_mean(suite_ratios.get('quickjs', [])))} |"
-        )
+        cells = [SUITE_LABELS.get(suite, suite), str(len(benches))]
+        cells.extend(str(suite_counts.get(engine, 0)) for engine in engines)
+        cells.extend(fmt_ratio(geo_mean(suite_ratios.get(engine, []))) for engine in ratio_engines)
+        w("| " + " | ".join(cells) + " |")
 
     dedup = compute_dedup_summary(data, engines)
     dedup_counts = dedup["counts"]
     dedup_ratios = dedup["ratios"]
-    w(
-        f"| **Overall dedup** | **{dedup['total']}** | "
-        f"**{dedup_counts.get('mir', 0)}** | **{dedup_counts.get('lambdajs', 0)}** | "
-        f"**{dedup_counts.get('quickjs', 0)}** | **{dedup_counts.get('nodejs', 0)}** | "
-        f"**{fmt_ratio(geo_mean(dedup_ratios.get('mir', [])))}** | "
-        f"**{fmt_ratio(geo_mean(dedup_ratios.get('lambdajs', [])))}** | "
-        f"**{fmt_ratio(geo_mean(dedup_ratios.get('quickjs', [])))}** |"
-    )
-    w(
-        f"| Overall raw | {total_rows} | "
-        f"{overall_counts.get('mir', 0)} | {overall_counts.get('lambdajs', 0)} | "
-        f"{overall_counts.get('quickjs', 0)} | {overall_counts.get('nodejs', 0)} | "
-        f"{fmt_ratio(geo_mean(overall_ratios.get('mir', [])))} | "
-        f"{fmt_ratio(geo_mean(overall_ratios.get('lambdajs', [])))} | "
-        f"{fmt_ratio(geo_mean(overall_ratios.get('quickjs', [])))} |"
-    )
+    dedup_cells = ["**Overall dedup**", f"**{dedup['total']}**"]
+    dedup_cells.extend(f"**{dedup_counts.get(engine, 0)}**" for engine in engines)
+    dedup_cells.extend(f"**{fmt_ratio(geo_mean(dedup_ratios.get(engine, [])))}**" for engine in ratio_engines)
+    w("| " + " | ".join(dedup_cells) + " |")
+    raw_cells = ["Overall raw", str(total_rows)]
+    raw_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
+    raw_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
+    w("| " + " | ".join(raw_cells) + " |")
     w()
     w("> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.")
     w("> Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.")
@@ -332,17 +351,15 @@ def write_report(args, data):
         w(f"## {SUITE_LABELS.get(suite, suite)}")
         w()
         header = "| Benchmark | Category |" + "".join(f" {ENGINE_LABELS.get(e, e)} (ms) |" for e in engines)
-        ratio_header = "".join(f" {ENGINE_LABELS.get(e, e)}/Node |" for e in engines if e != NODE_ENGINE)
+        ratio_header = "".join(f" {ENGINE_LABELS.get(e, e)}/Node |" for e in ratio_engines)
         w(header + ratio_header)
-        w("|---|---|" + "---:|" * len(engines) + "---:|" * (len(engines) - 1))
+        w("|---|---|" + "---:|" * (len(engines) + len(ratio_engines)))
         for bench_name, bench_data in data[suite].items():
             row = f"| {bench_name} | {bench_data.get('category', '')} |"
             for engine in engines:
-                row += f" {fmt_ms(value_of(bench_data.get(engine)))} |"
+                row += f" {display_ms(bench_data, engine)} |"
             node = value_of(bench_data.get(NODE_ENGINE))
-            for engine in engines:
-                if engine == NODE_ENGINE:
-                    continue
+            for engine in ratio_engines:
                 row += f" {fmt_ratio(ratio(bench_data.get(engine), node))} |"
             w(row)
 
