@@ -1405,14 +1405,15 @@ test-all-baseline: build-test
 
 # Keep the baseline report focused on test results. This target-specific value
 # propagates through its build prerequisites without changing standalone builds.
+# Lambda baseline cases, including ABI checks, are listed in the build config
+# consumed by test_run.js so execution and final-summary accounting stay under
+# one runner.
 test-lambda-baseline: TEST_BUILD_QUIET := 1
 test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
-	@echo "Running Lambda typed-item ABI tests..."
-	@./test/test_lambda_typed.exe
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline

@@ -1,24 +1,28 @@
 # Lambda / LambdaJS Performance Tuning Proposal
 
-- **Status:** remaining-work proposal, rev 4
-- **Revision date:** 2026-07-23
+- **Status:** remaining-work proposal, rev 5
+- **Revision date:** 2026-07-28
 - **Scope:** LambdaJS (`lambda/js/`), the shared runtime, and Lambda
   MIR-Direct (`lambda/transpile-mir.cpp`)
-- **Latest full benchmark:** `test/benchmark/Overall_Result10.md`
-- **Related plans:** `Lambda_Impl_Tune_COW.md`, `Lambda_Impl_JS_Tune.md`,
+- **Latest full benchmark:** `test/benchmark/Overall_Result15.md`
+- **Related plans:** `Lambda_Impl_Tune_COW (done).md`,
+  `Lambda_Impl_JS_Tune (done).md`, `Lambda_Impl_Tune6 (done).md`,
+  `Lambda_Impl_Tune7_JS_Plain_Call (done).md`,
+  `Lambda_Impl_Tune_JS_Dynamic_Call.md`,
+  `Lambda_Impl_Tune8_Result15_Bottlenecks.md`, and
+  `Lambda_Impl_Tune9_GC (done).md`, `Lambda_Impl_Tune10.md`, and
   `Lambda_Issues_Outstanding.md`
 - **Completed Lambda tuning records:** `Lambda_Impl_Tune1 (done).md`,
   `Lambda_Impl_Tune2 (done).md`, `Lambda_Impl_Tune3.md`
 
-This revision contains only work that remains open. Implemented and
-superseded items have been removed; their details remain in git history and in
-their owning implementation records.
+This revision records both the remaining work and the terminal disposition of
+the old R-items, so a completed, rejected, or intentionally parked track is
+not mistaken for unfinished implementation. Owning implementation records
+retain the detailed measurements and fixtures.
 
-Result10 is still the latest complete cross-engine benchmark, but it predates
-the landed Lambda M1/M2 numeric fixes and the planned COW Stage 1 work.
-`Lambda_Impl_Tune_COW.md` owns the next full release run, Result11. The
-Result10 LambdaJS measurements remain the current evidence for the separate
-LambdaJS regression described in R0.
+Result15 is the current complete cross-engine floor. Result11 completed COW
+Stage 1, Result13 closed Tune6, and Result14/15 recorded the later dynamic-call
+work and its inline-bitcast follow-up.
 
 ---
 
@@ -61,9 +65,12 @@ output-correctness checking before a timing enters an aggregate. MIR size or
 instruction-count reduction is supporting evidence, not proof of a runtime
 win.
 
-**Current floor: Result13** (`test/benchmark/benchmark_results_v13.json`,
-2026-07-26, commit `22eefe3f1`) — MIR/Node dedup geo **2.94x**, LambdaJS/Node
-**15.4x**, QuickJS/Node **7.45x**.
+**Current floor: Result15** (`test/benchmark/benchmark_results_v15.json`,
+2026-07-27, commit `770eb273a`) — MIR/Node dedup geo **2.92x**,
+LambdaJS/Node **13.8x**, QuickJS/Node **7.39x**. It is a 62-row clean-release
+re-run with the same Result14 engine stack and protocol. The LambdaJS movement
+against Result14 is real (4.3% while the QuickJS control moved 0.4%), but a
+matrix remains a floor, not phase attribution.
 
 **Three calibration facts, measured by running Result13 twice — once under
 normal load and once on a deliberately quiesced machine** (run 1 kept as
@@ -80,9 +87,10 @@ normal load and once on a deliberately quiesced machine** (run 1 kept as
    gap and did not, which is what proves it is a stable property of the two
    snapshot dates rather than variance.
 3. **Therefore the geo means cannot resolve movement below ~6%** across
-   snapshots. Result13's MIR/Node −2% sits inside a control that moved +6% the
-   other way, even though per-row Lambda wins of 1.3–2.5x are real and
-   independently confirmed.
+   snapshots. Result13's MIR/Node −2% sat inside a control that moved +6% the
+   other way, even though per-row Lambda wins of 1.3–2.5x were real and
+   independently confirmed. Result15's same-machine Result14 comparison is
+   stronger, but does not remove the need for per-phase interleaved A/B.
 
 Practical consequences:
 
@@ -101,50 +109,22 @@ Practical consequences:
 
 ## 2. Remaining proposals
 
-### R0 — Complete Result11 and diagnose the LambdaJS small/mid regression
+### R0 — Result11 and the previous LambdaJS regression — **CLOSED**
 
-Three pieces form the next trustworthy floor:
+Lambda COW Stage 1, the output-correct Result11 run, and its provenance were
+completed under `Lambda_Impl_Tune_COW (done).md`. Later Result13–15 records
+supersede Result10/11 as tuning floors. New LambdaJS regressions must follow
+the Result15 protocol: build both release binaries first, interleave each row,
+preserve timestamped raw data under `temp/`, and validate output before
+claiming a movement.
 
-1. Complete Lambda COW Stage 1 under `Lambda_Impl_Tune_COW.md`, including
-   retirement of the eager mutable-clone anchor for the in-scope Lambda
-   containers.
-2. Run Result11 with the Result9/Result10 release protocol and an integrated
-   output-correctness sweep.
-3. Preserve the raw before/after timing data under `temp/` with timestamped
-   JSON or CSV filenames instead of overwriting the previous profiling run.
-   The generated aggregate report must identify the exact raw inputs.
+### R1 — LambdaJS Tune6 — **CLOSED**
 
-In the same run, remeasure the Result10 LambdaJS regression cluster:
-`awfy/sieve`, `larceny/puzzle`, `larceny/array1`, `primes`,
-`navier_stokes`, `fannkuch`, `fasta`, and `nqueens`. If the regression
-remains, profile the smallest exact reproductions and find the lost
-specialization before re-ranking the general JS tuning queue.
-
-Exit:
-
-- Result11 records correct-output-only Lambda/MIR and LambdaJS aggregates;
-- the LambdaJS regression has a measured root cause or is shown to have
-  disappeared;
-- R1–R8 are re-ranked against that floor.
-
-### R1 — Execute the revised LambdaJS Tune-6 plan
-
-`Lambda_Impl_JS_Tune.md` is the source of truth. Its remaining tracks are:
-
-- **Track A — shaped-float register residency:** begin with read-only
-  residency for proven constructor-shaped FLOAT fields; write coalescing is a
-  separate measured decision.
-- **Track B — realm-owned intrinsic-prototype fast paths:** define the
-  realm/reset owner, consolidate the existing cache and tamper state,
-  centralize invalidation, and convert only measured hot lookup families.
-- **Track C — runtime and compile-time scaling:** add the event-listener target
-  index, profile DOM name dispatch, replace fixed transpiler collections with
-  pointer-stable source-sized storage, and gate Test262-only helpers out of
-  production builds.
-
-Tune-6 contains no native-INT arithmetic track. Its design questions and
-per-track correctness/performance gates are maintained in the implementation
-plan rather than duplicated here.
+Tune6 is fully implemented with terminal decisions for every track. Track B,
+listener/handler indices, exact transpiler storage, and production gating
+landed. Shaped-float residency stopped after its census found no viable hot
+stream; DOM-name dispatch stopped after profiling put it below 0.3% of editor
+wall time. Neither is pending implementation without new evidence.
 
 ### R2 — Inline named-property IC hits, then design the method/prototype PIC — **KIV (2026-07-26)**
 
@@ -184,17 +164,13 @@ FLOAT/BOOL; the verification bar is `js_exec_profile` branch counters identical
 before and after across the fixture set. OI-6 remains the record for PIC
 ownership and invalidation granularity.
 
-### R2b — Realm-owned shared root shape for plain objects — **OPEN, highest-value LJS item**
+### R2b — Realm-owned shared root shape for plain objects — **OPEN**
 
-Extracted from the Tune6 census; this, not R2/R3, is what the worst LJS rows are
-waiting on.
-
-**Result13 confirms the LJS column is entirely untouched** and still owns every
-bad row: geo **15.4x**, and the five rows over 100x are unchanged — hashmap
-**1121x**, havlak ~730x, cd ~260x, navier_stokes ~148x, spectralnorm ~105x.
-Tune6 landed nothing on this engine, so these numbers are the standing target.
-hashmap alone is a ~1.5x outlier over the next-worst row and ~9x over the third,
-and is the single clearest opportunity in the whole benchmark set.
+Extracted from the Tune6 census, this remains the LJS shape-identity item. The
+Result15 ownership-bitmap landing removed hashmap's pathological mark cost, but
+it did not make constructed-object TypeMaps converge. Re-profile its direct
+ceiling after R2c numeric-key and array-store changes; it remains especially
+relevant to the shape-heavy cd/havlak class of rows.
 
 `hashmap`'s 18.5M megamorphic probes are **shape identity, not shape content**:
 structurally identical instances (`Object.keys()` equal) carry pointer-distinct
@@ -214,6 +190,43 @@ structurally identical objects converge on one TypeMap. **Hang the root off
 `Input` so it dies with the realm's pool — not off the process-global
 `EmptyMap`**, per the realm-ownership constraint that the reverted global
 prototype cache established.
+
+### R2c — Result15 LambdaJS slow-row bottlenecks — **OPEN**
+
+Result15 profiling replaces generic “object churn” attribution with four
+independently measurable LJS mechanisms. They are complementary to R2b: solve
+each only with a release-profiled reproduction and retain the generic semantic
+path for unsupported objects.
+
+1. **Numeric-key stringification.** Computed compound assignments and updates
+   eagerly run numeric keys through `js_to_property_key`, then hot typed-array
+   paths parse and canonicalize the resulting strings again. Preserve proven
+   numeric keys as Items through the reference get/put path; separately
+   evaluate an integral conversion fast path, a real shortest-double converter,
+   and arithmetic typed-array canonical-key validation. This is the leading
+   Result15 ceiling on spectralnorm and material on navier, hashmap, and
+   havlak.
+2. **Descriptor-heavy array stores.** A numeric store that misses the dense
+   gate can allocate a full descriptor Map merely to ask whether an own
+   property exists. Add a lightweight own-property probe, then evaluate a
+   hole-aware dense first-write path for plain arrays whose canonical
+   prototypes are known accessor-clean. This targets navier’s compound-store
+   path and removes store-generated garbage in hashmap.
+3. **Expensive prototype hops.** `js_get_prototype` currently performs several
+   shape/map searches for every class-instance method lookup. Evaluate a
+   dedicated prototype field or TypeMap-cached prototype pointer with correct
+   mutation/invalidation behavior. It compounds with R2b on cd and havlak; do
+   not use it as a substitute for shared plain-object roots.
+4. **Function-object births.** Re-evaluated arrows and function expressions
+   allocate and initialize a full `JsFunction` on each birth. Profile and
+   compare an arrow-sized/deferred-field representation, precomputed call-lane
+   state, or a separately justified allocation policy; identity semantics rule
+   out unproven per-site reuse. This is a major cost in havlak and cd.
+
+The Result15 ownership-bitmap fix is already landed, so it is not a fifth
+candidate here: after that fix, hashmap marking is no longer a meaningful GC
+ceiling. The detailed attribution and acceptance ceilings live in
+`Lambda_Impl_Tune8_Result15_Bottlenecks.md`.
 
 ### R3 — Share object-literal shapes per call site — **CLOSED: tried, measured, reverted (2026-07-26)**
 
@@ -238,34 +251,37 @@ their type tag on shared shapes.
 literal sharing becomes worth re-measuring — but on current evidence it is a
 regression.
 
-### R4 — Reduce dynamic-call overhead
+### R4 — Reduce dynamic-call overhead — **PARTIALLY IMPLEMENTED**
 
-Treat these as independently measurable changes:
+Tune7 reduced the existing dispatcher cost but did not remove it for the broad
+plain-call population. Its successor, `Lambda_Impl_Tune_JS_Dynamic_Call.md`,
+landed P0–P2: entry selection at function finalization and specialized
+ordinary/home-class entries for arities 0–4. The plain 0/2-argument call-cost
+probes improved about 2.07–2.09x; Result15 preserved the expected wins on
+call-dominated rows.
 
-1. Allow native-specialized functions whose parameters are numeric but whose
-   return is boxed or void; keep boxing at the wrapper boundary.
-2. Add a verified fast lane for plain user functions that are not
-   generator/async/bound/proxy/constructor-special.
-3. Replace save/restore of global `this`/`new.target` state with explicit ABI
-   arguments where the call shape permits it.
-4. Emit the smallest hot helpers as MIR functions only when measurements show
-   that native-import call overhead is material.
+Remaining slices are deliberately independent:
 
-Each slice must retain the generic `js_call_function` path for unsupported or
-dynamic cases.
+1. **P3 / DC5 stage 2:** remove the two-slot callee/receiver RootFrame only
+   where safepoint publication proves it safe, and add entry-kind hit counters
+   plus benchmark/Test262/Node coverage tables.
+2. **P4 / DC6:** test epoch-disciplined monomorphic call-target cells at
+   richards/deltablue sites after measuring the thin-entry residual.
+3. **P5 / C4.1:** allow native-specialized numeric-parameter functions with a
+   boxed or void result, keeping boxing at the wrapper boundary.
+4. Re-profile exact-arity adaptation and hidden receiver ABI work before taking
+   them; neither is justified merely by classifier eligibility.
 
-### R5 — Cheapen emitted exception polling
+Every slice keeps the generic `js_call_function` path as semantic authority
+and uses the forced-generic differential mode as its oracle.
 
-`jm_emit_pending_exception_check` still emits a call to
-`js_check_exception` followed by a branch. Remaining stages:
+### R5 — Cheapen emitted exception polling — **CLOSED**
 
-1. Inline the pending-flag load and branch.
-2. Use the existing normalized import/call effects to omit polls only after
-   helpers proven unable to throw.
-3. Consider wider poll coalescing only if the first two stages leave a
-   measured cost; exception ordering and cleanup edges remain hard barriers.
+The online-exception tracker landed the inlined/elided per-call poll work. Do
+not reopen poll coalescing unless a fresh profile identifies remaining polling
+as a material cost; exception ordering and cleanup edges remain hard barriers.
 
-### R6 — Close Lambda MIR-Direct specialization and call-path gaps
+### R6 — Close Lambda MIR-Direct specialization and call-path gaps — **PARTIALLY IMPLEMENTED**
 
 The frozen C2MIR path still has two specializations absent from MIR-Direct:
 
@@ -292,6 +308,12 @@ and **L2** (`fn_member_ic` per-call-site member IC) worth 1.12–1.19x. Together
 richards.ls went 372.3 → 212.7 ms (**1.75x**). L2's stage-2 inline emission was
 deliberately not enabled — see R2 for why inlining an IC guard is not the
 remaining factor.
+
+Tune10 subsequently retained compact loop lanes, locally proven boolean-array
+narrowing, owned String buffers, static member-store key lowering, packed
+`u32` arithmetic, and a narrow fresh-map lifetime region. Those are separate
+MIR-tail wins; they do not close the R6 semantic-specialization or boxed-element
+residue below.
 
 Port any further shapes to `transpile-mir.cpp` and update
 `test/mir/lambda/sys_func_specialization.mir-check` deliberately when the
@@ -320,22 +342,24 @@ Three smaller Lambda-specific follow-ups remain:
    revive the removed heap `JitGcRootFrame` mechanism; zero-root-slot frame
    cleanup is already handled by the current frame finalization pass.
 
-### R7 — Reduce object-churn GC cost
+### R7 — Reduce object-churn GC cost — **RE-SCOPED / DEFERRED**
 
-Evidence-gated candidates for allocation-heavy object workloads:
+The Result15 investigation found and landed an O(1) bump-block ownership
+bitmap: hashmap mark time fell from seconds per collection to milliseconds.
+That root-cause fix supersedes the old assumption that generational collection
+was the immediate hashmap lever.
 
-- non-moving nursery/tenured collection with sticky mark state;
-- an old-to-young write barrier at centralized property/array/environment
-  stores;
-- lazy sweeping;
-- mark-time slot tracing through `slot_entries[]` rather than linked
-  `ShapeEntry` walks.
+Tune9 then tested its two measured allocation candidates and retained neither:
+the large-string no-zero path regressed `json_gen`, and direct typed-map
+construction improved `gcbench` only 4.7%, below its 10% gate. The remaining
+ideas—non-moving nursery/tenured collection with a centralized old-to-young
+barrier, sticky marking, lazy sweeping, and slot-array shape tracing—are
+deferred. Reopen them only when a completing workload shows at least 20%
+repeatable full-collection cost across three or more cycles and a prototype
+shows at least 10% end-to-end improvement. This work must not restore
+conservative native-stack scanning or introduce moving-GC assumptions.
 
-Start only after Result11 and R3 quantify the object churn that remains. This
-work must not restore conservative native-stack scanning or introduce moving
-GC assumptions.
-
-### R8 — Define Lambda/JS error conversion at the interop boundary
+### R8 — Define Lambda/JS error conversion at the interop boundary — **OPEN**
 
 Keep the languages' propagation mechanisms separate, but define one
 lossless boundary protocol:
@@ -354,7 +378,7 @@ it.
 
 ## 3. Parked work
 
-### R9 — Packed numeric storage for JS arrays
+### R9 — Packed numeric storage for JS arrays — **PARKED**
 
 Do not introduce a separate JS INT value type. A future dense numeric array
 representation must preserve JS Number semantics and expose binary64 values at
@@ -364,7 +388,7 @@ ownership remain owned by COW Stage 2 and OI-9.
 Revisit only after shaped-field residency and boxed-element measurements show
 the remaining value.
 
-### R10 — Destination-passing lowering
+### R10 — Destination-passing lowering — **PARKED**
 
 This remains the largest code-generation project. Keep it parked until the
 smaller call, IC, residency, and element-access changes land and a fresh MIR
@@ -376,26 +400,23 @@ volume profile shows that redundant moves are still a leading cost.
 
 Recommended order:
 
-1. COW Stage 1 and Result11.
-2. R0 LambdaJS regression diagnosis and queue re-ranking.
-3. R1 Tune-6 in its own order: C3, C1, B, profiled C2, A, C4.
-4. ~~R3, then R2~~ — **superseded 2026-07-26.** R3 was implemented and reverted
-   (net negative); R2 is KIV. **R2b replaces both** as the LJS shape item.
-5. **R2b (shared root shape for plain objects)** — the highest-value LJS item on
-   current evidence, and a prerequisite for ever re-measuring R3.
-6. R4 and R5 as separately measured call-path slices. **Now the leading
-   candidate for the next substantial factor**: Tune6 exhausted the
-   property-lookup tail (R6's L1+L2+L3 all landed; the largest was 1.54x and the
-   combined richards figure 1.75x), so what remains on those rows is call
-   overhead and boxing rather than lookup. `Lambda_Impl_Tune7.md` owns the
-   dynamic-call flow.
-7. ~~R6 in parallel with JS-only work~~ — **largely done** (L1, L2, L3 landed
-   under Tune6). Residue: typed unboxed sys-func variants, and boxed element
-   loads feeding `any` arithmetic.
-8. R7 only on post-Result11 evidence.
-9. R8 when interop work requires the boundary contract.
+1. Establish an interleaved Result15-era release baseline for the exact target
+   row before accepting any phase; do not infer a bottleneck from a geo mean.
+2. R2c numeric-key preservation and the descriptor-free/hole-aware array-store
+   path. These are the largest currently measured LJS ceilings.
+3. R2b shared plain-object roots, then R2c prototype-hop reduction, with fresh
+   shape and invalidation census after each change. R3 remains a re-measure only
+   after R2b; R2 remains KIV.
+4. R2c function-birth work only after a focused birth/allocation profile picks
+   a semantics-preserving representation or allocation strategy.
+5. R4 P3–P5, independently measured against the thin-entry baseline. R5 is
+   complete and is not a prerequisite.
+6. R6 residue: typed unboxed system functions and boxed-element arithmetic
+   first; static materialization and scalar-recursion audit only on evidence.
+7. R7 only when its explicit collection-cost trigger is met.
+8. R8 when interop work requires the boundary contract.
 
-R9 and R10 remain parked. R2 is KIV.
+R9 and R10 remain parked. R2 is KIV; R3 is closed/reverted.
 
 **Standing lesson from Tune6, worth applying to R4/R5.** Three of its five
 phases missed their gates, and in every case the gate was set from an assumed
