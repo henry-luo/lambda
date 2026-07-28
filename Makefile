@@ -473,7 +473,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
     lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
@@ -534,6 +534,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
+	@echo "  test-lambda-full - Run Lambda baseline plus the concurrency runtime gate"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
@@ -1409,7 +1410,20 @@ test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --parallel --input-results=test_output/input_baseline_results.json
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	@echo "Running Lambda typed-item ABI tests..."
+	@./test/test_lambda_typed.exe
+
+# Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
+test-lambda-full: test-lambda-baseline
+	@echo "Running Lambda concurrency runtime gate..."
+	@./test/test_lambda_concurrency_gtest.exe
+	@echo "Running extended Lambda runtime gate..."
+	@./test/test_lambda_extended_gtest.exe
+	@echo "Running Lambda DOM-node gate..."
+	@./test/test_lambda_domnode_gtest.exe
+	@echo "Running Lambda validator-input gate..."
+	@./test/test_validator_input_gtest.exe
 
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying

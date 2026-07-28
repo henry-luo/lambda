@@ -42,6 +42,13 @@ struct LambdaVisitKind {
     int operator()(lam::ItemOf<T>) { return 9; }
 };
 
+struct LambdaVisitTag {
+    template<TypeId Tag>
+    TypeId operator()(lam::ItemOf<Tag>) { return Tag; }
+
+    TypeId operator()(Item) { return LMD_TYPE_COUNT; }
+};
+
 static void set_test_shape_name(char* out, int index) {
     out[0] = 'k';
     out[1] = (char)('0' + ((index / 10) % 10));
@@ -74,6 +81,44 @@ TEST(LambdaTypedItem, TagSpecializationsAreExplicit) {
     static_assert(!HasItemTag<LMD_TYPE_COUNT>::value,
                   "sentinel tags should not be mapped");
 
+    SUCCEED();
+}
+
+TEST(LambdaTypedItem, CanonicalTypeTagsHaveTypedWitnesses) {
+#define ASSERT_TYPED_ITEM_TAG(tag) \
+    static_assert(HasItemTag<tag>::value, "canonical runtime tags need typed witnesses")
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_RAW_POINTER);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_NULL);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_UNDEFINED);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_BOOL);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_NUM_SIZED);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_INT);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_INT64);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_UINT64);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_FLOAT);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_DECIMAL);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_DTIME);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_SYMBOL);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_STRING);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_BINARY);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_PATH);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_RANGE);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ARRAY_NUM);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ARRAY);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_MAP);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_VMAP);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ELEMENT);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_OBJECT);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_TYPE);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_FUNC);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ANY);
+    ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ERROR);
+#undef ASSERT_TYPED_ITEM_TAG
+
+    // f64 syntax is canonicalized to float; a separate witness would let a
+    // retired runtime encoding leak back into typed code.
+    static_assert(!HasItemTag<LMD_TYPE_FLOAT64>::value,
+                  "legacy float64 tag must not gain a typed witness");
     SUCCEED();
 }
 
@@ -119,6 +164,54 @@ TEST(LambdaTypedItem, ReadsInlineAndTaggedScalars) {
     auto int64_match = lam::as<LMD_TYPE_INT64>(int64_item);
     ASSERT_TRUE((bool)int64_match);
     EXPECT_EQ(int64_match.value(), 42);
+}
+
+TEST(LambdaTypedItem, PointerFactoriesPreserveScalarAndContainerEncodings) {
+    Array arr = {};
+    arr.type_id = LMD_TYPE_ARRAY;
+    uint64_t wide_unsigned = UINT64_MAX;
+    double wide_float = 3.25;
+
+    auto array_witness = lam::ItemOf<LMD_TYPE_ARRAY>::from_ptr(&arr);
+    EXPECT_EQ(array_witness.raw().item, (uint64_t)(uintptr_t)&arr);
+    EXPECT_EQ(array_witness.ptr(), &arr);
+    EXPECT_EQ(lam::as<LMD_TYPE_ARRAY>(array_witness.raw()).ptr(), &arr);
+
+    auto uint_witness = lam::ItemOf<LMD_TYPE_UINT64>::from_ptr(&wide_unsigned);
+    EXPECT_EQ(get_type_id(uint_witness.raw()), LMD_TYPE_UINT64);
+    EXPECT_EQ(uint_witness.ptr(), &wide_unsigned);
+    EXPECT_EQ(lam::as<LMD_TYPE_UINT64>(uint_witness.raw()).ptr(), &wide_unsigned);
+
+    auto float_witness = lam::ItemOf<LMD_TYPE_FLOAT>::from_ptr(&wide_float);
+    EXPECT_EQ(get_type_id(float_witness.raw()), LMD_TYPE_FLOAT);
+    EXPECT_EQ(float_witness.ptr(), &wide_float);
+    EXPECT_DOUBLE_EQ(lam::as<LMD_TYPE_FLOAT>(float_witness.raw()).value(), 3.25);
+}
+
+TEST(LambdaTypedItem, FloatAndSizedNumericViewsPreserveCanonicalEncodings) {
+    double positive_zero = 0.0;
+    double negative_zero = -0.0;
+    double ordinary = 3.25;
+    Item plus_zero = lambda_float_ptr_to_item(&positive_zero);
+    Item minus_zero = lambda_float_ptr_to_item(&negative_zero);
+    Item ordinary_float = lambda_float_ptr_to_item(&ordinary);
+
+    EXPECT_EQ(plus_zero.item, ITEM_FLOAT_P0);
+    EXPECT_EQ(minus_zero.item, ITEM_FLOAT_N0);
+    EXPECT_DOUBLE_EQ(lam::as<LMD_TYPE_FLOAT>(plus_zero).value(), 0.0);
+    EXPECT_DOUBLE_EQ(lam::as<LMD_TYPE_FLOAT>(minus_zero).value(), -0.0);
+    EXPECT_DOUBLE_EQ(lam::as<LMD_TYPE_FLOAT>(ordinary_float).value(), 3.25);
+
+    Item signed_sized = {.item = i8_to_item(-7)};
+    Item unsigned_sized = {.item = u32_to_item(UINT32_MAX)};
+    auto signed_match = lam::as<LMD_TYPE_NUM_SIZED>(signed_sized);
+    auto unsigned_match = lam::as<LMD_TYPE_NUM_SIZED>(unsigned_sized);
+    ASSERT_TRUE((bool)signed_match);
+    ASSERT_TRUE((bool)unsigned_match);
+    EXPECT_EQ(signed_match.value().get_num_type(), NUM_INT8);
+    EXPECT_EQ(signed_match.value().get_num_sized_as_int64(), -7);
+    EXPECT_EQ(unsigned_match.value().get_num_type(), NUM_UINT32);
+    EXPECT_EQ(unsigned_match.value().get_u32(), UINT32_MAX);
 }
 
 TEST(LambdaTypedItem, GroupAccessorsRejectWrongStorageAtCompileTime) {
@@ -168,6 +261,25 @@ TEST(LambdaTypedItem, VisitDispatchesTypedWitnesses) {
     EXPECT_EQ(lam::visit(arr_item, LambdaVisitKind()), 1);
     EXPECT_EQ(lam::visit(map_item, LambdaVisitKind()), 2);
     EXPECT_EQ(lam::visit(bool_item, LambdaVisitKind()), 3);
+}
+
+TEST(LambdaTypedItem, VisitDispatchesCanonicalScalarAndContainerTags) {
+    int64_t signed_value = INT64_MAX;
+    uint64_t unsigned_value = UINT64_MAX;
+    double float_value = 3.25;
+    Array arr = {};
+    arr.type_id = LMD_TYPE_ARRAY;
+    Item signed_item = {.item = l2it(&signed_value)};
+    Item unsigned_item = {.item = u64_to_item(&unsigned_value)};
+    Item float_item = lambda_float_ptr_to_item(&float_value);
+    Item array_item = {.array = &arr};
+    Item undefined_item = {.item = ITEM_JS_UNDEFINED};
+
+    EXPECT_EQ(lam::visit(signed_item, LambdaVisitTag()), LMD_TYPE_INT64);
+    EXPECT_EQ(lam::visit(unsigned_item, LambdaVisitTag()), LMD_TYPE_UINT64);
+    EXPECT_EQ(lam::visit(float_item, LambdaVisitTag()), LMD_TYPE_FLOAT);
+    EXPECT_EQ(lam::visit(array_item, LambdaVisitTag()), LMD_TYPE_ARRAY);
+    EXPECT_EQ(lam::visit(undefined_item, LambdaVisitTag()), LMD_TYPE_UNDEFINED);
 }
 
 TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
