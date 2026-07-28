@@ -23,6 +23,9 @@ typedef struct Heap {
 
 void heap_init();
 void heap_init_with_pool(Pool* pool);  // reuse existing pool (batch mode)
+// Emergency recovery only: release the GC/pool generation without invoking
+// object finalizers after a signal interrupted normal runtime execution.
+void heap_discard_unfinalized();
 extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
@@ -63,6 +66,7 @@ typedef struct Runner {
 
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
+    uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
     struct hashmap* script_index;  // canonical script path -> Script*
     TSParser* parser;
     char* current_dir;

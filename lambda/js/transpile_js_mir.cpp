@@ -16,9 +16,6 @@ extern __thread EvalContext* context;
 
 // External from js_runtime.cpp
 extern "C" void js_reset_module_vars();
-extern "C" Item* js_alloc_module_vars(void);
-extern "C" Item* js_get_active_module_vars(void);
-extern "C" void js_set_active_module_vars(Item* vars);
 extern "C" void js_process_emit_exit(int code);
 
 // Global MIR error handler override for batch mode.

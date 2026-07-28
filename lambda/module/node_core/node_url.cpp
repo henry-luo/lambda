@@ -36,6 +36,21 @@ static NodeUrlSessionState* node_url_state(void) {
 #define js_blob_url_next_id (node_url_state()->blob_url_next_id)
 #define url_module_namespace (node_url_state()->module_namespace)
 
+static bool node_url_ensure_host(void) {
+    if (node_url_host && node_url_state()) return true;
+
+    Item url_namespace = ItemNull;
+    // Global URL and URLSearchParams use the node-core-owned primitive even
+    // when no `require("url")` preceded them. Activate the descriptor at this
+    // first use so direct globals cannot dereference an uninitialized host.
+    if (jube_specifier_resolve("url", &url_namespace) != JUBE_SPECIFIER_RESOLVED ||
+            !node_url_host || !node_url_state()) {
+        log_error("node-url: global URL primitive activation failed");
+        return false;
+    }
+    return true;
+}
+
 // Helper: make JS undefined value
 // Helper: extract C string from Item
 static const char* item_to_cstr(Item value, char* buf, int buf_size) {
@@ -542,6 +557,7 @@ extern "C" Item js_url_legacy_construct(void) {
 
 // new URL(input[, base]) — construct URL object
 extern "C" Item js_url_module_construct(Item input_item, Item base_item) {
+    if (!node_url_ensure_host()) return ItemNull;
     char input_buf[4096];
     const char* input = item_to_cstr(input_item, input_buf, sizeof(input_buf));
     if (!input) {
@@ -1259,6 +1275,7 @@ extern "C" Item js_usp_size(void) {
 
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
+    if (!node_url_ensure_host()) return ItemNull;
     Item obj = js_new_object();
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return obj;

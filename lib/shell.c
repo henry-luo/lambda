@@ -36,9 +36,15 @@
   #include <fcntl.h>
   #include <spawn.h>
   #include <poll.h>
+  #include <pthread.h>
   #include <limits.h>
   #include <time.h>
   extern char** environ;
+
+  // A child spawned while another thread is between pipe() and posix_spawn()
+  // inherits that thread's capture descriptors.  Serialize setup/spawn so
+  // parallel test batches cannot retain each other's stdin or output pipes.
+  static pthread_mutex_t shell_spawn_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 // for gethostname
@@ -550,14 +556,17 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     ShellCapture stdout_capture = {0};
     ShellCapture stderr_capture = {0};
 
+    pthread_mutex_lock(&shell_spawn_mutex);
     if (pipe(stdout_pipe) < 0) {
         log_error("shell: pipe() failed: %s", strerror(errno));
+        pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
     if (!merge && pipe(stderr_pipe) < 0) {
         log_error("shell: pipe() failed: %s", strerror(errno));
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
     if (opts && opts->stdin_path) {
@@ -570,6 +579,7 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
                 close(stderr_pipe[0]);
                 close(stderr_pipe[1]);
             }
+            pthread_mutex_unlock(&shell_spawn_mutex);
             return result;
         }
     }
@@ -585,6 +595,7 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
             close(stderr_pipe[1]);
         }
         if (stdin_fd >= 0) close(stdin_fd);
+        pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
 
@@ -638,6 +649,7 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
         if (stdin_fd >= 0) close(stdin_fd);
         shell_capture_discard(&stdout_capture);
         shell_capture_discard(&stderr_capture);
+        pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
 
@@ -654,6 +666,7 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     close(stdout_pipe[1]);
     if (!merge) close(stderr_pipe[1]);
     if (stdin_fd >= 0) close(stdin_fd);
+    pthread_mutex_unlock(&shell_spawn_mutex);
 
     if (spawn_err != 0) {
         log_error("shell: posix_spawnp failed for '%s': %s", program, strerror(spawn_err));

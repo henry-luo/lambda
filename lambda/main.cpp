@@ -34,6 +34,7 @@
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "runtime/transpiler.hpp"  // For Runtime struct definition
+#include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_sexpr.h"  // For --emit-sexpr command
 
@@ -272,9 +273,18 @@ struct JsCliRunArgs {
 static void* js_cli_run_on_stack_thread(void* arg) {
     JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
     lambda_stack_init();
+    EvalContext* eval_context = runtime_get_eval_context(run_args->runtime);
+    EvalContextScope context_scope(eval_context);
+    JsRuntimeState* previous_js_state = js_active_runtime_state;
+    if (eval_context && eval_context->js_state) {
+        // The large-stack CLI worker is a distinct thread, so bind its realm
+        // before native JS helpers consult context-owned runtime state.
+        js_runtime_state_bind_context(eval_context);
+    }
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
+    js_active_runtime_state = previous_js_state;
     // Runtime cleanup runs on the caller thread after this worker joins. It
     // owns the context binding required by libuv callbacks, so do not drain
     // them here after the worker's temporary binding has been restored.
@@ -320,32 +330,32 @@ static Item js_cli_transpile_with_execution_stack(
 }
 #endif
 
-static void js_test262_hot_context_create(EvalContext* batch_context) {
+static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
     context = batch_context;
     heap_init();
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create(batch_context->pool, nullptr);
     batch_context->type_list = arraylist_new(64);
+    // Batch recovery replaces the realm in place. Keep Runtime's integration
+    // fields on that same canonical EvalContext so JS helpers never retain the
+    // previous heap generation.
+    runtime->heap = batch_context->heap;
+    runtime->name_pool = batch_context->name_pool;
+    runtime->type_list = (ArrayList*)batch_context->type_list;
 }
 
-static void js_test262_hot_context_destroy(EvalContext* batch_context) {
+static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_context) {
     if (!batch_context) return;
     context = batch_context;
-    js_batch_reset();
-    if (batch_context->name_pool) {
-        name_pool_release(batch_context->name_pool);
-        batch_context->name_pool = NULL;
-    }
-    if (batch_context->heap) {
-        heap_destroy();
-        batch_context->heap = NULL;
-    }
-    if (batch_context->type_list) {
-        arraylist_free((ArrayList*)batch_context->type_list);
-        batch_context->type_list = NULL;
-    }
+    // A signal can interrupt an allocator or a GC finalizer. Reclaim the bulk
+    // heap generation without running those finalizers before replacing it.
+    heap_discard_unfinalized();
     memset(batch_context, 0, sizeof(EvalContext));
+    runtime->heap = NULL;
+    runtime->name_pool = NULL;
+    runtime->type_list = NULL;
+    js_runtime_state_bind_context(NULL);
     context = NULL;
 }
 
@@ -367,6 +377,24 @@ static void js_test262_clear_preamble(
         *saved_harness_src = NULL;
     }
     *saved_harness_len = 0;
+}
+
+static void js_test262_abandon_preamble_for_recovery(
+    JsPreambleState* preamble, bool* has_preamble) {
+    if (!preamble || !has_preamble || !*has_preamble) return;
+    // A heap recycle can follow a recovered signal. MIR_finish may re-enter
+    // allocator state interrupted by that signal, so this short-lived worker
+    // abandons the old compiled preamble and recompiles from saved source.
+    memset(preamble, 0, sizeof(JsPreambleState));
+    *has_preamble = false;
+}
+
+static bool js_test262_restore_preamble_module_state(const JsPreambleState* preamble) {
+    if (!preamble || !js_set_active_module_state_id(preamble->module_state_id)) {
+        log_error("test262 batch: retained preamble module slab is unavailable");
+        return false;
+    }
+    return true;
 }
 
 #ifdef _WIN32
@@ -3916,14 +3944,10 @@ int main(int argc, char *argv[]) {
         // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
         // Enables the reusing_context fast-path in transpile_js_to_mir,
         // avoiding heap/name_pool teardown+recreation between tests.
-        EvalContext batch_context;
-        memset(&batch_context, 0, sizeof(EvalContext));
+        EvalContext* batch_context = runtime_get_eval_context(&runtime);
+        if (!batch_context) return lambda_main_finish(1);
         if (hot_reload) {
-            context = &batch_context;
-            heap_init();
-            batch_context.pool = batch_context.heap->pool;
-            batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
-            batch_context.type_list = arraylist_new(64);
+            js_test262_hot_context_create(&runtime, batch_context);
         }
 
         // Preamble state for two-module MIR split (harness compiled once per batch)
@@ -3969,9 +3993,9 @@ int main(int argc, char *argv[]) {
                 js_test262_clear_preamble(&preamble, &has_preamble, &preamble_var_checkpoint,
                                           &saved_harness_src, &saved_harness_len);
                 if (hot_reload) {
-                    js_test262_hot_context_destroy(&batch_context);
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     jm_cleanup_deferred_mir();
-                    js_test262_hot_context_create(&batch_context);
+                    js_test262_hot_context_create(&runtime, batch_context);
                 } else {
                     js_batch_reset();
                     runtime_reset_heap(&runtime);
@@ -4039,7 +4063,11 @@ int main(int argc, char *argv[]) {
                     // test in the batch starts with a clean environment.  Without
                     // this, stale cached globals / constructor prototypes left by
                     // the preamble can cause the first test to fail.
-                    js_batch_reset_to(preamble_var_checkpoint);
+                    if (js_test262_restore_preamble_module_state(&preamble)) {
+                        js_batch_reset_to(preamble_var_checkpoint);
+                    } else {
+                        has_preamble = false;
+                    }
                 }
                 continue;
             }
@@ -4159,12 +4187,12 @@ int main(int argc, char *argv[]) {
             // depend on process.on('exit') flushing expected output.
             js_batch_execution_mode = (inline_source || inline_module_source || has_preamble) ? 1 : 0;
 
-            if (!batch_context.side_root_base &&
-                !lambda_side_stack_bind(&batch_context)) {
+            if (!batch_context->side_root_base &&
+                !lambda_side_stack_bind(batch_context)) {
                 log_error("batch side-stack: failed to initialize execution regions");
             }
             LambdaRecoveryCheckpoint batch_recovery_checkpoint =
-                lambda_recovery_checkpoint_capture(&batch_context);
+                lambda_recovery_checkpoint_capture(batch_context);
             if (result == 0) {
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
@@ -4183,8 +4211,9 @@ int main(int argc, char *argv[]) {
                     printf("\x01" "BATCH_EXIT between_test_crash signal=%d tests=%d\n",
                             crash_sig, batch_test_count);
                     fflush(stdout);
-                    js_batch_reset();
-                    js_batch_document_finish(&runtime, &batch_document);
+                    // The signal can have interrupted allocator-backed reset
+                    // work. Do not re-enter that cleanup from this recovery
+                    // frame; the one-shot worker exits below.
                     break;
                 }
                 fprintf(stderr, "Crash: script '%s' caught signal %d (recovered)\n", script_path, crash_sig);
@@ -4264,7 +4293,14 @@ int main(int argc, char *argv[]) {
             }
 #endif
             }
-            mem_free(js_source);
+            if (result < 128) {
+                mem_free(js_source);
+            } else {
+                // Signal recovery can resume while mem_alloc's lock is held.
+                // This one-shot worker leaves the interrupted source buffer to
+                // process reclamation rather than deadlocking in mem_free().
+                js_source = NULL;
+            }
             fflush(stdout);
 
             if (result == 0 &&
@@ -4311,12 +4347,11 @@ int main(int argc, char *argv[]) {
             // exist in a few batches, so actual peak is much lower.
             static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
             static const size_t RSS_RESET_LIMIT = 1024UL * 1024 * 1024; // 1 GB
-            static const size_t RSS_GROWTH_RESET_LIMIT = 128UL * 1024 * 1024; // 128 MB
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
                 // Restore context (longjmp on timeout/crash may leave it dangling)
-                context = &batch_context;
+                context = batch_context;
 
                 if (result == 124 || result >= 128) {
                     // Crash or timeout recovery: reset heap and continue, but
@@ -4329,20 +4364,17 @@ int main(int argc, char *argv[]) {
                                 batch_crash_count, MAX_CRASH_COUNT,
                                 rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
                         fflush(stdout);
-                        js_batch_reset();
-                        js_batch_document_finish(&runtime, &batch_document);
+                        // A recovered signal may have interrupted allocator or
+                        // finalizer state. The worker protocol is complete once
+                        // this record is flushed; shutdown must not re-enter it.
+#ifndef _WIN32
+                        _exit(0);
+#else
                         break;
+#endif
                     }
-                    js_batch_reset();
-                    if (batch_context.name_pool) {
-                        name_pool_release(batch_context.name_pool);
-                        batch_context.name_pool = NULL;
-                    }
-                    if (batch_context.type_list) {
-                        arraylist_free((ArrayList*)batch_context.type_list);
-                        batch_context.type_list = NULL;
-                    }
-                    heap_destroy();
+                    js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     // Clean up deferred MIR contexts from previous tests — heap objects
                     // referencing their code pages are now gone after heap_destroy().
                     jm_cleanup_deferred_mir();
@@ -4350,18 +4382,9 @@ int main(int argc, char *argv[]) {
                     // (never deferred because transpile_js_to_mir_core didn't finish).
                     extern void jm_cleanup_active_mir(void);
                     jm_cleanup_active_mir();
-                    memset(&batch_context, 0, sizeof(EvalContext));
-                    context = &batch_context;
-                    heap_init();
-                    batch_context.pool = batch_context.heap->pool;
-                    batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
-                    batch_context.type_list = arraylist_new(64);
+                    js_test262_hot_context_create(&runtime, batch_context);
 
                     // Heap destroyed — recompile preamble for subsequent tests.
-                    if (has_preamble) {
-                        preamble_state_destroy(&preamble);
-                        has_preamble = false;
-                    }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
                         uint64_t preamble_result_home = 0;
@@ -4371,8 +4394,9 @@ int main(int argc, char *argv[]) {
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
-                            // Reset runtime state after preamble recompilation
-                            js_batch_reset_to(preamble_var_checkpoint);
+                            // A fresh heap has no test-owned cache state.  Do not
+                            // re-enter reset after a signal recovery: the signal
+                            // may have interrupted allocator-backed cleanup.
                         }
                     }
                 } else if (rss_after > RSS_LIMIT) {
@@ -4383,33 +4407,15 @@ int main(int argc, char *argv[]) {
                     js_batch_reset();
                     js_batch_document_finish(&runtime, &batch_document);
                     break;
-                } else if (rss_after > RSS_RESET_LIMIT ||
-                           (rss_after > rss_before && rss_after - rss_before > RSS_GROWTH_RESET_LIMIT)) {
+                } else if (rss_after > RSS_RESET_LIMIT) {
                     // Successful but memory-heavy test. Recycle the hot heap before
                     // the next test so large temporary strings from generated
                     // Unicode/URI suites do not make later tests hit the alarm.
-                    js_batch_reset();
-                    if (batch_context.name_pool) {
-                        name_pool_release(batch_context.name_pool);
-                        batch_context.name_pool = NULL;
-                    }
-                    if (batch_context.type_list) {
-                        arraylist_free((ArrayList*)batch_context.type_list);
-                        batch_context.type_list = NULL;
-                    }
-                    heap_destroy();
+                    js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     jm_cleanup_deferred_mir();
-                    memset(&batch_context, 0, sizeof(EvalContext));
-                    context = &batch_context;
-                    heap_init();
-                    batch_context.pool = batch_context.heap->pool;
-                    batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
-                    batch_context.type_list = arraylist_new(64);
+                    js_test262_hot_context_create(&runtime, batch_context);
 
-                    if (has_preamble) {
-                        preamble_state_destroy(&preamble);
-                        has_preamble = false;
-                    }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
                         uint64_t preamble_result_home = 0;
@@ -4419,13 +4425,27 @@ int main(int argc, char *argv[]) {
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
-                            js_batch_reset_to(preamble_var_checkpoint);
+                            if (js_test262_restore_preamble_module_state(&preamble)) {
+                                js_batch_reset_to(preamble_var_checkpoint);
+                            } else {
+                                has_preamble = false;
+                            }
                         }
                     }
                 } else if (has_preamble) {
-                    js_batch_reset_to(preamble_var_checkpoint);
+                    if (js_test262_restore_preamble_module_state(&preamble)) {
+                        js_batch_reset_to(preamble_var_checkpoint);
+                    } else {
+                        has_preamble = false;
+                    }
                 } else {
-                    js_batch_reset();
+                    // Module-source and native-harness jobs have no retained
+                    // preamble to restore. Their previous heap is the realm
+                    // boundary; retaining it lets one module's TLA registry
+                    // and globals affect the next test in this hot worker.
+                    js_test262_hot_context_destroy(&runtime, batch_context);
+                    jm_cleanup_deferred_mir();
+                    js_test262_hot_context_create(&runtime, batch_context);
                 }
             } else {
                 // Normal mode: transpile_js_to_mir created/destroyed its own heap.
@@ -4460,24 +4480,26 @@ int main(int argc, char *argv[]) {
         }
 
         if (hot_reload) {
-            js_test262_hot_context_destroy(&batch_context);
-            jm_cleanup_deferred_mir();
-            if (has_preamble) {
-                preamble_state_destroy(&preamble);
-                has_preamble = false;
-            }
-            context = NULL;
-        } else {
-            // Clean up deferred MIR contexts after the JS batch state has been
-            // released. This matches the in-batch heap recycle path: heap
-            // objects may still reference JIT code pages until the batch state
-            // is gone.
-            jm_cleanup_deferred_mir();
+            // js-test-batch is a one-shot process. A test can recover through
+            // siglongjmp with an allocator lock held, so terminal destruction
+            // must not re-enter allocator-backed realm cleanup after results.
+            js_batch_execution_mode = 0;
+#ifndef _WIN32
+            _exit(0);
+#else
+            return lambda_main_finish(0);
+#endif
+        }
 
-            if (has_preamble) {
-                preamble_state_destroy(&preamble);
-                has_preamble = false;
-            }
+        // Clean up deferred MIR contexts after the JS batch state has been
+        // released. This matches the in-batch heap recycle path: heap
+        // objects may still reference JIT code pages until the batch state
+        // is gone.
+        jm_cleanup_deferred_mir();
+
+        if (has_preamble) {
+            preamble_state_destroy(&preamble);
+            has_preamble = false;
         }
         if (saved_harness_src) { mem_free(saved_harness_src); saved_harness_src = NULL; }
 

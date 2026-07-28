@@ -25,6 +25,7 @@ extern "C" JsFunction* js_alloc_gc_function_object(void) {
     if (!fn) return NULL;
     fn->type_id = LMD_TYPE_FUNC;
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    js_function_init_native_module_scope(fn);
     return fn;
 }
 
@@ -232,6 +233,7 @@ static Item js_new_function_with_context(Context* runtime, void* func_ptr,
         : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
+    js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->runtime_context = runtime;
@@ -240,7 +242,7 @@ static Item js_new_function_with_context(Context* runtime, void* func_ptr,
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
-    fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    fn->module_state_id = js_get_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -302,7 +304,7 @@ static Item js_new_method_function_with_context(Context* runtime, void* func_ptr
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
-    fn->module_vars = js_active_module_vars;
+    fn->module_state_id = js_get_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -342,7 +344,7 @@ static Item js_new_closure_with_context(Context* runtime, void* func_ptr,
         fn->env = env;
         fn->env_size = env_size;
         fn->prototype = ItemNull;
-        fn->module_vars = js_active_module_vars; // bind to creating module's vars
+        fn->module_state_id = js_get_active_module_state_id();
     }
     // A new closure is not owned by its caller until return. Root it across
     // scalar rehoming and dynamic-with capture, both of which may allocate.

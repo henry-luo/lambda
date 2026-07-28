@@ -697,6 +697,16 @@ Item js_get_module_var(int index);
 void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
     int count, int define_global_var_properties);
 void js_reset_module_vars(void);
+uint32_t js_alloc_module_state(uint32_t var_count);
+bool js_activate_module_state(uint32_t var_count);
+bool js_ensure_active_module_var_capacity(uint32_t required_var_count);
+uint32_t js_get_active_module_state_id(void);
+bool js_set_active_module_state_id(uint32_t module_state_id);
+bool js_module_state_is_available(uint32_t module_state_id);
+uint32_t js_get_batch_preamble_var_count(void);
+bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
+                                     uint32_t destination_module_state_id,
+                                     uint32_t count);
 void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
 void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);
@@ -1157,8 +1167,8 @@ void js_module_set_body_state(Item specifier, int state);
 int  js_module_assign_async_eval_order(Item specifier);
 void js_module_reset_aeo_counter(void);
 void js_module_complete_tla_body(Item specifier);
-void js_module_save_context(Item specifier, Item* module_vars);
-Item* js_module_get_saved_module_vars(Item specifier);
+void js_module_save_context(Item specifier, uint32_t module_state_id);
+uint32_t js_module_get_saved_module_state_id(Item specifier);
 
 /**
  * Create a module namespace object from an export map.

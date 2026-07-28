@@ -16596,7 +16596,7 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
                 layout = (LambdaModuleLayout*)item->addr;
             } else if (strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
                 LambdaModuleVarRef* ref = (LambdaModuleVarRef*)item->addr;
-                ref->module_id = (uint32_t)script->index;
+                ref->module_id = script->module_state_id;
                 ref->slot = slot++;
             }
         }
@@ -16606,7 +16606,7 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
             script->reference ? script->reference : "<unknown>");
         return;
     }
-    layout->module_id = (uint32_t)script->index;
+    layout->module_id = script->module_state_id;
     layout->var_count = slot;
     layout->member_ic_count = member_ic_count;
     layout->reserved = 0;

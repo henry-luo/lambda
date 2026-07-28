@@ -36,7 +36,7 @@ struct JsFunction {
     int16_t formal_length;
     String* special_ctor_name;
     JsCallEntry invoke;
-    Item* module_vars;
+    uint32_t module_state_id;
     Item home_global;
     Item home_class;
     String* source_text;
@@ -58,6 +58,13 @@ static_assert(offsetof(JsFunction, func_ptr) == 8,
               "JsFunction prefix must preserve the compiled-function ABI");
 static_assert(offsetof(JsFunction, bound_this_store) == 48,
               "JsFunction bound-this slot must preserve the shared ABI");
+
+static inline void js_function_init_native_module_scope(JsFunction* fn) {
+    if (!fn) return;
+    // Pool allocation zeroes this field, but zero is a valid module id. Native
+    // wrappers have no compiled module scope and must not switch callers to it.
+    fn->module_state_id = UINT32_MAX;
+}
 
 static inline void js_function_set_bound_this(JsFunction* fn, Item value) {
     owned_item_slot_store(fn->bound_this_store, 1, 0, value);

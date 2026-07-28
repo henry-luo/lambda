@@ -757,7 +757,10 @@ static Item js_geometry_observer_initial_sample(void) {
 }
 
 extern "C" void js_dom_observers_reset(void) {
-    if (!js_active_runtime_state) return;
+    // Batch teardown must not instantiate the 64-observer table for scripts
+    // that never used an observer; doing so made every test262 reset pay its
+    // full zeroing cost.
+    if (!js_active_runtime_state || !js_runtime_state.dom_observer_state) return;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = &observers[i];
         for (int j = 0; j < observer->target_count; j++) {

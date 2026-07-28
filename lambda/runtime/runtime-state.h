@@ -45,6 +45,10 @@ extern bool g_dry_run;
 struct LambdaModuleState;
 bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
                                  uint32_t var_count, uint32_t member_ic_count);
+bool lambda_module_state_reserve(Context* runtime, uint32_t var_count,
+                                 uint32_t member_ic_count, uint32_t* out_module_id);
+bool lambda_active_js_module_state_ensure_vars(Context* runtime,
+                                               uint32_t required_var_count);
 bool lambda_module_state_bind_static(Context* runtime, uint32_t module_id,
                                      void* consts, void* type_list);
 void* lambda_module_const_at(Context* runtime,

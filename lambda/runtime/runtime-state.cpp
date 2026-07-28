@@ -1,5 +1,6 @@
 #include "../lambda-data.hpp"
 #include "runtime-state.h"
+#include "transpiler.hpp"
 #include "heap_api.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
@@ -60,6 +61,7 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
 
     state = (LambdaModuleState*)mem_calloc(1, sizeof(LambdaModuleState), MEM_CAT_EVAL);
     if (!state) return false;
+    state->module_id = module_id;
     state->var_count = var_count;
     state->member_ic_count = member_ic_count;
     if (var_count) {
@@ -88,6 +90,58 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
         }
     }
     owner->module_states[module_id] = state;
+    return true;
+}
+
+extern "C" bool lambda_module_state_reserve(Context* runtime, uint32_t var_count,
+        uint32_t member_ic_count, uint32_t* out_module_id) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || !out_module_id) return false;
+    Runtime* runtime_owner = owner->runtime;
+    if (!runtime_owner) {
+        log_error("module-state: cannot reserve module id without owning runtime");
+        return false;
+    }
+    uint32_t module_id = runtime_owner->next_module_state_id++;
+    if (!lambda_module_state_prepare(runtime, module_id, var_count, member_ic_count)) return false;
+    *out_module_id = module_id;
+    return true;
+}
+
+extern "C" bool lambda_active_js_module_state_ensure_vars(Context* runtime,
+        uint32_t required_var_count) {
+    EvalContext* owner = (EvalContext*)runtime;
+    LambdaModuleState* state = owner ? owner->active_js_module_state : NULL;
+    if (!state || required_var_count <= state->var_count) return state != NULL;
+
+    Item* vars = (Item*)mem_calloc(required_var_count, sizeof(Item), MEM_CAT_EVAL);
+    uint64_t* payloads = (uint64_t*)mem_calloc(required_var_count,
+        sizeof(uint64_t), MEM_CAT_EVAL);
+    if (!vars || !payloads) {
+        mem_free(vars);
+        mem_free(payloads);
+        return false;
+    }
+    memcpy(vars, state->vars, state->var_count * sizeof(Item));
+    memcpy(payloads, state->var_payloads, state->var_count * sizeof(uint64_t));
+    if (!heap_register_gc_root_range_for(runtime, (uint64_t*)vars,
+            (int)required_var_count)) {
+        mem_free(vars);
+        mem_free(payloads);
+        return false;
+    }
+
+    // Direct eval shares its caller's bindings but can introduce new slots.
+    // Retire the old exact root only after the replacement root is published.
+    if (state->vars_registered) {
+        heap_unregister_gc_root_range_for(runtime, (uint64_t*)state->vars);
+    }
+    mem_free(state->vars);
+    mem_free(state->var_payloads);
+    state->vars = vars;
+    state->var_payloads = payloads;
+    state->var_count = required_var_count;
+    state->vars_registered = true;
     return true;
 }
 
@@ -165,6 +219,7 @@ extern "C" void lambda_module_state_reset(Context* runtime) {
 extern "C" void lambda_module_state_destroy(Context* runtime) {
     EvalContext* owner = (EvalContext*)runtime;
     if (!owner || !owner->module_states) return;
+    owner->active_js_module_state = NULL;
     for (uint32_t i = 0; i < owner->module_state_capacity; i++) {
         LambdaModuleState* state = owner->module_states[i];
         if (!state) continue;

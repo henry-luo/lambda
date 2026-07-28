@@ -2392,7 +2392,7 @@ JitImport jit_runtime_imports[] = {
     {"js_module_reset_aeo_counter", FPTR(js_module_reset_aeo_counter)},
     {"js_module_complete_tla_body", FPTR(js_module_complete_tla_body)},
     {"js_module_save_context", FPTR(js_module_save_context)},
-    {"js_module_get_saved_module_vars", FPTR(js_module_get_saved_module_vars)},
+    {"js_module_get_saved_module_state_id", FPTR(js_module_get_saved_module_state_id)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support

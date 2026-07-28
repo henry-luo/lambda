@@ -2367,6 +2367,10 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
 // Create a typed array from another array (copy)
 extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> source_root(roots, source);
+    Rooted<Item> result_root(roots, ItemNull);
+    source = source_root.get();
     TypeId src_type = get_type_id(source);
 
     if (js_is_typed_array(source)) {
@@ -2388,7 +2392,8 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         // current length (TypedArrayLength of the witness record), not the
         // cached src->length which may be stale.
         int src_len = js_typed_array_current_length(src);
-        Item result = js_typed_array_new(type_id, src_len);
+        result_root.set(js_typed_array_new(type_id, src_len));
+        Item result = result_root.get();
         JsTypedArray* dst = js_get_typed_array_ptr(result.map);
         bool copied = false;
         if (src->element_type == (JsTypedArrayType)type_id) {
@@ -2399,19 +2404,21 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         }
         if (!copied) {
             for (int i = 0; i < src_len; i++) {
+                source = source_root.get();
                 Item idx = (Item){.item = i2it(i)};
                 Item val = js_typed_array_get(source, idx);
-                js_typed_array_set(result, idx, val);
+                js_typed_array_set(result_root.get(), idx, val);
             }
         }
-        return result;
+        return result_root.get();
     }
 
     if (src_type == LMD_TYPE_ARRAY) {
         // Copy from regular array
         Array* arr = source.array;
         int len = (int)arr->length;
-        Item result = js_typed_array_new(type_id, len);
+        result_root.set(js_typed_array_new(type_id, len));
+        Item result = result_root.get();
         if (js_typed_array_try_raw_from_dense_number_array(result, arr, len)) return result;
         Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
         for (int i = 0; i < len; i++) values[i] = arr->items[i];
@@ -2419,10 +2426,10 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
             Item idx = (Item){.item = i2it(i)};
             Item val = values ? values[i] : ItemNull;
             if (val.item == JS_DELETED_SENTINEL_VAL) val = (Item){.item = ITEM_JS_UNDEFINED};
-            js_typed_array_set(result, idx, val);
+            js_typed_array_set(result_root.get(), idx, val);
         }
         if (values) mem_free(values);
-        return result;
+        return result_root.get();
     }
 
     // Fallback: treat as length
@@ -2432,6 +2439,16 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
 
 // Smart constructor: dispatches based on argument type
 extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset_item, Item length_item, int argc) {
+    RootFrame roots((Context*)context, 3);
+    // Constructor coercion creates names and can collect before it inspects an
+    // array argument; keep every caller-owned Item exact until the result is
+    // linked into its destination object.
+    Rooted<Item> arg_root(roots, arg);
+    Rooted<Item> byte_offset_root(roots, byte_offset_item);
+    Rooted<Item> length_root(roots, length_item);
+    arg = arg_root.get();
+    byte_offset_item = byte_offset_root.get();
+    length_item = length_root.get();
     if (argc == 0) {
         return js_typed_array_new(type_id, 0);
     }
@@ -2451,11 +2468,11 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     // Check if arg is an ArrayBuffer
     if (js_is_arraybuffer(arg)) {
         int byte_offset = 0;
-        if (argc > 1 && !js_dataview_to_index(byte_offset_item, &byte_offset)) return ItemNull;
+        if (argc > 1 && !js_dataview_to_index(byte_offset_root.get(), &byte_offset)) return ItemNull;
         int length = -1;
-        if (argc > 2 && get_type_id(length_item) != LMD_TYPE_UNDEFINED &&
-            !js_dataview_to_index(length_item, &length)) return ItemNull;
-        return js_typed_array_new_from_buffer(type_id, arg, byte_offset, length);
+        if (argc > 2 && get_type_id(length_root.get()) != LMD_TYPE_UNDEFINED &&
+            !js_dataview_to_index(length_root.get(), &length)) return ItemNull;
+        return js_typed_array_new_from_buffer(type_id, arg_root.get(), byte_offset, length);
     }
 
     // Check if arg is another TypedArray or Array
@@ -2465,7 +2482,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     }
     if (arg_type == LMD_TYPE_ARRAY) {
         Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
-        Item iter_method = js_property_get(arg, iter_key);
+        Item iter_method = js_property_get(arg_root.get(), iter_key);
         if (js_check_exception()) return ItemNull;
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL &&
@@ -2474,11 +2491,11 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             if (iter_type != LMD_TYPE_FUNC) {
                 return js_throw_type_error("@@iterator is not callable");
             }
-            Item values = js_iterable_to_array(arg);
+            Item values = js_iterable_to_array(arg_root.get());
             if (js_check_exception()) return ItemNull;
             return js_typed_array_new_from_array(type_id, values);
         }
-        return js_typed_array_new_from_array(type_id, arg);
+        return js_typed_array_new_from_array(type_id, arg_root.get());
     }
 
     if (arg_type == LMD_TYPE_MAP || arg_type == LMD_TYPE_ELEMENT || arg_type == LMD_TYPE_FUNC || js_is_generator(arg)) {
@@ -2489,7 +2506,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             return js_typed_array_new_from_array(type_id, values);
         }
         Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
-        iter_method = js_property_get(arg, iter_key);
+        iter_method = js_property_get(arg_root.get(), iter_key);
         if (js_check_exception()) return ItemNull;
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
@@ -2497,19 +2514,19 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             if (iter_type != LMD_TYPE_FUNC) {
                 return js_throw_type_error("@@iterator is not callable");
             }
-            Item values = js_iterable_to_array(arg);
+            Item values = js_iterable_to_array(arg_root.get());
             if (js_check_exception()) return ItemNull;
             return js_typed_array_new_from_array(type_id, values);
         }
 
         Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-        Item length_value = js_property_get(arg, length_key);
+        Item length_value = js_property_get(arg_root.get(), length_key);
         if (js_check_exception()) return ItemNull;
         int len = 0;
         if (!js_dataview_to_index(length_value, &len)) return ItemNull;
         Item result = js_typed_array_new(type_id, len);
         for (int i = 0; i < len; i++) {
-            Item value = js_property_get(arg, (Item){.item = i2it(i)});
+            Item value = js_property_get(arg_root.get(), (Item){.item = i2it(i)});
             if (js_check_exception()) return ItemNull;
             js_typed_array_set(result, (Item){.item = i2it(i)}, value);
             if (js_check_exception()) return ItemNull;

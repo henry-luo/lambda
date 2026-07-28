@@ -82,8 +82,9 @@ class Input;
 // One sealed MIR module is instantiated separately in every EvalContext.  The
 // generated code may retain only the module id/slot constants; the mutable
 // binding and inline-cache storage is reached through this context-owned slab.
-// The arrays never move after publication because `vars` is a precise GC root
-// range and compiled code addresses `member_ics` directly.
+// `member_ics` never moves after publication because compiled Lambda code
+// addresses it directly. JS direct eval may grow `vars`; its MIR lowering
+// reloads that pointer from the active context for every module-slot access.
 typedef struct LambdaModuleState {
     Item* vars;
     uint64_t* var_payloads;
@@ -92,6 +93,7 @@ typedef struct LambdaModuleState {
     void* type_list;
     uint32_t var_count;
     uint32_t member_ic_count;
+    uint32_t module_id;
     bool vars_registered;
 } LambdaModuleState;
 
@@ -128,6 +130,9 @@ typedef struct EvalContext : Context {
     void* template_state_store;   // context-owned view/edit state map
     void* jube_node_session;      // context-owned Jube Node service session
     JsRuntimeState* js_state;  // context-owned JS semantic state capsule
+    // Native JS ABI paths select a context-owned module slab here. Generated
+    // JS MIR receives this Context directly and can load the same selector.
+    LambdaModuleState* active_js_module_state;
     // Indexed by sealed module id.  The table and every state are created at
     // module-instantiation boundaries; generated hot paths only load this
     // pointer and use ordinary owner-thread loads/stores in the selected slab.
