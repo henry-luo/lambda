@@ -106,6 +106,8 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"box_float", 0, 0, 0, 0},
     {"unbox_int", 0, 0, 0, 0},
     {"unbox_float", 0, 0, 0, 0},
+    {"module_var_get", 0, 0, 0, 0},
+    {"module_var_set", 0, 0, 0, 0},
     {"coerce", 0, 0, 0, 0},
     {"other_runtime_call", 0, 0, 0, 0},
 };
@@ -440,17 +442,17 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
     if (!fn_name) return JS_EXEC_PROF_OTHER_RUNTIME_CALL;
     if (strcmp(fn_name, "js_property_get") == 0 ||
         strcmp(fn_name, "js_super_property_get") == 0 ||
-        strcmp(fn_name, "js_get_global_property") == 0 ||
-        strcmp(fn_name, "js_get_module_var") == 0) {
+        strcmp(fn_name, "js_get_global_property") == 0) {
         return JS_EXEC_PROF_PROPERTY_GET;
     }
+    if (strcmp(fn_name, "js_get_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_GET;
     if (strcmp(fn_name, "js_property_set") == 0 ||
         strcmp(fn_name, "js_property_set_v") == 0 ||
         strcmp(fn_name, "js_property_set_named_ic") == 0 ||
-        strcmp(fn_name, "js_super_property_set") == 0 ||
-        strcmp(fn_name, "js_set_module_var") == 0) {
+        strcmp(fn_name, "js_super_property_set") == 0) {
         return JS_EXEC_PROF_PROPERTY_SET;
     }
+    if (strcmp(fn_name, "js_set_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_SET;
     if (strcmp(fn_name, "js_property_access") == 0 ||
         strcmp(fn_name, "js_property_access_named_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
     if (strcmp(fn_name, "js_array_get_int") == 0) return JS_EXEC_PROF_ARRAY_GET_INT;

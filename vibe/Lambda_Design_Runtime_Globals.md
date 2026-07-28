@@ -817,10 +817,21 @@ context-dependent is reached through `rt` (the `Context*` each function holds af
   that use neither module variables nor ICs pay no module-state load. Variable operations then
   use baked offsets and ordinary loads/stores. Cross-module `pub` access uses the exporter's frozen `_mod_id` and
   baked slot. Slabs are context-owned, registered as root ranges against their own heap →
-  `walk_bss_gc_roots` and the reset dance are deleted. `JsFunction::module_vars` and
-  saved-module records remain fast direct pointers because those function objects/records are
-  context-owned and cannot cross contexts; cross-context transfer clones/serializes values
-  rather than sharing heap objects. Note the naive fix — a
+  `walk_bss_gc_roots` and the reset dance are deleted.
+
+  **Decision — JS module variables migrate to this common model.** JS currently has a separate
+  `JsRuntimeState::module_vars` fallback array and dynamically switches an
+  `active_module_vars` pointer; compiled JS embeds only a local slot number, while a
+  `JsFunction` captures the selected array pointer. This is a legacy parallel module-state
+  system, not an allowed direct-pointer exception. Each sealed JS compilation unit will receive
+  a stable runtime module id and its bindings will live in that context's
+  `module_states[module_id]->vars` slab. JS MIR will resolve/hoist that slab from its hidden
+  `Context*` and inline compiler-proven slot accesses. `JsFunction` and saved-module records
+  will retain the sealed module identity/activation information needed to select the same
+  context-owned slab, rather than an `Item*` into a JS-private array. Dynamic eval, nested
+  `require`, VM contexts, batch preambles, and async continuation re-entry must use the common
+  activation lifecycle. This gives Lambda and JS one module-variable owner, one GC-root range,
+  and one reset/destroy path per module instance. Note the naive fix — a
   `_mod_vars_ptr` cell holding "the" slab pointer — *violates* the contract (different value
   per context).
 - **`_mod_consts_ptr` / `_mod_type_list_ptr` — legal only after ownership proof.** The pointed-to
@@ -934,6 +945,99 @@ operations concurrently and verify both results and status isolation.
   event-loop benchmarks must show no statistically reproducible slowdown. A neutral aggregate
   cannot hide a hot-path regression; any confirmed regression blocks the phase until the
   ownership-preserving layout/codegen is improved.
+
+### 2026-07-28 — Test262 realm lifecycle tuning
+
+The matched release Test262 baseline run was reduced from **269.5s** to
+**115.5s** by making Jube realm setup and teardown genuinely demand-driven.
+Ordinary JS realms no longer attach a Jube/Node session during global or base
+`process` construction. A session is attached only when a Jube global, a Jube
+module specifier, or a Node-owned `process` method is actually used. Reset and
+detach return directly when the realm never attached a live Jube session.
+
+The post-change run completed all 42,889 discovered tests in 115.5s
+(114.8s batched: 81.8s sync + 33.0s async), with zero actual baseline
+regressions or failed tests. Two existing batch-killed TypedArray cases
+recovered on individual retry and remain classified as non-fully-passing by
+the harness.
+
+This measurement rules out the two initially suspected steady-state causes for
+this workload: the hidden `Context*` argument on generated JS calls, and the
+ordinary owner-local accesses through `runtime->js_state` or
+`runtime->module_states[module_id]`. Those accesses remain on the hot path,
+yet the regression disappeared when only cold realm setup/teardown and lazy
+Jube attachment were changed. It does not prove those accesses are free in
+every workload; they remain subject to the focused call and module/IC gates
+above.
+
+### 2026-07-28 — JS inline-MIR state access audit
+
+The current JS MIR emitter does **not** directly access `JsRuntimeState`,
+`EvalContext::js_state`, or a `module_states` entry. The generated code uses
+the hidden `Context*` only for base `Context` fields: side-root/side-number
+frame management, the template-literal allocation pool, and the shared
+double-bitcast scratch slot. Fresh release MIR dumps confirm those direct
+offset loads/stores and contain no `JsRuntimeState` field offset.
+
+JS module-variable operations are therefore not inline state accesses today:
+their generated MIR calls native `js_get_module_var` and
+`js_set_module_var`, whose TLS-backed active-module pointer is the next
+separate profiling target. This is an implementation boundary, not a claim
+that the native helpers are free.
+
+### 2026-07-28 — Test262 module-variable helper profile
+
+A count-only `release_profile` run of the same 40,261-script Test262 baseline
+recorded **54,946,636** `js_get_module_var` calls and **20,989,868**
+`js_set_module_var` calls: **75,936,504** calls total, or about **1,886 per
+script**. The emitter also recorded 469,616 generated get call sites and
+415,675 generated set call sites across the batch processes. This confirms
+that these helpers are a meaningful next optimization target, unlike a
+direct inline `JsRuntimeState` field load which current JS MIR does not emit.
+
+The counters sit in the native helper bodies, so their call totals also
+include the small number of native global-binding synchronization and
+module-variable initialization writes. The run deliberately used counts
+rather than per-call clocks, avoiding profiler timing overhead in this
+75.9-million-call path; it establishes frequency, not the helpers' inclusive
+time or a causal share of suite wall time.
+
+### Proposed tuning — inline JS module-variable operations
+
+The Test262 profile makes module-variable helpers an important integration
+point: the 40,261-script baseline executed 75,936,504 helper calls, or about
+**1,886 `js_get_module_var` / `js_set_module_var` calls per script**. The
+decision is to inline compiler-proven JS module-slot loads/stores, but the
+primary reason is ownership unification rather than shaving a helper call.
+
+`EvalContext` already owns the generic module-variable slabs as
+`module_states[module_id]->vars`. JS must use those slabs as its canonical
+binding storage. `JsRuntimeState::module_vars`, `active_module_vars`, and its
+JS-private module-variable count are transitional duplicates and should be
+retired; JS-specific runtime state may retain module metadata, but not a
+second mutable binding array.
+
+Each sealed JS compilation unit needs the same stable `module_id` and
+`LambdaModuleState` lifecycle used by Lambda MIR. At JS module instantiation,
+prepare the context-owned slab with its sealed variable count and register
+its GC roots through the common runtime API. In a generated JS function,
+resolve the current module state from the hidden `EvalContext*` once in its
+prologue, hoist `LambdaModuleState::vars`, and use baked slot offsets for
+ordinary lexical/global loads and stores. Cross-module JS bindings resolve the
+target module state by its stable id. Native and dynamic-index operations
+remain checked helper calls, but those helpers select the same
+`EvalContext`-owned slab rather than JS-private storage.
+
+No `JsRuntimeState` field needs to be migrated merely to make the generated
+MIR faster: the required variable storage already belongs under
+`EvalContext`. The only possible new context field is a small active-JS-module
+selector for native ABI paths that do not receive an explicit module state;
+it is an execution-selection aid, not another array or owner. Its update,
+save/restore, reset, nested `require`, eval, and Test262 batch-preamble
+semantics must be centralized with module activation. The migration is
+complete only when JS reset/destroy uses the common module-state lifecycle and
+there is one GC-root registration and one authoritative value for every
+module slot.
 
 ## 7. Migration phases
 
