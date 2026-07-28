@@ -1,13 +1,28 @@
 #include <gtest/gtest.h>
 
+#ifndef _WIN32
+#include <pthread.h>
+#include <time.h>
+#endif
+
 #include "../lambda/runtime/concurrency.h"
 #include "../lambda/lambda.hpp"
 #include "../lambda/runtime/lambda-error.h"
+#include "../lambda/runtime/lambda-stack.h"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lambda/core/lambda-decimal.hpp"
+#include "../lambda/core/name_pool.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lib/uv_loop.h"
+#include "../lib/url.h"
 
 extern __thread EvalContext* context;
+
+#ifndef _WIN32
+extern __thread Context* input_context;
+#endif
 
 static gc_heap_t* concurrency_test_gc;
 
@@ -359,3 +374,463 @@ TEST_F(LambdaConcurrencyRuntime, ParkedFramesAndMailboxesSurviveCollection) {
     EXPECT_EQ(message.vmap, message_value);
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, message.vmap));
 }
+
+#ifndef _WIN32
+
+// The script code and its import cone are compiled once below.  Every worker
+// receives the same sealed Script pointers, but owns its heap/module slabs/ICs.
+// This is the runtime-globals invariant: only immutable code is shared.
+typedef struct SharedModuleStressCase {
+    const char* name;
+    const char* source;
+    Script* script;
+} SharedModuleStressCase;
+
+static const char* kSharedModuleStressChartBar =
+    "import vega: lambda.package.chart.vega\n"
+    "import chart: lambda.package.chart.chart\n"
+    "let spec = vega.convert({width: 120, height: 80, data: {values: "
+    "[{category: 'A', amount: 2}, {category: 'B', amount: 5}]}, mark: "
+    "{type: 'bar'}, encoding: {x: {field: 'category', type: 'nominal'}, "
+    "y: {field: 'amount', type: 'quantitative'}}})\n"
+    "len(format(chart.render_spec(spec), 'xml'))\n";
+
+static const char* kSharedModuleStressChartLine =
+    "import vega: lambda.package.chart.vega\n"
+    "import chart: lambda.package.chart.chart\n"
+    "let spec = vega.convert({width: 120, height: 80, data: {values: "
+    "[{x: 0, y: 3}, {x: 1, y: 7}, {x: 2, y: 4}]}, mark: {type: 'line'}, "
+    "encoding: {x: {field: 'x', type: 'quantitative'}, y: {field: 'y', "
+    "type: 'quantitative'}}})\n"
+    "len(format(chart.render_spec(spec), 'xml'))\n";
+
+static const char* kSharedModuleStressPdfPageCount =
+    "import pdf: lambda.package.pdf.pdf\n"
+    "let doc^err = input('test/input/test.pdf', 'pdf')\n"
+    "pdf.pdf_page_count(doc)\n";
+
+static const char* kSharedModuleStressPdfContent =
+    "import resolve: lambda.package.pdf.resolve\n"
+    "let doc^err = input('test/input/test.pdf', 'pdf')\n"
+    "let page = resolve.page_at(doc, 0)\n"
+    "len(resolve.page_content_bytes(doc, page))\n";
+
+static SharedModuleStressCase shared_module_stress_cases[] = {
+    {"chart-bar", kSharedModuleStressChartBar, NULL},
+    {"chart-line", kSharedModuleStressChartLine, NULL},
+    {"pdf-page-count", kSharedModuleStressPdfPageCount, NULL},
+    {"pdf-content", kSharedModuleStressPdfContent, NULL},
+};
+static const int shared_module_stress_case_count =
+    (int)(sizeof(shared_module_stress_cases) / sizeof(shared_module_stress_cases[0]));
+static Runtime shared_module_stress_runtime = {};
+
+static uint64_t shared_module_stress_now_ms(void) {
+    struct timespec ts = {};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+typedef struct SharedModuleStressGate {
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    int setup_turn;
+    int ready_count;
+    bool release_workers;
+} SharedModuleStressGate;
+
+typedef enum SharedModuleStressMode {
+    SHARED_MODULE_STRESS_COLD_INSTANTIATE,
+    SHARED_MODULE_STRESS_HOT_LOOP,
+    SHARED_MODULE_STRESS_WARM_ONLY,
+} SharedModuleStressMode;
+
+typedef struct SharedModuleStressWorker {
+    SharedModuleStressCase* cases;
+    int case_count;
+    int worker_id;
+    SharedModuleStressGate* gate;
+    SharedModuleStressMode mode;
+    EvalContext eval;
+    ArrayList* import_cone;
+    ArrayList* visited_scripts;
+    uint64_t evaluations;
+    uint64_t started_ms;
+    uint64_t stopped_ms;
+    uintptr_t module_state_address;
+    uintptr_t module_member_ics_address;
+    TypeId failed_result_type;
+    int failed_error_code;
+    bool module_uses_shared_consts;
+    const char* failure;
+} SharedModuleStressWorker;
+
+extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx,
+                                               void* consts, void* type_list);
+
+static bool shared_module_stress_select_case(SharedModuleStressWorker* worker,
+                                             SharedModuleStressCase* test_case) {
+    if (!test_case || !test_case->script || !test_case->script->main_func ||
+            !test_case->script->const_list) {
+        return false;
+    }
+    worker->eval.consts = (void**)test_case->script->const_list->data;
+    worker->eval.type_list = test_case->script->type_list;
+    worker->eval.current_file = test_case->script->reference;
+    return true;
+}
+
+static bool shared_module_stress_is_integral_result(Item result) {
+    switch (get_type_id(result)) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool shared_module_stress_execute_case(SharedModuleStressWorker* worker,
+                                              SharedModuleStressCase* test_case,
+                                              int64_t* result_value) {
+    if (!shared_module_stress_select_case(worker, test_case)) return false;
+    worker->eval.result = ItemNull;
+    Item result = test_case->script->main_func((Context*)&worker->eval);
+    worker->eval.result = result;
+    if (worker->eval.heap) worker->eval.heap->result_root = result.item;
+    if (!shared_module_stress_is_integral_result(result) || worker->eval.last_error != NULL) {
+        worker->failed_result_type = get_type_id(result);
+        worker->failed_error_code = worker->eval.last_error ?
+            worker->eval.last_error->code : 0;
+        return false;
+    }
+    if (result_value) *result_value = 0;
+    return true;
+}
+
+static bool shared_module_stress_collect_import_cone(SharedModuleStressWorker* worker,
+                                                     Script* script, bool include_script) {
+    if (!script || !script->main_func || !worker->import_cone ||
+            !worker->visited_scripts) return false;
+    for (int i = 0; i < worker->visited_scripts->length; i++) {
+        if ((Script*)worker->visited_scripts->data[i] == script) return true;
+    }
+    // Mark before descending so circular imports match the runner's graph
+    // walk rather than recursively re-entering the same sealed module.
+    if (!arraylist_append(worker->visited_scripts, script)) return false;
+
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            Script* dependency = (Script*)script->direct_imports->data[i];
+            if (!shared_module_stress_collect_import_cone(worker, dependency, true)) return false;
+        }
+    }
+    return !include_script || arraylist_append(worker->import_cone, script) != 0;
+}
+
+static void shared_module_stress_record_module_state(SharedModuleStressWorker* worker,
+                                                     SharedModuleStressCase* test_case) {
+    for (uint32_t i = 0; i < worker->eval.module_state_capacity; i++) {
+        LambdaModuleState* state = worker->eval.module_states[i];
+        if (!state || state->consts != test_case->script->const_list->data) continue;
+        worker->module_state_address = (uintptr_t)state;
+        worker->module_member_ics_address = (uintptr_t)state->member_ics;
+        worker->module_uses_shared_consts = true;
+        return;
+    }
+}
+
+static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
+    memset(&worker->eval, 0, sizeof(worker->eval));
+    EvalContextScope scope(&worker->eval);
+    input_context = (Context*)&worker->eval;
+    lambda_stack_init();
+    worker->eval.stack_limit = _lambda_stack_limit;
+    if (!lambda_side_stack_bind(&worker->eval)) return false;
+    worker->eval.pool = worker->cases[0].script->pool;
+    worker->eval.name_pool = name_pool_create(worker->eval.pool, NULL);
+    heap_init();
+    if (!worker->eval.heap) return false;
+    worker->eval.pool = worker->eval.heap->pool;
+    worker->eval.type_info = type_info;
+    // PDF input resolves relative paths through cwd; a hand-built EvalContext
+    // must establish the same context-owned URL as runner_setup_context().
+    worker->eval.cwd = get_current_dir();
+    worker->eval.decimal_ctx = decimal_fixed_context();
+    worker->eval.context_alloc = heap_alloc;
+    worker->eval.scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
+    worker->import_cone = arraylist_new(worker->case_count * 4);
+    worker->visited_scripts = arraylist_new(worker->case_count * 4);
+    if (!worker->eval.name_pool || !worker->eval.cwd || !worker->eval.scheduler ||
+            !worker->import_cone || !worker->visited_scripts) {
+        worker->failure = "context resource initialization";
+        return false;
+    }
+
+    // Match the normal runner: initialize package imports, but leave each
+    // selected test script for the evaluation phase below.
+    for (int i = 0; i < worker->case_count; i++) {
+        if (!shared_module_stress_collect_import_cone(worker, worker->cases[i].script, false)) {
+            worker->failure = worker->cases[i].name;
+            return false;
+        }
+    }
+    for (int i = 0; i < worker->import_cone->length; i++) {
+        Script* script = (Script*)worker->import_cone->data[i];
+        if (script->jit_context && !prepare_context_module_state((Context*)&worker->eval,
+                (void*)script->jit_context,
+                script->const_list ? script->const_list->data : NULL, script->type_list)) {
+            worker->failure = script->reference;
+            return false;
+        }
+    }
+    for (int i = 0; i < worker->case_count; i++) {
+        Script* script = worker->cases[i].script;
+        if (!script || !script->jit_context || !prepare_context_module_state(
+                (Context*)&worker->eval, (void*)script->jit_context,
+                script->const_list ? script->const_list->data : NULL, script->type_list)) {
+            worker->failure = worker->cases[i].name;
+            return false;
+        }
+    }
+    for (int i = 0; i < worker->import_cone->length; i++) {
+        Script* script = (Script*)worker->import_cone->data[i];
+        worker->eval.consts = script->const_list ? (void**)script->const_list->data : NULL;
+        worker->eval.type_list = script->type_list;
+        worker->eval.current_file = script->reference;
+        worker->eval.result = script->main_func((Context*)&worker->eval);
+        if (worker->eval.heap) worker->eval.heap->result_root = worker->eval.result.item;
+    }
+    for (int i = 0; i < worker->case_count; i++) {
+        if (!shared_module_stress_execute_case(worker, &worker->cases[i], NULL)) {
+            worker->failure = worker->cases[i].name;
+            return false;
+        }
+        if (i == 0) shared_module_stress_record_module_state(worker, &worker->cases[i]);
+    }
+    return true;
+}
+
+static void shared_module_stress_destroy_worker(SharedModuleStressWorker* worker) {
+    EvalContextScope scope(&worker->eval);
+    input_context = (Context*)&worker->eval;
+    if (worker->eval.scheduler) {
+        lambda_scheduler_destroy(worker->eval.scheduler);
+        worker->eval.scheduler = NULL;
+    }
+    lambda_module_state_destroy((Context*)&worker->eval);
+    if (worker->import_cone) {
+        arraylist_free(worker->import_cone);
+        worker->import_cone = NULL;
+    }
+    if (worker->visited_scripts) {
+        arraylist_free(worker->visited_scripts);
+        worker->visited_scripts = NULL;
+    }
+    if (worker->eval.name_pool) {
+        name_pool_release(worker->eval.name_pool);
+        worker->eval.name_pool = NULL;
+    }
+    if (worker->eval.heap) heap_destroy();
+    if (worker->eval.cwd) {
+        url_destroy(worker->eval.cwd);
+        worker->eval.cwd = NULL;
+    }
+    lambda_stack_cleanup();
+    input_context = NULL;
+}
+
+static void* shared_module_stress_worker_main(void* arg) {
+    SharedModuleStressWorker* worker = (SharedModuleStressWorker*)arg;
+    SharedModuleStressGate* gate = worker->gate;
+    // Generated code and runtime helpers resolve allocation/context state
+    // through TLS for the entire evaluation, not only during setup.
+    EvalContextScope worker_scope(&worker->eval);
+    input_context = (Context*)&worker->eval;
+    worker->started_ms = shared_module_stress_now_ms();
+    // The worker's budget starts at pthread entry.  Context construction is
+    // deliberately included: the test must not hide setup cost behind a
+    // separate, longer process-wide timing window.
+    uint64_t deadline = worker->started_ms + 20000u;
+
+    // Construction touches cold process/runtime setup; serialize it so the
+    // following concurrent phase isolates shared-module execution correctness.
+    pthread_mutex_lock(&gate->mutex);
+    while (gate->setup_turn != worker->worker_id) {
+        pthread_cond_wait(&gate->condition, &gate->mutex);
+    }
+    bool initialized = shared_module_stress_init_worker(worker);
+    gate->setup_turn++;
+    gate->ready_count++;
+    pthread_cond_broadcast(&gate->condition);
+    while (!gate->release_workers) {
+        pthread_cond_wait(&gate->condition, &gate->mutex);
+    }
+    pthread_mutex_unlock(&gate->mutex);
+
+    if (initialized) {
+        uint64_t state = 0x9e3779b97f4a7c15ULL ^ (uint64_t)(worker->worker_id + 1);
+        while (worker->mode == SHARED_MODULE_STRESS_HOT_LOOP &&
+                shared_module_stress_now_ms() < deadline) {
+            state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+            SharedModuleStressCase* test_case =
+                &worker->cases[(int)((state >> 32) % (uint64_t)worker->case_count)];
+            if (!shared_module_stress_execute_case(worker, test_case, NULL)) {
+                worker->failure = test_case->name;
+                break;
+            }
+            worker->evaluations++;
+        }
+        if (worker->mode == SHARED_MODULE_STRESS_COLD_INSTANTIATE) {
+            for (int i = 0; i < worker->case_count; i++) {
+                if (!shared_module_stress_execute_case(worker, &worker->cases[i], NULL)) {
+                    worker->failure = worker->cases[i].name;
+                    break;
+                }
+                if (i == 0) shared_module_stress_record_module_state(worker,
+                    &worker->cases[i]);
+                worker->evaluations++;
+            }
+        }
+    } else {
+        if (!worker->failure) worker->failure = "context initialization";
+    }
+    shared_module_stress_destroy_worker(worker);
+    worker->stopped_ms = shared_module_stress_now_ms();
+    return NULL;
+}
+
+class RuntimeGlobalsConcurrency : public ::testing::Test {
+protected:
+    static void SetUpTestSuite() {
+        runtime_init(&shared_module_stress_runtime);
+        shared_module_stress_runtime.use_mir_direct = true;
+
+        // Cache the shared package code before worker contexts exist.  Calling
+        // load_script from a worker would test per-thread compilation instead
+        // of shared immutable module execution.
+        Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
+        "lambda/package/chart/chart.ls", NULL, true);
+        Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
+        "lambda/package/pdf/pdf.ls", NULL, true);
+        ASSERT_NE(chart_package, nullptr);
+        ASSERT_NE(pdf_package, nullptr);
+        for (int i = 0; i < shared_module_stress_case_count; i++) {
+            shared_module_stress_cases[i].script = load_script_mir_direct(
+                &shared_module_stress_runtime, shared_module_stress_cases[i].name,
+                shared_module_stress_cases[i].source, false);
+            ASSERT_NE(shared_module_stress_cases[i].script, nullptr)
+                << shared_module_stress_cases[i].name;
+            ASSERT_NE(shared_module_stress_cases[i].script->main_func, nullptr)
+                << shared_module_stress_cases[i].name;
+        }
+    }
+
+    static void TearDownTestSuite() {
+        runtime_cleanup(&shared_module_stress_runtime);
+        memset(&shared_module_stress_runtime, 0, sizeof(shared_module_stress_runtime));
+    }
+};
+
+static bool shared_module_stress_run_workers(SharedModuleStressWorker* workers,
+                                             int worker_count) {
+    SharedModuleStressGate gate = {};
+    if (pthread_mutex_init(&gate.mutex, NULL) != 0) return false;
+    if (pthread_cond_init(&gate.condition, NULL) != 0) {
+        pthread_mutex_destroy(&gate.mutex);
+        return false;
+    }
+    pthread_t threads[4] = {};
+    if (worker_count > (int)(sizeof(threads) / sizeof(threads[0]))) return false;
+    pthread_attr_t attributes = {};
+    if (pthread_attr_init(&attributes) != 0) return false;
+    // Chart/PDF MIR entrypoints have deep native frames; the platform default
+    // worker stack is too small and faults in chkstk before Lambda runs.
+    if (pthread_attr_setstacksize(&attributes, 8u * 1024u * 1024u) != 0) {
+        pthread_attr_destroy(&attributes);
+        return false;
+    }
+
+    for (int i = 0; i < worker_count; i++) {
+        workers[i].cases = shared_module_stress_cases;
+        workers[i].case_count = shared_module_stress_case_count;
+        workers[i].worker_id = i;
+        workers[i].gate = &gate;
+        if (pthread_create(&threads[i], &attributes, shared_module_stress_worker_main,
+                &workers[i]) != 0) {
+            pthread_attr_destroy(&attributes);
+            return false;
+        }
+    }
+    pthread_attr_destroy(&attributes);
+
+    pthread_mutex_lock(&gate.mutex);
+    while (gate.ready_count != worker_count) {
+        pthread_cond_wait(&gate.condition, &gate.mutex);
+    }
+    gate.release_workers = true;
+    pthread_cond_broadcast(&gate.condition);
+    pthread_mutex_unlock(&gate.mutex);
+
+    for (int i = 0; i < worker_count; i++) {
+        if (pthread_join(threads[i], NULL) != 0) return false;
+    }
+
+    pthread_cond_destroy(&gate.condition);
+    pthread_mutex_destroy(&gate.mutex);
+    return true;
+}
+
+TEST_F(RuntimeGlobalsConcurrency, SharedChartAndPdfModulesStayStableAcrossEvalThreads) {
+    constexpr int worker_count = 4;
+    SharedModuleStressWorker workers[worker_count] = {};
+    for (int i = 0; i < worker_count; i++) {
+        workers[i].mode = SHARED_MODULE_STRESS_HOT_LOOP;
+    }
+
+    ASSERT_TRUE(shared_module_stress_run_workers(workers, worker_count));
+    for (int i = 0; i < worker_count; i++) {
+        EXPECT_STREQ(workers[i].failure, nullptr) << "worker " << i
+            << " result_type=" << workers[i].failed_result_type
+            << " error=" << workers[i].failed_error_code;
+        EXPECT_GT(workers[i].evaluations, 0u) << "worker " << i;
+        EXPECT_GE(workers[i].stopped_ms - workers[i].started_ms, 20000u)
+            << "worker " << i << " must run for its own full 20-second budget";
+    }
+}
+
+TEST_F(RuntimeGlobalsConcurrency, ModuleStateSlabsArePrivateToEachEvalContext) {
+    constexpr int worker_count = 4;
+    SharedModuleStressWorker workers[worker_count] = {};
+    for (int i = 0; i < worker_count; i++) {
+        workers[i].mode = SHARED_MODULE_STRESS_WARM_ONLY;
+    }
+
+    ASSERT_TRUE(shared_module_stress_run_workers(workers, worker_count));
+    for (int i = 0; i < worker_count; i++) {
+        EXPECT_STREQ(workers[i].failure, nullptr) << "worker " << i
+            << " result_type=" << workers[i].failed_result_type
+            << " error=" << workers[i].failed_error_code;
+        EXPECT_TRUE(workers[i].module_uses_shared_consts) << "worker " << i;
+        EXPECT_NE(workers[i].module_state_address, 0u) << "worker " << i;
+    }
+    for (int i = 0; i < worker_count; i++) {
+        for (int j = i + 1; j < worker_count; j++) {
+            EXPECT_NE(workers[i].module_state_address, workers[j].module_state_address);
+            if (workers[i].module_member_ics_address &&
+                    workers[j].module_member_ics_address) {
+                EXPECT_NE(workers[i].module_member_ics_address,
+                    workers[j].module_member_ics_address);
+            }
+        }
+    }
+}
+
+#else
+
+TEST(RuntimeGlobalsConcurrency, SharedChartAndPdfModulesStayStableAcrossEvalThreads) {
+    GTEST_SKIP() << "the native concurrency harness requires pthread support";
+}
+
+#endif
