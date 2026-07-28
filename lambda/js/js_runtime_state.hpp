@@ -528,6 +528,12 @@ struct JsRuntimeNamespaceState {
     JsRootRange roots = {};
 };
 
+struct JsVmRuntimeState {
+    Item namespace_object = {};
+    uint64_t namespace_epoch = 0;
+    int source_text_identifier_counter = 0;
+};
+
 struct JsTest262AgentState {
     Item object = {};
     Item callbacks[JS_TEST262_AGENT_MAX] = {};
@@ -958,6 +964,10 @@ struct JsRuntimeState {
     JsGlobalBindingState global_bindings = {};
     JsConstructorCacheState constructors = {};
     JsRuntimeNamespaceState namespaces = {};
+    // VM namespaces and generated module identifiers are observable realm
+    // state. Keeping them here prevents a new document from accepting an
+    // equal epoch and reusing an Item from a retired document heap.
+    JsVmRuntimeState vm = {};
     JsTest262AgentState test262_agent = {};
     JsProcessState process = {};
     JsIteratorState iterators = {};
