@@ -7018,18 +7018,15 @@ struct EventDocumentScope {
         owner->type_list = runtime->type_list;
         owner->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
         if (!eval_context_thread_initialize(owner)) return;
-        if (owner->js_state) {
+        // Lambda templates initialize a JS support capsule for Jube helpers,
+        // but only the selected retained document JS runtime has an Input that
+        // can build global DOM constructors. Do not publish template documents
+        // as JS realms merely because their support capsule exists.
+        bool has_document_js_runtime = runtime == doc->js.runtime && doc->js.mir_ctx;
+        if (has_document_js_runtime) {
             if (!js_runtime_state_thread_initialize(owner)) return;
             js_dom_set_ui_context(uicon);
             js_dom_set_document(doc);
-        } else {
-            // Lambda template documents have their own runtime but do not own
-            // JS intrinsics; publishing them as a JS document would allocate
-            // constructors through a null JS input owner.
-            if (js_active_runtime_state) {
-                log_error("event-document: Lambda owner has foreign JS state");
-                return;
-            }
         }
         active = true;
     }
