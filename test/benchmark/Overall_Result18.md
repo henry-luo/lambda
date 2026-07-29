@@ -3,8 +3,10 @@
 - **Date:** 2026-07-29
 - **Platform:** Darwin arm64
 - **Lambda commit:** `e406aa9b87ef26ea179f8933c650c76a9b0f8742`
-- **Lambda build:** clean release build (`make release`)
+- **Lambda build:** archived release binary `test/benchmark/exe/lambda-v18-e406aa9b87` (20,006,136 bytes)
 - **Instrumentation check:** passed
+- **Test262 baseline:** 40,261 / 40,261 passed in 122.20s (harness time; post-snapshot archived-binary verification)
+- **Test262 phases:** prep 0.0s; batch 122.1s (batched 121.6s: sync 86.0s, async 35.6s; non-batched 0.6s); retry 0.0s; partial 0.0s; timing 0.0s; memory 0.0s; eval 0.0s
 - **Node.js:** v22.13.0
 - **QuickJS:** 2025-09-13
 - **Methodology:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 120s per run; suites run in order `r7rs -> awfy -> beng -> kostya -> larceny -> jetstream` with a 10s idle gap between suites

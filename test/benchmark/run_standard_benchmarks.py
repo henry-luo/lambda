@@ -4,11 +4,13 @@
 import argparse
 import datetime
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 
 
 PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -22,6 +24,32 @@ PROFILE_MARKERS = [
 # Emitted by the debug banner in lambda/main.cpp; absent from release builds.
 DEBUG_BUILD_MARKER = "Running DEBUG build"
 CACHE_DIR = os.path.join("test", "benchmark", "exe")
+TEST262_BASELINE_CMD = [
+    "./test/test_js_test262_gtest.exe",
+    "--baseline-only",
+    "--batch-only",
+    "--run-async",
+    "--async-list=test/js262/test262_baseline.txt",
+    "--gtest_brief=1",
+]
+TEST262_SUMMARY_RE = re.compile(
+    r"^\[test262\] All (?P<completed_tests>\d+) tests completed in "
+    r"(?P<duration_s>[\d.]+)s \((?P<components>.*)\)$", re.MULTILINE)
+TEST262_FULLY_PASSED_RE = re.compile(r"Fully passed:\s*(?P<fully_passed>\d+)\s*/\s*(?P<baseline_tests>\d+)")
+TEST262_REGRESSIONS_RE = re.compile(r"Regressions:\s*(?P<regressions>\d+)")
+TEST262_COMPONENT_RES = {
+    "prep": re.compile(r"\bprep (?P<value>[\d.]+)s"),
+    "batch": re.compile(r"\bbatch (?P<value>[\d.]+)s \["),
+    "batched": re.compile(r"\bbatched (?P<value>[\d.]+)s: sync"),
+    "sync": re.compile(r"\bsync (?P<value>[\d.]+)s"),
+    "async": re.compile(r"\basync (?P<value>[\d.]+)s"),
+    "non_batched": re.compile(r"\bnon-batched (?P<value>[\d.]+)s"),
+    "retry": re.compile(r"\bretry (?P<value>[\d.]+)s"),
+    "partial": re.compile(r"\bpartial (?P<value>[\d.]+)s"),
+    "timing": re.compile(r"\btiming (?P<value>[\d.]+)s"),
+    "memory": re.compile(r"\bmemory (?P<value>[\d.]+)s"),
+    "eval": re.compile(r"\beval (?P<value>[\d.]+)s"),
+}
 
 
 def derive_results_output(report_output):
@@ -99,9 +127,10 @@ def cache_lambda_exe(results_output):
 
 def run_command(args, env=None, log_path=None):
     print("+ " + " ".join(args), flush=True)
+    started_at = time.monotonic()
     if not log_path:
         subprocess.run(args, cwd=PROJECT_ROOT, env=env, check=True)
-        return
+        return time.monotonic() - started_at
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     with open(log_path, "w") as log_file:
         proc = subprocess.Popen(args, cwd=PROJECT_ROOT, env=env, stdout=subprocess.PIPE,
@@ -110,8 +139,74 @@ def run_command(args, env=None, log_path=None):
             print(line, end="")
             log_file.write(line)
         rc = proc.wait()
+    elapsed_s = time.monotonic() - started_at
     if rc != 0:
-        raise subprocess.CalledProcessError(rc, args)
+        error = subprocess.CalledProcessError(rc, args)
+        error.elapsed_s = elapsed_s
+        raise error
+    return elapsed_s
+
+
+def parse_test262_baseline_report(log_path):
+    """Read the harness timing breakdown instead of conflating it with setup time."""
+    with open(log_path) as f:
+        output = f.read()
+    summary = TEST262_SUMMARY_RE.search(output)
+    passed = TEST262_FULLY_PASSED_RE.search(output)
+    regressions = TEST262_REGRESSIONS_RE.search(output)
+    if not summary or not passed or not regressions:
+        raise ValueError("missing Test262 completion, pass-count, or regression summary")
+    timing_s = {}
+    component_text = summary.group("components")
+    for name, pattern in TEST262_COMPONENT_RES.items():
+        match = pattern.search(component_text)
+        if not match:
+            raise ValueError(f"missing Test262 timing component {name!r}")
+        timing_s[name] = float(match.group("value"))
+    return {
+        "status": "passed",
+        "duration_s": float(summary.group("duration_s")),
+        "completed_tests": int(summary.group("completed_tests")),
+        "baseline_tests": int(passed.group("baseline_tests")),
+        "fully_passed": int(passed.group("fully_passed")),
+        "regressions": int(regressions.group("regressions")),
+        "timing_s": timing_s,
+    }
+
+
+def run_test262_baseline(log_dir):
+    """Gate snapshots on Test262 and time only the release-runtime test pass."""
+    prepare_log = os.path.join(log_dir, "test262_prepare.log")
+    result_log = os.path.join(log_dir, "test262_baseline.log")
+    try:
+        run_command(["make", "ensure-test262-gtest"], log_path=prepare_log)
+    except subprocess.CalledProcessError:
+        raise SystemExit(
+            "benchmark aborted: could not prepare the Test262 baseline runner; "
+            f"see {prepare_log}") from None
+    try:
+        baseline_env = os.environ.copy()
+        baseline_env.pop("JS_EXEC_PROFILE", None)
+        baseline_env.pop("JS_EXEC_PROFILE_OUT", None)
+        elapsed_s = run_command(TEST262_BASELINE_CMD, env=baseline_env, log_path=result_log)
+    except subprocess.CalledProcessError as error:
+        elapsed_s = getattr(error, "elapsed_s", 0.0)
+        raise SystemExit(
+            "benchmark aborted: Test262 baseline failed "
+            f"after {elapsed_s:.2f}s; benchmark results were not produced. "
+            f"See {result_log}") from None
+    try:
+        result = parse_test262_baseline_report(result_log)
+    except ValueError as error:
+        raise SystemExit(
+            "benchmark aborted: Test262 baseline passed but its timing summary could not be parsed; "
+            f"benchmark results were not produced. {error}. See {result_log}") from None
+    result["wall_duration_s"] = elapsed_s
+    result["command"] = " ".join(TEST262_BASELINE_CMD)
+    result["gate"] = True
+    print(f"Test262 baseline passed: {result['fully_passed']} / {result['baseline_tests']} "
+          f"in {result['duration_s']:.2f}s (harness); {elapsed_s:.2f}s wall")
+    return result
 
 
 def detect_ac_power():
@@ -277,6 +372,9 @@ def main():
         print(f"+ strings ./lambda.exe  [debug-build check, log: {os.path.join(log_dir, 'release_check.log')}]")
         if not args.skip_profile_check:
             print(f"+ strings ./lambda.exe  [profile marker check, log: {os.path.join(log_dir, 'profile_check.log')}]")
+        print(f"+ make ensure-test262-gtest  [log: {os.path.join(log_dir, 'test262_prepare.log')}]")
+        print("+ " + " ".join(TEST262_BASELINE_CMD)
+              + f"  [gate and timing log: {os.path.join(log_dir, 'test262_baseline.log')}]")
         cache_commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
                                       capture_output=True, text=True, check=True).stdout.strip()
         print(f"+ cache ./lambda.exe -> {derive_cache_path(results_output, cache_commit)}")
@@ -301,6 +399,7 @@ def main():
     if not args.skip_profile_check:
         check_profile_markers(log_path=os.path.join(log_dir, "profile_check.log"))
 
+    test262_result = run_test262_baseline(log_dir)
     cache_info = cache_lambda_exe(results_output)
 
     env = os.environ.copy()
@@ -312,6 +411,7 @@ def main():
     env["LAMBDA_BENCH_ARCHIVE"] = cache_info["path"]
     env["LAMBDA_BENCH_ARCHIVE_SIZE_BYTES"] = str(cache_info["size_bytes"])
     env["LAMBDA_BENCH_ARCHIVE_SHA256"] = cache_info["sha256"]
+    env["LAMBDA_BENCH_TEST262_RESULT"] = json.dumps(test262_result, separators=(",", ":"))
     run_command(benchmark_cmd, env=env, log_path=os.path.join(log_dir, "benchmark.log"))
 
     if report_cmd:

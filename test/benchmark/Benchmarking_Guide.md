@@ -224,16 +224,25 @@ Default behavior, in order:
   for debug configurations. This runs *even with* `--skip-build`, where a stale
   debug binary left over from a test cycle is exactly the likely mistake.
 - Checks `lambda.exe` with `strings` and rejects binaries containing profiling markers such as `JS_EXEC_PROFILE`.
-- Caches that exact release binary in `test/benchmark/exe/` before measurement. The
-  cache name includes the Result number and commit and deliberately omits `.exe`,
-  so broad test cleanup does not remove it. A pre-existing cache entry must be
-  byte-identical; otherwise the run aborts rather than attaching a report to an
-  ambiguous executable.
 - Clears `JS_EXEC_PROFILE` and `JS_EXEC_PROFILE_OUT` from the benchmark environment.
+- Ensures the Test262 baseline runner exists, then runs the complete release
+  Test262 baseline as a mandatory gate. Any failing test aborts the snapshot
+  before the benchmark matrix begins. The report records the wall time of the
+  Test262 harness itself (excluding runner-build setup) and its prep, batch,
+  sync, async, retry, partial, timing, memory, and evaluation phase breakdown
+  as a LambdaJS runtime meter.
+- Caches that exact, Test262-validated release binary in `test/benchmark/exe/`
+  before the benchmark matrix. The cache name includes the Result number and
+  commit and deliberately omits `.exe`, so broad test cleanup does not remove
+  it. A pre-existing cache entry must be byte-identical; otherwise the run
+  aborts rather than attaching a report to an ambiguous executable.
 - Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`.
 - Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
 - Starts snapshot runs from an empty result file by default. Use `--merge` only when intentionally refreshing part of an existing JSON.
-- Writes run logs under `temp/benchmark_vN/`: `power_check.log`, `build_release.log`, `release_check.log`, `profile_check.log`, `benchmark.log`, and `report.log`.
+- Writes run logs under `temp/benchmark_vN/`: `power_check.log`,
+  `build_release.log`, `release_check.log`, `profile_check.log`,
+  `test262_prepare.log`, `test262_baseline.log`, `benchmark.log`, and
+  `report.log`.
 - If `--report-output` is provided, generates the report from the JSON via `test/benchmark/gen_overall_result.py`.
 
 Use `--skip-build` only for a quick local recheck when you already know `lambda.exe` is a fresh release binary. Use `run_benchmarks.py` directly only for exploratory filters or one-off diagnosis.
@@ -254,7 +263,7 @@ already known.
 
 | Need | Use | What it adds |
 |---|---|---|
-| A new comparable ResultN report | `run_standard_benchmarks.py` | AC/release/profile gates, exact-binary cache, fresh versioned JSON, logs, and report generation |
+| A new comparable ResultN report | `run_standard_benchmarks.py` | AC/release/profile/Test262 gates, exact-binary cache, fresh versioned JSON, logs, and report generation |
 | A focused benchmark or an A/B archive replay | `run_benchmarks.py` | Suite, benchmark, engine, mode, and executable selection without rebuilding |
 | Time, memory, or MIR-vs-C measurement | `run_benchmarks.py` | The three measurement modes and their runner-specific options |
 
