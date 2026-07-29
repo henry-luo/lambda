@@ -22,12 +22,12 @@ JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIter
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 9 | 10 | 1.61x | 1.07x | 5.32x | 6.33x |
 | AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 2.12x | 1.56x | 18.7x | 4.90x |
-| BENG | 10 | 10 | 10 | 10 | 7 | 10 | 1.47x | 1.21x | 7.79x | 4.21x |
+| BENG | 10 | 10 | 10 | 10 | 7 | 10 | 1.69x | 1.36x | 7.80x | 4.22x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 5.05x | 4.03x | 16.2x | 12.0x |
 | LARCENY | 12 | 12 | 12 | 12 | 12 | 12 | 5.00x | 2.79x | 13.8x | 13.9x |
 | JetStream | 9 | 9 | 9 | 9 | 7 | 9 | 7.45x | 5.64x | 64.2x | 14.0x |
-| **Overall dedup** | **56** | **56** | **56** | **56** | **50** | **56** | **2.59x** | **1.87x** | **13.5x** | **7.37x** |
-| Overall raw | 62 | 62 | 62 | 62 | 56 | 62 | 2.99x | 2.11x | 14.7x | 7.98x |
+| **Overall dedup** | **56** | **56** | **56** | **56** | **50** | **56** | **2.65x** | **1.91x** | **13.5x** | **7.37x** |
+| Overall raw | 62 | 62 | 62 | 62 | 56 | 62 | 3.06x | 2.15x | 14.7x | 7.99x |
 
 > **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -48,7 +48,7 @@ This report supersedes the first Result17. The earlier numbers were not comparab
 
 **Two typed scripts were broken and being timed anyway.** `jetstream/splay2.ls` had dropped the retained-header borrow that `splay.ls` uses, so its tree collapsed to 1 node instead of 8000 — the old typed figure of 47.6 ms measured almost no work. `jetstream/raytrace3d2.ls` did not finish in 120 s because declared map types on locals made every triangle read a deep COW copy. Both are fixed and pass.
 
-**`beng/fasta` and `beng/revcomp` correctness — FIXED after these timings were taken, so those two rows are STALE and must be re-measured.** fasta: the JS and Python references carried a 289-character ALU instead of the canonical 287, so they diverged from the Lambda port after the first wrap; the constant is corrected and all engines now agree. Content-only, so the recorded fasta timings remain representative. revcomp: the Lambda scripts printed the complement WITHOUT reversing it, because `fn_reverse` returns text unchanged by design (strings are singular and not iterable; only `reverse(vec)` exists) — and `revcomp.txt` had been generated from that wrong output, so the row passed its own golden while computing something different from Node. Both scripts now reverse explicitly and match a independently computed reverse-complement, as does Node; the goldens were regenerated from that verified output. The recorded MIR figures of 1.155 ms / 1.178 ms predate the fix and are for strictly less work than the benchmark now does.
+**`beng/fasta` and `beng/revcomp` correctness — FIXED, and both rows re-measured on the same archived binary.** fasta: the JS and Python references carried a 289-character ALU instead of the canonical 287, so they diverged from the Lambda port after the first wrap; the constant is corrected and all engines now agree. Being content-only, its timings barely moved (MIR 7.28 -> 7.12 ms). revcomp: the Lambda scripts printed the complement WITHOUT reversing it, because `fn_reverse` returns text unchanged by design (strings are singular and not iterable; only `reverse(vec)` exists) — and `revcomp.txt` had been generated from that wrong output, so the row passed its own golden while computing something different from Node. Both scripts now reverse explicitly; all three of Lambda-untyped, Lambda-typed and Node match an independently computed reverse-complement, and the goldens were regenerated from that verified output rather than from program output. Doing the real work moved MIR from 1.155 ms to 4.596 ms and typed from 1.178 ms to 4.011 ms; the Node and LambdaJS figures were already correct and did not move.
 
 Measured while an unrelated build was running on the same machine, so absolute values carry more noise than usual; the per-row ratios are the meaningful part.
 
@@ -132,13 +132,13 @@ Measured while an unrelated build was running on the same machine, so absolute v
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | binarytrees | allocation | 10.1 | 6.66 | 37.0 | 25.5 | 4.21 | 2.40x | 1.58x | 8.78x | 6.06x |
 | fannkuch | permutation | 0.675 | 0.679 | 13.6 | 7.78 | 4.22 | 0.16x | 0.16x | 3.24x | 1.84x |
-| fasta | generation | 7.28 | 7.21 | 20.4 | 8.94 | 6.30 | 1.16x | 1.15x | 3.25x | 1.42x |
+| fasta | generation | 7.12 | 6.70 | 20.6 | 8.88 | 6.20 | 1.15x | 1.08x | 3.33x | 1.43x |
 | knucleotide | hashing | 12.4 | 12.2 | 163.2 | --- | 5.43 | 2.29x | 2.24x | 30.1x | --- |
 | mandelbrot | numeric | 137.9 | 137.4 | 66.6 | 710.4 | 15.5 | 8.90x | 8.87x | 4.30x | 45.8x |
 | nbody | numeric | 86.1 | 46.5 | 402.3 | 160.8 | 8.15 | 10.6x | 5.70x | 49.4x | 19.7x |
 | pidigits | bignum | 0.314 | 0.319 | 0.336 | 0.132 | 2.09 | 0.15x | 0.15x | 0.16x | 0.06x |
 | regexredux | regex | 1.37 | 1.39 | 16.0 | --- | 2.59 | 0.53x | 0.54x | 6.18x | --- |
-| revcomp | string | 1.16 | 1.18 | 40.6 | --- | 3.47 | 0.33x | 0.34x | 11.7x | --- |
+| revcomp | string | 4.60 | 4.01 | 39.5 | --- | 3.45 | 1.33x | 1.16x | 11.5x | --- |
 | spectralnorm | numeric | 50.0 | 19.1 | 324.1 | 69.5 | 2.68 | 18.6x | 7.12x | 121x | 25.9x |
 
 ## KOSTYA

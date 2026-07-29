@@ -36,7 +36,7 @@
           "**Workload alignment.** The JetStream JS wrappers ran a blanket x8 loop over each benchmark's inner function, discarding the file's own `runIteration()` count: the JS engines were doing 8/50 of Lambda's work on richards and splay, 8/25 on crypto_sha1, 8/20 on deltablue, and 8x too much on navier_stokes and hashmap. Separately, three AWFY untyped scripts ran a fraction of the canonical workload (richards 1 iteration vs 50, deltablue 1 vs 20, nbody 1000 steps vs 36000), which is why untyped awfy/richards previously printed 1.40x against Node and now reports honestly.",
           "**Typed coverage.** 31 benchmarks had no typed source and silently reused the untyped result (marked `*`). All 62 rows now have a real typed script; there are no `*` cells.",
           "**Two typed scripts were broken and being timed anyway.** `jetstream/splay2.ls` had dropped the retained-header borrow that `splay.ls` uses, so its tree collapsed to 1 node instead of 8000 \u2014 the old typed figure of 47.6 ms measured almost no work. `jetstream/raytrace3d2.ls` did not finish in 120 s because declared map types on locals made every triangle read a deep COW copy. Both are fixed and pass.",
-          "**`beng/fasta` and `beng/revcomp` correctness \u2014 FIXED after these timings were taken, so those two rows are STALE and must be re-measured.** fasta: the JS and Python references carried a 289-character ALU instead of the canonical 287, so they diverged from the Lambda port after the first wrap; the constant is corrected and all engines now agree. Content-only, so the recorded fasta timings remain representative. revcomp: the Lambda scripts printed the complement WITHOUT reversing it, because `fn_reverse` returns text unchanged by design (strings are singular and not iterable; only `reverse(vec)` exists) \u2014 and `revcomp.txt` had been generated from that wrong output, so the row passed its own golden while computing something different from Node. Both scripts now reverse explicitly and match a independently computed reverse-complement, as does Node; the goldens were regenerated from that verified output. The recorded MIR figures of 1.155 ms / 1.178 ms predate the fix and are for strictly less work than the benchmark now does.",
+          "**`beng/fasta` and `beng/revcomp` correctness \u2014 FIXED, and both rows re-measured on the same archived binary.** fasta: the JS and Python references carried a 289-character ALU instead of the canonical 287, so they diverged from the Lambda port after the first wrap; the constant is corrected and all engines now agree. Being content-only, its timings barely moved (MIR 7.28 -> 7.12 ms). revcomp: the Lambda scripts printed the complement WITHOUT reversing it, because `fn_reverse` returns text unchanged by design (strings are singular and not iterable; only `reverse(vec)` exists) \u2014 and `revcomp.txt` had been generated from that wrong output, so the row passed its own golden while computing something different from Node. Both scripts now reverse explicitly; all three of Lambda-untyped, Lambda-typed and Node match an independently computed reverse-complement, and the goldens were regenerated from that verified output rather than from program output. Doing the real work moved MIR from 1.155 ms to 4.596 ms and typed from 1.178 ms to 4.011 ms; the Node and LambdaJS figures were already correct and did not move.",
           "Measured while an unrelated build was running on the same machine, so absolute values carry more noise than usual; the per-row ratios are the meaningful part.",
           "**Suite cooldown.** `run_benchmarks.py` now idles 10 s between suites (`--cooldown`, 0 disables) and records `suite_cooldown_seconds`, so the methodology line above is generated from what the runner actually did. The timings in this report were taken BEFORE that change, with no gap between suites."
         ],
@@ -78,7 +78,18 @@
           }
         ]
       }
-    ]
+    ],
+    "partial_rerun": {
+      "rows": [
+        "beng/fasta",
+        "beng/revcomp"
+      ],
+      "reason": "re-measured after the fasta ALU and revcomp reverse-complement fixes",
+      "at": "2026-07-29T13:59:04",
+      "lambda_exe": "test/benchmark/exe/lambda-v17-3ca5bcefe",
+      "runs": 3,
+      "timeout_s": 120
+    }
   },
   "r7rs": {
     "fib": {
@@ -1179,7 +1190,7 @@
     },
     "fasta": {
       "category": "generation",
-      "mir": 7.283,
+      "mir": 7.115,
       "_status": {
         "mir": "ok",
         "mir_typed": "ok",
@@ -1214,10 +1225,10 @@
           }
         }
       },
-      "mir_typed": 7.213,
-      "lambdajs": 20.438375,
-      "quickjs": 8.943,
-      "nodejs": 6.295916
+      "mir_typed": 6.701,
+      "lambdajs": 20.618459,
+      "quickjs": 8.875,
+      "nodejs": 6.196292
     },
     "knucleotide": {
       "category": "hashing",
@@ -1431,7 +1442,7 @@
     },
     "revcomp": {
       "category": "string",
-      "mir": 1.155,
+      "mir": 4.596,
       "_status": {
         "mir": "ok",
         "mir_typed": "ok",
@@ -1466,10 +1477,10 @@
           }
         }
       },
-      "mir_typed": 1.178,
-      "lambdajs": 40.582292,
+      "mir_typed": 4.011,
+      "lambdajs": 39.542,
       "quickjs": null,
-      "nodejs": 3.471583
+      "nodejs": 3.448333
     },
     "spectralnorm": {
       "category": "numeric",
