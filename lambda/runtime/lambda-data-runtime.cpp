@@ -1597,7 +1597,9 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     TypeId type_id = get_type_id(key);
     switch (type_id) {
     case LMD_TYPE_COMPLEX: {
-        RootFrame roots(active_runtime, 1);
+        // Native hash helpers root through the stable evaluator TLS; retaining
+        // the removed explicit-context constructor broke release compilation.
+        RootFrame roots(1);
         Rooted<Item> rooted_key(roots, key);
         Complex* value = rooted_key.get().get_complex();
         if (!value) return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);

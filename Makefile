@@ -139,16 +139,20 @@ GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
 TS_ENUM_H = lambda/runtime/ts-enum.h
 UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
+# Use the exact project-pinned CLI directly. `npx package@version` may query
+# npm after a clean even when this dependency is installed, making release
+# builds fail offline before compilation begins.
+TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
 # Auto-generate parser and ts-enum.h when grammar.js changes
 $(TS_ENUM_H): $(GRAMMAR_JS)
 	@echo "Grammar changed, regenerating parser and ts-enum.h..."
-	@cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate
+	@cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate
 	$(UPDATE_TS_ENUM_SCRIPT)
 	@echo "Updated ts-enum.h from grammar changes"
 
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Lambda embedding dependencies
 # Auto-generate lambda-embed.h when lambda.h changes
@@ -252,32 +256,32 @@ $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@# regenerate parser.c at ABI 14 (it's gitignored) then build; output is
 	@# captured and shown only on failure so success is a single status line.
-	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="npx tree-sitter-cli@0.24.7" 2>&1 && \
-		env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="$(TREE_SITTER_CLI)" 2>&1 && \
+		env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="$(TREE_SITTER_CLI)" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 	@echo "✅ tree-sitter-javascript library built"
 
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
-	$(call ts_lib_build,bash,TS="npx tree-sitter-cli@0.24.7")
+	$(call ts_lib_build,bash,TS="$(TREE_SITTER_CLI)")
 
 # Regenerate the ignored Python parser before a direct Premake compile.
 # The ABI-14 header cannot compile a stale ABI-15 parser.c from an older CLI.
 generate-tree-sitter-python-parser:
 	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-python \
-		src/parser.c TS="$(CURDIR)/node_modules/.bin/tree-sitter" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+		src/parser.c TS="$(TREE_SITTER_CLI)" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 	@echo "Building tree-sitter-python library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="$(CURDIR)/node_modules/.bin/tree-sitter" \
+		libtree-sitter-python.a TS="$(TREE_SITTER_CLI)" \
 		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-typescript && \
 		{ [ -d node_modules/tree-sitter-javascript ] || npm install --save tree-sitter-javascript@file:../tree-sitter-javascript; } && \
-		npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+		$(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-typescript library (depends on parser generation + scanner)
 $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
@@ -285,11 +289,11 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 
 # Build tree-sitter-ruby library
 $(TREE_SITTER_RUBY_LIB):
-	$(call ts_lib_build,ruby,TS="npx tree-sitter-cli@0.24.7")
+	$(call ts_lib_build,ruby,TS="$(TREE_SITTER_CLI)")
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-latex && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex library (depends on parser generation)
 $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
@@ -297,7 +301,7 @@ $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
 
 # Generate LaTeX Math parser from grammar.js when it changes
 $(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex-math && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex-math library (depends on parser generation)
 $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)

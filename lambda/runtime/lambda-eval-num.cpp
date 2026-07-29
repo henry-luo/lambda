@@ -184,7 +184,8 @@ Item fn_complex_cos(Item item) {
 Item fn_complex_tan(Item item) {
     Item sine = fn_complex_sin(item);
     if (get_type_id(sine) == LMD_TYPE_ERROR) return sine;
-    RootFrame roots((Context*)context, 1);
+    // Native numeric helpers root through the stable evaluator TLS.
+    RootFrame roots(1);
     Rooted<Item> rooted_sine(roots, sine);
     Item cosine = fn_complex_cos(item);
     if (get_type_id(cosine) == LMD_TYPE_ERROR) return cosine;

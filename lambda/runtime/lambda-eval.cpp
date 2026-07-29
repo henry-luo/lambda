@@ -1604,7 +1604,8 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
                 isnan(value->imag) || !is_numeric_type_id(get_type_id(real_item))) {
             return BOOL_FALSE;
         }
-        RootFrame roots((Context*)context, 2);
+        // Native evaluator helpers use the TLS-only RootFrame ABI.
+        RootFrame roots(2);
         Rooted<Item> rooted_complex(roots, complex_item);
         Rooted<Item> rooted_real(roots, real_item);
         value = rooted_complex.get().get_complex();
@@ -1850,7 +1851,7 @@ static int total_complex_cmp(Item a_item, Item b_item) {
     bool a_real = !a_complex || (a && a->imag == 0.0);
     bool b_real = !b_complex || (b && b->imag == 0.0);
     if (a_real && b_real) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Item> rooted_a(roots, a_item);
         Rooted<Item> rooted_b(roots, b_item);
         a = a_complex ? rooted_a.get().get_complex() : NULL;
@@ -2640,7 +2641,7 @@ String* fn_string(Item itm) {
         return heap_strcpy(buf, len);
     }
     case LMD_TYPE_COMPLEX: {
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<Item> rooted(roots, itm);
         StrBuf* sb = strbuf_new_cap(64);
         if (!sb) return &STR_ERROR;

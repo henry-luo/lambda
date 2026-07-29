@@ -1925,13 +1925,34 @@
             "source": "lib/test_gc_heap_gtest.cpp",
             "name": "GC Heap Tests",
             "dependencies": [
-              "lambda-rt"
+              "lambda-rt",
+              "radiant"
             ],
             "libraries": [
               "gtest",
               "gtest_main",
               "rpmalloc"
             ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "binary": "test_gc_heap_gtest.exe",
             "icon": "♻️"
           },

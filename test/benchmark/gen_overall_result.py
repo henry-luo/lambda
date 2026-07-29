@@ -250,6 +250,13 @@ def write_report(args, data):
     w(f"- **Node.js:** {node_version}")
     w(f"- **QuickJS:** {qjs_version}")
     timeout_text = f", timeout {timeout_s}s per run" if timeout_s else ""
+    cooldown_s = metadata.get("suite_cooldown_seconds")
+    # reported from metadata, not hand-written: an earlier revision stated a cooldown
+    # in prose that the runner did not actually perform
+    if cooldown_s:
+        order = metadata.get("suite_order") or SUITE_ORDER
+        timeout_text += (f"; suites run in order `{" -> ".join(order)}`"
+                         f" with a {cooldown_s}s idle gap between suites")
     w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     w(f"- **Results source:** `{args.input}`")

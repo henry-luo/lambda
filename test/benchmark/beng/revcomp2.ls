@@ -41,21 +41,26 @@ pn complement(seq: string) {
 
 pn output_reverse_complement(header: string, seq: string) {
     print(header ++ "\n")
-    // complement then reverse (equivalent to reverse-complement)
     var comp: string = complement(seq)
-    // reverse() on a string returns the reversed string
-    var rev: string = reverse(comp)
-    // output in LINE_WIDTH chunks
-    var total = len(rev)
+    // fn_reverse() returns text unchanged — strings are singular and not iterable in
+    // Lambda (lambda-vector.cpp), and only reverse(vec) is defined. This file used to
+    // call reverse(comp) and print the COMPLEMENT ONLY, which is not the benchmark.
+    // The reversal is done explicitly here, one output line at a time, so the string
+    // concatenation stays bounded by LINE_WIDTH instead of the whole sequence.
+    var total = len(comp)
     var pos: int = 0
     while (pos < total) {
-        // end_pos is compared/assigned against len(rev) (int64), so it stays
-        // unannotated: `int` here is a hard type error on the reassignment
         var end_pos = pos + LINE_WIDTH
         if (end_pos > total) {
             end_pos = total
         }
-        print(slice(rev, pos, end_pos) ++ "\n")
+        var line: string = ""
+        var k = pos
+        while (k < end_pos) {
+            line = line ++ comp[total - 1 - k]
+            k = k + 1
+        }
+        print(line ++ "\n")
         pos = end_pos
     }
 }

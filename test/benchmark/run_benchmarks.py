@@ -37,6 +37,7 @@ import signal
 import subprocess
 import sys
 import time
+import time
 
 # ============================================================
 # Ensure we run from project root regardless of where script is invoked
@@ -49,6 +50,10 @@ os.chdir(PROJECT_ROOT)
 # Configuration
 # ============================================================
 DEFAULT_TIMEOUT_S = 120
+# Idle gap between suites so a long matrix does not measure a progressively hotter
+# machine. Suites are ordered r7rs -> awfy -> beng -> kostya -> larceny -> jetstream,
+# and the later ones are the heaviest, so without a gap they are the most penalised.
+DEFAULT_SUITE_COOLDOWN_S = 10
 LAMBDA_EXE = os.environ.get("LAMBDA_EXE", "./lambda.exe")
 NODE_EXE = "node"
 PYTHON_EXE = "python3"
@@ -322,7 +327,8 @@ def get_command_output(args):
     return proc.stdout.strip() or proc.stderr.strip() or None
 
 
-def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters, bench_filters):
+def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters,
+                       bench_filters, suite_cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
     quickjs_output = get_command_output([QJS_EXE, "--help"])
     # A present QuickJS executable can still emit no version banner; metadata
@@ -340,6 +346,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "engines": engines,
         "runs": num_runs,
         "timeout_s": timeout_s,
+        "suite_cooldown_seconds": suite_cooldown_s,
         "results_output": results_output,
         "fresh": fresh,
         "suite_filters": suite_filters or [],
@@ -895,8 +902,17 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
     return row
 
 
+def suite_cooldown(seconds, finished_suite):
+    """Idle between suites. No sleep before the first suite or after the last."""
+    if seconds <= 0:
+        return
+    print(f"\n  cooling down {seconds}s after suite {finished_suite.upper()}...",
+          flush=True)
+    time.sleep(seconds)
+
+
 def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path, fresh,
-                  metadata, include_typed=False):
+                  metadata, include_typed=False, cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     """Execute TIME mode: measure execution time across engines."""
     # Load existing results (merge mode)
     if os.path.exists(output_path) and not fresh:
@@ -910,6 +926,8 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path
     current_suite = None
     for b in benchmarks:
         if b["suite"] != current_suite:
+            if current_suite is not None:
+                suite_cooldown(cooldown_s, current_suite)
             current_suite = b["suite"]
             count = sum(1 for x in benchmarks if x["suite"] == current_suite)
             print(f"\n{'=' * 70}")
@@ -1504,6 +1522,9 @@ Examples:
                         help=f"Comma-separated engine(s): {','.join(ALL_ENGINES)} (default: all)")
     parser.add_argument("-t", "--timeout", type=int, default=DEFAULT_TIMEOUT_S,
                         help=f"Timeout per single run in seconds (default: {DEFAULT_TIMEOUT_S})")
+    parser.add_argument("--cooldown", type=int, default=DEFAULT_SUITE_COOLDOWN_S,
+                        help=f"Idle seconds between suites so later suites are not measured on a "
+                             f"hotter machine (default: {DEFAULT_SUITE_COOLDOWN_S}; 0 disables)")
     parser.add_argument("--typed", action="store_true",
                         help="Time typed and untyped MIR variants; in mir-vs-c also include typed R7RS variants")
     parser.add_argument("--list", action="store_true",
@@ -1536,7 +1557,8 @@ Examples:
         results_output = args.results_output or MEMORY_JSON_PATH
     else:
         results_output = args.results_output or MIR_VS_C_CSV_PATH
-    metadata = build_run_metadata(mode, [], 0, timeout_s, results_output, args.fresh, suite_filters, bench_filters)
+    metadata = build_run_metadata(mode, [], 0, timeout_s, results_output, args.fresh, suite_filters,
+                                  bench_filters, args.cooldown)
 
     # Default runs depends on mode
     if args.runs is not None:
@@ -1631,7 +1653,7 @@ Examples:
     if mode == "time":
         metadata["typed_variants"] = args.typed
         run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output,
-                      args.fresh, metadata, args.typed)
+                      args.fresh, metadata, args.typed, args.cooldown)
     elif mode == "memory":
         run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
     elif mode == "mir-vs-c":
