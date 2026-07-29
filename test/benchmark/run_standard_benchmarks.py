@@ -3,8 +3,10 @@
 
 import argparse
 import datetime
+import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -19,6 +21,7 @@ PROFILE_MARKERS = [
 ]
 # Emitted by the debug banner in lambda/main.cpp; absent from release builds.
 DEBUG_BUILD_MARKER = "Running DEBUG build"
+CACHE_DIR = os.path.join("test", "benchmark", "exe")
 
 
 def derive_results_output(report_output):
@@ -39,6 +42,59 @@ def derive_log_dir(report_output, results_output):
     match = re.search(r"(?:Overall_Result|benchmark_results_v)(\d+)", base_name)
     suffix = f"v{match.group(1)}" if match else "latest"
     return os.path.join("temp", f"benchmark_{suffix}")
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def derive_cache_path(results_output, commit):
+    """Name a snapshot archive without a .exe suffix so make clean preserves it."""
+    match = re.search(r"benchmark_results_v(\d+)\.json$", os.path.basename(results_output))
+    prefix = f"lambda-v{match.group(1)}" if match else "lambda"
+    return os.path.join(CACHE_DIR, f"{prefix}-{commit[:10]}")
+
+
+def cache_lambda_exe(results_output):
+    """Preserve the just-checked release binary and reject ambiguous cache collisions."""
+    source = os.path.join(PROJECT_ROOT, "lambda.exe")
+    if not os.path.isfile(source):
+        raise SystemExit("benchmark aborted: release binary ./lambda.exe is missing before cache")
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    if not commit:
+        raise SystemExit("benchmark aborted: unable to determine the release binary commit")
+    cache_path = os.path.join(PROJECT_ROOT, derive_cache_path(results_output, commit))
+    source_hash = sha256_file(source)
+    if os.path.exists(cache_path):
+        cache_hash = sha256_file(cache_path)
+        if cache_hash != source_hash:
+            # A result name and commit must identify one exact artifact; otherwise a later
+            # benchmark report could claim reproducibility with the wrong executable.
+            raise SystemExit(
+                "benchmark aborted: cached binary collision at "
+                f"{os.path.relpath(cache_path, PROJECT_ROOT)}; contents differ from ./lambda.exe")
+        print(f"release cache hit: {os.path.relpath(cache_path, PROJECT_ROOT)}")
+    else:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        shutil.copy2(source, cache_path)
+        if sha256_file(cache_path) != source_hash:
+            raise SystemExit(
+                "benchmark aborted: copied release binary did not match ./lambda.exe at "
+                f"{os.path.relpath(cache_path, PROJECT_ROOT)}")
+        print(f"release cached: {os.path.relpath(cache_path, PROJECT_ROOT)}")
+    return {
+        "path": os.path.relpath(cache_path, PROJECT_ROOT),
+        "size_bytes": os.path.getsize(cache_path),
+        "sha256": source_hash,
+    }
 
 
 def run_command(args, env=None, log_path=None):
@@ -221,6 +277,9 @@ def main():
         print(f"+ strings ./lambda.exe  [debug-build check, log: {os.path.join(log_dir, 'release_check.log')}]")
         if not args.skip_profile_check:
             print(f"+ strings ./lambda.exe  [profile marker check, log: {os.path.join(log_dir, 'profile_check.log')}]")
+        cache_commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT,
+                                      capture_output=True, text=True, check=True).stdout.strip()
+        print(f"+ cache ./lambda.exe -> {derive_cache_path(results_output, cache_commit)}")
         print("+ " + " ".join(benchmark_cmd) + f"  [log: {os.path.join(log_dir, 'benchmark.log')}]")
         if report_cmd:
             print("+ " + " ".join(report_cmd) + f"  [log: {os.path.join(log_dir, 'report.log')}]")
@@ -242,12 +301,17 @@ def main():
     if not args.skip_profile_check:
         check_profile_markers(log_path=os.path.join(log_dir, "profile_check.log"))
 
+    cache_info = cache_lambda_exe(results_output)
+
     env = os.environ.copy()
     env.pop("JS_EXEC_PROFILE", None)
     env.pop("JS_EXEC_PROFILE_OUT", None)
     env["LAMBDA_BENCH_PROFILE_CHECK"] = "passed" if not args.skip_profile_check else "skipped"
     env["LAMBDA_BENCH_POWER_CHECK"] = power_state
     env["LAMBDA_BENCH_LOG_DIR"] = log_dir
+    env["LAMBDA_BENCH_ARCHIVE"] = cache_info["path"]
+    env["LAMBDA_BENCH_ARCHIVE_SIZE_BYTES"] = str(cache_info["size_bytes"])
+    env["LAMBDA_BENCH_ARCHIVE_SHA256"] = cache_info["sha256"]
     run_command(benchmark_cmd, env=env, log_path=os.path.join(log_dir, "benchmark.log"))
 
     if report_cmd:

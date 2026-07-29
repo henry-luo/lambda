@@ -237,8 +237,12 @@ def write_report(args, data):
     w(f"- **Date:** {date}")
     w(f"- **Platform:** {platform.system()} {platform.machine()}")
     w(f"- **Lambda commit:** `{commit}`")
-    lambda_exe = metadata.get("lambda_exe")
-    exe_size = metadata.get("lambda_exe_size_bytes")
+    lambda_exe = metadata.get("lambda_archive") or metadata.get("lambda_exe")
+    exe_size = metadata.get("lambda_archive_size_bytes") or metadata.get("lambda_exe_size_bytes")
+    try:
+        exe_size = int(exe_size) if exe_size is not None else None
+    except (TypeError, ValueError):
+        exe_size = None
     if lambda_exe and "/exe/" in lambda_exe:
         # an archived binary from test/benchmark/exe/ — name it, so the reader knows
         # these numbers are re-measurable rather than tied to a since-changed build
