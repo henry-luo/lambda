@@ -27,7 +27,7 @@ The discriminator is `jm_get_effective_type` (the per-node inferred `TypeId`, fe
 
 Boxing and unboxing of the common scalars is emitted **inline as MIR bit-ops**, not as runtime calls, so the fast paths stay branch-light.
 
-- **Box int** — `jm_box_int_reg` (`js_mir_calls_boxing_types.cpp:356`) masks to 56 bits and ORs in `ITEM_INT_TAG`, but first range-checks against `INT56_MAX/MIN` and the symbol limit `-(JS_SYMBOL_BASE)`; out-of-range integers are promoted to a boxed float via `MIR_I2D` + `push_d` rather than truncated. `jm_box_int_const` (`:329`) is the constant-folded variant: a pure `MIR_MOV` of `ITEM_INT_TAG | (value & MASK56)`.
+- **Box int** — `jm_box_int_reg` (`js_mir_calls_boxing_types.cpp:356`) masks to 56 bits and ORs in `ITEM_INT_TAG`, but first range-checks against `INT53_MAX/MIN` and the symbol limit `-(JS_SYMBOL_BASE)`; out-of-range integers are promoted to a boxed float via `MIR_I2D` + `push_d` rather than truncated. `jm_box_int_const` (`:329`) is the constant-folded variant: a pure `MIR_MOV` of `ITEM_INT_TAG | (value & MASK56)`.
 - **Box float** — `jm_box_float` is a single `push_d` call. Inline encodings stay in the Item; only the out-of-band residue consumes one raw slot in the current number side-stack (see [JS_03](JS_03_Value_Model.md)).
 - **Box string** — `jm_box_string` (`:411`) ORs `STR_TAG` onto a non-null pointer (NULL maps to `ITEM_NULL`); `jm_box_string_literal` (`:429`) interns into the name pool at transpile time and bakes `s2it(interned)` as a raw `MIR_MOV` constant — valid because the interned `String*` outlives the transpiler.
 - **Box bool** — handled in `jm_box_native` (`:767`) by ORing `LMD_TYPE_BOOL << 56` onto the 0/1 reg.

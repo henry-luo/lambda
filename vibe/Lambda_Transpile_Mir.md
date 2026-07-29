@@ -373,7 +373,7 @@ module "lambda_script":
 - [ ] Import `_lambda_rt` as BSS and set it at function entry (analogous to `_lambda_rt = runtime;` in C)
 - [ ] Extract actual literal values from AST source text (parse `int`, `int64`, `float`, `bool`, `null` from `ts_node_start_byte`/`ts_node_end_byte`)
 - [ ] Implement constant loading: `const_s(index)` → load from `rt->consts[index]` with appropriate tagging
-- [ ] Box integers via `i2it()` call or inline INT56 packing
+- [ ] Box integers via `i2it()` call or inline INT53 packing
 - [ ] Box floats via `push_d()` + `d2it()` calls
 - [ ] Box strings/symbols/datetimes/decimals via `const_s2it(index)` patterns
 - [ ] Handle `ITEM_NULL`, `ITEM_TRUE`, `ITEM_FALSE` as known constants

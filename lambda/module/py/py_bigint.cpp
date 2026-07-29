@@ -155,7 +155,7 @@ Item py_bigint_normalize(Item x) {
     // check if integer part fits in int56
     uint32_t status = 0;
     mpd_ssize_t v = mpd_qget_ssize(d->dec_val, &status);
-    if (status == 0 && v >= (mpd_ssize_t)INT56_MIN && v <= (mpd_ssize_t)INT56_MAX) {
+    if (status == 0 && v >= (mpd_ssize_t)INT53_MIN && v <= (mpd_ssize_t)INT53_MAX) {
         return (Item){.item = i2it((int64_t)v)};
     }
     return x;

@@ -2,9 +2,48 @@
 
 **Status:** adopted and implemented (2026-07-08; revised and landed 2026-07-20) — Part 1 is the normative model; Part 2 is an informative implementation record
 **Changelog:** v2 born from the JS-interop question "any issue mapping JS number to `TYPE_FLOAT`?"; N1–N9 confirmed 2026-07-08; sized-scalar arithmetic (Go-style) added same day; division rule and literal-typing rule resolved same day; **`is`/`type()` semantics finalized same day after three iterations** (flat → hybrid → final): **uniform exact-embedding subtyping over all scalar numeric types; containers covariant where values copy, invariant at `var`-param borrows** (a brief blanket-invariance detour was reverted to the pre-existing normative ruling, ADR §9.2/C12) — supersedes both the draft lattice paragraph and the interim flat rule (history preserved in §6); doc restructured into spec form same day.
-**2026-07-20 arithmetic decision:** operand promotion is type-directed, never magnitude-directed. Sized-integer × sized-integer arithmetic remains in a Lambda-selected sized lane and then follows Go overflow behavior. A sized integer mixed with a non-sized number first enters its smallest complete non-sized domain (`i8`…`u32 → int`, `i64/u64 → integer`) and then follows the value tower. Flex-`int` result overflow deliberately remains `int → float` for practical performance, accepting correctly rounded precision loss at boundary cases.
+**2026-07-20 arithmetic decision:** operand promotion is type-directed, never magnitude-directed. Sized-integer × sized-integer arithmetic remains in a Lambda-selected sized lane and then follows Go overflow behavior. A sized integer mixed with a non-sized number first enters its smallest complete non-sized domain (`i8`…`u32 → int`, `i64/u64 → integer`) and then follows the value tower.
+
+**2026-07-29 amendment — fixed-width integer × `float` meets in `float`, not `decimal`.**
+The domain-entry rule above sends `i64`/`u64` into `integer`, and the tower then meets
+`integer` with `float` at `decimal`. That is right for a bigint and wrong for a fixed-width
+integer, so the meet is now split: **bounded integer types — `i8`…`u32`, `int`, `i64` —
+meet `float` in `float`; only the unbounded `integer` meets `float` in `decimal`.**
+`i64` still enters `integer` for exactness joins against a bigint; the exception applies only
+against `float`.
+
+**`u64` required a runtime fix to participate.** The first implementation of this amendment
+turned `18446744073709551615u64 + 0.5` into `0.5`, silently dropping the integer — caught by
+`test/lambda/sized_numeric_u64_mixed.ls`. Root cause: `runtime_integral_as_int64`
+(`lambda/runtime/lambda-eval-num.cpp`) has no `LAMBDA_NUM_U64` arm and returns 0 for it, and
+`runtime_numeric_as_double` delegated to it. Latent until now because `u64` never reached the
+float lane — it always joined at decimal. `runtime_numeric_as_double` now reads the `u64` carrier
+directly: it must not round-trip through int64, where 2⁶⁴−1 reads back as −1.
+
+Precision note: `u64`/`i64` magnitudes above 2⁵³ round when they enter the float lane, so
+`18446744073709551615u64 + 0.5` is `1.8446744073709552e19`. That is the accepted cost stated
+above, and matches binary64 exactly (verified against an independent computation).
+
+Three reasons, in order of weight:
+
+1. **Exactness is already gone.** With a binary float as an operand the result is inexact
+   whatever carrier holds it. Producing `decimal` does not recover precision the float never
+   had — it re-encodes an approximation in an exact type and overstates its accuracy.
+2. **Cost.** `float` is an inline self-tagged lane; `decimal` is a heap carrier backed by
+   libmpdec. The old rule allocated, and added GC pressure, on every mixed `i64`/`float`
+   operation in ordinary code — a tax paid by programs that never asked for exact arithmetic.
+3. **Convention.** Every mainstream language pairing a fixed-width integer with a binary float
+   promotes toward the float. A language returning an exact decimal there surprises every
+   reader of the expression.
+
+Accepted cost: an `i64` magnitude above 2⁵³ loses precision in a mixed operation. That is the
+same trade §2.1 already makes for flex-`int` overflow, and a caller who needs exactness has
+`integer` and `decimal` and can name them. Implementation: `lambda_numeric_classify` in
+`lambda/runtime/lambda-number.hpp` demotes the `DECIMAL` join back to `FLOAT` when neither
+operand was a true `integer`/`decimal`.
+ Flex-`int` result overflow deliberately remains `int → float` for practical performance, accepting correctly rounded precision loss at boundary cases.
 **Normative home:** this doc designs in the area owned by `../doc/Lambda_Formal_Semantics.md` **§4 Numerics** (§4.1 two-tier integers [C3] · §4.3 promotion lattice [C3] · §4.4 decimal tiers [C13] · §4.5 float↔decimal [C8.5a] · §4.7 division) and touches **§5 Equality** [C8], **§6 Ordering** [C11], **§9.2 Covariance** [C12]. Where v2 amends a section, the amendment flows back into the ADR when implemented; until then the ADR governs the language and this doc records the agreed direction.
-**Grounding:** `js_make_number` (`lambda/js/js_runtime_value.cpp`), the compact-int band (`INT56_MAX` in `lambda/lambda.h` = ±(2⁵³−1), deliberately the JS safe-integer band), the two libmpdec contexts (`g_fixed_ctx` decimal128 / `g_unlimited_ctx` arbitrary in `lambda/lambda-decimal.cpp`), the `NUM_SIZED` carriers and `EnumArrayNumElemType` (`lambda/lambda.h`), the scalar-home contract (`Lambda_Design_Stack_API.md`), and the Go spec (`go.dev/ref/spec#Numeric_types`, `#Integer_overflow`, `#Constants`, `#Conversions`).
+**Grounding:** `js_make_number` (`lambda/js/js_runtime_value.cpp`), the compact-int band (`INT53_MAX` in `lambda/lambda.h` = ±(2⁵³−1), deliberately the JS safe-integer band), the two libmpdec contexts (`g_fixed_ctx` decimal128 / `g_unlimited_ctx` arbitrary in `lambda/lambda-decimal.cpp`), the `NUM_SIZED` carriers and `EnumArrayNumElemType` (`lambda/lambda.h`), the scalar-home contract (`Lambda_Design_Stack_API.md`), and the Go spec (`go.dev/ref/spec#Numeric_types`, `#Integer_overflow`, `#Constants`, `#Conversions`).
 
 ---
 

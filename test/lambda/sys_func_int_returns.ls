@@ -1,0 +1,29 @@
+// Counts and indices return Lambda `int` (the unsized lane), not `int64`.
+// int64() is the one deliberate exception: the explicit widening constructor.
+// Before 2026-07-29 len/index_of/last_index_of were declared int64, which made
+// ordinary length arithmetic widen into the decimal-backed `integer` carrier.
+
+"=== count / index return types ==="
+type(len("abcd"))
+type(len([1, 2, 3]))
+type(index_of("hello", "l"))
+type(last_index_of("hello", "l"))
+type(ord("A"))
+
+"=== the widening constructor keeps int64 ==="
+type(int64(16))
+int64(1.0e17)
+type(int64(1.0e17))
+
+"=== length arithmetic stays in the unsized lane ==="
+9 - len("abcd")
+type(9 - len("abcd"))
+len("abcd") + 1
+type(len("abcd") + 1)
+type(len("abcd") * 2)
+
+"=== values ==="
+len("abcd")
+index_of("hello", "l")
+last_index_of("hello", "l")
+index_of("hello", "zz")

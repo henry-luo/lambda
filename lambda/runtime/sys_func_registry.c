@@ -270,7 +270,7 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
 
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
@@ -555,10 +555,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
      C_RET_BOOL, C_ARG_ITEM, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
 
-    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false,
+    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
      C_RET_INT64, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
 
-    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false,
+    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
      C_RET_INT64, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
@@ -929,22 +929,26 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Bitwise functions — operate on integers, not method-eligible
     // ========================================================================
-    {SYSFUNC_BAND, "band", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    // Bitwise ops preserve their operand's integer type (i8->i8, int->int,
+    // i64->i64) via lambda_numeric_classify and the fn_*_item runtime
+    // classifier, so no single static type describes them. `int` was a lie for
+    // i64/sized operands and would let callers trust a lane the value is not in.
+    {SYSFUNC_BAND, "band", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_band", FPTR(fn_band), NULL, NULL, false, 0},
 
-    {SYSFUNC_BOR, "bor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_BOR, "bor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_bor", FPTR(fn_bor), NULL, NULL, false, 0},
 
-    {SYSFUNC_BXOR, "bxor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_BXOR, "bxor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_bxor", FPTR(fn_bxor), NULL, NULL, false, 0},
 
-    {SYSFUNC_BNOT, "bnot", 1, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_BNOT, "bnot", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
 
-    {SYSFUNC_SHL, "shl", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_SHL, "shl", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_shl", FPTR(fn_shl), NULL, NULL, false, 0},
 
-    {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_SHR, "shr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_shr", FPTR(fn_shr), NULL, NULL, false, 0},
 
     {SYSFUNC_USHR, "ushr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,

@@ -519,7 +519,7 @@ print(http_error(502))  # server error
 - `lambda/module/py/py_stdlib.cpp` — all modules in one file:
   - **math**: 24 functions directly reuse `fn_math_*` Lambda builtins; `floor/ceil/trunc/fsum/prod` reuse `fn_floor/fn_ceil/fn_trunc/fn_sum/fn_math_prod`; new: `factorial` (iterative), `gcd`/`lcm` (Euclidean), `isnan/isinf/isfinite/fabs/copysign/fmod/degrees/radians` (POSIX `<cmath>`). Constants: `pi`, `e`, `tau`, `inf`, `nan`.
   - **os**: POSIX `getcwd/opendir/readdir/getenv`; `os.path` submodule (join, exists, isfile, isdir, basename, dirname, abspath, splitext via POSIX `stat/realpath/strrchr`). Builtins: `sep="/"`, `linesep="\n"`, `name="posix"`.
-  - **sys**: `exit` (`exit()`), `argv`, `version="3.12.0 (Lambda Python)"`, `platform="darwin"`, `maxsize=INT56_MAX`, `path`.
+  - **sys**: `exit` (`exit()`), `argv`, `version="3.12.0 (Lambda Python)"`, `platform="darwin"`, `maxsize=INT53_MAX`, `path`.
   - **re**: `match` (ANCHOR_START), `search` (UNANCHORED), `findall` (3-case group handling), `sub` (StrBuf-based), `split`. Match objects as dicts with `py_bind_method`-bound `group/groups/start/end/span` methods.
   - **json**: `loads` wraps `fn_parse2_mir(s, "json")`; `dumps` wraps `format_json(pool, obj)` — pure passthrough, no custom parsing.
   - **time**: `time` (CLOCK_REALTIME), `monotonic` (CLOCK_MONOTONIC), `sleep` (usleep), `perf_counter` (Lambda `pn_clock`).

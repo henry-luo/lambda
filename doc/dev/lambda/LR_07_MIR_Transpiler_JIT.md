@@ -37,7 +37,7 @@ The authoritative type oracle is `get_effective_type` (`:2070`). It deliberately
 
 Boxing is inline for cheap tags and a runtime call for the rest. `emit_box` (`:1058`) dispatches by `TypeId`:
 
-- `emit_box_int` (`:829`) — inline INT56 range-check and tag, `ITEM_ERROR` on overflow.
+- `emit_box_int` (`:829`) — inline INT53 range-check and tag, `ITEM_ERROR` on overflow.
 - `emit_box_bool` (`:885`) — `UEXT8` to clear garbage upper bits, error-check, tag.
 - `emit_box_float` routes through canonical `push_d`; `emit_box_int64` and the
   `uint64` sibling use the shared full-domain number-home boxers.

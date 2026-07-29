@@ -235,6 +235,26 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         decision.left_domain, decision.right_domain);
     if (joined == LAMBDA_NUM_INVALID) return decision;
 
+    // int64/uint64 enter the `integer` semantic domain so exactness joins against
+    // a true bigint stay exact. Against a binary FLOAT, though, they are ordinary
+    // fixed-width integers and must yield float like every other sized integer —
+    // only the unbounded `integer` domain needs decimal to remain exact. Widening
+    // a fixed-width int into decimal on contact with a float made `int64 * float`
+    // return decimal, which is both slower and a representation change (float is
+    // an inline lane, decimal is a heap carrier) for an operation that is already
+    // inexact. Every other language with a fixed-width int and a float promotes
+    // toward the float.
+    // u64 is included: runtime_numeric_as_double (lambda-eval-num.cpp) reads the
+    // u64 carrier directly rather than through int64, so the float lane carries
+    // its full magnitude.
+    if (joined == LAMBDA_NUM_DECIMAL &&
+            (decision.left_domain == LAMBDA_NUM_FLOAT ||
+             decision.right_domain == LAMBDA_NUM_FLOAT) &&
+            left != LAMBDA_NUM_INTEGER && right != LAMBDA_NUM_INTEGER &&
+            left != LAMBDA_NUM_DECIMAL && right != LAMBDA_NUM_DECIMAL) {
+        joined = LAMBDA_NUM_FLOAT;
+    }
+
     if (op == LAMBDA_NUM_OP_BITWISE || op == LAMBDA_NUM_OP_SHIFT) {
         if (joined != LAMBDA_NUM_INT && joined != LAMBDA_NUM_INTEGER) return decision;
         decision.result = joined;

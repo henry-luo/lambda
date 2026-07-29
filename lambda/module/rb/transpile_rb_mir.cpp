@@ -447,10 +447,10 @@ static TypeId rm_get_effective_type(RbMirTranspiler* mt, RbAstNode* node) {
     }
 }
 
-// Box a native int64_t register into an Item (with INT56 overflow check)
+// Box a native int64_t register into an Item (with INT53 overflow check)
 static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
-    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+    int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+    int64_t INT53_MIN_VAL = INT53_MIN;
 
     MIR_reg_t result = rm_new_reg(mt, "boxi", MIR_T_I64);
     MIR_reg_t masked = rm_new_reg(mt, "mask", MIR_T_I64);
@@ -460,9 +460,9 @@ static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
     MIR_reg_t in_range = rm_new_reg(mt, "rng", MIR_T_I64);
 
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_LE, MIR_new_reg_op(mt->em.ctx, le_max),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT56_MAX_VAL)));
+        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT53_MAX_VAL)));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_GE, MIR_new_reg_op(mt->em.ctx, ge_min),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT56_MIN_VAL)));
+        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT53_MIN_VAL)));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, in_range),
         MIR_new_reg_op(mt->em.ctx, le_max), MIR_new_reg_op(mt->em.ctx, ge_min)));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, masked),

@@ -1249,8 +1249,8 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 
 // Lambda compact int is capped to the IEEE float64 safe-integer band; the
 // payload is wider, so every packing/overflow check must enforce this bound.
-#define INT56_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
-#define INT56_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
+#define INT53_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
+#define INT53_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
 
 static inline uint64_t lambda_int64_ptr_to_item_bits(const int64_t* ptr) {
     if (!ptr) return ITEM_NULL;
@@ -1271,9 +1271,9 @@ inline uint64_t b2it(uint8_t bool_val) {
 }
 // int56: check range and pack, return ITEM_ERROR on overflow
 #ifndef __cplusplus
-#define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
+#define i2it(int_val)        (((int64_t)(int_val) <= INT53_MAX && (int64_t)(int_val) >= INT53_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #else
-#define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
+#define i2it(int_val)        (((int64_t)(int_val) <= INT53_MAX && (int64_t)(int_val) >= INT53_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #endif
 // BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)

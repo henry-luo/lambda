@@ -1892,7 +1892,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                 if (ns_resolved && strcmp(ns_resolved, "math") == 0) {
                     if (id_node->name->len == 7 && memcmp(id_node->name->chars, "max_int", 7) == 0) {
                         TypeInt64* it = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
-                        it->int64_val = INT56_MAX;
+                        it->int64_val = INT53_MAX;
                         arraylist_append(tp->const_list, &it->int64_val);
                         it->const_index = tp->const_list->length - 1;
                         it->is_const = 1;  it->is_literal = 1;
@@ -2436,10 +2436,17 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         int lookup_arg_count = arg_count + tp->pipe_inject_args;
 
         // Check if the function name resolves in user scope first;
-        // user-defined functions shadow system functions with the same name
+        // user-defined functions shadow system functions with the same name.
+        // AST_NODE_PROC counts too: a `pn` is as much a user definition as a
+        // `fn`. Omitting it meant a user `pn` sharing a builtin's name AND arity
+        // was silently discarded in favour of the builtin — `pn emit(a, b)` (the
+        // arity-2 `emit` sysproc) compiled and ran but produced nothing, with no
+        // diagnostic. A one-arg `pn emit(v)` appeared to work only because the
+        // arity-keyed lookup missed the builtin.
         NameEntry* user_name = lookup_name(tp, func_name);
         bool user_shadows = (user_name != NULL && user_name->node != NULL &&
-            user_name->node->node_type == AST_NODE_FUNC);
+            (user_name->node->node_type == AST_NODE_FUNC ||
+             user_name->node->node_type == AST_NODE_PROC));
 
         if (!user_shadows) {
             sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
@@ -3750,7 +3757,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        if (errno == ERANGE || value < INT56_MIN || value > INT56_MAX) {
+        if (errno == ERANGE || value < INT53_MIN || value > INT53_MAX) {
             record_semantic_error(tp, child, ERR_INVALID_NUMBER,
                 "integer literal is outside compact int range; use an explicit suffix or decimal literal");
             ast_node->type = &TYPE_ERROR;
@@ -9210,7 +9217,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
 
         log_debug("SYM_INT: parsed value %lld, checking range", value);
         // Check if the value fits in 56-bit signed integer range
-        if (INT56_MIN <= value && value <= INT56_MAX) {
+        if (INT53_MIN <= value && value <= INT53_MAX) {
             log_debug("Using LIT_INT for value %lld", value);
             i_node->type = &LIT_INT;
         }

@@ -220,10 +220,10 @@ Organize tests by category. For **each function**, test: valid inputs, edge case
 ```
 Test: boundary_int.ls
 ──────────────────────
-INT56_MAX  = 36028797018963967
-INT56_MIN  = -36028797018963968
-INT56_MAX + 1   → overflow behavior
-INT56_MIN - 1   → overflow behavior
+INT53_MAX  = 36028797018963967
+INT53_MIN  = -36028797018963968
+INT53_MAX + 1   → overflow behavior
+INT53_MIN - 1   → overflow behavior
 0, -0, 1, -1    → trivial values
 Large multiply   → 999999999 * 999999999
 Division precision → 1 / 3 * 3

@@ -287,8 +287,8 @@ void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_
 // Box int64 register -> Item (runtime range check)
 // Avoids creating ints in the symbol collision range (< -JS_SYMBOL_BASE)
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
-    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+    int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+    int64_t INT53_MIN_VAL = INT53_MIN;
     int64_t SYMBOL_LIMIT  = -(int64_t)JS_SYMBOL_BASE;  // values <= this are symbols
 
     MIR_reg_t result = jm_new_reg(mt, "boxi", MIR_T_I64);
@@ -301,9 +301,9 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     MIR_reg_t in_range2 = jm_new_reg(mt, "rn2", MIR_T_I64);
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
-        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT53_MAX_VAL)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
-        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT53_MIN_VAL)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GT, MIR_new_reg_op(mt->ctx, gt_sym),
         MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, SYMBOL_LIMIT)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),

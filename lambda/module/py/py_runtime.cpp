@@ -445,7 +445,7 @@ extern "C" bool py_is_truthy(Item value) {
 // ============================================================================
 
 static Item py_make_number(double d) {
-    if (isfinite(d) && d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX) {
+    if (isfinite(d) && d == (double)(int64_t)d && d >= INT53_MIN && d <= INT53_MAX) {
         return (Item){.item = i2it((int64_t)d)};
     }
     return push_d(d);
@@ -481,7 +481,7 @@ extern "C" Item py_add(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         int64_t r = a + b;
-        if (r >= INT56_MIN && r <= INT56_MAX) {
+        if (r >= INT53_MIN && r <= INT53_MAX) {
             return (Item){.item = i2it(r)};
         }
         // overflow → bigint
@@ -517,7 +517,7 @@ extern "C" Item py_subtract(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         int64_t r = a - b;
-        if (r >= INT56_MIN && r <= INT56_MAX) {
+        if (r >= INT53_MIN && r <= INT53_MAX) {
             return (Item){.item = i2it(r)};
         }
         // overflow → bigint
@@ -582,12 +582,12 @@ extern "C" Item py_multiply(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         // check overflow
-        if (b != 0 && (a > INT56_MAX / (b > 0 ? b : -b) || a < INT56_MIN / (b > 0 ? b : -b))) {
+        if (b != 0 && (a > INT53_MAX / (b > 0 ? b : -b) || a < INT53_MIN / (b > 0 ? b : -b))) {
             // overflow → bigint
             return py_bigint_mul(left, right);
         }
         int64_t r = a * b;
-        if (r >= INT56_MIN && r <= INT56_MAX) {
+        if (r >= INT53_MIN && r <= INT53_MAX) {
             return (Item){.item = i2it(r)};
         }
         return py_bigint_mul(left, right);
@@ -865,7 +865,7 @@ extern "C" Item py_power(Item left, Item right) {
             if (e & 1) {
                 int64_t tmp;
                 if (__builtin_mul_overflow(result, b, &tmp) ||
-                    tmp < INT56_MIN || tmp > INT56_MAX) {
+                    tmp < INT53_MIN || tmp > INT53_MAX) {
                     return py_bigint_pow(left, right);
                 }
                 result = tmp;
@@ -953,7 +953,7 @@ extern "C" Item py_lshift(Item left, Item right) {
         }
         int64_t a = it2i(left);
         int64_t r = a << shift;
-        if (r >= INT56_MIN && r <= INT56_MAX) return (Item){.item = i2it(r)};
+        if (r >= INT53_MIN && r <= INT53_MAX) return (Item){.item = i2it(r)};
         return py_bigint_lshift(left, right);
     }
     return (Item){.item = i2it((int64_t)py_get_number(left) << (int64_t)py_get_number(right))};

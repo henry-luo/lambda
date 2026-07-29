@@ -5866,7 +5866,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 num_arr->items[index] = (int64_t)value.get_int56();
             } else if (val_type == LMD_TYPE_INT64) {
                 int64_t lval = value.get_int64();
-                if (lval >= INT56_MIN && lval <= INT56_MAX) {
+                if (lval >= INT53_MIN && lval <= INT53_MAX) {
                     num_arr->items[index] = lval;
                 } else {
                     convert_specialized_to_generic(arr);
