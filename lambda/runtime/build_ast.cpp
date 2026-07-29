@@ -189,6 +189,7 @@ static TypeId jube_signature_type_id(const char* text) {
     if (jube_type_name_matches(text, "int64")) return LMD_TYPE_INT64;
     if (jube_type_name_matches(text, "int")) return LMD_TYPE_INT;
     if (jube_type_name_matches(text, "float")) return LMD_TYPE_FLOAT;
+    if (jube_type_name_matches(text, "complex")) return LMD_TYPE_COMPLEX;
     if (jube_type_name_matches(text, "string")) return LMD_TYPE_STRING;
 
     int module_count = jube_static_module_count();
@@ -228,6 +229,7 @@ static Type* jube_type_from_type_id(TypeId type_id) {
     case LMD_TYPE_INT: return &TYPE_INT;
     case LMD_TYPE_INT64: return &TYPE_INT64;
     case LMD_TYPE_FLOAT: return &TYPE_FLOAT;
+    case LMD_TYPE_COMPLEX: return &TYPE_COMPLEX;
     case LMD_TYPE_STRING: return &TYPE_STRING;
     default: return &TYPE_ANY;
     }
@@ -531,7 +533,10 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
         return is_integer_type_id(arg_tid) ||
                arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
     case LMD_TYPE_FLOAT:
-        return is_numeric_type_id(arg_tid) || arg_tid == LMD_TYPE_BOOL;
+        // Complex has no scalar float representation; accepting it here would
+        // let a typed float array silently discard the imaginary component.
+        return (arg_tid != LMD_TYPE_COMPLEX && is_numeric_type_id(arg_tid)) ||
+               arg_tid == LMD_TYPE_BOOL;
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64:
         return is_integer_type_id(arg_tid) ||
@@ -655,7 +660,7 @@ static bool typed_array_literal_elements_compatible(AstNode* node, Type* expecte
 
 static bool is_global_simple_type(const Type* type) {
     return type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
-           type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_DECIMAL ||
+           type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_COMPLEX || type == &TYPE_DECIMAL ||
            type == &TYPE_INTEGER_VALUE ||
            type == &TYPE_NUMBER || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
            type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
@@ -666,6 +671,13 @@ static bool is_global_simple_type(const Type* type) {
            type == &TYPE_I32 || type == &TYPE_U8 || type == &TYPE_U16 ||
            type == &TYPE_U32 || type == &TYPE_F16 || type == &TYPE_F32 ||
            type == &TYPE_UINT64;
+}
+
+static bool is_complex_component_type(TypeId type_id) {
+    // Complex promotion is intentionally limited to binary64-preserving lanes;
+    // exact decimal and full-width integer values require an explicit float().
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT ||
+           type_id == LMD_TYPE_NUM_SIZED;
 }
 
 static inline bool is_param_full_type_id(TypeId type_id) {
@@ -2168,6 +2180,18 @@ static SysFuncInfo* lookup_global_imported_sys_func(Transpiler* tp, StrView* fun
     return NULL;
 }
 
+static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_count) {
+    static const char* names[] = {"sqrt", "exp", "log", "sin", "cos", "tan"};
+    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
+        if (!strview_equal(func_name, names[i])) continue;
+        char qualified_name[16];
+        snprintf(qualified_name, sizeof(qualified_name), "math_%s", names[i]);
+        StrView qualified_view = strview_from_cstr(qualified_name);
+        return get_sys_func_info(&qualified_view, arg_count);
+    }
+    return NULL;
+}
+
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp,
@@ -2437,6 +2461,11 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     ast_node->pipe_inject = true;
                 }
             }
+        }
+        if (!sys_func_info) {
+            // The complex-number surface exposes these principal functions
+            // directly while reusing the established math-module entries.
+            sys_func_info = lookup_complex_math_builtin(&func_name, lookup_arg_count);
         }
     }
 
@@ -3267,6 +3296,28 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+Type* build_lit_imaginary(Transpiler* tp, TSNode node) {
+    StrView source = ts_node_source(tp, node);
+    if (source.length < 2 || source.str[source.length - 1] != 'j') return &TYPE_ERROR;
+    char* coefficient = (char*)mem_alloc(source.length, MEM_CAT_AST);
+    if (!coefficient) return &TYPE_ERROR;
+    memcpy(coefficient, source.str, source.length - 1);
+    coefficient[source.length - 1] = '\0';
+
+    double imag = 0.0;
+    if (strcmp(coefficient, "inf") == 0) imag = INFINITY;
+    else if (strcmp(coefficient, "nan") == 0) imag = NAN;
+    else imag = str_to_double_default(coefficient, source.length - 1, 0.0);
+    mem_free(coefficient);
+
+    TypeComplex* item_type = (TypeComplex*)alloc_type(tp->pool, LMD_TYPE_COMPLEX, sizeof(TypeComplex));
+    item_type->real = 0.0;
+    item_type->imag = imag;
+    item_type->is_const = 1;
+    item_type->is_literal = 1;
+    return (Type*)item_type;
+}
+
 Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
@@ -3546,6 +3597,9 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "float")) {
         return (Type*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "complex")) {
+        return (Type*)&LIT_TYPE_COMPLEX;
+    }
     else if (strview_equal(&type_name, "f64")) {
         // f64 is accepted on input but canonicalizes to float.
         return (Type*)&LIT_TYPE_FLOAT;
@@ -3710,6 +3764,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else if (symbol == SYM_FLOAT) {
         ast_node->type = build_lit_float(tp, child);
+    }
+    else if (symbol == SYM_IMAGINARY) {
+        ast_node->type = build_lit_imaginary(tp, child);
     }
     else if (symbol == SYM_SIZED_INT) {
         ast_node->type = build_lit_sized_integer(tp, child);
@@ -4089,7 +4146,7 @@ static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond,
 }
 
 static bool is_magnitude_numeric_type(TypeId type_id) {
-    return is_numeric_type_id(type_id);
+    return type_id != LMD_TYPE_COMPLEX && is_numeric_type_id(type_id);
 }
 
 static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
@@ -4427,6 +4484,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     bool arithmetic_op = ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB ||
         ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV ||
         ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD;
+    bool complex_arithmetic_op = arithmetic_op || ast_node->op == OPERATOR_POW;
     bool left_numeric_array = known_numeric_array_type(ast_node->left->type);
     bool right_numeric_array = known_numeric_array_type(ast_node->right->type);
     bool left_numeric_scalar = lambda_numeric_kind_from_type(ast_node->left->type) != LAMBDA_NUM_INVALID;
@@ -4442,6 +4500,21 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (arithmetic_op && ast_node->op == OPERATOR_ADD &&
         left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
         type_id = LMD_TYPE_ARRAY;
+    }
+    else if (complex_arithmetic_op && (left_type == LMD_TYPE_COMPLEX || right_type == LMD_TYPE_COMPLEX)) {
+        bool supported = ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB ||
+            ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV ||
+            ast_node->op == OPERATOR_POW;
+        bool left_valid = left_type == LMD_TYPE_COMPLEX || is_complex_component_type(left_type);
+        bool right_valid = right_type == LMD_TYPE_COMPLEX || is_complex_component_type(right_type);
+        if (!supported || !left_valid || !right_valid) {
+            record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+                "operator '%.*s' is not defined for %s and %s",
+                (int)op.length, op.str, get_type_name(left_type), get_type_name(right_type));
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+        type_id = LMD_TYPE_COMPLEX;
     }
     else if (arithmetic_op) {
         LambdaNumericOpFamily family = ast_node->op == OPERATOR_ADD ? LAMBDA_NUM_OP_ADD :
@@ -5582,6 +5655,9 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     }
     else if (strview_equal(&type_name, "float")) {
         ast_node->type = (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "complex")) {
+        ast_node->type = (Type*)&LIT_TYPE_COMPLEX;
     }
     else if (strview_equal(&type_name, "f64")) {
         // f64 is accepted on input but canonicalizes to float.
@@ -9148,6 +9224,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         f_node->type = build_lit_float(tp, expr_node);
         return (AstNode*)f_node;
+    }
+    case SYM_IMAGINARY: {
+        AstPrimaryNode* c_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        c_node->type = build_lit_imaginary(tp, expr_node);
+        return (AstNode*)c_node;
     }
     case SYM_SIZED_INT: {
         AstPrimaryNode* si_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));

@@ -7,7 +7,7 @@
 ## Decision
 
 Lambda gains a built-in `complex` type whose value is an ordered pair of
-binary64 components, `(real, imag)`. The source spelling for an imaginary
+float64 (IEEE binary64) components, `(real, imag)`. The source spelling for an imaginary
 literal is a numeric coefficient followed immediately by lowercase `j`:
 
 ```lambda
@@ -70,7 +70,7 @@ adjacent to the coefficient; `4 j` is invalid.
 
 The initial feature intentionally excludes `m`, `n`, and sized-number suffixes
 inside an imaginary literal: `1mj`, `1nj`, `1i8j`, and `1f32j` are invalid.
-Complex components are binary64, so accepting an exact-decimal spelling would
+Complex components are float64 (IEEE binary64), so accepting an exact-decimal spelling would
 hide a precision loss. The author must write the conversion visibly:
 
 ```lambda
@@ -106,14 +106,14 @@ edits the generated `parser.c` directly.
 
 ### Component domain
 
-A `complex` value has exactly two IEEE-754 binary64 components. It is neither
+A `complex` value has exactly two float64 (IEEE binary64) components. It is neither
 a two-element `array` nor a `map`; no collection operation can observe or
 mutate its storage.
 
 Small `int`, `f16`, `f32`, and `float` values convert implicitly to `complex`
 when an arithmetic operand is already complex. The converted value has zero
 imaginary part. This is lossless for Lambda's `int` range, which is contained
-in the exactly representable binary64 integer range.
+in the exactly representable float64 (IEEE binary64) integer range.
 
 `integer`, `decimal`, `i64`, and `u64` do **not** implicitly convert to
 `complex`, because that would violate Lambda's “exact until you ask for float”
@@ -147,7 +147,7 @@ For `z = a + bj` and `w = c + dj`:
 | `z + w` | `(a + c) + (b + d)j` |
 | `z - w` | `(a - c) + (b - d)j` |
 | `z * w` | `(ac - bd) + (ad + bc)j` |
-| `z / w` | binary64 complex division, with an overflow-safe scaled algorithm |
+| `z / w` | complex division over float64 (IEEE binary64) components, with an overflow-safe scaled algorithm |
 | `+z`, `-z` | identity and component-wise negation |
 | `z ** w` | principal-value `exp(w * log(z))` |
 
@@ -169,16 +169,29 @@ real(z)       // float: real component
 imag(z)       // float: imaginary component
 conj(z)       // complex: a - bj
 abs(z)        // float: hypot(a, b), scaled to avoid avoidable overflow
-arg(z)        // float: atan2(b, a), principal angle in (-pi, pi]
-norm(z)       // float: a*a + b*b, subject to normal float overflow
 complex(a, b = 0.0)
 sqrt(z), exp(z), log(z)
 sin(z), cos(z), tan(z)
 ```
 
-`sqrt`, `log`, and `z ** w` use their principal branches. `arg(0+0j)` is
-`0.0`. The functions return ordinary float or complex values and therefore
-inherit the float `nan` and infinity rules already used by Lambda.
+`sqrt`, `log`, and `z ** w` use their principal branches. The phase and
+squared magnitude are intentionally derived operations rather than named
+complex built-ins:
+
+```lambda
+fn complex_phase(z) => math.atan2(imag(z), real(z))
+fn squared_magnitude(z) => real(z) * real(z) + imag(z) * imag(z)
+fn from_rectangular(real_part, imag_part) => complex(real_part, imag_part)
+fn from_polar(r, theta) =>
+    complex(r * math.cos(theta), r * math.sin(theta))
+```
+
+`squared_magnitude` follows ordinary float multiplication and addition, so it
+is subject to normal float overflow. `abs(z)` remains the overflow-aware way
+to compute the magnitude itself. `from_rectangular` replaces a separate
+rectangular constructor, while `from_polar` replaces a separate `rect(r,
+theta)` helper. The helpers return ordinary float or complex values and
+therefore inherit the float `nan` and infinity rules already used by Lambda.
 
 No implicit conversion from `string`, `binary`, `datetime`, containers, or
 maps is provided. Parsing a textual complex value belongs in an explicit
@@ -328,7 +341,8 @@ Implementation is accepted only with focused unit and integration coverage for:
   `1i8j`, unary signs, and precedence;
 - arithmetic, mixed `int`/float promotion, forbidden exact-domain mixing,
   scaled multiply/divide edge cases, and principal-branch functions;
-- `real`, `imag`, `conj`, `abs`, `arg`, and constructor conversions;
+- `real`, `imag`, `conj`, `abs`, derived phase/squared-magnitude expressions,
+  and constructor conversions;
 - equality, hash coherence, zero-imaginary real equality, `-0.0`, and `nan`;
 - comparison errors plus deterministic total-order sorting;
 - canonical print-to-parse round trips, including zero imaginary parts and

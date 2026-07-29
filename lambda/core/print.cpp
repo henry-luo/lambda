@@ -219,6 +219,19 @@ void print_double(StrBuf *strbuf, double num) {
     strbuf_append_str(strbuf, num_buf);
 }
 
+static void print_complex(StrBuf* strbuf, Complex* value) {
+    if (!value) { strbuf_append_str(strbuf, "error"); return; }
+    print_double(strbuf, value->real);
+    if (signbit(value->imag)) {
+        strbuf_append_char(strbuf, '-');
+        print_double(strbuf, fabs(value->imag));
+    } else {
+        strbuf_append_char(strbuf, '+');
+        print_double(strbuf, value->imag);
+    }
+    strbuf_append_char(strbuf, 'j');
+}
+
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
     // Use centralized decimal_to_string function
@@ -324,6 +337,9 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         break;
     case LMD_TYPE_FLOAT:
         print_double(strbuf, titem->double_val);
+        break;
+    case LMD_TYPE_COMPLEX:
+        print_complex(strbuf, (Complex*)(uintptr_t)titem->item);
         break;
     case LMD_TYPE_NUM_SIZED: {
         Item it = {.item = titem->item};
@@ -491,6 +507,10 @@ struct PrintItemVisitor {
     void operator()(lam::ItemOf<LMD_TYPE_BINARY> item) const {
         Binary* binary = item.ptr();
         format_binary_literal(strbuf, binary);
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_COMPLEX> item) const {
+        print_complex(strbuf, item.ptr());
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_RANGE> item) const {

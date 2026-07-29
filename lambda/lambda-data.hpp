@@ -162,6 +162,14 @@ struct Decimal {
     mpd_t* dec_val;  // libmpdec decimal number
 };
 
+// Complex values are immutable GC objects with no outgoing references.  The
+// leading tag lets a raw-pointer Item participate in the normal type dispatch.
+typedef struct Complex {
+    TypeId type_id;
+    double real;
+    double imag;
+} Complex;
+
 #pragma pack(push, 1)
 // TypedItem for storing data in map with type_id
 typedef struct TypedItem {
@@ -209,6 +217,11 @@ typedef struct TypeConst : Type {
 typedef struct TypeFloat : TypeConst {
     double double_val;
 } TypeFloat;
+
+typedef struct TypeComplex : TypeConst {
+    double real;
+    double imag;
+} TypeComplex;
 
 typedef struct TypeInt64 : TypeConst {
     int64_t int64_val;
@@ -721,6 +734,7 @@ extern Type TYPE_INT;
 extern Type TYPE_INT64;
 extern Type TYPE_FLOAT;
 extern Type TYPE_FLOAT64;
+extern Type TYPE_COMPLEX;
 extern Type TYPE_DECIMAL;
 extern Type TYPE_INTEGER;
 // Runtime integer values use the decimal carrier but retain a distinct Type*
@@ -767,6 +781,7 @@ extern Type LIT_BOOL;
 extern Type LIT_INT;
 extern Type LIT_INT64;
 extern Type LIT_FLOAT;
+extern Type LIT_COMPLEX;
 extern Type LIT_DECIMAL;
 extern Type LIT_STRING;
 extern Type LIT_DTIME;
@@ -780,6 +795,7 @@ extern TypeType LIT_TYPE_INT;
 extern TypeType LIT_TYPE_INT64;
 extern TypeType LIT_TYPE_FLOAT;
 extern TypeType LIT_TYPE_FLOAT64;
+extern TypeType LIT_TYPE_COMPLEX;
 extern TypeType LIT_TYPE_DECIMAL;
 extern TypeType LIT_TYPE_INTEGER;
 extern TypeType LIT_TYPE_NUMBER;

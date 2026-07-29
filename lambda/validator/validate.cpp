@@ -82,6 +82,11 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
     TypeId item_type = get_type_id(item);
     TypeId pattern_type = get_type_id(pattern);
     if (item_type != pattern_type) {
+        if (item_type == LMD_TYPE_COMPLEX || pattern_type == LMD_TYPE_COMPLEX) {
+            // Complex equality has a real-axis bridge; raw it2d() would inspect
+            // a pointer payload instead of applying that value-level rule.
+            return fn_eq(item, pattern) == BOOL_TRUE;
+        }
         if (IS_NUMERIC_ID(item_type) && IS_NUMERIC_ID(pattern_type)) {
             if (item_type == LMD_TYPE_DECIMAL || pattern_type == LMD_TYPE_DECIMAL) {
                 return decimal_cmp_items(item, pattern) == 0;
@@ -108,6 +113,8 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
         return item.get_double() == pattern.get_double();
     case LMD_TYPE_NUM_SIZED:
         return item.num_type == pattern.num_type && item.num_value == pattern.num_value;
+    case LMD_TYPE_COMPLEX:
+        return fn_eq(item, pattern) == BOOL_TRUE;
     case LMD_TYPE_DECIMAL:
         return decimal_cmp_items(item, pattern) == 0;
     case LMD_TYPE_DTIME: {

@@ -6,8 +6,50 @@
 #include "../../lib/str.h"
 #include "format-markup.h"
 #include "../core/lambda-decimal.hpp"
+#include "../core/mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
+
+static bool format_contains_complex(const ItemReader& item, int depth) {
+    if (item.getType() == LMD_TYPE_COMPLEX) return true;
+    if (depth >= 64) return false;
+
+    if (item.isArray() || item.isList()) {
+        ArrayReader array = item.asArray();
+        auto iter = array.items();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (format_contains_complex(child, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    if (item.getType() == LMD_TYPE_MAP || item.getType() == LMD_TYPE_OBJECT) {
+        MapReader map = MapReader::fromItem(item.item());
+        auto iter = map.entries();
+        const char* key;
+        ItemReader value;
+        while (iter.next(&key, &value)) {
+            if (format_contains_complex(value, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    if (item.isElement()) {
+        ElementReader element = item.asElement();
+        auto attrs = element.attrs();
+        const char* key;
+        ItemReader value;
+        while (attrs.next(&key, &value)) {
+            if (format_contains_complex(value, depth + 1)) return true;
+        }
+        auto children = element.children();
+        while (children.next(&value)) {
+            if (format_contains_complex(value, depth + 1)) return true;
+        }
+    }
+    return false;
+}
 
 static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
     TypeId type = get_type_id(item);
@@ -114,6 +156,13 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
 
     log_debug("Formatting with type: %s%s%s", t, f ? "-" : "", f ? f : "");
+
+    if (strcmp(t, "mark") != 0 && format_contains_complex(ItemReader(item.to_const()), 0)) {
+        // External data syntaxes have no unambiguous complex scalar; refusing
+        // the whole document prevents a nested value from silently becoming 0.
+        log_error("format: complex values require the mark format");
+        return NULL;
+    }
 
     // ---- Static dispatch table: type → format function (no flavor) ----
     struct FormatEntry {

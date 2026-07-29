@@ -1581,6 +1581,28 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
 
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
+    if (a_type_id == LMD_TYPE_COMPLEX || b_type_id == LMD_TYPE_COMPLEX) {
+        if (a_type_id == LMD_TYPE_COMPLEX && b_type_id == LMD_TYPE_COMPLEX) {
+            Complex* a = a_item.get_complex();
+            Complex* b = b_item.get_complex();
+            if (!a || !b || isnan(a->real) || isnan(a->imag) ||
+                    isnan(b->real) || isnan(b->imag)) return BOOL_FALSE;
+            return (a->real == b->real && a->imag == b->imag) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        Item complex_item = a_type_id == LMD_TYPE_COMPLEX ? a_item : b_item;
+        Item real_item = a_type_id == LMD_TYPE_COMPLEX ? b_item : a_item;
+        Complex* value = complex_item.get_complex();
+        if (!value || value->imag != 0.0 || isnan(value->real) ||
+                isnan(value->imag) || !is_numeric_type_id(get_type_id(real_item))) {
+            return BOOL_FALSE;
+        }
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> rooted_complex(roots, complex_item);
+        Rooted<Item> rooted_real(roots, real_item);
+        value = rooted_complex.get().get_complex();
+        // push_d() may collect before comparing an exact decimal or wide-integer peer.
+        return value ? numeric_items_equal_exact(push_d(value->real), rooted_real.get()) : BOOL_FALSE;
+    }
     if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
         return numeric_items_equal_exact(a_item, b_item);
     }
@@ -1772,6 +1794,7 @@ static int total_type_rank(Item item) {
     case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
     case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_UINT64:
+    case LMD_TYPE_COMPLEX:
         return 3;
     case LMD_TYPE_DTIME: return 4;
     case LMD_TYPE_SYMBOL: return 5;
@@ -1794,6 +1817,44 @@ static int total_type_rank(Item item) {
     default:
         return 16;
     }
+}
+
+static int total_complex_component_cmp(double left, double right) {
+    if (isnan(left) || isnan(right)) {
+        if (isnan(left) && isnan(right)) {
+            uint64_t left_bits, right_bits;
+            __builtin_memcpy(&left_bits, &left, sizeof(left_bits));
+            __builtin_memcpy(&right_bits, &right, sizeof(right_bits));
+            return (left_bits > right_bits) - (left_bits < right_bits);
+        }
+        return isnan(left) ? 1 : -1;
+    }
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+
+static int total_complex_cmp(Item a_item, Item b_item) {
+    TypeId a_tid = get_type_id(a_item);
+    TypeId b_tid = get_type_id(b_item);
+    bool a_complex = a_tid == LMD_TYPE_COMPLEX;
+    bool b_complex = b_tid == LMD_TYPE_COMPLEX;
+    Complex* a = a_complex ? a_item.get_complex() : NULL;
+    Complex* b = b_complex ? b_item.get_complex() : NULL;
+    bool a_real = !a_complex || (a && a->imag == 0.0);
+    bool b_real = !b_complex || (b && b->imag == 0.0);
+    if (a_real && b_real) {
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> rooted_a(roots, a_item);
+        Rooted<Item> rooted_b(roots, b_item);
+        a = a_complex ? rooted_a.get().get_complex() : NULL;
+        b = b_complex ? rooted_b.get().get_complex() : NULL;
+        Item ar = a_complex ? push_d(a->real) : rooted_a.get();
+        Item br = b_complex ? push_d(b->real) : rooted_b.get();
+        LambdaNumericComparison comparison = lambda_numeric_compare(ar, br);
+        return comparison.valid && !comparison.unordered ? comparison.order : 0;
+    }
+    if (a_real != b_real) return a_real ? -1 : 1;
+    int real_cmp = total_complex_component_cmp(a->real, b->real);
+    return real_cmp ? real_cmp : total_complex_component_cmp(a->imag, b->imag);
 }
 
 static int total_byte_cmp(Item a_item, Item b_item) {
@@ -1862,6 +1923,12 @@ static int map_data_total_cmp(TypeMap* type_a, void* data_a, TypeMap* type_b, vo
 }
 
 int total_cmp(Item a_item, Item b_item) {
+    TypeId total_a_tid = get_type_id(a_item);
+    TypeId total_b_tid = get_type_id(b_item);
+    if ((total_a_tid == LMD_TYPE_COMPLEX || total_b_tid == LMD_TYPE_COMPLEX) &&
+            is_numeric_type_id(total_a_tid) && is_numeric_type_id(total_b_tid)) {
+        return total_complex_cmp(a_item, b_item);
+    }
     int rank_a = total_type_rank(a_item);
     int rank_b = total_type_rank(b_item);
     if (rank_a != rank_b) return (rank_a > rank_b) - (rank_a < rank_b);
@@ -2563,6 +2630,16 @@ String* fn_string(Item itm) {
         snprintf(buf, sizeof(buf), "%lld", (long long)int_val);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
+    }
+    case LMD_TYPE_COMPLEX: {
+        RootFrame roots((Context*)context, 1);
+        Rooted<Item> rooted(roots, itm);
+        StrBuf* sb = strbuf_new_cap(64);
+        if (!sb) return &STR_ERROR;
+        print_item(sb, rooted.get(), 1, null);
+        String* result = heap_strcpy(sb->str, sb->length);
+        strbuf_free(sb);
+        return result ? result : &STR_ERROR;
     }
     case LMD_TYPE_INT64: {
         char buf[32];
@@ -5860,6 +5937,9 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(Binary**)field_ptr = value.get_safe_binary();
         break;
     }
+    case LMD_TYPE_COMPLEX:
+        *(Complex**)field_ptr = value.get_complex();
+        break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = value.container;
@@ -5898,6 +5978,9 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             break;
         case LMD_TYPE_BINARY:
             titem.binary = value.get_safe_binary();
+            break;
+        case LMD_TYPE_COMPLEX:
+            titem.pointer = value.get_complex();
             break;
         case LMD_TYPE_SYMBOL:
             titem.symbol = value.get_safe_symbol();

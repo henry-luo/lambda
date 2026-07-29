@@ -149,6 +149,7 @@ typedef struct Item {
     inline DateTime* get_datetime_ptr() const { return (DateTime*)(uintptr_t)this->datetime_ptr; }
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
+    inline Complex* get_complex() const { return (Complex*)(uintptr_t)this->item; }
     inline String* get_string() const { return (String*)this->string_ptr; }
     inline Symbol* get_symbol() const { return (Symbol*)this->symbol_ptr; }
     inline Binary* get_binary() const{ return (Binary*)this->binary_ptr; }

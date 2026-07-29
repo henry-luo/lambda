@@ -1596,6 +1596,28 @@ void array_push_spread_all(Array* arr, Item item) {
 uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     TypeId type_id = get_type_id(key);
     switch (type_id) {
+    case LMD_TYPE_COMPLEX: {
+        RootFrame roots(active_runtime, 1);
+        Rooted<Item> rooted_key(roots, key);
+        Complex* value = rooted_key.get().get_complex();
+        if (!value) return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        // Zero-imaginary values share the real numeric hash so equal map keys
+        // cannot land in different buckets across the real/complex boundary.
+        if (value->imag == 0.0) {
+            Item real_item = push_d(value->real);
+            char real_buf[128];
+            if (lambda_numeric_to_canonical_string(real_item, real_buf, sizeof(real_buf))) {
+                return hashmap_sip(real_buf, strlen(real_buf), seed0, seed1);
+            }
+        }
+        value = rooted_key.get().get_complex();
+        if (!value) return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        char real_buf[64], imag_buf[64], pair_buf[160];
+        lambda_double_to_shortest(value->real, real_buf, sizeof(real_buf));
+        lambda_double_to_shortest(value->imag, imag_buf, sizeof(imag_buf));
+        snprintf(pair_buf, sizeof(pair_buf), "complex:%s:%s", real_buf, imag_buf);
+        return hashmap_sip(pair_buf, strlen(pair_buf), seed0, seed1);
+    }
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64:
@@ -2162,6 +2184,9 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_BINARY:
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         return {.item = x2it(ptr_val)};
+    case LMD_TYPE_COMPLEX:
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {

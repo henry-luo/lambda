@@ -24,7 +24,7 @@
 #include "../js/js_test262_fast_paths.h"
 
 // External Type globals (defined in lambda-data.cpp)
-extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
+extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
 extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
 
 // ============================================================================
@@ -285,6 +285,21 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0},
+
+    {SYSFUNC_COMPLEX, "complex", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_complex1", FPTR(fn_complex1), NULL, NULL, false, 0},
+
+    {SYSFUNC_COMPLEX2, "complex", 2, &TYPE_COMPLEX, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_complex2", FPTR(fn_complex2), NULL, NULL, false, 0},
+
+    {SYSFUNC_REAL, "real", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_real", FPTR(fn_real), NULL, NULL, false, 0},
+
+    {SYSFUNC_IMAG, "imag", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_imag", FPTR(fn_imag), NULL, NULL, false, 0},
+
+    {SYSFUNC_CONJ, "conj", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_conj", FPTR(fn_conj), NULL, NULL, false, 0},
 
     {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_decimal", FPTR(fn_decimal), NULL, NULL, false, 0},
@@ -1344,6 +1359,7 @@ JitImport jit_runtime_imports[] = {
     {"push_d", FPTR(push_d),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+    {"complex_new", FPTR(complex_new)},
     {"lambda_item_adopt_scalar_home", FPTR(lambda_item_adopt_scalar_home),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |

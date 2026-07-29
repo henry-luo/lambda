@@ -3319,6 +3319,10 @@
           "named": true
         },
         {
+          "type": "imaginary",
+          "named": true
+        },
+        {
           "type": "index_expr",
           "named": true
         },
@@ -3443,6 +3447,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "imaginary",
           "named": true
         },
         {
@@ -3612,6 +3620,10 @@
             "named": true
           },
           {
+            "type": "imaginary",
+            "named": true
+          },
+          {
             "type": "integer",
             "named": true
           },
@@ -3655,6 +3667,10 @@
           },
           {
             "type": "float",
+            "named": true
+          },
+          {
+            "type": "imaginary",
             "named": true
           },
           {
@@ -4489,6 +4505,10 @@
     "named": false
   },
   {
+    "type": "imaginary",
+    "named": true
+  },
+  {
     "type": "import",
     "named": false
   },
@@ -4602,11 +4622,11 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",

@@ -250,7 +250,11 @@ module.exports = grammar({
     // Actual parsing done by AST builder
     binary: _ => token(seq("b'", repeat1(/[^']/), "'")),
 
-    _number: $ => choice($.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
+    _number: $ => choice($.imaginary, $.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
+
+    // Keep the imaginary suffix in one token so `4j` cannot be parsed as an
+    // integer followed by an identifier.  Signs remain unary operators.
+    imaginary: _ => token(seq(choice(float_literal, integer_literal, 'inf', 'nan'), 'j')),
 
     integer: _ => token(choice(hex_integer_literal, integer_literal)),
 
@@ -936,7 +940,7 @@ module.exports = grammar({
     // reducing SYMBOL_COUNT by 19. Keywords also used standalone elsewhere
     // ('error', 'type', 'string', 'symbol') remain as separate keywords.
     _base_type_kw: _ => token(prec(1, choice(
-      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'decimal', 'integer', 'number',
+      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'complex', 'decimal', 'integer', 'number',
       'datetime', 'date', 'time', 'binary', 'range',
       'list', 'array', 'map', 'element', 'entity', 'object', 'function',
       'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32', 'f64'
