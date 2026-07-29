@@ -1471,7 +1471,34 @@ static bool inline_sequence_is_unbreakable_ascii(DomNode* node) {
     return true;
 }
 
+static float ruby_simple_segment_inline_size(LayoutContext* lycon, DomNode* ruby) {
+    float base_size = 0.0f;
+    float annotation_size = 0.0f;
+    for (DomNode* child = ruby && ruby->is_element()
+             ? ruby->as_element()->first_child : nullptr;
+         child; child = child->next_sibling) {
+        if (child->is_element() && child->tag() == HTM_TAG_RP) continue;
+        float child_size = calculate_max_content_width(lycon, child);
+        if (child->is_element() && child->tag() == HTM_TAG_RT) {
+            annotation_size += child_size;
+        } else {
+            base_size += child_size;
+        }
+    }
+    // A simple ruby segment is one column: its base and annotation levels
+    // overlap instead of contributing sequential widths to the parent line.
+    return max(base_size, annotation_size);
+}
+
 LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
+    if (span && span->is_element() &&
+        resolve_display_value(span).inner == CSS_VALUE_RUBY) {
+        float ruby_size = ruby_simple_segment_inline_size(lycon, span);
+        float line_right = lycon->line.has_float_intrusion ?
+            lycon->line.effective_right : lycon->line.right;
+        return lycon->line.advance_x + ruby_size > line_right + 0.001f
+            ? RDT_LINE_FILLED : RDT_NOT_SURE;
+    }
     DomNode* node = nullptr;
     if (span->is_element()) {
         node = lam::dom_require_element(span)->first_child;
@@ -1628,6 +1655,19 @@ void line_reset(LayoutContext* lycon) {
         // Use unified line adjustment via BlockContext
         adjust_line_for_floats(lycon);
         log_debug("DEBUG: Used BlockContext %p for line adjustment", (void*)bfc);
+    }
+
+    if (lycon->block.initial_letter_exclusion_lines > 0 &&
+        lycon->block.initial_letter_exclusion_width > 0.0f) {
+        // The initial letter is in-flow, but its margin box still shortens each
+        // impacted following line just as the CSS Inline initial-letter exclusion does.
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            lycon->line.effective_right -= lycon->block.initial_letter_exclusion_width;
+        } else {
+            lycon->line.effective_left += lycon->block.initial_letter_exclusion_width;
+            lycon->line.advance_x = max(lycon->line.advance_x, lycon->line.effective_left);
+        }
+        lycon->block.initial_letter_exclusion_lines--;
     }
 
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
@@ -2607,6 +2647,17 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
     // and siblings through non-processed html nodes
     log_debug("check if view has line filled");
     DomNode* node = view->next_sibling;
+    DomNode* parent = view->parent;
+    if (parent && parent->is_element() &&
+        resolve_display_value(parent).inner == CSS_VALUE_RUBY) {
+        // Annotation levels are outside the base-level inline flow. Looking
+        // through <rt> here would make a base text run wrap before an
+        // annotation that is positioned over it rather than after it.
+        while (node && node->is_element() &&
+               (node->tag() == HTM_TAG_RT || node->tag() == HTM_TAG_RP)) {
+            node = node->next_sibling;
+        }
+    }
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
@@ -2651,8 +2702,6 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
     return RDT_NOT_SURE;
 }
 
-static float initial_letter_sink_size(DomNode* text_node);
-
 static void include_text_rect_bounds(ViewText* text, const TextRect* rect) {
     float right = max(text->x + text->width, rect->x + rect->width);
     float bottom = max(text->y + text->height, rect->y + rect->height);
@@ -2679,6 +2728,23 @@ static bool text_range_has_non_collapsed_content(ViewText* text,
     return false;
 }
 
+static bool initial_letter_block_trims_start_edge(const DomNode* text_node,
+                                                  const LayoutContext* lycon) {
+    if (text_node && text_node->parent && text_node->parent->is_element()) {
+        DomElement* pseudo = text_node->parent->as_element();
+        if (pseudo && pseudo->parent && pseudo->parent->is_element()) {
+            DomElement* owner = pseudo->parent->as_element();
+            if (owner && owner->blk) {
+                return (owner->block()->text_box_trim & TEXT_BOX_TRIM_START) != 0;
+            }
+        }
+    }
+    return lycon && lycon->block.establishing_element &&
+        lycon->block.establishing_element->blk &&
+        (lycon->block.establishing_element->block()->text_box_trim &
+         TEXT_BOX_TRIM_START) != 0;
+}
+
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
     if (text_length <= 0) {
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
@@ -2687,6 +2753,9 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
+    InitialLetterInfo initial_letter = {};
+    bool is_raised_initial_letter = layout_get_text_initial_letter_info(
+        static_cast<DomNode*>(text), &initial_letter) && initial_letter.raised;
     if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(text);
     ViewElement* text_parent = text->parent_view();
     if (!lycon->line.has_direct_block_text && text_parent && text_parent->is_block() &&
@@ -2714,6 +2783,26 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     // CSS 2.1 §8.3: Inline content has been placed on this line, so any pending
     // inline left edges (margin+border+padding) have been consumed.
     lycon->line.inline_start_edge_pending = 0;
+
+    if (is_raised_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
+        // Initial letters do not enlarge their originating line box. Shift the
+        // following inline flow down by the cap overhang so the glyph stays within
+        // the containing block without disturbing ruby or other line participants.
+        float overhang = max(0.0f, initial_letter.size - 1.0f) * lycon->block.line_height;
+        if (!initial_letter_block_trims_start_edge(static_cast<DomNode*>(text), lycon)) {
+            lycon->block.advance_y += overhang;
+        }
+        lycon->block.initial_letter_origin_offset_applied = true;
+
+        int following_lines = (int)ceilf(initial_letter.size - initial_letter.sink) - 1; // INT_CAST_OK: discrete initial-letter line count
+        if (following_lines > 0) {
+            lycon->block.initial_letter_exclusion_width = max(
+                lycon->block.initial_letter_exclusion_width, rect->width);
+            lycon->block.initial_letter_exclusion_lines = max(
+                lycon->block.initial_letter_exclusion_lines, following_lines);
+        }
+    }
+
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     // When line-height is explicitly set, the inline box height equals line-height.
     // Leading = line-height - content_height is split half above and half below.
@@ -2726,7 +2815,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             font_get_content_area_split(lycon->font.font_handle, &ascender, &descender);
         }
     }
-    if (ascender > 0 || descender > 0) {
+    if (!is_raised_initial_letter && (ascender > 0 || descender > 0)) {
         float half_leading = 0.0f;
         float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal) {
@@ -2799,16 +2888,6 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
         }
-        float initial_size = initial_letter_sink_size(text);
-        if (initial_size > 1.0f && lycon->block.line_height > 0.0f) {
-            // initial-letter reserves block-axis flow space; without this, following inline rows collapse upward.
-            float reserved_height = lycon->block.line_height * initial_size;
-            float reserved_descender = reserved_height - lycon->line.max_ascender;
-            if (reserved_descender > lycon->line.max_descender) {
-                lycon->line.max_descender = reserved_descender;
-                lycon->line.has_expanded_inline_lh = true;
-            }
-        }
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
@@ -2850,33 +2929,6 @@ static inline bool line_is_at_collapsible_text_edge(LayoutContext* lycon) {
         !lycon->line.has_replaced_content &&
         !lycon->line.has_c1_control_text &&
         !lycon->line.has_non_c1_text;
-}
-
-static float initial_letter_sink_size(DomNode* text_node) {
-    if (!text_node || !text_node->parent || !text_node->parent->is_element()) return 0.0f;
-    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(text_node->parent);
-    if (!elem || !elem->tag_name || strcmp(elem->tag_name, "::first-letter") != 0 ||
-        !elem->specified_style) {
-        return 0.0f;
-    }
-    CssDeclaration* decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_INITIAL_LETTER);
-    if (!decl || !decl->value) return 0.0f;
-    if (!decl->value_text || strstr(decl->value_text, "raise") == NULL) return 0.0f;
-    CssValue* value = decl->value;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        return value->data.keyword == CSS_VALUE_NORMAL ? 0.0f : 1.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return value->data.number.value > 1.0 ? (float)value->data.number.value : 0.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        CssValue* first = value->data.list.values[0];
-        if (first && first->type == CSS_VALUE_TYPE_NUMBER && first->data.number.value > 1.0) {
-            return (float)first->data.number.value;
-        }
-    }
-    return 0.0f;
 }
 
 static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
@@ -3214,12 +3266,33 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // CSS line-height affects line spacing/positioning, but text rect height is font-based
     // Use platform-specific metrics (CoreText on macOS) for accurate ascent+descent
     rect->height = font_get_cell_height(lycon->font.font_handle);
+    InitialLetterInfo rect_initial_letter = {};
+    bool is_rect_initial = layout_get_text_initial_letter_info(
+        text_node, &rect_initial_letter);
+    bool is_raised_rect_initial = is_rect_initial && rect_initial_letter.raised;
+    if (is_rect_initial && text_view->font &&
+        text_view->font->initial_letter_computed_font_size > 0.0f &&
+        text_view->font->font_size > 0.0f) {
+        // Range geometry retains the computed pseudo font while glyph layout uses
+        // the CSS Inline 3 used size calculated from the containing line.
+        rect->height *= text_view->font->initial_letter_computed_font_size /
+            text_view->font->font_size;
+    }
 
     // Text rect y-position based on vertical alignment
     // CSS half-leading model: text is centered within the line box
     // When line-height < font height, half_leading can be negative (text extends above line box)
     // Use backend font_height for half-leading calculation (consistent with lead_y calculation)
-    if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
+    if (is_raised_rect_initial) {
+        rect->y = lycon->block.advance_y + lycon->block.lead_y;
+        if (initial_letter_block_trims_start_edge(text_node, lycon)) {
+            // trim-start makes the overhang part of the trimmed first-line area,
+            // so the initial rises without moving the following inline content.
+            rect->y -= max(0.0f, rect_initial_letter.size - 1.0f) *
+                lycon->block.line_height;
+        }
+    }
+    else if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         rect->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }

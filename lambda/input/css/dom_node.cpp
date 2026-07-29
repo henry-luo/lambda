@@ -113,6 +113,13 @@ static const HtmlElementInfo html_elements[] = {
     {"progress", HTM_TAG_PROGRESS},
     {"q", HTM_TAG_Q},
     {"radialgradient", HTM_TAG_RADIALGRADIENT},
+    // Ruby tags must retain their HTML identities so the layout engine can
+    // establish ruby formatting rather than treating them as unknown spans.
+    {"rb", HTM_TAG_RB},
+    {"rp", HTM_TAG_RP},
+    {"rt", HTM_TAG_RT},
+    {"rtc", HTM_TAG_RTC},
+    {"ruby", HTM_TAG_RUBY},
     {"s", HTM_TAG_S},
     {"samp", HTM_TAG_SAMP},
     {"script", HTM_TAG_SCRIPT},

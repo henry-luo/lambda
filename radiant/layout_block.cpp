@@ -4596,6 +4596,9 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     // Initialize is_first_line to true when starting a new block
     lycon->block.is_first_line = true;
+    lycon->block.initial_letter_exclusion_width = 0.0f;
+    lycon->block.initial_letter_exclusion_lines = 0;
+    lycon->block.initial_letter_origin_offset_applied = false;
 
     // -webkit-line-clamp support: initialize line tracking
     lycon->block.line_number = 0;

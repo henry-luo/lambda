@@ -2329,7 +2329,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT ||
         intrinsic_tag == HTM_TAG_UL || intrinsic_tag == HTM_TAG_OL ||
-        intrinsic_tag == HTM_TAG_MENU;
+        intrinsic_tag == HTM_TAG_MENU || intrinsic_tag == HTM_TAG_RUBY ||
+        intrinsic_tag == HTM_TAG_RT;
     if (!element->styles_resolved() && intrinsic_needs_resolved_style) {
         // Form controls and list containers have UA box metrics that participate
         // in intrinsic sizing, so resolve the cascade before measuring their box.

@@ -31,6 +31,7 @@ static BlockProp make_block_prop_default() {
 static FontProp make_font_prop_default() {
     FontProp value = {};
     value.font_size = 16.0f;
+    value.initial_letter_computed_font_size = 0.0f;
     value.font_style = CSS_VALUE_NORMAL;
     value.font_weight = CSS_VALUE_NORMAL;
     value.font_weight_numeric = 400;

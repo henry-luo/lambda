@@ -48,6 +48,9 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->direction = CSS_VALUE_LTR;
     ctx->given_width = -1;
     ctx->given_height = -1;
+    ctx->initial_letter_exclusion_width = 0.0f;
+    ctx->initial_letter_exclusion_lines = 0;
+    ctx->initial_letter_origin_offset_applied = false;
 
     // Initialize BFC hierarchy
     ctx->parent = nullptr;

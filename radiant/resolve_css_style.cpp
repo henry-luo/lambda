@@ -2867,6 +2867,10 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_INLINE;
                                 display.inner = CSS_VALUE_TABLE;
                                 return display;
+                            } else if (keyword == CSS_VALUE_RUBY) {
+                                display.outer = CSS_VALUE_INLINE;
+                                display.inner = CSS_VALUE_RUBY;
+                                return needs_blockify ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_TABLE_ROW) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE_ROW;
@@ -3080,6 +3084,11 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_RUBY) {
+            // HTML ruby establishes an inline ruby formatting context, not a
+            // regular inline flow box containing sequential base and <rt> text.
+            display.outer = CSS_VALUE_INLINE;
+            display.inner = CSS_VALUE_RUBY;
         } else if (tag_id == HTM_TAG_SVG) {
             // SVG elements are inline replaced elements by default
             display.outer = CSS_VALUE_INLINE;
@@ -3088,6 +3097,7 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
             tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
+            tag_id == HTM_TAG_RP ||
             tag_id == HTM_TAG_DATALIST) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
@@ -4488,29 +4498,10 @@ static void apply_grid_template_track_value(const CssValue* value,
 // ============================================================================
 
 // Callback for AVL tree traversal - first pass (font properties only)
-static bool is_first_letter_raise_initial_letter_context(LayoutContext* lycon) {
-    if (!lycon || !lycon->view || !lycon->view->is_element()) return false;
-    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
-    if (!elem || !elem->specified_style || !elem->tag_name ||
-        strcmp(elem->tag_name, "::first-letter") != 0) {
-        return false;
-    }
-    CssDeclaration* decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_INITIAL_LETTER);
-    if (!decl || !decl->value) return false;
-    return decl->value_text && strstr(decl->value_text, "raise") != NULL;
-}
-
 static bool resolve_font_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyId prop_id = (CssPropertyId)node->property_id;
-
-    if ((prop_id == CSS_PROPERTY_FONT_SIZE || prop_id == CSS_PROPERTY_LINE_HEIGHT) &&
-        is_first_letter_raise_initial_letter_context(lycon)) {
-        // initial-letter sizes from the parent line metrics; authored pseudo font metrics would create a plain oversized first-letter.
-        return true;
-    }
 
     // Only process font-related properties in first pass
     // These must be resolved before width/height/etc. which may use em/ex units
@@ -4782,6 +4773,54 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
     return true;
 }
 
+static void apply_raised_initial_letter_used_font_size(DomElement* dom_elem,
+                                                       LayoutContext* lycon,
+                                                       const FontBox& parent_font) {
+    if (!dom_elem || !lycon || !dom_elem->tag_name ||
+        strcmp(dom_elem->tag_name, "::first-letter") != 0) {
+        return;
+    }
+
+    InitialLetterInfo initial = {};
+    if (!layout_get_initial_letter_info(dom_elem, &initial) || !initial.raised ||
+        !parent_font.style || !parent_font.font_handle ||
+        lycon->block.line_height <= 0.0f) {
+        return;
+    }
+
+    ViewSpan* span = lam::view_require_element(lycon->view);
+    if (!span) return;
+    span->ensure_font(lycon);
+    if (!span->font || span->fontp()->font_size <= 0.0f) return;
+
+    FontBox computed_font = {};
+    setup_font(lycon->ui_context, &computed_font, span->font);
+    const FontMetrics* parent_metrics = font_get_metrics(parent_font.font_handle);
+    const FontMetrics* initial_metrics = font_get_metrics(computed_font.font_handle);
+    if (!parent_metrics || !initial_metrics || parent_metrics->cap_height <= 0.0f ||
+        initial_metrics->cap_height <= 0.0f) {
+        return;
+    }
+
+    float computed_size = span->fontp()->font_size;
+    float initial_cap_ratio = initial_metrics->cap_height / computed_size;
+    if (initial_cap_ratio <= 0.0f) return;
+
+    float target_cap_height = (initial.size - 1.0f) * lycon->block.line_height +
+        parent_metrics->cap_height;
+    float used_size = target_cap_height / initial_cap_ratio;
+    if (used_size <= 0.0f || isnan(used_size)) return;
+
+    // Initial-letter font-size stays computed for em values, but glyph sizing is
+    // derived from the containing line's cap-height and line-height.
+    span->font->initial_letter_computed_font_size = computed_size;
+    span->font->font_size = used_size;
+    span->font->font_size_from_medium = false;
+
+    FontBox used_font = {};
+    setup_font(lycon->ui_context, &used_font, span->font);
+}
+
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
@@ -4811,6 +4850,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
 
     FontProp* parent_font_style = lycon->font.style;
+    FontBox parent_font = lycon->font;
 #ifndef NDEBUG
     int font_processed = 0;
 #endif
@@ -5473,6 +5513,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+    apply_raised_initial_letter_used_font_size(dom_elem, lycon, parent_font);
     resolve_placeholder_pseudo_style(dom_elem, lycon);
 }
 

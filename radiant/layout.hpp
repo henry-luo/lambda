@@ -25,6 +25,19 @@
 
 typedef struct LayoutContext LayoutContext;
 
+// CSS Inline 3 §7.3 initial-letter value after resolving the size and sink.
+// `raised` also covers the equivalent explicit sink of one line.
+struct InitialLetterInfo {
+    float size;
+    float sink;
+    bool raised;
+};
+
+bool layout_get_initial_letter_info(const DomElement* element,
+                                    InitialLetterInfo* out_info);
+bool layout_get_text_initial_letter_info(const DomNode* text_node,
+                                         InitialLetterInfo* out_info);
+
 // ============================================================================
 // Layout Safety Guards
 // ============================================================================
@@ -1216,6 +1229,12 @@ typedef struct BlockContext {
     // CSS text-indent: applies only to the first line of a block container
     float text_indent;          // Resolved text-indent value in pixels
     bool is_first_line;         // True if we're laying out the first line of this block
+
+    // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
+    // its inline-start margin edge while the letter occupies those lines.
+    float initial_letter_exclusion_width;
+    int initial_letter_exclusion_lines;
+    bool initial_letter_origin_offset_applied;
 
     // -webkit-line-clamp support
     int line_number;            // Current line number (1-based, incremented by line_break)
