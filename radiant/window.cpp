@@ -72,11 +72,14 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
 
     Context* saved_input_ctx = input_context;
     // Promise and timer callbacks allocate during the host pump just like event
-    // listeners do; use the retained document heap instead of the loader's
-    // already-restored context, which may be null or belong to another batch.
-    EvalContext* saved_ctx = eval_context_bind(pump_ctx);
+    // listeners do. The pump may initialize a fresh host thread, but it cannot
+    // replace a different evaluator already assigned to that thread.
+    if (!eval_context_thread_initialize(pump_ctx)) return false;
     input_context = nullptr;
-    if (pump_ctx->js_state) js_runtime_state_bind_context(pump_ctx);
+    if (pump_ctx->js_state && !js_runtime_state_thread_initialize(pump_ctx)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     js_dom_set_document(doc);
     // A native handler can enqueue a Promise callback after inserting its DOM
     // (Popper and virtual-list libraries do this). Commit that insertion before
@@ -102,9 +105,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         js_event_loop_pump_nowait();
     }
     if (uicon) radiant_reconcile_js_dom_mutations(uicon, doc);
-    eval_context_restore(saved_ctx);
     input_context = saved_input_ctx;
-    js_runtime_state_bind_context(saved_ctx);
     return pumped;
 }
 

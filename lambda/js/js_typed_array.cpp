@@ -1579,7 +1579,7 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
 }
 
 static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> ctor_root(roots, js_get_constructor(
         (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
@@ -1604,7 +1604,7 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     m->data = ab;
     m->data_cap = 0;
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> result_root(roots, (Item){.map = m});
     js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
     return result_root.get();
@@ -1680,7 +1680,7 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> result_root(roots, (Item){.map = m});
     js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
     return result_root.get();
@@ -2161,7 +2161,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
     Rooted<Item> view_root(roots, ItemNull);
     if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
@@ -2195,7 +2195,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
 
 extern "C" Item js_buffer_from_bytes(const char* data, int len) {
     if (len < 0) len = 0;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> buffer_root(roots, js_typed_array_new(JS_TYPED_UINT8, len));
     if (!js_is_typed_array(buffer_root.get())) return ItemNull;
     JsTypedArray* typed_array = js_get_typed_array_ptr(buffer_root.get().map);
@@ -2289,7 +2289,7 @@ extern "C" Item binary_from_dataview(JsDataView* dv) {
 
 // Create a typed array as a view over an ArrayBuffer
 extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> view_root(roots, ItemNull);
     buffer_item = buffer_root.get();
@@ -2367,7 +2367,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
 // Create a typed array from another array (copy)
 extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> source_root(roots, source);
     Rooted<Item> result_root(roots, ItemNull);
     source = source_root.get();
@@ -2439,7 +2439,7 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
 
 // Smart constructor: dispatches based on argument type
 extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset_item, Item length_item, int argc) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     // Constructor coercion creates names and can collect before it inspects an
     // array argument; keep every caller-owned Item exact until the result is
     // linked into its destination object.
@@ -3196,7 +3196,7 @@ extern "C" JsDataView* js_get_dataview_ptr(Item val) {
 }
 
 extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> buffer_root(roots, buffer);
     buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {

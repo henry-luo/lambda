@@ -613,8 +613,7 @@ static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_no
 }
 
 MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
-    MIR_reg_t fn_item = jm_call_3(mt, "js_new_method_function_context", MIR_T_I64,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+    MIR_reg_t fn_item = jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
     if (fc->is_strict) {
@@ -1525,8 +1524,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     JsFuncCollected* func = &mt->func_entries[fi];
                     int fpc = func->param_count;
                     if (func->has_rest_param) fpc = -fpc;
-                    MIR_reg_t fn_reg = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+                    MIR_reg_t fn_reg = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
                     jm_emit_finalize_function(mt, fn_reg, func, func->node);
@@ -12540,8 +12538,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
         if (use_scope_env) {
-            fn_reg = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            fn_reg = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
@@ -12637,8 +12634,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_reg_op(mt->ctx, val)));
             }
             jm_copy_parent_env_link_for_copied_closure(mt, fc, env, env_alloc_size, has_remapped);
-            fn_reg = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            fn_reg = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -12661,8 +12657,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_track_tdz_closure_captures(mt, env, fc, has_remapped);
         }
     } else {
-        fn_reg = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        fn_reg = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
     }
@@ -12747,8 +12742,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
         if (use_scope_env) {
             jm_track_last_closure_env(mt, mt->scope_env_reg, fc, true);
 
-            fn_reg = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            fn_reg = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
@@ -12942,8 +12936,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             jm_copy_parent_env_link_for_copied_closure(mt, fc, env, env_alloc_size, has_remapped);
             jm_track_last_closure_env(mt, env, fc, has_remapped);
 
-            fn_reg = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            fn_reg = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -12957,8 +12950,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             }
         }
     } else {
-        fn_reg = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        fn_reg = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
     }

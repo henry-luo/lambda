@@ -221,13 +221,12 @@ Item js_get_length_item(Item object);
 // =============================================================================
 
 Item js_new_function(void* func_ptr, int param_count);
-Item js_new_function_context(Context* runtime, void* func_ptr, int param_count);
+Item js_new_function_mir(void* func_ptr, int param_count);
 Item js_new_distinct_function(void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
-Item js_new_method_function_context(Context* runtime, void* func_ptr, int param_count);
+Item js_new_method_function_mir(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
-Item js_new_closure_context(Context* runtime, void* func_ptr, int param_count,
-                            Item* env, int env_size);
+Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
@@ -274,26 +273,21 @@ Item js_call_function_into(Item func_item, Item this_val, Item* args,
 Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
                                           Item* args, int arg_count,
                                           uint64_t* result_home);
-Item js_call_export_0_into(Context* runtime, Function* function,
+Item js_call_export_0_into(Function* function, uint64_t* result_home);
+Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
+Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
+Item js_call_export_3_into(Function* function, Item a, Item b, Item c,
                            uint64_t* result_home);
-Item js_call_export_1_into(Context* runtime, Function* function, Item a,
+Item js_call_export_4_into(Function* function, Item a, Item b, Item c, Item d,
                            uint64_t* result_home);
-Item js_call_export_2_into(Context* runtime, Function* function, Item a, Item b,
-                           uint64_t* result_home);
-Item js_call_export_3_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, uint64_t* result_home);
-Item js_call_export_4_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, Item d, uint64_t* result_home);
-Item js_call_export_5_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, Item d, Item e, uint64_t* result_home);
-Item js_call_export_6_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, Item d, Item e, Item f, uint64_t* result_home);
-Item js_call_export_7_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, Item d, Item e, Item f, Item g,
-                           uint64_t* result_home);
-Item js_call_export_8_into(Context* runtime, Function* function, Item a, Item b,
-                           Item c, Item d, Item e, Item f, Item g, Item h,
-                           uint64_t* result_home);
+Item js_call_export_5_into(Function* function, Item a, Item b, Item c, Item d,
+                           Item e, uint64_t* result_home);
+Item js_call_export_6_into(Function* function, Item a, Item b, Item c, Item d,
+                           Item e, Item f, uint64_t* result_home);
+Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d,
+                           Item e, Item f, Item g, uint64_t* result_home);
+Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
+                           Item e, Item f, Item g, Item h, uint64_t* result_home);
 void js_call_stats_dump(void);
 void js_array_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);
@@ -939,8 +933,7 @@ Item js_symbol_well_known(Item name);
  * env/env_size represent captured closure variables.
  */
 Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
-Item js_generator_create_context(Context* runtime, void* func_ptr, Item* env,
-                                 int env_size, int is_async);
+Item js_generator_create_mir(void* func_ptr, Item* env, int env_size, int is_async);
 
 /**
  * Advance the generator: execute next state, return {value, done} result.
@@ -1014,8 +1007,8 @@ Item js_await_sync(Item value);                  // Phase 5: synchronous await u
 int64_t js_async_must_suspend(Item value);       // 1 if pending promise, 0 otherwise
 Item js_async_get_resolved(void);                // get cached resolved value
 Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val);
-Item js_async_context_create_context(Context* runtime, void* fn_ptr, Item* env,
-                                     int64_t env_size, Item this_val);
+Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
+                                 Item this_val);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 

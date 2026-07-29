@@ -82,7 +82,7 @@ static LambdaRootFrame* symbol_key_list_add_chunk(LambdaSymbolKeyList* keys) {
         1, sizeof(LambdaRootFrame), MEM_CAT_CONTAINER);
     if (!chunk) return nullptr;
     size_t capacity = keys->next_chunk_capacity;
-    if (!lambda_root_frame_begin((Context*)context, chunk, capacity) ||
+    if (!lambda_root_frame_begin(chunk, capacity) ||
             !keys->root_chunks.append(chunk)) {
         lambda_root_frame_end(chunk);
         mem_free(chunk);
@@ -218,7 +218,7 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     // The data-zone allocation can force GC before this helper returns the new
     // header to generated code, so the native construction interval needs an
     // exact root of its own.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
     arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
@@ -264,7 +264,7 @@ ArrayNum* array_num_new_external_view(Container* base, void* data_base,
 
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     if (!roots.valid()) return NULL;
     // The shape allocation may collect before the new view reaches its owner.
     Rooted<ArrayNum*> rooted_view(roots, view);
@@ -295,7 +295,7 @@ ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
     }
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     if (!roots.valid()) return NULL;
     // The shape allocation may collect before the new view reaches its owner.
     Rooted<ArrayNum*> rooted_view(roots, view);
@@ -318,7 +318,7 @@ ArrayNum* array_num_new_storage_view(ByteStorage* storage,
         bool mutable_view) {
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     if (!roots.valid()) return NULL;
     // The shape allocation may collect before the new view reaches its owner.
     Rooted<ArrayNum*> rooted_view(roots, view);
@@ -454,7 +454,7 @@ ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim
     if (!arr) return NULL;
     // The shape allocation can collect the newly returned header before its
     // generated caller has a chance to install the result in a canonical slot.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
     ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
@@ -630,7 +630,7 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
 
     // Both the parent and its shape can otherwise disappear or relocate at
     // either allocation below while this helper holds native/interior pointers.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_parent(roots, parent);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
@@ -1509,7 +1509,7 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner && inner->is_spreadable) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
@@ -1524,7 +1524,7 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         List* inner = item.array;
         if (inner && inner->is_spreadable) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
@@ -1539,7 +1539,7 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* inner = item.array_num;
         if (inner && inner->is_spreadable) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < inner->length; i++) {
@@ -1563,7 +1563,7 @@ void array_push_spread_all(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
@@ -1577,7 +1577,7 @@ void array_push_spread_all(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* inner = item.array_num;
         if (inner) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < inner->length; i++) {
@@ -1705,7 +1705,7 @@ static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
 }
 
 Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> rooted_rows_item(roots, rows_item);
     Rooted<Item> rooted_keys_item(roots, keys_item);
     Rooted<Array*> rooted_out(roots, (Array*)NULL);
@@ -1804,7 +1804,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
 }
 
 Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_rows(roots, rows_item);
     Rooted<Item> rooted_keys(roots, keys_item);
     Rooted<Item> rooted_aliases(roots, aliases_item);

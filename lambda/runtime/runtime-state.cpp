@@ -9,14 +9,38 @@
 // focused runtime fixtures share one provider without linking each other.
 __thread EvalContext* context = nullptr;
 
-EvalContext* eval_context_bind(EvalContext* next) {
-    EvalContext* previous = context;
-    context = next;
-    return previous;
+bool eval_context_thread_initialize(EvalContext* owner) {
+    if (!owner) {
+        log_error("eval-thread-init: missing EvalContext owner");
+        return false;
+    }
+    if (context && context != owner) {
+        // A live evaluator thread cannot borrow another isolate at a nested
+        // boundary; that work must be routed to the other owner thread.
+        log_error("eval-thread-init: refusing context switch current=%p owner=%p",
+                  (void*)context, (void*)owner);
+        return false;
+    }
+    context = owner;
+    return true;
 }
 
-void eval_context_restore(EvalContext* previous) {
-    context = previous;
+bool eval_context_thread_matches(const EvalContext* owner) {
+    return owner && context == owner;
+}
+
+bool eval_context_thread_shutdown(EvalContext* owner) {
+    if (!owner || context != owner) {
+        log_error("eval-thread-shutdown: owner mismatch current=%p owner=%p",
+                  (void*)context, (void*)owner);
+        return false;
+    }
+    context = NULL;
+    return true;
+}
+
+extern "C" Context* eval_context_tls_runtime(void) {
+    return (Context*)context;
 }
 
 static uint32_t module_state_capacity_for(uint32_t module_id) {
@@ -25,9 +49,9 @@ static uint32_t module_state_capacity_for(uint32_t module_id) {
     return capacity;
 }
 
-extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
+extern "C" bool lambda_module_state_prepare(uint32_t module_id,
         uint32_t var_count, uint32_t member_ic_count) {
-    EvalContext* owner = (EvalContext*)runtime;
+    EvalContext* owner = context;
     if (!owner) return false;
 
     if (module_id >= owner->module_state_capacity) {
@@ -52,7 +76,7 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
             return false;
         }
         if (state->vars && !state->vars_registered) {
-            if (!heap_register_gc_root_range_for(runtime, (uint64_t*)state->vars,
+            if (!heap_try_register_gc_root_range((uint64_t*)state->vars,
                     (int)state->var_count)) return false;
             state->vars_registered = true;
         }
@@ -67,7 +91,7 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
     if (var_count) {
         state->vars = (Item*)mem_calloc(var_count, sizeof(Item), MEM_CAT_EVAL);
         state->var_payloads = (uint64_t*)mem_calloc(var_count, sizeof(uint64_t), MEM_CAT_EVAL);
-        if (!state->vars || !state->var_payloads || !heap_register_gc_root_range_for(runtime,
+        if (!state->vars || !state->var_payloads || !heap_try_register_gc_root_range(
                 (uint64_t*)state->vars, (int)var_count)) {
             mem_free(state->vars);
             mem_free(state->var_payloads);
@@ -82,8 +106,7 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
         // type and performs no cache publication or synchronization.
         state->member_ics = mem_calloc(member_ic_count, 2 * sizeof(uint64_t), MEM_CAT_EVAL);
         if (!state->member_ics) {
-            if (state->vars) heap_unregister_gc_root_range_for(runtime,
-                (uint64_t*)state->vars);
+            if (state->vars) heap_unregister_gc_root_range((uint64_t*)state->vars);
             mem_free(state->vars);
             mem_free(state);
             return false;
@@ -93,9 +116,9 @@ extern "C" bool lambda_module_state_prepare(Context* runtime, uint32_t module_id
     return true;
 }
 
-extern "C" bool lambda_module_state_reserve(Context* runtime, uint32_t var_count,
+extern "C" bool lambda_module_state_reserve(uint32_t var_count,
         uint32_t member_ic_count, uint32_t* out_module_id) {
-    EvalContext* owner = (EvalContext*)runtime;
+    EvalContext* owner = context;
     if (!owner || !out_module_id) return false;
     Runtime* runtime_owner = owner->runtime;
     if (!runtime_owner) {
@@ -103,14 +126,14 @@ extern "C" bool lambda_module_state_reserve(Context* runtime, uint32_t var_count
         return false;
     }
     uint32_t module_id = runtime_owner->next_module_state_id++;
-    if (!lambda_module_state_prepare(runtime, module_id, var_count, member_ic_count)) return false;
+    if (!lambda_module_state_prepare(module_id, var_count, member_ic_count)) return false;
     *out_module_id = module_id;
     return true;
 }
 
-extern "C" bool lambda_active_js_module_state_ensure_vars(Context* runtime,
+extern "C" bool lambda_active_js_module_state_ensure_vars(
         uint32_t required_var_count) {
-    EvalContext* owner = (EvalContext*)runtime;
+    EvalContext* owner = context;
     LambdaModuleState* state = owner ? owner->active_js_module_state : NULL;
     if (!state || required_var_count <= state->var_count) return state != NULL;
 
@@ -124,7 +147,7 @@ extern "C" bool lambda_active_js_module_state_ensure_vars(Context* runtime,
     }
     memcpy(vars, state->vars, state->var_count * sizeof(Item));
     memcpy(payloads, state->var_payloads, state->var_count * sizeof(uint64_t));
-    if (!heap_register_gc_root_range_for(runtime, (uint64_t*)vars,
+    if (!heap_try_register_gc_root_range((uint64_t*)vars,
             (int)required_var_count)) {
         mem_free(vars);
         mem_free(payloads);
@@ -134,7 +157,7 @@ extern "C" bool lambda_active_js_module_state_ensure_vars(Context* runtime,
     // Direct eval shares its caller's bindings but can introduce new slots.
     // Retire the old exact root only after the replacement root is published.
     if (state->vars_registered) {
-        heap_unregister_gc_root_range_for(runtime, (uint64_t*)state->vars);
+        heap_unregister_gc_root_range((uint64_t*)state->vars);
     }
     mem_free(state->vars);
     mem_free(state->var_payloads);
@@ -145,9 +168,9 @@ extern "C" bool lambda_active_js_module_state_ensure_vars(Context* runtime,
     return true;
 }
 
-extern "C" bool lambda_module_state_bind_static(Context* runtime,
-        uint32_t module_id, void* consts, void* type_list) {
-    EvalContext* owner = (EvalContext*)runtime;
+extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
+        void* consts, void* type_list) {
+    EvalContext* owner = context;
     if (!owner || module_id >= owner->module_state_capacity) return false;
     LambdaModuleState* state = owner->module_states[module_id];
     if (!state) return false;
@@ -156,9 +179,9 @@ extern "C" bool lambda_module_state_bind_static(Context* runtime,
     return true;
 }
 
-extern "C" void* lambda_module_const_at(Context* runtime,
-        const LambdaModuleLayout* layout, uint32_t index) {
-    EvalContext* owner = (EvalContext*)runtime;
+extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
+        uint32_t index) {
+    EvalContext* owner = context;
     if (!owner || !layout || layout->module_id >= owner->module_state_capacity) return NULL;
     LambdaModuleState* state = owner->module_states[layout->module_id];
     if (!state || !state->consts) return NULL;
@@ -195,14 +218,14 @@ extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
     }
 }
 
-extern "C" void lambda_module_state_reset(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
+extern "C" void lambda_module_state_reset(void) {
+    EvalContext* owner = context;
     if (!owner || !owner->module_states) return;
     for (uint32_t i = 0; i < owner->module_state_capacity; i++) {
         LambdaModuleState* state = owner->module_states[i];
         if (!state) continue;
         if (state->vars && state->vars_registered) {
-            heap_unregister_gc_root_range_for(runtime, (uint64_t*)state->vars);
+            heap_unregister_gc_root_range((uint64_t*)state->vars);
             state->vars_registered = false;
         }
         if (state->vars) {
@@ -216,15 +239,15 @@ extern "C" void lambda_module_state_reset(Context* runtime) {
     }
 }
 
-extern "C" void lambda_module_state_destroy(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
+extern "C" void lambda_module_state_destroy(void) {
+    EvalContext* owner = context;
     if (!owner || !owner->module_states) return;
     owner->active_js_module_state = NULL;
     for (uint32_t i = 0; i < owner->module_state_capacity; i++) {
         LambdaModuleState* state = owner->module_states[i];
         if (!state) continue;
         if (state->vars && state->vars_registered) {
-            heap_unregister_gc_root_range_for(runtime, (uint64_t*)state->vars);
+            heap_unregister_gc_root_range((uint64_t*)state->vars);
         }
         mem_free(state->vars);
         mem_free(state->var_payloads);

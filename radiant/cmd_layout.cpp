@@ -4412,7 +4412,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             math_runtime->result_arena = input->arena;
 
             Input* math_result = run_script_mir(math_runtime, script->str, (char*)"<math_render>", false);
-            context = nullptr;
             input_context = nullptr;
 
             if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
@@ -4723,9 +4722,8 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // run_script_mir leaves thread-local context pointing at a stack Runner.
-    // The runtime itself is retained on the document; clear the transient TLS.
-    context = nullptr;
+    // The retained runtime remains this eval thread's owner until document
+    // teardown; only input construction state is call-scoped.
     input_context = nullptr;
 
     if (!html_root) {
@@ -5098,6 +5096,12 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_error("load_lambda_script_doc: invalid parameters");
         return nullptr;
     }
+    if (context) {
+        // Starting a second document Runtime on an occupied eval thread would
+        // require the forbidden save/switch/restore lifetime pattern.
+        log_error("load_lambda_script_doc: eval thread already owns a Runtime");
+        return nullptr;
+    }
 
     struct ScriptTempPathGuard {
         char* path;
@@ -5125,7 +5129,11 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     }
     // Template/render registration starts before run_script_mir initializes the
     // heap, but it still belongs to this long-lived document Runtime.
-    context = layout_context;
+    if (!eval_context_thread_initialize(layout_context)) {
+        log_error("load_lambda_script_doc: failed to initialize eval thread");
+        release_layout_runtime(runtime);
+        return nullptr;
+    }
 
     // Phase 5: Create result Input with arena for unified DOM allocation.
     // Elements from JIT execution will be fat DomElements on this arena.
@@ -5153,7 +5161,12 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             layout_context->ui_mode = true;
             layout_context->arena = runtime->result_arena;
         }
-        context = layout_context;
+        if (!eval_context_thread_matches(layout_context)) {
+            log_error("load_lambda_script_doc: eval owner changed during execution");
+            release_layout_runtime(runtime);
+            pool_destroy(result_pool);
+            return nullptr;
+        }
         input_context = (Context*)layout_context;
     }
 
@@ -5459,8 +5472,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     Item html_item_root = {.element = html_elem};
     render_map_set_doc_root(html_item_root);
 
-    // Event execution restores this document Runtime's canonical context.
-    context = nullptr;
+    // Event execution continues on this document Runtime's canonical context.
     input_context = nullptr;
 
     // Store the retained runtime on the document for event handler execution.
@@ -6789,8 +6801,9 @@ static bool layout_single_file(
         // editor path table still belong to this document Runtime, so release
         // them before JS teardown removes that canonical context.
         Runtime* render_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
-        if (render_runtime) {
-            context = runtime_get_eval_context(render_runtime);
+        if (render_runtime &&
+                !eval_context_thread_initialize(runtime_get_eval_context(render_runtime))) {
+            log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();
         // StateStore releases document-owned template and render maps while

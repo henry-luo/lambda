@@ -6,6 +6,7 @@
 #include "lambda-decimal.hpp"
 #include "../lambda-data.hpp"
 #include "../runtime/heap_api.h"
+#include "../runtime/runtime-state.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
@@ -248,8 +249,15 @@ Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited);
 // Item Creation (higher-level API)
 // ─────────────────────────────────────────────────────────────────────
 
-Item decimal_from_int64(int64_t val, EvalContext* ctx) {
-    mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
+static mpd_context_t* decimal_current_fixed_context() {
+    // Native decimal helpers use the thread owner; only generated MIR
+    // functions carry EvalContext as a hidden ABI argument.
+    EvalContext* owner = (EvalContext*)eval_context_tls_runtime();
+    return owner && owner->decimal_ctx ? owner->decimal_ctx : decimal_fixed_context();
+}
+
+Item decimal_from_int64(int64_t val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
     mpd_t* dec_val = mpd_new(dec_ctx);
     if (!dec_val) return ItemError;
     
@@ -257,8 +265,8 @@ Item decimal_from_int64(int64_t val, EvalContext* ctx) {
     return decimal_push_result(dec_val, false);  // fixed precision
 }
 
-Item decimal_from_uint64(uint64_t val, EvalContext* ctx) {
-    mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
+Item decimal_from_uint64(uint64_t val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
     mpd_t* dec_val = mpd_new(dec_ctx);
     if (!dec_val) return ItemError;
 
@@ -266,8 +274,8 @@ Item decimal_from_uint64(uint64_t val, EvalContext* ctx) {
     return decimal_push_result(dec_val, false);  // fixed precision
 }
 
-Item decimal_from_double(double val, EvalContext* ctx) {
-    mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
+Item decimal_from_double(double val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
     mpd_t* dec_val = mpd_new(dec_ctx);
     if (!dec_val) return ItemError;
     
@@ -284,10 +292,10 @@ Item decimal_from_double(double val, EvalContext* ctx) {
     return decimal_push_result(dec_val, false);  // fixed precision
 }
 
-Item decimal_from_string(const char* str, EvalContext* ctx) {
+Item decimal_from_string(const char* str) {
     if (!str) return ItemError;
     
-    mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
     mpd_t* dec_val = mpd_new(dec_ctx);
     if (!dec_val) return ItemError;
     
@@ -757,7 +765,7 @@ static void cleanup_temp(mpd_t* dec, bool was_decimal) {
     }
 }
 
-Item decimal_add(Item a, Item b, EvalContext* ctx) {
+Item decimal_add(Item a, Item b) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -797,7 +805,7 @@ Item decimal_add(Item a, Item b, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_sub(Item a, Item b, EvalContext* ctx) {
+Item decimal_sub(Item a, Item b) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -837,7 +845,7 @@ Item decimal_sub(Item a, Item b, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_mul(Item a, Item b, EvalContext* ctx) {
+Item decimal_mul(Item a, Item b) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -883,9 +891,7 @@ typedef enum DecimalDivisionOp {
     DECIMAL_REMAINDER,
 } DecimalDivisionOp;
 
-static Item decimal_division_apply(Item a, Item b, EvalContext* ctx,
-                                   DecimalDivisionOp op) {
-    (void)ctx;
+static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -947,19 +953,19 @@ static Item decimal_division_apply(Item a, Item b, EvalContext* ctx,
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_div(Item a, Item b, EvalContext* ctx) {
-    return decimal_division_apply(a, b, ctx, DECIMAL_DIVIDE);
+Item decimal_div(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_DIVIDE);
 }
 
-Item decimal_idiv(Item a, Item b, EvalContext* ctx) {
-    return decimal_division_apply(a, b, ctx, DECIMAL_INTEGER_DIVIDE);
+Item decimal_idiv(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_INTEGER_DIVIDE);
 }
 
-Item decimal_mod(Item a, Item b, EvalContext* ctx) {
-    return decimal_division_apply(a, b, ctx, DECIMAL_REMAINDER);
+Item decimal_mod(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_REMAINDER);
 }
 
-Item decimal_pow(Item a, Item b, EvalContext* ctx) {
+Item decimal_pow(Item a, Item b) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -997,7 +1003,7 @@ Item decimal_pow(Item a, Item b, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_neg(Item a, EvalContext* ctx) {
+Item decimal_neg(Item a) {
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     
@@ -1024,7 +1030,7 @@ Item decimal_neg(Item a, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_abs(Item a, EvalContext* ctx) {
+Item decimal_abs(Item a) {
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     
@@ -1135,7 +1141,7 @@ char* decimal_to_string(Decimal* decimal) {
 // Rounding Operations (floor, ceil, round, trunc)
 // ─────────────────────────────────────────────────────────────────────
 
-Item decimal_floor(Item a, EvalContext* ctx) {
+Item decimal_floor(Item a) {
     if (!decimal_is_any(a)) return ItemError;
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
@@ -1150,7 +1156,7 @@ Item decimal_floor(Item a, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_ceil(Item a, EvalContext* ctx) {
+Item decimal_ceil(Item a) {
     if (!decimal_is_any(a)) return ItemError;
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
@@ -1165,7 +1171,7 @@ Item decimal_ceil(Item a, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_round(Item a, EvalContext* ctx) {
+Item decimal_round(Item a) {
     if (!decimal_is_any(a)) return ItemError;
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
@@ -1191,7 +1197,7 @@ Item decimal_round(Item a, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_trunc(Item a, EvalContext* ctx) {
+Item decimal_trunc(Item a) {
     if (!decimal_is_any(a)) return ItemError;
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();

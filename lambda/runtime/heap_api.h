@@ -19,15 +19,23 @@ void* heap_data_alloc(size_t size);
 void* heap_data_calloc(size_t size);
 void heap_register_gc_root(uint64_t* slot);
 void heap_unregister_gc_root(uint64_t* slot);
+bool heap_try_register_gc_root_range(uint64_t* base, int count);
+void heap_register_gc_root_range(uint64_t* base, int count);
+void heap_unregister_gc_root_range(uint64_t* base);
 void heap_register_gc_weak(uint64_t* slot,
                            void (*on_clear)(uint64_t*, void*), void* context);
 void heap_unregister_gc_weak(uint64_t* slot);
+// Explicit-subject variants are reserved for isolated collector tests and
+// cold control-plane teardown where the subject is not the executing owner.
 bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
 void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
 bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count);
 void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base);
-void heap_no_gc_scope_begin(Context* runtime);
-void heap_no_gc_scope_end(Context* runtime);
+bool heap_try_register_gc_root(uint64_t* slot);
+void heap_no_gc_scope_begin(void);
+void heap_no_gc_scope_end(void);
+void heap_gc_defer_collection_begin(void);
+void heap_gc_defer_collection_end(void);
 
 #ifdef __cplusplus
 }

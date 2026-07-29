@@ -5,7 +5,7 @@
     {
       "in_func": "_js_anon1_#_body",
       "expect_seq": [
-        { "pattern": "call\tjs_new_function_context_p" },
+        { "pattern": "call\tjs_new_function_mir_p" },
         { "pattern": "mov\ti64:16(active_js_module_vars_" }
       ],
       "expect": [

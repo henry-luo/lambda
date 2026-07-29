@@ -24,7 +24,7 @@ String* fn_strcat(String* left, String* right);
 
 Item push_c(int64_t cval) {
     if (cval == INT64_ERROR) { return ItemError; }
-    return decimal_from_int64(cval, context);
+    return decimal_from_int64(cval);
 }
 // Use decimal_add/sub/mul/div/mod/pow from lambda-decimal.hpp instead.
 
@@ -291,7 +291,7 @@ static Item runtime_numeric_decimal_operand(Item item, LambdaNumericKind kind) {
 static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
         Item item_b, LambdaNumericKind kind_b, LambdaNumericKind result_kind,
         LambdaNumericOpFamily op) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_a(roots, item_a);
     Rooted<Item> rooted_b(roots, item_b);
 
@@ -308,12 +308,12 @@ static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
     rooted_b.set(converted_b);
 
     switch (op) {
-    case LAMBDA_NUM_OP_ADD: return decimal_add(rooted_a.get(), rooted_b.get(), context);
-    case LAMBDA_NUM_OP_SUB: return decimal_sub(rooted_a.get(), rooted_b.get(), context);
-    case LAMBDA_NUM_OP_MUL: return decimal_mul(rooted_a.get(), rooted_b.get(), context);
-    case LAMBDA_NUM_OP_TRUE_DIV: return decimal_div(rooted_a.get(), rooted_b.get(), context);
-    case LAMBDA_NUM_OP_IDIV: return decimal_idiv(rooted_a.get(), rooted_b.get(), context);
-    case LAMBDA_NUM_OP_MOD: return decimal_mod(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_ADD: return decimal_add(rooted_a.get(), rooted_b.get());
+    case LAMBDA_NUM_OP_SUB: return decimal_sub(rooted_a.get(), rooted_b.get());
+    case LAMBDA_NUM_OP_MUL: return decimal_mul(rooted_a.get(), rooted_b.get());
+    case LAMBDA_NUM_OP_TRUE_DIV: return decimal_div(rooted_a.get(), rooted_b.get());
+    case LAMBDA_NUM_OP_IDIV: return decimal_idiv(rooted_a.get(), rooted_b.get());
+    case LAMBDA_NUM_OP_MOD: return decimal_mod(rooted_a.get(), rooted_b.get());
     default: return ItemError;
     }
 }
@@ -589,7 +589,7 @@ static bool apply_classified_bitwise(Item item_a, Item item_b,
         return true;
     }
     if (decision.result == LAMBDA_NUM_INTEGER) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Item> left(roots, item_a);
         Rooted<Item> right(roots, item_b);
         left.set(runtime_numeric_to_integer(left.get(), kind_a));
@@ -635,7 +635,7 @@ static bool apply_classified_shift(Item item_a, Item item_b,
         return true;
     }
     if (decision.result == LAMBDA_NUM_INTEGER) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Item> left(roots, item_a);
         Rooted<Item> right(roots, item_b);
         left.set(runtime_numeric_to_integer(left.get(), kind_a));
@@ -702,7 +702,7 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
     int64_t length = vector_length(item);
     if (length < 0) return ItemError;
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<ArrayNum*> rooted_result(roots, array_float_new(length));
     for (int64_t i = 0; i < length; i++) {
@@ -733,7 +733,7 @@ Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out)
         return IS_NUMERIC_ID(get_type_id(item)) ? item : ItemError;
     }
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Item> accumulator(roots, ItemNull);
     int64_t count = 0;
@@ -907,14 +907,14 @@ Item fn_pow(Item item_a, Item item_b) {
         kind_a == LAMBDA_NUM_I64 || kind_b == LAMBDA_NUM_I64 ||
         kind_a == LAMBDA_NUM_U64 || kind_b == LAMBDA_NUM_U64;
     if (decimal_domain) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Item> rooted_a(roots, item_a);
         Rooted<Item> rooted_b(roots, item_b);
         rooted_a.set(runtime_numeric_decimal_operand(rooted_a.get(), kind_a));
         if (get_type_id(rooted_a.get()) == LMD_TYPE_ERROR) return ItemError;
         rooted_b.set(runtime_numeric_decimal_operand(rooted_b.get(), kind_b));
         if (get_type_id(rooted_b.get()) == LMD_TYPE_ERROR) return ItemError;
-        return decimal_pow(rooted_a.get(), rooted_b.get(), context);
+        return decimal_pow(rooted_a.get(), rooted_b.get());
     }
 
     return push_d(pow(runtime_numeric_as_double(item_a, kind_a),
@@ -977,7 +977,7 @@ Item fn_abs(Item item) {
         return numeric_vector_unary_float(item, NUMERIC_VECTOR_ABS, "abs");
     }
     else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_abs(item, context);
+        return decimal_abs(item);
     }
     else {
         log_error("abs not supported for type: %d", type);
@@ -1006,7 +1006,7 @@ Item fn_round(Item item) {
         return numeric_vector_unary_float(item, NUMERIC_VECTOR_ROUND, "round");
     }
     else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_round(item, context);
+        return decimal_round(item);
     }
     else {
         log_debug("round not supported for type: %d", type);
@@ -1034,7 +1034,7 @@ Item fn_floor(Item item) {
         return numeric_vector_unary_float(item, NUMERIC_VECTOR_FLOOR, "floor");
     }
     else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_floor(item, context);
+        return decimal_floor(item);
     }
     else {
         log_debug("floor not supported for type: %d", type);
@@ -1062,7 +1062,7 @@ Item fn_ceil(Item item) {
         return numeric_vector_unary_float(item, NUMERIC_VECTOR_CEIL, "ceil");
     }
     else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_ceil(item, context);
+        return decimal_ceil(item);
     }
     else {
         log_debug("ceil not supported for type: %d", type);
@@ -1111,7 +1111,7 @@ static Item numeric_extreme_collection(Item item, bool minimum) {
     if (length == 0) return ItemNull;
     if (length < 0) return IS_NUMERIC_ID(get_type_id(item)) ? item : ItemError;
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Item> selected(roots, vector_get(item, 0));
     if (get_type_id(selected.get()) == LMD_TYPE_NULL) return ItemNull;
@@ -1249,7 +1249,7 @@ Item fn_neg(Item item) {
         return push_d(-val);
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
-        return decimal_neg(item, context);
+        return decimal_neg(item);
     }
     else if (get_type_id(item) == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
@@ -1387,7 +1387,7 @@ Item fn_int(Item item) {
         uint64_t uval = item.get_uint64();
         // Do not reinterpret a wide unsigned value as negative merely because
         // it crossed INT64_MAX; ordinary numeric conversion preserves value.
-        if (uval > (uint64_t)INT64_MAX) return decimal_from_uint64(uval, context);
+        if (uval > (uint64_t)INT64_MAX) return decimal_from_uint64(uval);
         if (uval > (uint64_t)INT32_MAX) return box_int64_value((int64_t)uval);
         return {.item = i2it((int32_t)uval)};
     }
@@ -1417,7 +1417,7 @@ Item fn_int(Item item) {
         // check for overflow - if errno is set or we couldn't parse the full string
         if (errno == ERANGE || (*endptr != '\0')) {
             // try to parse as decimal
-            return decimal_from_string(chars, context);
+            return decimal_from_string(chars);
         }
         return (Item) { .item = i2it(val) };
     }
@@ -1491,23 +1491,23 @@ Item fn_decimal(Item item) {
         return item;  // Already a decimal
     }
     else if (get_type_id(item) == LMD_TYPE_INT) {
-        return decimal_from_int64(item.get_int56(), context);
+        return decimal_from_int64(item.get_int56());
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
-        return decimal_from_int64(item.get_int64(), context);
+        return decimal_from_int64(item.get_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_FLOAT) {
-        return decimal_from_double(item.get_double(), context);
+        return decimal_from_double(item.get_double());
     }
     else if (get_type_id(item) == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-            return decimal_from_double(item.get_num_sized_as_double(), context);
+            return decimal_from_double(item.get_num_sized_as_double());
         }
-        return decimal_from_int64(item.get_num_sized_as_int64(), context);
+        return decimal_from_int64(item.get_num_sized_as_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
-        return decimal_from_uint64(item.get_uint64(), context);
+        return decimal_from_uint64(item.get_uint64());
     }
     else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
@@ -1524,7 +1524,7 @@ Item fn_decimal(Item item) {
         }
         memcpy(null_term_str, chars, len);
         null_term_str[len] = '\0';
-        Item result = decimal_from_string(null_term_str, context);
+        Item result = decimal_from_string(null_term_str);
         mem_free(null_term_str);
         return result;
     }

@@ -39,26 +39,42 @@ typedef struct LambdaRootFrame {
     bool active;
 } LambdaRootFrame;
 
-bool lambda_side_stack_bind(Context* context);
-bool lambda_side_stack_ensure(Context* context, size_t root_slots,
-                              size_t number_slots);
-void lambda_side_stack_reset(Context* context);
-LambdaSideStackSnapshot lambda_side_stack_snapshot(Context* context);
-void lambda_side_stack_restore(Context* context, LambdaSideStackSnapshot snapshot);
-LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(Context* context);
+bool lambda_side_stack_bind(void);
+// MIR imports use the thread-bound evaluator rather than carrying Context*
+// through every native helper call.
+bool lambda_side_stack_ensure_tls(size_t root_slots, size_t number_slots);
+void lambda_side_stack_reset(void);
+LambdaSideStackSnapshot lambda_side_stack_snapshot(void);
+void lambda_side_stack_restore(LambdaSideStackSnapshot snapshot);
+LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(void);
 void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint);
 void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint);
 // Reserve canonical Item roots above the current watermark. The caller owns
 // restoration through a saved side-stack snapshot or an enclosing frame.
-uint64_t* lambda_side_root_alloc_n(Context* context, size_t slot_count);
-uint64_t* lambda_side_number_alloc(Context* context);
-void lambda_side_stack_decommit_unused(Context* context);
+uint64_t* lambda_side_root_alloc_n(size_t slot_count);
+uint64_t* lambda_side_number_alloc(void);
+void lambda_side_stack_decommit_unused(void);
 
-bool lambda_root_frame_begin(Context* context, LambdaRootFrame* frame,
-                             size_t slot_count);
+bool lambda_root_frame_begin(LambdaRootFrame* frame, size_t slot_count);
 uint64_t* lambda_root_frame_slot(LambdaRootFrame* frame, size_t index);
 uint64_t* lambda_root_frame_take_slot(LambdaRootFrame* frame);
 void lambda_root_frame_end(LambdaRootFrame* frame);
+
+// Explicit-owner variants are test/control-plane surfaces for an inactive
+// context. Runtime execution must use the TLS APIs above.
+bool lambda_side_stack_bind_for(Context* context);
+void lambda_side_stack_reset_for(Context* context);
+LambdaSideStackSnapshot lambda_side_stack_snapshot_for(Context* context);
+void lambda_side_stack_restore_for(Context* context,
+                                   LambdaSideStackSnapshot snapshot);
+LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture_for(
+    Context* context);
+void lambda_recovery_checkpoint_restore_for(
+    Context* context, LambdaRecoveryCheckpoint* checkpoint);
+uint64_t* lambda_side_root_alloc_n_for(Context* context, size_t slot_count);
+uint64_t* lambda_side_number_alloc_for(Context* context);
+bool lambda_root_frame_begin_for(Context* context, LambdaRootFrame* frame,
+                                 size_t slot_count);
 
 #ifdef __cplusplus
 }

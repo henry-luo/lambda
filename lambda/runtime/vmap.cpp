@@ -413,7 +413,7 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
 
 extern "C" Item vmap_clone_for_cow(Item source) {
     if (get_type_id(source) != LMD_TYPE_VMAP || !source.vmap) return ItemError;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);
     VMap* src = rooted_source.get().vmap;
     // Host projections and task handles can expose mutable external state; no
@@ -493,8 +493,8 @@ SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
     // SymbolKeyList installs side-stack chunks that intentionally outlive this
     // activation. Registered exact handles avoid placing a shorter frame below
     // those iterator chunks, which would violate LIFO restoration on return.
-    PersistentRooted<Item> rooted_vmap((Context*)context, vmap_item);
-    PersistentRooted<Item> rooted_result((Context*)context, ItemNull);
+    PersistentRooted<Item> rooted_vmap(vmap_item);
+    PersistentRooted<Item> rooted_result(ItemNull);
     if (!rooted_vmap.valid() || !rooted_result.valid()) return nullptr;
     VMap* vm = rooted_vmap.get().vmap;
 

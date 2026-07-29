@@ -341,7 +341,7 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     int arity = rec->arity;
     if (arity < 0) arity = 0;
     if (arity > 7) arity = 7;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_receiver(roots, receiver);
     Rooted<Function*> rooted_fn(roots, (Function*)NULL);
     // Lambda projection reads run outside js_input, so Jube methods cannot use
@@ -369,7 +369,11 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
 }
 
 static Item jube_member_method_item(Item receiver, JubeMemberRecord* rec) {
-    if (js_input && js_input->pool) return jube_member_js_method_item(rec);
+    // Pure Lambda evaluators have no JS capsule; do not dereference derived JS
+    // TLS merely to choose the host-language method wrapper.
+    if (js_active_runtime_state && js_input && js_input->pool) {
+        return jube_member_js_method_item(rec);
+    }
     return jube_member_lambda_method_item(receiver, rec);
 }
 
@@ -724,7 +728,7 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
 int jube_member_own_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> rooted_receiver(roots, receiver);
     Rooted<Item> rooted_keys(roots, ItemNull);
     Rooted<Item> rooted_name(roots, ItemNull);
@@ -779,7 +783,7 @@ static bool jube_array_has_string_key(Item keys, const char* chars) {
 int jube_member_projection_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> rooted_receiver(roots, receiver);
     Rooted<Item> rooted_keys(roots, ItemNull);
     Rooted<Item> rooted_name(roots, ItemNull);

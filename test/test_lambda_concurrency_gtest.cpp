@@ -94,7 +94,7 @@ protected:
         heap.gc = concurrency_test_gc;
         heap.pool = concurrency_test_gc->pool;
         eval.heap = &heap;
-        context = &eval;
+        ASSERT_TRUE(eval_context_thread_initialize(&eval));
         err_set_heap_allocator(heap_calloc);
         scheduler = lambda_scheduler_create(3);
         ASSERT_NE(scheduler, nullptr);
@@ -107,7 +107,7 @@ protected:
         eval.scheduler = NULL;
         lambda_uv_cleanup();
         err_set_heap_allocator(NULL);
-        context = NULL;
+        EXPECT_TRUE(eval_context_thread_shutdown(&eval));
         gc_heap_destroy(concurrency_test_gc);
         concurrency_test_gc = NULL;
     }
@@ -465,8 +465,8 @@ typedef struct SharedModuleStressWorker {
     const char* failure;
 } SharedModuleStressWorker;
 
-extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx,
-                                               void* consts, void* type_list);
+extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
+                                               void* type_list);
 
 static bool shared_module_stress_select_case(SharedModuleStressWorker* worker,
                                              SharedModuleStressCase* test_case) {
@@ -543,11 +543,14 @@ static void shared_module_stress_record_module_state(SharedModuleStressWorker* w
 
 static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     memset(&worker->eval, 0, sizeof(worker->eval));
-    EvalContextScope scope(&worker->eval);
+    if (!eval_context_thread_matches(&worker->eval)) {
+        worker->failure = "eval thread ownership";
+        return false;
+    }
     input_context = (Context*)&worker->eval;
     lambda_stack_init();
     worker->eval.stack_limit = _lambda_stack_limit;
-    if (!lambda_side_stack_bind(&worker->eval)) return false;
+    if (!lambda_side_stack_bind()) return false;
     worker->eval.pool = worker->cases[0].script->pool;
     worker->eval.name_pool = name_pool_create(worker->eval.pool, NULL);
     heap_init();
@@ -578,8 +581,7 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     }
     for (int i = 0; i < worker->import_cone->length; i++) {
         Script* script = (Script*)worker->import_cone->data[i];
-        if (script->jit_context && !prepare_context_module_state((Context*)&worker->eval,
-                (void*)script->jit_context,
+        if (script->jit_context && !prepare_context_module_state((void*)script->jit_context,
                 script->const_list ? script->const_list->data : NULL, script->type_list)) {
             worker->failure = script->reference;
             return false;
@@ -588,7 +590,7 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     for (int i = 0; i < worker->case_count; i++) {
         Script* script = worker->cases[i].script;
         if (!script || !script->jit_context || !prepare_context_module_state(
-                (Context*)&worker->eval, (void*)script->jit_context,
+                (void*)script->jit_context,
                 script->const_list ? script->const_list->data : NULL, script->type_list)) {
             worker->failure = worker->cases[i].name;
             return false;
@@ -613,13 +615,16 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
 }
 
 static void shared_module_stress_destroy_worker(SharedModuleStressWorker* worker) {
-    EvalContextScope scope(&worker->eval);
+    if (!eval_context_thread_matches(&worker->eval)) {
+        worker->failure = "eval thread ownership during teardown";
+        return;
+    }
     input_context = (Context*)&worker->eval;
     if (worker->eval.scheduler) {
         lambda_scheduler_destroy(worker->eval.scheduler);
         worker->eval.scheduler = NULL;
     }
-    lambda_module_state_destroy((Context*)&worker->eval);
+    lambda_module_state_destroy();
     if (worker->import_cone) {
         arraylist_free(worker->import_cone);
         worker->import_cone = NULL;
@@ -646,7 +651,10 @@ static void* shared_module_stress_worker_main(void* arg) {
     SharedModuleStressGate* gate = worker->gate;
     // Generated code and runtime helpers resolve allocation/context state
     // through TLS for the entire evaluation, not only during setup.
-    EvalContextScope worker_scope(&worker->eval);
+    if (!eval_context_thread_initialize(&worker->eval)) {
+        worker->failure = "eval thread initialization";
+        return NULL;
+    }
     input_context = (Context*)&worker->eval;
     worker->started_ms = shared_module_stress_now_ms();
     // The worker's budget starts at pthread entry.  Context construction is
@@ -697,6 +705,9 @@ static void* shared_module_stress_worker_main(void* arg) {
         if (!worker->failure) worker->failure = "context initialization";
     }
     shared_module_stress_destroy_worker(worker);
+    if (!eval_context_thread_shutdown(&worker->eval) && !worker->failure) {
+        worker->failure = "eval thread shutdown";
+    }
     worker->stopped_ms = shared_module_stress_now_ms();
     return NULL;
 }

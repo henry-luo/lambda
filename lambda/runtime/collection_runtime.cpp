@@ -59,7 +59,7 @@ void expand_list(List* list, Arena* arena) {
 
     size_t new_size;
     if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) return;
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<List*> rooted_list(roots, list);
     Item* new_items = (Item*)heap_data_alloc(new_size);
     list = rooted_list.get();
@@ -101,7 +101,7 @@ void js_array_set_props(Array* arr, Map* props) {
         return;
     }
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Map*> rooted_props(roots, props);
     int64_t dense_capacity = arr->capacity >= arr->extra ? arr->capacity - arr->extra : 0;
     int64_t dense_required = arr->length < dense_capacity ? arr->length : dense_capacity;
@@ -149,7 +149,7 @@ void array_push(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         List* nested = item.array;
         if (nested && nested->is_content) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<Array*> rooted_array(roots, arr);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < nested->length; i++) {
@@ -163,7 +163,7 @@ void array_push(Array* arr, Item item) {
     if (arr->length + arr->extra + 2 > arr->capacity) {
         // A collection allocation is a safepoint. Both the destination and
         // the incoming value must survive it before their storage is read.
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Array*> rooted_array(roots, arr);
         Rooted<Item> rooted_item(roots, item);
         expand_list((List*)rooted_array.get(), nullptr);
@@ -259,7 +259,7 @@ void list_push(List* list, Item item) {
                 log_error("list_push: nested list has no backing storage");
                 return;
             }
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < nested->length; i++) {
@@ -298,7 +298,7 @@ void list_push(List* list, Item item) {
                     if (input_context && input_context->consts) {
                         // This allocation may compact the list and the incoming
                         // string. Root both owners before reading either again.
-                        RootFrame roots((Context*)context, 2);
+                        RootFrame roots(2);
                         Rooted<List*> rooted_list(roots, list);
                         Rooted<Item> rooted_item(roots, item);
                         merged = (String*)context->context_alloc(
@@ -330,7 +330,7 @@ void list_push(List* list, Item item) {
     if (list->length + list->extra + 2 > list->capacity) {
         // expand_list is a safepoint; the incoming value is not owned by the
         // list yet, so retain it independently across the allocation.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<Item> rooted_item(roots, item);
         expand_list(list, nullptr);
         item = rooted_item.get();
@@ -349,7 +349,7 @@ void list_push_spread(List* list, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         if (arr && arr->is_spreadable) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < arr->length; i++) {
@@ -363,7 +363,7 @@ void list_push_spread(List* list, Item item) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
         if (arr && arr->is_spreadable) {
-            RootFrame roots((Context*)context, 2);
+            RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < arr->length; i++) {

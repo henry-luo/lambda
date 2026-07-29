@@ -50,7 +50,7 @@
 extern __thread EvalContext* context;
 
 // External functions
-extern "C" Pool* eval_context_get_pool(EvalContext* ctx);
+extern "C" Pool* eval_context_get_pool(void);
 
 // Helper to convert ConstItem to Item (same memory layout)
 static inline Item to_item(ConstItem ci) {
@@ -128,7 +128,7 @@ extern "C" void sysinfo_init(void) {
     if (g_cache) {
         // Create a dedicated Input for sysinfo using eval context's pool
         if (context) {
-            Pool* pool = eval_context_get_pool(context);
+            Pool* pool = eval_context_get_pool();
             if (pool) {
                 g_cache->input = Input::create(pool, nullptr, nullptr);
                 log_info("sysinfo_init: created input %p", g_cache->input);
@@ -222,7 +222,7 @@ static Input* get_input(void) {
 
     // Re-create Input if context changed
     if (!g_cache->input && context) {
-        Pool* pool = eval_context_get_pool(context);
+        Pool* pool = eval_context_get_pool();
         if (pool) {
             g_cache->input = Input::create(pool, nullptr, nullptr);
         }

@@ -665,7 +665,7 @@ extern "C" Item js_to_boolean(Item value) {
 }
 
 extern "C" bool js_is_truthy(Item value) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     TypeId type = get_type_id(value);
 
     switch (type) {
@@ -700,7 +700,7 @@ extern "C" bool js_is_truthy(Item value) {
 
 // js_is_nullish: returns true if value is null or undefined (for ?? operator)
 extern "C" int64_t js_is_nullish(Item value) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     TypeId type = get_type_id(value);
     return (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) ? 1 : 0;
 }

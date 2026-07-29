@@ -570,7 +570,7 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
 
     // create Map container
     Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Map*> rooted_map(roots, mp);
     mp->type_id = LMD_TYPE_MAP;
     mp->type = mt;
@@ -593,7 +593,7 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
                                int64_t limit, bool ignore_case) {
     List* result = list();
     result->is_content = 1;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
     if (!pattern || !str || len == 0) return rooted_result.get();
@@ -733,7 +733,7 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
 
 // Split string by pattern matches
 List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);
     Rooted<List*> rooted_result(roots, (List*)NULL);
     List* result = list();

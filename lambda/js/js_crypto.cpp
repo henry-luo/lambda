@@ -1546,12 +1546,17 @@ static void crypto_untrack_hmac_context(HmacCtx* ctx) {
     }
 }
 
-static void hmac_ctx_free(HmacCtx* ctx) {
+static void hmac_ctx_release(HmacCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_hmac_context(ctx);
     if (ctx->key) mem_free(ctx->key);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
+}
+
+static void hmac_ctx_free(HmacCtx* ctx) {
+    if (!ctx) return;
+    crypto_untrack_hmac_context(ctx);
+    hmac_ctx_release(ctx);
 }
 
 static void hmac_ctx_append(HmacCtx* ctx, const uint8_t* buf, int len) {
@@ -1723,11 +1728,16 @@ static void crypto_untrack_hash_context(HashCtx* ctx) {
     }
 }
 
+static void hash_ctx_release(HashCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
 static void hash_ctx_free(HashCtx* ctx) {
     if (!ctx) return;
     crypto_untrack_hash_context(ctx);
-    if (ctx->data) mem_free(ctx->data);
-    mem_free(ctx);
+    hash_ctx_release(ctx);
 }
 
 static void hash_ctx_append(HashCtx* ctx, const uint8_t* buf, int len) {
@@ -2062,11 +2072,16 @@ static void crypto_untrack_sign_verify_context(SignVerifyCtx* ctx) {
     }
 }
 
+static void sign_verify_ctx_release(SignVerifyCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
 static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
     if (!ctx) return;
     crypto_untrack_sign_verify_context(ctx);
-    if (ctx->data) mem_free(ctx->data);
-    mem_free(ctx);
+    sign_verify_ctx_release(ctx);
 }
 
 static void sign_verify_ctx_append(SignVerifyCtx* ctx, const uint8_t* buf, int len) {
@@ -4510,9 +4525,8 @@ static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) 
     }
 }
 
-static void cipher_ctx_free(CipherCtx* ctx) {
+static void cipher_ctx_release(CipherCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_cipher_context(ctx);
     if (ctx->use_gcm) mbedtls_gcm_free(&ctx->gcm);
     else if (!ctx->use_kw) mbedtls_cipher_free(&ctx->cipher);
     if (ctx->key) mem_free(ctx->key);
@@ -4520,6 +4534,12 @@ static void cipher_ctx_free(CipherCtx* ctx) {
     if (ctx->aad) mem_free(ctx->aad);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
+}
+
+static void cipher_ctx_free(CipherCtx* ctx) {
+    if (!ctx) return;
+    crypto_untrack_cipher_context(ctx);
+    cipher_ctx_release(ctx);
 }
 
 static bool crypto_is_known_output_encoding(const char* enc) {
@@ -8597,7 +8617,7 @@ extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) 
 // ============================================================================
 
 static void crypto_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item_crypto(name));
     Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
@@ -8605,7 +8625,7 @@ static void crypto_set_method(Item ns, const char* name, void* func_ptr, int par
 }
 
 static void crypto_set_hidden_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item_crypto(name));
     Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
@@ -8622,7 +8642,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     heap_register_gc_root(&crypto_namespace.item);
     crypto_namespace = js_new_object();
 
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> subtle_root(roots, ItemNull);
     Rooted<Item> constants_root(roots, ItemNull);
     Rooted<Item> ecdh_ctor_root(roots, ItemNull);
@@ -8752,6 +8772,37 @@ static void crypto_reset_live_contexts(void) {
     }
 }
 
+static void crypto_destroy_live_contexts(JsCryptoNativeState* state) {
+    if (!state) return;
+    // Context teardown names the inactive capsule explicitly. Release records
+    // from that capsule without rebinding the thread-local JS state.
+    while (state->cipher_context_count > 0) {
+        int index = --state->cipher_context_count;
+        CipherCtx* ctx = (CipherCtx*)state->cipher_contexts[index];
+        state->cipher_contexts[index] = NULL;
+        cipher_ctx_release(ctx);
+    }
+    while (state->sign_verify_context_count > 0) {
+        int index = --state->sign_verify_context_count;
+        SignVerifyCtx* ctx =
+            (SignVerifyCtx*)state->sign_verify_contexts[index];
+        state->sign_verify_contexts[index] = NULL;
+        sign_verify_ctx_release(ctx);
+    }
+    while (state->hash_context_count > 0) {
+        int index = --state->hash_context_count;
+        HashCtx* ctx = (HashCtx*)state->hash_contexts[index];
+        state->hash_contexts[index] = NULL;
+        hash_ctx_release(ctx);
+    }
+    while (state->hmac_context_count > 0) {
+        int index = --state->hmac_context_count;
+        HmacCtx* ctx = (HmacCtx*)state->hmac_contexts[index];
+        state->hmac_contexts[index] = NULL;
+        hmac_ctx_release(ctx);
+    }
+}
+
 extern "C" void js_crypto_reset(void) {
     if (!js_active_runtime_state) return;
     if (!js_runtime_state.crypto.native_state) {
@@ -8776,10 +8827,8 @@ extern "C" void js_crypto_reset(void) {
 
 extern "C" void js_crypto_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->crypto.native_state) return;
-    JsRuntimeState* previous = js_active_runtime_state;
-    js_active_runtime_state = runtime_state;
-    crypto_reset_live_contexts();
-    js_active_runtime_state = previous;
+    crypto_destroy_live_contexts(
+        (JsCryptoNativeState*)runtime_state->crypto.native_state);
     mem_free(runtime_state->crypto.native_state);
     runtime_state->crypto.native_state = NULL;
 }

@@ -4,6 +4,8 @@
 // runtime side-stack API so value-model headers do not own collection state.
 #include "lambda-stack.h"
 
+extern "C" Context* eval_context_tls_runtime(void);
+
 #ifdef __cplusplus
 extern "C++" {
 #endif
@@ -12,10 +14,11 @@ class RootFrame {
     LambdaRootFrame frame_;
 
 public:
-    RootFrame(Context* runtime, size_t slot_count) : frame_{} {
+    explicit RootFrame(size_t slot_count) : frame_{} {
         // Pool/arena-backed input paths have no collecting runtime, so their
         // fallback homes are safe; only a real runtime reservation may fail closed.
-        if (runtime && !lambda_root_frame_begin(runtime, &frame_, slot_count)) {
+        if (eval_context_tls_runtime() &&
+                !lambda_root_frame_begin(&frame_, slot_count)) {
             lambda_root_frame_overflow_error();
         }
     }
@@ -114,17 +117,16 @@ public:
 
 template <typename T>
 class PersistentRooted {
-    Context* runtime_;
     uint64_t slot_;
     bool registered_;
 
 public:
-    PersistentRooted(Context* runtime, T value)
-        : runtime_(runtime), slot_((uint64_t)(uintptr_t)value),
-          registered_(heap_register_gc_root_for(runtime_, &slot_)) {}
+    explicit PersistentRooted(T value)
+        : slot_((uint64_t)(uintptr_t)value),
+          registered_(heap_try_register_gc_root(&slot_)) {}
 
     ~PersistentRooted() {
-        if (registered_) heap_unregister_gc_root_for(runtime_, &slot_);
+        if (registered_) heap_unregister_gc_root(&slot_);
     }
 
     T get() const { return (T)(uintptr_t)slot_; }
@@ -138,17 +140,15 @@ public:
 
 template <>
 class PersistentRooted<Item> {
-    Context* runtime_;
     uint64_t slot_;
     bool registered_;
 
 public:
-    PersistentRooted(Context* runtime, Item value)
-        : runtime_(runtime), slot_(value.item),
-          registered_(heap_register_gc_root_for(runtime_, &slot_)) {}
+    explicit PersistentRooted(Item value)
+        : slot_(value.item), registered_(heap_try_register_gc_root(&slot_)) {}
 
     ~PersistentRooted() {
-        if (registered_) heap_unregister_gc_root_for(runtime_, &slot_);
+        if (registered_) heap_unregister_gc_root(&slot_);
     }
 
     Item get() const { return (Item){.item = slot_}; }
@@ -161,26 +161,18 @@ public:
 };
 
 class AutoAssertNoGC {
-    Context* runtime_;
-
 public:
-    explicit AutoAssertNoGC(Context* runtime) : runtime_(runtime) {
-        heap_no_gc_scope_begin(runtime_);
-    }
-    ~AutoAssertNoGC() { heap_no_gc_scope_end(runtime_); }
+    AutoAssertNoGC() { heap_no_gc_scope_begin(); }
+    ~AutoAssertNoGC() { heap_no_gc_scope_end(); }
 
     AutoAssertNoGC(const AutoAssertNoGC&) = delete;
     AutoAssertNoGC& operator=(const AutoAssertNoGC&) = delete;
 };
 
 class AutoDeferGC {
-    Context* runtime_;
-
 public:
-    explicit AutoDeferGC(Context* runtime) : runtime_(runtime) {
-        heap_gc_defer_collection_begin(runtime_);
-    }
-    ~AutoDeferGC() { heap_gc_defer_collection_end(runtime_); }
+    AutoDeferGC() { heap_gc_defer_collection_begin(); }
+    ~AutoDeferGC() { heap_gc_defer_collection_end(); }
 
     AutoDeferGC(const AutoDeferGC&) = delete;
     AutoDeferGC& operator=(const AutoDeferGC&) = delete;

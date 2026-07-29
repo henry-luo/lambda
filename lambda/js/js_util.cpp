@@ -1133,7 +1133,7 @@ static Item js_util_promisify_callback(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> resolve_root(roots, env[0]);
     Rooted<Item> reject_root(roots, env[1]);
     Rooted<Item> custom_args_root(roots, env[2]);
@@ -1160,7 +1160,7 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    RootFrame roots((Context*)context, 9);
+    RootFrame roots(9);
     Rooted<Item> original_root(roots, env[0]);
     Rooted<Item> this_root(roots, env[1]);
     Rooted<Item> call_args_root(roots, env[2]);
@@ -1201,7 +1201,7 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_reject(make_string_item("promisified function missing target"));
 
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> original_root(roots, env[0]);
     Rooted<Item> custom_args_root(roots, env[1]);
     Rooted<Item> this_root(roots, js_get_this());
@@ -2827,7 +2827,7 @@ static bool util_ensure_roots(void) {
 }
 
 static void js_util_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item(name));
     Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
@@ -2846,7 +2846,7 @@ extern "C" Item js_get_util_namespace(void) {
     // cache until construction completes, so its stable cache slot owns it.
     util_namespace = js_new_object();
 
-    RootFrame roots((Context*)context, 9);
+    RootFrame roots(9);
     Rooted<Item> inspect_root(roots, ItemNull);
     Rooted<Item> custom_symbol_root(roots, ItemNull);
     Rooted<Item> default_options_root(roots, ItemNull);

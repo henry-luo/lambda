@@ -662,7 +662,7 @@ static bool fs_options_bigint(Item options_item);
 
 // Helper: build a Stats object from uv_stat_t
 static Item make_stats_object(const uv_stat_t* st, bool bigint) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> obj_root(roots, js_new_object());
     // Every Stats field installation allocates keys and may compact. The
     // result object must remain rooted until its property graph is complete.
@@ -918,7 +918,7 @@ static Item js_fs_readstream_close(Item callback_item) {
 }
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> path_root(roots, path_item);
     Rooted<Item> options_root(roots, options_item);
     Rooted<Item> stream_root(roots, ItemNull);
@@ -1255,7 +1255,7 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
 }
 
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> path_root(roots, path_item);
     Rooted<Item> options_root(roots, options_item);
     Rooted<Item> stream_root(roots, ItemNull);
@@ -1630,7 +1630,7 @@ static Item fs_statfs_number(uint64_t value, bool bigint) {
 static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
                                uint64_t blocks, uint64_t bfree, uint64_t bavail,
                                uint64_t files, uint64_t ffree, bool bigint) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     // statfs fields are created one at a time; root the result across each
     // key/value allocation so forced collection cannot publish a stale map.
     Rooted<Item> obj_root(roots, js_new_object());
@@ -2624,7 +2624,7 @@ static Item fs_get_filehandle_constructor(void) {
 }
 
 static Item fs_create_filehandle(Item fd) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> fd_root(roots, fd);
     Rooted<Item> handle_root(roots, js_new_object());
     js_set_prototype(handle_root.get(), fs_get_filehandle_prototype());
@@ -3188,7 +3188,7 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // =============================================================================
 
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item(name));
     Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
@@ -3197,7 +3197,7 @@ static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int para
 }
 
 static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> fn_root(roots, fn);
     Rooted<Item> names_root(roots, js_array_new(0));
     Rooted<Item> symbol_root(roots, ItemNull);
@@ -3208,7 +3208,7 @@ static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const ch
 }
 
 static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> fn_root(roots, fn);
     Rooted<Item> custom_root(roots, js_new_function(func_ptr, param_count));
     Rooted<Item> symbol_root(roots, js_util_promisify_custom_symbol());
@@ -3770,7 +3770,7 @@ extern "C" Item js_internal_fs_validateOffsetLengthWrite(Item offset_item, Item 
 }
 
 extern "C" Item js_get_internal_fs_utils_namespace(void) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> ns_root(roots, js_new_object());
     js_fs_set_method(ns_root.get(), "validateOffsetLengthRead",
         (void*)js_internal_fs_validateOffsetLengthRead, 3);
@@ -3786,7 +3786,7 @@ extern "C" Item js_get_fs_namespace(void) {
 
     fs_namespace = js_new_object();
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> constants_root(roots, ItemNull);
     Rooted<Item> promises_root(roots, ItemNull);
     Rooted<Item> default_key_root(roots, ItemNull);

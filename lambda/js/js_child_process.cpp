@@ -3729,7 +3729,7 @@ extern "C" Item js_get_child_process_namespace(void) {
     if (!js_cp_register_namespace_root()) return ItemError;
     if (cp_namespace.item != 0) return cp_namespace;
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> namespace_root(roots, ItemNull);
     cp_namespace = js_new_object();
     namespace_root.set(cp_namespace);

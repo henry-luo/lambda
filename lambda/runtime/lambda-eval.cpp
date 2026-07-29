@@ -55,7 +55,7 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // External path functions for path ++ operation
-extern "C" Pool* eval_context_get_pool(EvalContext* ctx);
+extern "C" Pool* eval_context_get_pool(void);
 extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
 extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
 extern "C" PathScheme path_get_scheme(Path* path);
@@ -221,7 +221,7 @@ static String* string_buffer_copy_join(String* left, String* right, size_t capac
 
     // Allocation may relocate both sources. Their exact roots remain valid
     // until the new buffer has copied both halves of the concatenation.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<String*> rooted_left(roots, left);
     Rooted<String*> rooted_right(roots, right);
     String* result = (String*)heap_alloc((int)bytes, LMD_TYPE_STRING);
@@ -287,7 +287,7 @@ String *fn_string_freeze(String *str) {
 static String* fn_concat_string_items(Item left, Item right) {
     // The second conversion can collect the first conversion result before
     // fn_strcat receives it, so conversion temporaries need native homes too.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<String*> left_str(roots, fn_string(left));
     Rooted<String*> right_str(roots, (String*)NULL);
     right_str.set(fn_string(right));
@@ -315,7 +315,7 @@ Item fn_join(Item left, Item right) {
     // Handle path concatenation first (path must be on the left)
     if (left_type == LMD_TYPE_PATH) {
         Path* left_path = left.path;
-        Pool* pool = eval_context_get_pool(context);
+        Pool* pool = eval_context_get_pool();
 
         if (right_type == LMD_TYPE_STRING) {
             // path ++ string: add string as new segment
@@ -370,7 +370,7 @@ Item fn_join(Item left, Item right) {
         String *result = fn_concat_string_items(left, right);
         // Symbol allocation is another safepoint before it copies the inline
         // characters from the intermediate String.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<String*> rooted_result(roots, result);
         // Create a proper Symbol from the concatenated string
         result = rooted_result.get();
@@ -393,7 +393,7 @@ Item fn_join(Item left, Item right) {
                 result->type_id = LMD_TYPE_ARRAY_NUM;
                 result->set_elem_type(la->get_elem_type());
                 result->length = total;  result->capacity = total;
-                RootFrame roots((Context*)context, 1);
+                RootFrame roots(1);
                 Rooted<ArrayNum*> rooted_result(roots, result);
                 size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
                 result->data = heap_data_alloc(total * elem_size);
@@ -629,11 +629,15 @@ void lambda_function_mark_mir_public_abi(Function* fn) {
     fn->flags |= FN_FLAG_MIR_PUBLIC_ABI;
 }
 
-void lambda_function_mark_mir_context_abi(Function* fn, Context* runtime) {
+void lambda_function_mark_mir_context_abi(Function* fn) {
     if (!fn) return;
-    // A generated Function may outlive the caller that created it. Retain the
-    // owner selected at creation so dynamic dispatch forwards an explicit
-    // context instead of reading process-global execution state.
+    Context* runtime = (Context*)context;
+    if (!runtime) {
+        log_error("mir-context-abi: missing TLS owner while publishing function");
+        return;
+    }
+    // A generated Function may outlive its creating activation. Capture the
+    // TLS owner here so later native dispatch can forward it only to MIR code.
     fn->flags |= FN_FLAG_MIR_CONTEXT_ABI;
     fn->runtime_context = runtime;
 }
@@ -940,14 +944,18 @@ Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, I
     return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h);
 }
 
-Item fn_call_boxed_0_into(Context* runtime, void* fp, uint64_t* result_home) {
+Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
+    Context* runtime = (Context*)context;
+    if (!runtime) return ItemError;
     return ((Item(*)(Context*, uint64_t*))fp)(runtime, result_home);
 }
 
 #define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
 #define DEFINE_BOXED_CALL_INTO(count, params, args) \
-    Item fn_call_boxed_##count##_into(Context* runtime, void* fp, \
+    Item fn_call_boxed_##count##_into(void* fp, \
             EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
+        Context* runtime = (Context*)context; \
+        if (!runtime) return ItemError; \
         return ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
             runtime, EXPAND_BOXED_CALL_PARAMS args, result_home); \
     }
@@ -2258,7 +2266,7 @@ Item fn_child_query(Item data, Item type_val) {
 
 static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
     if (!array) return -1;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_array(roots, array);
     Rooted<Item> rooted_needle(roots, needle);
     int64_t index = reverse ? array->length - 1 : 0;
@@ -2463,7 +2471,7 @@ String* fn_string(Item itm) {
         // Symbol has different layout than String; create a String from symbol chars
         // heap_strcpy may collect before copying its source. Keep the Symbol's
         // owning Item exact-rooted so its inline character buffer stays live.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<Item> rooted(roots, itm);
         Symbol* sym = rooted.get().get_safe_symbol();
         if (!sym) return &STR_NULL;
@@ -2841,16 +2849,7 @@ extern "C" TypeId item_type_id(Item item) {
     return item.type_id();
 }
 
-extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 extern "C" Input* input_from_target(Target* target, String* type, String* flavor);
-
-Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
-    log_debug("input_data at: %s, type: %s, flavor: %s",
-        url ? url->chars : "null", type ? type->chars : "null",
-        flavor ? flavor->chars : "null");
-    // Pass NULL for cwd if ctx is NULL to avoid crash
-    return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
-}
 
 RetItem fn_input2(Item target_item, Item type) {
     // Dry-run mode: return fabricated input data
@@ -3553,7 +3552,7 @@ Item fn_member(Item item, Item key) {
                     // each bound function so dynamic dispatch supplies the
                     // runtime before its boxed self argument.
                     lambda_function_mark_mir_public_abi(bound);
-                    lambda_function_mark_mir_context_abi(bound, (Context*)context);
+                    lambda_function_mark_mir_context_abi(bound);
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -3573,7 +3572,7 @@ Item fn_member(Item item, Item key) {
                         // storage as direct methods and need the same context
                         // binding before fn_call dispatches them.
                         lambda_function_mark_mir_public_abi(bound);
-                        lambda_function_mark_mir_context_abi(bound, (Context*)context);
+                        lambda_function_mark_mir_context_abi(bound);
                         return {.item = (uint64_t)(uintptr_t)bound};
                     }
                     bmethod = bmethod->next;
@@ -4536,7 +4535,7 @@ Item fn_split(Item str_item, Item sep_item) {
         return ItemError;
     }
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_str(roots, str_item);
     Rooted<Item> rooted_sep(roots, sep_item);
     Rooted<List*> rooted_result(roots, (List*)NULL);
@@ -4683,7 +4682,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     uint32_t str_len = str_item.get_len();
     uint32_t sep_len = sep_item.get_len();
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_str(roots, str_item);
     Rooted<Item> rooted_sep(roots, sep_item);
     Rooted<List*> rooted_result(roots, (List*)NULL);
@@ -4822,7 +4821,7 @@ Item fn_join2(Item list_item, Item sep_item) {
         return ItemError;
     }
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_list(roots, list_item);
     Rooted<Item> rooted_sep(roots, sep_item);
 
@@ -5238,7 +5237,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 
     List* result = list();
     result->is_content = 1;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
     if (!needle || needle_len == 0) return {.array = rooted_result.get()};
@@ -6083,7 +6082,7 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     if (!src) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Array*> rooted_src(roots, src);
     Rooted<Array*> rooted_dst(roots, (Array*)NULL);
     Array* dst = array_plain();
@@ -6112,7 +6111,7 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
     }
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_src(roots, src);
     Rooted<ArrayNum*> rooted_dst(roots, (ArrayNum*)NULL);
     ArrayNumElemType elem_type = src->get_elem_type();
@@ -6155,7 +6154,7 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Map*> rooted_src(roots, src);
     Rooted<Map*> rooted_dst(roots, (Map*)NULL);
     Map* dst = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
@@ -6184,7 +6183,7 @@ static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) 
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Object*> rooted_src(roots, src);
     Rooted<Object*> rooted_dst(roots, (Object*)NULL);
     Object* dst = (Object*)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
@@ -6211,7 +6210,7 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Element*> rooted_src(roots, src);
     Rooted<Element*> rooted_dst(roots, (Element*)NULL);
     Element* dst = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
@@ -6434,7 +6433,7 @@ static void cow_mark_shape_children(TypeMap* type, void* data) {
 
 static Item cow_clone_array_one_level(Array* source) {
     if (!source) return ItemError;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Array*> rooted_source(roots, source);
     Rooted<Array*> rooted_copy(roots, array_plain());
     if (!rooted_copy.get()) return ItemError;
@@ -6454,7 +6453,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
     TypeId type_id = get_type_id(source_item);
     Container* source = source_item.container;
     if (!source) return ItemError;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source_item);
     Rooted<Item> rooted_copy(roots, ItemNull);
     size_t size = type_id == LMD_TYPE_MAP ? sizeof(Map) :
@@ -6613,7 +6612,7 @@ Item map_set_cow(Item owner, Item key, Item value) {
 Item cow_path_set_raw(Item owner, Item key, Item value) {
     // The compiler links each copied child before descending, so this helper
     // must remain a rooted raw write and never perform another COW decision.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_key(roots, key);
     Rooted<Item> rooted_value(roots, value);
@@ -6646,7 +6645,7 @@ Item cow_path_set(Item owner, Item path, Item value) {
 
     // Every spine link may allocate while it is detached, so all live owners,
     // keys, and the incoming value need exact roots across raw setter calls.
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
@@ -6766,7 +6765,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // Shape rebuild is already a cold path. A structured frame avoids leaving
     // registered native addresses behind on a non-local recovery edge while
     // keeping both unpublished owners exact through the data allocation.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Container*> rooted_container(roots, container);
     Rooted<Item> rooted_value(roots, new_value);
 

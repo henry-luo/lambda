@@ -491,13 +491,17 @@ extern "C" void heap_gc_collect(void) {
         side_root_base, side_root_count);
     // Side-stack virtual reservations are cheap; return untouched committed
     // pages after a collection so transient recursion does not set the RSS floor.
-    lambda_side_stack_decommit_unused(context);
+    lambda_side_stack_decommit_unused();
 }
 
 // register an external root slot (e.g., BSS global address)
+extern "C" bool heap_try_register_gc_root(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return false;
+    return gc_try_register_root(context->heap->gc, slot) != 0;
+}
+
 extern "C" void heap_register_gc_root(uint64_t* slot) {
-    if (!context || !context->heap || !context->heap->gc || !slot) return;
-    gc_register_root(context->heap->gc, slot);
+    (void)heap_try_register_gc_root(slot);
 }
 
 extern "C" bool heap_register_gc_root_for(Context* runtime, uint64_t* slot) {
@@ -526,27 +530,23 @@ extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* ba
     gc_unregister_root_range(owner->heap->gc, base);
 }
 
-extern "C" void heap_no_gc_scope_begin(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
-    if (owner && owner->heap) gc_no_gc_scope_begin(owner->heap->gc);
+extern "C" void heap_no_gc_scope_begin(void) {
+    if (context && context->heap) gc_no_gc_scope_begin(context->heap->gc);
 }
 
-extern "C" void heap_no_gc_scope_end(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
-    if (owner && owner->heap) gc_no_gc_scope_end(owner->heap->gc);
+extern "C" void heap_no_gc_scope_end(void) {
+    if (context && context->heap) gc_no_gc_scope_end(context->heap->gc);
 }
 
-extern "C" void heap_gc_defer_collection_begin(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
-    if (owner && owner->heap && owner->heap->gc) {
-        gc_defer_collection_begin(owner->heap->gc);
+extern "C" void heap_gc_defer_collection_begin(void) {
+    if (context && context->heap && context->heap->gc) {
+        gc_defer_collection_begin(context->heap->gc);
     }
 }
 
-extern "C" void heap_gc_defer_collection_end(Context* runtime) {
-    EvalContext* owner = (EvalContext*)runtime;
-    if (owner && owner->heap && owner->heap->gc) {
-        gc_defer_collection_end(owner->heap->gc);
+extern "C" void heap_gc_defer_collection_end(void) {
+    if (context && context->heap && context->heap->gc) {
+        gc_defer_collection_end(context->heap->gc);
     }
 }
 
@@ -559,13 +559,21 @@ extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
 }
 
 // register a contiguous range of Items as GC roots (e.g., JS closure env arrays)
+extern "C" bool heap_try_register_gc_root_range(uint64_t* base, int count) {
+    if (!context || !context->heap || !context->heap->gc ||
+            !base || count <= 0) return false;
+    gc_register_root_range(context->heap->gc, base, count);
+    return true;
+}
+
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
-    heap_register_gc_root_range_for((Context*)context, base, count);
+    (void)heap_try_register_gc_root_range(base, count);
 }
 
 // unregister a previously-registered root range by base pointer
 extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
-    heap_unregister_gc_root_range_for((Context*)context, base);
+    if (!context || !context->heap || !context->heap->gc || !base) return;
+    gc_unregister_root_range(context->heap->gc, base);
 }
 
 // unregister an external root slot
@@ -622,8 +630,8 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
-extern "C" int64_t lambda_restore_number_frame_top(Context* runtime,
-        uint64_t* top) {
+extern "C" int64_t lambda_restore_number_frame_top(uint64_t* top) {
+    Context* runtime = (Context*)context;
     if (!runtime || !top || !runtime->side_number_base ||
             !runtime->side_number_top || top < runtime->side_number_base ||
             top > runtime->side_number_top) {
@@ -819,11 +827,11 @@ Symbol* heap_create_symbol(const char* symbol) {
 }
 
 static Item box_float_number_stack(double dval) {
-    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("number-stack float boxing called with invalid context");
         return ItemError;
     }
-    double *dptr = (double*)lambda_side_number_alloc(context);
+    double *dptr = (double*)lambda_side_number_alloc();
     if (!dptr) {
         lambda_stack_overflow_error("number-side-stack");
         return ItemError;
@@ -850,21 +858,21 @@ Item push_d(double dval) {
 }
 
 extern "C" uint64_t lambda_mir_double_bits(double dval) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     uint64_t bits;
     memcpy(&bits, &dval, sizeof(bits));
     return bits;
 }
 
 extern "C" double lambda_mir_bits_double(uint64_t bits) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     double dval;
     memcpy(&dval, &bits, sizeof(dval));
     return dval;
 }
 
 extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     if (!lambda_item_uses_scalar_home(item)) return item;
     // Copy before watermark restore to prevent unbounded frame donation.
     if (!home) {
@@ -890,13 +898,13 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
 }
 
 Item box_int64_value(int64_t lval) {
-    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("int64 number-home boxing called with invalid context");
         return ItemError;
     }
     // INT64 never uses an inline Item so every transient value follows the
     // same return and ownership protocol regardless of magnitude.
-    int64_t *lptr = (int64_t*)lambda_side_number_alloc(context);
+    int64_t *lptr = (int64_t*)lambda_side_number_alloc();
     if (!lptr) {
         lambda_stack_overflow_error("number-side-stack");
         return ItemError;
@@ -906,13 +914,13 @@ Item box_int64_value(int64_t lval) {
 }
 
 Item box_uint64_value(uint64_t uval) {
-    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("uint64 number-home boxing called with invalid context");
         return ItemError;
     }
     // UINT64 shares the one-word scalar-home protocol with INT64; transient
     // unsigned values must not allocate a standalone GC payload.
-    uint64_t* uptr = lambda_side_number_alloc(context);
+    uint64_t* uptr = lambda_side_number_alloc();
     if (!uptr) {
         lambda_stack_overflow_error("number-side-stack");
         return ItemError;
@@ -987,8 +995,7 @@ void heap_discard_unfinalized() {
     context->heap = NULL;
 }
 
-void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
-                              bool reusing_context) {
+void mir_guest_finish_context(Runtime* runtime, bool reusing_context) {
     if (!reusing_context && context) {
         if (runtime) {
             // A standalone guest result may reference this heap after the MIR
@@ -1003,7 +1010,6 @@ void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
             if (context->heap) heap_destroy();
         }
     }
-    context = old_context;
 }
 
 // finalize all GC-managed objects before pool_destroy.

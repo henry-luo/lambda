@@ -4,6 +4,13 @@
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
 // Type definitions — field order MUST match map literal order in constructors
+// NOTE: locals are deliberately NOT annotated with the named map types below.
+// A declared map type on a `var` here makes the local a fresh COW value root
+// instead of a borrow, so every triangle/light read in the intersect loops deep-
+// copies its map — this file did not finish in 120 s with those annotations and
+// runs in ~85 ms without them. The types stay on PARAMETERS, which are borrows
+// and are worth ~2x here. Field reads go through fn_member_ic either way: the
+// Phase 3 direct-offset path is disabled in transpile-mir.cpp.
 type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map, reflection: float}
 type Scene = {triangles: array, lights: array, ambient: array, background: array, n_lights: int, n_triangles: int}
 type Light = {pos: array, colour: array}
@@ -127,7 +134,7 @@ pn create_triangle(p1: float[], p2: float[], p3: float[]) {
     var nv = normal[v] / normal[axis]
     var nd = vec_dot(normal, p1) / normal[axis]
     var det = u1 * v2 - v1 * u2
-    var tri: Triangle = {axis: axis, normal: n_norm, nu: nu, nv: nv, nd: nd,
+    var tri = {axis: axis, normal: n_norm, nu: nu, nv: nv, nd: nd,
             eu: p1[u], ev: p1[v],
             nu1: u1 / det, nv1: 0.0 - v1 / det,
             nu2: v2 / det, nv2: 0.0 - u2 / det,
@@ -164,7 +171,7 @@ pn triangle_intersect(tri: Triangle, orig: float[], dir: float[], near: float, f
 
 // Scene: list of triangles, lights, ambient, background
 pn create_scene(triangles) {
-    var sc: Scene = {triangles: triangles, lights: fill(0, null),
+    var sc = {triangles: triangles, lights: fill(0, null),
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}
     return sc
@@ -173,7 +180,7 @@ pn create_scene(triangles) {
 pn scene_add_light(scene: Scene, pos: float[], colour: float[]) {
     var idx = scene.n_lights
     // Store as flat array: [x,y,z, r,g,b]
-    var light: Light = {pos: pos, colour: colour}
+    var light = {pos: pos, colour: colour}
     var new_lights = (scene.lights) ++ [light]
     scene.lights = new_lights
     scene.n_lights = idx + 1
@@ -186,7 +193,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
     var closest = null
     var i: int = 0
     while (i < scene.n_triangles) {
-        var tri: Triangle = (scene.triangles)[i]
+        var tri = (scene.triangles)[i]
         var d: float = triangle_intersect(tri, origin, dir, near, far)
         if (d > 0.0) {
             far = d
@@ -208,7 +215,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
     var l = [scene.ambient[0], scene.ambient[1], scene.ambient[2]]
     i = 0
     while (i < scene.n_lights) {
-        var light: Light = (scene.lights)[i]
+        var light = (scene.lights)[i]
         var to_light = vec_sub(light.pos, hit)
         var distance: float = vec_length(to_light)
         to_light = vec_scale(to_light, 1.0 / distance)
@@ -216,7 +223,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
         var blocked = false
         var bi: int = 0
         while (bi < scene.n_triangles) {
-            var tri: Triangle = (scene.triangles)[bi]
+            var tri = (scene.triangles)[bi]
             var sd: float = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
             if (sd > 0.0) {
                 blocked = true
@@ -265,7 +272,7 @@ pn create_camera(origin: float[], lookat: float[], up: float[]) {
     d1 = transform_matrix(m, d1)
     d2 = transform_matrix(m, d2)
     d3 = transform_matrix(m, d3)
-    var cam: Camera = {origin: origin, d0: d0, d1: d1, d2: d2, d3: d3}
+    var cam = {origin: origin, d0: d0, d1: d1, d2: d2, d3: d3}
     return cam
 }
 
@@ -325,13 +332,13 @@ pn raytrace_scene() {
     var floor2 = create_triangle(fbl, ffr, ffl)
     var all_tris = triangles ++ [floor1, floor2]
 
-    var scene: Scene = create_scene(all_tris)
+    var scene = create_scene(all_tris)
     scene_add_light(scene, vec3(20.0, 38.0, -22.0), [0.7, 0.3, 0.3])
     scene_add_light(scene, vec3(-23.0, 40.0, 17.0), [0.7, 0.3, 0.3])
     scene_add_light(scene, vec3(23.0, 20.0, 17.0), [0.7, 0.7, 0.7])
     scene.ambient = [0.1, 0.1, 0.1]
 
-    var cam: Camera = create_camera(vec3(-40.0, 40.0, 40.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0))
+    var cam = create_camera(vec3(-40.0, 40.0, 40.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0))
     let size = 30
     var pixels = render_scene(cam, scene, size)
     return pixels

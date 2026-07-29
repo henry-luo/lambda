@@ -148,8 +148,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
 
     MIR_reg_t function_item = method->fc->capture_count > 0
         ? jm_build_closure_for_method(mt, method->fc, method->param_count)
-        : jm_call_3(mt, "js_new_method_function_context", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        : jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_ref_op(mt->ctx, method->fc->func_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, method->param_count));
     // Class setup invokes several allocating helpers before publishing the
@@ -2705,8 +2704,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
-        MIR_reg_t gen_obj = jm_call_5(mt, "js_generator_create_context", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        MIR_reg_t gen_obj = jm_call_4(mt, "js_generator_create_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, gen_env),
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),
@@ -2832,8 +2830,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // js_async_drive re-installs this into js_current_this around each
         // resumption, so it must carry the TDZ sentinel through unthrown too.
         MIR_reg_t async_this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-        MIR_reg_t ctx_idx = jm_call_5(mt, "js_async_context_create_context", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+        MIR_reg_t ctx_idx = jm_call_4(mt, "js_async_context_create_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, async_env),
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),

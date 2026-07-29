@@ -445,7 +445,8 @@ void clear_persistent_last_error() {
     }
 }
 
-void preserve_context_last_error(EvalContext* ctx, Item result) {
+void preserve_context_last_error(Item result) {
+    EvalContext* ctx = context;
     if (!ctx || !ctx->last_error) {
         return;
     }
@@ -462,19 +463,18 @@ void preserve_context_last_error(EvalContext* ctx, Item result) {
 
 // Helper functions for C code to access EvalContext members (used by path.c)
 extern "C" {
-Pool* eval_context_get_pool(EvalContext* ctx) {
-    if (!ctx || !ctx->heap) return nullptr;
-    return ctx->heap->pool;
+Pool* eval_context_get_pool() {
+    if (!context || !context->heap) return nullptr;
+    return context->heap->pool;
 }
 
-NamePool* eval_context_get_name_pool(EvalContext* ctx) {
-    if (!ctx) return nullptr;
-    return ctx->name_pool;
+NamePool* eval_context_get_name_pool() {
+    return context ? context->name_pool : nullptr;
 }
 }
 
 static Pool* runner_path_pool_provider(void) {
-    return context ? eval_context_get_pool(context) : NULL;
+    return eval_context_get_pool();
 }
 
 
@@ -1430,7 +1430,7 @@ void runner_setup_context(Runner* runner) {
 
     // Store stack_limit in context for fast access from JIT-compiled code
     ctx->stack_limit = _lambda_stack_limit;
-    if (!lambda_side_stack_bind(ctx)) {
+    if (!lambda_side_stack_bind()) {
         log_error("runner side-stack: failed to initialize execution regions");
     }
 
@@ -1459,7 +1459,7 @@ void runner_setup_context(Runner* runner) {
     }
 
     input_context = (Context*)ctx;
-    eval_context_bind(ctx);
+    if (!eval_context_thread_initialize(ctx)) return;
     // Phase 5: propagate ui_mode and result_arena from Runtime to context
     Runtime* ui_rt = runner->runtime;
     if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
@@ -1515,7 +1515,10 @@ void runner_setup_context(Runner* runner) {
         }
         rt->js_bootstrap_context = NULL;
     }
-    if (ctx->js_state) js_runtime_state_bind_context(ctx);
+    // Radiant/Jube Lambda calls reuse JS DOM primitives even without importing
+    // JavaScript. Initialize the derived capsule once for this eval-thread
+    // lifetime so those native helpers can read their paired TLS state.
+    if (!js_runtime_state_thread_initialize(ctx)) return;
 
     // Initialize template registry for view/edit template dispatch
     if (!g_template_registry) {
@@ -1530,8 +1533,8 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 
 // Module-state instantiation from mir.c. It runs before execution and owns
 // the one-time slab allocation/root publication for a sealed module.
-extern "C" bool prepare_context_module_state(Context* runtime, void* mir_ctx,
-                                              void* consts, void* type_list);
+extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
+                                              void* type_list);
 
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
@@ -1576,8 +1579,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     // Establish the script's context-owned global and IC slabs.
     if (runner->script->jit_context) {
-        if (!prepare_context_module_state((Context*)ctx,
-                (void*)runner->script->jit_context,
+        if (!prepare_context_module_state((void*)runner->script->jit_context,
                 runner->script->const_list ? runner->script->const_list->data : nullptr,
                 runner->script->type_list)) return nullptr;
     }
@@ -1591,7 +1593,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // siglongjmp back here. No per-call overhead — detection is OS-level.
     Item result;
     LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture(context);
+        lambda_recovery_checkpoint_capture();
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -1622,7 +1624,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         context->heap->result_root = context->result.item;
     }
 
-    preserve_context_last_error(context, result);
+    preserve_context_last_error(result);
 
     // Create output Input with its own pool (independent from Script's pool)
     // This allows safe cleanup of the execution context and heap
@@ -1771,13 +1773,14 @@ void runtime_reset_heap(Runtime* runtime) {
     if (runtime->heap) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
+        if (!eval_context_thread_initialize(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime->scheduler;
-        EvalContext* previous_context = eval_context_bind(cleanup_context);
-        if (cleanup_context->js_state) js_runtime_state_bind_context(cleanup_context);
+        if (cleanup_context->js_state &&
+                !js_runtime_state_thread_initialize(cleanup_context)) return;
         if (cleanup_context->last_error) {
             // Diagnostics can own allocations from the retiring heap. Clear
             // them before teardown so the next batch never frees a stale
@@ -1814,7 +1817,7 @@ void runtime_reset_heap(Runtime* runtime) {
         // Module bindings and ICs are context-owned slabs.  Drop their precise
         // root registrations and bulk-clear them while the old heap is still
         // current; the next module instantiation re-registers once.
-        lambda_module_state_reset((Context*)cleanup_context);
+        lambda_module_state_reset();
 
         // Release name_pool BEFORE heap_destroy: the NamePool struct is
         // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
@@ -1828,15 +1831,13 @@ void runtime_reset_heap(Runtime* runtime) {
             runtime->type_list = NULL;
         }
 
-        js_runtime_state_release_heap_resources(cleanup_context);
+        js_runtime_state_release_heap_resources();
         heap_destroy();
         runtime->heap = NULL;
         cleanup_context->heap = NULL;
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
-        eval_context_restore(previous_context);
-        js_runtime_state_bind_context(previous_context);
     }
     if (runtime->js_bootstrap_context) {
         // Cross-language imports can use the canonical EvalContext directly;
@@ -1850,6 +1851,12 @@ void runtime_reset_heap(Runtime* runtime) {
 
 void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
+    EvalContext* cleanup_owner = runtime->eval_context;
+    if (cleanup_owner) {
+        if (!eval_context_thread_initialize(cleanup_owner)) return;
+        if (cleanup_owner->js_state &&
+                !js_runtime_state_thread_initialize(cleanup_owner)) return;
+    }
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
     js_exec_profile_dump();
@@ -1867,16 +1874,16 @@ void runtime_cleanup(Runtime* runtime) {
 
     // Destroy retained execution state (heap and name_pool)
     if (runtime->heap) {
-        EvalContext* cleanup_context = runtime_get_eval_context(runtime);
+        EvalContext* cleanup_context = cleanup_owner
+            ? cleanup_owner : runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        // heap_destroy is legacy context-based, so bind the Runtime-owned
-        // context rather than manufacturing a stack owner during teardown.
+        if (!eval_context_thread_initialize(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
-        EvalContext* previous_context = eval_context_bind(cleanup_context);
-        if (cleanup_context->js_state) js_runtime_state_bind_context(cleanup_context);
+        if (cleanup_context->js_state &&
+                !js_runtime_state_thread_initialize(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
         edit_bridge_destroy();
@@ -1923,24 +1930,23 @@ void runtime_cleanup(Runtime* runtime) {
             runtime->type_list = NULL;
         }
 
-        js_runtime_state_release_heap_resources(cleanup_context);
+        js_runtime_state_release_heap_resources();
         if (cleanup_context->js_state) {
             // Full JS capsule destruction can release function-owned module
             // bindings, so keep both the JS realm and its slabs alive until it
             // has completed while the owning heap is still valid.
-            js_runtime_state_bind_context(cleanup_context);
-            js_runtime_state_destroy_context(cleanup_context);
+            if (!js_runtime_state_thread_matches(cleanup_context)) return;
+            js_runtime_state_destroy_context();
         }
         // DOM and JS cleanup can dispose callbacks that still activate their
         // defining module slab; destroy those slabs only after that cleanup.
-        lambda_module_state_destroy((Context*)cleanup_context);
+        lambda_module_state_destroy();
         heap_destroy();
         runtime->heap = NULL;
         cleanup_context->heap = NULL;
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
-        eval_context_restore(previous_context);
     } else {
         js_dom_shutdown();
         if (runtime->dom_doc) {
@@ -1951,7 +1957,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && runtime->eval_context->js_state) {
-            js_runtime_state_bind_context(runtime->eval_context);
+            if (!js_runtime_state_thread_initialize(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
         lambda_uv_cleanup();
@@ -1961,14 +1967,14 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->js_bootstrap_context = NULL;
     }
     if (runtime->eval_context) {
-        // Do not restore a TLS pointer to freed runtime-owned context.
-        if (context == runtime->eval_context) context = NULL;
+        EvalContext* retiring_context = runtime->eval_context;
         if (runtime->eval_context->last_error) {
             err_free(runtime->eval_context->last_error);
             runtime->eval_context->last_error = NULL;
         }
-        js_runtime_state_destroy_context(runtime->eval_context);
-        lambda_module_state_destroy((Context*)runtime->eval_context);
+        js_runtime_state_destroy_context();
+        lambda_module_state_destroy();
+        if (!eval_context_thread_shutdown(retiring_context)) return;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;
     }

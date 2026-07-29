@@ -90,8 +90,8 @@ void resolve_sys_paths_recursive(Item item);
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
-    bool prepare_context_module_state(Context* runtime, void* mir_ctx,
-        void* consts, void* type_list);
+    bool prepare_context_module_state(void* mir_ctx, void* consts,
+                                      void* type_list);
     extern int g_mir_interp_mode;
 }
 
@@ -2605,8 +2605,7 @@ static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, layout),
         MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
-    MIR_reg_t ptr = emit_call_3(mt, "lambda_module_const_at", MIR_T_P,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+    MIR_reg_t ptr = emit_call_2(mt, "lambda_module_const_at", MIR_T_P,
         MIR_T_P, MIR_new_reg_op(mt->ctx, layout),
         MIR_T_I64, MIR_new_int_op(mt->ctx, const_index));
     if (as_type == MIR_T_P) return ptr;
@@ -3290,9 +3289,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 if (needs_context_abi) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
+                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
                 strbuf_free(fn_import_name);
                 return fn_obj;
@@ -3402,9 +3400,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     if (uses_wrapper) {
                         emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
+                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     }
 
                     return fn_obj;
@@ -3426,9 +3423,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     if (uses_wrapper) {
                         emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
+                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     }
 
                     strbuf_free(nm_buf);
@@ -10086,26 +10082,25 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     abort();
                 }
 
-                // Build trampoline call: fn_call_boxed_N_into(runtime, fp, args..., home)
+                // The C trampoline reads TLS, then forwards the hidden context
+                // only to the compiled `_b` wrapper.
                 MIR_var_t tramp_vars[18];
-                tramp_vars[0] = {MIR_T_P, "runtime", 0};
-                tramp_vars[1] = {MIR_T_P, "fp", 0};
-                for (int i = 0; i < ai; i++) tramp_vars[2 + i] = arg_vars[i];
-                tramp_vars[2 + ai] = {MIR_T_P, "home", 0};
+                tramp_vars[0] = {MIR_T_P, "fp", 0};
+                for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
+                tramp_vars[1 + ai] = {MIR_T_P, "home", 0};
 
                 MirImportEntry* tramp_ie = ensure_import(mt, trampoline_name,
-                    MIR_T_I64, 3 + ai, tramp_vars, 1);
+                    MIR_T_I64, 2 + ai, tramp_vars, 1);
 
-                int nops = 3 + 3 + ai;  // proto + import + result + runtime + fp + args + home
+                int nops = 3 + 2 + ai;  // proto + import + result + fp + args + home
                 MIR_op_t ops[21];
                 ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
                 result = new_reg(mt, "impcall", MIR_T_I64);
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
-                ops[3] = MIR_new_reg_op(mt->ctx, mt->em.frame.runtime);
-                ops[4] = MIR_new_reg_op(mt->ctx, fp_reg);
-                for (int i = 0; i < ai; i++) ops[5 + i] = arg_ops[i];
-                ops[5 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
+                ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
+                for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
+                ops[4 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
 
                 async_emit_invoke_resume_point(mt, call_node);
                 em_emit_borrowed_call(&mt->em, trampoline_name,
@@ -13205,9 +13200,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 if (uses_wrapper) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
+                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
 
                 return fn_obj;
@@ -13229,9 +13223,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 if (uses_wrapper) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_2(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj),
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime));
+                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
 
                 strbuf_free(name_buf);
@@ -14410,19 +14403,17 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, launch_env), MIR_new_int_op(mt->ctx, 0)));
         }
-        MIR_var_t launch_vars[5] = {
-            {MIR_T_P, "runtime", 0}, {MIR_T_P, "fn", 0},
-            {MIR_T_P, "env", 0}, {MIR_T_I64, "env_count", 0},
-            {MIR_T_P, "args", 0}
+        MIR_var_t launch_vars[4] = {
+            {MIR_T_P, "fn", 0}, {MIR_T_P, "env", 0},
+            {MIR_T_I64, "env_count", 0}, {MIR_T_P, "args", 0}
         };
         MirImportEntry* launch_import = ensure_import(mt, "lambda_task_run_root_raw",
-            MIR_T_I64, 5, launch_vars, 1);
+            MIR_T_I64, 4, launch_vars, 1);
         MIR_reg_t launch_result = new_reg(mt, "async_root_result", MIR_T_I64);
-        emit_insn(mt, MIR_new_call_insn(mt->ctx, 8,
+        emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
             MIR_new_ref_op(mt->ctx, launch_import->proto),
             MIR_new_ref_op(mt->ctx, launch_import->import),
             MIR_new_reg_op(mt->ctx, launch_result),
-            MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
             MIR_new_reg_op(mt->ctx, function_ptr),
             MIR_new_reg_op(mt->ctx, launch_env),
             MIR_new_int_op(mt->ctx, fn_node->analysis ? fn_node->analysis->capture_count : 0),
@@ -16775,9 +16766,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         log_error("template-registry: MIR compilation has no canonical EvalContext");
         return;
     }
-    // Template registration is an isolate-instantiation operation performed
-    // while code is sealed; bind its owner once here, never in generated code.
-    EvalContextScope template_context_scope(template_context);
+    // Compilation may initialize an otherwise idle eval thread, but it cannot
+    // borrow a different live context and restore the caller afterward.
+    if (!eval_context_thread_initialize(template_context)) return;
 
     // Ensure template registry exists for post-JIT template registration
     if (!g_template_registry) {
@@ -17141,14 +17132,12 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         for (int i = 0; i < import_cone->length; i++) {
             Script* imp_script = (Script*)import_cone->data[i];
             if (imp_script && imp_script->jit_context) {
-                if (!prepare_context_module_state((Context*)runner.context,
-                        (void*)imp_script->jit_context,
+                if (!prepare_context_module_state((void*)imp_script->jit_context,
                         imp_script->const_list ? imp_script->const_list->data : nullptr,
                         imp_script->type_list)) return nullptr;
             }
         }
-        if (!prepare_context_module_state((Context*)runner.context,
-                (void*)runner.script->jit_context,
+        if (!prepare_context_module_state((void*)runner.script->jit_context,
                 runner.script->const_list ? runner.script->const_list->data : nullptr,
                 runner.script->type_list)) return nullptr;
 
@@ -17170,7 +17159,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         runner.context->run_main = run_main;
         Item result;
         LambdaRecoveryCheckpoint recovery_checkpoint =
-            lambda_recovery_checkpoint_capture(runner.context);
+            lambda_recovery_checkpoint_capture();
         #if defined(__APPLE__) || defined(__linux__)
         if (sigsetjmp(_lambda_recovery_point, 1)) {
         #elif defined(_WIN32)
@@ -17193,7 +17182,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         if (runner.context->heap) {
             runner.context->heap->result_root = runner.context->result.item;
         }
-        preserve_context_last_error(runner.context, result);
+        preserve_context_last_error(result);
 
         // Create output
         Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");

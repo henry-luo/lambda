@@ -4,17 +4,19 @@
 
 let N = 10
 
-// named node shape so field reads compile to direct byte offsets;
-// field order must match the map literals in make_tree
+// named node shape, used on the check() parameter to document the tree shape
 type Node = {left: Node, right: Node}
 
+// make_tree must return its map literals DIRECTLY. mir_region_producer_candidate()
+// only accepts a body of blocks/ifs/returns/map-literals, so binding the literal to
+// a local first (`var n: Node = {...}; return n`) disqualifies the function, drops
+// the caller's `_region` argument, and downgrades map_with_region_tl to the generic
+// heap map_with — ~1.6x on allocation-bound code.
 pn make_tree(depth: int) Node {
     if (depth == 0) {
-        var leaf: Node = {left: null, right: null}
-        return leaf
+        return {left: null, right: null}
     }
-    var node: Node = {left: make_tree(depth - 1), right: make_tree(depth - 1)}
-    return node
+    return {left: make_tree(depth - 1), right: make_tree(depth - 1)}
 }
 
 pn check(node: Node) int {

@@ -1091,13 +1091,14 @@ struct JsRuntimeState {
     void* event_loop_rooted_gc = NULL;
 };
 
-// This is a non-semantic execution binding. It is installed once at a runtime
-// entry/callback boundary; JS hot paths then use a direct TLS pointer load with
-// no lock, atomic operation, or context lookup.
+// This derived TLS cache is initialized once after the eval thread acquires
+// its context. It must stay paired with `context` until thread teardown.
 extern __thread JsRuntimeState* js_active_runtime_state;
-bool js_runtime_state_bind_context(EvalContext* context);
-void js_runtime_state_release_heap_resources(EvalContext* context);
-void js_runtime_state_destroy_context(EvalContext* context);
+bool js_runtime_state_thread_initialize(EvalContext* context);
+bool js_runtime_state_thread_matches(const EvalContext* context);
+bool js_runtime_state_thread_shutdown(EvalContext* context);
+void js_runtime_state_release_heap_resources(void);
+void js_runtime_state_destroy_context(void);
 extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_runtime_state (*js_active_runtime_state)

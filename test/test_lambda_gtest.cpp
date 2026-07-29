@@ -59,7 +59,8 @@ static const char* MIR_SKIP_TESTS[] = {
     // benchmark tests not yet passing in MIR Direct
     "awfy_json",        // JSON benchmark uses features not yet in MIR
     "awfy_json2",       // JSON benchmark uses features not yet in MIR
-    "awfy_list2",       // list benchmark uses features not yet in MIR
+    // awfy_list2 re-enabled 2026-07-29: it now prints "List: PASS" under MIR Direct,
+    // matching golden awfy/list2.txt
     // awfy_deltablue / awfy_deltablue2 re-enabled: converted to the growable []/push/len/splice
     // vector (no chunked + .sz wrapper), which fixed both the timeout and the null-output issue.
     "awfy_richards",    // Richards benchmark produces wrong output in MIR Direct

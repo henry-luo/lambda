@@ -1260,9 +1260,9 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     return lambda_task_handle(task);
 }
 
-extern "C" Item lambda_task_run_root_raw(Context* runtime,
-    void* function_ptr, void* env, int env_count, List* args) {
-    EvalContext* owner = (EvalContext*)runtime;
+extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
+    int env_count, List* args) {
+    EvalContext* owner = context;
     if (!function_ptr || !owner || !owner->scheduler) {
         return task_error(ERR_INVALID_STATE, "task root requires a scheduler");
     }
@@ -1273,7 +1273,7 @@ extern "C" Item lambda_task_run_root_raw(Context* runtime,
     // explicit owner so scheduler resumption never reinterprets a user Item as
     // the generated entry's Context argument.
     lambda_function_mark_mir_public_abi(function);
-    lambda_function_mark_mir_context_abi(function, runtime);
+    lambda_function_mark_mir_context_abi(function);
     function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;
     Item handle = lambda_task_start_function((Item){.function = function}, args);
     LambdaTask* task = lambda_task_from_handle(handle);

@@ -1331,7 +1331,7 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 // Same approach: mutable own property. Applied during dispatch.
 
 Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> event_root(roots, js_new_object());
     Rooted<Item> descriptor_root(roots, ItemNull);
     // Event construction performs many allocating property writes; keep the
@@ -1436,7 +1436,7 @@ Item js_create_event(const char* type, bool bubbles, bool cancelable) {
 
 Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
                                bool composed, Item view, const char* data) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> view_root(roots, view);
     Rooted<Item> event_root(
         roots, js_create_event_init(type, bubbles, cancelable, composed));
@@ -1452,7 +1452,7 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
 
 Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,
                                  bool composed, Item detail) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> detail_root(roots, detail);
     Rooted<Item> event_root(
         roots, js_create_event_init(type, bubbles, cancelable, composed));

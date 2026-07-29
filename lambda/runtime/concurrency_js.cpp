@@ -37,7 +37,7 @@ static Item lambda_error_to_js(Item result) {
 }
 
 static Item js_rejection_to_lambda(Item reason) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> reason_root(roots, reason);
     if (get_type_id(reason) == LMD_TYPE_ERROR) return reason;
     Item text = js_to_string(reason_root.get());
@@ -62,7 +62,7 @@ static void lambda_promise_observer_complete(
     (void)task;
     LambdaPromiseObserver* observer = (LambdaPromiseObserver*)data;
     if (!observer) return;
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> promise_root(roots, observer->promise);
     Rooted<Item> result_root(roots, result);
     if (get_type_id(result) == LMD_TYPE_ERROR) {
@@ -75,7 +75,7 @@ static void lambda_promise_observer_complete(
 }
 
 static Item lambda_handle_to_js_promise(Item handle) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> handle_root(roots, handle);
     LambdaTask* task = lambda_task_from_handle(handle_root.get());
     if (!task) return js_promise_reject(
@@ -112,7 +112,7 @@ static Item lambda_promise_rejected(Item env_item, Item reason) {
 }
 
 static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> promise_root(roots, promise);
     if (!waiter || !js_promise_is(promise_root.get())) {
         return err2it(err_create_heap(ERR_INVALID_OPERATION,
@@ -151,7 +151,7 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
 }
 
 static Item lambda_js_procedure_call(Item env_item, Item rest_args) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> env_root(roots, env_item);
     Rooted<Item> args_root(roots, rest_args);
     Item* env = (Item*)(uintptr_t)env_root.get().item;
@@ -189,7 +189,7 @@ extern "C" Item lambda_js_wrap_procedure(
     // A negative one-parameter signature gives the adapter one JS rest array,
     // preserving the procedure's source arity without fixed C trampolines.
     Item wrapper = js_new_closure((void*)lambda_js_procedure_call, -1, env, 1);
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> wrapper_root(roots, wrapper);
     js_set_formal_length(wrapper_root.get(), arity);
     if (name) {

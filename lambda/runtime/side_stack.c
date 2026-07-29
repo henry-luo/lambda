@@ -3,6 +3,10 @@
 #include "../lambda.h"
 #include "../../lib/log.h"
 
+// The runtime-state header is C++-only; this C helper only needs its TLS
+// owner as an opaque pointer before handing it to the side-stack API.
+extern void* eval_context_tls_runtime(void);
+
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -74,7 +78,7 @@ static bool side_stack_region_ensure(SideStackRegion* region, uint64_t* end) {
 #endif
 }
 
-bool lambda_side_stack_bind(Context* runtime_context) {
+bool lambda_side_stack_bind_for(Context* runtime_context) {
     if (!runtime_context) return false;
     if (!side_stack_region_reserve(&root_region,
                                    LAMBDA_SIDE_ROOT_RESERVE_BYTES) ||
@@ -100,10 +104,16 @@ bool lambda_side_stack_bind(Context* runtime_context) {
     return true;
 }
 
-bool lambda_side_stack_ensure(Context* runtime_context, size_t root_slots,
-                              size_t number_slots) {
+bool lambda_side_stack_bind(void) {
+    return lambda_side_stack_bind_for((Context*)eval_context_tls_runtime());
+}
+
+static bool lambda_side_stack_ensure_for(Context* runtime_context,
+                                         size_t root_slots,
+                                         size_t number_slots) {
     if (!runtime_context) return false;
-    if (!runtime_context->side_root_base && !lambda_side_stack_bind(runtime_context)) {
+    if (!runtime_context->side_root_base &&
+            !lambda_side_stack_bind_for(runtime_context)) {
         return false;
     }
     if (root_slots > (size_t)(runtime_context->side_root_limit -
@@ -123,13 +133,24 @@ bool lambda_side_stack_ensure(Context* runtime_context, size_t root_slots,
     return true;
 }
 
-void lambda_side_stack_reset(Context* runtime_context) {
+bool lambda_side_stack_ensure_tls(size_t root_slots, size_t number_slots) {
+    Context* runtime_context = (Context*)eval_context_tls_runtime();
+    return runtime_context && lambda_side_stack_ensure_for(runtime_context,
+        root_slots, number_slots);
+}
+
+void lambda_side_stack_reset_for(Context* runtime_context) {
     if (!runtime_context) return;
     runtime_context->side_root_top = runtime_context->side_root_base;
     runtime_context->side_number_top = runtime_context->side_number_base;
 }
 
-LambdaSideStackSnapshot lambda_side_stack_snapshot(Context* runtime_context) {
+void lambda_side_stack_reset(void) {
+    lambda_side_stack_reset_for((Context*)eval_context_tls_runtime());
+}
+
+LambdaSideStackSnapshot lambda_side_stack_snapshot_for(
+        Context* runtime_context) {
     LambdaSideStackSnapshot snapshot = {0};
     if (!runtime_context) return snapshot;
     snapshot.root_top = runtime_context->side_root_top;
@@ -137,8 +158,12 @@ LambdaSideStackSnapshot lambda_side_stack_snapshot(Context* runtime_context) {
     return snapshot;
 }
 
-void lambda_side_stack_restore(Context* runtime_context,
-                               LambdaSideStackSnapshot snapshot) {
+LambdaSideStackSnapshot lambda_side_stack_snapshot(void) {
+    return lambda_side_stack_snapshot_for((Context*)eval_context_tls_runtime());
+}
+
+void lambda_side_stack_restore_for(Context* runtime_context,
+                                   LambdaSideStackSnapshot snapshot) {
     if (!runtime_context) return;
     if (runtime_context->side_root_base && runtime_context->side_root_limit &&
         snapshot.root_top >= runtime_context->side_root_base &&
@@ -152,27 +177,51 @@ void lambda_side_stack_restore(Context* runtime_context,
     }
 }
 
-LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(Context* runtime_context) {
+void lambda_side_stack_restore(LambdaSideStackSnapshot snapshot) {
+    lambda_side_stack_restore_for((Context*)eval_context_tls_runtime(), snapshot);
+}
+
+LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture_for(
+        Context* runtime_context) {
     LambdaRecoveryCheckpoint checkpoint = {0};
     checkpoint.context = runtime_context;
-    checkpoint.side_stack = lambda_side_stack_snapshot(runtime_context);
+    checkpoint.side_stack = lambda_side_stack_snapshot_for(runtime_context);
     checkpoint.active = runtime_context != NULL;
     return checkpoint;
 }
 
-void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint) {
+LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(void) {
+    return lambda_recovery_checkpoint_capture_for(
+        (Context*)eval_context_tls_runtime());
+}
+
+void lambda_recovery_checkpoint_restore_for(
+        Context* runtime_context, LambdaRecoveryCheckpoint* checkpoint) {
     if (!checkpoint || !checkpoint->active) return;
+    if (runtime_context != checkpoint->context) {
+        // Recovery may rewind frames, but it cannot cross an EvalContext
+        // lifetime or use the checkpoint as authority to switch TLS owners.
+        log_error("recovery-checkpoint: EvalContext owner changed");
+        checkpoint->active = false;
+        return;
+    }
     // A non-local jump can skip any number of nested generated/native frames;
     // restore both allocation regions before the landing path may allocate.
-    lambda_side_stack_restore(checkpoint->context, checkpoint->side_stack);
+    lambda_side_stack_restore_for(runtime_context, checkpoint->side_stack);
     checkpoint->active = false;
+}
+
+void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint) {
+    lambda_recovery_checkpoint_restore_for(
+        (Context*)eval_context_tls_runtime(), checkpoint);
 }
 
 void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint) {
     if (checkpoint) checkpoint->active = false;
 }
 
-uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) {
+uint64_t* lambda_side_root_alloc_n_for(Context* runtime_context,
+                                       size_t slot_count) {
     if (!runtime_context) return NULL;
 
     uint64_t* slots = runtime_context->side_root_top;
@@ -185,7 +234,7 @@ uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) 
     bool fits_committed = base && top >= base && committed >= top &&
         slot_count <= (committed - top) / sizeof(uint64_t);
     if (!fits_committed) {
-        if (!lambda_side_stack_ensure(runtime_context, slot_count, 0)) return NULL;
+        if (!lambda_side_stack_ensure_for(runtime_context, slot_count, 0)) return NULL;
         slots = runtime_context->side_root_top;
     }
 
@@ -207,11 +256,21 @@ uint64_t* lambda_side_root_alloc_n(Context* runtime_context, size_t slot_count) 
     return slots;
 }
 
-uint64_t* lambda_side_number_alloc(Context* runtime_context) {
-    if (!runtime_context || !lambda_side_stack_ensure(runtime_context, 0, 1)) {
+uint64_t* lambda_side_root_alloc_n(size_t slot_count) {
+    return lambda_side_root_alloc_n_for((Context*)eval_context_tls_runtime(),
+        slot_count);
+}
+
+uint64_t* lambda_side_number_alloc_for(Context* runtime_context) {
+    if (!runtime_context ||
+            !lambda_side_stack_ensure_for(runtime_context, 0, 1)) {
         return NULL;
     }
     return runtime_context->side_number_top++;
+}
+
+uint64_t* lambda_side_number_alloc(void) {
+    return lambda_side_number_alloc_for((Context*)eval_context_tls_runtime());
 }
 
 static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
@@ -236,7 +295,7 @@ static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
 #endif
 }
 
-void lambda_side_stack_decommit_unused(Context* runtime_context) {
+static void lambda_side_stack_decommit_unused_for(Context* runtime_context) {
     if (!runtime_context) return;
     side_stack_region_decommit(&root_region, runtime_context->side_root_top);
     side_stack_region_decommit(&number_region, runtime_context->side_number_top);
@@ -244,8 +303,13 @@ void lambda_side_stack_decommit_unused(Context* runtime_context) {
     runtime_context->side_number_commit_limit = number_region.committed;
 }
 
-bool lambda_root_frame_begin(Context* runtime_context, LambdaRootFrame* frame,
-                             size_t slot_count) {
+void lambda_side_stack_decommit_unused(void) {
+    lambda_side_stack_decommit_unused_for(
+        (Context*)eval_context_tls_runtime());
+}
+
+bool lambda_root_frame_begin_for(Context* runtime_context,
+                                 LambdaRootFrame* frame, size_t slot_count) {
     if (!frame) return false;
     frame->context = runtime_context;
     frame->watermark = NULL;
@@ -253,7 +317,7 @@ bool lambda_root_frame_begin(Context* runtime_context, LambdaRootFrame* frame,
     frame->slot_count = 0;
     frame->next_slot = 0;
     frame->active = false;
-    uint64_t* slots = lambda_side_root_alloc_n(runtime_context, slot_count);
+    uint64_t* slots = lambda_side_root_alloc_n_for(runtime_context, slot_count);
     if (!slots) {
         return false;
     }
@@ -263,6 +327,11 @@ bool lambda_root_frame_begin(Context* runtime_context, LambdaRootFrame* frame,
     frame->slot_count = slot_count;
     frame->active = true;
     return true;
+}
+
+bool lambda_root_frame_begin(LambdaRootFrame* frame, size_t slot_count) {
+    return lambda_root_frame_begin_for((Context*)eval_context_tls_runtime(),
+        frame, slot_count);
 }
 
 uint64_t* lambda_root_frame_slot(LambdaRootFrame* frame, size_t index) {

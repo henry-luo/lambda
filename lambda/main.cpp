@@ -274,20 +274,23 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
     lambda_stack_init();
     EvalContext* eval_context = runtime_get_eval_context(run_args->runtime);
-    EvalContextScope context_scope(eval_context);
-    JsRuntimeState* previous_js_state = js_active_runtime_state;
-    if (eval_context && eval_context->js_state) {
-        // The large-stack CLI worker is a distinct thread, so bind its realm
-        // before native JS helpers consult context-owned runtime state.
-        js_runtime_state_bind_context(eval_context);
+    if (!eval_context_thread_initialize(eval_context)) {
+        run_args->result = ItemError;
+        return NULL;
+    }
+    if (eval_context->js_state &&
+            !js_runtime_state_thread_initialize(eval_context)) {
+        eval_context_thread_shutdown(eval_context);
+        run_args->result = ItemError;
+        return NULL;
     }
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
-    js_active_runtime_state = previous_js_state;
-    // Runtime cleanup runs on the caller thread after this worker joins. It
-    // owns the context binding required by libuv callbacks, so do not drain
-    // them here after the worker's temporary binding has been restored.
+    if (eval_context->js_state) js_runtime_state_thread_shutdown(eval_context);
+    // The large-stack worker is an eval-thread lifetime boundary. Cleanup
+    // starts only after join, when the caller acquires the same owner.
+    eval_context_thread_shutdown(eval_context);
     return NULL;
 }
 
@@ -332,7 +335,7 @@ static Item js_cli_transpile_with_execution_stack(
 
 static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
-    context = batch_context;
+    if (!eval_context_thread_initialize(batch_context)) return;
     heap_init();
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create(batch_context->pool, nullptr);
@@ -347,16 +350,19 @@ static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_c
 
 static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_context) {
     if (!batch_context) return;
-    context = batch_context;
+    if (!eval_context_thread_matches(batch_context)) {
+        log_error("test262-hot-context: owner thread mismatch during destroy");
+        return;
+    }
+    if (batch_context->js_state) js_runtime_state_thread_shutdown(batch_context);
     // A signal can interrupt an allocator or a GC finalizer. Reclaim the bulk
     // heap generation without running those finalizers before replacing it.
     heap_discard_unfinalized();
+    eval_context_thread_shutdown(batch_context);
     memset(batch_context, 0, sizeof(EvalContext));
     runtime->heap = NULL;
     runtime->name_pool = NULL;
     runtime->type_list = NULL;
-    js_runtime_state_bind_context(NULL);
-    context = NULL;
 }
 
 static void js_test262_clear_preamble(
@@ -1760,8 +1766,11 @@ static int node_runner_run_file(const char* exe_path, const char* file,
 #endif
         EvalContext* js_result_context = runtime_get_eval_context(&runtime);
         if (js_result_context && js_result_context->js_state) {
-            context = js_result_context;
-            js_runtime_state_bind_context(js_result_context);
+            if (!eval_context_thread_initialize(js_result_context) ||
+                    !js_runtime_state_thread_initialize(js_result_context)) {
+                log_error("js-cli-result: failed to acquire Runtime owner");
+                result = ItemError;
+            }
         }
         if (result.item == ITEM_ERROR) exit_code = 1;
         else exit_code = js_process_current_exit_code();
@@ -2352,8 +2361,11 @@ int main(int argc, char *argv[]) {
             // inspect exceptions, promises, or other JS semantic state.
             EvalContext* js_result_context = runtime_get_eval_context(&runtime);
             if (js_result_context && js_result_context->js_state) {
-                context = js_result_context;
-                js_runtime_state_bind_context(js_result_context);
+                if (!eval_context_thread_initialize(js_result_context) ||
+                        !js_runtime_state_thread_initialize(js_result_context)) {
+                    log_error("js-document-result: failed to acquire Runtime owner");
+                    result = ItemError;
+                }
             }
             if (runtime.dom_doc && !js_check_exception()) {
                 // The document fast path executes without the CLI worker's
@@ -4188,11 +4200,11 @@ int main(int argc, char *argv[]) {
             js_batch_execution_mode = (inline_source || inline_module_source || has_preamble) ? 1 : 0;
 
             if (!batch_context->side_root_base &&
-                !lambda_side_stack_bind(batch_context)) {
+                !lambda_side_stack_bind()) {
                 log_error("batch side-stack: failed to initialize execution regions");
             }
             LambdaRecoveryCheckpoint batch_recovery_checkpoint =
-                lambda_recovery_checkpoint_capture(batch_context);
+                lambda_recovery_checkpoint_capture();
             if (result == 0) {
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
@@ -4350,8 +4362,12 @@ int main(int argc, char *argv[]) {
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
-                // Restore context (longjmp on timeout/crash may leave it dangling)
-                context = batch_context;
+                // A recovery jump must preserve the eval-thread owner; a
+                // mismatch indicates a forbidden nested context switch.
+                if (!eval_context_thread_matches(batch_context)) {
+                    log_error("test262-hot-context: owner changed across recovery");
+                    result = 1;
+                }
 
                 if (result == 124 || result >= 128) {
                     // Crash or timeout recovery: reset heap and continue, but

@@ -5955,7 +5955,7 @@ static void js_http_agent_assign_socket(Item request, Item socket) {
 // Agent.addRequest(req, options[, port[, localAddress]])
 extern "C" Item js_http_agent_addRequest(Item request, Item options,
                                            Item port, Item local_address) {
-    RootFrame roots((Context*)context, 10);
+    RootFrame roots(10);
     Rooted<Item> agent_root(roots, js_get_this());
     Rooted<Item> request_root(roots, request);
     Rooted<Item> options_root(roots, options);

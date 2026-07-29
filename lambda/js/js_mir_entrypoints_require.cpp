@@ -209,10 +209,18 @@ static size_t js_mir_large_source_interp_threshold(void) {
     return (size_t)parsed;
 }
 
-static void js_mir_destroy_unowned_eval_context(EvalContext* local_context, EvalContext* old_context, bool reusing_context) {
+static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
+        EvalContext* local_context, bool reusing_context) {
     if (!reusing_context && local_context) {
-        context = local_context;
-        js_runtime_state_bind_context(local_context);
+        if (!eval_context_thread_matches(local_context)) {
+            log_error("js-mir-cleanup: failed context is not current");
+            return;
+        }
+        if (local_context->js_state &&
+                !js_runtime_state_thread_matches(local_context)) {
+            log_error("js-mir-cleanup: failed JS state is not current");
+            return;
+        }
         // MIR setup can fail after a one-shot JS heap is created; destroy it here because
         // runtime_cleanup() only owns heaps that reached the normal runtime stash point.
         if (local_context->name_pool) {
@@ -227,10 +235,13 @@ static void js_mir_destroy_unowned_eval_context(EvalContext* local_context, Eval
             heap_destroy();
             local_context->heap = NULL;
         }
-        js_runtime_state_destroy_context(local_context);
+        js_runtime_state_destroy_context();
+        if (runtime) {
+            runtime->heap = NULL;
+            runtime->name_pool = NULL;
+            runtime->type_list = NULL;
+        }
     }
-    context = old_context;
-    js_runtime_state_bind_context(old_context);
 }
 
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
@@ -238,13 +249,12 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
 
     // Use Runtime's canonical context for a fresh JS activation. A nested
-    // caller borrows its already-bound context only for this synchronous call.
+    // caller may reuse its already-bound context, but no path may switch back
+    // to another owner after this call.
     EvalContext* js_context = NULL;
-    EvalContext* old_context = context;
     bool reusing_context = false;
 
-    if (old_context && old_context->heap) {
-        context = old_context;
+    if (context && context->heap) {
         js_context = context;
         reusing_context = true;
         if (!context->type_list) {
@@ -255,7 +265,9 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     } else {
         js_context = runtime_get_eval_context(runtime);
         if (!js_context) return (Item){.item = ITEM_ERROR};
-        context = js_context;
+        if (!eval_context_thread_initialize(js_context)) {
+            return (Item){.item = ITEM_ERROR};
+        }
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
             runtime->reuse_pool = NULL;
@@ -272,7 +284,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         runtime->type_list = (ArrayList*)context->type_list;
     }
     context->runtime = runtime;
-    js_runtime_state_bind_context(context);
+    if (!js_runtime_state_thread_initialize(context)) return ItemError;
 
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
@@ -281,7 +293,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir-ast: MIR context init failed");
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -289,7 +301,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
     if (!mt) {
         MIR_finish(ctx);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -301,7 +313,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -318,7 +330,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -331,7 +343,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         log_error("js-mir-ast: failed to find js_main");
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     if (g_jm_preamble_out) {
@@ -378,8 +390,6 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
 
     jm_cleanup_deferred_mir();
-    context = old_context;
-    js_runtime_state_bind_context(old_context);
 
     log_debug("js-mir-ast: transpilation completed");
     return final_result;
@@ -488,11 +498,6 @@ static bool js_scan_string_literal(const char* source, size_t source_len, size_t
     return false;
 }
 
-static void js_mir_restore_compile_binding(EvalContext* caller_context) {
-    context = caller_context;
-    js_runtime_state_bind_context(caller_context);
-}
-
 static size_t js_commonjs_injection_offset(const char* source, size_t source_len) {
     size_t i = js_skip_trivia(source, source_len, 0, true, NULL);
     while (i < source_len) {
@@ -518,23 +523,18 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
 Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
                                   size_t js_source_len, const char* filename,
                                   uint64_t* result_home) {
-    // Recovery ownership begins before parsing. Bind the Runtime's canonical
-    // context now so source/AST failures cannot fall back to process globals.
-    EvalContext* caller_context = context;
-    if (!context || !js_active_runtime_state) {
-        EvalContext* compile_context = caller_context ? caller_context :
-            runtime_get_eval_context(runtime);
-        if (!compile_context) {
-            log_error("js-mir: cannot bind compile recovery context");
-            js_mir_restore_compile_binding(caller_context);
-            return ItemError;
-        }
-        context = compile_context;
-        if (!js_runtime_state_bind_context(compile_context)) {
-            log_error("js-mir: cannot bind compile recovery state");
-            js_mir_restore_compile_binding(caller_context);
-            return ItemError;
-        }
+    // Recovery ownership begins before parsing. The first entry may initialize
+    // an idle eval thread, but compilation cannot borrow and restore another
+    // live context.
+    EvalContext* compile_context = context ? context :
+        runtime_get_eval_context(runtime);
+    if (!eval_context_thread_initialize(compile_context)) {
+        log_error("js-mir: cannot initialize compile recovery context");
+        return ItemError;
+    }
+    if (!js_runtime_state_thread_initialize(compile_context)) {
+        log_error("js-mir: cannot initialize compile recovery state");
+        return ItemError;
     }
     js_mir_reset_last_phase_timing();
     long phase_total_start = js_mir_phase_now_us();
@@ -544,7 +544,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     char* owned_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_JS_RUNTIME);
     if (!owned_source) {
         log_error("js-mir: failed to allocate source buffer");
-        js_mir_restore_compile_binding(caller_context);
         return (Item){.item = ITEM_ERROR};
     }
     memcpy(owned_source, js_source, js_source_len);
@@ -622,7 +621,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         log_error("js-mir: failed to create transpiler");
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_restore_compile_binding(caller_context);
         return (Item){.item = ITEM_ERROR};
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
@@ -635,7 +633,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_restore_compile_binding(caller_context);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
@@ -652,7 +649,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_restore_compile_binding(caller_context);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
@@ -667,7 +663,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_restore_compile_binding(caller_context);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
@@ -675,11 +670,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
     EvalContext* js_context = NULL;
-    EvalContext* old_context = caller_context;
     bool reusing_context = false;
 
-    if (old_context && old_context->heap) {
-        context = old_context;
+    if (context->heap) {
         js_context = context;
         reusing_context = true;
         if (!context->type_list) {
@@ -689,15 +682,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         }
     } else {
         js_context = runtime_get_eval_context(runtime);
-        if (!js_context) {
+        if (!js_context || !eval_context_thread_matches(js_context)) {
             jm_clear_active_js_transpile(tp, NULL, NULL);
             js_transpiler_destroy(tp);
             jm_clear_active_js_transpile(NULL, NULL, owned_source);
             mem_free(owned_source);
-            js_mir_restore_compile_binding(caller_context);
+            log_error("js-mir: Runtime context differs from eval-thread owner");
             return ItemError;
         }
-        context = js_context;
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
             runtime->reuse_pool = NULL;
@@ -713,7 +705,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         runtime->type_list = (ArrayList*)context->type_list;
     }
     context->runtime = runtime;
-    js_runtime_state_bind_context(context);
+    if (!js_runtime_state_thread_initialize(context)) return ItemError;
     if (runtime->dom_ui_context) {
         // The stack worker binds a distinct execution realm. Carry the host's
         // borrowed UI session into that realm before any DOM wrapper or task is
@@ -776,7 +768,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
@@ -795,7 +787,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
@@ -827,7 +819,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -853,7 +845,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -962,7 +954,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, reusing_context);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     if (g_jm_preamble_out) {
@@ -972,31 +964,34 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         g_jm_preamble_out->owns_compiled_state = true;
     }
 
+    // Publish/grow the execution slab before realm setup. DOM installation can
+    // compile inline handlers, and those nested native callbacks need the same
+    // active module owner as the js_main that follows.
+    if (!g_jm_preamble_compile_only && g_jm_preamble_in) {
+        if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
+            log_error("js-mir: failed to grow inherited preamble module state");
+            return (Item){.item = ITEM_ERROR};
+        }
+    } else if (!g_jm_preamble_compile_only) {
+        if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+            return (Item){.item = ITEM_ERROR};
+        }
+    }
+
     // v14: initialize event loop before execution. Dynamic import runs inside
     // an active script, so preserve the caller's pending PromiseJobs.
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
 
-    // Set up DOM document context if available
-    if (runtime->dom_doc) {
+    // Compile-only cache construction must not instantiate DOM wrappers or
+    // inline handlers in the disposable compilation heap.
+    if (runtime->dom_doc && !g_jm_preamble_compile_only) {
         js_dom_set_document(runtime->dom_doc);
     }
 
     // Execute
     log_debug("js-mir: executing JIT compiled code");
-    if (!g_jm_preamble_compile_only && g_jm_preamble_in) {
-        // A test inherits the harness slab, but its own top-level declarations
-        // can add fixed MIR slots beyond the harness layout. Grow before js_main
-        // runs so generated module-var stores cannot address past that slab.
-        if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
-            log_error("js-mir: failed to grow inherited preamble module state");
-            return (Item){.item = ITEM_ERROR};
-        }
-    } else if (!g_jm_preamble_compile_only) {
-        // Normal/preamble mode: allocate per-module vars for this top-level module
-        if (!js_activate_module_state((uint32_t)mt->module_var_count)) return (Item){.item = ITEM_ERROR};
-    }
 
     // Save module_consts as eval preamble BEFORE execution so that
     // eval()/new Function() called during js_main can resolve outer-scope
@@ -1021,7 +1016,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     Item result = ItemNull;
     if (!g_jm_preamble_compile_only) {
     LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture((Context*)context);
+        lambda_recovery_checkpoint_capture();
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -1219,8 +1214,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // recorded in the context capsule, so runtime teardown destroys it again.
     jm_clear_active_js_transpile(tp, NULL, NULL);
     jm_clear_active_js_transpile(NULL, NULL, owned_source);
-    context = old_context;
-    js_runtime_state_bind_context(old_context);
     js_transpiler_destroy(tp);
     mem_free(owned_source);
     g_last_js_mir_phase_timing.cleanup_us = js_mir_phase_now_us() - phase_start;
@@ -1334,13 +1327,10 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     runtime_context->name_pool = runtime->name_pool;
     runtime_context->type_list = runtime->type_list;
     runtime_context->pool = runtime->heap->pool;
-    if (!js_runtime_state_bind_context(runtime_context)) return ItemError;
-
-    EvalContext* old_context = context;
-    // The compiled entry can outlive this caller through callbacks. Bind the
-    // Runtime-owned context directly instead of fabricating a stack context.
-    context = runtime_context;
-    js_runtime_state_bind_context(runtime_context);
+    if (!eval_context_thread_initialize(runtime_context) ||
+            !js_runtime_state_thread_initialize(runtime_context)) {
+        return ItemError;
+    }
     if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
 
@@ -1348,11 +1338,9 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     js_main_func_t js_main = (js_main_func_t)compiled_state->entry_func;
     js_mir_reset_last_phase_timing();
     long execute_start = js_mir_phase_now_us();
-    Item result = js_main((Context*)runtime_context);
+    Item result = js_main((Context*)context);
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
     g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
-    context = old_context;
-    js_runtime_state_bind_context(old_context);
     return result;
 }
 
@@ -1367,7 +1355,11 @@ Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_sour
                                            uint64_t* result_home) {
     if (!preamble || !js_module_state_is_available(preamble->module_state_id) ||
             js_get_active_module_state_id() == preamble->module_state_id) {
-        log_error("js-mir: preamble module slab is not active in this realm");
+        log_error("js-mir: invalid preamble consumer preamble=%u active=%u available=%d",
+                  preamble ? preamble->module_state_id : UINT32_MAX,
+                  js_get_active_module_state_id(),
+                  preamble && js_module_state_is_available(preamble->module_state_id)
+                      ? 1 : 0);
         return ItemError;
     }
     g_jm_preamble_mode = false;
@@ -1405,8 +1397,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state) {
     if (!runtime || !clone_js_preamble_state(cached, out_state)) return ItemError;
 
-    EvalContext* old_context = context;
-    if (old_context && old_context->heap) {
+    if (context && context->heap) {
         // Cached code is only safe when instantiated into a new document heap.
         preamble_state_destroy(out_state);
         return ItemError;
@@ -1417,9 +1408,15 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         preamble_state_destroy(out_state);
         return ItemError;
     }
-    context = js_context;
+    if (!eval_context_thread_initialize(js_context)) {
+        preamble_state_destroy(out_state);
+        return ItemError;
+    }
     context->runtime = runtime;
-    js_runtime_state_bind_context(context);
+    if (!js_runtime_state_thread_initialize(context)) {
+        preamble_state_destroy(out_state);
+        return ItemError;
+    }
     if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->reuse_pool) {
         heap_init_with_pool(runtime->reuse_pool);
@@ -1429,7 +1426,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     }
     if (!context->heap) {
         preamble_state_destroy(out_state);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, false);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, false);
         return ItemError;
     }
     context->pool = context->heap->pool;
@@ -1437,12 +1434,21 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     context->type_list = arraylist_new(64);
     if (!context->name_pool || !context->type_list) {
         preamble_state_destroy(out_state);
-        js_mir_destroy_unowned_eval_context(js_context, old_context, false);
+        js_mir_destroy_unowned_eval_context(runtime, js_context, false);
         return ItemError;
     }
     runtime->heap = context->heap;
     runtime->name_pool = context->name_pool;
     runtime->type_list = (ArrayList*)context->type_list;
+
+    // Realm construction can compile inline DOM handlers before js_main runs.
+    // Publish the preamble slab first so those native compilation callbacks
+    // never observe a context with no active module state.
+    if (!js_activate_module_state((uint32_t)cached->module_var_count)) {
+        preamble_state_destroy(out_state);
+        return ItemError;
+    }
+    out_state->module_state_id = js_get_active_module_state_id();
 
     // js262 restores a value checkpoint because its harness heap survives.
     // This heap is new: clear all process caches, then retain only the compiled
@@ -1457,8 +1463,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     (void)js_get_global_this();
     js_event_loop_init();
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
-    if (!js_activate_module_state((uint32_t)cached->module_var_count)) return (Item){.item = ITEM_ERROR};
-    out_state->module_state_id = js_get_active_module_state_id();
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)cached->entry_func;
@@ -1469,8 +1473,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
     js_microtask_flush();
 
-    context = old_context;
-    js_runtime_state_bind_context(old_context);
     return result;
 }
 
@@ -1550,13 +1552,21 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
             mem_free(source);
             return ItemNull;
         }
-        context = js_context;
+        if (!eval_context_thread_initialize(js_context)) {
+            jm_clear_active_js_transpile(NULL, NULL, source);
+            mem_free(source);
+            return ItemNull;
+        }
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
         context->runtime = runtime;
-        js_runtime_state_bind_context(context);
+        if (!js_runtime_state_thread_initialize(context)) {
+            jm_clear_active_js_transpile(NULL, NULL, source);
+            mem_free(source);
+            return ItemNull;
+        }
 
         // The canonical context owns the bootstrap heap through runner setup.
         runtime->heap = context->heap;

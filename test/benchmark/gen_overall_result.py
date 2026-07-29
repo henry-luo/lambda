@@ -237,7 +237,15 @@ def write_report(args, data):
     w(f"- **Date:** {date}")
     w(f"- **Platform:** {platform.system()} {platform.machine()}")
     w(f"- **Lambda commit:** `{commit}`")
-    w("- **Lambda build:** clean release build (`make release`)")
+    lambda_exe = metadata.get("lambda_exe")
+    exe_size = metadata.get("lambda_exe_size_bytes")
+    if lambda_exe and "/exe/" in lambda_exe:
+        # an archived binary from test/benchmark/exe/ — name it, so the reader knows
+        # these numbers are re-measurable rather than tied to a since-changed build
+        w(f"- **Lambda build:** archived release binary `{lambda_exe}`"
+          + (f" ({exe_size:,} bytes)" if exe_size else ""))
+    else:
+        w("- **Lambda build:** clean release build (`make release`)")
     w(f"- **Instrumentation check:** {profile_check}")
     w(f"- **Node.js:** {node_version}")
     w(f"- **QuickJS:** {qjs_version}")
@@ -248,7 +256,12 @@ def write_report(args, data):
     if "mir_typed" in engines:
         w("- **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists")
     w()
-    w("JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop over the detected benchmark function. They do not use per-file `Benchmark.runIteration()` counts, because those counts drift across JetStream files.")
+    w("JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` "
+      "workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, "
+      "richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda "
+      "`.ls` port implements exactly one `runIteration()`, so every engine times the same work. "
+      "A previous revision hard-coded 8 repeats for every file, which made the JS engines run "
+      "8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.")
     w()
     w("---")
     w()

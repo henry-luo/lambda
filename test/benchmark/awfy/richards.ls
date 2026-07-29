@@ -443,7 +443,14 @@ pn benchmark() {
 
 pn main() {
     var __t0 = clock()
-    var result = benchmark()
+    // 50 iterations: the canonical AWFY workload, matching richards2.ls and
+    // richards2.js (runAWFY('Richards', ..., 50)) so every engine times the same work
+    var result = 0
+    var k = 0
+    while (k < 50) {
+        result = benchmark()
+        k = k + 1
+    }
     var __t1 = clock()
     if (result == 1) {
         print("Richards: PASS\n")

@@ -97,15 +97,18 @@ static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
 
     Context* saved_input_ctx = input_context;
     void* saved_doc = js_dom_get_document();
-    EvalContext* saved_ctx = eval_context_bind(focus_ctx);
+    // Simulated events execute on the document's eval thread; a host callback
+    // must not borrow the thread by replacing another runtime's TLS owner.
+    if (!eval_context_thread_initialize(focus_ctx)) return false;
     input_context = nullptr;
-    if (focus_ctx->js_state) js_runtime_state_bind_context(focus_ctx);
+    if (focus_ctx->js_state && !js_runtime_state_thread_initialize(focus_ctx)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     js_dom_set_document(doc);
     js_dom_focus_method_bridge(target, true);
     js_dom_restore_active_document(saved_doc);
-    eval_context_restore(saved_ctx);
     input_context = saved_input_ctx;
-    js_runtime_state_bind_context(saved_ctx);
     return true;
 }
 

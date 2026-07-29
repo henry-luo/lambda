@@ -6457,8 +6457,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    MIR_reg_t fn_item = jm_call_3(mt, "js_new_function_context", MIR_T_I64,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
                     // Keep hoisted declarations on the same atomic metadata path as
@@ -6748,8 +6747,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
                     }
-                    MIR_reg_t fn_item = jm_call_5(mt, "js_new_closure_context", MIR_T_I64,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -8091,7 +8089,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // binds the Context-owned JS state. Test262's hot batch path calls this
     // entrypoint directly; without this bind, TLA state dereferences a null
     // capsule before the module can be parsed.
-    if (!runtime || !context || !context->heap || !js_runtime_state_bind_context(context)) {
+    if (!runtime || !context || !context->heap ||
+            !js_runtime_state_thread_initialize(context)) {
         log_error("js-mir: module compilation requires a bound runtime context");
         return ItemError;
     }

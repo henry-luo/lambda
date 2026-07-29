@@ -22,8 +22,6 @@ typedef JsDomMediaQueryState JsMediaQueryState;
 #define js_dom_media_query_count (js_runtime_state.dom_platform.media_query_count)
 
 extern "C" bool js_dom_evaluate_media_query(const char* query);
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
 extern "C" uint64_t js_get_heap_epoch(void);
 extern __thread EvalContext* context;
 
@@ -32,12 +30,12 @@ static bool dom_platform_ensure_roots(void) {
     JsDomPlatformState* state = &js_runtime_state.dom_platform;
     uint64_t epoch = js_get_heap_epoch();
     if (state->roots_epoch == epoch) return true;
-    if (!heap_register_gc_root_for((Context*)context, &state->local_storage.object.item) ||
-        !heap_register_gc_root_for((Context*)context, &state->session_storage.object.item)) {
+    if (!heap_try_register_gc_root(&state->local_storage.object.item) ||
+        !heap_try_register_gc_root(&state->session_storage.object.item)) {
         return false;
     }
     for (int i = 0; i < JS_MEDIA_QUERY_CAP; i++) {
-        if (!heap_register_gc_root_for((Context*)context, &state->media_queries[i].object.item)) {
+        if (!heap_try_register_gc_root(&state->media_queries[i].object.item)) {
             return false;
         }
     }
@@ -161,7 +159,7 @@ static Item storage_object(JsStorageState* storage) {
     Item object = js_new_object();
     storage->object = object;
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
     js_property_set(object, js_make_string("key"),
         js_new_function((void*)js_storage_key, 1));
@@ -253,7 +251,7 @@ extern "C" Item js_match_media(Item query_item) {
     if (!dom_platform_ensure_roots()) return ItemError;
     state->object = js_create_event_target();
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
     js_property_set(state->object, js_make_string("media"),
         js_make_string(state->query));

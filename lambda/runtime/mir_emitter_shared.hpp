@@ -777,11 +777,10 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
 static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                       size_t context_offset, MIR_reg_t value) {
     if (context_offset == offsetof(Context, side_number_top)) {
-        MIR_type_t types[2] = {MIR_T_P, MIR_T_P};
-        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, runtime),
-            MIR_new_reg_op(em->ctx, value)};
+        MIR_type_t types[1] = {MIR_T_P};
+        MIR_op_t args[1] = {MIR_new_reg_op(em->ctx, value)};
         (void)em_call_with_args(em, "lambda_restore_number_frame_top",
-            MIR_T_I64, 2, types, args, true);
+            MIR_T_I64, 1, types, args, true);
         return;
     }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -1140,12 +1139,12 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         }
     }
     if (entry_mode == MIR_ENTRY_CHECKED) {
-        MIR_var_t ensure_args[3] = {
-            {MIR_T_P, "context", 0}, {MIR_T_I64, "root_slots", 0},
+        MIR_var_t ensure_args[2] = {
+            {MIR_T_I64, "root_slots", 0},
             {MIR_T_I64, "number_slots", 0},
         };
-        ensure_import = em_ensure_import(em, "lambda_side_stack_ensure",
-            MIR_T_I64, 3, ensure_args, 1, false);
+        ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_tls",
+            MIR_T_I64, 2, ensure_args, 1, false);
         MIR_reg_t bound = em_new_reg(em, "frame_bound", MIR_T_I64);
         MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
         MIR_label_t bound_label = em_new_label(em);
@@ -1163,11 +1162,10 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                 MIR_new_label_op(em->ctx, bound_label),
                 MIR_new_reg_op(em->ctx, bound)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_call_insn(em->ctx, 6,
+            MIR_new_call_insn(em->ctx, 5,
                 MIR_new_ref_op(em->ctx, ensure_import->proto),
                 MIR_new_ref_op(em->ctx, ensure_import->import),
                 MIR_new_reg_op(em->ctx, ensured),
-                MIR_new_reg_op(em->ctx, frame->runtime),
                 MIR_new_int_op(em->ctx, frame->root_slot_count),
                 MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
@@ -1251,12 +1249,12 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                 MIR_new_reg_op(em->ctx, overflow)));
 #if defined(_WIN32)
         if (!ensure_import) {
-            MIR_var_t ensure_args[3] = {
-                {MIR_T_P, "context", 0}, {MIR_T_I64, "root_slots", 0},
+            MIR_var_t ensure_args[2] = {
+                {MIR_T_I64, "root_slots", 0},
                 {MIR_T_I64, "number_slots", 0},
             };
-            ensure_import = em_ensure_import(em, "lambda_side_stack_ensure",
-                MIR_T_I64, 3, ensure_args, 1, false);
+            ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_tls",
+                MIR_T_I64, 2, ensure_args, 1, false);
         }
         MIR_reg_t commit_limit = em_new_reg(em, "root_commit_limit", MIR_T_I64);
         MIR_reg_t needs_commit = em_new_reg(em, "root_needs_commit", MIR_T_I64);
@@ -1277,11 +1275,10 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
             MIR_new_insn(em->ctx, MIR_BF, MIR_new_label_op(em->ctx, ready),
                 MIR_new_reg_op(em->ctx, needs_commit)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_call_insn(em->ctx, 6,
+            MIR_new_call_insn(em->ctx, 5,
                 MIR_new_ref_op(em->ctx, ensure_import->proto),
                 MIR_new_ref_op(em->ctx, ensure_import->import),
                 MIR_new_reg_op(em->ctx, committed),
-                MIR_new_reg_op(em->ctx, frame->runtime),
                 MIR_new_int_op(em->ctx, frame->root_slot_count),
                 MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,

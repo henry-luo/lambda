@@ -644,7 +644,7 @@ extern "C" void* import_resolver(const char* name);
 
 static bool jube_host_root_frame_begin(LambdaRootFrame* frame,
         size_t slot_count) {
-    return lambda_root_frame_begin((Context*)context, frame, slot_count);
+    return lambda_root_frame_begin(frame, slot_count);
 }
 
 static uint64_t* jube_host_root_frame_take_slot(LambdaRootFrame* frame) {
@@ -667,7 +667,7 @@ static bool jube_host_opaque_root_frame_begin(JubeRootFrame* frame,
     if (!host_frame) return false;
     // Reused guest stack storage must not retain a prior activation watermark.
     memset(host_frame, 0, sizeof(*host_frame));
-    return lambda_root_frame_begin((Context*)context, host_frame, slot_count);
+    return lambda_root_frame_begin(host_frame, slot_count);
 }
 
 static uint64_t* jube_host_opaque_root_frame_take_slot(JubeRootFrame* frame) {
@@ -1735,7 +1735,6 @@ struct JubeGuestExecution {
     Runtime runtime;
     Runtime* runtime_owner;
     EvalContext* active_context;
-    EvalContext* previous_context;
     Context* frame_runtime;
     bool reusing_context;
     bool activation_active;
@@ -2785,7 +2784,6 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     if (!execution || !out_input || execution->activation_active) return -1;
 
-    execution->previous_context = context;
     execution->reusing_context = context && context->heap;
     if (execution->reusing_context) {
         execution->active_context = context;
@@ -2793,7 +2791,7 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
         execution->active_context = runtime_get_eval_context(
             jube_guest_execution_runtime(execution));
         if (!execution->active_context) return -1;
-        context = execution->active_context;
+        if (!eval_context_thread_initialize(execution->active_context)) return -1;
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, NULL);
@@ -2805,7 +2803,7 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
     execution->frame_runtime = (Context*)context;
     execution->input = Input::create(context->pool);
     if (!execution->input) {
-        mir_guest_finish_context(jube_guest_execution_runtime(execution), execution->previous_context,
+        mir_guest_finish_context(jube_guest_execution_runtime(execution),
                                  execution->reusing_context);
         return -1;
     }
@@ -2837,7 +2835,7 @@ static int jube_host_execution_run_main(void* execution_context, void* entry_fun
     JubeGuestMainFn entry = (JubeGuestMainFn)entry_function;
     if (!execution || !execution->activation_active || !entry || !out_result) return -1;
 
-    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture((Context*)context);
+    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture();
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -2867,7 +2865,7 @@ static int jube_host_execution_run_main_into(void* execution_context,
     JubeGuestMainIntoFn entry = (JubeGuestMainIntoFn)entry_function;
     if (!execution || !execution->activation_active || !entry || !out_result) return -1;
 
-    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture((Context*)context);
+    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture();
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -2897,12 +2895,11 @@ static void jube_host_execution_finish_guest(void* execution_context) {
     // Restore nested activation state before releasing the opaque data token.
     jube_active_guest_execution = execution->previous_active_execution;
     execution->previous_active_execution = NULL;
-    mir_guest_finish_context(jube_guest_execution_runtime(execution), execution->previous_context,
+    mir_guest_finish_context(jube_guest_execution_runtime(execution),
                              execution->reusing_context);
     execution->input = NULL;
     execution->active_context = NULL;
     execution->frame_runtime = NULL;
-    execution->previous_context = NULL;
     execution->reusing_context = false;
     execution->activation_active = false;
 }
@@ -3435,7 +3432,7 @@ static Item jube_host_node_emit_callback(Item env_item) {
 
 static void jube_host_node_next_tick_callback(void* session, Item callback, Item error, Item result) {
     if (!jube_host_node_session_is_live(session) || get_type_id(callback) != LMD_TYPE_FUNC) return;
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> callback_root(roots, callback);
     Rooted<Item> error_root(roots, error);
     Rooted<Item> result_root(roots, result);

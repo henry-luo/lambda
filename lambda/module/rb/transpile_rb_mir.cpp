@@ -4616,10 +4616,9 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
 
     // Use Runtime's canonical context when this guest owns a fresh activation.
     // A nested guest borrows its caller's already-bound heap for the duration.
-    EvalContext* old_context = context;
     bool reusing_context = false;
 
-    if (old_context && old_context->heap) {
+    if (context && context->heap) {
         reusing_context = true;
     } else {
         EvalContext* rb_context = runtime_get_eval_context(runtime);
@@ -4628,7 +4627,10 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
             rb_transpiler_destroy(tp);
             return (Item){.item = ITEM_ERROR};
         }
-        context = rb_context;
+        if (!eval_context_thread_initialize(rb_context)) {
+            rb_transpiler_destroy(tp);
+            return (Item){.item = ITEM_ERROR};
+        }
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
@@ -4647,7 +4649,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     if (!ctx) {
         log_error("rb-mir: MIR context init failed");
         rb_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4657,7 +4659,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         log_error("rb-mir: failed to allocate RbMirTranspiler");
         MIR_finish(ctx);
         rb_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     memset(mt, 0, sizeof(RbMirTranspiler));
@@ -4708,7 +4710,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         mem_free(mt);
         MIR_finish(ctx);
         rb_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4730,7 +4732,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     MIR_finish(ctx);
     rb_transpiler_destroy(tp);
 
-    mir_guest_finish_context(runtime, old_context, reusing_context);
+    mir_guest_finish_context(runtime, reusing_context);
 
     return result;
 }

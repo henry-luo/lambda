@@ -64,14 +64,14 @@ IS_MACOS = platform.system() == "Darwin"
 ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
 
 # Rows that RUN and exit 0 but compute the wrong answer on a given engine. They are
-# excluded per-engine, not per-row: the entry below is legitimately timed under
-# LambdaJS. Verify with test/benchmark goldens before adding or removing an entry.
-WRONG_OUTPUT_ROWS = {
-    ("awfy", "list", "mir_typed"):
-        'list2.ls prints "List: FAIL result=6"; golden awfy/list2.txt is "List: PASS". '
-        "Completes in ~0.012 ms because it does almost no work, so timing it produces "
-        "a spurious best-in-class row. Already on MIR_SKIP_TESTS in test_lambda_gtest.",
-}
+# excluded per-engine, not per-row. Verify with test/benchmark goldens before adding
+# or removing an entry.
+#
+# The ("awfy", "list", "mir_typed") entry was removed 2026-07-29: list2.ls now prints
+# "List: PASS", matching golden awfy/list2.txt, and runs the same workload as list.ls
+# and list2.js (tak over lists of 15/10/6). It is no longer a ~0.012 ms no-op either —
+# it measures ~0.79 ms against Node's ~0.50 ms, so the row is not spuriously fast.
+WRONG_OUTPUT_ROWS = {}
 ENGINE_LABELS = {
     "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
     "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
@@ -398,43 +398,57 @@ def make_qjs_wrapper(js_path):
 
 
 def make_jetstream_node_wrapper(bench_name, js_path):
-    """Create Node.js wrapper for JetStream benchmark with standardized x8 timing."""
-    run_expr = _detect_jetstream_run_function(js_path)
-    if run_expr is None:
+    """Create Node.js wrapper timing one runIteration() of a JetStream benchmark."""
+    detected = _detect_jetstream_run_function(js_path)
+    if detected is None:
         return None
+    run_expr, run_count = detected
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_node_bench_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
+                "// with the file's OWN loop count so every engine runs the same work\n")
         f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
 
 
 def _detect_jetstream_run_function(js_path):
-    """Detect the benchmark's run function from the Benchmark class body."""
+    """Detect (call_expr, repeat_count) for one runIteration() of a JetStream benchmark.
+
+    The count is the benchmark file's OWN loop bound inside runIteration(), not a fixed
+    number. An earlier version hard-coded 8 repeats for every file, which silently made
+    the JS engines run a different workload from the Lambda ports — the .ls scripts each
+    implement exactly one runIteration(). It was 8/50 of Lambda's work on richards and
+    splay, 8/25 on crypto_sha1, 8/20 on deltablue, and 8x TOO MUCH on navier_stokes and
+    hashmap (whose runIteration bodies are a single unlooped call).
+    """
     with open(js_path) as f:
         code = f.read()
     m = re.search(r'runIteration\(\)\s*\{([^}]+)\}', code)
-    if m:
-        body = m.group(1).strip()
-        calls = re.findall(r'(\w+)\(\)', body)
-        for call in calls:
-            if call not in ('let', 'var', 'const', 'for', 'if'):
-                return f"{call}()"
+    if not m:
+        return None
+    body = m.group(1).strip()
+    # a bare `foo();` body is one repeat; `for (... < N; ...) foo();` is N
+    count_m = re.search(r'for\s*\([^;]*;[^<]*<\s*(\d+)\s*;', body)
+    count = int(count_m.group(1)) if count_m else 1
+    for call in re.findall(r'(\w+)\(\)', body):
+        if call not in ('let', 'var', 'const', 'for', 'if'):
+            return f"{call}()", count
     return None
 
 
 def make_jetstream_ljs_wrapper(bench_name, js_path):
-    """Create LambdaJS wrapper for JetStream benchmark with standardized x8 timing."""
-    run_expr = _detect_jetstream_run_function(js_path)
-    if run_expr is None:
+    """Create LambdaJS wrapper timing one runIteration() of a JetStream benchmark."""
+    detected = _detect_jetstream_run_function(js_path)
+    if detected is None:
         return None
+    run_expr, run_count = detected
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_ljs_jetstream_{bench_name}.js")
     with open(js_path) as f:
@@ -443,19 +457,21 @@ def make_jetstream_ljs_wrapper(bench_name, js_path):
     code = code.replace('"use strict";', "")
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
+                "// with the file's OWN loop count so every engine runs the same work\n")
         f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
 
 
 def make_jetstream_qjs_wrapper(bench_name, js_path):
-    """Create QuickJS wrapper for JetStream benchmark with standardized x8 timing."""
-    run_expr = _detect_jetstream_run_function(js_path)
-    if run_expr is None:
+    """Create QuickJS wrapper timing one runIteration() of a JetStream benchmark."""
+    detected = _detect_jetstream_run_function(js_path)
+    if detected is None:
         return None
+    run_expr, run_count = detected
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_qjs_jetstream_{bench_name}.js")
     with open(js_path) as f:
@@ -466,9 +482,10 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
         f.write("import * as std from 'std';\n")
         f.write(QJS_POLYFILL)
         f.write(code)
-        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
+                "// with the file's OWN loop count so every engine runs the same work\n")
         f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper

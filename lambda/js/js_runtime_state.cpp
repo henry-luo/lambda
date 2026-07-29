@@ -38,9 +38,9 @@ extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
-bool js_runtime_state_bind_context(EvalContext* runtime_context) {
-    if (!runtime_context) {
-        js_active_runtime_state = NULL;
+bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
+    if (!eval_context_thread_matches(runtime_context)) {
+        log_error("js-thread-init: EvalContext is not current owner");
         return false;
     }
     if (!runtime_context->js_state) {
@@ -48,7 +48,6 @@ bool js_runtime_state_bind_context(EvalContext* runtime_context) {
             MEM_CAT_JS_RUNTIME);
         if (!runtime_context->js_state) {
             log_error("js-runtime-state: failed to allocate context state");
-            js_active_runtime_state = NULL;
             return false;
         }
         memset(runtime_context->js_state, 0, sizeof(JsRuntimeState));
@@ -79,18 +78,47 @@ bool js_runtime_state_bind_context(EvalContext* runtime_context) {
         runtime_context->js_state->assert.node_test_next_id = 1;
         runtime_context->js_state->performance.origin_epoch = UINT64_MAX;
     }
+    if (js_active_runtime_state &&
+            js_active_runtime_state != runtime_context->js_state) {
+        // A derived JS TLS cache may never conceal an EvalContext switch.
+        log_error("js-thread-init: refusing runtime-state switch current=%p owner=%p",
+                  (void*)js_active_runtime_state, (void*)runtime_context->js_state);
+        return false;
+    }
     js_active_runtime_state = runtime_context->js_state;
     js_fetch_apply_bootstrap_base_path();
     return true;
 }
 
-void js_runtime_state_release_heap_resources(EvalContext* runtime_context) {
+bool js_runtime_state_thread_matches(const EvalContext* runtime_context) {
+    return runtime_context && eval_context_thread_matches(runtime_context) &&
+        runtime_context->js_state &&
+        js_active_runtime_state == runtime_context->js_state;
+}
+
+bool js_runtime_state_thread_shutdown(EvalContext* runtime_context) {
+    if (!runtime_context || !eval_context_thread_matches(runtime_context) ||
+            (js_active_runtime_state &&
+             js_active_runtime_state != runtime_context->js_state)) {
+        log_error("js-thread-shutdown: owner mismatch");
+        return false;
+    }
+    js_active_runtime_state = NULL;
+    return true;
+}
+
+void js_runtime_state_release_heap_resources(void) {
+    EvalContext* runtime_context = context;
     if (!runtime_context || !runtime_context->js_state) return;
+    if (!js_runtime_state_thread_matches(runtime_context)) {
+        // Heap-bound JS cleanup invokes ambient helpers and therefore must run
+        // on the already-bound owner thread instead of rebinding its capsule.
+        log_error("js-runtime-state-release: owner thread is not current");
+        return;
+    }
     // Regex cache records point into the current GC heap. Release their native
     // engines before heap_destroy invalidates those records; capsule teardown
     // later only disposes context-owned containers that are still present.
-    JsRuntimeState* previous = js_active_runtime_state;
-    js_active_runtime_state = runtime_context->js_state;
     // Listener root slots and DOM pins must leave while both their heap and
     // document owner are still valid. Dispatch remains direct state access.
     js_dom_events_reset();
@@ -102,10 +130,10 @@ void js_runtime_state_release_heap_resources(EvalContext* runtime_context) {
     js_fetch_reset();
     js_reset_template_registry();
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
-    js_active_runtime_state = previous;
 }
 
-void js_runtime_state_destroy_context(EvalContext* runtime_context) {
+void js_runtime_state_destroy_context(void) {
+    EvalContext* runtime_context = context;
     if (!runtime_context || !runtime_context->js_state) return;
     bool was_active = js_active_runtime_state == runtime_context->js_state;
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
@@ -625,7 +653,7 @@ extern "C" Item* js_ensure_active_module_vars(void) {
         return context->active_js_module_state->vars;
     }
     uint32_t module_id = 0;
-    if (!context || !lambda_module_state_reserve((Context*)context,
+    if (!context || !lambda_module_state_reserve(
             JS_MAX_MODULE_VARS, 0, &module_id)) {
         log_error("js-module-vars: failed to reserve fallback module state");
         return NULL;
@@ -678,7 +706,7 @@ extern "C" Item js_in(Item key, Item object);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> desc_root(roots, ItemNull);
@@ -785,7 +813,7 @@ extern "C" void js_reset_module_vars() {
 extern "C" uint32_t js_alloc_module_state(uint32_t var_count) {
     uint32_t module_id = 0;
     if (var_count == 0) var_count = 1;
-    if (!context || !lambda_module_state_reserve((Context*)context,
+    if (!context || !lambda_module_state_reserve(
             var_count, 0, &module_id)) return UINT32_MAX;
     return module_id;
 }
@@ -796,9 +824,19 @@ extern "C" bool js_activate_module_state(uint32_t var_count) {
 }
 
 extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count) {
-    if (!context || !context->active_js_module_state) return false;
-    return lambda_active_js_module_state_ensure_vars((Context*)context,
-        required_var_count);
+    if (!context || !context->active_js_module_state) {
+        log_error("js-module-vars: no active slab while growing to %u",
+                  required_var_count);
+        return false;
+    }
+    if (!lambda_active_js_module_state_ensure_vars(required_var_count)) {
+        log_error("js-module-vars: failed to grow slab %u from %u to %u",
+                  context->active_js_module_state->module_id,
+                  context->active_js_module_state->var_count,
+                  required_var_count);
+        return false;
+    }
+    return true;
 }
 
 extern "C" uint32_t js_get_active_module_state_id(void) {
@@ -900,13 +938,13 @@ extern "C" const char* js_get_exception_message(void) {
 }
 
 extern "C" int js_check_exception(void) {
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     return js_exception_pending ? 1 : 0;
 }
 
 extern "C" void js_debug_assert_exception_clear(void) {
 #ifndef NDEBUG
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     if (js_exception_pending) {
         log_error("js-exc assert-clear: pending flag unexpectedly set");
         abort();
@@ -916,7 +954,7 @@ extern "C" void js_debug_assert_exception_clear(void) {
 
 extern "C" void js_debug_assert_exception_set(void) {
 #ifndef NDEBUG
-    AutoAssertNoGC no_gc((Context*)context);
+    AutoAssertNoGC no_gc;
     if (!js_exception_pending) {
         log_error("js-exc assert-set: pending flag unexpectedly clear");
         abort();
@@ -1504,7 +1542,7 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
 
 // v12: Create typed Error with compile-time stack trace
 extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
-    RootFrame roots((Context*)context, 14);
+    RootFrame roots(14);
     Rooted<Item> error_name_root(roots, error_name);
     Rooted<Item> message_root(roots, message);
     Rooted<Item> stack_str_root(roots, stack_str);
@@ -1849,7 +1887,7 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 
 extern "C" Item js_build_arguments_object() {
-    RootFrame roots((Context*)context, 10);
+    RootFrame roots(10);
     Rooted<Item> arr_root(roots, ItemNull);
     Rooted<Item> companion_root(roots, ItemNull);
     Rooted<Item> key_root(roots, ItemNull);

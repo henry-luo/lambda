@@ -48,10 +48,8 @@ static RenderMapState* render_map_state(void) {
 static void render_map_register_roots(RenderMapState* state) {
     if (!state || state->roots_registered) return;
     if (!context || !context->heap ||
-            !heap_register_gc_root_range_for((Context*)context,
-                &state->doc_root.item, 1) ||
-            !heap_register_gc_root_range_for((Context*)context,
-                &state->source_doc_root.item, 1)) {
+            !heap_try_register_gc_root_range(&state->doc_root.item, 1) ||
+            !heap_try_register_gc_root_range(&state->source_doc_root.item, 1)) {
         log_error("render-map: failed to publish context root slots");
         abort();
     }
@@ -164,8 +162,8 @@ void render_map_destroy(void) {
         hashmap_free(state->reverse_map);
     }
     if (state->roots_registered) {
-        heap_unregister_gc_root_range_for((Context*)context, &state->doc_root.item);
-        heap_unregister_gc_root_range_for((Context*)context, &state->source_doc_root.item);
+        heap_unregister_gc_root_range(&state->doc_root.item);
+        heap_unregister_gc_root_range(&state->source_doc_root.item);
     }
     if (state->path_recorder_state && state->path_recorder_state_cleanup) {
         state->path_recorder_state_cleanup(state->path_recorder_state);

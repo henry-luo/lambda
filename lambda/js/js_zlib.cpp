@@ -120,7 +120,7 @@ static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
 
 // create Uint8Array result from raw bytes
 static Item make_buffer_result(const uint8_t* data, int len) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> result_root(roots, js_typed_array_new(JS_TYPED_UINT8, len));
     Item result = result_root.get();
     JsTypedArray* ta = js_get_typed_array_ptr(result.map);
@@ -136,7 +136,7 @@ static Item make_buffer_result(const uint8_t* data, int len) {
 typedef bool (*NodeZlibSyncCodec)(const uint8_t* data, int length, NodeZlibBytes* out_bytes);
 
 static Item js_zlib_sync_codec(Item input_item, NodeZlibSyncCodec codec, const char* method) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> input_root(roots, input_item);
     const uint8_t* input_data = NULL;
     int input_length = 0;
@@ -950,7 +950,7 @@ extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
 }
 
 static void zlib_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item(name));
     Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
@@ -959,7 +959,7 @@ static void zlib_set_method(Item ns, const char* name, void* func_ptr, int param
 
 static Item zlib_set_constructor(Item ns, const char* name, void* func_ptr, int mode,
                                  Item transform_proto) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> transform_proto_root(roots, transform_proto);
     Rooted<Item> ctor_root(roots, js_new_function(func_ptr, 1));
@@ -986,7 +986,7 @@ extern "C" Item js_get_zlib_namespace(void) {
     if (zlib_namespace.item != 0) return zlib_namespace;
 
     zlib_namespace = js_new_object();
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> ns_root(roots, zlib_namespace);
     Rooted<Item> stream_root(roots, ItemNull);
     Rooted<Item> transform_ctor_root(roots, ItemNull);

@@ -1895,7 +1895,7 @@ extern "C" Item js_date_now(void) {
 extern "C" Item js_get_global_property(Item key);
 
 static void js_date_set_instance_prototype(Item obj) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> constructor_root(roots, ItemNull);
     Rooted<Item> prototype_root(roots, ItemNull);
@@ -1919,7 +1919,7 @@ static Item js_date_get_time_value(Item date_obj, bool* found) {
 }
 
 extern "C" Item js_date_new(void) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> object_root(roots, js_new_object());
     Item time_val = js_date_now();
     Rooted<Item> key_root(roots, (Item){.item = s2it(heap_create_name("__time__"))});
@@ -1937,7 +1937,7 @@ extern "C" Item js_date_now_string(void) {
 
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> object_root(roots, js_new_object());
     Rooted<Item> value_root(roots, value);
     Rooted<Item> key_root(roots, (Item){.item = s2it(heap_create_name("__time__"))});
@@ -3070,7 +3070,7 @@ extern "C" Item js_node_throw_system_error(const char* syscall, int error_number
 #endif
     char message[128];
     snprintf(message, sizeof(message), "%s %s", syscall, code ? code : "UNKNOWN");
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> message_root(roots,
         (Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
     Rooted<Item> error_root(roots, js_new_error(message_root.get()));
@@ -3449,25 +3449,25 @@ static uv_pipe_t* js_process_ipc_pipe_ptr(void) {
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
 typedef struct JsProcessIpcScope {
-    EvalContext* previous;
-    bool active;
+    bool valid;
 } JsProcessIpcScope;
 
 static bool js_process_ipc_enter(uv_handle_t* handle, JsProcessIpcScope* scope) {
     memset(scope, 0, sizeof(*scope));
     EvalContext* owner = handle ? (EvalContext*)handle->data : NULL;
     if (!owner || !owner->js_state) return false;
-    scope->previous = context;
-    context = owner;
-    js_runtime_state_bind_context(owner);
-    scope->active = true;
+    if (!eval_context_thread_matches(owner) ||
+            !js_runtime_state_thread_matches(owner)) {
+        // libuv must deliver IPC completion on the context's owner loop.
+        log_error("js-process-ipc: callback arrived on non-owner thread");
+        return false;
+    }
+    scope->valid = true;
     return true;
 }
 
 static void js_process_ipc_exit(JsProcessIpcScope* scope) {
-    if (!scope || !scope->active) return;
-    context = scope->previous;
-    js_runtime_state_bind_context(scope->previous);
+    if (scope) scope->valid = false;
 }
 
 static void js_process_ipc_refresh_ref(void) {
@@ -7513,7 +7513,7 @@ static int js_idx_pair_cmp(const void* a, const void* b) {
 
 // Reflect.ownKeys(obj) — returns array of all own property keys (strings + symbols)
 extern "C" Item js_reflect_own_keys(Item obj) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> names_root(roots, ItemNull);
     Rooted<Item> symbols_root(roots, ItemNull);
@@ -7580,7 +7580,7 @@ extern "C" Item js_reflect_own_keys(Item obj) {
 }
 
 static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> desc_root(roots, js_new_object());
     // Descriptor assembly allocates several shape transitions; keep both the
@@ -7599,7 +7599,7 @@ static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs
 }
 
 static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, bool include_create_attrs) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> receiver_root(roots, receiver);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
@@ -7612,7 +7612,7 @@ static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, 
 // Reflect.set(target, key, value [, receiver]) — returns boolean.
 // ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
@@ -7867,7 +7867,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
 
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> descriptor_root(roots, desc);
@@ -7908,7 +7908,7 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
 
 // Reflect.deleteProperty(obj, key) — returns boolean
 extern "C" Item js_reflect_delete_property(Item obj, Item key) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> key_root(roots, key);
     // ES §28.1.4 Reflect.deleteProperty: target must be an Object.
@@ -8125,7 +8125,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
 }
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> value_root(roots, ItemNull);
@@ -8689,7 +8689,7 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
 }
 
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> value_root(roots, value);
@@ -8987,7 +8987,7 @@ static void js_define_properties_cleanup(Item* desc_keys, Item* desc_objs) {
 }
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> properties_root(roots, props);
     Rooted<Item> properties_object_root(roots, props);
@@ -9142,7 +9142,7 @@ extern "C" Item js_alert(Item msg) {
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> result_root(roots, ItemNull);
 
@@ -9889,7 +9889,7 @@ extern "C" Item js_object_keys(Item object) {
     }
 
     TypeMap* tm = (TypeMap*)m->type;
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> result_root(roots, js_array_new(0));
     Rooted<Item> final_result_root(roots, ItemNull);
@@ -12494,7 +12494,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
     extern int js_check_exception(void);
     extern Item js_clear_exception(void);
     extern void js_throw_value(Item value);
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> map_fn_root(roots, mapFn);
     Rooted<Item> this_arg_root(roots, this_arg);
@@ -12536,7 +12536,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
 
 // Returns true if `iterable` exposes a callable Symbol.iterator (`__sym_1`).
 static bool js_has_sym_iterator(Item iterable) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> factory_root(roots, ItemNull);
@@ -12555,7 +12555,7 @@ static bool js_has_sym_iterator(Item iterable) {
 }
 
 static void js_array_from_define_index_or_throw(Item object, int64_t index, Item value) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> key_root(roots, ItemNull);
@@ -12574,7 +12574,7 @@ static void js_array_from_define_index_or_throw(Item object, int64_t index, Item
 static void js_array_from_close_preserve_exception(Item iterator) {
     extern Item js_clear_exception(void);
     extern void js_throw_value(Item value);
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> iterator_root(roots, iterator);
     Rooted<Item> saved_root(roots, js_clear_exception());
     js_iterator_close(iterator_root.get());
@@ -12583,7 +12583,7 @@ static void js_array_from_close_preserve_exception(Item iterator) {
 }
 
 static int64_t js_array_from_array_like_length(Item object) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
@@ -12605,7 +12605,7 @@ static int64_t js_array_from_array_like_length(Item object) {
 }
 
 static void js_array_from_array_like_into(Item result, Item iterable, int64_t len, Item mapFn, Item this_arg, bool mapping) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> map_fn_root(roots, mapFn);
@@ -12631,7 +12631,7 @@ static void js_array_from_array_like_into(Item result, Item iterable, int64_t le
 }
 
 extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping) {
-    RootFrame roots((Context*)context, 8);
+    RootFrame roots(8);
     Rooted<Item> ctor_root(roots, ctor);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> map_fn_root(roots, mapFn);
@@ -12698,7 +12698,7 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
 
 extern "C" Item js_array_from(Item iterable) {
     extern Item js_throw_type_error(const char* msg);
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> converted_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
@@ -12802,7 +12802,7 @@ extern "C" Item js_array_from(Item iterable) {
 }
 
 static Item js_array_from_with_mapper_impl(Item iterable, Item mapFn, Item this_arg) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> map_fn_root(roots, mapFn);
     Rooted<Item> this_arg_root(roots, this_arg);
@@ -15246,7 +15246,7 @@ static Item js_message_port_make_close_event(void) {
 }
 
 static Item js_message_port_queue(Item port) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> port_root(roots, port);
     Item queue = js_property_get(port_root.get(), make_string_item("__message_queue__"));
     Rooted<Item> queue_root(roots, queue);
@@ -15519,7 +15519,7 @@ static Item js_message_port_deliver(Item env_item) {
 
 static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Item self = js_get_this();
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> self_root(roots, self);
     Rooted<Item> message_root(roots, msg);
     Rooted<Item> transfer_root(roots, transfer_list);
@@ -15622,7 +15622,7 @@ extern "C" Item js_message_port_receive_message_on_port(Item port) {
     Item msg = js_message_port_shift_message(port);
     if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> message_root(roots, msg);
     Item result = js_new_object();
     Rooted<Item> result_root(roots, result);
@@ -15908,7 +15908,7 @@ extern "C" Item js_get_global_this() {
         {
             extern Item js_performance_now(void);
             extern Item js_performance_observer_new(Item callback);
-            RootFrame performance_roots((Context*)context, 5);
+            RootFrame performance_roots(5);
             Item perf = js_new_object();
             Rooted<Item> perf_root(performance_roots, perf);
             Rooted<Item> timing_root(performance_roots, ItemNull);
@@ -18055,7 +18055,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
     if (ctor_id == JS_CTOR_SYMBOL) js_populate_symbol_ctor(fn_item);
     if (ctor_id == JS_CTOR_EVENT || ctor_id == JS_CTOR_CUSTOM_EVENT) {
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         // Static phase constants on Event / CustomEvent constructor + prototype.
         struct { const char* n; int v; } ph[] = {
             {"NONE", 0}, {"CAPTURING_PHASE", 1}, {"AT_TARGET", 2}, {"BUBBLING_PHASE", 3}

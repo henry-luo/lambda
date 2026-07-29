@@ -114,8 +114,7 @@ struct Runtime {
 
 // Complete a guest MIR activation that either reused its caller's heap or
 // created a standalone heap which must remain owned until runtime_cleanup().
-void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
-                              bool reusing_context);
+void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 #include "runtime-state.h"
@@ -197,7 +196,7 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
-void preserve_context_last_error(EvalContext* ctx, Item result);
+void preserve_context_last_error(Item result);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);

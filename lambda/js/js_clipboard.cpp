@@ -954,7 +954,7 @@ extern "C" Item js_dt_clear_data(Item format_item) {
 }
 
 static Item js_make_data_transfer_object(void) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> dt_root(roots, ItemNull);
     Rooted<Item> items_root(roots, ItemNull);
     Rooted<Item> files_root(roots, ItemNull);

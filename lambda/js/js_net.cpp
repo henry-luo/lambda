@@ -2015,7 +2015,7 @@ static NetBlockList* net_block_list_alloc(void) {
 }
 
 static Item make_socket_handle_object(JsSocket* sock) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> handle_root(roots, js_new_object());
     js_property_set(handle_root.get(), make_string_item("__socket_handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
@@ -2031,7 +2031,7 @@ static Item make_socket_handle_object(JsSocket* sock) {
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> obj_root(roots, js_new_object());
     Rooted<Item> hwm_root(roots, ItemNull);
     Rooted<Item> readable_state_root(roots, ItemNull);
@@ -5272,7 +5272,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
         }
     }
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> obj_root(roots, js_new_object());
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj_root.get(), JS_CLASS_SERVER);  // A3-T3b
@@ -5687,7 +5687,7 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
 // =============================================================================
 
 static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> namespace_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item(name));
     Rooted<Item> function_root(roots, js_new_function(func_ptr, param_count));
@@ -5698,7 +5698,7 @@ static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_
 }
 
 static Item net_constructor_prototype(Item ctor, JsClass cls) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> constructor_root(roots, ctor);
     Rooted<Item> key_root(roots, make_string_item("prototype"));
     Rooted<Item> prototype_root(roots,
@@ -5750,7 +5750,7 @@ extern "C" Item js_get_net_namespace(void) {
     net_namespace = js_new_object();
     // The namespace is process-cached; register its root before any exported
     // constructor allocation so forced collection cannot reclaim the cache.
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> namespace_root(roots, net_namespace);
     Rooted<Item> create_server_root(roots, ItemNull);
     Rooted<Item> socket_root(roots, ItemNull);

@@ -296,12 +296,24 @@ void free_document(DomDocument* doc) {
 
     Runtime* timer_runtime = doc->js.runtime;
     EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
-    EvalContext* previous_timer_context = nullptr;
+    Runtime* state_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+    EvalContext* state_owner = state_runtime
+        ? runtime_get_eval_context(state_runtime) : nullptr;
+    if (timer_owner && state_owner && timer_owner != state_owner) {
+        // One document cannot multiplex independent evaluators on one host
+        // thread. Such documents need a shared owner or separate worker.
+        log_error("free_document: Lambda and JS runtimes have different EvalContexts");
+        return;
+    }
+    EvalContext* document_owner = state_owner ? state_owner : timer_owner;
+    if (document_owner && !eval_context_thread_initialize(document_owner)) {
+        log_error("free_document: document EvalContext is not the thread owner");
+        return;
+    }
     if (timer_owner && timer_owner->js_state) {
         // Timer handles live in the document capsule; teardown must not inspect
         // another document's queue through an ambient host context.
-        previous_timer_context = eval_context_bind(timer_owner);
-        js_runtime_state_bind_context(timer_owner);
+        if (!js_runtime_state_thread_initialize(timer_owner)) return;
     }
     if (timer_owner && timer_owner->js_state) {
         if (script_runner_js_batch_cleanup_unsafe()) {
@@ -309,26 +321,17 @@ void free_document(DomDocument* doc) {
         } else {
             js_event_loop_cancel_document_timers(doc);
         }
-        eval_context_restore(previous_timer_context);
-        js_runtime_state_bind_context(previous_timer_context);
     }
 
-    Runtime* state_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
-    EvalContext* state_owner = state_runtime
-        ? runtime_get_eval_context(state_runtime) : nullptr;
-    EvalContext* previous_state_context = nullptr;
     if (state_owner) {
         // StateStore owns template/render maps attached to this runtime. Bind
-        // its canonical context until they are detached; otherwise teardown
-        // can consult a null TLS context after the JS heap is released.
-        previous_state_context = eval_context_bind(state_owner);
-        js_runtime_state_bind_context(state_owner->js_state ? state_owner : nullptr);
+        // its canonical context until thread teardown; nested cleanup cannot
+        // save and restore a different evaluator.
+        if (!eval_context_thread_matches(state_owner)) return;
+        if (state_owner->js_state &&
+                !js_runtime_state_thread_initialize(state_owner)) return;
     }
     radiant_document_destroy_state(doc);
-    if (state_owner) {
-        eval_context_restore(previous_state_context);
-        js_runtime_state_bind_context(previous_state_context);
-    }
 
     // State teardown releases context-owned maps, so the retained JS runtime
     // can be destroyed only after the document has detached those references.

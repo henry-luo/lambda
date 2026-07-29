@@ -121,11 +121,11 @@ static void test_weak_clear(uint64_t* slot, void* context) {
 
 TEST(SideStackRootFrameTest, NestedFramesRestoreExactWatermarks) {
     Context runtime{};
-    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
     uint64_t* initial_top = runtime.side_root_top;
 
     LambdaRootFrame outer{};
-    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &outer, 3));
+    ASSERT_TRUE(lambda_root_frame_begin_for(&runtime, &outer, 3));
     ASSERT_EQ(runtime.side_root_top, initial_top + 3);
     for (size_t i = 0; i < 3; i++) {
         ASSERT_NE(lambda_root_frame_slot(&outer, i), nullptr);
@@ -134,7 +134,7 @@ TEST(SideStackRootFrameTest, NestedFramesRestoreExactWatermarks) {
     *lambda_root_frame_take_slot(&outer) = UINT64_C(0x1234);
 
     LambdaRootFrame inner{};
-    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &inner, 2));
+    ASSERT_TRUE(lambda_root_frame_begin_for(&runtime, &inner, 2));
     EXPECT_EQ(inner.watermark, initial_top + 3);
     EXPECT_EQ(runtime.side_root_top, initial_top + 5);
     lambda_root_frame_end(&inner);
@@ -143,49 +143,49 @@ TEST(SideStackRootFrameTest, NestedFramesRestoreExactWatermarks) {
 
     lambda_root_frame_end(&outer);
     EXPECT_EQ(runtime.side_root_top, initial_top);
-    lambda_side_stack_reset(&runtime);
+    lambda_side_stack_reset_for(&runtime);
 }
 
 TEST(SideStackRootFrameTest, RecoveryCheckpointRestoresBothStacks) {
     Context runtime{};
-    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
     LambdaRecoveryCheckpoint checkpoint =
-        lambda_recovery_checkpoint_capture(&runtime);
+        lambda_recovery_checkpoint_capture_for(&runtime);
     ASSERT_TRUE(checkpoint.active);
 
     LambdaRootFrame roots{};
-    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &roots, 2));
-    ASSERT_NE(lambda_side_number_alloc(&runtime), nullptr);
+    ASSERT_TRUE(lambda_root_frame_begin_for(&runtime, &roots, 2));
+    ASSERT_NE(lambda_side_number_alloc_for(&runtime), nullptr);
     EXPECT_NE(runtime.side_root_top, checkpoint.side_stack.root_top);
     EXPECT_NE(runtime.side_number_top, checkpoint.side_stack.number_top);
 
-    lambda_recovery_checkpoint_restore(&checkpoint);
+    lambda_recovery_checkpoint_restore_for(&runtime, &checkpoint);
     EXPECT_EQ(runtime.side_root_top, checkpoint.side_stack.root_top);
     EXPECT_EQ(runtime.side_number_top, checkpoint.side_stack.number_top);
     EXPECT_FALSE(checkpoint.active);
-    lambda_side_stack_reset(&runtime);
+    lambda_side_stack_reset_for(&runtime);
 }
 
 TEST(SideStackRootFrameTest, OversizedFrameFailsWithoutAdvancingWatermark) {
     Context runtime{};
-    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
     uint64_t* initial_top = runtime.side_root_top;
     LambdaRootFrame roots{};
     size_t reserve_slots =
         LAMBDA_SIDE_ROOT_RESERVE_BYTES / sizeof(uint64_t);
 
-    EXPECT_FALSE(lambda_root_frame_begin(&runtime, &roots,
+    EXPECT_FALSE(lambda_root_frame_begin_for(&runtime, &roots,
         reserve_slots + 1));
     EXPECT_FALSE(roots.active);
     EXPECT_EQ(runtime.side_root_top, initial_top);
-    lambda_side_stack_reset(&runtime);
+    lambda_side_stack_reset_for(&runtime);
 }
 
 TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
     Context runtime{};
-    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
-    LambdaSideStackSnapshot checkpoint = lambda_side_stack_snapshot(&runtime);
-    uint64_t* roots = lambda_side_root_alloc_n(&runtime, 3);
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+    LambdaSideStackSnapshot checkpoint = lambda_side_stack_snapshot_for(&runtime);
+    uint64_t* roots = lambda_side_root_alloc_n_for(&runtime, 3);
     ASSERT_NE(roots, nullptr);
     EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 3);
     EXPECT_EQ(roots[0], 0u);
@@ -197,7 +197,7 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
     roots[0] = string_item(object);
 
     LambdaRootFrame nested{};
-    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &nested, 2));
+    ASSERT_TRUE(lambda_root_frame_begin_for(&runtime, &nested, 2));
     EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 5);
     gc_collect_with_root_region(gc, NULL, 0, runtime.side_root_base,
         (int64_t)(runtime.side_root_top - runtime.side_root_base));
@@ -206,29 +206,29 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
 
     lambda_root_frame_end(&nested);
     EXPECT_EQ(runtime.side_root_top, checkpoint.root_top + 3);
-    lambda_side_stack_restore(&runtime, checkpoint);
+    lambda_side_stack_restore_for(&runtime, checkpoint);
     gc_collect_with_root_region(gc, NULL, 0, runtime.side_root_base,
         (int64_t)(runtime.side_root_top - runtime.side_root_base));
     EXPECT_EQ(gc->object_count, 0u);
 
     // Reusing a committed extent must clear stale words before publishing the
     // fast-path watermark; precise GC scans every slot below the new top.
-    uint64_t* reused = lambda_side_root_alloc_n(&runtime, 3);
+    uint64_t* reused = lambda_side_root_alloc_n_for(&runtime, 3);
     ASSERT_EQ(reused, roots);
     EXPECT_EQ(reused[0], 0u);
     EXPECT_EQ(reused[1], 0u);
     EXPECT_EQ(reused[2], 0u);
-    lambda_side_stack_restore(&runtime, checkpoint);
+    lambda_side_stack_restore_for(&runtime, checkpoint);
 
     // A commit-boundary miss must retain the generic ensure path rather than
     // advancing beyond the Context's currently accessible region.
     runtime.side_root_commit_limit = runtime.side_root_top;
-    uint64_t* after_ensure = lambda_side_root_alloc_n(&runtime, 1);
+    uint64_t* after_ensure = lambda_side_root_alloc_n_for(&runtime, 1);
     ASSERT_NE(after_ensure, nullptr);
     EXPECT_EQ(after_ensure, checkpoint.root_top);
     EXPECT_GT(runtime.side_root_commit_limit, checkpoint.root_top);
-    lambda_side_stack_restore(&runtime, checkpoint);
-    lambda_side_stack_reset(&runtime);
+    lambda_side_stack_restore_for(&runtime, checkpoint);
+    lambda_side_stack_reset_for(&runtime);
 }
 
 // ============================================================================

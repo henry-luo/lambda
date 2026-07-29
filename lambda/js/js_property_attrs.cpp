@@ -486,7 +486,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     extern __thread EvalContext* context;
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> getter_root(roots, getter);
@@ -566,7 +566,7 @@ static bool js_accessor_half_same(Item left, Item right) {
 extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
     extern __thread EvalContext* context;
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> fn_root(roots, fn);
@@ -649,7 +649,7 @@ extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
                                           int is_setter) {
     extern __thread EvalContext* context;
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> fn_root(roots, fn);

@@ -581,7 +581,7 @@ extern "C" bool rb_array_ensure_capacity(Array* arr, int64_t min_capacity) {
     }
     if (new_capacity > (int64_t)(SIZE_MAX / sizeof(Item))) return false;
 
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Array*> rooted_arr(roots, arr);
     // Ruby arrays are GC containers; keeping their item buffers in the GC data zone
     // prevents tracked side allocations from surviving until process shutdown.

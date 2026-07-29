@@ -45,9 +45,15 @@ pn splay(tree: SplayTree, key: float) {
         return 0
     }
     var dummy: SplayNode = create_node(0.0, null)
-    var left: SplayNode = dummy
-    var right: SplayNode = dummy
-    var current: SplayNode = tree.root
+    // The retained header owns the cursor sources. Extracting its fields gives the
+    // top-down loop explicit borrows rather than new COW value roots — binding
+    // `var left = dummy` directly takes a value copy under C4 mutable value
+    // semantics, so the rotations below never reach the real tree and it collapses
+    // to a single node. splay.ls has always done this; splay2.ls had dropped it.
+    var links = {left: dummy, right: dummy, current: tree.root}
+    var left: SplayNode = links.left
+    var right: SplayNode = links.right
+    var current: SplayNode = links.current
     var done = false
     while (done == false) {
         if (key < current.key) {

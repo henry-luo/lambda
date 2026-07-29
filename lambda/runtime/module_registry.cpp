@@ -36,7 +36,7 @@ bool is_sys_func_name(const char* name, int name_len);
 static struct hashmap* registry_map = NULL;
 
 static Item js_namespace_get(Item namespace_obj, const char* name) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> namespace_root(roots, namespace_obj);
     Item key = {.item = s2it(heap_create_name(name))};
     Rooted<Item> key_root(roots, key);
@@ -187,7 +187,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
 
     AstScript* ast = (AstScript*)script->ast_root;
     Item ns = js_new_object();
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> namespace_root(roots, ns);
 
     AstNode* node = ast->child;
@@ -228,7 +228,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
                         log_error("module_registry: pub fn '%s' shadows system function", export_name);
                     }
                     Item key = {.item = s2it(heap_create_name(export_name))};
-                    RootFrame export_roots((Context*)context, 3);
+                    RootFrame export_roots(3);
                     Rooted<Item> key_root(export_roots, key);
                     Function* fn = to_fn_named((fn_ptr)func_ptr, arity, export_name);
                     Rooted<Item> function_root(export_roots,
@@ -238,7 +238,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
                         // and the defining context; otherwise a namespace callback
                         // shifts its first Item into the generated Context slot.
                         lambda_function_mark_mir_public_abi(fn);
-                        lambda_function_mark_mir_context_abi(fn, (Context*)context);
+                        lambda_function_mark_mir_context_abi(fn);
                     }
                     // Lambda procedures cross into JavaScript through one
                     // uniform Promise membrane, even when a particular call

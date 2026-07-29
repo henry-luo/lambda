@@ -70,6 +70,8 @@ static SourcePosTestContextBinding source_pos_test_context_binding;
 
 extern "C" void heap_register_gc_root(uint64_t*) {}
 extern "C" void heap_register_gc_root_range(uint64_t*, int) {}
+extern "C" bool heap_try_register_gc_root_range(uint64_t*, int) { return true; }
+extern "C" void heap_unregister_gc_root_range(uint64_t*) {}
 extern "C" bool heap_register_gc_root_range_for(Context*, uint64_t*, int) { return true; }
 extern "C" void heap_unregister_gc_root_range_for(Context*, uint64_t*) {}
 

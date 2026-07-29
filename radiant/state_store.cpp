@@ -982,8 +982,14 @@ bool StateStore::init(DomDocument* owner_document) {
         ? runtime_get_eval_context(semantic_runtime) : nullptr;
     if (semantic_context) {
         // Template/render maps belong to the document Runtime, never an
-        // unrelated ambient context left by a completed script evaluation.
-        EvalContextScope semantic_scope(semantic_context);
+        // unrelated evaluator. Initialization may claim a fresh host thread,
+        // but it must not switch an already-owned thread.
+        if (!eval_context_thread_initialize(semantic_context)) {
+            log_error("state_store_init: document EvalContext is not the thread owner");
+            semantic_context = nullptr;
+            destroy();
+            return false;
+        }
         tmpl_state_init();
         doc_state->template_state_map = tmpl_state_get_map();
         render_map_init();
@@ -1043,9 +1049,11 @@ void StateStore::destroy() {
     if (!state && owner_document && owner_document->state_store == this) {
         state = owner_document->state;
     }
-    EvalContext* previous_context = nullptr;
-    if (semantic_context) {
-        previous_context = eval_context_bind(semantic_context);
+    if (semantic_context && !eval_context_thread_initialize(semantic_context)) {
+        // State maps contain Items owned by this context; destroying them under
+        // another evaluator would unregister roots from the wrong heap.
+        log_error("state_store_destroy: document EvalContext is not the thread owner");
+        return;
     }
     if (state) {
         state_begin_batch(state);
@@ -1080,10 +1088,7 @@ void StateStore::destroy() {
     doc_state = NULL;
     document = NULL;
     pool = NULL;
-    if (semantic_context) {
-        eval_context_restore(previous_context);
-        semantic_context = NULL;
-    }
+    semantic_context = NULL;
 }
 
 void state_store_destroy(DomDocument* document) {

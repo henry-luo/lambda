@@ -916,7 +916,7 @@ void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
-int64_t lambda_restore_number_frame_top(struct Context* runtime, uint64_t* top);
+int64_t lambda_restore_number_frame_top(uint64_t* top);
 // A terminal native consumer owns this word only until it unboxes, discards, or
 // copies the result into destination-owned storage; never return its Item.
 #define LAMBDA_SCALAR_HOME(name) uint64_t name = 0
@@ -1031,7 +1031,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 extern "C" {
 #endif
 void lambda_function_mark_mir_public_abi(Function* fn);
-void lambda_function_mark_mir_context_abi(Function* fn, struct Context* runtime);
+void lambda_function_mark_mir_context_abi(Function* fn);
 #ifdef __cplusplus
 }
 #endif
@@ -1053,12 +1053,13 @@ void lambda_region_end(LambdaRegion* region);
 void* lambda_region_calloc(LambdaRegion* region, size_t size, TypeId type_id);
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);
-bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
-void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
-void heap_no_gc_scope_begin(Context* runtime);
-void heap_no_gc_scope_end(Context* runtime);
-void heap_gc_defer_collection_begin(Context* runtime);
-void heap_gc_defer_collection_end(Context* runtime);
+bool heap_try_register_gc_root(uint64_t* slot);
+void heap_unregister_gc_root(uint64_t* slot);
+bool heap_try_register_gc_root_range(uint64_t* base, int count);
+void heap_no_gc_scope_begin(void);
+void heap_no_gc_scope_end(void);
+void heap_gc_defer_collection_begin(void);
+void heap_gc_defer_collection_end(void);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings

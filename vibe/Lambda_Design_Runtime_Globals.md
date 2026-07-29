@@ -1,11 +1,11 @@
 # Lambda Runtime Globals — Audit & Migration to EvalContext
 
-**Date:** 2026-07-27
-**Status:** Implemented. Core context ownership, Lambda module state, JS
-runtime state, the Direct hidden-context ABI, Jube session ownership, and the
-in-scope Radiant bridge state are context-owned. Release verification is
-recorded in the implementation checkpoint; known unrelated fixture diagnostics
-are explicitly called out rather than being treated as migration regressions.
+**Date:** 2026-07-29
+**Status:** Implemented and audited for context ownership, the MIR Direct
+helper ABI, and stable eval-thread identity. The 2026-07-29 cleanup removed the
+remaining scoped `EvalContext` rebinding APIs and call sites. Production native
+execution helpers now read the current evaluator from TLS; only generated MIR
+functions receive the hidden context argument.
 **Scope:** `lambda/runtime/`, `lambda/core/`, `lambda/js/`, `lambda/jube/`, guest runtimes (`py/`, `bash/`), `lambda/module/`, and the `lib/` infra they lean on.
 **Relation to prior docs:** expands the global-state ledger in `vibe/Lambda_Js_Thread.md` §6.5 into a full inventory and migration design. The Js_Thread JT decisions (JT1 context-thread rule, JT4 per-thread recovery, JT6 loop affinity) are taken as given; this doc is the state-ownership side of the same program.
 
@@ -42,6 +42,105 @@ The desired result is structural cleanup **and** equal-or-better steady-state pe
 Moving a global behind a lock or atomic is not an acceptable migration for ICs, module variables,
 call/eval registers, exception state, queues, timers, or other repeated runtime paths.
 
+### 2026-07-29 — MIR ABI and eval-thread invariants
+
+The following two rules are normative for MIR Direct:
+
+1. **The hidden `Context*`/`EvalContext*` argument belongs only to generated
+   MIR functions.** Generated MIR entrypoints and generated-to-generated calls
+   carry and forward it. A native C/C++ execution helper does not receive the
+   current evaluator as an ordinary or hidden argument; it obtains the current
+   `EvalContext` from the `context` TLS root. A native-to-MIR adapter reads TLS,
+   verifies that any retained function owner is the same context, and passes
+   that TLS value as the generated callee's hidden argument.
+2. **An eval thread has one `EvalContext` identity for its execution
+   lifetime.** Thread initialization makes the single `NULL -> owner`
+   transition before runtime work begins; thread teardown makes the
+   `owner -> NULL` transition after callbacks and cleanup are complete. No
+   call, callback, module load, document operation, async/generator resume,
+   guest activation, compilation, or cleanup path may perform an
+   `A -> B -> A` save/bind/restore sequence.
+
+The boundary contract is:
+
+| Boundary | Context rule |
+|---|---|
+| generated MIR → generated MIR | forward the hidden context argument unchanged |
+| native adapter → generated MIR | read TLS once, assert retained owner equals TLS, pass TLS as the hidden argument |
+| generated MIR → native execution helper | no context parameter; helper reads TLS |
+| native → native execution helper | no context parameter; helper reads TLS |
+| async or cross-thread admission | retain owner identity/generation for validation and routing only; enqueue to the owner thread |
+| cold lifecycle/control-plane operation | may name an explicit owner when operating before thread initialization, after execution stops, or on an inactive collector |
+
+The last row is a narrow qualification, not a helper-ABI exception. Thread
+initialization/validation/teardown names the owner whose TLS identity is being
+established or checked. Retained callbacks may carry owner identity for
+validation and routing. Explicit `_for(Context*, ...)` side-stack/collector
+operations exist only for isolated tests or a cold operation on an inactive
+collector. Ordinary root publication, module-state preparation/reset,
+side-stack use, and capsule cleanup read TLS and take no context argument.
+None of these APIs may switch a thread between live contexts.
+
+A context may move to another thread only through a **quiescent handoff**:
+the old owner has stopped executing and admitting callbacks, clears its TLS
+binding, and the new owner initializes its TLS binding to the same context
+before execution resumes. Reusing a physical worker thread for another
+context, if ever supported, requires a complete eval-thread teardown and new
+initialization; it is not a nested calling boundary. Cross-context callbacks
+must be queued to the target owner thread instead of rebinding the caller.
+Consequently, one event-loop or UI thread cannot directly multiplex multiple
+live contexts. An integration that requires both UI-thread and context-thread
+affinity needs an explicit queue/bridge, not a TLS switch.
+
+Stable context identity does not make every field immutable. Heap replacement,
+run-state reset, and lazy JS-capsule creation may mutate the canonical context
+through lifecycle APIs while the TLS pointer remains unchanged. Generation
+tokens invalidate records tied to the replaced heap.
+
+The frozen C2MIR `_lambda_rt` compatibility path is outside this contract.
+Thread infrastructure TLS such as stack guards and recovery checkpoints is
+also unaffected because it does not select semantic runtime ownership.
+Any context-derived TLS cache, currently including `js_active_runtime_state`,
+must be initialized from `context` at eval-thread startup and remain paired
+with it for the same lifetime. Such a cache does not create permission to
+switch either pointer at a nested boundary; cold teardown should operate on an
+explicit capsule rather than temporarily rebinding the cache.
+
+#### Live-code review
+
+The current MIR Direct call sites follow rule 1:
+
+- generated Lambda, JS, Bash, Ruby, template, handler, async, and generator
+  functions carry the hidden context argument;
+- native helper imports—including decimal, boxed-call, module-state,
+  side-stack/root-frame, error, JS export/function/generator/async, and
+  pool/name accessors—take no current-context parameter and read TLS;
+- native-to-MIR adapters validate any retained function/async/generator owner
+  against TLS, then pass TLS as the generated callee's hidden argument;
+- `_lambda_rt` and `get_runtime_pool()` are compiled only for frozen C2MIR.
+
+Rule 2 is enforced by `eval_context_thread_initialize/matches/shutdown`.
+Repository search finds no `eval_context_bind`, `eval_context_restore`,
+`EvalContextScope`, `JsMirContextScope`, or `js_runtime_state_bind_context`,
+and production code assigns `context` only inside `runtime-state.cpp`.
+`js_active_runtime_state` is likewise assigned only by its initialization and
+teardown implementation.
+
+The remaining explicit context arguments are intentional and non-semantic:
+
+- eval-thread and derived-JS-state initialization, identity validation, and
+  final teardown;
+- owner identity retained by compiled functions, async/generator records, and
+  libuv handles solely for validation/routing;
+- `_for(Context*, ...)` side-stack/collector APIs used by isolated tests or
+  cold control-plane work on an inactive subject;
+- frozen C2MIR generated entrypoints.
+
+These are not permission to perform an `A -> B -> A` nested switch. A UI or
+event-loop thread that already owns A must queue work for B. A document that
+would require distinct live Lambda and JS owners on one thread is rejected
+until the integration provides an owner-thread queue or one shared context.
+
 Why now:
 
 - **Correctness under concurrency.** Everything today is safe only under the single-executor
@@ -55,11 +154,13 @@ Why now:
   `*_roots_epoch` re-registration dance. Centralizing them under the context that owns the heap
   removes an entire class of stale-root bugs (the forced-GC sweep keeps finding these).
 
-### Implementation checkpoint (2026-07-27)
+### Implementation checkpoint (2026-07-29)
 
 - `Runtime::eval_context` is the canonical long-lived owner. `context` is now
-  only a scoped TLS binding; runner cleanup and JS entrypoints no longer create
-  a stack `EvalContext` for a normal activation.
+  the TLS execution root; runner cleanup and JS entrypoints no longer create a
+  stack `EvalContext` for a normal activation. Nested compilation, callbacks,
+  guest entry, document dispatch, async/generator resume, and cleanup validate
+  the same owner and never save, replace, or restore TLS.
 - Lambda globals and member ICs are instantiated as fixed per-context module
   slabs. Their roots are registered once when the module instance is prepared;
   generated loads/stores and IC probes use ordinary context-owned memory.
@@ -69,8 +170,9 @@ Why now:
   JS wrappers, fixed-arity dynamic entries, direct calls, closures, native
   variants, generator resumption, async resumption, and module entrypoints all
   preserve the pointer without `_lambda_rt` import/TLS reloads in generated
-  code. JS function objects retain their immutable owner context for the one
-  dynamic-dispatch adaptation boundary.
+  code. JS function objects retain their immutable owner identity for
+  dynamic-dispatch validation; the adapter must pass the matching TLS pointer,
+  not use the retained pointer to rebind the thread.
 - Template registries are now `EvalContext` state. Guest activation and Jube
   frame-runtime plumbing use canonical/execution-owned context pointers rather
   than publishing `_lambda_rt`.
@@ -78,21 +180,24 @@ Why now:
   Their fixed document-root slots are registered once against the owning heap
   and unregistered during that context's heap reset/teardown.
 - Lambda document loading, custom layout, and retained Lambda event handlers
-  now re-enter the document Runtime's canonical context instead of creating
-  heap-only stack contexts after script execution.
+  use the document Runtime's canonical context instead of creating heap-only
+  stack contexts after script execution. Owner-thread entry is initialization
+  or an equality check; no callback restores a prior evaluator.
 - The active DOM document, main document, UI context, host-loop mode,
   `designMode`, and active element are now `JsDomState` fields rather than
-  thread-local state. Document-script reattachment explicitly rebinds the
-  document Runtime before publishing DOM wrappers; post-teardown host hooks
-  are context-free no-ops rather than creating or mutating a replacement
-  realm.
+  thread-local state. Document-script reattachment selects the document
+  Runtime before publishing DOM wrappers through owner-thread routing, not TLS
+  rebinding.
+  Post-teardown host hooks are context-free no-ops rather than creating or
+  mutating a replacement realm.
 - DOM platform `localStorage`, `sessionStorage`, and `matchMedia` records are
   now context-owned. Their object homes are published once to the owning heap;
   storage reads/writes and media-query evaluation use direct owner-thread
   storage without synchronization.
 - Pre-runtime document/UI setup no longer writes a thread-global DOM binding:
   those host notifications are no-ops until a document `EvalContext` exists,
-  and the normal script-entry rebind publishes the document into that owner.
+  and normal owner-thread initialization publishes the document into that
+  owner.
 - Mutation, resize, and intersection observer records (including callback
   roots and pinned native targets) are lazily allocated per `JsRuntimeState`.
   The fixed callback/object root homes are registered once per owning heap;
@@ -143,9 +248,9 @@ Why now:
 - Dynamic-eval parser diagnostics and MIR debug-site counters are compiler
   instance state. Tagged-template eval salts are context-local, so concurrent
   compilation cannot overwrite a process-global last-error/counter value.
-- `process.exitCode` is now retained only in the executing context; CLI code
-  rebinds the Runtime-owned context before reading it instead of synchronizing
-  through a process-global scalar.
+- `process.exitCode` is now retained only in the executing context. CLI
+  postprocessing must run on that context's owner thread (or after a quiescent
+  handoff) and read it through the already-initialized TLS binding.
 - Jube's active Node-service session is now selected from the bound
   `EvalContext`; module attachment is recorded per session rather than by a
   single last-attached generation. The registry uses a cold attach/detach lock
@@ -203,21 +308,28 @@ Why now:
   the frozen C2MIR path is outside the new Direct-runtime ABI contract.
 - JS MIR timeout-recovery ownership (active MIR context, transpiler, owned
   source, and nested compilation stack) is a lazy `JsRuntimeState` capsule.
-  The compile entry binds the canonical context before parsing and restores the
-  caller on every early error; this cold path never appears in generated code.
+  Compile work runs on the eval thread's already-bound context; early-error
+  cleanup must not restore or switch a different evaluator.
 - The Radiant editor source-path side table is an opaque extension of the
   context-owned render-map capsule, with a lifecycle cleanup callback. Range
   ids, text-control undo/redo guard depth, and ambient history `inputType` are
   direct `DocState` fields, so document editing has no TLS or synchronization
   dependency.
-- Release validation (`make build-release-compile`) completed with zero build
-  errors. Fresh-realm JS microbenches completed for property, binop, and
-  equality paths; the property benchmark measured direct owner-local accesses
-  (best: set 16.02 ns/op, get 20.46 ns/op). The Jube OS registry batch and the
-  Radiant click-bubbling layout fixture complete successfully. That layout
-  fixture still emits its pre-existing `document.fonts` null errors, and the
-  batch runner still reports its pre-existing retained JS-runtime allocations
-  at process shutdown; neither is introduced by this migration.
+- The 2026-07-29 audit additionally converted native decimal construction,
+  module-state lifecycle, root publication, side-stack binding/root frames,
+  JS-state cleanup, and Radiant DOM/render-map roots to TLS-only execution
+  APIs. The explicit `_for` variants have no production call sites.
+- Browser-preamble verification exposed a separate module-slab ordering bug:
+  DOM setup could compile inline handlers before a slab was active, and later
+  scripts could run in the immutable preamble slab. Realm setup now activates
+  the slab before DOM callbacks and gives browser scripts one document-local
+  consumer slab seeded from the preamble. Both uncached single-document and
+  cached two-document layout runs complete without JS runtime errors.
+- Pure Lambda Radiant/Jube execution also uses JS DOM primitives. Runner
+  initialization therefore creates and publishes the derived JS capsule once
+  on the already-bound eval thread, even when the source imports no JavaScript.
+  Jube's language-wrapper selection treats that capsule as optional rather
+  than dereferencing an absent JS TLS cache.
 
 ### Post-migration implementation invariants (2026-07-27)
 
@@ -238,20 +350,25 @@ Why now:
   A forked child's inherited IPC descriptor can arrive while `process` is
   being built, before ordinary JS script entry initializes libuv. The process
   bootstrap establishes the event-loop instance before opening that descriptor
-  and stores the canonical `EvalContext` in `uv_handle_t::data`; every libuv
-  callback re-enters that owner with `EvalContextScope`. This is a one-time
-  bootstrap edge, not a per-message synchronization mechanism.
+  and stores the canonical `EvalContext` identity in `uv_handle_t::data` for
+  lifetime validation and owner-thread routing. Every libuv callback executes
+  on that already-bound owner thread and asserts that `context` matches the
+  retained identity; it does not rebind TLS.
 - **Function ABI and realm ownership are explicit boundary contracts.** Only
-  compiled MIR method wrappers carry the hidden `Context*` ABI. Jube trampolines
-  and native/DOM callbacks retain the ordinary ABI and receive fresh wrapper
-  identities where JS observability requires it. Similarly, a stack-worker or
-  document execution realm receives its borrowed UI context before script
-  execution; transferring it after callbacks have been installed is invalid.
-  These are allocation/bootstrap boundaries, so callback invocation and DOM/IC
-  hot paths remain direct owner-local accesses.
-- **Verification.** `make test-lambda-baseline` completed with 1,480/1,480
-  passing tests after this implementation checkpoint, including JS IPC,
-  hosted `BoundSocket`, forced-GC MIR, and emission-ratchet coverage.
+  functions compiled in MIR carry the hidden `Context*` ABI. Native helpers,
+  Jube trampolines, and native/DOM callbacks retain their ordinary ABI and use
+  TLS for the active evaluator. A native adapter that invokes generated code
+  passes that same TLS pointer as the generated callee's hidden argument.
+  Similarly, a stack-worker or document execution realm receives its borrowed
+  UI context before script execution; transferring it after callbacks have
+  been installed is invalid. These are allocation/bootstrap boundaries, so
+  callback invocation and DOM/IC hot paths remain direct owner-local accesses.
+- **Verification.** The 2026-07-29 final release gates passed 1,522/1,522
+  Lambda-runtime tests plus 2,104/2,104 input tests (3,626/3,626 combined).
+  Test262 passed 40,261/40,261 with zero non-fully-passing tests, failures,
+  retries, or regressions. The focused state-store/source-position/edit/MIR
+  emission tests passed 50/50, and the two-owner concurrency suite passed
+  13/13.
 
 ---
 
@@ -300,15 +417,20 @@ End state:
 - `Runner`, timer callbacks, module entrypoints, cleanup, and guest activations **borrow a
   canonical context**. They do not create a partial `EvalContext` merely to make TLS-dependent
   helpers work.
-- `EvalContextScope` (name illustrative) saves the previous `context`, binds the canonical
-  context for a native/JIT entry, and restores it on every normal exit. Recovery checkpoints
-  also snapshot/restore the binding explicitly; `siglongjmp` cannot rely on a C++ destructor.
-  Async records retain a stable context handle/control block plus a generation token, not a raw
-  pointer whose token check would dereference freed storage. A callback for a destroyed or
-  replaced context is suppressed, never rebound to a look-alike heap.
+- Eval-thread initialization binds the canonical context once. The TLS pointer
+  remains identical until eval-thread teardown; nested entries and recovery do
+  not save, replace, or restore it. A recovery checkpoint validates that the
+  TLS owner is unchanged after `siglongjmp`.
+- Async records retain a stable context handle/control block plus a generation
+  token for lifetime validation and owner-thread routing, not a raw pointer
+  whose token check would dereference freed storage. A callback for a destroyed
+  or replaced context is suppressed. A callback for another live context is
+  queued to that context's owner thread, never handled by rebinding the current
+  thread.
 - Truly standalone paths (`convert`, standalone guest execution) create a complete minimal
-  context through `eval_context_init` / `eval_context_destroy`. Raw `memset`, copying, or
-  partial stack fabrication of an initialized `EvalContext` is forbidden.
+  context through `eval_context_init` / `eval_context_destroy` as part of
+  eval-thread initialization/teardown. Raw `memset`, copying, or partial stack
+  fabrication of an initialized `EvalContext` is forbidden.
 - `Runtime` and `EvalContext` are not synonyms: `Runtime` owns context-independent compile and
   module artifacts; `EvalContext` owns one isolate's instantiated semantic state. A Runtime may
   serve more than one context only where the shared artifacts satisfy the MT2 contract (§5.5).
@@ -337,15 +459,18 @@ and cannot be used once one Runtime serves multiple contexts.
 
 ### RG1 — Exactly one bootstrap TLS root
 
-`__thread EvalContext* context` ([runtime-state.cpp:6](../lambda/runtime/runtime-state.cpp)) is
+`__thread EvalContext* context` ([runtime-state.cpp:10](../lambda/runtime/runtime-state.cpp)) is
 the *only* sanctioned runtime TLS root. It is execution authority, not semantic storage: it
 identifies which canonical context the current native/JIT activation may access. Chicken-and-egg
 makes one such root irreducible.
 
-Every entry from shell, worker, event loop, retained callback, guest runtime, or host API must
-install an `EvalContextScope` before it can execute code or register roots. Nested entries restore
-the previous binding. Functions may assume `context != NULL` only when their API contract says
-they execute inside such a scope; init/compile helpers must accept an explicit owner instead.
+Every eval thread installs its context once before shell, worker, event-loop,
+retained-callback, guest, or host execution begins. All nested entries assert
+that their retained owner, if any, equals the existing TLS value. They never
+install a scope or restore a previous context. Functions may assume
+`context != NULL` only when their API contract requires an initialized eval
+thread. Cold lifecycle/control-plane APIs that must operate outside execution
+accept an explicit owner; native execution helpers do not.
 
 `input_context` / `input_allocation_context` ([input.cpp:27](../lambda/input/input.cpp)) are a
 second and third root today. They exist because input parsing can run without a full
@@ -353,6 +478,10 @@ second and third root today. They exist because input parsing can run without a 
 `EvalContext::input_ctx` for runtime-initiated parsing — and have the standalone convert path
 construct a minimal `EvalContext` (it already builds a `Context` with pool/arena; the marginal
 cost is nil). Until that lands they are tolerated as transitional roots, tagged B-transitional.
+They carry input construction/allocation policy only: scoped changes to these pointers never
+change the evaluator-authority TLS `context`, are never passed as a native-helper context ABI,
+and therefore are not an exception to the one-`EvalContext`-per-eval-thread invariant. Their
+remaining save/restore sites are P5 cleanup debt, not evaluator rebinding.
 
 ### RG2 — Capsule pointers on the canonical context, not inline megastructs
 
@@ -425,19 +554,25 @@ other thread. Options:
 | B (entry call) | JIT'd function calls `Context* lambda_rt_current(void)` once at entry, caches in a local reg | repeated native call/TLS lookup at every function entry | correct but not an acceptable performance end-state |
 | C (hidden arg) | thread `Context*` as a hidden parameter through every JIT↔JIT call (generalizes `main(Context*)`) | ABI/codegen change; steady-state context stays in a call argument/register | correct for N threads; no lookup/call added per function |
 
-**Decision:** implement **C** as the migration end-state. Option B may exist only as a temporary
-diagnostic flag while validating codegen and must not be the merged steady-state path. Host,
-event-loop, and async entry boundaries already resolve the canonical context once through
-`EvalContextScope`; their invoke adapter passes that pointer into generated code. JIT↔JIT calls,
-closures, methods, dynamic dispatch, and per-callee invoke entries forward the same hidden
-argument. Hot native helpers that need context take it explicitly; context-free helpers keep
-their existing ABI.
+**Decision:** implement **C** as the migration end-state. Option B may exist
+only as a temporary diagnostic flag while validating codegen and must not be
+the merged steady-state path. Eval-thread initialization resolves the
+canonical context once. A host, event-loop, async, or dynamic-dispatch adapter
+validates that its retained owner matches TLS and passes the TLS pointer into
+generated code. JIT↔JIT calls, closures, methods, dynamic dispatch, and
+per-callee invoke entries forward the same hidden argument.
 
-Every direct native read/write of `_lambda_rt`, every `&_lambda_rt` ABI exposure (including Jube
-frame slots), and every `prev_lambda_rt` save/restore migrates to the explicit argument or
-boundary scope. The global is deleted when that inventory is empty. This ABI work composes with
-the fn->invoke per-callee entry design and is benchmarked for register pressure/code size before
-landing. The same MT2 audit covers the per-module BSS cells
+Every direct native read/write of `_lambda_rt`, every `&_lambda_rt` ABI
+exposure (including Jube frame slots), and every `prev_lambda_rt` save/restore
+migrates as follows: generated MIR uses the hidden argument; native execution
+helpers read `context` TLS and expose no context parameter; native-to-MIR
+adapters pass TLS to the generated callee. Explicit `Context*` parameters
+remain only where the context is the subject of a cold lifecycle/control-plane
+operation, not the ambient evaluator. The Direct-runtime global is deleted
+when that inventory is empty; the frozen C2MIR compatibility definition
+remains outside this contract. This ABI work composes with the fn->invoke
+per-callee entry design and is benchmarked for register pressure/code size
+before landing. The same MT2 audit covers the per-module BSS cells
 (`_mod_consts_ptr`, `_mod_type_list_ptr`) — those hold compile-time pointers (tag C, per-module,
 immutable after publication) and may remain only under the publication contract in §5.5.
 
@@ -457,6 +592,11 @@ not sufficient. Registration happens at capsule/module-instance construction and
 replacement, before execution can publish an Item into the range. Repeated operations such as
 stack push, cache fill, or module-variable store do not call `ensure_registered` or compare a
 root epoch; a debug-only invariant check may remain outside release hot paths.
+
+These are explicit collector-lifecycle operations, not ambient native
+execution helpers. Prefer `Heap*`/`gc_heap*` for an inactive collector; an
+execution-time root/no-GC helper for the current evaluator uses TLS and does
+not receive `EvalContext*`.
 
 Capsules expose the same semantic `js_root_range_*` operations, with `range->slots` pointing into
 context-owned storage. The root-range *registry* itself
@@ -514,9 +654,10 @@ context thread (JT6). The event-loop SIGSEGV drain guard
 This requires an API change in `lib/uv_loop.c`, not only moving `g_loop`: loop, prepare/check
 handles, drain callbacks, and active flags become fields of an explicit loop instance passed to
 `lambda_uv_*` operations (or recovered from `uv_handle_t::data` inside callbacks). No libuv
-callback may consult a process-global "current loop". Timer/request records retain a stable
-handle to their owning canonical context plus generation and enter it through
-`EvalContextScope` only after successful validation.
+callback may consult a process-global "current loop". Timer/request records
+retain a stable handle to their owning canonical context plus generation.
+Completion is enqueued to that context's owner thread; the callback validates
+that TLS already names the owner and never changes it.
 
 ### RG9 — Guest runtimes get the same treatment
 
@@ -597,8 +738,10 @@ The migration uses three mutation classes:
 2. **Mutable and context-owned.** IC entries, module-variable slabs, globals, call/eval registers,
    exceptions, queues, timers, DOM caches, guest state, and diagnostic counters live in the
    canonical context. The context has one owner thread at a time, so these use ordinary
-   loads/stores with no synchronization. A context may move threads only through a quiescent
-   handoff after the old owner stops executing it.
+   loads/stores with no synchronization. A context may move threads only
+   through a quiescent handoff after the old owner stops executing it and
+   clears TLS; the new owner initializes TLS before execution resumes. Neither
+   thread switches between two non-NULL context identities.
 3. **Intentionally cross-context.** `JsAgentCluster`, SharedArrayBuffer/Atomics waiters, and
    similar language-visible coordination use synchronization inside those explicit APIs. Their
    locks/atomics do not leak into unrelated property access, calls, IC probes, or event-loop
@@ -642,7 +785,7 @@ sweep; the named rows are the load-bearing ones. Anything not listed follows its
 
 | Variable | Where | Tag |
 |---|---|---|
-| `__thread EvalContext* context` | runtime-state.cpp:6 | **B** — the root; stays |
+| `__thread EvalContext* context` | runtime-state.cpp:10 | **B** — the root; stays |
 | `__thread Context* input_context`, `input_allocation_context` | input.cpp:27–28 | B-transitional → `EvalContext` field (RG1) |
 | `__thread LambdaError* persistent_last_error` | runner.cpp:433 | **R** — duplicates `EvalContext::last_error`; merge |
 | `__thread List* current_vargs` | lambda-eval.cpp:5445 | **R** → `rt_state` (it is live across JIT calls — verify no JIT-baked address; it's accessed via helpers, safe) |
@@ -655,7 +798,7 @@ sweep; the named rows are the load-bearing ones. Anything not listed follows its
 
 | Variable(s) | Where | Target |
 |---|---|---|
-| `Context* _lambda_rt` | mir.c:21 | RG4 — hidden context argument; delete after generated and native users migrate |
+| `Context* _lambda_rt` | mir.c:21 | RG4 — frozen C2MIR compatibility only; MIR Direct generated functions use the hidden argument and native helpers use TLS |
 | `g_lambda_shape_epoch` | lambda-data-runtime.cpp:2271 | context/module-instance generation; remove per-probe shared epoch after IC slabs bulk-clear on heap replacement |
 | MIR member/store IC BSS cells | transpile-mir.cpp:7546 | dense per-context `ContextModuleState::ic_entries` slab (RG13/§5.5) |
 | decimal contexts + lazy-init flags | lambda-decimal.cpp:23,1253 | immutable templates (I) + per-context live copies (R); no shared mutable `mpd_context_t` |
@@ -738,16 +881,20 @@ Declaration counts from the sweep (mutable file-scope only, functions excluded):
 ### 5.1 `_lambda_rt` (RG4)
 Covered above. Implementation order:
 
-1. establish canonical context entry/exit (`EvalContextScope`) and audit every native/JIT entry;
+1. establish eval-thread context initialization/teardown and audit every
+   native/MIR entry; reject any non-NULL-to-different-non-NULL TLS transition;
 2. add the hidden-context ABI to direct calls, closures, methods, dynamic dispatch, and host
    invoke adapters behind a flag; A/C diff correctness, code size, and release performance;
-3. migrate hot native `_lambda_rt` users to explicit context parameters and cold boundary users
-   to `EvalContextScope`;
-4. delete the MIR Direct import/global and every `prev_lambda_rt` save/restore.
+3. migrate native execution helpers to TLS without a context parameter; retain
+   explicit owners only on cold lifecycle/control-plane APIs;
+4. delete the MIR Direct import/global and every context save/bind/restore
+   sequence; keep `_lambda_rt` only for frozen C2MIR compatibility.
 
-A retained function pointer or async callback installs its owner context once at the boundary
-and passes that context through the hidden argument. Generated callees never rediscover it from
-TLS.
+A retained function pointer or async record keeps owner identity only for
+lifetime validation and routing. The callback runs on the already-bound owner
+thread; its native adapter asserts that the owner equals TLS and passes TLS
+through the generated callee's hidden argument. Generated callees never
+rediscover it from TLS, while native helpers never receive it as an argument.
 
 ### 5.2 Rooted Items moving home
 Every `static Item`/`Item[]` that moves must (a) land in never-reallocated capsule storage,
@@ -759,8 +906,11 @@ for every phase below.
 
 Reset ordering is part of the contract: close callback admission and advance generation →
 drain/cancel async owners → clear heap-bound Items → unregister native ranges → tear down the
-collector → attach/register the replacement → reopen admission. A root helper that silently
-consults TLS cannot prove this ordering and is not an acceptable end-state API.
+collector → attach/register the replacement → reopen admission. During ordinary execution and
+owner-thread teardown, root helpers resolve that collector through the stable TLS owner and take
+no context argument. An explicit `_for` helper is reserved for a cold operation on an inactive
+collector or an isolated collector test; it must never be used to substitute another live
+context for the current thread owner.
 All range registration/re-registration occurs in this lifecycle path or module-instance
 construction, not in the repeated operation that writes the rooted slot.
 
@@ -1051,10 +1201,13 @@ Each phase: green `make test-lambda-baseline` + `make test-radiant-baseline`, js
   Add a hot-path synchronization audit/allowlist: new locks, atomic RMWs, TLS context lookups,
   and publication-state checks in IC/call/module-var/event-loop paths fail review.
 - **P1 — Canonical context + root lifecycle.** Add `Runtime` back-pointer, context
-  init/reset/replace-heap/destroy APIs, `EvalContextScope`, owner generation, and explicit-owner
-  root registration. Split Runtime's retained run/heap fields into context ownership; convert
-  `Runner`, cleanup temporaries, timers, and guest/module activation scaffolding so initialized
-  contexts are never copied or raw-`memset`. Add alternating-context, heap-replacement, and
+  init/reset/replace-heap/destroy APIs, eval-thread bind-once/unbind-once
+  guards, owner generation, TLS-owned execution root registration, and
+  explicit-subject `_for` operations only for inactive collectors. Split
+  Runtime's retained run/heap fields into context ownership; convert `Runner`,
+  cleanup temporaries, timers, and guest/module activation scaffolding so
+  initialized contexts are never copied, raw-`memset`, or switched at nested
+  boundaries. Add two-owner-thread interleaving, heap-replacement, and
   stale-callback tests before moving global state.
 - **P2 — JsRuntimeState pivot.** Add checked JS entry-boundary setup, allocate the capsule there,
   move the root-range registry with it, and switch hot-context reset to the lifecycle API.
@@ -1080,10 +1233,13 @@ Each phase: green `make test-lambda-baseline` + `make test-radiant-baseline`, js
   direct module pointer so execution never revisits publication state. This can proceed in
   parallel with late P4/P5 work after P1 contracts exist.
 - **P7 — `_lambda_rt` hidden-context ABI.** Thread the context argument through Lambda MIR, JS
-  MIR, direct calls, closures, methods, dynamic dispatch, and host adapters; migrate hot native
-  users to explicit context parameters. Delete the MIR Direct global/import and every
-  save/restore. Run a controlled two-owner-thread concurrency test against the same sealed
-  generated code and enforce the function-entry/call-dispatch performance gate.
+  MIR, direct calls, closures, methods, dynamic dispatch, and host adapters;
+  migrate every native execution helper to TLS and remove its context
+  parameter. Delete the MIR Direct global/import and every execution-time
+  save/bind/restore sequence, retaining `_lambda_rt` only for frozen C2MIR.
+  Run a controlled two-owner-thread concurrency test against the same sealed
+  generated code and enforce the function-entry/call-dispatch performance
+  gate.
 - **P8 — Guests.** py/bash/rb capsules and Jube execution sessions (RG9), using the same
   canonical-context and explicit-root contracts.
 
@@ -1093,14 +1249,23 @@ Exit criteria:
 - every I declaration has a freeze/publication argument, every D declaration is race-safe and
   absent from semantic branches, and every T declaration contains infrastructure only;
 - initialized `EvalContext` objects are created/reset/destroyed only through lifecycle APIs;
-- root registration always names an owner collector and survives repeated heap replacement;
+- root registration always resolves the stable TLS owner's collector during execution;
+  explicit-subject registration is confined to inactive-collector control/test paths, and
+  registrations survive repeated heap replacement;
 - module publication is the only synchronization on ordinary module execution: generated and
   native hot paths contain no migration-added locks, atomic RMWs, READY checks, shared refcounts,
   or TLS context helper calls;
+- the MIR import registry contains no native execution helper with a
+  `Context*`/`EvalContext*` parameter, and every native-to-MIR adapter asserts
+  that its retained owner equals TLS before passing TLS as the hidden argument;
+- an initialized eval thread never changes from one non-NULL `EvalContext`
+  identity to another; execution paths contain no
+  `EvalContextScope`/save-bind-restore mechanism;
 - every mutable IC and module-variable slot is context-owned and uses ordinary owner-thread
   loads/stores; module/heap reset invalidates them in bulk outside execution;
-- two contexts run alternately with forced GC, async callbacks, closures, dynamic import, DOM
-  swaps, and guest execution with zero cross-talk;
+- two contexts run in deterministically interleaved steps on separate owner
+  threads with forced GC, async callbacks, closures, dynamic import, DOM swaps,
+  and guest execution with zero cross-talk;
 - after P7, two owner threads run separate contexts concurrently against shared sealed code and
   match solo results; run ThreadSanitizer or the platform race checker where supported;
 - release Result-suite and focused hot-path benchmarks show no reproducible regression versus

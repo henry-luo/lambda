@@ -993,15 +993,21 @@ pn projection_test(n) {
 
 pn main() {
     var __t0 = clock()
-    var r1 = chain_test(100)
-    if (r1 == 0) {
-        print("DeltaBlue: FAIL (chain)\n")
-        return 0
-    }
-    var r2 = projection_test(100)
-    if (r2 == 0) {
-        print("DeltaBlue: FAIL (projection)\n")
-        return 0
+    // 20 outer iterations of the 100-element tests: the canonical AWFY workload,
+    // matching deltablue2.ls and deltablue2.js (runAWFY('DeltaBlue', ..., 100, 20))
+    var k = 0
+    while (k < 20) {
+        var r1 = chain_test(100)
+        if (r1 == 0) {
+            print("DeltaBlue: FAIL (chain)\n")
+            return 0
+        }
+        var r2 = projection_test(100)
+        if (r2 == 0) {
+            print("DeltaBlue: FAIL (projection)\n")
+            return 0
+        }
+        k = k + 1
     }
     var __t1 = clock()
     print("DeltaBlue: PASS\n")

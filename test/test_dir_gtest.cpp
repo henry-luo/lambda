@@ -19,8 +19,18 @@ extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base
     return true;
 }
 
+extern "C" bool heap_try_register_gc_root_range(uint64_t* base, int count) {
+    (void)base;
+    (void)count;
+    return true;
+}
+
 extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
     (void)runtime;
+    (void)base;
+}
+
+extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
     (void)base;
 }
 

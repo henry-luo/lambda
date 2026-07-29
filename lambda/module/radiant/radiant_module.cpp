@@ -170,7 +170,7 @@ static Item radiant_obj_get(Item obj, const char* key) {
 }
 
 static Item radiant_array_new_item(int capacity) {
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Array*> rooted_arr(roots, (Array*)NULL);
     Array* arr = array();
     rooted_arr.set(arr);
@@ -393,7 +393,7 @@ static Item radiant_layout_text_item(DomNode* node) {
 
 static Item radiant_layout_edges_item(const VelmtEdges* edges) {
     if (!radiant_host_api || !radiant_host_api->value || !edges) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_obj_new());
     radiant_rooted_obj_set(rooted_obj, "left", radiant_float_item(edges->left));
     radiant_rooted_obj_set(rooted_obj, "right", radiant_float_item(edges->right));
@@ -404,7 +404,7 @@ static Item radiant_layout_edges_item(const VelmtEdges* edges) {
 
 static Item radiant_layout_box_item(const VelmtBox* box) {
     if (!radiant_host_api || !radiant_host_api->value || !box) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_obj_new());
     radiant_rooted_obj_set(rooted_obj, "x", radiant_float_item(box->x));
     radiant_rooted_obj_set(rooted_obj, "y", radiant_float_item(box->y));
@@ -415,7 +415,7 @@ static Item radiant_layout_box_item(const VelmtBox* box) {
 
 static Item radiant_layout_attrs_item(DomElement* elem) {
     if (!radiant_host_api || !radiant_host_api->value || !elem) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_attrs(roots, radiant_obj_new());
     int attr_count = 0;
     const char** names = elem->attribute_names(&attr_count);
@@ -448,7 +448,7 @@ static bool radiant_layout_style_snapshot_callback(StyleNode* node, void* contex
 
 static Item radiant_layout_style_item(DomElement* elem) {
     if (!radiant_host_api || !radiant_host_api->value) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_style(roots, radiant_obj_new());
     if (!elem || !elem->specified_style || !elem->specified_style->tree) return rooted_style.get();
 
@@ -620,7 +620,7 @@ static int radiant_layout_view_child_count(View* view) {
 static Item radiant_layout_view_children_item(View* view, int depth) {
     if (!radiant_host_api || !radiant_host_api->value) return ItemNull;
     int child_count = depth > 0 ? radiant_layout_view_child_count(view) : 0;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_children(roots, radiant_array_new_item(child_count));
     if (!view || !view->is_element() || depth <= 0) return rooted_children.get();
 
@@ -673,7 +673,7 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
 
 static Item radiant_layout_children_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_arr(roots, radiant_array_new_item(context->child_count));
     for (int i = 0; i < context->child_count; i++) {
         Item child = radiant_layout_velmt_host_item(&context->children[i]);
@@ -684,7 +684,7 @@ static Item radiant_layout_children_item(const CustomLayoutContext* context) {
 
 static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_obj_new());
     radiant_rooted_obj_set(rooted_obj, "layout_name", radiant_string_item(context->layout_name));
     radiant_rooted_obj_set(rooted_obj, "available_width", radiant_float_item(context->available_width));
@@ -829,7 +829,6 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     g_radiant_velmt_active_pass_id = pass_id;
 
     EvalContext* callback_context = nullptr;
-    EvalContext* saved_context = ::context;
     Context* saved_input_context = input_context;
     Runtime* runtime = (context->parent && context->parent->doc)
         ? context->parent->doc->lambda_runtime : nullptr;
@@ -846,7 +845,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         callback_context->type_info = type_info;
         // Retained callbacks borrow their Runtime-owned side stack rather
         // than fabricating an activation-local context.
-        if (!lambda_side_stack_bind((Context*)callback_context)) {
+        if (!lambda_side_stack_bind()) {
             g_radiant_velmt_active_pass_id = previous_pass_id;
             log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
             return false;
@@ -858,14 +857,18 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         } else {
             input_context = nullptr;
         }
-        ::context = callback_context;
+        if (!eval_context_thread_initialize(callback_context)) {
+            input_context = saved_input_context;
+            g_radiant_velmt_active_pass_id = previous_pass_id;
+            return false;
+        }
     }
 
     bool ok = false;
     {
         // Every argument builder allocates. Keep prior arguments, the retained
         // callback, and its result exact-rooted until result parsing completes.
-        RootFrame roots((Context*)::context, 5);
+        RootFrame roots(5);
         Rooted<Item> rooted_fn(roots, entry->fn);
         Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
@@ -884,14 +887,13 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
             ok = radiant_custom_layout_parse_result(context, rooted_result.get(), result);
         }
     }
-    // This stack-local context owns runtime diagnostics raised by the callback;
-    // dropping it without release leaked both LambdaError and its message.
+    // Retained callback diagnostics belong to the canonical document context
+    // and are consumed at this host boundary.
     if (callback_context && callback_context->last_error) {
         err_free(callback_context->last_error);
         callback_context->last_error = nullptr;
     }
     g_radiant_velmt_active_pass_id = previous_pass_id;
-    ::context = saved_context;
     input_context = saved_input_context;
     return ok;
 }
@@ -1165,7 +1167,7 @@ RADIANT_C_API Item fn_radiant_box(Item node_item) {
     box.y = node->y;
     box.width = node->width;
     box.height = node->height;
-    RootFrame roots((Context*)::context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_layout_box_item(&box));
     // The compatibility aliases allocate boxed floats; retain the VMap owner
     // across both writes instead of appending through a stale moved header.

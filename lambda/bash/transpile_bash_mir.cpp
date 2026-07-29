@@ -6190,10 +6190,9 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 
     // Use Runtime's canonical context when this guest owns a fresh activation.
     // A nested guest borrows its caller's already-bound heap for the duration.
-    EvalContext* old_context = context;
     bool reusing_context = false;
 
-    if (old_context && old_context->heap) {
+    if (context && context->heap) {
         reusing_context = true;
     } else {
         EvalContext* bash_context = runtime_get_eval_context(runtime);
@@ -6206,7 +6205,14 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
             if (dd_buf) strbuf_free(dd_buf);
             return (Item){.item = ITEM_ERROR};
         }
-        context = bash_context;
+        if (!eval_context_thread_initialize(bash_context)) {
+            ts_tree_delete(tree);
+            ts_parser_delete(parser);
+            bash_transpiler_destroy(tp);
+            if (preproc_buf) strbuf_free(preproc_buf);
+            if (dd_buf) strbuf_free(dd_buf);
+            return (Item){.item = ITEM_ERROR};
+        }
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
@@ -6231,7 +6237,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -6354,7 +6360,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     if (preproc_buf) strbuf_free(preproc_buf);
     if (dd_buf) strbuf_free(dd_buf);
 
-    mir_guest_finish_context(runtime, old_context, reusing_context);
+    mir_guest_finish_context(runtime, reusing_context);
 
     return result;
 }

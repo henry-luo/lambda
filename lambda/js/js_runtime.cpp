@@ -62,6 +62,28 @@ extern "C" Item js_cp_fork(Item rest_args);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
+
+static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
+    EvalContext* owner = (EvalContext*)runtime;
+    if (!owner || !eval_context_thread_matches(owner) ||
+            !js_runtime_state_thread_matches(owner)) {
+        // Retained MIR owners validate routing; they must never authorize a
+        // native callback to replace this thread's evaluator.
+        log_error("%s: compiled owner is not current", boundary);
+        return false;
+    }
+    return true;
+}
+
+static Item js_invoke_mir_state(void* func_ptr, Item* env, Item input,
+        int64_t state) {
+    if (!context || !js_runtime_state_thread_matches(context) || !func_ptr) {
+        log_error("js-mir-state: owner thread is not initialized");
+        return ItemError;
+    }
+    typedef Item (*MirStateFn)(Context*, Item*, Item, int64_t);
+    return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+}
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
 extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
@@ -396,7 +418,7 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (dense_required < index + 1) dense_required = index + 1;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
         int64_t old_capacity = arr->capacity;
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<Item> rooted_value(roots, value);
         expand_list((List*)arr);
         value = rooted_value.get();
@@ -957,7 +979,7 @@ static Item js_proxy_trap_set_failure(Item key) {
 
 // Proxy [[Set]](key, value, receiver)
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> proxy_root(roots, proxy);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
@@ -1067,7 +1089,7 @@ extern "C" Item js_proxy_trap_has(Item proxy, Item key) {
 
 // Proxy [[Delete]](key)
 extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> proxy_root(roots, proxy);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> trap_root(roots, ItemNull);
@@ -1460,7 +1482,7 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
 
 // Proxy [[DefineOwnProperty]](key, desc)
 extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> proxy_root(roots, proxy);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> input_descriptor_root(roots, desc);
@@ -1963,7 +1985,7 @@ extern "C" void js_set_class_instance_field_metadata_bulk(Item class_item,
         !field_kinds || count <= 0) {
         return;
     }
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> class_root(roots, class_item);
     Rooted<Item> keys_root(roots, js_array_new(count));
     Rooted<Item> values_root(roots, js_array_new(count));
@@ -2006,7 +2028,7 @@ extern "C" void js_set_class_instance_field_metadata_value(
 
 static bool js_init_class_instance_field(Item callee, Item object, Item field_key,
     bool value_found, Item field_value, bool brand_only) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> callee_root(roots, callee);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> key_root(roots, field_key);
@@ -3353,7 +3375,7 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
 
 extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> value_root(roots, value);
     Map* m = (Map*)object.map;
@@ -4333,7 +4355,7 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
 
 extern "C" Item js_property_get(Item object, Item key) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
-    RootFrame property_roots((Context*)context, 2);
+    RootFrame property_roots(2);
     Rooted<Item> object_root(property_roots, object);
     Rooted<Item> key_root(property_roots, key);
     // Getter dispatch may allocate before it calls the accessor. Keep the
@@ -6990,7 +7012,7 @@ static Item js_property_set_function(Item object, Item key, Item value) {
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
@@ -8512,7 +8534,7 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
         // The value must survive the growth allocation before it is stored.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<Item> rooted_value(roots, value);
         int64_t old_capacity = arr->capacity;
         expand_list((List*)arr);
@@ -9686,6 +9708,9 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         }
         if (!fn->runtime_context) {
             log_error("js_invoke_fn: context wrapper missing context owner");
+            return ItemError;
+        }
+        if (!js_mir_owner_is_current(fn->runtime_context, "js-invoke-fn")) {
             return ItemError;
         }
         if (!fn->func_ptr) return make_js_undefined();
@@ -13734,8 +13759,8 @@ static Item js_finish_borrowed_scalar_result(Item result, bool uses_local_home) 
     return ItemError;
 }
 
-extern "C" bool lambda_side_root_contains_span(Context* runtime, const void* span,
-        size_t item_count) {
+extern "C" bool lambda_side_root_contains_span(const void* span, size_t item_count) {
+    Context* runtime = (Context*)context;
     if (!runtime || item_count == 0) return item_count == 0;
     if (!span || !runtime->side_root_base || !runtime->side_root_top) return false;
     uintptr_t begin = (uintptr_t)span;
@@ -13780,13 +13805,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     }
     int rooted_argc = !args_prerooted && args && arg_count > 0 ? arg_count : 0;
     if (args_prerooted && arg_count > 0 &&
-        !lambda_side_root_contains_span((Context*)context, args, (size_t)arg_count)) {
+        !lambda_side_root_contains_span(args, (size_t)arg_count)) {
         // Only the MIR frame-scope import may select this path; containment is
         // a diagnostic backstop that catches a broken scope lifetime early.
         log_error("js-call-prerooted: argument span is outside the live side-root range");
         return ItemError;
     }
-    RootFrame call_roots((Context*)context, (size_t)(2 + rooted_argc));
+    RootFrame call_roots((size_t)(2 + rooted_argc));
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     uint64_t** arg_roots = rooted_argc > 0
@@ -14381,7 +14406,11 @@ template <int N, bool HasEnv, bool PublicAbi, bool ContextAbi>
 static inline Item js_entry_invoke_body(JsFunction* fn, const Item* a,
         uint64_t* home) {
     void* p = fn->func_ptr;
-    Context* runtime = ContextAbi ? fn->runtime_context : NULL;
+    Context* runtime = ContextAbi ? (Context*)context : NULL;
+    if (ContextAbi &&
+            !js_mir_owner_is_current(fn->runtime_context, "js-call-entry")) {
+        return ItemError;
+    }
     if (HasEnv) {
         Item env = {.item = (uint64_t)fn->env};
         if (ContextAbi) {
@@ -14478,7 +14507,7 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
     // body still receives the caller's own array, exactly as the generic path
     // does — these slots only keep the values reachable.
     int rooted_argc = (!args_prerooted && N > 0) ? N : 0;
-    RootFrame call_roots((Context*)context, (size_t)(2 + rooted_argc));
+    RootFrame call_roots((size_t)(2 + rooted_argc));
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     for (int i = 0; i < rooted_argc; i++) {
@@ -14664,49 +14693,30 @@ extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_v
         result_home, true);
 }
 
-static Item js_call_export_into(Context* runtime, Function* function, Item* args,
-        int arg_count, uint64_t* result_home) {
+static Item js_call_export_into(Function* function, Item* args, int arg_count,
+        uint64_t* result_home) {
+    Context* runtime = (Context*)context;
     if (!runtime || !function || !result_home) return ItemError;
-    EvalContext* owner = (EvalContext*)runtime;
-    EvalContext* previous_context = context;
-    JsRuntimeState* previous_state = js_active_runtime_state;
-    bool needs_bind = previous_context != owner || previous_state != owner->js_state;
-    if (needs_bind) {
-        // A Lambda-to-JS call enters through a raw MIR import, bypassing the
-        // JS dispatcher that normally installs the export's owner capsule.
-        // Bind only at this language boundary so function bodies retain their
-        // direct TLS state loads and never consult process-global state.
-        context = owner;
-        if (!js_runtime_state_bind_context(owner)) {
-            context = previous_context;
-            js_active_runtime_state = previous_state;
-            return ItemError;
-        }
-    }
+    if (!js_mir_owner_is_current(runtime, "js-export-bridge")) return ItemError;
     Item callable = {.function = function};
     Item result = js_call_function_into(callable, make_js_undefined(), args,
         arg_count, result_home);
     if (result.item == ItemError.item && js_check_exception()) {
         log_error("js-export-bridge: %s", js_get_exception_message());
     }
-    if (needs_bind) {
-        context = previous_context;
-        js_active_runtime_state = previous_state;
-    }
     return result;
 }
 
-extern "C" Item js_call_export_0_into(Context* runtime, Function* function,
-        uint64_t* result_home) {
-    return js_call_export_into(runtime, function, NULL, 0, result_home);
+extern "C" Item js_call_export_0_into(Function* function, uint64_t* result_home) {
+    return js_call_export_into(function, NULL, 0, result_home);
 }
 
 #define JS_EXPORT_CALL_PARAMS(...) __VA_ARGS__
 #define DEFINE_JS_EXPORT_CALL_INTO(count, params, values) \
-    extern "C" Item js_call_export_##count##_into(Context* runtime, \
-            Function* function, JS_EXPORT_CALL_PARAMS params, uint64_t* result_home) { \
+    extern "C" Item js_call_export_##count##_into(Function* function, \
+            JS_EXPORT_CALL_PARAMS params, uint64_t* result_home) { \
         Item args[] = {JS_EXPORT_CALL_PARAMS values}; \
-        return js_call_export_into(runtime, function, args, count, result_home); \
+        return js_call_export_into(function, args, count, result_home); \
     }
 
 DEFINE_JS_EXPORT_CALL_INTO(1, (Item a), (a))
@@ -14858,7 +14868,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
         return ItemNull;
     }
     int rooted_argc = bound_args && bound_argc > 0 ? bound_argc : 0;
-    RootFrame roots((Context*)context, (size_t)(4 + rooted_argc));
+    RootFrame roots((size_t)(4 + rooted_argc));
     Rooted<Item> func_root(roots, func_item);
     Rooted<Item> this_root(roots, bound_this);
     Rooted<Item*> args_root(roots, bound_args);
@@ -16708,7 +16718,7 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
     rd->unicode = ce.has_unicode;
     rd->has_indices = ce.has_indices;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     // Creating each property can allocate; keep the half-built RegExp rooted
     // until its own property map becomes the durable owner of the values.
     Rooted<Item> regex_obj_root(roots, js_new_object());
@@ -18174,7 +18184,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern_len = literal_len;
     }
     // create a Map object and set properties
-    RootFrame regex_roots((Context*)context, 2);
+    RootFrame regex_roots(2);
     // Every following property setup can allocate. Keep the object and its
     // eventual prototype alive until the map owns the completed graph.
     Rooted<Item> regex_obj_root(regex_roots, js_new_object());
@@ -19881,7 +19891,7 @@ static void js_collection_link_prototype(Item obj, const char* ctor_name, int ct
     // this point, and heap_create_name/js_property_get below can collect. With
     // with exact roots, an unrooted obj is freed mid-link and the prototype
     // is written into dead memory, which later reads back as a missing "add".
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_obj(roots, obj);
     Rooted<Item> rooted_ctor(roots, ItemNull);
     Rooted<Item> rooted_proto(roots, ItemNull);
@@ -20018,7 +20028,7 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
     // all collect. The set must be rooted from creation -- linking its
     // prototype allocates, and losing it there surfaced later as
     // "Set.prototype.add is not callable".
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> rooted_set(roots, js_collection_create(JS_COLLECTION_SET));
     Rooted<Item> rooted_iterable(roots, iterable);
     Rooted<Item> rooted_adder(roots, ItemNull);
@@ -20054,7 +20064,7 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
 }
 
 extern "C" Item js_map_collection_new_from(Item iterable) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> map_root(roots, js_collection_create(JS_COLLECTION_MAP));
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> adder_root(roots, ItemNull);
@@ -26383,7 +26393,7 @@ static Item js_array_generic_with(Item object, Item* args, int argc) {
 }
 
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind) {
-    RootFrame roots((Context*)context, 8);
+    RootFrame roots(8);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> callback_object_root(roots, callback_object);
     Rooted<Item> callback_root(roots, argc > 0 ? args[0] : ItemNull);
@@ -27200,7 +27210,7 @@ includes_slow_path:
     if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
-        RootFrame roots((Context*)context, 6);
+        RootFrame roots(6);
         Rooted<Item> array_root(roots, arr);
         Rooted<Item> callback_root(roots, args[0]);
         Rooted<Item> result_root(roots, ItemNull);
@@ -29237,7 +29247,7 @@ extern "C" Item js_new_number_wrapper(Item arg) {
     // js_to_number, js_property_set can grow the map, wrapper_set_proto reads the
     // constructor). The half-built wrapper is referenced only by this local, so
     // it must stay exact-rooted or a collection mid-construction frees it.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> arg_root(roots, arg);
     Rooted<Item> obj_root(roots, js_new_object());
     Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
@@ -29264,7 +29274,7 @@ extern "C" Item js_new_number_checked(Item arg) {
 extern "C" Item js_new_boolean_wrapper(Item arg) {
     // See js_new_number_wrapper: keep the unfinished wrapper exact-rooted across
     // every allocating construction step.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> arg_root(roots, arg);
     Rooted<Item> obj_root(roots, js_new_object());
     Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
@@ -29281,7 +29291,7 @@ extern "C" Item js_new_string_wrapper(Item arg) {
     // js_property_set, wrapper_set_proto, three attr marks) while referenced only
     // by these locals — all must stay exact-rooted so a mid-construction
     // collection cannot free the half-built map or the wrapped string.
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> arg_root(roots, arg);
     Rooted<Item> obj_root(roots, js_new_object());
     Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
@@ -29311,7 +29321,7 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
         // exact-root the half-built wrapper across the allocating steps (see
         // js_new_number_wrapper) — an unrooted obj is freed by a mid-build GC.
-        RootFrame roots((Context*)context, 3);
+        RootFrame roots(3);
         Rooted<Item> value_root(roots, value);
         Rooted<Item> obj_root(roots, js_new_object());
         Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
@@ -29324,7 +29334,7 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
     if (js_is_bigint_egress(value)) {
         // BigInt wrapper object with __primitiveValue__; exact-root as above.
-        RootFrame roots((Context*)context, 4);
+        RootFrame roots(4);
         Rooted<Item> value_root(roots, value);
         Rooted<Item> obj_root(roots, js_new_object());
         Rooted<Item> pv_key_root(roots, (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))});
@@ -29820,7 +29830,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
 
 // Helper: create {value, done} iterator result object
 static Item js_make_iter_result(Item value, bool done) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> result_root(roots, js_new_object());
     String* val_key = heap_create_name("value", 5);
@@ -29950,16 +29960,18 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
     return proto;
 }
 
-static Item js_generator_create_with_context(Context* runtime, void* func_ptr,
-        Item* env, int env_size, int is_async) {
+static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
+        int is_async) {
+    Context* runtime = (Context*)context;
     if (!runtime) {
         log_error("js-generator: state machine missing context owner");
         return ItemError;
     }
+    if (!js_mir_owner_is_current(runtime, "js-generator-create")) return ItemError;
     // Generator construction performs several allocating property/prototype
     // operations after creating the owning map. Keep that fresh map in an
     // exact native home so its GC tracer continuously owns the raw env.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> obj_root(roots, ItemNull);
     Rooted<Item> proto_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
@@ -30035,8 +30047,8 @@ static Item js_generator_create_with_context(Context* runtime, void* func_ptr,
     // here ensures destructuring errors throw synchronously at call time, not on .next().
     {
         gen->executing = true;
-        typedef Item (*GenFn)(Context*, Item*, Item, int64_t);
-        result_root.set(((GenFn)func_ptr)(runtime, env, make_js_undefined(), 0));
+        result_root.set(js_invoke_mir_state(func_ptr, env,
+            make_js_undefined(), 0));
         gen->executing = false;
 
         // If param destructuring threw, propagate the exception
@@ -30058,15 +30070,19 @@ static Item js_generator_create_with_context(Context* runtime, void* func_ptr,
     return obj_root.get();
 }
 
-extern "C" Item js_generator_create_context(Context* runtime, void* func_ptr,
-        Item* env, int env_size, int is_async) {
-    return js_generator_create_with_context(runtime, func_ptr, env, env_size, is_async);
+extern "C" Item js_generator_create_mir(void* func_ptr, Item* env,
+        int env_size, int is_async) {
+    Context* runtime = (Context*)context;
+    if (!runtime) {
+        log_error("js-generator: state machine missing context owner");
+        return ItemError;
+    }
+    return js_generator_create_current(func_ptr, env, env_size, is_async);
 }
 
 extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size,
         int is_async) {
-    return js_generator_create_with_context((Context*)context, func_ptr, env,
-        env_size, is_async);
+    return js_generator_create_current(func_ptr, env, env_size, is_async);
 }
 
 static JsGenerator* js_get_generator(Item gen_obj) {
@@ -30219,17 +30235,19 @@ static Item js_async_generator_await_reject(Item generator, Item reason) {
 }
 
 extern "C" Item js_generator_next(Item generator, Item input) {
-    RootFrame roots((Context*)context, 4);
-    Rooted<Item> generator_root(roots, generator);
-    Rooted<Item> input_root(roots, input);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
         log_error("generator_next: invalid generator object");
         Item result = js_make_iter_result(make_js_undefined(), true);
         return result;
     }
+    if (!js_mir_owner_is_current(gen->runtime_context,
+            "js-generator-next")) return ItemError;
+    RootFrame roots(4);
+    Rooted<Item> generator_root(roots, generator);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
 
     bool is_async = gen->is_async;
 
@@ -30314,10 +30332,8 @@ run_state_machine:
     // The state machine returns {value, next_state} as a 2-element array
     // If next_state == -1, the generator is done
     // If next_state == -3, this is yield* delegation: value is the iterable
-    typedef Item (*GenFn)(Context*, Item*, Item, int64_t);
-
-    result_root.set(((GenFn)gen->state_fn)(gen->runtime_context, gen->env,
-        input_root.get(), gen->state));
+    result_root.set(js_invoke_mir_state(gen->state_fn,
+        gen->env, input_root.get(), gen->state));
     Item result = result_root.get();
 
     if (get_type_id(result) == LMD_TYPE_ARRAY) {
@@ -30390,6 +30406,8 @@ extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (!js_mir_owner_is_current(gen->runtime_context,
+                "js-generator-return")) return ItemError;
         if (!gen->done && !gen->started) {
             gen->done = true;
             gen->state = -1;
@@ -30459,10 +30477,9 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                         return ItemNull;
                     }
                     gen->executing = true;
-                    typedef Item (*GenFn)(Context*, Item*, Item, int64_t);
                     Item signal = js_gen_return_signal(inner_value);
-                    Item result = ((GenFn)gen->state_fn)(gen->runtime_context,
-                        gen->env, signal, gen->state);
+                    Item result = js_invoke_mir_state(
+                        gen->state_fn, gen->env, signal, gen->state);
                     gen->executing = false;
                     if (js_check_exception()) {
                         gen->done = true;
@@ -30514,10 +30531,9 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                 return ItemNull;
             }
             gen->executing = true;
-            typedef Item (*GenFn)(Context*, Item*, Item, int64_t);
             Item signal = js_gen_return_signal(value);
-            Item result = ((GenFn)gen->state_fn)(gen->runtime_context,
-                gen->env, signal, gen->state);
+            Item result = js_invoke_mir_state(
+                gen->state_fn, gen->env, signal, gen->state);
             gen->executing = false;
             if (js_check_exception()) {
                 gen->done = true;
@@ -30558,6 +30574,8 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (!js_mir_owner_is_current(gen->runtime_context,
+                "js-generator-throw")) return ItemError;
         if (!gen->done && !gen->started) {
             gen->done = true;
             gen->state = -1;
@@ -30699,7 +30717,7 @@ static Item js_make_iterator_proto(Item* cache, int next_builtin_id,
         *cache = (Item){0};
     }
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> proto_root(roots, js_new_object());
     Rooted<Item> next_fn_root(roots, ItemNull);
     Rooted<Item> tag_val_root(roots, ItemNull);
@@ -30727,7 +30745,7 @@ static Item js_get_iterator_proto() {
         get_type_id(js_iterator_proto_cache) == LMD_TYPE_MAP) {
         return js_iterator_proto_cache;
     }
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> proto_root(roots, js_new_object());
     Rooted<Item> si_fn_root(roots, ItemNull);
     // The cache becomes the persistent owner only after the prototype is
@@ -30810,7 +30828,7 @@ struct JsIterData {
 
 // v28: Create lightweight fixed-layout array iterator (MAP_KIND_ITERATOR)
 static Item js_create_array_iterator(Item source) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> source_root(roots, source);
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
@@ -30826,7 +30844,7 @@ static Item js_create_array_iterator(Item source) {
 }
 
 static Item js_create_array_iterator_object(Item source, int kind) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> source_root(roots, source);
     Rooted<Item> iter_root(roots, js_new_object());
     Rooted<Item> si_fn_root(roots, ItemNull);
@@ -30843,7 +30861,7 @@ static Item js_create_array_iterator_object(Item source, int kind) {
 
 // v28: Create lightweight fixed-layout string iterator
 static Item js_create_string_iterator(Item source) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> source_root(roots, source);
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
@@ -30859,7 +30877,7 @@ static Item js_create_string_iterator(Item source) {
 
 // v28: Create lightweight fixed-layout typed array iterator
 static Item js_create_typed_array_iterator(Item source) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> source_root(roots, source);
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
@@ -30901,7 +30919,7 @@ Item js_check_array_sym_iterator() {
 
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
 static bool js_iterator_cache_next_method(Item iterator) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> iterator_root(roots, iterator);
     Rooted<Item> next_root(roots, ItemNull);
     // A freshly returned iterator may have no published owner yet; keep it
@@ -31114,7 +31132,7 @@ extern "C" Item js_get_iterator_lazy(Item iterable) {
 // The sentinel is a unique bit pattern (type tag 0x7F) that cannot collide with
 // any valid JS value including null, undefined, false, 0, or empty string.
 extern "C" Item js_iterator_step(Item iterator) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> iterator_root(roots, iterator);
     Rooted<Item> source_root(roots, ItemNull);
     Rooted<Item> next_fn_root(roots, ItemNull);
@@ -31353,7 +31371,7 @@ extern "C" Item js_iterator_step(Item iterator) {
 
 // IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)
 extern "C" Item js_iterator_close(Item iterator) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> iterator_root(roots, iterator);
     Rooted<Item> return_fn_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
@@ -31404,7 +31422,7 @@ extern "C" Item js_iterator_close(Item iterator) {
 
 // collect remaining iterator values into a new array (for rest elements in destructuring)
 extern "C" Item js_iterator_collect_rest(Item iterator) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> iterator_root(roots, iterator);
     Rooted<Item> array_root(roots, js_array_new(0));
     Rooted<Item> value_root(roots, ItemNull);
@@ -31437,7 +31455,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         return ItemNull;
     }
 
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> array_root(roots, ItemNull);
     Rooted<Item> iterator_root(roots, ItemNull);
@@ -31817,7 +31835,7 @@ static JsPromise* js_alloc_promise() {
 static Item js_promise_to_item(JsPromise* p) {
     if (p->wrapper_created) return p->wrapper;
 
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> wrapper_root(roots, ItemNull);
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> ctor_key_root(roots, ItemNull);
@@ -31923,7 +31941,7 @@ static Item js_promise_make_type_error(const char* message, int len) {
 }
 
 static Item js_promise_make_resolving_state(JsPromise* p) {
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> state(roots, js_new_object());
     int idx = p ? (int)(p - js_promises) : -1;
     // The state is fresh and otherwise unreachable while its two properties
@@ -31963,7 +31981,7 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         js_promise_settle(target, JS_PROMISE_REJECTED, error);
         return;
     }
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> target_root(roots, js_promise_to_item(target));
     Rooted<Item> resolve_base_root(roots, ItemNull);
     Rooted<Item> reject_base_root(roots, ItemNull);
@@ -32057,7 +32075,7 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value) {
 // Called with 3 bound args: handler, result, next_promise_item.
 // Calls handler(result), then settles next_promise with the return value.
 static Item js_promise_microtask_run(Item handler, Item result, Item next_promise_item) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> handler_root(roots, handler);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> next_root(roots, next_promise_item);
@@ -32139,7 +32157,7 @@ extern "C" Item js_promise_async_function_start(void) {
 }
 
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> promise_root(roots, promise);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> resolve_base_root(roots, ItemNull);
@@ -32269,7 +32287,7 @@ static void js_promise_mark_rejection_handled(JsPromise* p) {
 }
 
 static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domain) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     // Promise reaction wrappers are not queue-owned until the final enqueue;
     // exact-root each intermediate thunk across the nested binding allocations.
     Rooted<Item> thunk_root(roots, thunk);
@@ -32296,7 +32314,7 @@ static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domai
 // Enqueue a promise handler as a microtask with proper chaining.
 // Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> handler_root(roots, handler);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> next_root(roots, next_promise_item);
@@ -32311,7 +32329,7 @@ static void js_promise_enqueue_handler(Item handler, Item result, Item next_prom
 }
 
 static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> handler_root(roots, handler);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> next_root(roots, next_promise_item);
@@ -32330,7 +32348,7 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
 
 // Enqueue a finally handler as a microtask.
 static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsPromiseState state, Item result, Item domain) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> handler_root(roots, handler);
     Rooted<Item> next_root(roots, next_promise_item);
     Rooted<Item> result_root(roots, result);
@@ -32347,7 +32365,7 @@ static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsP
 }
 
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain) {
-    RootFrame roots((Context*)context, 5);
+    RootFrame roots(5);
     Rooted<Item> next_root(roots, next_promise_item);
     Rooted<Item> result_root(roots, result);
     Rooted<Item> domain_root(roots, domain);
@@ -32433,7 +32451,7 @@ extern "C" Item js_promise_create(Item executor) {
     if (get_type_id(executor) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Promise resolver is not a function");
     }
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> executor_root(roots, executor);
     Rooted<Item> promise_root(roots, ItemNull);
     Rooted<Item> resolving_state_root(roots, ItemNull);
@@ -32473,7 +32491,7 @@ extern "C" Item js_promise_create(Item executor) {
 }
 
 extern "C" Item js_promise_resolve(Item value) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> promise_root(roots, ItemNull);
     // If value is already a promise, return it
@@ -32511,7 +32529,7 @@ extern "C" void js_promise_reject_existing(Item promise, Item reason) {
 }
 
 extern "C" Item js_promise_reject(Item reason) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> reason_root(roots, reason);
     Rooted<Item> promise_root(roots, ItemNull);
     JsPromise* p = js_alloc_promise();
@@ -32662,7 +32680,7 @@ static Item js_promise_capability_normalize_arg(Item value) {
 
 // NewPromiseCapability executor. Bound arg: holder object.
 static Item js_promise_capability_executor(Item holder, Item resolve, Item reject) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> holder_root(roots, holder);
     Rooted<Item> resolve_root(roots, js_promise_capability_normalize_arg(resolve));
     Rooted<Item> reject_root(roots, js_promise_capability_normalize_arg(reject));
@@ -32682,7 +32700,7 @@ static Item js_promise_capability_executor(Item holder, Item resolve, Item rejec
 }
 
 static Item js_promise_new_capability(Item constructor, Item* out_resolve, Item* out_reject) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> constructor_root(roots, constructor);
     Rooted<Item> holder_root(roots, ItemNull);
     Rooted<Item> capture_base_root(roots, ItemNull);
@@ -32800,7 +32818,7 @@ static Item js_promise_call_capability_reject(Item reject, Item reason) {
 }
 
 static void js_promise_forward_native_to_capability(Item native_promise, Item resolve, Item reject) {
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> native_root(roots, native_promise);
     Rooted<Item> resolve_root(roots, resolve);
     Rooted<Item> reject_root(roots, reject);
@@ -32821,7 +32839,7 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
 
 static bool js_promise_resolve_elements_with_constructor(Item constructor, Item resolve_method,
     Item arr_item, Item* out_array, Item reject) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> constructor_root(roots, constructor);
     Rooted<Item> resolve_method_root(roots, resolve_method);
     Rooted<Item> array_root(roots, arr_item);
@@ -32978,7 +32996,7 @@ static Item js_promise_combinator_iterable_with_constructor(
 }
 
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
-    RootFrame roots((Context*)context, 9);
+    RootFrame roots(9);
     Rooted<Item> constructor_root(roots, constructor);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> resolve_root(roots, ItemNull);
@@ -33298,17 +33316,19 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
 // Core async state machine driver: calls the state machine and handles results
 static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    RootFrame roots((Context*)context, 5);
+    if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
+        return;
+    }
+    RootFrame roots(5);
     Rooted<Item> input_root(roots, input);
     Rooted<Item> result_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> resume_root(roots, ItemNull);
     Rooted<Item> reject_root(roots, ItemNull);
-    typedef Item (*AsyncSmFn)(Context*, Item*, Item, int64_t);
     Item prev_this = js_current_this;
     js_current_this = ctx->this_val;
-    result_root.set(((AsyncSmFn)ctx->state_fn)(ctx->runtime_context, ctx->env,
-        input_root.get(), state));
+    result_root.set(js_invoke_mir_state(
+        ctx->state_fn, ctx->env, input_root.get(), state));
     js_current_this = prev_this;
 
     // Parse result: [value, next_state]
@@ -33376,12 +33396,14 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
 }
 
 // Create an async context: allocates promise, returns context index
-static Item js_async_context_create_with_context(Context* runtime, void* fn_ptr,
-        Item* env, int64_t env_size, Item this_val) {
+static Item js_async_context_create_current(void* fn_ptr, Item* env,
+        int64_t env_size, Item this_val) {
+    Context* runtime = (Context*)context;
     if (!runtime) {
         log_error("js-async: state machine missing context owner");
         return ItemError;
     }
+    if (!js_mir_owner_is_current(runtime, "js-async-create")) return ItemError;
     js_async_register_roots_once();
     if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
         log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
@@ -33406,16 +33428,19 @@ static Item js_async_context_create_with_context(Context* runtime, void* fn_ptr,
     return (Item){.item = i2it(idx)};
 }
 
-extern "C" Item js_async_context_create_context(Context* runtime, void* fn_ptr,
-        Item* env, int64_t env_size, Item this_val) {
-    return js_async_context_create_with_context(runtime, fn_ptr, env, env_size,
-        this_val);
+extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
+        int64_t env_size, Item this_val) {
+    Context* runtime = (Context*)context;
+    if (!runtime) {
+        log_error("js-async: state machine missing context owner");
+        return ItemError;
+    }
+    return js_async_context_create_current(fn_ptr, env, env_size, this_val);
 }
 
 extern "C" Item js_async_context_create(void* fn_ptr, Item* env,
         int64_t env_size, Item this_val) {
-    return js_async_context_create_with_context((Context*)context, fn_ptr, env,
-        env_size, this_val);
+    return js_async_context_create_current(fn_ptr, env, env_size, this_val);
 }
 
 // Start execution of an async state machine (initial call at state 0)
@@ -33435,7 +33460,7 @@ extern "C" Item js_async_get_promise(Item ctx_idx_item) {
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
-    RootFrame roots((Context*)context, 9);
+    RootFrame roots(9);
     Rooted<Item> promise_root(roots, promise);
     Rooted<Item> fulfilled_root(roots, on_fulfilled);
     Rooted<Item> rejected_root(roots, on_rejected);
@@ -33697,7 +33722,7 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
 // Per ES spec, Promise.all/race/any/allSettled must call Invoke(nextPromise, "then", ...)
 // so that user-overridden .then methods are respected.
 static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error) {
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> elem_root(roots, elem);
     Rooted<Item> resolve_root(roots, resolve_fn);
     Rooted<Item> reject_root(roots, reject_fn);
@@ -33744,7 +33769,7 @@ static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item
 }
 
 static bool js_promise_builtin_constructor_resolve(Item value, Item* out_promise) {
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> constructor_root(roots, ItemNull);
     Rooted<Item> resolve_root(roots, ItemNull);
@@ -33963,7 +33988,7 @@ static Item js_promise_race_iterable(Item iterable) {
 }
 
 extern "C" Item js_promise_any(Item iterable) {
-    RootFrame roots((Context*)context, 12);
+    RootFrame roots(12);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> array_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
@@ -36123,7 +36148,7 @@ static Item js_dc_channel_withStoreScope(Item message) {
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_dc_register_roots();
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> name_root(roots, name);
     if (!js_dc_is_channel_name(name)) {
         return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
@@ -38749,7 +38774,7 @@ extern "C" Item js_get_async_hooks_namespace(void) {
         ah_epoch = js_heap_epoch;
         ah_ns = js_new_object();
         heap_register_gc_root(&ah_ns.item);
-        RootFrame roots((Context*)context, 6);
+        RootFrame roots(6);
 
         // AsyncLocalStorage class
         Rooted<Item> als_class_root(roots, js_new_object());
@@ -39959,7 +39984,7 @@ extern "C" Item js_get_node_module_namespace(void) {
         module_epoch = js_heap_epoch;
         module_ns = js_new_object();
         heap_register_gc_root(&module_ns.item);
-        RootFrame roots((Context*)context, 3);
+        RootFrame roots(3);
         Rooted<Item> builtin_modules_root(roots, ItemNull);
         Rooted<Item> constants_root(roots, ItemNull);
         Rooted<Item> status_root(roots, ItemNull);
@@ -40276,7 +40301,7 @@ extern "C" Item js_module_namespace_create(Item exports_map) {
 extern "C" Item js_text_encoder_new(void) {
     // exact-root the object across the allocating property-set and class-stamp
     // (typemap clone) — an unrooted obj is freed by a mid-construction GC.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> obj_root(roots, js_new_object());
     Rooted<Item> k_root(roots, (Item){.item = s2it(heap_create_name("encoding"))});
     Rooted<Item> v_root(roots, (Item){.item = s2it(heap_create_name("utf-8"))});
@@ -40660,7 +40685,7 @@ extern "C" Item js_weakref_new(Item target) {
     // exact-root obj (and the borrowed target) across prototype link, class
     // stamp, key alloc, and property set — an unrooted obj is freed by a
     // mid-construction GC.
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> obj_root(roots, js_new_object());
     js_collection_link_prototype(obj_root.get(), "WeakRef", 7);
@@ -40690,7 +40715,7 @@ extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
     // stamp, two key allocs, the cells array alloc, and two property sets — an
     // unrooted obj is freed by a mid-construction GC (register() would then be
     // missing from the collected object).
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> cleanup_root(roots, cleanup_callback);
     Rooted<Item> obj_root(roots, js_new_object());
     js_collection_link_prototype(obj_root.get(), "FinalizationRegistry", 20);

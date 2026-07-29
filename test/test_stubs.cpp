@@ -46,13 +46,12 @@ Script* load_script(Runtime* runtime, const char* script_path, const char* sourc
 
 // Helper functions for C code to access EvalContext members (used by path.c)
 extern "C" {
-Pool* eval_context_get_pool(EvalContext* ctx) {
-    if (!ctx || !ctx->heap) return nullptr;
-    return ctx->heap->pool;
+Pool* eval_context_get_pool() {
+    if (!context || !context->heap) return nullptr;
+    return context->heap->pool;
 }
 
-NamePool* eval_context_get_name_pool(EvalContext* ctx) {
-    if (!ctx) return nullptr;
-    return ctx->name_pool;
+NamePool* eval_context_get_name_pool() {
+    return context ? context->name_pool : nullptr;
 }
 }

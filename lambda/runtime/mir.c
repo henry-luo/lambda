@@ -14,18 +14,13 @@
 #endif
 #include "../lambda.h"
 #include "lambda-error.h"
+#include "runtime-state.h"
 #include "sys_func_registry.h"
 
-// Defined by runtime-state.cpp. This is an instantiation-boundary operation;
-// generated code never calls it from a variable or inline-cache path.
-extern bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
-                                        uint32_t var_count, uint32_t member_ic_count);
-extern bool lambda_module_state_bind_static(Context* runtime, uint32_t module_id,
-                                            void* consts, void* type_list);
-
-// Shared runtime context pointer - all JIT modules import this
-// This ensures imported modules share the same runtime context as the main module
+// Frozen C2MIR compatibility. MIR Direct never imports or reads this slot.
+#ifdef LAMBDA_C2MIR
 Context* _lambda_rt = NULL;
+#endif
 
 
 // POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
@@ -486,9 +481,8 @@ void jit_cleanup(MIR_context_t ctx) {
     MIR_finish(ctx);
 }
 
-bool prepare_context_module_state(Context* runtime, void* mir_ctx,
-        void* consts, void* type_list) {
-    if (!runtime || !mir_ctx) return false;
+bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list) {
+    if (!eval_context_tls_runtime() || !mir_ctx) return false;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
          module != NULL; module = DLIST_NEXT(MIR_module_t, module)) {
@@ -497,10 +491,9 @@ bool prepare_context_module_state(Context* runtime, void* mir_ctx,
             if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr ||
                     strcmp(item->u.bss->name, "_mod_layout") != 0) continue;
             LambdaModuleLayout* layout = (LambdaModuleLayout*)item->addr;
-            if (!lambda_module_state_prepare(runtime, layout->module_id,
+            if (!lambda_module_state_prepare(layout->module_id,
                     layout->var_count, layout->member_ic_count)) return false;
-            return lambda_module_state_bind_static(runtime, layout->module_id,
-                consts, type_list);
+            return lambda_module_state_bind_static(layout->module_id, consts, type_list);
         }
     }
     log_error("module-state: sealed MIR module has no layout descriptor");

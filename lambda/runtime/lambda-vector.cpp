@@ -87,7 +87,7 @@ static Item vector_get(Item item, int64_t index) {
 }
 
 static Array* vector_to_plain_array(Item item, int64_t len) {
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Array*> rooted_result(roots, (Array*)NULL);
     Array* result = array();
@@ -277,7 +277,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         if (!swrap) return ItemError;
         // Broadcasting allocates its result before consuming this native-only
         // scalar wrapper, so keep the wrapper exact-rooted across that call.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_swrap(roots, swrap);
         if (sint) swrap->items[0] = (int64_t)scalar_val;
         else      swrap->float_items[0] = scalar_val;
@@ -295,7 +295,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         (vec.array_num->get_elem_type() == ELEM_INT64 || vec.array_num->get_elem_type() == ELEM_INT)) {
         ArrayNumElemType et = vec.array_num->get_elem_type();
         int64_t sval = (int64_t)scalar_val;
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_vec(roots, vec.array_num);
         ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(len) : array_num_new(ELEM_INT, len);
         // Result allocation can relocate the source data buffer.
@@ -320,7 +320,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     // kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
     if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_FLOAT32) {
         float sval = (float)scalar_val;
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_vec(roots, vec.array_num);
         ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
         // Result allocation can relocate the source data buffer.
@@ -350,7 +350,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     // __restrict kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
     if (vec_type == LMD_TYPE_ARRAY_NUM && is_double_elem(vec.array_num->get_elem_type())) {
         double sval = scalar_val;
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_vec(roots, vec.array_num);
         ArrayNum* result = array_float_new(len);
         // Result allocation can relocate the source data buffer.
@@ -377,7 +377,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     }
 
     if (use_float && vec_type == LMD_TYPE_ARRAY_NUM) {
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_vec(roots, vec.array_num);
         ArrayNum* result = array_float_new(len);
         ArrayNum* source = rooted_vec.get();
@@ -568,7 +568,7 @@ static ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int
     if (!arr || ndim == 1) return arr;
     // The shape allocation is a second safepoint before this native helper can
     // return the new header to generated code, so root that construction gap.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     // attach shape side-table
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
@@ -620,7 +620,7 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
                            op == 3 || op == 5;
     ArrayNumElemType result_etype = result_is_float ? ELEM_FLOAT64 : ELEM_INT64;
     // Result construction can collect before the operand data is consumed.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_a(roots, a);
     Rooted<ArrayNum*> rooted_b(roots, b);
     ArrayNum* result = alloc_ndim_arraynum(result_etype, out_ndim, out_shp);
@@ -706,7 +706,7 @@ static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
     int64_t total = 1;
     for (int i = 0; i < out_ndim; i++) total *= out_shp[i];
     // Result construction can collect before the operand data is consumed.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_a(roots, a);
     Rooted<ArrayNum*> rooted_b(roots, b);
     ArrayNum* result = alloc_ndim_arraynum(ELEM_BOOL, out_ndim, out_shp);
@@ -744,7 +744,7 @@ Item vec_cmp(Item a, Item b, int op) {
         if (!sw) return ItemError;
         // The broadcast result allocation is a safepoint before it reads this
         // temporary scalar array.
-        RootFrame roots((Context*)context, 1);
+        RootFrame roots(1);
         Rooted<ArrayNum*> rooted_sw(roots, sw);
         if (sint) sw->items[0] = (int64_t)sv; else sw->float_items[0] = sv;
         return a_arr ? vec_cmp_broadcast(a.array_num, rooted_sw.get(), op)
@@ -816,7 +816,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         vec_a.array_num->get_elem_type() == vec_b.array_num->get_elem_type() &&
         (vec_a.array_num->get_elem_type() == ELEM_INT64 || vec_a.array_num->get_elem_type() == ELEM_INT)) {
         ArrayNumElemType et = vec_a.array_num->get_elem_type();
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<ArrayNum*> rooted_a(roots, vec_a.array_num);
         Rooted<ArrayNum*> rooted_b(roots, vec_b.array_num);
         ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(len) : array_num_new(ELEM_INT, len);
@@ -838,7 +838,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     // add/sub/mul/div; fmod/pow stay on scalar loops.
     if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_FLOAT32 &&
         type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_FLOAT32) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<ArrayNum*> rooted_a(roots, vec_a.array_num);
         Rooted<ArrayNum*> rooted_b(roots, vec_b.array_num);
         ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
@@ -863,7 +863,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM &&
         is_double_elem(vec_a.array_num->get_elem_type()) &&
         is_double_elem(vec_b.array_num->get_elem_type())) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<ArrayNum*> rooted_a(roots, vec_a.array_num);
         Rooted<ArrayNum*> rooted_b(roots, vec_b.array_num);
         ArrayNum* result = array_float_new(len);
@@ -891,7 +891,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         vec_a.array_num->get_elem_type() == vec_b.array_num->get_elem_type() &&
         is_small_int_elem(vec_a.array_num->get_elem_type())) {
         ArrayNumElemType et = vec_a.array_num->get_elem_type();
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<ArrayNum*> rooted_a(roots, vec_a.array_num);
         Rooted<ArrayNum*> rooted_b(roots, vec_b.array_num);
         ArrayNum* result = array_int64_new(len);
@@ -926,7 +926,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 
     // fast path: both homogeneous numeric arrays with float result
     if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM && use_float) {
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<ArrayNum*> rooted_a(roots, vec_a.array_num);
         Rooted<ArrayNum*> rooted_b(roots, vec_b.array_num);
         ArrayNum* result = array_float_new(len);
@@ -1159,7 +1159,7 @@ static Item vec_classified_scalar_op(Item vec, Item scalar, int op,
 
     ArrayNumElemType result_elem = ELEM_INT;
     bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_vec(roots, vec);
     Rooted<Item> rooted_scalar(roots, scalar);
     Rooted<Item> rooted_result(roots, ItemNull);
@@ -1214,7 +1214,7 @@ static Item vec_classified_broadcast_op(ArrayNum* left, ArrayNum* right,
     ArrayNumElemType result_elem = ELEM_INT;
     bool typed = vector_decision_has_typed_result(decision, op, &result_elem);
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<ArrayNum*> rooted_left(roots, left);
     Rooted<ArrayNum*> rooted_right(roots, right);
     Rooted<Item> rooted_result(roots, ItemNull);
@@ -1278,7 +1278,7 @@ static Item vec_classified_vec_op(Item left, Item right, int op) {
 
     ArrayNumElemType result_elem = ELEM_INT;
     bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_left(roots, left);
     Rooted<Item> rooted_right(roots, right);
     Rooted<Item> rooted_result(roots, ItemNull);
@@ -1394,7 +1394,7 @@ static Item vector_cumulative_model(Item item, int op) {
     ArrayNumElemType result_elem = ELEM_INT;
     bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
 
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Item> accumulator(roots, vector_get(item, 0));
     Rooted<Item> rooted_result(roots, vector_allocate_result(len, typed, result_elem));
@@ -1560,7 +1560,7 @@ Item fn_math_dot(Item a, Item b) {
 
     if (len_a == 0) return push_d(0.0);
 
-    RootFrame roots((Context*)context, 4);
+    RootFrame roots(4);
     Rooted<Item> rooted_a(roots, a);
     Rooted<Item> rooted_b(roots, b);
     Rooted<Item> product(roots, ItemNull);
@@ -1969,10 +1969,10 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
     if (type == LMD_TYPE_FUNC) {
         // A MIR callback needs an explicit number-stack result home that stays
         // valid until the generated caller adopts this native helper's result.
-        RootFrame roots((Context*)context, 2);
+        RootFrame roots(2);
         Rooted<Item> rooted_collection(roots, collection);
         Rooted<Item> rooted_function(roots, func_or_result);
-        uint64_t* result_home = lambda_side_number_alloc((Context*)context);
+        uint64_t* result_home = lambda_side_number_alloc();
         if (!result_home) {
             lambda_stack_overflow_error("fn_pipe_call-result-home");
             return ItemError;
@@ -2614,7 +2614,7 @@ Item fn_sort2(Item item, Item dir_item) {
         // Callback invocations may compact all inputs, the output under
         // construction, the function itself, and every previously returned
         // key. Give each live value an exact home for the whole sort.
-        RootFrame roots((Context*)context, (size_t)len + 3);
+        RootFrame roots((size_t)len + 3);
         Rooted<Item> rooted_source(roots, item);
         Rooted<Item> rooted_key_fn(roots, (Item){.function = key_fn});
         Rooted<Array*> rooted_result(roots, (Array*)NULL);
@@ -2703,7 +2703,7 @@ Item fn_reduce(Item collection, Item func_item) {
         log_error("reduce: 2nd argument must be a function, got type: %s", get_type_name(func_type));
         return ItemError;
     }
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<Item> rooted_collection(roots, collection);
     Rooted<Item> rooted_function(roots, func_item);
     Rooted<Item> rooted_acc(roots, ItemNull);
@@ -2712,7 +2712,7 @@ Item fn_reduce(Item collection, Item func_item) {
     if (len <= 0) return ItemNull;  // empty collection
     if (len == 1) return vector_get(rooted_collection.get(), 0);  // single element
 
-    uint64_t* accumulator_home = lambda_side_number_alloc((Context*)context);
+    uint64_t* accumulator_home = lambda_side_number_alloc();
     if (!accumulator_home) {
         lambda_stack_overflow_error("reduce-result-home");
         return ItemError;
@@ -3068,7 +3068,7 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
 
     // Root the source before allocating: its header is stable, but its data and
     // shape fields may be compacted at either construction safepoint.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_base(roots, base);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
@@ -3166,7 +3166,7 @@ Item fn_reshape(Item vec, Item shape_item) {
     ArrayNumElemType etype = base->get_elem_type();
 
     // allocate the view header
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_base(roots, base);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
@@ -3229,7 +3229,7 @@ Item fn_shape(Item vec) {
     List* result = list();
     if (!result) return ItemError;
     // Dimension boxing/list growth are safepoints after the new list is returned.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<List*> rooted_result(roots, result);
     for (int i = 0; i < ndim; i++) {
         Item dim = box_int64_value(dims[i]);
@@ -3310,7 +3310,7 @@ Item fn_transpose(Item vec) {
     int64_t* bshp = array_num_shape_dims(bs);
     int64_t* bstr = array_num_shape_strides(bs);
 
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_base(roots, base);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
@@ -3360,7 +3360,7 @@ Item fn_flatten(Item vec) {
     int64_t length = base->length;
     // Result allocation may compact the nursery, so keep the source owner exact-rooted
     // instead of retaining a stale header/data pointer across the safepoint.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<ArrayNum*> rooted_base(roots, base);
     ArrayNum* result = array_num_new(et, length);
     if (!result || length == 0) return { .array_num = result };
@@ -3382,7 +3382,7 @@ Item fn_ravel(Item vec) {
         return fn_flatten(vec);
     }
     // contiguous → a 1-D view with a shape side-table (carries base ref for GC)
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_base(roots, base);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
@@ -3436,7 +3436,7 @@ Item fn_matmul(Item a_item, Item b_item) {
     }
     // Every remaining branch allocates its result before reading the operands;
     // exact-root both owners so nursery compaction cannot stale their data pointers.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_a(roots, A);
     Rooted<ArrayNum*> rooted_b(roots, B);
     if (a_ndim == 2 && b_ndim == 2) {           // (m,k)·(k,n) → (m,n)
@@ -3519,7 +3519,7 @@ Item fn_concat(Item a_item, Item b_item) {
     out_shape[0] = a_shp[0] + b_shp[0];
     for (int ax = 1; ax < a_ndim; ax++) out_shape[ax] = a_shp[ax];
     // Destination allocation is a safepoint before either source is copied.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_a(roots, A);
     Rooted<ArrayNum*> rooted_b(roots, B);
     ArrayNum* R = (a_ndim >= 2) ? alloc_ndim_arraynum(ret_et, a_ndim, out_shape)
@@ -3554,7 +3554,7 @@ Item fn_stack(Item a_item, Item b_item) {
     out_shape[0] = 2;
     for (int ax = 0; ax < a_ndim; ax++) out_shape[ax + 1] = a_shp[ax];
     // Destination allocation is a safepoint before either source is copied.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_a(roots, A);
     Rooted<ArrayNum*> rooted_b(roots, B);
     ArrayNum* R = alloc_ndim_arraynum(ret_et, a_ndim + 1, out_shape);
@@ -3579,7 +3579,7 @@ static ArrayNum* arr_num_slice_axis(ArrayNum* src, int ndim, int64_t* shp, int64
 
     ArrayNumElemType et = src->get_elem_type();
     // The result allocation can relocate the source header and its data zone.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<ArrayNum*> rooted_src(roots, src);
     ArrayNum* result = (ndim >= 2) ? alloc_ndim_arraynum(et, ndim, out_shape)
                                    : array_num_new(et, out_shape[0]);
@@ -3629,7 +3629,7 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
 
     // Each slice allocation can collect the source and every slice already
     // owned by the not-yet-returned result list.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     Rooted<List*> rooted_result(roots, (List*)NULL);
     List* result = list();
@@ -3764,7 +3764,7 @@ static int64_t parse_axis(Item axis_item) {
 static Item reduce_lane_model(ArrayNum* arr, int64_t base_offset,
         int64_t stride, int64_t length, int op) {
     if (length <= 0) return ItemNull;
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     Rooted<Item> accumulator(roots, array_num_read_item(arr, base_offset));
     for (int64_t i = 1; i < length; i++) {
@@ -3846,7 +3846,7 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
     bool typed = (op == RED_MIN || op == RED_MAX) ?
         lambda_numeric_kind_to_elem_type(decision.result, &result_elem) :
         vector_decision_has_typed_result(&decision, vector_op, &result_elem);
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     Rooted<Item> rooted_result(roots, ItemNull);
     Item result_item = typed ?
@@ -3899,7 +3899,7 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
     // result: same shape, owned C-contiguous
     int64_t full_shape[32];
     for (int d = 0; d < ndim; d++) full_shape[d] = shp[d];
-    RootFrame roots((Context*)context, 3);
+    RootFrame roots(3);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     Rooted<Item> accumulator(roots, ItemNull);
     Rooted<Item> rooted_result(roots, ItemNull);
@@ -4226,7 +4226,7 @@ Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
     int64_t oH = (H + stride_h - 1) / stride_h, oW = (W + stride_w - 1) / stride_w;
     int64_t oshape[3]; oshape[0] = oH; oshape[1] = oW; if (indim == 3) oshape[2] = C;
     // Output construction is a safepoint before either input is sampled.
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<ArrayNum*> rooted_in(roots, in);
     Rooted<ArrayNum*> rooted_ker(roots, ker);
     ArrayNum* out = alloc_ndim_arraynum(ELEM_FLOAT64, indim, oshape);
@@ -4298,7 +4298,7 @@ Item fn_convolve(Item img, Item kernel) {
 // non-overlapping top-left pooling.
 static Item stencil_box_op(Item img, Item ksize_item, int op, int64_t stride, int64_t pad) {
     // Kernel construction can collect before the image reaches the shared engine.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> rooted_img(roots, img);
     ArrayNum* ker = stencil_box_kernel(stencil_ksize_arg(ksize_item));
     if (!ker) return ItemError;
@@ -4865,7 +4865,7 @@ Item fn_zip(Item a, Item b) {
     // Pair/list allocation and numeric boxing can compact every value that is
     // not yet owned by a rooted container, so keep the whole construction
     // frontier in exact slots and reload it at each allocating operation.
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     Rooted<Item> rooted_a(roots, a);
     Rooted<Item> rooted_b(roots, b);
     Rooted<List*> rooted_result(roots, (List*)NULL);

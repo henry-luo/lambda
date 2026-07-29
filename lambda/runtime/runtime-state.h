@@ -13,24 +13,12 @@ struct Context;
 // runner.cpp; narrow test fixtures may provide it without linking the runner.
 extern __thread EvalContext* context;
 
-// TLS identifies the context executing on this thread; it never owns runtime
-// state.  Enter/leave is intentionally explicit so nested guests and callback
-// dispatch can restore their caller without publishing mutable state globally.
-EvalContext* eval_context_bind(EvalContext* next);
-void eval_context_restore(EvalContext* previous);
-
-class EvalContextScope {
-public:
-    explicit EvalContextScope(EvalContext* next)
-        : previous(eval_context_bind(next)) {}
-    ~EvalContextScope() { eval_context_restore(previous); }
-
-    EvalContextScope(const EvalContextScope&) = delete;
-    EvalContextScope& operator=(const EvalContextScope&) = delete;
-
-private:
-    EvalContext* previous;
-};
+// An evaluator thread acquires one context identity before execution and keeps
+// it until teardown. Nested callbacks and guest dispatch may validate the
+// owner, but must never replace and later restore the TLS pointer.
+bool eval_context_thread_initialize(EvalContext* owner);
+bool eval_context_thread_matches(const EvalContext* owner);
+bool eval_context_thread_shutdown(EvalContext* owner);
 #endif
 
 #ifdef __cplusplus
@@ -43,20 +31,21 @@ extern bool g_dry_run;
 // These lifecycle calls may allocate/register roots; generated code never
 // calls them from a repeated variable or inline-cache path.
 struct LambdaModuleState;
-bool lambda_module_state_prepare(Context* runtime, uint32_t module_id,
-                                 uint32_t var_count, uint32_t member_ic_count);
-bool lambda_module_state_reserve(Context* runtime, uint32_t var_count,
-                                 uint32_t member_ic_count, uint32_t* out_module_id);
-bool lambda_active_js_module_state_ensure_vars(Context* runtime,
-                                               uint32_t required_var_count);
-bool lambda_module_state_bind_static(Context* runtime, uint32_t module_id,
-                                     void* consts, void* type_list);
-void* lambda_module_const_at(Context* runtime,
-                             const struct LambdaModuleLayout* layout,
+bool lambda_module_state_prepare(uint32_t module_id, uint32_t var_count,
+                                 uint32_t member_ic_count);
+bool lambda_module_state_reserve(uint32_t var_count, uint32_t member_ic_count,
+                                 uint32_t* out_module_id);
+bool lambda_active_js_module_state_ensure_vars(uint32_t required_var_count);
+bool lambda_module_state_bind_static(uint32_t module_id, void* consts,
+                                     void* type_list);
+// MIR-imported helpers obtain their owner from TLS.  `Context*` remains an
+// ABI parameter only between generated MIR functions.
+Context* eval_context_tls_runtime(void);
+void* lambda_module_const_at(const struct LambdaModuleLayout* layout,
                              uint32_t index);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
-void lambda_module_state_reset(Context* runtime);
-void lambda_module_state_destroy(Context* runtime);
+void lambda_module_state_reset(void);
+void lambda_module_state_destroy(void);
 
 #ifdef __cplusplus
 }

@@ -120,7 +120,9 @@ pn benchmark() {
     offset_momentum(bvx, bvy, bvz, bmass)
 
     var i = 0
-    while (i < 1000) {
+    // 36000 steps: the canonical AWFY workload, matching nbody2.ls and
+    // nbody2.js (runAWFY('NBody', ..., 36000)) so every engine times the same work
+    while (i < 36000) {
         advance(bx, by, bz, bvx, bvy, bvz, bmass, 0.01)
         i = i + 1
     }
@@ -132,9 +134,9 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    // Verify by scaling to integer: floor(energy * -10000000) should be 1690876
+    // Verify by scaling to integer: floor(energy * -10000000) should be 1690142
     var check = floor(result * -10000000.0)
-    if (check == 1690876) {
+    if (check == 1690142) {
         print("NBody: PASS\n")
     } else {
         print("NBody: FAIL check=")

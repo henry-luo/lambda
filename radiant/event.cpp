@@ -2072,7 +2072,6 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 EvalContext* handler_ctx = nullptr;
                                 DomDocument* doc = event_context_target_document(evcon);
                                 Runtime* rt = doc ? doc->lambda_runtime : nullptr;
-                                EvalContext* saved_context = context;
                                 Context* saved_input_context = input_context;
                                 if (rt && rt->heap) {
                                     handler_ctx = runtime_get_eval_context(rt);
@@ -2082,13 +2081,18 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     handler_ctx->pool = rt->reuse_pool ?
                                         rt->reuse_pool : rt->heap->pool;
                                     handler_ctx->type_info = type_info;
+                                    // A retained handler runs on the document's eval thread;
+                                    // nested dispatch must never replace that thread owner.
+                                    if (!eval_context_thread_initialize(handler_ctx)) {
+                                        log_error("lambda event handler: eval thread belongs to another context");
+                                        return true;
+                                    }
                                     // Retained handlers outlive Runner's stack context; bind a
                                     // live side stack before generated code enters its context ABI.
-                                    if (!lambda_side_stack_bind((Context*)handler_ctx)) {
+                                    if (!lambda_side_stack_bind()) {
                                         log_error("lambda event handler: failed to bind side stack");
                                         return true;
                                     }
-                                    context = handler_ctx;
                                 }
                                 // Phase 5: Set ui_mode + arena so retransformed body functions
                                 // allocate fat DomElements/DomTexts on the result arena.
@@ -2177,8 +2181,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     }
                                 }
 
-                                // restore previous context
-                                context = saved_context;
+                                // input construction is call-scoped; the eval owner is thread-scoped.
                                 input_context = saved_input_context;
 
                                 return true;
@@ -4710,7 +4713,6 @@ static DomElement* radiant_view_to_dom_element(View* v) {
 // allocates from the active JS runtime heap and number-stack base frame.
 typedef struct {
     EvalContext* handler_ctx;
-    EvalContext* saved_ctx;
     Context*     saved_input_ctx;
     DomDocument* doc;
     bool         active;
@@ -4730,9 +4732,12 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->name_pool = runtime->name_pool;
     s->handler_ctx->type_list = runtime->type_list;
     s->handler_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
-    s->saved_ctx = eval_context_bind(s->handler_ctx);
     s->saved_input_ctx = input_context;
-    if (s->handler_ctx->js_state) js_runtime_state_bind_context(s->handler_ctx);
+    if (!eval_context_thread_initialize(s->handler_ctx) ||
+            (s->handler_ctx->js_state &&
+             !js_runtime_state_thread_initialize(s->handler_ctx))) {
+        return false;
+    }
     input_context = nullptr;
     js_dom_set_document(s->doc);
     dom_js_mutation_reset_records(s->doc);
@@ -4745,9 +4750,7 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
 {
     if (!s->active) return;
     auto t_handler = std::chrono::high_resolution_clock::now();
-    eval_context_restore(s->saved_ctx);
     input_context = s->saved_input_ctx;
-    js_runtime_state_bind_context(s->saved_ctx);
     post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
 }
@@ -4782,10 +4785,8 @@ static bool rich_transaction_default_mutate_scoped(
             evcon, state, surface, intent, user);
     }
 
-    // Native contenteditable defaults run after beforeinput dispatch has
-    // restored the retained page context. MutationObserver records allocate JS
-    // values, so the entire DOM mutation and publication must re-enter that
-    // context as one scope rather than notifying from a context-free callback.
+    // Native contenteditable defaults and MutationObserver publication must
+    // remain on the document's already-initialized eval thread.
     JsDispatchScope mutation_scope(evcon);
     if (!mutation_scope.active) return false;
     return rich_transaction_default_mutate_unscoped(
@@ -4830,9 +4831,7 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     // would invalidate its current View pointers; the mutation ledger requests
     // the safe event-loop reflow after this scheduler tick completes.
     if (entered_scope) {
-        eval_context_restore(scope.saved_ctx);
         input_context = scope.saved_input_ctx;
-        js_runtime_state_bind_context(scope.saved_ctx);
         scope.active = false;
     }
 }
@@ -7005,11 +7004,10 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 // lookup, DOM wrappers, and nested JS dispatch cannot borrow a null or
 // unrelated runtime capsule.
 struct EventDocumentScope {
-    EvalContext* saved_context;
     bool active;
 
     EventDocumentScope(UiContext* uicon, DomDocument* doc)
-        : saved_context(nullptr), active(false) {
+        : active(false) {
         Runtime* runtime = doc && doc->lambda_runtime
             ? doc->lambda_runtime : (doc ? doc->js.runtime : nullptr);
         if (!runtime) return;
@@ -7019,25 +7017,24 @@ struct EventDocumentScope {
         owner->name_pool = runtime->name_pool;
         owner->type_list = runtime->type_list;
         owner->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
-        saved_context = eval_context_bind(owner);
+        if (!eval_context_thread_initialize(owner)) return;
         if (owner->js_state) {
-            js_runtime_state_bind_context(owner);
+            if (!js_runtime_state_thread_initialize(owner)) return;
             js_dom_set_ui_context(uicon);
             js_dom_set_document(doc);
         } else {
             // Lambda template documents have their own runtime but do not own
             // JS intrinsics; publishing them as a JS document would allocate
             // constructors through a null JS input owner.
-            js_runtime_state_bind_context(nullptr);
+            if (js_active_runtime_state) {
+                log_error("event-document: Lambda owner has foreign JS state");
+                return;
+            }
         }
         active = true;
     }
 
-    ~EventDocumentScope() {
-        if (!active) return;
-        eval_context_restore(saved_context);
-        js_runtime_state_bind_context(saved_context);
-    }
+    ~EventDocumentScope() = default;
 };
 
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {

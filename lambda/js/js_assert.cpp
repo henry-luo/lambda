@@ -5338,7 +5338,7 @@ static Item js_assert_create_instance(Item options) {
 
     // Fresh wrappers allocate methods before they are published, so every
     // alias must remain rooted across a compacting collection.
-    RootFrame roots((Context*)context, 7);
+    RootFrame roots(7);
     Rooted<Item> options_root(roots, options);
     Rooted<Item> instance_root(roots, js_new_distinct_function((void*)js_assert_ok, 2));
     bool strict_mode = js_assert_options_strict(options_root.get());

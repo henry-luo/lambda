@@ -216,13 +216,15 @@ extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
-// shared runtime context (defined in mir.c)
+// Frozen C2MIR compatibility only. MIR Direct generated code carries Context*
+// explicitly and its native helpers read EvalContext from TLS.
+#ifdef LAMBDA_C2MIR
 extern Context* _lambda_rt;
 
-// helper to access runtime pool from JIT code
 static Pool* get_runtime_pool(void) {
     return _lambda_rt ? _lambda_rt->pool : NULL;
 }
+#endif
 
 // helper functions for map pipe iteration in JIT
 static int64_t pipe_map_len(void* keys_ptr) {
@@ -1057,33 +1059,32 @@ extern Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e);
 extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f);
 extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
 extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
-extern Item fn_call_boxed_0_into(Context* runtime, void* fp, uint64_t* result_home);
-extern Item fn_call_boxed_1_into(Context* runtime, void* fp, Item a, uint64_t* result_home);
-extern Item fn_call_boxed_2_into(Context* runtime, void* fp, Item a, Item b, uint64_t* result_home);
-extern Item fn_call_boxed_3_into(Context* runtime, void* fp, Item a, Item b, Item c, uint64_t* result_home);
-extern Item fn_call_boxed_4_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, uint64_t* result_home);
-extern Item fn_call_boxed_5_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
-extern Item fn_call_boxed_6_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
-extern Item fn_call_boxed_7_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
-extern Item fn_call_boxed_8_into(Context* runtime, void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
-extern Item js_call_export_0_into(Context* runtime, Function* function, uint64_t* result_home);
-extern Item js_call_export_1_into(Context* runtime, Function* function, Item a, uint64_t* result_home);
-extern Item js_call_export_2_into(Context* runtime, Function* function, Item a, Item b, uint64_t* result_home);
-extern Item js_call_export_3_into(Context* runtime, Function* function, Item a, Item b, Item c, uint64_t* result_home);
-extern Item js_call_export_4_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, uint64_t* result_home);
-extern Item js_call_export_5_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
-extern Item js_call_export_6_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
-extern Item js_call_export_7_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
-extern Item js_call_export_8_into(Context* runtime, Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
+extern Item fn_call_boxed_0_into(void* fp, uint64_t* result_home);
+extern Item fn_call_boxed_1_into(void* fp, Item a, uint64_t* result_home);
+extern Item fn_call_boxed_2_into(void* fp, Item a, Item b, uint64_t* result_home);
+extern Item fn_call_boxed_3_into(void* fp, Item a, Item b, Item c, uint64_t* result_home);
+extern Item fn_call_boxed_4_into(void* fp, Item a, Item b, Item c, Item d, uint64_t* result_home);
+extern Item fn_call_boxed_5_into(void* fp, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
+extern Item fn_call_boxed_6_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
+extern Item fn_call_boxed_7_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
+extern Item fn_call_boxed_8_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
+extern Item js_call_export_0_into(Function* function, uint64_t* result_home);
+extern Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
+extern Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
+extern Item js_call_export_3_into(Function* function, Item a, Item b, Item c, uint64_t* result_home);
+extern Item js_call_export_4_into(Function* function, Item a, Item b, Item c, Item d, uint64_t* result_home);
+extern Item js_call_export_5_into(Function* function, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
+extern Item js_call_export_6_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
+extern Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
+extern Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
 extern Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
 extern Item fn_call0_into(Function* fn, uint64_t* result_home);
 extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
 extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
 extern void lambda_function_mark_mir_public_abi(Function* fn);
-extern void lambda_function_mark_mir_context_abi(Function* fn, Context* runtime);
-extern void* lambda_module_const_at(Context* runtime,
-    const LambdaModuleLayout* layout, uint32_t index);
+extern void lambda_function_mark_mir_context_abi(Function* fn);
+extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Debug tracing helpers
@@ -1253,7 +1254,7 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
-    {"lambda_side_stack_ensure", FPTR(lambda_side_stack_ensure)},
+    {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
 
     // ========================================================================
     // Array constructors and operations
@@ -1353,8 +1354,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_restore_number_frame_top", FPTR(lambda_restore_number_frame_top),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER)}},
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1404,8 +1404,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_module_const_at", FPTR(lambda_module_const_at),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"push_d_safe", FPTR(push_d_safe),
@@ -1731,12 +1730,14 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Runtime pool access
     // ========================================================================
+#ifdef LAMBDA_C2MIR
     {"get_runtime_pool", FPTR(get_runtime_pool)},
 
     // ========================================================================
     // Shared runtime context pointer
     // ========================================================================
     {"_lambda_rt", (fn_ptr) &_lambda_rt},
+#endif
 
     // ========================================================================
     // StringBuf functions (template literals)
@@ -1874,11 +1875,11 @@ JitImport jit_runtime_imports[] = {
     {"js_array_length", FPTR(js_array_length)},
     {"js_array_push", FPTR(js_array_push)},
     {"js_new_function", FPTR(js_new_function)},
-    {"js_new_function_context", FPTR(js_new_function_context)},
+    {"js_new_function_mir", FPTR(js_new_function_mir)},
     {"js_new_method_function", FPTR(js_new_method_function)},
-    {"js_new_method_function_context", FPTR(js_new_method_function_context)},
+    {"js_new_method_function_mir", FPTR(js_new_method_function_mir)},
     {"js_new_closure", FPTR(js_new_closure)},
-    {"js_new_closure_context", FPTR(js_new_closure_context)},
+    {"js_new_closure_mir", FPTR(js_new_closure_mir)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
     {"js_throw_range_error", FPTR(js_throw_range_error)},
@@ -2319,7 +2320,7 @@ JitImport jit_runtime_imports[] = {
     {"js_location_get_property", FPTR(js_location_get_property)},
     // v14: Generator runtime
     {"js_generator_create", FPTR(js_generator_create)},
-    {"js_generator_create_context", FPTR(js_generator_create_context)},
+    {"js_generator_create_mir", FPTR(js_generator_create_mir)},
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
     {"js_gen_await_result", FPTR(js_gen_await_result)},
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
@@ -2405,7 +2406,7 @@ JitImport jit_runtime_imports[] = {
     {"js_async_must_suspend", FPTR(js_async_must_suspend)},
     {"js_async_get_resolved", FPTR(js_async_get_resolved)},
     {"js_async_context_create", FPTR(js_async_context_create)},
-    {"js_async_context_create_context", FPTR(js_async_context_create_context)},
+    {"js_async_context_create_mir", FPTR(js_async_context_create_mir)},
     {"js_async_start", FPTR(js_async_start)},
     {"js_async_get_promise", FPTR(js_async_get_promise)},
     // Phase 3: TextEncoder / TextDecoder

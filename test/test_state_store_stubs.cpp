@@ -11,14 +11,20 @@
 
 __thread EvalContext* context = NULL;
 
-EvalContext* eval_context_bind(EvalContext* next) {
-    EvalContext* previous = context;
-    context = next;
-    return previous;
+bool eval_context_thread_initialize(EvalContext* owner) {
+    if (!owner || (context && context != owner)) return false;
+    context = owner;
+    return true;
 }
 
-void eval_context_restore(EvalContext* previous) {
-    context = previous;
+bool eval_context_thread_matches(const EvalContext* owner) {
+    return owner && context == owner;
+}
+
+bool eval_context_thread_shutdown(EvalContext* owner) {
+    if (!owner || context != owner) return false;
+    context = NULL;
+    return true;
 }
 
 EvalContext* runtime_get_eval_context(Runtime* runtime) {
@@ -55,8 +61,18 @@ extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base
     return true;
 }
 
+extern "C" bool heap_try_register_gc_root_range(uint64_t* base, int count) {
+    (void)base;
+    (void)count;
+    return true;
+}
+
 extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
     (void)runtime;
+    (void)base;
+}
+
+extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
     (void)base;
 }
 

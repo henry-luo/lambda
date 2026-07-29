@@ -211,8 +211,13 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
     js_function_root_item_if_needed(jsfn, &jsfn->prototype);
 }
 
-static Item js_new_function_with_context(Context* runtime, void* func_ptr,
-        int param_count) {
+static Item js_new_function_impl(void* func_ptr, int param_count,
+        bool mir_context_abi) {
+    Context* runtime = mir_context_abi ? (Context*)context : NULL;
+    if (mir_context_abi && !runtime) {
+        log_error("js-new-function: compiled wrapper missing context owner");
+        return ItemError;
+    }
     if (!func_ptr) {
         log_error("js_new_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
@@ -226,7 +231,7 @@ static Item js_new_function_with_context(Context* runtime, void* func_ptr,
 
     // Only cache-addressable compiled wrappers are module-lifetime. A wrapper
     // carrying `with` state or cache-suppressed identity must own traced edges.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> fn_root(roots, ItemNull);
     JsFunction* fn = (has_with_env || suppress_cache)
         ? js_alloc_gc_function_object()
@@ -254,7 +259,7 @@ static Item js_new_function_with_context(Context* runtime, void* func_ptr,
 }
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
-    return js_new_function_with_context(NULL, func_ptr, param_count);
+    return js_new_function_impl(func_ptr, param_count, false);
 }
 
 extern "C" Item js_new_distinct_function(void* func_ptr, int param_count) {
@@ -262,29 +267,29 @@ extern "C" Item js_new_distinct_function(void* func_ptr, int param_count) {
     // only wrapper caching; using the compiled-method constructor here would
     // incorrectly impose its Context* ABI on an ordinary native callback.
     js_func_cache_suppress_push();
-    Item fn = js_new_function_with_context(NULL, func_ptr, param_count);
+    Item fn = js_new_function_impl(func_ptr, param_count, false);
     js_func_cache_suppress_pop();
     return fn;
 }
 
-extern "C" Item js_new_function_context(Context* runtime, void* func_ptr,
-        int param_count) {
-    if (!runtime) {
-        log_error("js-new-function: compiled wrapper missing context owner");
-        return ItemError;
-    }
-    return js_new_function_with_context(runtime, func_ptr, param_count);
+extern "C" Item js_new_function_mir(void* func_ptr, int param_count) {
+    return js_new_function_impl(func_ptr, param_count, true);
 }
 
-static Item js_new_method_function_with_context(Context* runtime, void* func_ptr,
-        int param_count) {
+static Item js_new_method_function_impl(void* func_ptr, int param_count,
+        bool mir_context_abi) {
+    Context* runtime = mir_context_abi ? (Context*)context : NULL;
+    if (mir_context_abi && !runtime) {
+        log_error("js-new-method: compiled wrapper missing context owner");
+        return ItemError;
+    }
     if (!func_ptr) {
         log_error("js_new_method_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
     }
     // Method wrappers are not in the func_ptr identity cache, so ordinary GC
     // ownership avoids retaining every dynamically materialized method.
-    RootFrame roots((Context*)context, 1);
+    RootFrame roots(1);
     Rooted<Item> fn_root(roots, ItemNull);
     JsFunction* fn = js_alloc_gc_function_object();
     if (!fn) return ItemError;
@@ -313,28 +318,28 @@ static Item js_new_method_function_with_context(Context* runtime, void* func_ptr
 }
 
 extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
-    return js_new_method_function_with_context(NULL, func_ptr, param_count);
+    return js_new_method_function_impl(func_ptr, param_count, false);
 }
 
-extern "C" Item js_new_method_function_context(Context* runtime, void* func_ptr,
-        int param_count) {
-    if (!runtime) {
-        log_error("js-new-method: compiled wrapper missing context owner");
-        return ItemError;
-    }
-    return js_new_method_function_with_context(runtime, func_ptr, param_count);
+extern "C" Item js_new_method_function_mir(void* func_ptr, int param_count) {
+    return js_new_method_function_impl(func_ptr, param_count, true);
 }
 
 // Create a closure (function with captured environment)
-static Item js_new_closure_with_context(Context* runtime, void* func_ptr,
-        int param_count, Item* env, int env_size) {
-    RootFrame roots((Context*)context, 1);
+static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
+        int env_size, bool mir_context_abi) {
+    Context* runtime = mir_context_abi ? (Context*)context : NULL;
+    if (mir_context_abi && !runtime) {
+        log_error("js-new-closure: compiled wrapper missing context owner");
+        return ItemError;
+    }
+    RootFrame roots(1);
     JsFunction* fn = NULL;
     {
         // A closure environment is movable data-zone storage, not an Item.
         // Attach it to its function before a collection can run; raw addresses
         // in an Item root are not valid GC reachability edges for data zones.
-        AutoDeferGC defer_gc((Context*)context);
+        AutoDeferGC defer_gc;
         fn = js_alloc_gc_function_object();
         if (!fn) return ItemError;
         fn->func_ptr = func_ptr;
@@ -358,16 +363,12 @@ static Item js_new_closure_with_context(Context* runtime, void* func_ptr,
 
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env,
         int env_size) {
-    return js_new_closure_with_context(NULL, func_ptr, param_count, env, env_size);
+    return js_new_closure_impl(func_ptr, param_count, env, env_size, false);
 }
 
-extern "C" Item js_new_closure_context(Context* runtime, void* func_ptr,
-        int param_count, Item* env, int env_size) {
-    if (!runtime) {
-        log_error("js-new-closure: compiled wrapper missing context owner");
-        return ItemError;
-    }
-    return js_new_closure_with_context(runtime, func_ptr, param_count, env, env_size);
+extern "C" Item js_new_closure_mir(void* func_ptr, int param_count,
+        Item* env, int env_size) {
+    return js_new_closure_impl(func_ptr, param_count, env, env_size, true);
 }
 
 // Set the ES spec formal .length for a function (params before first default, excl rest)

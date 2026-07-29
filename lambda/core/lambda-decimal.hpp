@@ -79,16 +79,16 @@ mpd_t* decimal_parse_unlimited_str(const char* str);
 // ─────────────────────────────────────────────────────────────────────
 
 // Create fixed decimal Item from int64
-Item decimal_from_int64(int64_t val, EvalContext* ctx);
+Item decimal_from_int64(int64_t val);
 
 // Create fixed decimal Item from uint64 without signed reinterpretation.
-Item decimal_from_uint64(uint64_t val, EvalContext* ctx);
+Item decimal_from_uint64(uint64_t val);
 
 // Create fixed decimal Item from double
-Item decimal_from_double(double val, EvalContext* ctx);
+Item decimal_from_double(double val);
 
 // Create fixed decimal Item from string (returns ItemError if parse fails)
-Item decimal_from_string(const char* str, EvalContext* ctx);
+Item decimal_from_string(const char* str);
 
 // Free mpdecimal string (wrapper for mpd_free)
 void decimal_free_string(char* str);
@@ -164,47 +164,47 @@ double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
 // - Otherwise result is fixed precision
 
 // Addition: a + b
-Item decimal_add(Item a, Item b, EvalContext* ctx);
+Item decimal_add(Item a, Item b);
 
 // Subtraction: a - b
-Item decimal_sub(Item a, Item b, EvalContext* ctx);
+Item decimal_sub(Item a, Item b);
 
 // Multiplication: a * b
-Item decimal_mul(Item a, Item b, EvalContext* ctx);
+Item decimal_mul(Item a, Item b);
 
 // Division: a / b (returns error on division by zero)
-Item decimal_div(Item a, Item b, EvalContext* ctx);
+Item decimal_div(Item a, Item b);
 
 // Integer division: a div b (truncates toward zero, returns error on zero)
-Item decimal_idiv(Item a, Item b, EvalContext* ctx);
+Item decimal_idiv(Item a, Item b);
 
 // Modulo: a % b
-Item decimal_mod(Item a, Item b, EvalContext* ctx);
+Item decimal_mod(Item a, Item b);
 
 // Power: a ^ b
-Item decimal_pow(Item a, Item b, EvalContext* ctx);
+Item decimal_pow(Item a, Item b);
 
 // Negation: -a
-Item decimal_neg(Item a, EvalContext* ctx);
+Item decimal_neg(Item a);
 
 // Absolute value: |a|
-Item decimal_abs(Item a, EvalContext* ctx);
+Item decimal_abs(Item a);
 
 // ─────────────────────────────────────────────────────────────────────
 // Rounding Operations
 // ─────────────────────────────────────────────────────────────────────
 
 // Floor: round toward negative infinity
-Item decimal_floor(Item a, EvalContext* ctx);
+Item decimal_floor(Item a);
 
 // Ceil: round toward positive infinity
-Item decimal_ceil(Item a, EvalContext* ctx);
+Item decimal_ceil(Item a);
 
 // Round: round to nearest integer
-Item decimal_round(Item a, EvalContext* ctx);
+Item decimal_round(Item a);
 
 // Truncate: round toward zero (removes fractional part)
-Item decimal_trunc(Item a, EvalContext* ctx);
+Item decimal_trunc(Item a);
 
 // Convert decimal Item to int64 (truncates toward zero)
 int64_t decimal_to_int64(Item item);

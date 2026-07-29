@@ -175,7 +175,7 @@ static JsObserverState* observer_create(JsObserverKind kind, Item callback) {
         return nullptr;
     }
     observer_register_roots();
-    RootFrame roots((Context*)context, 2);
+    RootFrame roots(2);
     Rooted<Item> callback_root(roots, callback);
     Rooted<Item> object_root(roots, ItemNull);
     JsObserverState* observer = &observers[observer_count++];

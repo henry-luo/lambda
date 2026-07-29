@@ -179,7 +179,7 @@ extern "C" int js_microtask_pending_count(void) {
 }
 
 static void js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
-    RootFrame roots((Context*)context, 6);
+    RootFrame roots(6);
     // Queue pop clears the persistent slots before context setup can allocate;
     // keep the dequeued callback graph exact-rooted for the entire invocation.
     Rooted<Item> callback_root(roots, cb);
@@ -389,15 +389,13 @@ static void close_all_timer_handles(void);
 static void timer_register_gc_roots(JsTimerHandle* th);
 
 typedef struct JsTimerRuntimeScope {
-    EvalContext* saved_context;
     void* saved_doc;
-    bool active;
     bool doc_active;
 } JsTimerRuntimeScope;
 
 static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
     if (!th) return;
-    RootFrame roots((Context*)context, (size_t)(5 + th->extra_count));
+    RootFrame roots((size_t)(5 + th->extra_count));
     Rooted<Item> callback_root(roots, th->callback);
     Rooted<Item> object_root(roots, th->object);
     Rooted<Item> resource_root(roots, th->async_resource);
@@ -437,16 +435,13 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     if (!th || !scope) return false;
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
     scope->saved_doc = js_dom_get_document();
-    bool needs_runtime_scope =
-        !context || context != th->runtime_context;
-    if (needs_runtime_scope) {
-        if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool) {
-            return false;
-        }
-        scope->saved_context = context;
-        context = th->runtime_context;
-        js_runtime_state_bind_context(context);
-        scope->active = true;
+    if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
+            !eval_context_thread_matches(th->runtime_context) ||
+            !js_runtime_state_thread_matches(th->runtime_context)) {
+        // Timer ownership is a routing check. A loop callback cannot borrow a
+        // different evaluator and restore the previous one afterward.
+        log_error("js-timer-runtime: callback arrived on non-owner thread");
+        return false;
     }
     if (th->runtime_doc) {
         js_dom_set_document(th->runtime_doc);
@@ -458,27 +453,8 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
 static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     if (!scope) return;
     if (scope->doc_active) {
-        EvalContext* active_context = context;
-        if (scope->active && scope->saved_context) {
-            context = scope->saved_context;
-        }
         js_dom_set_document(scope->saved_doc);
-        context = active_context;
         scope->doc_active = false;
-    }
-    if (scope->active) {
-        context = scope->saved_context;
-        js_runtime_state_bind_context(context);
-        scope->active = false;
-    }
-}
-
-extern "C" void js_event_loop_adopt_context(void* heap, Context* owner_context) {
-    EvalContext* owner = (EvalContext*)owner_context;
-    if (!heap || !owner) return;
-    for (int i = 0; i < timer_handle_count; i++) {
-        JsTimerHandle* timer = timer_handles[i];
-        if (timer && timer->runtime_heap == heap) timer->runtime_context = owner;
     }
 }
 
@@ -2131,7 +2107,7 @@ extern "C" int js_event_loop_drain(void) {
 
     int result = 0;
     LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture((Context*)context);
+        lambda_recovery_checkpoint_capture();
     if (sigsetjmp(event_loop_jmpbuf, 1) == 0) {
 #else
     int result = 0;
