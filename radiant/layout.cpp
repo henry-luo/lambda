@@ -41,6 +41,78 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+static bool initial_letter_value_has_identifier(const CssValue* value,
+                                                const char* identifier) {
+    if (!value || !identifier) return false;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        const char* name = value->data.custom_property.name;
+        return str_ieq_const(name, strlen(name), identifier);
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING && value->data.string) {
+        const char* name = value->data.string;
+        return str_ieq_const(name, strlen(name), identifier);
+    }
+    return false;
+}
+
+bool layout_get_initial_letter_info(const DomElement* element,
+                                    InitialLetterInfo* out_info) {
+    if (out_info) *out_info = {};
+    if (!element || !element->specified_style || !out_info) return false;
+
+    CssDeclaration* decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_INITIAL_LETTER);
+    if (!decl || !decl->value) return false;
+
+    const CssValue* value = decl->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
+        return false;
+    }
+
+    float numbers[2] = {};
+    int number_count = 0;
+    bool has_raise = false;
+    bool has_drop = false;
+    const CssValue* values[4] = {};
+    int value_count = 0;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        value_count = value->data.list.count;
+        for (int i = 0; i < value_count && i < 4; i++) values[i] = value->data.list.values[i];
+    } else {
+        value_count = 1;
+        values[0] = value;
+    }
+
+    for (int i = 0; i < value_count; i++) {
+        const CssValue* item = values[i];
+        if (!item) continue;
+        if (item->type == CSS_VALUE_TYPE_NUMBER && number_count < 2) {
+            numbers[number_count++] = (float)item->data.number.value;
+        }
+        has_raise = has_raise || initial_letter_value_has_identifier(item, "raise");
+        has_drop = has_drop || initial_letter_value_has_identifier(item, "drop");
+    }
+    if (number_count == 0 || numbers[0] < 1.0f) return false;
+
+    out_info->size = numbers[0];
+    out_info->sink = number_count > 1 ? numbers[1] : numbers[0];
+    if (has_raise) out_info->sink = 1.0f;
+    else if (has_drop) out_info->sink = out_info->size;
+    out_info->raised = out_info->sink <= 1.0f;
+    return true;
+}
+
+bool layout_get_text_initial_letter_info(const DomNode* text_node,
+                                         InitialLetterInfo* out_info) {
+    if (out_info) *out_info = {};
+    if (!text_node || !text_node->parent || !text_node->parent->is_element()) return false;
+    const DomElement* parent = text_node->parent->as_element();
+    if (!parent || !parent->tag_name || strcmp(parent->tag_name, "::first-letter") != 0) {
+        return false;
+    }
+    return layout_get_initial_letter_info(parent, out_info);
+}
+
 static DomElement* layout_positioned_containing_block(DomElement* elem) {
     if (!elem) return nullptr;
     for (DomNode* cur = elem->parent; cur; cur = cur->parent) {
@@ -1564,9 +1636,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     // parent_font_* fields in lycon->line are set by span_vertical_align before recursing.
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text_view = lam::view_require_text(view);
+        InitialLetterInfo initial_letter = {};
+        bool is_raised_initial = layout_get_text_initial_letter_info(
+            static_cast<DomNode*>(text_view), &initial_letter) && initial_letter.raised;
         TextRect* rect = text_view->rect;
         while (rect) {
             if (rect->line_number != lycon->block.line_number) {
+                rect = rect->next;
+                continue;
+            }
+            if (is_raised_initial) {
+                // Raised initials align to their over edge, not the normal text baseline.
                 rect = rect->next;
                 continue;
             }
@@ -1672,6 +1752,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     else if (view->view_type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (span->tag() == HTM_TAG_RT && span->parent && span->parent->is_element() &&
+            span->parent->tag() == HTM_TAG_RUBY) {
+            // Ruby annotations are positioned against their base level; the
+            // parent line's baseline alignment applies only to that base level.
+            return;
+        }
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
         // recompute the span's bounding box. The bounding box was computed earlier

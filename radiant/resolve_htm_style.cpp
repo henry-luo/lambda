@@ -1229,6 +1229,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // font-size: larger (1.17em) - deprecated but still supported
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 1.17f, false);
         break;
+    case HTM_TAG_RUBY:
+        // Keep the UA display role on the resolved element so speculative
+        // inline measurement sees the same ruby formatting context as layout.
+        span->display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
+        break;
+    case HTM_TAG_RT:
+        // The HTML ruby UA rule scales annotations from their ruby base; author
+        // declarations still resolve afterward and override this default.
+        apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.5f, false);
+        break;
     case HTM_TAG_SUB:
         // subscript: smaller font, lowered baseline
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.83f, false);

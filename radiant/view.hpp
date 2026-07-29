@@ -660,6 +660,9 @@ typedef struct TextShadow TextShadow;
 struct FontProp {
     char* family;  // font family name
     float font_size;  // font size in pixels, scaled by pixel_ratio
+    // CSS Inline 3 initial letters retain their computed font size for em-based
+    // properties while glyph layout uses the size derived from parent metrics.
+    float initial_letter_computed_font_size;
     CssEnum font_style;
     CssEnum font_weight;
     CssEnum font_variant;  // CSS font-variant (normal, small-caps)
