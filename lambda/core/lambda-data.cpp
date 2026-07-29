@@ -32,6 +32,7 @@ Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT};
+Type TYPE_COMPLEX = {.type_id = LMD_TYPE_COMPLEX};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL};
@@ -77,6 +78,7 @@ Type LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_literal = 1, .is_const = 1};
 Type LIT_INT = {.type_id = LMD_TYPE_INT, .is_literal = 1, .is_const = 1};
 Type LIT_INT64 = {.type_id = LMD_TYPE_INT64, .is_literal = 1, .is_const = 1};
 Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_literal = 1, .is_const = 1};
+Type LIT_COMPLEX = {.type_id = LMD_TYPE_COMPLEX, .is_literal = 1, .is_const = 1};
 Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_literal = 1, .is_const = 1};
 Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_literal = 1, .is_const = 1};
 Type LIT_DTIME = {.type_id = LMD_TYPE_DTIME, .is_literal = 1, .is_const = 1};
@@ -95,6 +97,7 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_INT64: return "int64";
         case LMD_TYPE_FLOAT: return "float";
         case LMD_TYPE_FLOAT64: return "float";
+        case LMD_TYPE_COMPLEX: return "complex";
         case LMD_TYPE_DECIMAL: return "decimal";
         case LMD_TYPE_DTIME: return "datetime";
         case LMD_TYPE_SYMBOL: return "symbol";
@@ -139,6 +142,7 @@ TypeType LIT_TYPE_INT;
 TypeType LIT_TYPE_INT64;
 TypeType LIT_TYPE_FLOAT;
 TypeType LIT_TYPE_FLOAT64;
+TypeType LIT_TYPE_COMPLEX;
 TypeType LIT_TYPE_DECIMAL;
 TypeType LIT_TYPE_INTEGER;
 TypeType LIT_TYPE_NUMBER;
@@ -196,6 +200,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_INT64) = LIT_TYPE;  LIT_TYPE_INT64.type = &TYPE_INT64;
     *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
     *(Type*)(&LIT_TYPE_FLOAT64) = LIT_TYPE;  LIT_TYPE_FLOAT64.type = &TYPE_FLOAT;
+    *(Type*)(&LIT_TYPE_COMPLEX) = LIT_TYPE;  LIT_TYPE_COMPLEX.type = &TYPE_COMPLEX;
     *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
     *(Type*)(&LIT_TYPE_INTEGER) = LIT_TYPE;  LIT_TYPE_INTEGER.type = &TYPE_INTEGER;
     *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
@@ -249,6 +254,7 @@ void init_type_info() {
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
+    type_info[LMD_TYPE_COMPLEX] = {sizeof(Complex*), "complex", &TYPE_COMPLEX, (Type*)&LIT_TYPE_COMPLEX};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
     type_info[LMD_TYPE_DTIME] = {sizeof(DateTime), "datetime", &TYPE_DTIME, (Type*)&LIT_TYPE_DTIME};
     type_info[LMD_TYPE_SYMBOL] = {sizeof(char*), "symbol", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};
@@ -751,6 +757,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(Binary**)field_ptr = item.get_safe_binary();
                 break;
             }
+            case LMD_TYPE_COMPLEX:
+                *(Complex**)field_ptr = item.get_complex();
+                break;
             case LMD_TYPE_SYMBOL: {
                 Symbol *sym = item.get_safe_symbol();
                 *(Symbol**)field_ptr = sym;
@@ -818,6 +827,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     break;
                 case LMD_TYPE_BINARY:
                     titem.binary = item.get_safe_binary();
+                    break;
+                case LMD_TYPE_COMPLEX:
+                    titem.pointer = item.get_complex();
                     break;
                 case LMD_TYPE_SYMBOL:
                     titem.symbol = item.get_safe_symbol();
@@ -918,6 +930,9 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_BINARY:
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return {.item = x2it((String*)ptr_val)};
+    case LMD_TYPE_COMPLEX:
+        memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
+        return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
@@ -995,6 +1010,11 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_BINARY:
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         result = {.item = x2it((String*)ptr_val)};
+        break;
+    case LMD_TYPE_COMPLEX:
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        // Complex values are direct pointer Items, unlike the tagged scalar homes.
+        result.item = ptr_val ? (uint64_t)(uintptr_t)ptr_val : ITEM_NULL;
         break;
 
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:

@@ -45,7 +45,7 @@ Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out)
 
 // check if type is a scalar numeric type
 static inline bool is_scalar_numeric(TypeId type) {
-    return is_numeric_type_id(type);
+    return type != LMD_TYPE_COMPLEX && is_numeric_type_id(type);
 }
 
 // check if type is a collection that supports vectorized operations
@@ -1995,6 +1995,7 @@ Item fn_math_sqrt(Item item) {
     GUARD_ERROR1(item);
     // Check if scalar
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_sqrt(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(sqrt(val));
@@ -2006,6 +2007,7 @@ Item fn_math_sqrt(Item item) {
 Item fn_math_log(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_log(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(log(val));
@@ -2028,6 +2030,7 @@ Item fn_math_log10(Item item) {
 Item fn_math_exp(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_exp(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(exp(val));
@@ -2039,6 +2042,7 @@ Item fn_math_exp(Item item) {
 Item fn_math_sin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_sin(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(sin(val));
@@ -2050,6 +2054,7 @@ Item fn_math_sin(Item item) {
 Item fn_math_cos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_cos(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(cos(val));
@@ -2061,6 +2066,7 @@ Item fn_math_cos(Item item) {
 Item fn_math_tan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) return fn_complex_tan(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(tan(val));

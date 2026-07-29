@@ -341,6 +341,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_SYMBOL_      LMD_TYPE_SYMBOL
 #define LMD_TYPE_STRING_      LMD_TYPE_STRING
 #define LMD_TYPE_BINARY_      LMD_TYPE_BINARY
+#define LMD_TYPE_COMPLEX_     LMD_TYPE_COMPLEX
 #define LMD_TYPE_PATH_        LMD_TYPE_PATH
 #define LMD_TYPE_RANGE_       LMD_TYPE_RANGE
 #define LMD_TYPE_ARRAY_NUM_   LMD_TYPE_ARRAY_NUM
@@ -1331,6 +1332,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_SYMBOL_:
     case LMD_TYPE_BINARY_:
     case LMD_TYPE_DECIMAL_:
+    case LMD_TYPE_COMPLEX_:
     case LMD_TYPE_RANGE_:
     case LMD_TYPE_PATH_:
         break;
@@ -1480,7 +1482,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                                        field_type_id == LMD_TYPE_DECIMAL_ ||
                                        field_type_id == LMD_TYPE_INT64_ ||
                                        field_type_id == LMD_TYPE_FLOAT_ ||
-                                       field_type_id == LMD_TYPE_DTIME_) {
+                                       field_type_id == LMD_TYPE_DTIME_ ||
+                                       field_type_id == LMD_TYPE_COMPLEX_) {
                                 // these are stored as raw pointers in the data buffer
                                 // they need to be marked if they're GC-managed
                                 void* embedded_ptr = (void*)(uintptr_t)val;

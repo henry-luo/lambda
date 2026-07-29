@@ -107,6 +107,9 @@ enum EnumTypeId {
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
+    // A GC-managed pair of binary64 components.  It is a direct pointer Item
+    // so the payload stays distinct from the self-tagged float encoding.
+    LMD_TYPE_COMPLEX,
 
     // Path type for file/URL paths
     LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
@@ -166,6 +169,7 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DTIME), "datetime tag must 
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_SYMBOL), "symbol tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_STRING), "string tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_BINARY), "binary tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_COMPLEX), "complex tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_PATH), "path tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RANGE), "range tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY_NUM), "array-num tag must be non-double");
@@ -329,6 +333,11 @@ typedef enum SysFunc {
     SYSFUNC_INT,
     SYSFUNC_INT64,
     SYSFUNC_FLOAT,
+    SYSFUNC_COMPLEX,
+    SYSFUNC_COMPLEX2,
+    SYSFUNC_REAL,
+    SYSFUNC_IMAG,
+    SYSFUNC_CONJ,
     SYSFUNC_DECIMAL,
     SYSFUNC_NUMBER,
     SYSFUNC_STRING,
@@ -594,6 +603,7 @@ typedef struct Element Element;
 typedef struct Object Object;
 typedef struct Function Function;
 typedef struct Decimal Decimal;
+typedef struct Complex Complex;
 typedef struct TypePattern TypePattern;
 typedef struct ByteStorage ByteStorage;
 typedef struct ByteBufferHandle ByteBufferHandle;
@@ -1122,7 +1132,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 static inline bool is_numeric_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
            type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
-           type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED;
+           type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED ||
+           type_id == LMD_TYPE_COMPLEX;
 }
 
 static inline bool is_native_numeric_type_id(TypeId type_id) {
@@ -1778,6 +1789,18 @@ extern "C" {
     Item fn_float(Item a);
     Item fn_decimal(Item a);
     Item fn_binary(Item a);
+    Item fn_complex1(Item a);
+    Item fn_complex2(Item real, Item imag);
+    Item fn_real(Item a);
+    Item fn_imag(Item a);
+    Item fn_conj(Item a);
+    Item complex_new(double real, double imag);
+    Item fn_complex_sqrt(Item a);
+    Item fn_complex_log(Item a);
+    Item fn_complex_exp(Item a);
+    Item fn_complex_sin(Item a);
+    Item fn_complex_cos(Item a);
+    Item fn_complex_tan(Item a);
 
     Item fn_add(Item a, Item b);
     Item fn_mul(Item a, Item b);

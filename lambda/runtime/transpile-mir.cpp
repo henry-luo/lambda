@@ -2887,6 +2887,9 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         case LMD_TYPE_BINARY: { TypeBinaryConst* t = (TypeBinaryConst*)node->type; out->item = x2it(t->binary); return true; }
         case LMD_TYPE_NUM_SIZED: { TypeNumSized* t = (TypeNumSized*)node->type; out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits); return true; }
         case LMD_TYPE_UINT64: { TypeUint64* t = (TypeUint64*)node->type; out->item = u2it(&t->uint64_val); return true; }
+        // A complex literal must be heap-allocated and therefore cannot be embedded
+        // in an Input-backed static collection constant.
+        case LMD_TYPE_COMPLEX: return false;
         default: return false;
         }
     }
@@ -3048,6 +3051,12 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_mem_op(mt->ctx, MIR_T_D, 0, ptr, 0, 1)));
             return r;
+        }
+        case LMD_TYPE_COMPLEX: {
+            TypeComplex* value = (TypeComplex*)node->type;
+            return emit_call_2(mt, "complex_new", MIR_T_I64,
+                MIR_T_D, MIR_new_double_op(mt->ctx, value->real),
+                MIR_T_D, MIR_new_double_op(mt->ctx, value->imag));
         }
         case LMD_TYPE_BOOL: {
             bool val = parse_bool_literal(mt->source, node->node);
@@ -11595,6 +11604,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
                 MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
             return reg;
         }
+        case LMD_TYPE_COMPLEX:
+            return transpile_expr(mt, node);
         case LMD_TYPE_STRING: {
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_STRING);

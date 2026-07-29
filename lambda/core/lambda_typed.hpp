@@ -23,6 +23,7 @@ template<> struct ItemTagToType<LMD_TYPE_DTIME> { typedef DateTime type; enum { 
 template<> struct ItemTagToType<LMD_TYPE_SYMBOL> { typedef Symbol type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_STRING> { typedef String type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_BINARY> { typedef Binary type; enum { is_pointer = true, is_direct_pointer = false }; };
+template<> struct ItemTagToType<LMD_TYPE_COMPLEX> { typedef Complex type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_PATH> { typedef Path type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_RANGE> { typedef Range type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ARRAY_NUM> { typedef ArrayNum type; enum { is_pointer = true, is_direct_pointer = true }; };
@@ -173,6 +174,7 @@ decltype(auto) visit(Item it, F&& f) {
         case LMD_TYPE_SYMBOL: return f(require<LMD_TYPE_SYMBOL>(it));
         case LMD_TYPE_STRING: return f(require<LMD_TYPE_STRING>(it));
         case LMD_TYPE_BINARY: return f(require<LMD_TYPE_BINARY>(it));
+        case LMD_TYPE_COMPLEX: return f(require<LMD_TYPE_COMPLEX>(it));
         case LMD_TYPE_PATH: return f(require<LMD_TYPE_PATH>(it));
         case LMD_TYPE_RANGE: return f(require<LMD_TYPE_RANGE>(it));
         case LMD_TYPE_ARRAY_NUM: return f(require<LMD_TYPE_ARRAY_NUM>(it));

@@ -1,0 +1,12 @@
+'=== literals and arithmetic ==='
+[0+4j, 0-4j, 0+0.001j, 5+4j, -8+6j, 1.5+2j]
+'=== constructors and components ==='
+[3+0j, 3+4j, 3, 4, 3-4j, 5]
+'=== type and equality ==='
+[true, true, true, false, complex]
+'=== maps, arrays, and total order ==='
+[0+1j, 0+2j, 1, 2+0j, 0-2j, 0+3j, [2, 0+2j]]
+'=== complex math ==='
+[0+1j, 1+0j, 0+0j, 1-0j, 0+0j]
+'=== typed parameters ==='
+2-3j

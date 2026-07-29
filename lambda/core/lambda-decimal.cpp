@@ -164,7 +164,8 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {
     if (!out || out_size <= 0) return false;
     out[0] = '\0';
     TypeId type = get_type_id(item);
-    if (!IS_NUMERIC_ID(type)) return false;
+    // Complex is numeric in Lambda but has no scalar decimal canonicalization.
+    if (type == LMD_TYPE_COMPLEX || !IS_NUMERIC_ID(type)) return false;
 
     if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();

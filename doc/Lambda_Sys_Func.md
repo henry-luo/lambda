@@ -139,6 +139,17 @@ avg([1, 2, 3, 4])       // 2.5
 Compact `int` is bounded to ±(2^53 - 1). Use `n` (integer) or `m` (decimal)
 literals for exact arithmetic beyond this compact boundary.
 
+#### Special Float Checks
+
+Lambda does not provide `isnan()` or `isinf()` built-ins. Use `is` with the
+special float values instead:
+
+```lambda
+x is inf     // positive infinity only
+x is -inf    // negative infinity only
+x is nan     // NaN check
+```
+
 #### Trigonometric
 
 | Function | Description | Example | Result |

@@ -37,6 +37,161 @@ Item push_c(int64_t cval) {
                               (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
+static bool complex_component_from_item(Item item, double* out) {
+    if (!out) return false;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT:
+        *out = (double)item.get_int56();
+        return true;
+    case LMD_TYPE_FLOAT:
+        *out = item.get_double();
+        return true;
+    case LMD_TYPE_NUM_SIZED:
+        *out = item.get_num_sized_as_double();
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool complex_components_from_item(Item item, double* real, double* imag) {
+    if (!real || !imag) return false;
+    if (get_type_id(item) == LMD_TYPE_COMPLEX) {
+        Complex* value = item.get_complex();
+        if (!value) return false;
+        *real = value->real;
+        *imag = value->imag;
+        return true;
+    }
+    if (!complex_component_from_item(item, real)) return false;
+    *imag = 0.0;
+    return true;
+}
+
+Item complex_new(double real, double imag) {
+    Complex* value = (Complex*)heap_calloc(sizeof(Complex), LMD_TYPE_COMPLEX);
+    if (!value) return ItemError;
+    value->type_id = LMD_TYPE_COMPLEX;
+    value->real = real;
+    value->imag = imag;
+    return {.item = (uint64_t)(uintptr_t)value};
+}
+
+static Item complex_binary(Item left, Item right, int operation) {
+    double a, b, c, d;
+    if (!complex_components_from_item(left, &a, &b) ||
+            !complex_components_from_item(right, &c, &d)) {
+        log_error("complex arithmetic requires int, f16, f32, float, or complex operands");
+        return ItemError;
+    }
+    if (operation == OPERATOR_ADD) return complex_new(a + c, b + d);
+    if (operation == OPERATOR_SUB) return complex_new(a - c, b - d);
+    if (operation == OPERATOR_MUL) return complex_new(a * c - b * d, a * d + b * c);
+    if (operation == OPERATOR_DIV) {
+        // Scale by the dominant divisor component so finite inputs avoid a
+        // needless c*c+d*d overflow before IEEE exceptional values propagate.
+        if (fabs(c) >= fabs(d)) {
+            double ratio = d / c;
+            double denominator = c + d * ratio;
+            return complex_new((a + b * ratio) / denominator,
+                (b - a * ratio) / denominator);
+        }
+        double ratio = c / d;
+        double denominator = d + c * ratio;
+        return complex_new((a * ratio + b) / denominator,
+            (b * ratio - a) / denominator);
+    }
+    return ItemError;
+}
+
+Item fn_complex1(Item item) {
+    GUARD_ERROR1(item);
+    if (get_type_id(item) == LMD_TYPE_COMPLEX) return item;
+    double real;
+    if (!complex_component_from_item(item, &real)) {
+        log_error("complex() requires an int, f16, f32, or float component");
+        return ItemError;
+    }
+    return complex_new(real, 0.0);
+}
+
+Item fn_complex2(Item real_item, Item imag_item) {
+    GUARD_ERROR2(real_item, imag_item);
+    double real, imag;
+    if (!complex_component_from_item(real_item, &real) ||
+            !complex_component_from_item(imag_item, &imag)) {
+        log_error("complex() requires int, f16, f32, or float components");
+        return ItemError;
+    }
+    return complex_new(real, imag);
+}
+
+Item fn_real(Item item) {
+    GUARD_ERROR1(item);
+    if (get_type_id(item) != LMD_TYPE_COMPLEX) return ItemError;
+    Complex* value = item.get_complex();
+    return value ? push_d(value->real) : ItemError;
+}
+
+Item fn_imag(Item item) {
+    GUARD_ERROR1(item);
+    if (get_type_id(item) != LMD_TYPE_COMPLEX) return ItemError;
+    Complex* value = item.get_complex();
+    return value ? push_d(value->imag) : ItemError;
+}
+
+Item fn_conj(Item item) {
+    GUARD_ERROR1(item);
+    if (get_type_id(item) != LMD_TYPE_COMPLEX) return ItemError;
+    Complex* value = item.get_complex();
+    return value ? complex_new(value->real, -value->imag) : ItemError;
+}
+
+Item fn_complex_sqrt(Item item) {
+    double a, b;
+    if (!complex_components_from_item(item, &a, &b)) return ItemError;
+    double magnitude = hypot(a, b);
+    double real = sqrt((magnitude + a) * 0.5);
+    double imag = copysign(sqrt((magnitude - a) * 0.5), b);
+    return complex_new(real, imag);
+}
+
+Item fn_complex_log(Item item) {
+    double a, b;
+    if (!complex_components_from_item(item, &a, &b)) return ItemError;
+    return complex_new(log(hypot(a, b)), atan2(b, a));
+}
+
+Item fn_complex_exp(Item item) {
+    double a, b;
+    if (!complex_components_from_item(item, &a, &b)) return ItemError;
+    double scale = exp(a);
+    return complex_new(scale * cos(b), scale * sin(b));
+}
+
+Item fn_complex_sin(Item item) {
+    double a, b;
+    if (!complex_components_from_item(item, &a, &b)) return ItemError;
+    return complex_new(sin(a) * cosh(b), cos(a) * sinh(b));
+}
+
+Item fn_complex_cos(Item item) {
+    double a, b;
+    if (!complex_components_from_item(item, &a, &b)) return ItemError;
+    return complex_new(cos(a) * cosh(b), -sin(a) * sinh(b));
+}
+
+Item fn_complex_tan(Item item) {
+    Item sine = fn_complex_sin(item);
+    if (get_type_id(sine) == LMD_TYPE_ERROR) return sine;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> rooted_sine(roots, sine);
+    Item cosine = fn_complex_cos(item);
+    if (get_type_id(cosine) == LMD_TYPE_ERROR) return cosine;
+    // cosine allocation may collect; keep the first intermediate off the native stack.
+    return complex_binary(rooted_sine.get(), cosine, OPERATOR_DIV);
+}
+
 struct SizedIntegerValue {
     bool is_unsigned;
     int bits;
@@ -708,7 +863,9 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
     for (int64_t i = 0; i < length; i++) {
         Item element = vector_get(rooted_source.get(), i);
         TypeId element_type = get_type_id(element);
-        if (!is_numeric_type_id(element_type)) {
+        // This helper lowers results to one real float lane, so a complex value
+        // must not reach it through the broad numeric predicate.
+        if (element_type == LMD_TYPE_COMPLEX || !is_numeric_type_id(element_type)) {
             log_error("%s: non-numeric element at index %ld, type: %d",
                 function_name, i, element_type);
             return ItemError;
@@ -777,6 +934,8 @@ Item fn_add(Item item_a, Item item_b) {
 
     // null propagation: null + x = null
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
+        return complex_binary(item_a, item_b, OPERATOR_ADD);
 
     // vector operations: scalar+vector, vector+scalar, or vector+vector
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -797,6 +956,8 @@ Item fn_mul(Item item_a, Item item_b) {
 
     // null propagation: null * x = null
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
+        return complex_binary(item_a, item_b, OPERATOR_MUL);
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -817,6 +978,8 @@ Item fn_sub(Item item_a, Item item_b) {
 
     // null propagation: null - x = null
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
+        return complex_binary(item_a, item_b, OPERATOR_SUB);
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -837,6 +1000,8 @@ Item fn_div(Item item_a, Item item_b) {
 
     // null propagation: null / x = null, x / null = null
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
+        return complex_binary(item_a, item_b, OPERATOR_DIV);
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -887,6 +1052,18 @@ Item fn_pow(Item item_a, Item item_b) {
     }
 
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+
+    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX) {
+        double a, b, c, d;
+        if (!complex_components_from_item(item_a, &a, &b) ||
+                !complex_components_from_item(item_b, &c, &d)) return ItemError;
+        double log_radius = log(hypot(a, b));
+        double phase = atan2(b, a);
+        double exponent_real = c * log_radius - d * phase;
+        double exponent_imag = d * log_radius + c * phase;
+        double scale = exp(exponent_real);
+        return complex_new(scale * cos(exponent_imag), scale * sin(exponent_imag));
+    }
 
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
@@ -947,6 +1124,10 @@ Item fn_abs(Item item) {
     GUARD_ERROR1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_COMPLEX) {
+        Complex* value = item.get_complex();
+        return value ? push_d(hypot(value->real, value->imag)) : ItemError;
+    }
     LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
     if (lambda_numeric_is_sized_integer(kind)) {
         if (lambda_numeric_sized_is_unsigned(kind)) return item;
@@ -1182,7 +1363,10 @@ Item fn_avg(Item item) {
 Item fn_pos(Item item) {
     GUARD_ERROR1(item);
     // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
-    if (get_type_id(item) == LMD_TYPE_INT) {
+    if (get_type_id(item) == LMD_TYPE_COMPLEX) {
+        return item;
+    }
+    else if (get_type_id(item) == LMD_TYPE_INT) {
         return item;  // Already in correct format
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
@@ -1235,7 +1419,11 @@ Item fn_pos(Item item) {
 Item fn_neg(Item item) {
     GUARD_ERROR1(item);
     // Unary - operator - negate numeric values or cast and negate strings/symbols
-    if (get_type_id(item) == LMD_TYPE_INT) {
+    if (get_type_id(item) == LMD_TYPE_COMPLEX) {
+        Complex* value = item.get_complex();
+        return value ? complex_new(-value->real, -value->imag) : ItemError;
+    }
+    else if (get_type_id(item) == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
         return (Item) { .item = i2it(-val) };
     }
@@ -1698,7 +1886,11 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
 Item fn_float(Item item) {
     GUARD_ERROR1(item);
     // Convert item to float type
-    if (get_type_id(item) == LMD_TYPE_FLOAT) {
+    if (get_type_id(item) == LMD_TYPE_COMPLEX) {
+        log_error("float() cannot discard a complex imaginary component; use real()");
+        return ItemError;
+    }
+    else if (get_type_id(item) == LMD_TYPE_FLOAT) {
         return item;  // Already a float
     }
     else if (get_type_id(item) == LMD_TYPE_INT) {

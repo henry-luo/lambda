@@ -187,7 +187,11 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
                actual_tid == LMD_TYPE_UINT64 ||
                (actual_tid == LMD_TYPE_NUM_SIZED && validator_sized_kind_is_integer(actual_kind));
     }
-    if (target->type_id == LMD_TYPE_DECIMAL) return IS_NUMERIC_ID(actual_tid);
+    // Decimal remains an exact real domain; complex-to-decimal needs an explicit
+    // projection, just as runtime decimal() refuses to discard an imaginary part.
+    if (target->type_id == LMD_TYPE_DECIMAL) {
+        return actual_tid != LMD_TYPE_COMPLEX && IS_NUMERIC_ID(actual_tid);
+    }
     if (target->type_id == LMD_TYPE_FLOAT64) target = &TYPE_FLOAT;
     if (actual_tid == LMD_TYPE_FLOAT64) actual_tid = LMD_TYPE_FLOAT;
     if (actual_tid == target->type_id) {
