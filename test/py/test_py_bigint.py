@@ -30,6 +30,19 @@ print(factorial(25))   # 15511210043330985984000000
 # === 7. Left shift past 63 bits ===
 print(1 << 100)   # 1267650600228229401496703205376
 
+# === 7b. Shifts across the compact-int band (+/-(2^53-1)) ===
+# The Lambda-side int boxing admits only the float64 safe-integer band, so
+# these cross the boundary between the compact lane and the wide/bigint one.
+# Python semantics are arbitrary precision throughout: every value below must
+# stay EXACT. (1 << 54) + 1 is the discriminator — a float lane would round it
+# down to 18014398509481984.
+print(1 << 52)         # 4503599627370496
+print(1 << 53)         # 9007199254740992
+print(1 << 54)         # 18014398509481984
+print(1 << 62)         # 4611686018427387904
+print((1 << 54) + 1)   # 18014398509481985
+print((1 << 62) + 1)   # 4611686018427387905
+
 # === 8. Floor division of bigints ===
 print((2 ** 100) // (2 ** 50))   # 1125899906842624
 

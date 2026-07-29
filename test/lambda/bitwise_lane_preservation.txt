@@ -1,0 +1,33 @@
+"=== lane preserved by operand type ==="
+int
+int
+int
+int
+int
+int
+int64
+int64
+u8
+i8
+"=== int shift promotes to float past the compact band ==="
+4503599627370496
+int
+9007199254740992
+float
+18014398509481984
+float
+4611686018427388000
+float
+"=== i64 shift keeps the wide lane, no promotion ==="
+18014398509481984
+int64
+"=== shift edge cases ==="
+0
+int
+2
+-2
+"=== plain values ==="
+8
+15
+6
+-6

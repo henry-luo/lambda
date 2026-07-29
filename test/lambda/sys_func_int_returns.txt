@@ -1,0 +1,21 @@
+"=== count / index return types ==="
+int
+int
+int
+int
+int
+"=== the widening constructor keeps int64 ==="
+int64
+100000000000000000
+int64
+"=== length arithmetic stays in the unsized lane ==="
+5
+int
+5
+int
+int
+"=== values ==="
+4
+2
+3
+-1

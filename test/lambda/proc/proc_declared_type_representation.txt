@@ -1,0 +1,15 @@
+len:3
+ord:65
+starts_with:true
+ends_with:true
+concat:ABC!
+slice:BC
+len_short:3
+len_long:500
+pad_count:5
+pad_string:000001234
+int_from_integer_literal:5
+int64_from_len_expr:5
+float_from_integer:9
+let_int_from_len_expr:5
+

@@ -2,8 +2,6 @@
 // representation. Both halves of this file crashed or miscompiled before the
 // 2026-07-29 fixes in transpile-mir.cpp, and neither had any test.
 
-// NOTE: not named `emit` — that is a builtin sysproc of arity 2, and a
-// same-name same-arity user definition is silently ignored (no diagnostic).
 pn show(label, value) {
     print(label)
     print(":")
