@@ -5196,7 +5196,8 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             AstCallNode* call = (AstCallNode*)value;
             if (call->can_raise && !call->propagate && !ast_node->error_name) {
                 record_semantic_error(tp, asn_node, ERR_UNHANDLED_ERROR,
-                    "error from '%.*s' must be handled: use 'let %.*s^err = %.*s(...)' or '%.*s(...)?'",
+                    // '^' is the live propagation operator; '?' is the query operator and does not propagate
+                    "error from '%.*s' must be handled: use 'let %.*s^err = %.*s(...)' or '%.*s(...)^'",
                     (int)ast_node->name->len, ast_node->name->chars,
                     (int)ast_node->name->len, ast_node->name->chars,
                     (int)ast_node->name->len, ast_node->name->chars,
@@ -9014,7 +9015,8 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             fn_name_len = (int)strlen(fn_name);
                         }
                         record_semantic_error(tp, child, ERR_UNHANDLED_ERROR,
-                            "error from '%.*s' must be handled: use '%.*s(...)?' to propagate or 'let result^err = %.*s(...)' to capture",
+                            // '^' is the live propagation operator; '?' is the query operator and does not propagate
+                            "error from '%.*s' must be handled: use '%.*s(...)^' to propagate or 'let result^err = %.*s(...)' to capture",
                             fn_name_len, fn_name, fn_name_len, fn_name, fn_name_len, fn_name);
                     }
                 }
