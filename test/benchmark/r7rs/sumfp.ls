@@ -17,7 +17,9 @@ pn benchmark() {
 }
 
 pn main() {
+    let t0 = clock()
     let result = benchmark()
+    let elapsed = (clock() - t0) * 1000.0
     let expected = 5000050000.0
     let diff = abs(result - expected)
     if (diff < 1.0) {
@@ -27,4 +29,5 @@ pn main() {
         print(result)
         print("\n")
     }
+    print("__TIMING__:" ++ elapsed ++ "\n")
 }

@@ -1,0 +1,73 @@
+// BENG Benchmark: regex-redux (Typed version)
+// Read FASTA input, count regex pattern matches, perform substitutions
+// Uses file input instead of stdin (Lambda adaptation)
+// Expected: matches benchmarksgame regexredux-output.txt
+
+let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
+
+// This benchmark is almost entirely regex/replace builtin work, so typing only
+// reaches the two string locals.
+// NOTE: locals initialised from a len() expression stay unannotated — len() is
+// int64, and a declared `int` there either hard-errors or silently narrows in the
+// MIR JIT (repro: temp/repro_declared_int_len_concat.ls). `string` return types are
+// also avoided: they segfault the JIT once the result spans a GC
+// (repro: temp/repro_string_return_segv.ls).
+// 9 regex patterns to count matches
+// Lambda uses ("a"|"b") instead of [ab] for character alternation
+type pat1 = "agggtaaa" | "tttaccct"
+type pat2 = ("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g")
+type pat3 = "a" ("a" | "c" | "t") "ggtaaa" | "tttacc" ("a" | "g" | "t") "t"
+type pat4 = "ag" ("a" | "c" | "t") "gtaaa" | "tttac" ("a" | "g" | "t") "ct"
+type pat5 = "agg" ("a" | "c" | "t") "taaa" | "ttta" ("a" | "g" | "t") "cct"
+type pat6 = "aggg" ("a" | "c" | "g") "aaa" | "ttt" ("c" | "g" | "t") "ccct"
+type pat7 = "agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "taccct"
+type pat8 = "agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "ataccct"
+type pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "aataccct"
+
+// pattern to match header lines
+type header_pat = ">" \.*
+
+pn main() {
+    var __t0 = clock()
+    let text^err = input(INPUT_PATH, 'text')
+    var original_len = len(text)
+
+    // step 1: remove FASTA headers and newlines to get bare sequence
+    var seq: string = replace(text, header_pat, "")
+    seq = replace(seq, "\n", "")
+    var clean_len = len(seq)
+    let match_options = {ignore_case: true}
+
+    // step 2: count matches for each of 9 patterns using benchmarksgame /ig semantics
+    print("agggtaaa|tttaccct " ++ len(find(seq, pat1, match_options)) ++ "\n")
+    print("[cgt]gggtaaa|tttaccc[acg] " ++ len(find(seq, pat2, match_options)) ++ "\n")
+    print("a[act]ggtaaa|tttacc[agt]t " ++ len(find(seq, pat3, match_options)) ++ "\n")
+    print("ag[act]gtaaa|tttac[agt]ct " ++ len(find(seq, pat4, match_options)) ++ "\n")
+    print("agg[act]taaa|ttta[agt]cct " ++ len(find(seq, pat5, match_options)) ++ "\n")
+    print("aggg[acg]aaa|ttt[cgt]ccct " ++ len(find(seq, pat6, match_options)) ++ "\n")
+    print("agggt[cgt]aa|tt[acg]taccct " ++ len(find(seq, pat7, match_options)) ++ "\n")
+    print("agggta[cgt]a|t[acg]ataccct " ++ len(find(seq, pat8, match_options)) ++ "\n")
+    print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9, match_options)) ++ "\n")
+
+    // step 3: IUPAC code substitutions — each single letter expands to alternatives
+    var result: string = seq
+    result = replace(result, "B", "(c|g|t)")
+    result = replace(result, "D", "(a|g|t)")
+    result = replace(result, "H", "(a|c|t)")
+    result = replace(result, "K", "(g|t)")
+    result = replace(result, "M", "(a|c)")
+    result = replace(result, "N", "(a|c|g|t)")
+    result = replace(result, "R", "(a|g)")
+    result = replace(result, "S", "(c|g)")
+    result = replace(result, "V", "(a|c|g)")
+    result = replace(result, "W", "(a|t)")
+    result = replace(result, "Y", "(c|t)")
+
+    // step 4: print lengths
+    print("\n")
+    print(original_len ++ "\n")
+    print(clean_len ++ "\n")
+    print(len(result) ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
+}

@@ -1,0 +1,5 @@
+levenshtein: d(kitten,sitting)=3
+levenshtein: d(saturday,sunday)=3
+levenshtein: d(aaa...,bbb...)=500
+levenshtein: d(ababab...,babab...)=2
+levenshtein: PASS

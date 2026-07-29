@@ -833,7 +833,9 @@ pn verify_result(result, innerIterations) {
 }
 
 pn main() {
+    var __t0 = clock()
     var result = lta_main(1, 1, 10, 10, 5)
+    var __t1 = clock()
     var ok = verify_result(result, 1)
     if (ok == 1) {
         print("Havlak: PASS\n")
@@ -841,6 +843,7 @@ pn main() {
     if (ok == 0) {
         print("Havlak: FAIL\n")
     }
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
     // return the loops*100000+nodes figure verify_result checks, so the
     // echoed main result is a real assertion in the golden, not a constant 0
     return result
