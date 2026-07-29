@@ -118,7 +118,7 @@ TEST(ItemRepresentation, ContainerHeaderNamedStatePreservesRawAbi) {
 
 TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedPayload) {
     const int64_t values[] = {
-        INT64_MIN + 1, INT56_MIN, -1, 0, 1, INT56_MAX, INT64_MAX,
+        INT64_MIN + 1, INT53_MIN, -1, 0, 1, INT53_MAX, INT64_MAX,
     };
     for (const int64_t& value : values) {
         Item item = {.item = l2it(&value)};

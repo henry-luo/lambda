@@ -234,7 +234,7 @@ static inline int64_t int64_from_bits(uint64_t raw) {
 static inline Item pack_compact_int_or_float(__int128 value) {
     // The Item payload can hold more bits than Lambda's semantic int; overflow
     // crosses into float instead of becoming a wider tagged int or an error.
-    if (value <= INT56_MAX && value >= INT56_MIN) {
+    if (value <= INT53_MAX && value >= INT53_MIN) {
         return (Item){ .item = i2it((int64_t)value) };
     }
     return push_d((double)value);
@@ -411,6 +411,13 @@ static double runtime_numeric_as_double(Item item, LambdaNumericKind kind) {
     case LAMBDA_NUM_FLOAT: return item.get_double();
     case LAMBDA_NUM_F16: case LAMBDA_NUM_F32:
         return item.get_num_sized_as_double();
+    case LAMBDA_NUM_U64:
+        // u64 has its own case because it cannot round-trip through int64:
+        // 2^64-1 would read back as -1. runtime_integral_as_int64 has no U64
+        // arm at all and returns 0 for it, which silently dropped the operand
+        // from every mixed u64/float operation once those started joining in
+        // the float lane instead of decimal.
+        return (double)item.get_uint64();
     default:
         return (double)runtime_integral_as_int64(item, kind);
     }

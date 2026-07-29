@@ -208,8 +208,8 @@ two full-width ranks. Float's inline/residue split is a sibling decision in
 ### 5.1 Compact `int`: the 53-bit safe-integer band (ADR)
 
 The Item payload for compact `int` is 56 bits wide, but the range check
-deliberately clamps to `INT56_MAX = 2⁵³−1` — the IEEE float64 safe-integer
-band (`lambda/lambda.h`, comment at the `INT56_MAX` definition). **Every
+deliberately clamps to `INT53_MAX = 2⁵³−1` — the IEEE float64 safe-integer
+band (`lambda/lambda.h`, comment at the `INT53_MAX` definition). **Every
 compact int is exactly representable as a double**, so `int → float`
 promotion is lossless and the number model's "int embeds into float/decimal"
 rule holds exactly. Plain-`int` literals outside the band are a compile-time
@@ -261,7 +261,7 @@ BigInt, type-directed.
 
 | Concern | Location |
 | --- | --- |
-| NUM_SIZED packing, `INT56_MAX`, full-width `i64`/`u64` Item tagging | `lambda/lambda.h` |
+| NUM_SIZED packing, `INT53_MAX`, full-width `i64`/`u64` Item tagging | `lambda/lambda.h` |
 | Sized literal parsing (unsigned parse for `u64`) | `lambda/build_ast.cpp` |
 | Callable conversions, constant-overflow diagnostic E108 | `lambda/build_ast.cpp` (sized type names), `lambda/transpile-mir.cpp` |
 | Shared type-directed entry mapping; sized arithmetic/bitwise/`ushr` | `lambda/lambda-number.hpp`, `lambda/lambda-number-types.hpp`, `lambda/lambda-number-runtime.hpp`, `lambda/lambda-eval-num.cpp` |

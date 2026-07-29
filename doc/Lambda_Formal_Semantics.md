@@ -163,7 +163,9 @@ rejected alternative is automatic overflow into `integer`. [C3]
 ### 4.3 Mixed-operation promotion lattice
 
 > numeric operations use the exact-embedding lattice: `int` can enter both
-> `float` and `integer`; `integer` and `float` meet at `decimal`.
+> `float` and `integer`; the *unbounded* `integer` and `float` meet at
+> `decimal`. Fixed-width integers (`i8`…`u32`, `int`, `i64`, `u64`) meet
+> `float` in `float` — see §4.3.
 
 The exact meeting type is contagious. **A float entering the decimal world is
 converted by one rule: it denotes its shortest round-trip decimal** (§4.5), and
@@ -182,9 +184,31 @@ magnitudes. Sized-integer arithmetic has two cases:
 - **sized × non-sized:** leave the machine domain before the operation.
   `i8`…`u32` enter `int`; `i64` and `u64` enter `integer`. The resulting
   non-sized operands meet through `int → float` or
-  `int → integer → decimal`. Consequently `u8 + int → int`,
-  `i64 + int → integer`, and both `i64 + float` and `u64 + float` produce
-  `decimal`. Small and large `u64` values take the same path.
+  `int → integer → decimal`. Consequently `u8 + int → int` and
+  `i64 + int → integer`. Small and large `u64` values take the same path.
+- **fixed-width integer × float → `float`.** Every bounded integer type —
+  `i8`…`u32`, `int`, `i64`, `u64` — meets a binary float in `float`. Only the
+  unbounded `integer` domain meets `float` in `decimal`. So `i64 * float → float`
+  and `u64 * float → float`, while `integer * float → decimal`. This is the one
+  place a fixed-width type does **not** follow its semantic domain to the meet:
+  `i64`/`u64` enter `integer` for exactness joins against a bigint, but not
+  against a float.
+
+*Rationale (fixed-width integer × float).* Three arguments, in order of weight.
+**Exactness is already gone.** Once a binary float is an operand the result is
+inexact regardless of carrier; routing it into `decimal` does not recover
+precision the float never had, it only re-encodes an approximation in an exact
+type and misrepresents its accuracy. **Cost.** `float` is an inline
+self-tagged lane while `decimal` is a heap carrier, so the old rule allocated —
+and added GC pressure — on every mixed `i64`/`float` operation in ordinary code.
+**Convention.** Every mainstream language pairing a fixed-width integer with a
+binary float promotes toward the float; a language that instead produced an
+exact decimal would surprise every reader of the expression. The deliberate cost
+is that an `i64` magnitude above 2^53 loses precision in a mixed operation —
+accepted, because a caller who needs that exactness has `integer` and `decimal`
+and can ask for them by name. The unbounded `integer` domain keeps the decimal
+meet, where the exactness argument does hold: a bigint can carry values no float
+can represent even approximately, so there is real precision to preserve. [C3, C13]
 
 True division `/` always leaves the sized machine domain and follows §4.7.
 This operational lane selection is separate from the exact-embedding relation

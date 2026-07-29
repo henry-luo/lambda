@@ -132,7 +132,7 @@ if (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT) {
     MIR_reg_t r = pm_transpile_as_native_int(mt, bin->right);
     MIR_reg_t result = pm_new_reg(mt, "iadd", MIR_T_I64);
     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, result, l, r));
-    // overflow check: if result > INT56_MAX or < INT56_MIN, fallback to bigint
+    // overflow check: if result > INT53_MAX or < INT53_MIN, fallback to bigint
     return pm_box_int_reg(mt, result);
 }
 ```
@@ -153,8 +153,8 @@ if (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT) {
 
 | Python op | Typed path | MIR instruction | Overflow handling |
 |-----------|-----------|-----------------|-------------------|
-| `a + b` | int+int | `MIR_ADD` | Check INT56 bounds, fallback to `py_add` |
-| `a - b` | int-int | `MIR_SUB` | Check INT56 bounds |
+| `a + b` | int+int | `MIR_ADD` | Check INT53 bounds, fallback to `py_add` |
+| `a - b` | int-int | `MIR_SUB` | Check INT53 bounds |
 | `a * b` | int*int | `MIR_MUL` | `__builtin_mul_overflow` or bounds check |
 | `a // b` | int//int | `MIR_DIV` + floor adjust | Zero-division check |
 | `a % b` | int%int | `MIR_MOD` + sign adjust | Zero-division check |

@@ -28,7 +28,7 @@ GC safety for JIT-live Python Items therefore rests entirely on the **conservati
 
 ### 1.3 The int-overflow landmine (independent of SF)
 
-`pm_box_int_reg` (`transpile_py_mir.cpp:536–572`) range-checks against INT56 min/max, and its comment says "call py_add runtime for bigint promotion" — but the emitted fallback actually produces **`ITEM_ERROR`** (`:563–565`), not a BigInt. Inline arithmetic that overflows int56 yields an error Item instead of promoting; only the runtime-helper arithmetic path promotes correctly (`py_runtime.cpp:816`). A silent-wrong-answer path contradicting its own comment. → **PO1**.
+`pm_box_int_reg` (`transpile_py_mir.cpp:536–572`) range-checks against INT53 min/max, and its comment says "call py_add runtime for bigint promotion" — but the emitted fallback actually produces **`ITEM_ERROR`** (`:563–565`), not a BigInt. Inline arithmetic that overflows int56 yields an error Item instead of promoting; only the runtime-helper arithmetic path promotes correctly (`py_runtime.cpp:816`). A silent-wrong-answer path contradicting its own comment. → **PO1**.
 
 ### 1.4 Closures, generators, coroutines: pinned by pool, invisible to GC
 

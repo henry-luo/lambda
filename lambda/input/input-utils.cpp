@@ -78,7 +78,7 @@ Item parse_prefixed_integer_value(InputContext& ctx, const char* str, int base,
         return report_errors ? (Item){.item = ITEM_ERROR} : ItemNull;
     }
 
-    if (force_long || val < INT56_MIN || val > INT56_MAX) {
+    if (force_long || val < INT53_MIN || val > INT53_MAX) {
         return ctx.builder.createLong(val);
     }
     return ctx.builder.createInt(val);
@@ -139,7 +139,7 @@ Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len) {
     int64_t int_value = strtoll(num_str, &end, 10);
     if (errno == 0 && end == num_str + len) {
         // integer input climbs int -> int64 before decimal; avoid double as an intermediate.
-        Item result = (int_value >= INT56_MIN && int_value <= INT56_MAX) ?
+        Item result = (int_value >= INT53_MIN && int_value <= INT53_MAX) ?
             ctx.builder.createInt(int_value) : ctx.builder.createLong(int_value);
         if (heap_buf) mem_free(num_str);
         return result;

@@ -1186,10 +1186,10 @@ static PmCompilerRegister pm_emit_unbox_int(PyMirTranspiler* mt, PmCompilerRegis
     return result;
 }
 
-// box an unboxed int64 register back to a tagged Item, with INT56 range check
+// box an unboxed int64 register back to a tagged Item, with INT53 range check
 static PmCompilerRegister pm_box_int_reg(PyMirTranspiler* mt, PmCompilerRegister val) {
-    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+    int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+    int64_t INT53_MIN_VAL = INT53_MIN;
 
     PmCompilerRegister result = pm_new_reg(mt, "bxi", PM_COMPILER_VALUE_I64);
     PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
@@ -1198,8 +1198,8 @@ static PmCompilerRegister pm_box_int_reg(PyMirTranspiler* mt, PmCompilerRegister
     PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
     PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
 
-    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, val, 0, INT56_MAX_VAL);
-    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, val, 0, INT56_MIN_VAL);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, val, 0, INT53_MAX_VAL);
+    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, val, 0, INT53_MIN_VAL);
     pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range, le_max, ge_min, 0);
     pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked, val, 0,
         (int64_t)PY_MASK56);
@@ -1556,14 +1556,14 @@ static PmCompilerRegister pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode*
         pm_emit_i64_operation(mt, operation, res, l, r, 0);
 
         if (can_overflow) {
-            // range check: if result outside INT56, fall back to boxed runtime call
-            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+            // range check: if result outside INT53, fall back to boxed runtime call
+            int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+            int64_t INT53_MIN_VAL = INT53_MIN;
             PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
             PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
             PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
-            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, res, 0, INT56_MAX_VAL);
-            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, res, 0, INT56_MIN_VAL);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, res, 0, INT53_MAX_VAL);
+            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, res, 0, INT53_MIN_VAL);
             pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range, le_max, ge_min, 0);
             PmCompilerLabel l_ok = pm_new_label(mt);
             pm_emit_branch_true(mt, in_range, l_ok);
@@ -3614,15 +3614,15 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
                         pm_emit_i64_operation(mt, operation, res, l, r, 0);
 
                         if (can_overflow) {
-                            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-                            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+                            int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+                            int64_t INT53_MIN_VAL = INT53_MIN;
                             PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
                             PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
                             PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
                             pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max,
-                                res, 0, INT56_MAX_VAL);
+                                res, 0, INT53_MAX_VAL);
                             pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min,
-                                res, 0, INT56_MIN_VAL);
+                                res, 0, INT53_MIN_VAL);
                             pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range,
                                 le_max, ge_min, 0);
                             PmCompilerLabel l_ok = pm_new_label(mt);

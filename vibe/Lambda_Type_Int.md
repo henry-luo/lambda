@@ -224,8 +224,8 @@ struct {
 
 ```cpp
 // NEW: int56 limits
-#define INT56_MAX  ((int64_t)0x007FFFFFFFFFFFFF)   // +36,028,797,018,963,967
-#define INT56_MIN  ((int64_t)0xFF80000000000000)   // -36,028,797,018,963,968
+#define INT53_MAX  ((int64_t)0x007FFFFFFFFFFFFF)   // +36,028,797,018,963,967
+#define INT53_MIN  ((int64_t)0xFF80000000000000)   // -36,028,797,018,963,968
 
 #define ITEM_INT   ((uint64_t)LMD_TYPE_INT << 56)
 ```
@@ -243,12 +243,12 @@ struct {
 // AFTER - check 56-bit range, return ITEM_ERROR on overflow
 #ifndef __cplusplus
 #define i2it(val) \
-    (((int64_t)(val) <= INT56_MAX && (int64_t)(val) >= INT56_MIN) \
+    (((int64_t)(val) <= INT53_MAX && (int64_t)(val) >= INT53_MIN) \
         ? (ITEM_INT | ((uint64_t)(val) & 0x00FFFFFFFFFFFFFF)) \
         : ITEM_ERROR)
 #else
 #define i2it(val) \
-    (((int64_t)(val) <= INT56_MAX && (int64_t)(val) >= INT56_MIN) \
+    (((int64_t)(val) <= INT53_MAX && (int64_t)(val) >= INT53_MIN) \
         ? (ITEM_INT | ((uint64_t)(val) & 0x00FFFFFFFFFFFFFF)) \
         : ITEM_ERROR)
 #endif
@@ -340,7 +340,7 @@ Item fn_add(Item item_a, Item item_b) {
         int64_t result = a + b;
         
         // Check for overflow (result outside int56 range)
-        if (result > INT56_MAX || result < INT56_MIN) {
+        if (result > INT53_MAX || result < INT53_MIN) {
             log_error("integer overflow in addition");
             return ItemError;
         }
@@ -355,7 +355,7 @@ Item fn_sub(Item item_a, Item item_b) {
         int64_t b = item_b.get_int56();
         int64_t result = a - b;
         
-        if (result > INT56_MAX || result < INT56_MIN) {
+        if (result > INT53_MAX || result < INT53_MIN) {
             log_error("integer overflow in subtraction");
             return ItemError;
         }
@@ -378,14 +378,14 @@ Item fn_mul(Item item_a, Item item_b) {
             return ItemError;
         }
         // Also check int56 range (result fits in int64 but may exceed int56)
-        if (result > INT56_MAX || result < INT56_MIN) {
+        if (result > INT53_MAX || result < INT53_MIN) {
             log_error("integer overflow in multiplication");
             return ItemError;
         }
 #else
         // Fallback: use __int128 for precise overflow detection
         __int128 wide_result = (__int128)a * (__int128)b;
-        if (wide_result > INT56_MAX || wide_result < INT56_MIN) {
+        if (wide_result > INT53_MAX || wide_result < INT53_MIN) {
             log_error("integer overflow in multiplication");
             return ItemError;
         }
@@ -511,7 +511,7 @@ int64_t it2i(Item item);
 | File | Changes |
 |------|---------|
 | [lambda/lambda.hpp](lambda/lambda.hpp) | Add `get_int56()` helper method |
-| [lambda/lambda.h](lambda/lambda.h) | `INT56_MAX/MIN` constants, `i2it` macro, `it2i` return type |
+| [lambda/lambda.h](lambda/lambda.h) | `INT53_MAX/MIN` constants, `i2it` macro, `it2i` return type |
 | [lambda/lambda-data.cpp](lambda/lambda-data.cpp) | `it2i`, `it2l`, `it2d` - use `get_int56()` |
 | [lambda/lambda-eval-num.cpp](lambda/lambda-eval-num.cpp) | All arithmetic: use `get_int56()`, check overflow |
 | [lambda/lambda-eval.cpp](lambda/lambda-eval.cpp) | Comparisons: use `get_int56()` |
@@ -579,7 +579,7 @@ When parsing integer literals in Lambda scripts, if the literal value exceeds th
 
 ```cpp
 // Check if the value fits in 56-bit signed integer range
-if (INT56_MIN <= value && value <= INT56_MAX) {
+if (INT53_MIN <= value && value <= INT53_MAX) {
     log_debug("Using LIT_INT for value %lld", value);
     i_node->type = &LIT_INT;
 }
@@ -593,15 +593,15 @@ else { // promote to float for values outside int56 range
 
 ```lambda
 // Within int56 range - stays as int
-let a = 36028797018963967   // INT56_MAX - type: int
+let a = 36028797018963967   // INT53_MAX - type: int
 type(a)  // → "int"
 
 // Exceeds int56 range - promoted to float
-let b = 36028797018963968   // INT56_MAX + 1 - type: float
+let b = 36028797018963968   // INT53_MAX + 1 - type: float
 type(b)  // → "float"
 
 // Large negative - promoted to float
-let c = -36028797018963969  // < INT56_MIN - type: float
+let c = -36028797018963969  // < INT53_MIN - type: float
 type(c)  // → "float"
 
 // Very large literal - promoted to float
@@ -613,8 +613,8 @@ type(d)  // → "float"
 
 | Scenario | Parsing (Literals) | Runtime (Operations) |
 |----------|-------------------|---------------------|
-| Value > INT56_MAX | Promotes to float | Returns `ITEM_ERROR` |
-| Value < INT56_MIN | Promotes to float | Returns `ITEM_ERROR` |
+| Value > INT53_MAX | Promotes to float | Returns `ITEM_ERROR` |
+| Value < INT53_MIN | Promotes to float | Returns `ITEM_ERROR` |
 | Detection | At compile time | At runtime |
 | Behavior | Silent type change | Explicit error |
 
@@ -688,7 +688,7 @@ Both now use the same underlying storage (`int64_t*`), but maintain separate typ
 ## Migration Strategy
 
 ### Phase 1: Add Infrastructure
-1. Add `INT56_MAX`, `INT56_MIN` constants
+1. Add `INT53_MAX`, `INT53_MIN` constants
 2. Add `get_int56()` helper method to Item
 3. Add `item_get_int56()` C helper function
 
@@ -706,7 +706,7 @@ Both now use the same underlying storage (`int64_t*`), but maintain separate typ
 1. Run `make test-lambda-baseline` - must pass 100%
 2. Add tests for large integers (> 2³¹)
 3. Add overflow detection tests
-4. Test edge cases around INT56_MAX/MIN
+4. Test edge cases around INT53_MAX/MIN
 
 ---
 

@@ -247,7 +247,7 @@ A build where some producers inline and some still box violates §2.6 and makes 
 
 # Part 4 — Interaction with the 53-bit compact `int` (number model v2)
 
-The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-integer band (`INT56_MAX`, `lambda.h:896`; number model v2 §2.1) — packed in the low 56 bits with high byte = `LMD_TYPE_INT` (`i2it`, `lambda.h:904`). Findings:
+The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-integer band (`INT53_MAX`, `lambda.h:896`; number model v2 §2.1) — packed in the low 56 bits with high byte = `LMD_TYPE_INT` (`i2it`, `lambda.h:904`). Findings:
 
 1. **No packing change needed.** The `& 0x00FFFFFFFFFFFFFF` mask confines sign extension to the payload; the high byte is always `LMD_TYPE_INT` (= 5, bits 6,5 = 00), so packed ints — positive and negative — sit outside double space and are compliant with §2.3 by construction.
 2. **`int → float` conversion becomes allocation-free.** The band was chosen so every compact int is exactly representable in binary64; with self-tagging, every *nonzero* converted int is in-band (|n| ≥ 1 ⟹ `e ≥ 0x3FF`; a JIT that proves the operand nonzero may skip the check entirely), and zero maps to the packed immediate (§2.5). What is today `I2D + push_d` (allocation) becomes `I2D` + the mask check, with the resulting bits stored unchanged. This completes the number model's egress story: `int → number` is *exact* by design and now also *free*.

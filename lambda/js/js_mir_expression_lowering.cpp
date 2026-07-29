@@ -1995,9 +1995,9 @@ bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
             if (!isfinite(v)) return false;
             out->kind = JS_FOLD_NUM;
             out->num = v;
-            // Mirror literal lowering: values outside INT56 cannot be emitted through i2it.
+            // Mirror literal lowering: values outside INT53 cannot be emitted through i2it.
             out->is_float = lit->has_decimal ||
-                !(v == (double)(int64_t)v && v >= (double)INT56_MIN && v <= (double)INT56_MAX);
+                !(v == (double)(int64_t)v && v >= (double)INT53_MIN && v <= (double)INT53_MAX);
             return true;
         }
         if (lit->literal_type == JS_LITERAL_BOOLEAN) {
@@ -2042,7 +2042,7 @@ bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
             if (!isfinite(r)) return false;
             if (both_int) {
                 // int arithmetic must round-trip exactly to match the runtime's int64 path
-                if (r != (double)(int64_t)r || r < (double)INT56_MIN || r > (double)INT56_MAX) return false;
+                if (r != (double)(int64_t)r || r < (double)INT53_MIN || r > (double)INT53_MAX) return false;
                 out->is_float = false;
             } else {
                 out->is_float = true;

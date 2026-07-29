@@ -85,7 +85,7 @@ Consider `fn_add`:
 ```c
 if (ta == LMD_TYPE_INT && tb == LMD_TYPE_INT) {
     int64_t r = get_int56(a) + get_int56(b);
-    if (r > INT56_MAX || r < INT56_MIN) return push_l(r);
+    if (r > INT53_MAX || r < INT53_MIN) return push_l(r);
     return i2it(r);
 }
 ```

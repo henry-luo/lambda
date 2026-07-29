@@ -27,7 +27,7 @@ Functions for type conversion and inspection.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `int(x)` | Convert to integer | `int("42")` | `42` |
-| `int64(x)` | Convert to 64-bit integer | `int64("9999999999")` | `9999999999` |
+| `int64(x)` | Convert to 64-bit integer (the explicit widening constructor; the only system function returning `int64`) | `int64("9999999999")` | `9999999999` |
 | `float(x)` | Convert to float | `float("3.14")` | `3.14` |
 | `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456m` |
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
@@ -35,13 +35,38 @@ Functions for type conversion and inspection.
 | `binary(x)` | Convert to immutable bytes | `binary("hello")` | `b'\x68656C6C6F'` |
 | `number(x)` | Convert to number (int or float) | `number("3.14")` | `3.14` |
 
+### Return Type of Counts and Indices
+
+System functions that yield a **count** or a **position** return Lambda `int`, the unsized
+integer type — not `int64`:
+
+| Function | Returns |
+|----------|---------|
+| `len(x)` | `int` |
+| `index_of(s, sub)` | `int` (`-1` when not found) |
+| `last_index_of(s, sub)` | `int` (`-1` when not found) |
+| `ord(ch)` | `int` |
+| `ndim(x)` | `int` |
+
+`int` covers the IEEE-754 float64 safe-integer band, ±(2^53 − 1) — 8 PiB expressed as a byte
+count, which is beyond any collection that can exist in a single address space. Keeping these in
+`int` means ordinary arithmetic on a length (`9 - len(s)`) stays in the unsized integer lane
+instead of widening to another representation.
+
+`int64(x)` is the one deliberate exception: it is the explicit widening constructor, so it
+returns `int64` by definition. Use it when a value genuinely needs the wide lane.
+
+> Planned change: `len()` will move to `integer` (arbitrary precision) in a future version, so
+> lengths of virtual or computed sequences are representable without a fixed ceiling. Code that
+> treats a length as `int` today stays correct — `int` is a subtype of `integer`.
+
 ### Type Inspection
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `type(x)` | Get type of value | `type(42)` | `'int'` |
 | `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div'` |
-| `len(x)` | Get length of collection or string | `len([1, 2, 3])` | `3` |
+| `len(x)` | Get length of collection or string, as `int` | `len([1, 2, 3])` | `3` |
 
 ```lambda
 // Type conversion examples
@@ -265,9 +290,17 @@ let dice = floor(x * 6) + 1     // random 1-6
 
 ## Bitwise Functions
 
-Bitwise functions preserve a sized integer's width. `band`, `bor`, and `bxor`
-use the sized-integer promotion rules; `bnot` and shifts operate in the left
-operand's width.
+Bitwise functions **preserve their operand's integer type**: `i8 -> i8`,
+`int -> int`, `i64 -> i64`. `band`, `bor`, and `bxor` use the sized-integer
+promotion rules; `bnot` and shifts operate in the left operand's width. The
+implementation may compute in `int64`/`uint64` internally, but the result is
+boxed in the operand's own lane rather than widened to `int64`.
+
+Because no single static type describes them, all seven are declared `any`; the
+concrete type is resolved per operand. A shift whose result leaves the operand's
+lane follows that lane's overflow rule — for `int` that is promotion to `float`,
+so `shl(1, 54)` is `1.8014398509481984e16` (a `float`), not an error. A negative
+shift count is an error; a count of 64 or more yields `0`.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -474,7 +507,7 @@ ends_with("abc", "abcd")            // false
 
 ### index_of(str, substring)
 
-Return the index of the first occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+Return the index (`int`) of the first occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -488,7 +521,7 @@ index_of("abcabc", "bc")           // 1
 
 ### last_index_of(str, substring)
 
-Return the index of the last occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+Return the index (`int`) of the last occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|

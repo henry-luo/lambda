@@ -1673,7 +1673,7 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 // ============================================================================
 
 // Box int64_t -> Item (inline i2it macro equivalent)
-// i2it(v) = (v <= INT56_MAX && v >= INT56_MIN) ? (ITEM_INT | (v & MASK56)) : ITEM_ERROR
+// i2it(v) = (v <= INT53_MAX && v >= INT53_MIN) ? (ITEM_INT | (v & MASK56)) : ITEM_ERROR
 static MIR_reg_t emit_box_int(MirTranspiler* mt, MIR_reg_t val_reg) {
     MIR_reg_t result = new_reg(mt, "boxi", MIR_T_I64);
     MIR_reg_t masked = new_reg(mt, "mask", MIR_T_I64);
@@ -1682,17 +1682,17 @@ static MIR_reg_t emit_box_int(MirTranspiler* mt, MIR_reg_t val_reg) {
     MIR_reg_t le_max = new_reg(mt, "le", MIR_T_I64);
     MIR_reg_t ge_min = new_reg(mt, "ge", MIR_T_I64);
 
-    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
-    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+    int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
+    int64_t INT53_MIN_VAL = INT53_MIN;
     uint64_t MASK56 = 0x00FFFFFFFFFFFFFFULL;
     uint64_t ITEM_INT_TAG = (uint64_t)LMD_TYPE_INT << 56;
 
-    // le_max = val <= INT56_MAX
+    // le_max = val <= INT53_MAX
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
-        MIR_new_reg_op(mt->ctx, val_reg), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
-    // ge_min = val >= INT56_MIN
+        MIR_new_reg_op(mt->ctx, val_reg), MIR_new_int_op(mt->ctx, INT53_MAX_VAL)));
+    // ge_min = val >= INT53_MIN
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
-        MIR_new_reg_op(mt->ctx, val_reg), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+        MIR_new_reg_op(mt->ctx, val_reg), MIR_new_int_op(mt->ctx, INT53_MIN_VAL)));
     // in_range = le_max & ge_min
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
         MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
@@ -3639,6 +3639,20 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // self-describing result at an untyped function return boundary.
             return LMD_TYPE_ANY;
         }
+        // A native-lane int shift can leave the compact band (`shl(1, 54)`), and
+        // the model's overflow rule for the int domain is promotion to float
+        // (LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT). Its lowering therefore emits a
+        // self-describing Item — int when the result fits, float when it does
+        // not — so the result is ANY rather than a raw int lane. band/bor/bxor
+        // cannot leave the band from in-band operands and keep the raw lane.
+        if (native_int_path && call->function &&
+                call->function->node_type == AST_NODE_SYS_FUNC) {
+            AstSysFuncNode* shift_sys = (AstSysFuncNode*)call->function;
+            if (shift_sys->fn_info && (shift_sys->fn_info->fn == SYSFUNC_SHL ||
+                    shift_sys->fn_info->fn == SYSFUNC_SHR)) {
+                return LMD_TYPE_ANY;
+            }
+        }
         if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
             AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
             if (sys->fn_info && sys->fn_info->fn == SYSFUNC_BNOT &&
@@ -4261,15 +4275,15 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             MIR_reg_t prod = new_reg(mt, "fi_prod", MIR_T_D);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMUL, MIR_new_reg_op(mt->ctx, prod),
                 MIR_new_reg_op(mt->ctx, dl), MIR_new_reg_op(mt->ctx, dr)));
-            // |prod| <= INT56_MAX keeps it an int; anything else stays float.
+            // |prod| <= INT53_MAX keeps it an int; anything else stays float.
             MIR_reg_t lo_ok = new_reg(mt, "fi_lo", MIR_T_I64);
             MIR_reg_t hi_ok = new_reg(mt, "fi_hi", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DGE, MIR_new_reg_op(mt->ctx, lo_ok),
                 MIR_new_reg_op(mt->ctx, prod),
-                MIR_new_double_op(mt->ctx, (double)INT56_MIN)));
+                MIR_new_double_op(mt->ctx, (double)INT53_MIN)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DLE, MIR_new_reg_op(mt->ctx, hi_ok),
                 MIR_new_reg_op(mt->ctx, prod),
-                MIR_new_double_op(mt->ctx, (double)INT56_MAX)));
+                MIR_new_double_op(mt->ctx, (double)INT53_MAX)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
                 MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
@@ -4295,14 +4309,14 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             bi->op == OPERATOR_ADD ? MIR_ADD : MIR_SUB,
             MIR_new_reg_op(mt->ctx, sum),
             MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
-        // Single unsigned test for -INT56_MAX <= sum <= INT56_MAX:
-        // (sum + INT56_MAX) as unsigned must not exceed 2*INT56_MAX.
+        // Single unsigned test for -INT53_MAX <= sum <= INT53_MAX:
+        // (sum + INT53_MAX) as unsigned must not exceed 2*INT53_MAX.
         MIR_reg_t biased = new_reg(mt, "fi_bias", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, biased),
-            MIR_new_reg_op(mt->ctx, sum), MIR_new_int_op(mt->ctx, INT56_MAX)));
+            MIR_new_reg_op(mt->ctx, sum), MIR_new_int_op(mt->ctx, INT53_MAX)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ULE, MIR_new_reg_op(mt->ctx, in_range),
             MIR_new_reg_op(mt->ctx, biased),
-            MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)INT56_MAX * 2))));
+            MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)INT53_MAX * 2))));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, l_promote), MIR_new_reg_op(mt->ctx, in_range)));
         MIR_reg_t boxed_int = emit_box(mt, sum, LMD_TYPE_INT);
@@ -6607,6 +6621,19 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I,
                         MIR_new_reg_op(mt->ctx, ival), MIR_new_reg_op(mt->ctx, val)));
                     val = ival;
+                } else if ((var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64 ||
+                            var_tid == LMD_TYPE_FLOAT) && expr_tid == LMD_TYPE_DECIMAL) {
+                    // `var pad: int = 9 - len(s)` — len() is int64, but ordinary
+                    // arithmetic widens to the semantic `integer` carrier, which is
+                    // LMD_TYPE_DECIMAL at runtime (TYPE_INTEGER_VALUE). With no
+                    // conversion the decimal pointer Item was written straight into a
+                    // register every later read treats as a native lane: the binding
+                    // read back as ITEM_ERROR, and where it was a loop counter the loop
+                    // never terminated. it2i/it2l/it2d each already decode the decimal
+                    // carrier, so route through the same boundary the explicit int()
+                    // conversion uses.
+                    MIR_reg_t boxed = emit_box(mt, val, expr_tid);
+                    val = emit_unbox(mt, boxed, var_tid);
                 }
 
                 bool cow_owned = mir_expr_produces_cow_owner(mt, asn->as) &&
@@ -9590,13 +9617,24 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 return result;
             }
 
-            // shl/shr: guarded shift — negative is INT64_ERROR, b >= 64 is 0.
+            // shl/shr: guarded shift — negative count is an error, b >= 64 is 0,
+            // and a result outside the compact band promotes to float, which is
+            // the int domain's documented overflow rule
+            // (LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT, lambda-number.hpp). The runtime
+            // helper already did this; the inline path used to hand a raw int64
+            // to i2it instead, so `shl(1, 54)` became ITEM_ERROR while the same
+            // expression on a dynamic operand returned 1.8014398509481984e16.
+            // This lowering therefore yields a self-describing Item rather than a
+            // raw int lane — get_effective_type reports ANY for native int shifts.
             {
                 MIR_insn_code_t shift_op = (info->fn == SYSFUNC_SHL) ? MIR_LSH : MIR_RSH;
                 MIR_reg_t result = new_reg(mt, "shft", MIR_T_I64);
+                MIR_reg_t out = new_reg(mt, "shft_out", MIR_T_I64);
                 MIR_label_t l_ok = new_label(mt);
                 MIR_label_t l_err = new_label(mt);
                 MIR_label_t l_zero = new_label(mt);
+                MIR_label_t l_box = new_label(mt);
+                MIR_label_t l_promote = new_label(mt);
                 MIR_label_t l_end = new_label(mt);
 
                 // check b >= 0
@@ -9616,15 +9654,19 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 // in range: do the shift
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
+                // A negative count is an error Item directly. It must not reach the
+                // range check below: the old sentinel was INT64_ERROR == INT64_MAX,
+                // which that check would have promoted to 9.2e18 as a float instead
+                // of reporting the error.
                 emit_label(mt, l_err);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, INT64_ERROR)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+                    MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
                 emit_label(mt, l_zero);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                     MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_box)));
 
                 emit_label(mt, l_ok);
                 emit_insn(mt, MIR_new_insn(mt->ctx, shift_op,
@@ -9632,8 +9674,42 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_new_reg_op(mt->ctx, a1),
                     MIR_new_reg_op(mt->ctx, a2)));
 
+                // Both operands are compact ints, so only shl can leave the band;
+                // for shr the test always passes and costs two instructions.
+                // Single unsigned test for -INT53_MAX <= result <= INT53_MAX:
+                // (result + INT53_MAX) as unsigned must not exceed 2*INT53_MAX.
+                emit_label(mt, l_box);
+                MIR_reg_t sh_biased = new_reg(mt, "sh_bias", MIR_T_I64);
+                MIR_reg_t sh_in_range = new_reg(mt, "sh_rng", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, sh_biased),
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, INT53_MAX)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ULE,
+                    MIR_new_reg_op(mt->ctx, sh_in_range),
+                    MIR_new_reg_op(mt->ctx, sh_biased),
+                    MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)INT53_MAX * 2))));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, l_promote),
+                    MIR_new_reg_op(mt->ctx, sh_in_range)));
+                MIR_reg_t sh_boxed_int = emit_box(mt, result, LMD_TYPE_INT);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+                    MIR_new_reg_op(mt->ctx, sh_boxed_int)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+                // Rare path: out of the compact band. emit_box(FLOAT) handles the
+                // out-of-line boxing for values the inline float lane cannot hold.
+                emit_label(mt, l_promote);
+                MIR_reg_t sh_dval = new_reg(mt, "sh_d", MIR_T_D);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+                    MIR_new_reg_op(mt->ctx, sh_dval),
+                    MIR_new_reg_op(mt->ctx, result)));
+                MIR_reg_t sh_boxed_float = emit_box(mt, sh_dval, LMD_TYPE_FLOAT);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+                    MIR_new_reg_op(mt->ctx, sh_boxed_float)));
+
                 emit_label(mt, l_end);
-                return result;
+                return out;
             }
         }
         if (info->fn == SYSFUNC_BNOT) {
@@ -10618,9 +10694,19 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     result = emit_box(mt, result, call_nfi->return_type);
                 }
             } else {
-                // Standard boxed return — unbox if caller expects native type
+                // Standard boxed return — unbox if caller expects native type.
+                // LMD_TYPE_STRING must be included even though it is not a
+                // "native scalar": infer_return_type() deliberately refuses
+                // string as a native return, so a `pn f() string` hands back a
+                // boxed Item, yet the call expression's static type is STRING.
+                // The emitter's downstream contract is that a STRING-typed value
+                // IS a raw String* — len/ord/starts_with/ends_with pass it
+                // straight into String*-taking helpers. Leaving it boxed made
+                // fn_len_s dereference a tagged Item and segfault on any
+                // `len(f())`, regardless of string length.
                 if (!call_error_lane && !mt->emitting_async_call &&
-                        mir_is_native_scalar_value_type(call_tid)) {
+                        (mir_is_native_scalar_value_type(call_tid) ||
+                         call_tid == LMD_TYPE_STRING)) {
                     result = emit_unbox(mt, result, call_tid);
                 }
             }
@@ -11739,6 +11825,16 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         bool right_int64_b = (rt == LMD_TYPE_INT64);
         bool has_int64_b = left_int64_b || right_int64_b;
         if (has_int64_b) {
+            // int64 against a binary float now joins in the FLOAT lane rather
+            // than decimal, and mir_unbox_exact_native_numeric_result has
+            // already recovered that result as a native double. Passing the raw
+            // double through here handed a MIR_T_D register to a site expecting
+            // an Item, which MIR rejects ("unexpected operand mode ... Got
+            // 'double', expected 'int'"). Box it in its own lane instead.
+            if (numeric_decision.valid &&
+                    numeric_decision.result == LAMBDA_NUM_FLOAT) {
+                return emit_box_float(mt, val);
+            }
             return val;
         }
 

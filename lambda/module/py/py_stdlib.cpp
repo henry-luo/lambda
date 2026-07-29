@@ -476,7 +476,7 @@ extern "C" Item py_stdlib_sys_init(void) {
 #endif
 
     // sys.maxsize
-    mod_set(mod, "maxsize", mk_int(INT56_MAX));
+    mod_set(mod, "maxsize", mk_int(INT53_MAX));
 
     // sys.path — empty list (module search paths)
     mod_set(mod, "path", py_list_new(0));

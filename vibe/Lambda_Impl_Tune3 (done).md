@@ -182,7 +182,7 @@ compare-IC into MIR emission is explicitly out of scope (future work).
 **Equivalence proof against current runtime** (the reason this is a pure
 lowering change): today `apply_classified_numeric`
 (`lambda-eval-num.cpp:354-375`) computes ADD/SUB/MUL in `__int128` and calls
-`pack_compact_int_or_float` (`:78-85`): `|v| ≤ INT56_MAX (2^53−1)` → compact
+`pack_compact_int_or_float` (`:78-85`): `|v| ≤ INT53_MAX (2^53−1)` → compact
 int, else `(double)v` (exact value, correctly rounded once).
 
 - ADD/SUB: two compact ints are ≤ 2^53−1 in magnitude → int64 sum is exact
@@ -195,7 +195,7 @@ int, else `(double)v` (exact value, correctly rounded once).
   (values ≥ 2^53 round to ≥ 2^53), so the int/float decision is also
   identical. The in-range check on the double (`|d| ≤ 2^53−1`) therefore
   agrees with the runtime's check on the exact product.
-- Boundary constant: **`INT56_MAX/INT56_MIN` (`lambda/lambda.h:1178`,
+- Boundary constant: **`INT53_MAX/INT53_MIN` (`lambda/lambda.h:1178`,
   ±(2^53−1))** — the emitted constants must reference the same values; add a
   static_assert-style comment tying them.
 - Corner pins (all in the Phase-0 fixture): `0 * -5 = 0` (int, not −0.0);
@@ -217,9 +217,9 @@ ADD/SUB sketch (MUL analogous with DMUL-first):
 ```
   ; operands: raw int64 regs a, b (transpile_expr both-INT invariants)
   res  = ADD a, b                      ; exact in int64
-  ; range check |res| ≤ INT56_MAX  (two compares or the shift trick)
-  t    = ADD res, INT56_MAX            ; unsigned trick: t = res + (2^53−1)
-  cmp  = UGT t, 2*INT56_MAX            ; out-of-range iff t > 2^54−2
+  ; range check |res| ≤ INT53_MAX  (two compares or the shift trick)
+  t    = ADD res, INT53_MAX            ; unsigned trick: t = res + (2^53−1)
+  cmp  = UGT t, 2*INT53_MAX            ; out-of-range iff t > 2^54−2
   BT   cmp, slow
 fast:
   item = box_int(res)                  ; tag-only: existing emit_box(…, LMD_TYPE_INT)
@@ -234,7 +234,7 @@ MUL:
 
 ```
   da = I2D a ; db = I2D b ; d = DMUL da, db
-  ad = DABS-equivalent (AND mask or DBGE compares) ; in-range test |d| ≤ INT56_MAX
+  ad = DABS-equivalent (AND mask or DBGE compares) ; in-range test |d| ≤ INT53_MAX
   in-range:  i = D2I d ; item = box_int(i)
   else:      item = box_double(d)
 ```
