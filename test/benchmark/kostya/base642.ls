@@ -1,0 +1,87 @@
+// Kostya Benchmark: base64 (Typed version)
+// Base64 encode and decode
+// Adapted from github.com/kostya/benchmarks
+// Encodes a string of 10000 'a' chars to base64, decodes back, verifies
+// Repeats 100 times for timing
+
+// Base64 encoding table (array of single-char strings for fast indexed lookup)
+let TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
+             "N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+             "a","b","c","d","e","f","g","h","i","j","k","l","m",
+             "n","o","p","q","r","s","t","u","v","w","x","y","z",
+             "0","1","2","3","4","5","6","7","8","9","+","/"]
+
+// NOTE: no `string` return-type annotation on the string-building procedures —
+// it currently segfaults the MIR JIT once the returned string is large enough to
+// span a GC (repro: temp/repro_string_return_segv.ls). Param/local annotations
+// and `int` return types are unaffected.
+// TABLE stays unannotated: only int/float/int64/uint64 have packed ArrayNum
+// layouts, so a string[] annotation would fail to coerce
+// Encode using integer array of byte values
+pn b64_encode(bytes: int[], num_bytes: int) {
+    var result: string = ""
+    var i: int = 0
+    while (i + 2 < num_bytes) {
+        var b0: int = bytes[i]
+        var b1: int = bytes[i + 1]
+        var b2: int = bytes[i + 2]
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
+            ++ TABLE[(b1 % 16) * 4 + shr(b2, 6)] ++ TABLE[b2 % 64])
+        i = i + 3
+    }
+    if (i + 1 == num_bytes) {
+        var b0: int = bytes[i]
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16] ++ "==")
+    }
+    if (i + 2 == num_bytes) {
+        var b0: int = bytes[i]
+        var b1: int = bytes[i + 1]
+        result = result ++ (TABLE[shr(b0, 2)]
+            ++ TABLE[(b0 % 4) * 16 + shr(b1, 4)]
+            ++ TABLE[(b1 % 16) * 4] ++ "=")
+    }
+    return result
+}
+
+pn b64_decode_len(encoded: string) int {
+    var slen: int = len(encoded)
+    var n: int = shr(slen, 2) * 3
+    if (slen >= 1 and encoded[slen - 1] == "=") {
+        n = n - 1
+    }
+    if (slen >= 2 and encoded[slen - 2] == "=") {
+        n = n - 1
+    }
+    return n
+}
+
+pn main() {
+    var __t0 = clock()
+    // Create input: 10000 bytes all = 97 ('a')
+    let num_bytes: int = 10000
+    // fill(n, int) already infers a packed ArrayNum; an int[] annotation on the
+    // local would re-tag the var as ANY and lose the direct-index path
+    var bytes = fill(num_bytes, 97)
+
+    var encoded: string = ""
+    var decoded_len: int = 0
+
+    var iter: int = 0
+    while (iter < 100) {
+        encoded = b64_encode(bytes, num_bytes)
+        decoded_len = b64_decode_len(encoded)
+        iter = iter + 1
+    }
+    var __t1 = clock()
+
+    let enc_len: int = len(encoded)
+    print("base64: encoded_len=" ++ enc_len ++ " decoded_len=" ++ decoded_len ++ "\n")
+    if (decoded_len == num_bytes) {
+        print("base64: PASS\n")
+    } else {
+        print("base64: FAIL\n")
+    }
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
+}

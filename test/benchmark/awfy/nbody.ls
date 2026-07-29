@@ -129,7 +129,9 @@ pn benchmark() {
 }
 
 pn main() {
+    var __t0 = clock()
     let result = benchmark()
+    var __t1 = clock()
     // Verify by scaling to integer: floor(energy * -10000000) should be 1690876
     var check = floor(result * -10000000.0)
     if (check == 1690876) {
@@ -141,4 +143,5 @@ pn main() {
         print(result)
         print("\n")
     }
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

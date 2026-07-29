@@ -238,8 +238,9 @@ Use `--skip-build` only for a quick local recheck when you already know `lambda.
 **After a checked-in snapshot run, keep the binary.**
 
 ```bash
-cp -p lambda.exe test/benchmark/exe/lambda-vN-<commit>.exe
-shasum -a 256 test/benchmark/exe/lambda-vN-<commit>.exe   # record in MANIFEST.md
+# omit .exe so broad test cleanup does not remove the archived binary
+cp -p lambda.exe test/benchmark/exe/lambda-vN-<commit>
+shasum -a 256 test/benchmark/exe/lambda-vN-<commit>   # record in MANIFEST.md
 ```
 
 `test/benchmark/exe/` is **git-ignored** (~20 MB per binary) and carries a

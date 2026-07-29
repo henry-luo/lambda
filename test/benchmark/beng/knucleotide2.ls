@@ -1,0 +1,137 @@
+// BENG Benchmark: k-nucleotide (Typed version)
+// Count nucleotide k-mer frequencies from FASTA >THREE section
+// Uses file input instead of stdin (Lambda adaptation)
+// Expected: matches benchmarksgame knucleotide-output.txt
+
+let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
+
+// NOTE: locals initialised from a len() expression stay unannotated — len() is
+// int64, and a declared `int` there either hard-errors or silently narrows in the
+// MIR JIT (repro: temp/repro_declared_int_len_concat.ls). `string` return types are
+// also avoided: they segfault the JIT once the result spans a GC
+// (repro: temp/repro_string_return_segv.ls).
+// extract >THREE section from fasta input
+pn extract_three(text: string) {
+    let lines = split(text, "\n")
+    var num_lines = len(lines)
+    var seq: string = ""
+    var in_three: int = 0
+    var i: int = 0
+    while (i < num_lines) {
+        let line = lines[i]
+        if (len(line) > 0 and slice(line, 0, 1) == ">") {
+            if (in_three == 1) {
+                // hit next header, stop
+                return seq
+            }
+            if (starts_with(line, ">THREE")) {
+                in_three = 1
+            }
+        } else {
+            if (in_three == 1 and len(line) > 0) {
+                seq = seq ++ upper(line)
+            }
+        }
+        i = i + 1
+    }
+    return seq
+}
+
+// count all k-mers of length k in sequence
+// k stays untyped: print_count passes len(kmer), which is int64, and an `int`
+// param rejects it
+pn count_kmers(seq: string, k) {
+    var counts = map()
+    var seq_len = len(seq)
+    var i: int = 0
+    while (i <= seq_len - k) {
+        var kmer: string = slice(seq, i, i + k)
+        let cur = counts[kmer]
+        if (cur == null) {
+            counts.set(kmer, 1)
+        } else {
+            counts.set(kmer, cur + 1)
+        }
+        i = i + 1
+    }
+    return counts
+}
+
+// format float to 3 decimal places
+pn format3(x: float) {
+    var int_part: int = int(floor(x))
+    var frac: float = x - float(int_part)
+    var frac_f: float = floor(frac * 1000.0 + 0.5)
+    var frac_int: int = int(frac_f)
+    if (frac_int >= 1000) {
+        int_part = int_part + 1
+        frac_int = 0
+    }
+    var frac_str: string = string(frac_int)
+    var pad = 3 - len(frac_str)
+    var prefix: string = ""
+    while (pad > 0) {
+        prefix = prefix ++ "0"
+        pad = pad - 1
+    }
+    frac_str = prefix ++ frac_str
+    return int_part ++ "." ++ frac_str
+}
+
+// sort by count descending, then alphabetically ascending
+pn sort_entries(entries) {
+    entries = sort(entries, (e) => (e[0]))
+    return sort(entries, {by: (e) => (e[1]), dir: 'desc'})
+}
+
+pn print_frequencies(seq: string, k: int) {
+    let counts = count_kmers(seq, k)
+    var total = len(seq) - k + 1
+
+    // collect entries as [kmer, count] pairs
+    var entries = [for (key, val in counts) [key, val]]
+
+    // sort by count descending, then alphabetically
+    entries = sort_entries(entries)
+
+    var i: int = 0
+    while (i < len(entries)) {
+        let kmer: string = entries[i][0]
+        let count = entries[i][1]
+        let freq = float(count) * 100.0 / float(total)
+        print(kmer ++ " " ++ format3(freq) ++ "\n")
+        i = i + 1
+    }
+    print("\n")
+}
+
+// print count of a specific k-mer
+pn print_count(seq: string, kmer: string) {
+    let k = len(kmer)
+    let counts = count_kmers(seq, k)
+    let count = counts[kmer]
+    if (count == null) {
+        print("0\t" ++ kmer ++ "\n")
+    } else {
+        print(count ++ "\t" ++ kmer ++ "\n")
+    }
+}
+
+pn main() {
+    var __t0 = clock()
+    let text^err = input(INPUT_PATH, 'text')
+    let seq: string = extract_three(text)
+
+    // print frequency tables for 1-mers and 2-mers
+    print_frequencies(seq, 1)
+    print_frequencies(seq, 2)
+
+    // print counts of specific sequences
+    print_count(seq, "GGT")
+    print_count(seq, "GGTA")
+    print_count(seq, "GGTATT")
+    print_count(seq, "GGTATTTTAATT")
+    print_count(seq, "GGTATTTTAATTTATAGT")
+    var __t1 = clock()
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
+}

@@ -1071,7 +1071,9 @@ pn verify_result(collisions, numAircraft) {
 }
 
 pn main() {
+    var __t0 = clock()
     var collisions = cd(100)
+    var __t1 = clock()
     print("collisions=")
     print(collisions)
     print("\n")
@@ -1082,6 +1084,7 @@ pn main() {
     if (ok == 0) {
         print("CD: FAIL\n")
     }
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
     // return the computed collision count so the echoed main result is a
     // real assertion in the golden, not a constant 0
     return collisions

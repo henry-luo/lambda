@@ -1,0 +1,2 @@
+triangl: solutions=29760
+triangl: PASS

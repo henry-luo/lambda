@@ -1,0 +1,97 @@
+// BENG Benchmark: fannkuch-redux (Typed version)
+// For each of N! permutations of {0..N-1}, repeatedly reverse the first
+// perm[0]+1 elements until perm[0]==0. Track max flips and checksum.
+// N=7 expected: "228\nPfannkuchen(7) = 16\n"
+
+let N = 7
+
+pn main() {
+    var __t0 = clock()
+    var n: int = N
+    // perm/perm1/count stay unannotated: fill(n, int) already infers a packed
+    // ArrayNum, and a bracket annotation on a local re-tags the var as ANY
+    var perm = fill(n, 0)
+    var perm1 = fill(n, 0)
+    var count = fill(n, 0)
+    var max_flips: int = 0
+    var checksum: int = 0
+    var perm_count: int = 0
+
+    // initialize perm1 = [0, 1, ..., n-1]
+    var i: int = 0
+    while (i < n) {
+        perm1[i] = i
+        i = i + 1
+    }
+
+    var r: int = n
+    var running: int = 1
+    while (running == 1) {
+        // set count values for current r
+        while (r != 1) {
+            count[r - 1] = r
+            r = r - 1
+        }
+
+        // copy perm1 to perm
+        i = 0
+        while (i < n) {
+            perm[i] = perm1[i]
+            i = i + 1
+        }
+
+        // count flips
+        var flips: int = 0
+        var k: int = perm[0]
+        while (k != 0) {
+            var lo: int = 0
+            var hi: int = k
+            while (lo < hi) {
+                var tmp: int = perm[lo]
+                perm[lo] = perm[hi]
+                perm[hi] = tmp
+                lo = lo + 1
+                hi = hi - 1
+            }
+            flips = flips + 1
+            k = perm[0]
+        }
+
+        if (flips > max_flips) {
+            max_flips = flips
+        }
+        if (perm_count % 2 == 0) {
+            checksum = checksum + flips
+        } else {
+            checksum = checksum - flips
+        }
+        perm_count = perm_count + 1
+
+        // generate next permutation inline
+        var found: int = 0
+        r = 1
+        while (r < n and found == 0) {
+            var perm0: int = perm1[0]
+            i = 0
+            while (i < r) {
+                perm1[i] = perm1[i + 1]
+                i = i + 1
+            }
+            perm1[r] = perm0
+            count[r] = count[r] - 1
+            if (count[r] > 0) {
+                found = 1
+            } else {
+                r = r + 1
+            }
+        }
+        if (found == 0) {
+            running = 0
+        }
+    }
+
+    print(checksum ++ "\n")
+    print("Pfannkuchen(" ++ n ++ ") = " ++ max_flips ++ "\n")
+    var __t1 = clock()
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
+}

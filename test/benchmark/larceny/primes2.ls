@@ -1,0 +1,46 @@
+// Larceny Benchmark: primes (Typed version)
+// Sieve of Eratosthenes — count primes up to 1000000
+// Adapted from Larceny/Gambit benchmark suite
+// Expected: 78498 primes (well-known: pi(1000000) = 78498)
+
+pn sieve(limit: int) int {
+    // flags stay a boxed array: only int/float/int64/uint64 have packed
+    // ArrayNum layouts, so a bool[] annotation would fail to coerce
+    var flags = fill(limit + 1, true)
+    flags[0] = false
+    flags[1] = false
+    var i: int = 2
+    while (i * i <= limit) {
+        if (flags[i]) {
+            var j: int = i * i
+            while (j <= limit) {
+                flags[j] = false
+                j = j + i
+            }
+        }
+        i = i + 1
+    }
+    var count: int = 0
+    i = 2
+    while (i <= limit) {
+        if (flags[i]) {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    return count
+}
+
+pn main() {
+    var __t0 = clock()
+    let result = sieve(1000000)
+    var __t1 = clock()
+    if (result == 78498) {
+        print("primes: PASS\n")
+    } else {
+        print("primes: FAIL result=")
+        print(result)
+        print("\n")
+    }
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
+}
