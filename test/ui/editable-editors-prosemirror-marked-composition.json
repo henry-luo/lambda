@@ -1,0 +1,15 @@
+{
+  "name": "upstream ProseMirror preserves marks around physical composition",
+  "html": "test/editable-editors/fixtures/prosemirror/marked.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "one two"},
+    {"type": "focus", "target": {"selector": ".ProseMirror"}},
+    {"type": "set_editing_selection", "target": {"selector": ".ProseMirror"}, "start": 4, "end": 7},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "五", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "one 日本"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "\"type\":\"em\""}
+  ]
+}

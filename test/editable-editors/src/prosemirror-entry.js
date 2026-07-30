@@ -9,6 +9,7 @@ import { keymap } from "prosemirror-keymap";
 const host = document.getElementById("editor");
 const state = document.getElementById("state");
 const editorSchema = schema;
+const read_only = host.hasAttribute("data-readonly");
 let view = null;
 
 function publish() {
@@ -31,7 +32,8 @@ view = new EditorView(host, {
   dispatchTransaction(transaction) {
     view.updateState(view.state.apply(transaction));
     publish();
-  }
+  },
+  editable() { return !read_only; }
 });
 publish();
 

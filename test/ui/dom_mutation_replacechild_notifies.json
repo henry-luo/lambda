@@ -12,6 +12,8 @@
     {"type": "assert_count", "target": {"selector": "#new-child"}, "equals": 1},
     {"type": "assert_attribute", "target": {"selector": "#new-child"}, "attribute": "data-label", "equals": "replacement child"},
     {"type": "assert_attribute", "target": {"selector": "#status"}, "attribute": "data-state", "equals": "replaceChild complete"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_attribute", "target": {"selector": "#status"}, "attribute": "data-mutation", "equals": "childList:1:1:true:true"},
     {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
     {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#trigger"}}
   ]

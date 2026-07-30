@@ -1,0 +1,13 @@
+{
+  "name": "upstream ProseMirror parses external HTML clipboard blocks",
+  "html": "test/editable-editors/fixtures/prosemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "focus", "target": {"selector": ".ProseMirror"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "paste_text", "target": {"selector": ".ProseMirror"}, "text": "alpha\nbeta", "html": "<p>alpha</p><p>beta</p>"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "alpha"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "beta"},
+    {"type": "assert_count", "target": {"selector": ".ProseMirror p"}, "min": 2}
+  ]
+}

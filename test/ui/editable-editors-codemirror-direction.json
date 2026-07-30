@@ -1,0 +1,10 @@
+{
+  "name": "upstream CodeMirror observes themed right-to-left text direction",
+  "html": "test/editable-editors/fixtures/codemirror/direction.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "wait", "ms": 40},
+    {"type": "assert_text", "target": {"selector": "#direction"}, "equals": "rtl"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "אבג"}
+  ]
+}

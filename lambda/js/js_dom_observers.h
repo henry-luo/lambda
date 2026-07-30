@@ -15,6 +15,8 @@ void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                                       void* target, void* parent,
                                       const char* attribute_name,
                                       const char* old_value);
+void js_dom_observers_child_replace_notify(void* parent, void* added,
+                                           void* removed);
 void js_dom_observers_post_layout(void);
 void js_dom_observers_reset(void);
 

@@ -1,0 +1,17 @@
+{
+  "name": "upstream Editor.js maintains data-empty across empty block edits",
+  "html": "test/editable-editors/fixtures/editorjs/empty.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": ".ce-paragraph"}, "attribute": "data-empty", "equals": "true"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "x"},
+    {"type": "assert_attribute", "target": {"selector": ".ce-paragraph"}, "attribute": "data-empty", "equals": "false"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_attribute", "target": {"selector": ".ce-paragraph"}, "attribute": "data-empty", "equals": "true"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".ce-paragraph"}, "equals": 2},
+    {"type": "assert_attribute", "target": {"selector": ".ce-paragraph", "index": 1}, "attribute": "data-empty", "equals": "true"}
+  ]
+}

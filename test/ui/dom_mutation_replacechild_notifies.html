@@ -16,12 +16,26 @@
     const container = document.getElementById('container');
     const status = document.getElementById('status');
     let replaced = false;
+    let oldChild = null;
+    let newChild = null;
+
+    const observer = new MutationObserver((records) => {
+      const record = records[0];
+      status.setAttribute('data-mutation', [
+        record.type,
+        String(record.addedNodes.length),
+        String(record.removedNodes.length),
+        String(record.addedNodes[0] === newChild),
+        String(record.removedNodes[0] === oldChild)
+      ].join(':'));
+    });
+    observer.observe(container, { childList: true });
 
     trigger.addEventListener('keydown', () => {
       if (replaced) return;
       replaced = true;
-      const oldChild = document.getElementById('old-child');
-      const newChild = document.createElement('span');
+      oldChild = document.getElementById('old-child');
+      newChild = document.createElement('span');
       newChild.id = 'new-child';
       newChild.setAttribute('data-label', 'replacement child');
       container.replaceChild(newChild, oldChild);

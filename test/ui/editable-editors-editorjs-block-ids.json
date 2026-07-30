@@ -1,0 +1,15 @@
+{
+  "name": "upstream Editor.js stores unique block ids after keyboard insertion",
+  "html": "test/editable-editors/fixtures/editorjs/typing.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#ids"}, "attribute": "data-count", "equals": "4"},
+    {"type": "assert_attribute", "target": {"selector": "#ids"}, "attribute": "data-unique", "equals": "true"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_attribute", "target": {"selector": "#ids"}, "attribute": "data-count", "equals": "5"},
+    {"type": "assert_attribute", "target": {"selector": "#ids"}, "attribute": "data-unique", "equals": "true"}
+  ]
+}
