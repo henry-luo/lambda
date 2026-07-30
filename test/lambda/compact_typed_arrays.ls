@@ -70,7 +70,7 @@ a8[1]
 
 // ===== type annotations with compact arrays =====
 "=== annotations ==="
-let ta:u8[] = [1, 2, 3]
+let ta:u8[] = [1u8, 2u8, 3u8]
 ta
 len(ta)
 ta[0]

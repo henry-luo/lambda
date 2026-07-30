@@ -101,6 +101,14 @@ static ValidationResult* validate_array_num_occurrence(
         return result;
     }
 
+    // Validator `any` is the non-error data top type. A numeric carrier has
+    // no error members, including for N-D arrays, so it satisfies `any[]`
+    // without imposing a fabricated numeric element constraint.
+    if (operand_type->type_id == LMD_TYPE_ANY) {
+        result->valid = true;
+        return result;
+    }
+
     // N-D ArrayNum: leading-axis slices are themselves arrays.  Validate by
     // treating each "row" as a (ndim-1)-D ArrayNum and checking against
     // operand_type recursively.  The simplest sufficient check: if operand_type

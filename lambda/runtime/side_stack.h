@@ -63,6 +63,8 @@ void lambda_root_frame_end(LambdaRootFrame* frame);
 // Explicit-owner variants are test/control-plane surfaces for an inactive
 // context. Runtime execution must use the TLS APIs above.
 bool lambda_side_stack_bind_for(Context* context);
+bool lambda_side_stack_ensure_for(Context* context, size_t root_slots,
+                                  size_t number_slots);
 void lambda_side_stack_reset_for(Context* context);
 LambdaSideStackSnapshot lambda_side_stack_snapshot_for(Context* context);
 void lambda_side_stack_restore_for(Context* context,

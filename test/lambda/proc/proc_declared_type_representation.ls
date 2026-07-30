@@ -68,13 +68,13 @@ pn main() {
     // B — declared native type from a decimal-carrier expression
     show("pad_count", pad_count("1234"))
     show("pad_string", pad_string("1234"))
-    var direct: int = 5n
+    var direct: int = int(5n)
     show("int_from_integer_literal", direct)
-    var as_i64: int64 = 9 - len("abcd")
+    var as_i64 = int64(9 - len("abcd"))
     show("int64_from_len_expr", as_i64)
-    var as_float: float = 9n
+    var as_float: float = float(9n)
     show("float_from_integer", as_float)
     // the same binding in a let, and inside fn, took the identical bad path
-    let in_let: int = 9 - len("abcd")
+    let in_let: int = int(9 - len("abcd"))
     show("let_int_from_len_expr", in_let)
 }

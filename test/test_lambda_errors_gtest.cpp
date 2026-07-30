@@ -595,6 +595,36 @@ TEST_F(NegativeScriptTest, InvalidTypeAnnotation) {
     ExpectErrorWithoutCrash("test/lambda/negative/invalid_type_annotation.ls");
 }
 
+TEST_F(NegativeScriptTest, StaticAnnotatedDeclarationsRejectKnownMismatches) {
+    ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
+        "cannot initialize 'wrong_scalar' of type int with string");
+}
+
+TEST_F(NegativeScriptTest, StaticNamedMapLiteralFieldsAreCheckedBeforeLayoutAdoption) {
+    ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
+        "field 'age' of 'wrong_field' expects int, but got string");
+}
+
+TEST_F(NegativeScriptTest, StaticAnnotatedDeclarationsRejectNull) {
+    ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
+        "cannot initialize 'wrong_null' of type int with null");
+}
+
+TEST_F(NegativeScriptTest, StaticDeclaredReturnsRejectKnownMismatches) {
+    ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
+        "function 'wrong_return' body returns type string, declared return type int");
+}
+
+TEST_F(NegativeScriptTest, StaticTypedMapWritesRejectKnownMismatches) {
+    ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
+        "cannot assign string to typed map member of type int");
+}
+
+TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
+    ExpectErrorMessage("test/std/negative/wrong_arg_count.ls",
+        "function expects 2 arguments, got 1");
+}
+
 TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
     ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls");
 

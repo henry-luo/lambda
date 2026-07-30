@@ -147,11 +147,10 @@ pn test_fill_float_typed_float() {
 }
 
 // ============================================================
-// Test 9: int[] = fill(n, float) → cross-type coercion
-// ArrayFloat → ArrayInt, mutation works
+// Test 9: int[] = fill(n, int) → exact typed initialization
 // ============================================================
 pn test_fill_float_typed_int() {
-    var arr:int[] = fill(5, 0.0)
+    var arr:int[] = fill(5, 0)
     arr[0] = 7
     arr[4] = 99
     print(arr[0])
@@ -163,11 +162,10 @@ pn test_fill_float_typed_int() {
 }
 
 // ============================================================
-// Test 10: float[] = fill(n, int) → cross-type coercion
-// ArrayInt → ArrayFloat, mutation works
+// Test 10: float[] = fill(n, float) → exact typed initialization
 // ============================================================
 pn test_fill_int_typed_float() {
-    var arr:float[] = fill(5, 0)
+    var arr:float[] = fill(5, 0.0)
     arr[0] = 3.14
     arr[4] = 2.72
     print(arr[0])
@@ -179,10 +177,10 @@ pn test_fill_int_typed_float() {
 }
 
 // ============================================================
-// Test 11: int[] = fill(n, bool) → generic Array → ArrayInt
+// Test 11: int[] = fill(n, int) → exact typed initialization
 // ============================================================
 pn test_fill_bool_typed_int() {
-    var arr:int[] = fill(3, true)
+    var arr:int[] = fill(3, 0)
     arr[0] = 42
     arr[2] = 99
     print(arr[0])
@@ -194,10 +192,10 @@ pn test_fill_bool_typed_int() {
 }
 
 // ============================================================
-// Test 12: float[] = fill(n, bool) → generic Array → ArrayFloat
+// Test 12: float[] = fill(n, float) → exact typed initialization
 // ============================================================
 pn test_fill_bool_typed_float() {
-    var arr:float[] = fill(3, true)
+    var arr:float[] = fill(3, 0.0)
     arr[0] = 1.5
     arr[2] = 9.9
     print(arr[0])
@@ -279,10 +277,10 @@ pn test_fill_wrapper_typed_float() {
 }
 
 // ============================================================
-// Test 17: fill() through wrapper cross-type: float[] = fill(n, int)
+// Test 17: fill() through wrapper with an exact float value
 // ============================================================
 pn test_fill_wrapper_cross_float() {
-    var arr:float[] = make_array(5, 0)
+    var arr:float[] = make_array(5, 0.0)
     arr[0] = 2.5
     arr[4] = 8.8
     print(arr[0])
@@ -294,10 +292,10 @@ pn test_fill_wrapper_cross_float() {
 }
 
 // ============================================================
-// Test 18: fill() through wrapper cross-type: int[] = fill(n, float)
+// Test 18: fill() through wrapper with an exact int value
 // ============================================================
 pn test_fill_wrapper_cross_int() {
-    var arr:int[] = make_array(5, 0.0)
+    var arr:int[] = make_array(5, 0)
     arr[0] = 11
     arr[4] = 55
     print(arr[0])

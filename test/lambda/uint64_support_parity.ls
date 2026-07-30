@@ -22,7 +22,7 @@ let wide: u64[] = [1u64, 18446744073709551615u64]
 wide
 type(wide[0])
 type(wide[1])
-let converted: u64[] = [1, 2]
+let converted: u64[] = [1u64, 2u64]
 converted
 type(converted[0])
 let filled = fill(2, 18446744073709551615u64)

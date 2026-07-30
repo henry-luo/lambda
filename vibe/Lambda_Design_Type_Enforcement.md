@@ -1,6 +1,7 @@
 # Lambda — Type Support Design: Enforcement First
 
-**Status:** PROPOSAL rev 2 — complete, for discussion. Nothing here is implemented.
+**Status:** IMPLEMENTED — correctness scope complete; the annotation-performance work explicitly
+deferred by §1/§9 remains a separate follow-on.
 **Date:** 2026-07-29; revised 2026-07-30
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
@@ -10,8 +11,9 @@ touched here only where enforcement is its prerequisite.
 `doc/Lambda_Formal_Semantics.md` (semantic authority), `doc/Lambda_Type.md`,
 `vibe/Lambda_Issues_Outstanding.md` OI-5 (MIR value-representation contract),
 `doc/dev/lambda/LR_13_Schema_Validator.md` (validator design).
-**Evidence basis:** all "measured" claims below were reproduced on 2026-07-29 against the current
-release `lambda.exe`; repro scripts in `./temp/tsd_t*.ls`.
+**Evidence basis:** §§5–6 preserve the 2026-07-29 pre-implementation survey and its release
+reproductions, so they remain useful as the before-state. §8.1 records the shipped implementation
+and regression coverage as of 2026-07-30.
 
 ---
 
@@ -239,7 +241,11 @@ boundary), which is exactly backwards for the Go direction.
 
 ---
 
-## 5. Current implementation survey
+## 5. Pre-implementation survey (historical baseline)
+
+This section describes the implementation that motivated this proposal, before the enforcement
+work recorded in §8.1. Its words "today", "unchecked", and line references are historical; they
+must not be read as a description of the current runtime.
 
 ### 5.1 Static checker map (surveyed)
 
@@ -1083,6 +1089,50 @@ Each phase gates on `make test-lambda-baseline` and `make test262-baseline` at 1
 targeted tests (every new `*.ls` with its `*.txt` golden, per repo rule; negative compile-error
 cases assert the diagnostic text). Performance measurements use `make release`, never a debug
 binary.
+
+### 8.1 Delivered enforcement inventory (2026-07-30)
+
+The correctness work in P0–P4 is implemented. The old survey remains above as the before-state;
+this ledger is the authoritative current-state summary.
+
+| Boundary / invariant | Delivered implementation |
+|---|---|
+| Annotation metadata | `AstNamedNode` and `NameEntry` retain `declared_type` separately from the initializer/effective type. A `let` and a `var` therefore carry the same binding contract; only `var` permits later replacement. |
+| Static boundary | The builder classifies annotated declarations, named-map literal fields, whole-value `var` reassignments, parameters, returns, typed map members/indices, and typed array elements as proven, rejected, or deferred. Known argument and return mismatches use E207 and E208; generic binding/write mismatches use E201. Plain `T` rejects known `null`; `T?` remains the spelling that admits it. |
+| Deferred boundary | MIR routes dynamic declarations, calls, parameters, returns, array writes, and map writes through `lambda_type_check`. `lambda_type_matches` is also the `is` predicate path: it handles simple/numeric cases directly and asks the schema validator to match maps, arrays, unions, and occurrences. Failed shape checks retain the first validator path in the rich error. |
+| Error result | `lambda_type_error` creates a diagnostic error object rather than returning a native conversion fallback. An incoming error is preserved at an unchecked clean boundary, so no typed destination is established with it. Core `any` admits error; the validator's historical `any` remains the intentionally non-error validation pattern. |
+| Function contracts | Every emitted function records its `TypeFunc` signature. Direct and first-class calls enforce required/max/variadic arity, the boxed entry resolves omitted optional/default parameters before typed unboxing, and a variadic tail is marshalled as `varg()`. Dynamic calls with a wrong type or arity return rich E201/E206 values rather than entering the body. |
+| Named map input | A literal is checked field by field before any layout decision. A dynamic `Person` binding is validated deeply against the same `Type*`; a failure such as `.age: expected int, got string` reports that path and never publishes the binding. Named map contracts are open: extra keys survive. |
+| Typed array writes | A typed array write constructs and validates a candidate before replacement. A bad dynamic element cannot silently downgrade an `int[]` to a heterogeneous array. Array construction also keeps `any`, `null`, and error elements in generic storage rather than silently unboxing them into a compact numeric carrier. |
+| Typed map writes and COW | `lambda_map_set_checked` and `lambda_map_path_set_checked` operate on a detached candidate root. The raw store may extend/repack the candidate's exact runtime shape, then the entire candidate is checked against the binding's semantic root contract. Only a successful candidate replaces the root/path; the old value and any shared snapshot remain unchanged on failure. This covers named members, computed keys, and nested writes. |
+| Physical layout | A map's current `ShapeEntry` always describes its stored bytes. An unannotated root may legally evolve from `age: int` to `age: string`, which creates/reuses a matching exact shape. A typed root may undergo the same physical repack only when the resulting value still satisfies its semantic contract (for example an `int | string` field); `Person.age: int` rejects the change. |
+| Constrained types | The accepted interim rule is implemented: checks enforce the base type and deliberately do not evaluate the predicate refinement. This is validator follow-up work, not a hole in the base binding contract. |
+
+**Map member assignment rule, concretely.** For `var p: Person = ...`, `p.age = e` is never an
+in-place overwrite of the old `Person` bytes with an arbitrary carrier. The runtime evaluates
+`e`, clones the affected root/spine, writes it using a shape that matches its actual stored
+value, validates the new root as `Person`, and only then installs that replacement. Thus a bad
+dynamic `e` yields an error and leaves both `p` and `let snapshot = p` untouched. Conversely,
+`var q = {name: "Ana", age: 30}; q.age = "very old"` has no declared root contract: it is a
+legal COW shape evolution, and `snapshot` still observes the old `{age: 30}` map. This is the
+semantic distinction between an inferred mutable value and an annotated mutable binding.
+
+The generic native dynamic-call ABI has an existing physical eight-argument dispatch ceiling.
+For a valid signature beyond that ceiling, a dynamic call reports an arity diagnostic rather
+than bypassing its type contract; statically resolved calls retain their normal compiled ABI.
+That implementation limit is separate from the annotation-enforcement semantics and is tracked
+with the general first-class-call ABI work.
+
+**Verification snapshot (2026-07-30).** `make build` and `make build-test` pass. Focused
+coverage passes for static declaration/map/null/return rejection; deferred declaration, named
+map, parameter, and return rejection; typed array/map writes; dynamic arity; dynamic
+optional/default/variadic calls; and map COW snapshot isolation. The complete
+`./test/test_lambda_gtest.exe` suite passes **622/622**. The required
+`make test-lambda-baseline` gate is green: **2,104/2,104** input tests and
+**1,542/1,542** Lambda-runtime tests. `make test262-baseline` is also green:
+**40,261/40,261** baseline tests fully pass, with **0** non-fully-passing tests,
+**0** failures, **0** retries, and **0** regressions. The enforcement correctness scope is
+therefore closed; §9's performance work remains explicitly deferred.
 
 **P0 — Semantic foundation and static completion.** Establish TE-6's canonical
 `subtype`/`matches` primitives and truth tables first, then TE-7 items 1–4: declaration reorder

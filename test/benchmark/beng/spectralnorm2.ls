@@ -45,7 +45,7 @@ pn eval_A(i: int, j: int) float {
     return 1.0 / float((i + j) * (i + j + 1) / 2 + i + 1)
 }
 
-pn mul_Av(n: int, v: float[], av: float[]) {
+pn mul_Av(n: int, v: float[], var av: float[]) {
     var i: int = 0
     while (i < n) {
         var s: float = 0.0
@@ -59,7 +59,7 @@ pn mul_Av(n: int, v: float[], av: float[]) {
     }
 }
 
-pn mul_Atv(n: int, v: float[], atv: float[]) {
+pn mul_Atv(n: int, v: float[], var atv: float[]) {
     var i: int = 0
     while (i < n) {
         var s: float = 0.0
@@ -73,16 +73,16 @@ pn mul_Atv(n: int, v: float[], atv: float[]) {
     }
 }
 
-pn mul_AtAv(n: int, v: float[], out: float[]) {
-    var tmp = fill(n, 0.0)
+pn mul_AtAv(n: int, v: float[], var out: float[]) {
+    var tmp: float[] = fill(n, 0.0)
     mul_Av(n, v, tmp)
     mul_Atv(n, tmp, out)
 }
 
 pn main() {
     var __t0 = clock()
-    var u = fill(N, 1.0)
-    var v = fill(N, 0.0)
+    var u: float[] = fill(N, 1.0)
+    var v: float[] = fill(N, 0.0)
 
     var i: int = 0
     while (i < 10) {

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune4 M1: numeric-array load/store fast paths guard container kind, shaped/view flags, and element representation, retaining generic fallbacks for widened aliases.",
+  "description": "Typed numeric-array loads retain their guarded fast path; typed writes go through the checked replacement helper so a widened alias cannot mutate the bound array into an invalid representation.",
   "checks": [
     {
       "in_func": "_guarded_load_#",
@@ -20,17 +20,14 @@
     {
       "in_func": "_guarded_store_#",
       "expect_seq": [
-        { "pattern": "mov\tgtid_" },
-        { "pattern": "eq\tgtidok_" },
-        { "pattern": "mov\tglay_" },
-        { "pattern": "and\tgshp_" },
-        { "pattern": "mov\tgelm_" },
-        { "pattern": "eq\tgelmok_" },
-        { "pattern": "and\tfvw_" },
-        { "pattern": "call\tfn_array_set_p, fn_array_set" }
+        { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
+        { "pattern": "call\tlambda_array_set_checked_p, lambda_array_set_checked" },
+        { "pattern": "call\titem_type_id_p, item_type_id" },
+        { "pattern": "eq\tstmt_err_" },
+        { "pattern": "call\tfn_index_p, fn_index" }
       ],
       "count": {
-        "call\tfn_array_set_p, fn_array_set": 1
+        "call\tlambda_array_set_checked_p, lambda_array_set_checked": 1
       }
     }
   ]

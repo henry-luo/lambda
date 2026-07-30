@@ -252,6 +252,10 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool has_type_annotation;
+    // The explicit source annotation, when present.  `node->type` is the
+    // effective compiler type and historically lost this distinction during
+    // declaration construction, which let later boundaries guess from TypeId.
+    Type* declared_type;
     bool type_widened;
     bool is_lexical;
     bool is_const;
@@ -347,6 +351,9 @@ typedef struct AstNamedNode : AstNode {
     AstNode *as;
     String* error_name;
     NameEntry* entry;
+    // Kept separately from AstNode::type so a declaration can retain both its
+    // source annotation and its initializer's inferred type (`as->type`).
+    Type* declared_type;
 } AstNamedNode;
 
 typedef struct AstIdentNode : AstNode {

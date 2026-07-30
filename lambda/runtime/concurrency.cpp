@@ -486,11 +486,20 @@ static void wake_waiters(LambdaTask* target) {
             Item value = group->select_result ? target->handle : target->result;
             task_resume_with(group->waiter, value);
         } else {
-            // wait-group teardown removes every target link, so never retain a link
-            // across a resume that can free the group containing it.
+            // A waiter can already be done when its target completes. Removing
+            // only this target link leaves the group's next link dangling; tear
+            // down the whole settled group before either task is reclaimed.
             LambdaWaitLink* stale = target->waiters;
-            target->waiters = stale->next_target;
-            mem_free(stale);
+            if (group) {
+                if (group->waiter && group->waiter->wait_group == group) {
+                    group->waiter->wait_group = NULL;
+                }
+                wait_group_unlink(group);
+                wait_group_free(group);
+            } else {
+                target->waiters = stale->next_target;
+                mem_free(stale);
+            }
         }
     }
 }

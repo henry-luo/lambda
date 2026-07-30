@@ -96,7 +96,7 @@ pn print_frequencies(seq: string, k: int) {
 
     var i: int = 0
     while (i < len(entries)) {
-        let kmer: string = entries[i][0]
+        let kmer: string = string(entries[i][0])
         let count = entries[i][1]
         let freq = float(count) * 100.0 / float(total)
         print(kmer ++ " " ++ format3(freq) ++ "\n")

@@ -76,7 +76,7 @@ pn make_cumulative(probs: float[]) {
 
 // seed is mutable via array trick: seed_arr[0]
 pn random_fasta(id: string, desc: string, chars, probs: float[],
-                count: int, seed_arr: int[]) {
+                count: int, var seed_arr: int[]) {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var cum = make_cumulative(probs)
     var num_chars = len(chars)
@@ -110,7 +110,7 @@ pn random_fasta(id: string, desc: string, chars, probs: float[],
 pn main() {
     var __t0 = clock()
     // seed is shared across calls, stored in mutable array
-    var seed_arr = [42]
+    var seed_arr: int[] = [42]
 
     repeat_fasta("ONE", "Homo sapiens alu", ALU, N_COUNT * 2)
     random_fasta("TWO", "IUB ambiguity codes", IUB_CHARS, IUB_PROBS, N_COUNT * 3, seed_arr)

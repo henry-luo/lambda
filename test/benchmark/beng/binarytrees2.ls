@@ -5,7 +5,7 @@
 let N = 10
 
 // named node shape, used on the check() parameter to document the tree shape
-type Node = {left: Node, right: Node}
+type Node = {left: Node?, right: Node?}
 
 // make_tree must return its map literals DIRECTLY. mir_region_producer_candidate()
 // only accepts a body of blocks/ifs/returns/map-literals, so binding the literal to

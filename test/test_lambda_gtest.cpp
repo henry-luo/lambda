@@ -458,6 +458,34 @@ TEST(LambdaNegativeTests, test_typed_array_coercion_error) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/typed_array_coercion_error.ls");
 }
 
+TEST(LambdaNegativeTests, test_type_enforcement_typed_map_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_map_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_typed_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_arity) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_declaration) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_map) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_map.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_parameter) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_parameter.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_return) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_return.ls");
+}
+
 TEST(LambdaBinaryTests, output_writes_decoded_bytes) {
     const char* script_path = "test/lambda/proc/proc_binary_output.ls";
     const char* args[] = {LAMBDA_EXE, "--no-log", "run", script_path, NULL};

@@ -35,6 +35,11 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
     if (fn_node->captures) return false;  // closures already use Item ABI
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
 
+    // Dynamic dispatch has to materialize absent optionals/defaults and the
+    // trailing vargs list before the raw fixed-arity body is entered.
+    if (fn_type && (fn_type->is_variadic ||
+            fn_type->required_param_count != fn_type->param_count)) return true;
+
     // Functions with typed params need param unboxing wrapper
     if (has_typed_params(fn_node)) return true;
 

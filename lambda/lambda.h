@@ -1042,6 +1042,7 @@ extern "C" {
 #endif
 void lambda_function_mark_mir_public_abi(Function* fn);
 void lambda_function_mark_mir_context_abi(Function* fn);
+void lambda_function_set_type(Function* fn, void* fn_type);
 #ifdef __cplusplus
 }
 #endif
@@ -1119,6 +1120,9 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
 #define ITEM_TASK_SUSPENDED ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 2)  // internal resumable-call sentinel
+// Internal call-ABI marker.  It never reaches a Lambda binding: public MIR
+// wrappers replace it with an optional null or evaluate the declared default.
+#define ITEM_MISSING_ARGUMENT ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 3)
 #define ITEM_JS_JUBE_LAZY_SENTINEL (((uint64_t)LMD_TYPE_INT << 56) | UINT64_C(0x004A5542454C5A))  // unresolved Jube global
 #define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
@@ -1848,6 +1852,22 @@ extern "C" {
     Item fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
+    // Type-boundary primitives used by the MIR emitter. `lambda_type_check`
+    // returns its input on success and a diagnostic-carrying Error Item on a
+    // mismatch; no native lane may be entered before this succeeds.
+    bool lambda_type_matches(Item value, Type* expected);
+    Item lambda_type_error(Item actual, Type* expected, const char* boundary);
+    Item lambda_type_check(Item value, Type* expected, const char* boundary);
+    Item lambda_map_set_checked(Item owner, Item key, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
     Bool fn_at(Item a, Item b);

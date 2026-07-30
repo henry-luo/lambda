@@ -61,7 +61,7 @@ test_destructure_success()
 // ===== Nested propagation =====
 fn divide(a, b) int^ {
     if (b == 0) raise error("division by zero")
-    else a / b
+    else a div b
 }
 
 fn compute(x) int^ {

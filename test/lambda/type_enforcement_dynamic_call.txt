@@ -1,0 +1,5 @@
+{
+  optional: [1, null],
+  defaulted: 12,
+  variadic: [1, 2]
+}

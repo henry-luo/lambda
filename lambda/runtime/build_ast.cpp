@@ -63,6 +63,10 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node);
 // Forward declaration for object type building (used by pub type)
 AstNode* build_object_type(Transpiler* tp, TSNode type_node);
 
+typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
+static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+                            bool descend_functions);
+
 // System function definitions — single source of truth in sys_func_registry.cpp
 // See lambda/sys_func_registry.cpp for the complete table.
 extern SysFuncInfo sys_func_defs[];
@@ -853,6 +857,22 @@ static Type* ast_called_type_target(AstNode* function) {
     return type_type->type;
 }
 
+static bool ast_called_function_signature_ready(AstNode* function) {
+    while (function && function->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)function;
+        if (!primary->expr) break;
+        function = primary->expr;
+    }
+    if (!function || function->node_type != AST_NODE_IDENT) return true;
+    AstIdentNode* ident = (AstIdentNode*)function;
+    AstNode* declaration = ident->entry ? ident->entry->node : NULL;
+    if (!declaration || (declaration->node_type != AST_NODE_FUNC &&
+            declaration->node_type != AST_NODE_PROC)) return true;
+    // Top-level pass one publishes a function name before its parameters are
+    // built.  That placeholder has a zero count, not a zero-argument contract.
+    return ((AstFuncNode*)declaration)->body != NULL;
+}
+
 static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
     bool negate = false;
     while (node && node->node_type == AST_NODE_PRIMARY) {
@@ -948,8 +968,11 @@ static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* se
     }
 }
 
-// Record a type error and check if we should continue transpiling
-void record_type_error(Transpiler* tp, int line, const char* format, ...) {
+// Record a typed semantic error and check if we should continue transpiling.
+// Boundary sites select the specific public diagnostic code; E201 remains the
+// generic declaration/assignment mismatch.
+static void record_type_error_code(Transpiler* tp, int line, LambdaErrorCode code,
+        const char* format, ...) {
     tp->error_count++;
 
     // Format error message
@@ -962,7 +985,7 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     // Create structured error
     SourceLocation loc = src_loc(tp->reference, line, 1);
     loc.source = tp->source;
-    LambdaError* error = err_create(ERR_TYPE_MISMATCH, error_msg, &loc);
+    LambdaError* error = err_create(code, error_msg, &loc);
 
     // Store in error list if available
     if (tp->errors) {
@@ -970,12 +993,23 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     }
 
     // Also log for backward compatibility
-    log_error("type_error (line %d): %s", line, error_msg);
+    log_error("type_error[E%d] (line %d): %s", code, line, error_msg);
 
     // Check threshold
     if (tp->error_count >= tp->max_errors) {
         log_error("error_threshold: max errors (%d) reached", tp->max_errors);
     }
+}
+
+// Record a generic type mismatch. Keep this entry point for existing callers
+// that do not describe a more specific source boundary.
+void record_type_error(Transpiler* tp, int line, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    char error_msg[512];
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    record_type_error_code(tp, line, ERR_TYPE_MISMATCH, "%s", error_msg);
 }
 
 // Record a semantic error with error code
@@ -1019,6 +1053,156 @@ void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, co
 // Check if should continue transpiling based on error count
 bool should_continue_transpiling(Transpiler* tp) {
     return tp->error_count < tp->max_errors;
+}
+
+typedef enum StaticBoundaryResult {
+    STATIC_BOUNDARY_PROVEN,
+    STATIC_BOUNDARY_REJECTED,
+    STATIC_BOUNDARY_DEFERRED,
+} StaticBoundaryResult;
+
+static Type* boundary_unwrap_type(Type* type) {
+    type = unwrap_simple_type_type(type);
+    if (type && !is_global_simple_type(type) && type->kind == TYPE_KIND_CONSTRAINED) {
+        TypeConstrained* constrained = (TypeConstrained*)type;
+        type = unwrap_simple_type_type(constrained->base);
+    }
+    return type;
+}
+
+static bool boundary_type_is_extended(const Type* type, TypeKind kind) {
+    return type && !is_global_simple_type(type) && type->kind == kind;
+}
+
+// This is the static half of an annotated boundary.  It intentionally treats
+// `any` and an unproven map shape as deferred rather than silently accepting
+// them: the MIR/runtime boundary supplies the corresponding dynamic check.
+static StaticBoundaryResult static_boundary_relation(Type* source, Type* target) {
+    source = boundary_unwrap_type(source);
+    target = boundary_unwrap_type(target);
+    if (!source || !target || source->type_id == LMD_TYPE_ANY) {
+        return STATIC_BOUNDARY_DEFERRED;
+    }
+    if (target->type_id == LMD_TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
+
+    if (boundary_type_is_extended(target, TYPE_KIND_BINARY)) {
+        TypeBinary* target_binary = (TypeBinary*)target;
+        if (target_binary->op == OPERATOR_UNION) {
+            StaticBoundaryResult left = static_boundary_relation(source, target_binary->left);
+            StaticBoundaryResult right = static_boundary_relation(source, target_binary->right);
+            if (left == STATIC_BOUNDARY_PROVEN || right == STATIC_BOUNDARY_PROVEN) {
+                return STATIC_BOUNDARY_PROVEN;
+            }
+            return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
+                STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_REJECTED;
+        }
+    }
+    if (boundary_type_is_extended(source, TYPE_KIND_BINARY)) {
+        TypeBinary* source_binary = (TypeBinary*)source;
+        if (source_binary->op == OPERATOR_UNION) {
+            StaticBoundaryResult left = static_boundary_relation(source_binary->left, target);
+            StaticBoundaryResult right = static_boundary_relation(source_binary->right, target);
+            if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED) {
+                return STATIC_BOUNDARY_REJECTED;
+            }
+            return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
+                STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_PROVEN;
+        }
+    }
+    // A parameter/member can carry an occurrence or optional wrapper as its
+    // effective AST type. Its structural relation is not represented by the
+    // compact Type prefix, so defer to the runtime matcher instead of
+    // misdiagnosing a statically well-formed nullable container call.
+    if (boundary_type_is_extended(source, TYPE_KIND_UNARY)) {
+        return STATIC_BOUNDARY_DEFERRED;
+    }
+    if (boundary_type_is_extended(target, TYPE_KIND_UNARY)) {
+        TypeUnary* target_unary = (TypeUnary*)target;
+        if (target_unary->op == OPERATOR_OPTIONAL) {
+            if (source->type_id == LMD_TYPE_NULL) return STATIC_BOUNDARY_PROVEN;
+            return static_boundary_relation(source, target_unary->operand);
+        }
+        // Occurrence/array membership requires element information that can be
+        // absent from a nonliteral source, so keep the dynamic path available.
+        return STATIC_BOUNDARY_DEFERRED;
+    }
+    if (source->type_id == LMD_TYPE_MAP && target->type_id == LMD_TYPE_MAP &&
+            source != target && target != &TYPE_MAP) {
+        return STATIC_BOUNDARY_DEFERRED;
+    }
+    return types_compatible_with_full(source, target, target) ?
+        STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
+}
+
+static AstNode* boundary_unwrap_primary(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstNode* inner = ((AstPrimaryNode*)node)->expr;
+        if (!inner) break;
+        node = inner;
+    }
+    return node;
+}
+
+static void check_declared_map_literal(Transpiler* tp, AstNamedNode* declaration,
+        TypeMap* expected, int line) {
+    AstNode* rhs = boundary_unwrap_primary(declaration->as);
+    if (!rhs || rhs->node_type != AST_NODE_MAP || !expected ||
+            expected == (TypeMap*)&TYPE_MAP) return;
+    TypeMap* actual = (TypeMap*)rhs->type;
+    if (!actual) return;
+
+    bool has_spread = false;
+    for (ShapeEntry* entry = actual->shape; entry; entry = entry->next) {
+        if (!entry->name) {
+            has_spread = true;
+            break;
+        }
+    }
+    for (ShapeEntry* expected_entry = expected->shape; expected_entry;
+            expected_entry = expected_entry->next) {
+        if (!expected_entry->name || !expected_entry->name->str) continue;
+        ShapeEntry* actual_entry = typemap_shape_lookup_last(actual,
+            expected_entry->name->str, (int)expected_entry->name->length);
+        if (!actual_entry) {
+            if (!has_spread) {
+                record_semantic_error(tp, declaration->node, ERR_UNDEFINED_FIELD,
+                    "map assigned to '%.*s' is missing required field '%.*s'",
+                    (int)declaration->name->len, declaration->name->chars,
+                    (int)expected_entry->name->length, expected_entry->name->str);
+            }
+            continue;
+        }
+        StaticBoundaryResult field_result = static_boundary_relation(actual_entry->type,
+            expected_entry->type);
+        if (field_result == STATIC_BOUNDARY_REJECTED) {
+            record_type_error(tp, line,
+                "field '%.*s' of '%.*s' expects %s, but got %s",
+                (int)expected_entry->name->length, expected_entry->name->str,
+                (int)declaration->name->len, declaration->name->chars,
+                get_type_name(boundary_unwrap_type(expected_entry->type)->type_id),
+                get_type_name(boundary_unwrap_type(actual_entry->type)->type_id));
+        }
+    }
+}
+
+static void check_declaration_static_boundary(Transpiler* tp, AstNamedNode* declaration,
+        Type* expected, int line) {
+    if (!declaration || !declaration->as || !expected) return;
+    Type* actual = declaration->as->type;
+    StaticBoundaryResult result = static_boundary_relation(actual, expected);
+    if (result == STATIC_BOUNDARY_REJECTED) {
+        Type* actual_type = boundary_unwrap_type(actual);
+        Type* expected_type = boundary_unwrap_type(expected);
+        record_type_error(tp, line, "cannot initialize '%.*s' of type %s with %s",
+            (int)declaration->name->len, declaration->name->chars,
+            get_type_name(expected_type ? expected_type->type_id : LMD_TYPE_ANY),
+            get_type_name(actual_type ? actual_type->type_id : LMD_TYPE_ANY));
+        return;
+    }
+    Type* expected_type = boundary_unwrap_type(expected);
+    if (expected_type && expected_type->type_id == LMD_TYPE_MAP) {
+        check_declared_map_literal(tp, declaration, (TypeMap*)expected_type, line);
+    }
 }
 
 // Forward declaration for closure capture analysis
@@ -1098,6 +1282,60 @@ static AstIdentNode* compound_root_ident(AstNode* node) {
         return compound_root_ident(field->object);
     }
     return NULL;
+}
+
+// Resolve a statically named member/index path from an explicitly annotated
+// root.  Inferred map shapes intentionally do not participate: an unannotated
+// `var` remains free to evolve its value/shape, while `var p: Person` keeps the
+// Person contract across every interior write.
+static Type* declared_compound_destination_type(AstNode* node) {
+    node = unwrap_primary_node(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ident->entry ? ident->entry->declared_type : NULL;
+    }
+    if (node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* member = (AstFieldNode*)node;
+        Type* owner_type = declared_compound_destination_type(member->object);
+        owner_type = boundary_unwrap_type(owner_type);
+        if (!owner_type || owner_type->type_id != LMD_TYPE_MAP ||
+                !member->field || member->field->node_type != AST_NODE_IDENT) {
+            return NULL;
+        }
+        AstIdentNode* field_name = (AstIdentNode*)member->field;
+        ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
+            field_name->name->chars, field_name->name->len);
+        return field ? boundary_unwrap_type(field->type) : NULL;
+    }
+    if (node->node_type == AST_NODE_INDEX_EXPR) {
+        AstFieldNode* index = (AstFieldNode*)node;
+        Type* owner_type = boundary_unwrap_type(
+            declared_compound_destination_type(index->object));
+        if (boundary_type_is_extended(owner_type, TYPE_KIND_UNARY)) {
+            TypeUnary* occurrence = (TypeUnary*)owner_type;
+            if (occurrence->op == OPERATOR_REPEAT) {
+                return boundary_unwrap_type(occurrence->operand);
+            }
+        }
+        if (!owner_type || owner_type->type_id != LMD_TYPE_ARRAY ||
+                is_global_simple_type(owner_type)) {
+            return NULL;
+        }
+        TypeArray* array_type = (TypeArray*)owner_type;
+        return boundary_unwrap_type(array_type->nested);
+    }
+    return NULL;
+}
+
+static void check_compound_assignment_static_boundary(Transpiler* tp, TSNode node,
+        AstNode* destination, AstNode* value, const char* label) {
+    Type* expected = declared_compound_destination_type(destination);
+    if (!expected || !value || !value->type) return;
+    if (static_boundary_relation(value->type, expected) != STATIC_BOUNDARY_REJECTED) return;
+    record_semantic_error(tp, node, ERR_TYPE_MISMATCH,
+        "cannot assign %s to typed %s of type %s",
+        get_type_name(value->type->type_id), label, get_type_name(expected->type_id));
 }
 
 static bool same_name_string(String* a, String* b) {
@@ -1512,6 +1750,13 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     entry->name = node->name;
     entry->node = (AstNode*)node;  entry->import = import;
     entry->scope = tp->current_scope;  // track which scope this variable belongs to
+    if (node->node_type == AST_NODE_ASSIGN || node->node_type == AST_NODE_PARAM) {
+        entry->declared_type = node->declared_type;
+        entry->has_type_annotation = node->declared_type != NULL;
+    }
+    // `push_name` also registers loop/function/object nodes through historical
+    // layout-compatible casts.  Do not write AstNamedNode-only fields here:
+    // on a loop that alias is its join pointer and would turn every for into a join.
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
@@ -2633,6 +2878,24 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         String* var_arg_roots[64];
         int var_arg_root_count = 0;
 
+        // A statically resolved function cannot manufacture missing values.
+        // The old emitter padded absent native parameters with zero/null before
+        // their contracts ran, which made arity a representation-dependent bug.
+        if (ast_called_function_signature_ready(ast_node->function) &&
+                (arg_count < func_type->required_param_count ||
+                 (!func_type->is_variadic && arg_count > func_type->param_count))) {
+            record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
+                "function expects %d%s argument%s, got %d",
+                func_type->required_param_count,
+                func_type->is_variadic ? " or more" : "",
+                func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
+                arg_count);
+            if (!should_continue_transpiling(tp)) {
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+        }
+
         while (arg && expected_param) {
             if (expected_param->is_var_param) {
                 AstIdentNode* root = compound_root_ident(arg);
@@ -2659,7 +2922,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 }
                 if (!type_exact_match(arg->type, expected_param)) {
                     Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
-                    record_type_error(tp, line,
+                    record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                         "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
                         arg_index + 1,
                         get_type_name(full_type->type_id),
@@ -2670,17 +2933,18 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     }
                 }
             }
-            bool compatible = types_compatible_with_full(arg->type, (Type*)expected_param, expected_param->full_type);
+            Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+            StaticBoundaryResult relation = static_boundary_relation(arg->type, full_type);
+            bool compatible = relation != STATIC_BOUNDARY_REJECTED;
             if (!compatible) {
-                Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
                 compatible = typed_array_argument_compatible(arg, full_type);
             }
             if (arg->type && !compatible) {
                 // surface language type names; raw TypeId numbers made call errors hard to act on.
-                record_type_error(tp, line,
+                record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                     "argument %d expected %s, got %s",
                     arg_index + 1,
-                    get_type_name(expected_param->type_id),
+                    get_type_name(full_type->type_id),
                     get_type_name(arg->type->type_id));
                 if (!should_continue_transpiling(tp)) {
                     ast_node->type = &TYPE_ERROR;
@@ -2705,6 +2969,17 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             record_semantic_error(tp, call_node, ERR_SEMANTIC_ERROR,
                 "'^' used on '%.*s' which does not return errors",
                 fn_name_len, fn_name);
+        } else if (ast_node->function &&
+                ast_node->function->type &&
+                ast_node->function->type->type_id == LMD_TYPE_FUNC) {
+            Type* success_type = ((TypeFunc*)ast_node->function->type)->returned;
+            if (success_type) {
+                // Propagation returns before the enclosing expression can see
+                // an error, so its continuation has the callee's success type.
+                // Keeping the pre-propagation ANY here turned `int^` results
+                // into generic arithmetic and later failed a typed return.
+                ast_node->type = success_type;
+            }
         }
     }
 
@@ -5016,6 +5291,23 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
     TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
 
+    // Resolve an annotation before building the initializer and retain it on
+    // the declaration.  The RHS keeps its own inferred type in `as->type`.
+    // This ordering is the static-boundary invariant: no later pass has to
+    // reconstruct whether a source annotation existed from a TypeId.
+    Type* annotation_type = NULL;
+    if (!is_type_definition && !ts_node_is_null(type_node)) {
+        AstNode* type_expr = build_expr(tp, type_node);
+        if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+            annotation_type = ((TypeType*)type_expr->type)->type;
+            ast_node->declared_type = annotation_type;
+        } else {
+            StrView type_str = ts_node_source(tp, type_node);
+            record_semantic_error(tp, asn_node, ERR_UNDEFINED_TYPE,
+                "invalid type annotation '%.*s'", (int)type_str.length, type_str.str);
+        }
+    }
+
     // handle type definitions vs variable assignments differently
     if (is_type_definition) {
         // for type statements: type Name = TypeExpr
@@ -5067,55 +5359,17 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 ast_node->type = ast_node->as->type;
             }
             else {
-                AstNode* type_expr = build_expr(tp, type_node);
-                // validate that type_expr is actually a type (TypeType)
-                if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
-                    ast_node->type = ((TypeType*)type_expr->type)->type;
+                if (annotation_type) {
+                    ast_node->type = annotation_type;
+                    int declaration_line = ts_node_start_point(asn_node).row + 1;
+                    check_declaration_static_boundary(tp, ast_node, annotation_type, declaration_line);
 
-                    // for named map types: build direct-access shape entries on the
-                    // map literal's own TypeMap.  The named type definition has
-                    // TypeType wrappers on its shape entries; unwrap them so that
-                    // the transpiler's can_direct check sees raw types and emits
-                    // direct byte-offset construction with proper conversions.
-                    {
-                        Type* ann = ast_node->type;
-                        AstNode* rhs = ast_node->as;
-                        if (rhs && rhs->node_type == AST_NODE_PRIMARY)
-                            rhs = ((AstPrimaryNode*)rhs)->expr;
-                        if (ann && ann->type_id == LMD_TYPE_MAP && ann != &TYPE_MAP
-                            && ((TypeMap*)ann)->struct_name
-                            && rhs && rhs->node_type == AST_NODE_MAP
-                            && rhs->type && rhs->type->type_id == LMD_TYPE_MAP) {
-                            TypeMap* named = (TypeMap*)ann;
-                            TypeMap* literal = (TypeMap*)rhs->type;
-                            // copy byte_size and length from named type
-                            literal->byte_size = named->byte_size;
-                            literal->length = named->length;
-                            literal->has_named_shape = true;  // mark as safe for direct stores
-                            // rebuild shape entries with unwrapped types
-                            ShapeEntry* src = named->shape;
-                            ShapeEntry* prev = nullptr;
-                            ShapeEntry* first = nullptr;
-                            while (src) {
-                                ShapeEntry* dst = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
-                                dst->name = src->name;
-                                dst->byte_offset = src->byte_offset;
-                                // unwrap TypeType wrapper to get the actual storage type
-                                Type* ft = src->type;
-                                if (ft && ft->type_id == LMD_TYPE_TYPE) {
-                                    Type* inner = ((TypeType*)ft)->type;
-                                    if (inner) ft = inner;
-                                }
-                                dst->type = ft;
-                                dst->next = nullptr;
-                                if (!first) first = dst;
-                                if (prev) prev->next = dst;
-                                prev = dst;
-                                src = src->next;
-                            }
-                            literal->shape = first;
-                        }
-                    }
+                    // A declared map type is a semantic root contract, not a
+                    // request to overwrite the literal's physical shape. Keep
+                    // the literal's exact field carriers (especially for
+                    // `int | string` fields); later legal writes rebuild and
+                    // repack that runtime shape while the root stays checked
+                    // against its declared map contract.
 
                     // compile-time type check: annotation vs RHS type
                     // when the annotation is an occurrence type (e.g., int[], float+)
@@ -5175,10 +5429,6 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                         }
                     }
                 } else {
-                    StrView type_str = ts_node_source(tp, type_node);
-                    log_error("Error: invalid type annotation '%.*s' - not a valid type",
-                        (int)type_str.length, type_str.str);
-                    tp->error_count++;
                     ast_node->type = &TYPE_ANY;
                 }
             }
@@ -7910,6 +8160,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
 
+        check_compound_assignment_static_boundary(tp, assign_node, (AstNode*)left,
+            ast_node->value, "array element");
+
         return (AstNode*)ast_node;
     }
     else if (target_symbol == SYM_MEMBER_EXPR) {
@@ -7947,6 +8200,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         left->type = &TYPE_ANY;
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
+
+        check_compound_assignment_static_boundary(tp, assign_node, (AstNode*)left,
+            ast_node->value, "map member");
 
         return (AstNode*)ast_node;
     }
@@ -7998,29 +8254,21 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
             TypeId var_tid = entry->node->type->type_id;
             TypeId val_tid = ast_node->value->type->type_id;
 
-            if (var_tid != val_tid) {
-                if (entry->has_type_annotation) {
-                    // type-annotated var: assignment must follow declared type
-                    // allow ANY/NULL values (will use runtime cast). A sized
-                    // destination is also an explicit conversion boundary and
-                    // retains the documented Go-style truncation/wrap behavior;
-                    // ordinary parameter passing still requires exact embedding.
-                    bool compatible = (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL);
-                    if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
-                    if (!compatible &&
-                            (var_tid == LMD_TYPE_NUM_SIZED || var_tid == LMD_TYPE_UINT64) &&
-                            lambda_numeric_kind_from_type(ast_node->value->type) != LAMBDA_NUM_INVALID) {
-                        compatible = true;
-                    }
-                    if (!compatible) {
-                        int line = ts_node_start_point(assign_node).row + 1;
-                        record_type_error(tp, line,
-                            "cannot assign %s value to var '%.*s' of type %s",
-                            get_type_name(val_tid),
-                            (int)target_str.length, target_str.str,
-                            get_type_name(var_tid));
-                    }
-                } else if (!entry->type_widened) {
+            if (entry->has_type_annotation && entry->declared_type) {
+                // An explicit var annotation is a binding contract, not a
+                // conversion request.  In particular, null and float values
+                // cannot enter an int lane just because the old type ids differ.
+                StaticBoundaryResult relation = static_boundary_relation(
+                    ast_node->value->type, entry->declared_type);
+                if (relation == STATIC_BOUNDARY_REJECTED) {
+                    int line = ts_node_start_point(assign_node).row + 1;
+                    record_type_error_code(tp, line, ERR_TYPE_MISMATCH,
+                        "cannot assign %s value to var '%.*s' of type %s",
+                        get_type_name(val_tid),
+                        (int)target_str.length, target_str.str,
+                        get_type_name(entry->declared_type->type_id));
+                }
+            } else if (var_tid != val_tid && !entry->type_widened) {
                     // non-annotated var: widen to Item if types differ
                     // null-initialized vars must widen too; otherwise later map
                     // literals keep a null-shaped field and drop reassigned values.
@@ -8030,7 +8278,6 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
                             (int)target_str.length, target_str.str,
                             get_type_name(var_tid), get_type_name(val_tid));
                     }
-                }
             }
         }
 
@@ -8089,6 +8336,9 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                 param_type->is_optional = was_optional;
                 param_type->is_var_param = was_var_param;
                 param_type->default_value = default_value;
+                // Keep the original full annotation for runtime boundary
+                // checks; the TypeParam prefix only preserves a compact TypeId.
+                ast_node->declared_type = type_type->type;
                 // For complex types (TypeBinary, TypeUnary) and named map/object types,
                 // store pointer to full type so that downstream code can access
                 // extended fields (shape, struct_name, methods, etc.)
@@ -8194,6 +8444,63 @@ static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
         ast_node->type = &TYPE_ERROR;
     }
     return (AstNode*)ast_node;
+}
+
+typedef struct ReturnBoundaryScan {
+    Transpiler* tp;
+    Type* expected;
+    String* function_name;
+    bool accepts_error;
+} ReturnBoundaryScan;
+
+static bool validate_declared_return_boundary(AstNode* node, void* data) {
+    ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
+    if (!node || node->node_type != AST_NODE_RETURN_STAM) return true;
+    AstReturnNode* ret = (AstReturnNode*)node;
+    Type* actual = ret->value && ret->value->type ? ret->value->type : &TYPE_NULL;
+    // `T^` carries errors on its declared channel.  A `raise` expression has
+    // type error in the body, but it is a valid early return for that channel,
+    // not a value attempting to inhabit the successful T result.
+    if (scan->accepts_error && boundary_unwrap_type(actual)->type_id == LMD_TYPE_ERROR) {
+        return true;
+    }
+    if (static_boundary_relation(actual, scan->expected) == STATIC_BOUNDARY_REJECTED) {
+        TSPoint point = ts_node_start_point(node->node);
+        record_type_error_code(scan->tp, (int)point.row + 1, ERR_RETURN_TYPE_MISMATCH,
+            "return from '%.*s' expected %s, got %s",
+            scan->function_name ? (int)scan->function_name->len : 10,
+            scan->function_name ? scan->function_name->chars : "<function>",
+            get_type_name(scan->expected->type_id), get_type_name(actual->type_id));
+    }
+    return should_continue_transpiling(scan->tp);
+}
+
+static void validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
+        Type* expected, bool accepts_error) {
+    if (!fn || !fn->body || !expected || expected->type_id == LMD_TYPE_ANY) return;
+    ReturnBoundaryScan scan = {tp, expected, fn->name, accepts_error};
+    // Nested functions own their return contracts.
+    walk_lambda_ast(fn->body, validate_declared_return_boundary, &scan, false);
+}
+
+static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
+        TypeFunc* signature) {
+    Type* expected = signature ? signature->returned : NULL;
+    if (!fn || !expected || expected->type_id == LMD_TYPE_ANY) return;
+    if (fn->body && fn->body->type &&
+            !(signature->can_raise &&
+              boundary_unwrap_type(fn->body->type)->type_id == LMD_TYPE_ERROR) &&
+            static_boundary_relation(fn->body->type, expected) ==
+                STATIC_BOUNDARY_REJECTED) {
+        TSPoint point = ts_node_start_point(fn->body->node);
+        record_type_error_code(tp, (int)point.row + 1, ERR_RETURN_TYPE_MISMATCH,
+            "function '%.*s' body returns type %s, declared return type %s",
+            fn->name ? (int)fn->name->len : 10,
+            fn->name ? fn->name->chars : "<function>",
+            get_type_name(fn->body->type->type_id),
+            get_type_name(expected->type_id));
+    }
+    validate_explicit_return_boundaries(tp, fn, expected, signature->can_raise);
 }
 
 // for both func expr and stam
@@ -8379,18 +8686,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // determine the function return type
     if (!fn_type->returned) {
         fn_type->returned = ast_node->body->type;
-    } else if (ast_node->body->type) {
-        // Validate declared return type against body type
-        if (!types_compatible(ast_node->body->type, fn_type->returned)) {
-            int line = ts_node_start_point(func_node).row + 1;
-            record_type_error(tp, line,
-                "function '%.*s' body returns type %s, declared return type %s",
-                (int)ast_node->name->len, ast_node->name->chars,
-                get_type_name(ast_node->body->type->type_id),
-                get_type_name(fn_type->returned->type_id));
-            // Keep declared return type for interface consistency
-        }
     }
+    validate_function_return_contract(tp, ast_node, fn_type);
 
     // restore parent namescope
     tp->current_scope = ast_node->vars->parent;
@@ -8821,6 +9118,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     if (!has_declared_return_type) {
                         fn_type->returned = &TYPE_ANY;  // Safe for all forward refs
                     }
+                    validate_function_return_contract(tp, fn_node, fn_type);
 
                     // Restore parent scope
                     tp->current_scope = fn_node->vars->parent;
@@ -9914,8 +10212,6 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     return (AstNode*)ast_node;
 }
 
-typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
-
 static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions) {
     if (!node || !visitor(node, data)) return;
@@ -10185,12 +10481,33 @@ static bool count_await_point_node(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_START) return false;
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) return false;
-    if (node->node_type == AST_NODE_CALL_EXPR &&
-            call_may_await((AstCallNode*)node, NULL, NULL)) {
-        ((AwaitPointScan*)data)->count++;
+    AwaitPointScan* scan = (AwaitPointScan*)data;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        // Lowering can insert an error-unwind continuation for a dynamic call
+        // result and for each dynamic argument checked against a parameter
+        // contract. Those continuations are not represented as AST exit nodes,
+        // but must have dispatcher labels before MIR lowering begins.
+        scan->count++;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            scan->count++;
+        }
+        if (call_may_await(call, NULL, NULL)) {
+            scan->count++;
+        }
+        if (call->propagate) {
+            scan->count++;
+        }
     }
-    if ((node->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)node)->propagate) ||
-            node->node_type == AST_NODE_RETURN_STAM ||
+    if (node->node_type == AST_NODE_LET_STAM ||
+            node->node_type == AST_NODE_VAR_STAM ||
+            node->node_type == AST_NODE_PUB_STAM) {
+        // A declared binding can lower to a runtime type check whose failure
+        // leaves the current task scope. Untyped bindings reserve an unused
+        // label, keeping this planner conservative and syntax-directed.
+        scan->count++;
+    }
+    if (node->node_type == AST_NODE_RETURN_STAM ||
             node->node_type == AST_NODE_RAISE_STAM ||
             node->node_type == AST_NODE_ASSIGN_STAM ||
             node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
@@ -10198,12 +10515,12 @@ static bool count_await_point_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PIPE_FILE_STAM) {
         // These syntax edges can leave a lexical block before its tail, so
         // each owns an unwind continuation in the resumable transform.
-        ((AwaitPointScan*)data)->count++;
+        scan->count++;
     }
     if (node->node_type == AST_NODE_CONTENT) {
         // Every lexical content block in a resumable pn has a synthetic scope
         // leave. Empty scopes return immediately; owning scopes may park.
-        ((AwaitPointScan*)data)->count++;
+        scan->count++;
     }
     return true;
 }

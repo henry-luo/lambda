@@ -9,7 +9,7 @@ pn lcg_next(seed: int) int {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn partition(arr: int[], lo: int, hi: int) int {
+pn partition(var arr: int[], lo: int, hi: int) int {
     var pivot: int = arr[hi]
     var i: int = lo
     var j: int = lo
@@ -28,7 +28,7 @@ pn partition(arr: int[], lo: int, hi: int) int {
     return i
 }
 
-pn quicksort(arr: int[], lo: int, hi: int) int {
+pn quicksort(var arr: int[], lo: int, hi: int) int {
     if (lo >= hi) {
         return 0
     }
@@ -53,9 +53,9 @@ pn is_sorted(arr: int[], n: int) int {
 
 pn benchmark() int {
     let size: int = 5000
-    // fill(n, int) already infers a packed ArrayNum; an int[] annotation on the
-    // local would re-tag the var as ANY and lose the direct-index path
-    var arr = fill(size, 0)
+    // The annotation binds the public contract while preserving packed int
+    // storage for direct indexing.
+    var arr: int[] = fill(size, 0)
 
     // Fill with deterministic descending + modular values
     var seed: int = 42
