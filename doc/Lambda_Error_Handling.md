@@ -31,12 +31,16 @@ This document covers Lambda's error handling system — how errors are created, 
 
 ## Overview
 
-Lambda adopts an **error-as-return-value** paradigm. There is **no** `try`/`throw`/`catch` exception handling. Instead:
+Lambda has returned error values and an explicit raised-error channel. There is
+no `try`/`throw`/`catch` exception handling. Instead:
 
 - Errors are explicit values that flow through the type system.
-- Functions declare whether they can fail using the `T^E` return type syntax.
-- The `raise` keyword is the only way to return an error from a function.
-- The compiler **enforces** that callers handle errors — ignoring an error is a compile-time error.
+- `T | error` returns an error as ordinary data, with no must-handle obligation.
+- `T^E` declares an enforcing raised channel; callers must engage it immediately.
+- `raise` originates an error only on a declared `T^E` channel. A
+  `T | error` function returns `error(...)` as an ordinary value.
+- `let value^err = e` and postfix `e^` are channel-agnostic: they discharge both
+  returned error values and raised errors through one surface.
 
 This approach is inspired by Rust's `Result<T, E>` and Zig's `T!E`, but with lighter syntax.
 
@@ -99,7 +103,8 @@ error({
 
 ## The `raise` Keyword
 
-`raise` is the **only** way to return an error from a function. It is distinct from `return`, which only returns normal values.
+`raise` originates an error on the enforcing `^E` channel. It is distinct from
+returning an `error(...)` value from a function declared `T | error`.
 
 ```lambda
 fn divide(a, b) int^ {
@@ -112,7 +117,8 @@ fn divide(a, b) int^ {
 
 - `raise` immediately returns the error value to the caller.
 - A function must declare an error return type (`T^` or `T^E`) to use `raise`.
-- Using `raise` in a function with a plain `T` return type is a compile error.
+- Using `raise` in a function with a plain `T` or `T | error` return type is a
+  compile error; the union form returns its error value normally.
 
 ```lambda
 // ❌ Compile error: function does not declare error return
@@ -130,6 +136,7 @@ Functions declare whether they can fail using the `^` suffix on their return typ
 | Syntax | Meaning |
 |--------|---------|
 | `T` | Always succeeds — no error possible |
+| `T \| error` | May return `T` or an error value; no caller obligation |
 | `T^` | May return `T` or any error (shorthand for `T^error`) |
 | `T^E` | May return `T` or a specific error type `E` |
 | `T^E1 \| E2` | May return `T` or one of multiple error types |
@@ -137,6 +144,11 @@ Functions declare whether they can fail using the `^` suffix on their return typ
 ```lambda
 // Always succeeds
 fn add(a: int, b: int) int => a + b
+
+// Error is returned as ordinary data
+fn parse_soft(s: string) int | error {
+    if (s == "") error("empty integer") else int(s)
+}
 
 // May fail with any error
 fn parse(s: string) int^ { ... }
@@ -150,9 +162,11 @@ fn load(path: string) Config ^ ParseError | IOError { ... }
 
 > **Note:** The error type after `^` is restricted to `error`, identifiers, or unions of these. Complex type expressions (maps, arrays) are not allowed — define a named type instead.
 
-### Error Union in Parameters and Let Bindings
+### Error Forms in Parameters and Let Bindings
 
-The `T^` syntax also works in parameter types and let bindings:
+In value positions, `T^` and `T | error` both describe a value-or-error
+outcome. The `^` spelling is distinctive on function returns because it adds
+the caller obligation and licenses `raise`.
 
 ```lambda
 // Parameter that accepts a value-or-error
@@ -160,27 +174,39 @@ fn process(input: int^) int { ... }
 
 // Let binding that may hold a value-or-error
 let result: int^ = may_fail(x)
+
+// Equivalent value-position spelling
+let result: int | error = may_fail(x)
 ```
 
 ---
 
 ## Error Handling at Call Sites
 
-When calling a function that returns `T^`, the caller **must** handle the error in one of the allowed ways:
+When calling a function that returns `T^`, the caller must immediately engage
+the error possibility. Channel-agnostic forms are allowed:
 
 | Pattern | Meaning | Allowed? |
 |---------|---------|----------|
 | `let a = F()^` | Propagate error, bind unwrapped value | ✅ |
-| `let a^err = F()` | Capture value and error explicitly | ✅ |
+| `let a^err = F()` | Capture returned or raised error explicitly | ✅ |
+| `let a: T \| error = F()` | Receive the outcome as an explicit union | ✅ |
+| `F() or default` | Explicitly consume a falsy error | ✅ |
+| `match (F()) { case error: ... }` | Explicitly branch on the error | ✅ |
 | `F()^` | Propagate error, discard value | ✅ |
 | `let a = F()` | **Ignoring error** | ❌ Compile error |
 | `F()` | **Ignoring error and value** | ❌ Compile error |
+
+A function returning `T | error` does not impose this must-handle rule.
+`let a = soft_F()` simply infers `a: T | error`.
 
 ---
 
 ## Error Propagation (`^` Operator)
 
-The `^` postfix operator on a call expression unwraps the success value or propagates the error to the caller:
+Postfix `^` unwraps the error-free success value or propagates the error to the
+caller. It is channel-agnostic: it handles an error returned in the value lane,
+an error delivered through `^E`, or both.
 
 ```lambda
 fn compute(x: int) int^ {
@@ -191,22 +217,30 @@ fn compute(x: int) int^ {
 ```
 
 **Semantics:**
-- If the call returns an error, `^` immediately returns that error from the enclosing function.
-- If the call succeeds, the expression evaluates to the unwrapped success value.
+- If the expression produces any error outcome, `^` immediately propagates it
+  from the enclosing function.
+- If it succeeds, the expression evaluates to the success value with all error
+  constituents removed from its type. An `any` success becomes
+  `any \ error`.
 
 **Rules:**
-- `^` is only valid on calls to functions that can raise errors.
-- Using `^` on a non-error-returning function is a compile error:
+- `^` is valid on expressions whose returned union or raised channel may
+  contain error.
+- Using `^` on an operand whose explicit type excludes error is a compile error:
   ```lambda
   let x = add(1, 2)^  // ❌ Compile error: 'add' does not return errors
   ```
-- The enclosing function must itself declare an error return type to use `^`.
+- The enclosing function must admit propagation: a declared `T^E` channel
+  receives the combined error set, while an undeclared return may infer
+  `T | error`. A declared plain-`T` return rejects propagation.
 
 ---
 
 ## Error Destructuring (`let a^err = expr`)
 
-The `^` in a let binding captures both the success value and the error into separate variables:
+The `^` in a let binding captures the success value and every error outcome
+into separate variables, regardless of whether the error was returned or
+raised:
 
 ```lambda
 let result^err = divide(10, x)
@@ -219,17 +253,25 @@ if (^err) {
 ```
 
 **Semantics:**
-- If the expression returns an error: the value variable (`result`) is `null`, the error variable (`err`) holds the error.
+- If the expression returns or raises an error: the value variable (`result`)
+  is `null`, and the error variable (`err`) holds that error.
 - If the expression succeeds: the value variable holds the value, the error variable is `null`.
+- The success type has all error constituents removed. For an `any` source,
+  `result` has type `any \ error`; for `T | E1 ^ E2`, it has type `T` and
+  `err` admits `E1 | E2` (plus `null` on success).
 - Use `^err` (prefix `^`) to test whether the error variable is an error (see [Checking for Errors](#checking-for-errors)).
 
-This is the primary way to **handle** an error locally rather than propagating it.
+This is the primary way to handle either error form locally rather than
+propagating it.
 
 ---
 
 ## Compile-Time Enforcement
 
-Lambda **refuses to compile** code that ignores errors. This is a language rule, not a warning.
+Lambda refuses to compile code that ignores an explicit `^E` obligation. This
+is a language rule, not a warning. An ordinary `T | error` union has no such
+obligation; it flows as data until the program chooses a boundary at which to
+inspect, default, validate, or destructure it.
 
 ### Why?
 
@@ -237,20 +279,20 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
 
 ### Rules
 
-1. **Error-returning function calls must be handled**
+1. **Calls with a raised `^E` channel must be engaged immediately**
    ```lambda
    divide(10, 0)           // ❌ compile error: unhandled error return
    let x = divide(10, 0)   // ❌ compile error: unhandled error return
    ```
 
-2. **Functions with plain `T` return type cannot contain `raise`**
+2. **Functions without a declared `^E` return cannot contain `raise`**
    ```lambda
    fn pure_add(a, b) int {
        raise error("oops")  // ❌ compile error
    }
    ```
 
-3. **`^` is only valid on error-returning calls**
+3. **`^` is valid only when the operand can produce error**
    ```lambda
    let x = add(1, 2)^  // ❌ compile error: 'add' does not return errors
    ```
@@ -259,7 +301,7 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
 
 | Aspect | **Go** | **Rust** | **Zig** | **Lambda** |
 |--------|--------|----------|---------|------------|
-| **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | ❌ Compile error |
+| **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | `^E`: ❌; `T \| error`: flows as data |
 | **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()^` |
 | **Destructure error** | `val, err := f()` | `match` on `Result` | `catch \|err\|` | `let val^err = f()` |
 | **Error type** | `(T, error)` tuple | `Result<T, E>` enum | `T!E` error union | `T^E` |
@@ -301,7 +343,7 @@ The following built-in functions perform I/O and may fail. They enforce the same
 
 ```lambda
 // ❌ Compile error: unhandled error from 'input'
-let data = input("file.json")^
+let data = input("file.json")
 
 // ✅ Propagate error
 let data = input("file.json")^
@@ -417,6 +459,28 @@ let value = result or default_value
 
 Falsy errors enable the `or` default idiom and prevent accidental use of error values as truthy conditions. The `^` prefix provides an explicit, lightweight error check.
 
+### Pitfall: Bare `error` Is the Type, Not an Error Value
+
+Types are first-class values in Lambda, and the bare identifier `error` in expression position denotes the **`error` type** — not an error value. The type is an ordinary (truthy, non-error) value, which produces three results that can trip users:
+
+```lambda
+error or 0          // → error   (the TYPE — truthy, so `or` selects it)
+error("msg") or 0   // → 0       (an error VALUE — falsy, rescued by `or`)
+
+error is error      // → false!  (the type is a type, not an error value)
+error("msg") is error  // → true (values classify normally)
+error is type       // → true    (what bare `error` actually is)
+
+if (error) "yes" else "no"   // → "yes" — and the condition lint warns:
+                             //   "condition has container type type, which is always truthy"
+```
+
+**Rules of thumb:**
+
+- Only `error(...)` (the constructor), values returned/raised by failing functions, and values that test `is error` are error *values*. Bare `error` is only meaningful in **type positions** — annotations (`int | error`), `is`/`match` right-hand sides, and schemas.
+- `x is error` is the classification test; `^x` is its shorthand. Both operate on `x`'s *value*. Writing the type on the left (`error is error`) asks whether the type itself is an error value — it is not.
+- The `if (error)` case is caught by the condition lint; `error or 0` currently is not, so a stray bare `error` in an `or` chain silently yields the type. If an `or` chain unexpectedly produces the literal output `error`, look for a missing constructor call.
+
 ---
 
 ## Examples
@@ -502,11 +566,12 @@ pn main() {
 
 | Concept | Syntax | Purpose |
 |---------|--------|---------|
+| Return error as data | `fn F() T \| error` | Error flows without must-handle obligation |
 | Declare error return | `fn F() T^` or `fn F() T^E` | Function may fail |
 | Create error | `error("message")` | Construct error value |
-| Raise error | `raise error("...")` | Return error from function |
-| Propagate error | `F()^` | Unwrap or auto-return error |
-| Capture error | `let val^err = F()` | Destructure into value + error |
+| Raise error | `raise error("...")` | Originate error on a declared `^E` channel |
+| Propagate error | `e^` | Strip success errors or propagate any error outcome |
+| Capture error | `let val^err = e` | Destructure returned and raised errors |
 | Check for error | `^err` or `x is error` | Test if value is an error |
 | Default on error | `expr or default` | Errors are falsy, fall through to default |
 

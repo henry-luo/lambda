@@ -170,9 +170,10 @@ It is purely the region-producer gate.
 path). `bool[]` and `string[]` are accepted by the grammar and the type system but fail at runtime
 with `cannot coerce array to bool[]`.
 
-That is a legitimate representational limit (only those four have packed `ArrayNum` lanes), but it
-surfaces as a **runtime** error on a construct the front end accepted. It should be a compile-time
-diagnostic naming the supported element types.
+That is a legitimate packed-representation limit (only those four have `ArrayNum` lanes), not a
+semantic type limit. `bool[]`, `string[]`, and other valid element types should use checked
+generic-array storage; the current runtime rejection incorrectly exposes a backend optimization
+constraint as a language restriction. See `Lambda_Design_Type_Enforcement.md` TE-7/P4.
 
 ### TS-8 — No arity overloading for user definitions
 

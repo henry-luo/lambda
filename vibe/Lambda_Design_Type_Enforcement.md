@@ -1,7 +1,7 @@
 # Lambda — Type Support Design: Enforcement First
 
-**Status:** PROPOSAL rev 1 — complete, for discussion. Nothing here is implemented.
-**Date:** 2026-07-29
+**Status:** PROPOSAL rev 2 — complete, for discussion. Nothing here is implemented.
+**Date:** 2026-07-29; revised 2026-07-30
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -21,15 +21,26 @@ release `lambda.exe`; repro scripts in `./temp/tsd_t*.ls`.
 not a gradual-typing hint in the tradition of TypeScript. Every annotated boundary must resolve
 to exactly one of three outcomes:
 
-1. **STATIC-PROVEN** — the checker proves the value's type; zero runtime cost.
+1. **STATIC-PROVEN** — the checker proves the value's type; zero runtime validation cost.
 2. **STATIC-REJECTED** — the checker proves a mismatch; compile error.
-3. **DEFERRED** — the static type is unknowable (`any`-typed expression, parsed input data);
-   a runtime check runs **at the boundary**, and a mismatch produces a diagnostic-carrying
-   type-error *value* (TE-9).
+3. **DEFERRED** — the source is genuinely dynamic (`any`-typed expression, parsed input data);
+   a runtime check runs **at the boundary**. Success establishes the declared `T`; mismatch
+   produces a diagnostic-carrying type-error *value* and does not establish or mutate the typed
+   destination (TE-9).
 
 What must never happen is the fourth outcome Lambda has today: the annotation silently ignored,
 silently lossy, or silently corrupting (see §5.4 — all three are measured, including declared-int
 bindings that print raw `String*` pointer bits).
+
+Annotated and inferred bindings are deliberately different:
+
+```lambda
+let x: T = e   // contract boundary: after success, x is T; failure yields error before x exists
+let x = e      // inference only: x receives e's effective type, which may be T | error
+```
+
+The second form is where batch-friendly error values flow without a panic or an imposed
+must-handle channel. It must not be used to weaken the first form's contract.
 
 **Non-goals of this stage:**
 
@@ -108,33 +119,76 @@ second.
 Decision items are numbered **TE-n** (type enforcement) and cross-reference the TS-n issue
 ledger.
 
-**TE-1 — Annotations are contracts, not hints.** `x: T` means: past this binding, `x` *is* a
-`T`, in both semantic type and runtime representation. The Go stance, not the TS stance. This
-holds identically for `let`, `var`, parameters, return types, and typed fields of named map
-types.
+**TE-1 — Annotations are semantic contracts, not hints.** `x: T` means: on successful passage
+through the boundary, `x` *is* a `T`. A failed check produces the boundary's error result before
+the binding is established; it never stores `error` in `x`. This holds identically for `let`,
+`var`, parameters, returns, and typed fields of named map types. `var` permits the value to
+change; it does not weaken or replace an explicit binding type. Every later whole-value
+assignment or interior update through `var x: T` must leave the new value conforming to `T`.
+By contrast, an unannotated `let x = e` or `var x = e` simply infers `e`'s effective type,
+including `T | error` when `e` is open; an unannotated `var` may acquire a different inferred
+type/shape after a later assignment.
+
+TE-1 does **not** assign one global physical representation to a semantic type. The boxed path
+may carry `int` as an `Item`, while an explicitly selected native function variant may carry it
+as a raw integer lane. Physical representation becomes an additional local invariant only where
+the implementation deliberately selects one — currently native/unboxed function bodies and
+explicitly typed packed map fields (TE-3).
 
 **TE-2 — Three-outcome resolution at every annotated boundary.** Each boundary is resolved as
-STATIC-PROVEN, STATIC-REJECTED, or DEFERRED (runtime-checked) — never silently trusted. The
-static relation used for PROVEN/REJECTED and the runtime relation used by DEFERRED checks must be
-**the same relation** (one assignability definition; today there are at least three partial ones,
-see §5 and TE-6).
+STATIC-PROVEN, STATIC-REJECTED, or DEFERRED (runtime-checked) — never silently trusted:
 
-**TE-3 — The representation invariant becomes enforceable.** The emitter's standing assumption —
-*a value's static TypeId implies its runtime representation* (`Lambda_Issue_Type_Support.md` §0)
-— stops being an unenforced convention: DEFERRED boundary checks are precisely what uphold it.
-This is the prerequisite for the perf stage: only guaranteed types may drive representation.
+- `S <: T` under Lambda's subtype relation → STATIC-PROVEN;
+- a statically known source that is not a subtype of `T` → STATIC-REJECTED (explicit unions must
+  be narrowed first; partial overlap does not silently become a runtime cast);
+- only a genuinely dynamic source (`any`, unresolved runtime input/shape) → DEFERRED.
 
-**TE-4 — Runtime mismatch produces a diagnostic-carrying error value.** A failed DEFERRED check
-yields an error *value* in the value lane (decided 2026-07-29 — see TE-9 for the full model),
-naming the boundary, the expected type, and the actual type/value. It flows like any Lambda
-value — dischargeable with `let x^err = …` / `?` / `x is error` — and a script whose
-uncontained result is an error fails with that diagnostic. Never `null`, never `0`, never
-pointer bits, never a silent pass-through.
+The static subtype relation, runtime value match, and explicit checked conversion are related
+operations with shared numeric/type primitives, but they are not falsely identified as one
+operation (TE-6).
 
-**TE-5 — `any` remains the gradual gate, one-way-free.** `T → any` (boxing) is always allowed
-and free. `any → T` is always DEFERRED — checked at the boundary, exactly like Go's `x.(T)`.
-There is no unchecked `any → T` anywhere: not at declarations, not at call arguments, not at
-returns, not at typed-container writes.
+**TE-3 — Representation invariants are local and proof-backed.** Semantic `Type*`/TypeId does
+not globally determine a value's carrier. Instead, every emitter operation that requires a
+physical representation must be dominated by one of:
+
+1. a statically proven boundary plus a conversion into that carrier;
+2. a successful runtime check/conversion; or
+3. construction directly into an explicitly typed physical slot.
+
+Within an unboxed function version, a proven `int` parameter may therefore remain a native
+integer throughout the body. Within a map layout, an explicitly typed `int` field may remain an
+unboxed field slot. The boxed version and generic maps remain valid alternative carriers of the
+same semantic types. Recording and exploiting these physical proofs is deliberately separated
+from enforcement correctness and revisited in the implementation/performance stage.
+
+Maps additionally maintain a strong local layout invariant: every stored field is encoded
+according to the map's **current runtime `ShapeEntry`**, and the current shape describes those
+bytes exactly. A store must never place a differently encoded value into an old slot while
+leaving the old shape in force. If a legal write changes a field's physical type, the runtime
+builds/selects a new shape and repacks the map before committing the replacement. COW may reuse
+a uniquely owned container header, but that optimization is unobservable; a shared value is
+detached and the replacement is installed back into the owning binding or parent path.
+
+**TE-4 — Runtime mismatch produces a rich diagnostic-carrying error value.** A failed DEFERRED
+check yields a proper error object/value (decided 2026-07-30; see TE-9), naming the boundary,
+expected type, actual type/value, source location, and validator path where applicable. It flows
+like any Lambda error value — dischargeable with `let x^err = …`, postfix `^`, `or`, or
+`x is error` — and a script whose uncontained result is an error fails with that diagnostic.
+Never `null`, never `0`, never pointer bits, never a silent pass-through. The earlier inline
+code-only error form is rejected: a bare code cannot satisfy this diagnostic contract.
+
+**TE-5 — `any` is the top type and the gradual gate.** `any` includes `error`; `T → any` is
+always assignable (though boxing need not be physically cost-free). `any → T` is DEFERRED and
+uses a Go-like runtime type assertion: the value must already match `T` under the same
+type/subtype rules; the boundary does not perform value-dependent narrowing such as
+`float(3.0) → int`. Explicit conversion functions own those conversions.
+
+`any \ error` is the non-error top type. It is the success type produced when channel-agnostic
+`^err` destructuring or postfix `^` strips errors from an `any` outcome. The schema validator's
+historical `any` pattern is intentionally treated as this non-error validation pattern
+(`any \ error`): validation asks whether a value is usable data, while the core language type
+`any` remains the true top type. This validator-specific spelling is documented until the
+validator gains a distinct surface alias.
 
 ---
 
@@ -317,7 +371,8 @@ turned into a hard fail-stop by `emit_return_item_error_if_zero`
 boundary in the entire emitter with a real runtime failure path**, and the template for TE-8.
 The holes: (1) the ARRAY_NUM→ARRAY_NUM cross-convert path (`:3018-3054`) converts blindly with
 no element checks; (2) TS-7 — the unsupported-element case is a *runtime* fail on a construct
-the front end accepted, where it should be a compile diagnostic. And after the coercion succeeds,
+the front end accepted, where it should use checked generic-array storage rather than making
+the semantic type depend on packed-carrier support. And after the coercion succeeds,
 the binding is downgraded to ANY (`:6598-6599`) and — worse — the stored value is a **raw
 untagged container pointer**, not a tagged Item; it survives only because `Item::type_id()`
 dereferences when the tag byte is 0 (`lambda/lambda.hpp:115-129`).
@@ -365,7 +420,7 @@ hard sibling.
 ### 5.3 Validator assets — what enforcement can reuse (surveyed)
 
 The schema validator is the big reusable asset, and the survey's headline is that **no
-representation bridge is needed**:
+parallel type-graph bridge is needed**. Runtime value-layout conversion is a separate question:
 
 - **One `Type` representation, shared.** The validator consumes the exact `Type` hierarchy the
   AST builder produces for script `type X = …` definitions — `TypeMap`/`ShapeEntry`
@@ -487,14 +542,15 @@ Every place a declared type meets a value, with today's status and the TE-2 targ
 | B1 | Declaration init, scalar (`let`/`var x: T = e`) | none (TS-1) | none — ladder falls through (pointer bits) or lossy (`D2I`) | check + checked convert |
 | B2 | Declaration init, typed array (`x: int[] = e`) | literal-element check only (`:5142`) | `ensure_typed_array` — real errors, but cross-convert hole + ANY/raw-pointer downgrade | keep; close hole; keep the contract on the binding |
 | B3 | Declaration init, named map / union type | none | none — shape adopted unchecked (t4), or annotation ignored (t16) | field check for literals; validator for dynamic |
-| B4 | Re-assignment to annotated `var` | ✅ checked (`:7995`) | unchecked unbox (`:11517`) | add checked convert |
-| B5 | Call arguments | ✅ checked (`:2673`) | unchecked unbox ×7 sites; missing arg → native `0` | checked convert; arity is a compile error |
-| B6 | Declared return type | vacuous (ANY body defeats `:8379`) | unchecked unbox ×6 sites | per-return static check + checked convert |
-| B7 | Typed container element write (`a[i] = v`) | none | `fn_array_set` silently degrades the array in place | checked write on annotated bindings |
-| B8 | Typed member read (declared field type) | n/a | unchecked unbox of `fn_member` result (`:8346`) | checked (or trusted once B3 guarantees construction) |
+| B4 | Re-assignment to annotated `var` | ✅ checked (`:7995`) | unchecked unbox (`:11517`) | checked boundary before commit |
+| B5 | Call arguments | ✅ checked (`:2673`) | unchecked unbox ×7 sites; missing arg → native `0` | checked boundary; arity is a compile error |
+| B6 | Declared return type | vacuous (ANY body defeats `:8379`) | unchecked unbox ×6 sites | per-return static check + checked boundary |
+| B7a | Typed container element write (`a[i] = v`) | none | `fn_array_set` silently degrades the array in place | check before mutation; failure leaves the array unchanged |
+| B7b | Map member/index write (`m.x = v`, `m[k] = v`) | none — builder records the left side as ANY | field setter dynamically retags/reshapes without preserving an annotated root contract | annotated root: check the post-state against its binding type before commit; unannotated root: permit shape evolution; every committed map keeps an exact runtime shape |
+| B8 | Typed member read (declared field type) | n/a | unchecked unbox of `fn_member` result (`:8346`) | trust only a proven typed layout; otherwise read through the value's runtime shape |
 | B9 | Parsed input → annotated binding | none | none | same as B3 — the canonical DEFERRED boundary |
 | B10 | Global/module var round trip | n/a | store boxes by declared tid; load unboxes trusting it | trusted, *provided* B1 enforces the store side |
-| B11 | `is` / `match` / constrained types | no operand checks | three divergent implementations (§5.1, §5.3) | one relation (TE-6) |
+| B11 | `is` / `match` / constrained types | no operand checks | three divergent implementations (§5.1, §5.3) | shared subtype/match foundation (TE-6) |
 | B12 | The `it2*` converter family | n/a | six different silent fallback values (§5.2) | boundaries stop calling them unchecked |
 | B13 | Sys-function arguments | none — registry `first_param_type` is dispatch-only metadata | per-function ad hoc: silent value, logged `ItemError`, or message-less `ItemError` (§5.5) | registry-driven static check; TE-9-quality diagnostics on runtime failure |
 
@@ -502,34 +558,95 @@ The pattern: **static checking exists exactly where someone once added it (B4, B
 else; dynamic checking exists exactly once (B2's coercion) and its result is then thrown away.**
 Everything else trusts.
 
+**B7b map-member assignment is a separate correctness boundary, not a variant of array
+assignment.** The live builder creates `AST_NODE_MEMBER_ASSIGN_STAM`, gives its synthetic left
+member `TYPE_ANY`, and performs no lookup against the root binding's declared `Type*`
+(`build_ast.cpp:7916-7951`). The runtime setter already distinguishes same-physical-type stores
+from type-changing stores: `fn_map_set` rebuilds a fresh `TypeMap` and repacks the data for the
+latter (`lambda-eval.cpp:6798-6909,7221-7227`), while `map_set_cow` detaches shared maps
+(`:6682-6693`) and the MIR assignment path installs the replacement back into the owning root
+(`transpile-mir.cpp:12662-12699`). Enforcement must preserve that shape-evolution model rather
+than freezing every map at its initialization shape.
+
+There are two independent invariants:
+
+1. **Binding invariant.** If the mutable root is annotated — `var p: Person = ...` — every
+   post-state of `p`, including one produced by `p.age = v` or a nested/computed-key update,
+   must conform to `Person`. `var` licenses rebinding, not type drift. A statically known
+   violation is STATIC-REJECTED; a genuinely dynamic value/key is checked before commit.
+2. **Map-layout invariant.** The resulting map's exact runtime shape must describe how each
+   field is physically stored. A legal `int → string` field transition therefore creates or
+   selects a new shape and repacks the map; it never writes string bits under an `int`
+   `ShapeEntry`. The semantic binding type may be broader than that exact shape.
+
+Those invariants produce these cases:
+
+```lambda
+type Person = {name: string, age: int}
+type FlexiblePerson = {name: string, age: int | string}
+
+var q = {name: "Ana", age: 30}
+let before = q
+q.age = "very old"                 // legal: q evolves to a new inferred map shape
+                                    // before remains {name: "Ana", age: 30}
+
+var p: Person = {name: "Ana", age: 30}
+p.age = "very old"                 // compile error: the post-state is not Person
+
+var f: FlexiblePerson = {name: "Ana", age: 30}
+f.age = "very old"                 // legal: new exact shape, still FlexiblePerson
+```
+
+For a named literal key, the checker resolves the field through the annotated root's full
+semantic type. For a computed key or dynamic value, the runtime checks the proposed post-state
+against that same root contract. An unknown key is accepted only when the annotated map type is
+open; the runtime extends the exact shape with a slot matching the stored value. A future
+closed-map form rejects it. An unannotated root has no binding-contract check: its exact runtime
+shape evolves with legal writes, and the binding's effective inferred type is updated or
+honestly widened.
+
+The operation is transactional. Evaluate and snapshot the right-hand side first, establish
+that the resulting root value satisfies any annotation, then commit the COW replacement. On
+mismatch, no replacement is installed, no field bytes or shape change, and the assignment
+produces the rich error value. Nested writes apply the rule to the resulting root, not merely
+to the final physical slot. A direct unboxed store is legal only after the semantic check and
+the exact-layout proof both succeed. A uniquely owned container may be updated in place as an
+unobservable COW optimization; observable semantics remain
+`p′ = { *: p, field: value }`.
+
 ---
 
 ## 7. Enforcement design
 
-### TE-6 — One assignability relation, one implementation
+### TE-6 — One subtype model, distinct operations
 
-Adopt a single relation `assignable(S, T)` used by *all four* consumers: the static checker, the
-runtime checked conversion, `fn_is`/`match`, and the validator. Its definition is the one the
-static side already has — `types_compatible_with_full`'s exact-embedding numeric lattice
-(`lambda_numeric_kind_exactly_embeds`) extended with shape/union/occurrence walking that
-currently lives only in the validator. Consolidation targets: `numeric_type_subsumes` (fn_is)
-vs `validator_numeric_type_embeds` (validator) vs `lambda_numeric_kind_exactly_embeds` (checker)
-— three numeric lattices claiming to agree; and the constrained-type three-way divergence
-(§5.1). The relation is **value-preserving by construction**: `INT→{INT64,INTEGER,FLOAT,DECIMAL}`,
-`INTEGER→DECIMAL`, `{F32,FLOAT}→{FLOAT,DECIMAL}`, sized-int widenings — and nothing lossy.
-`FLOAT→INT` is not assignable anywhere, which means the declaration ladder's `MIR_D2I` arm
-(t13) is *removed*, making declarations agree with the call boundary instead of the other way
-round.
+Use one shared type-walking/numeric foundation, but expose three deliberately distinct
+operations:
 
-Runtime-side, the relation needs a value-level variant `convertible(item, T)` for the DEFERRED
-checks: a `decimal` holding an exact int *is* convertible to `int` (via
-`decimal_to_int64_exact`), an inexact one is not (today: silent `INT64_MAX`). Same rule, decided
-on the value instead of the static type — never lossy.
+1. `subtype(S, T)` — the static relation used by TE-2. It extends
+   `lambda_numeric_kind_exactly_embeds` with shape/union/occurrence walking.
+2. `matches(item, T)` — runtime membership used by DEFERRED checks and `is`/`match`; it asks
+   whether the value's actual runtime type is a subtype of `T`.
+3. `checked_convert(item, T)` — explicit conversion semantics owned by conversion functions,
+   not implicitly by an annotated boundary.
+
+This is Go-like: if an `any` holds `float(3.0)`, binding it to `int` fails the runtime type
+assertion; the boundary does not inspect the magnitude and silently turn it into an int.
+Value-dependent conversions remain available through explicit functions. Lossless
+representation conversion after a successful subtype/match — for example, placing an `int` in
+a proven `float` carrier where the numeric model says it exactly embeds — is an emitter detail,
+not a fourth type relation.
+
+The shared foundation consolidates `numeric_type_subsumes` (`fn_is`),
+`validator_numeric_type_embeds` (validator), and
+`lambda_numeric_kind_exactly_embeds` (checker), while keeping the validator's documented
+`any`-means-`any \ error` policy at its validation boundary. `FLOAT→INT` is never a subtype,
+which removes the declaration ladder's `MIR_D2I` arm (t13).
 
 ### TE-7 — Complete the static layer (fix the four root causes)
 
 1. **Keep both types alive at declarations.** Reorder `build_assign_expr`: resolve the
-   annotation first, build the initializer, run `assignable(init_type, declared_type)`, *then*
+   annotation first, build the initializer, run `subtype(init_type, declared_type)`, *then*
    store the declared type. Statically-known-wrong initializers become STATIC-REJECTED
    (`var s: int = "abc"` joins `x = "abc"` as E-errors). This closes TS-1.
 2. **Record annotation-ness for every binding**, not just `var` — a `declared_type` that
@@ -537,51 +654,53 @@ on the value instead of the static type — never lossy.
    whitelist re-derivation at `transpile-mir.cpp:6500-6508` is the workaround to delete).
 3. **Extended types survive on declarations** the way they do on params (`full_type`
    equivalent), so union and occurrence annotations are checkable at declarations (t6).
-4. **Named-shape adoption checks before it adopts**: field-by-field `assignable(literal field,
-   declared field)` in `build_assign_expr:5077-5121`, with missing-required-field and (per
-   TE-10's openness decision) unknown-field diagnostics. Closes the t4 corruption at the front
-   door.
+4. **Named-shape adoption checks before it adopts**: field-by-field `subtype(literal field,
+   declared field)` in `build_assign_expr:5077-5121`, with missing-required-field diagnostics.
+   Open named types accept and preserve extra fields; a future closed form diagnoses them.
+   Closes the t4 corruption at the front door.
 
 Plus: per-return-site checking against the declared return type (the `:8379` check is kept but
 no longer the only line of defense — each `return e` / final body expression is checked where
 its type is known, killing the vacuous-ANY hole for the static half); call arity becomes a
-diagnostic (today's argument loop stops at the shorter list and the emitter pads `0`); TS-7's
-unsupported typed-array element types (`bool[]`, `string[]`) get a compile-time diagnostic
-naming the supported set.
+diagnostic (today's argument loop stops at the shorter list and the emitter pads `0`).
+`bool[]`, `string[]`, and other semantically valid typed arrays remain legal using checked
+generic-array storage; lack of a packed `ArrayNum` carrier is an optimization limitation, not a
+type-system error. Add B7b's annotated-root member-write check at the same static layer:
+statically prove or reject the root's post-state, while leaving unannotated shape evolution
+legal.
 
 Diagnostics stop funneling everything into E201: the dormant codes exist and get used
 (`ERR_ARGUMENT_TYPE_MISMATCH=207`, `ERR_RETURN_TYPE_MISMATCH=208`, `ERR_UNDEFINED_FIELD=205`,
 …, `lambda-error.h:71-99`).
 
-### TE-8 — The checked conversion (the DEFERRED half)
+### TE-8 — The checked boundary (the DEFERRED half)
 
-One new emitter primitive, `emit_checked_unbox(mt, reg, expected_tid, site)`, replacing bare
-`emit_unbox` at the **17 primary boundary sites** (§5.2 table: 7 argument, 4 declaration,
-6 return). Emission shape:
+One boundary primitive, conceptually
+`emit_checked_boundary(mt, reg, expected_type, site)`, replaces bare `emit_unbox` at the
+boundary sites. It accepts the full `Type*`/type-list reference, not only a TypeId, so unions,
+shapes, occurrences, and named types remain expressible. Emission shape:
 
 ```
-tag = item >> 56                          // or item_type_id() for tag-0 handling
-if tag == expected        → existing unbox (fast path unchanged)
-elif tag == error         → short-circuit: the error value becomes the boundary's result (TE-9)
-elif convertible(item, T) → convert (exact numeric embeddings only)
-else                      → lambda_type_error(expected, item, site) — construct the error value
+actual = item_type_id(item)                 // canonical tag-0-aware query
+if fast_simple_match(actual, expected) → establish proof and convert carrier if needed
+elif item matches expected_type        → establish proof; preserve/normalize carrier as required
+elif actual == error and T admits error → pass the error as a value
+else                                   → lambda_type_error(expected, item, site)
 ```
 
-The runtime side adds the checked converter family (`cast2i`, `cast2l`, `cast2d`, `cast2s`, …)
-for slow paths and boxed trampolines — same dispatch as `it2*` but the fall-through constructs
-a diagnostic-carrying error value instead of `0`/`NaN`/`nullptr`. The `it2*` family itself is left untouched for
-pre-verified internal callers; boundaries simply stop being routed through it. (`it2d`'s
-`NaN`-instead-of-0.0 comment shows this exact correction was already made once, one converter at
-a time; TE-8 finishes the thought at the boundary layer.)
+The runtime slow path returns either a proof-backed value suitable for the chosen carrier or a
+proper diagnostic error object; it never returns `0`/`NaN`/`nullptr` on mismatch. The `it2*`
+family remains available to pre-verified internal callers, but annotated boundaries stop being
+routed through it unchecked.
 
 Fast-path cost is one predictable branch on bits already in a register — the same shape as the
 guards the IC machinery already emits everywhere. The perf gate in §8 holds it to noise on the
 typed benchmark column.
 
-**Placement (revised by TE-14):** the **argument** group's checks are emitted once per
-function, in the boxed version's prologue — the per-call-site conversion sites listed above
-become plain entry selection. The **declaration** and **return** groups stay site-local. Net:
-checking code scales with the number of functions, not the number of call sites.
+Correctness does not depend on where a later backend chooses to place or deduplicate the check.
+A boxed-entry prologue is the likely implementation for dynamic calls, while declarations,
+returns, and writes remain site-local. TE-14 records this as a performance/implementation
+direction rather than a semantic prerequisite.
 
 ### TE-9 — Failed checks produce error **values** (decided 2026-07-29; supersedes rev 1's panic recommendation)
 
@@ -595,29 +714,30 @@ Three options existed; two are rejected by decision:
    all over Lambda code.
 3. **Therefore: error return values.** A failed DEFERRED check yields a diagnostic-carrying
    error value in the value lane — Lambda's existing errors-as-values model (and the Jube
-   C-ABI principle: errors as return values everywhere).
+   C-ABI principle: errors as return values everywhere). At an annotated destination, that
+   error is the boundary operation's result; it is not stored in the declared `T`.
 
-**The clean/open scheme.** For `fn a(b) int`, the declared type is the **success type**; whether
-`error` joins it is *inferred*:
+**Annotated and inferred outcomes stay distinct.**
 
-- **Clean case:** the compiler statically proves every boundary the result depends on — the
-  call's effective type is plain `int`. Zero runtime cost, and the **native unboxed variant**
-  serves exactly this case: no error path exists by construction (which also retires
-  `INT64_ERROR`-style sentinels from clean lanes).
-- **Open case:** some boundary is DEFERRED — the call's effective type is **`int | error`**,
-  and that union propagates through downstream code. *(Revised 2026-07-29 by §10.7's firewall
-  rule: this silent widening applies only to **undeclared** returns — a declared plain-`int`
-  function with an open body is a compile error, resolved by containing, disclosing
-  `int | error`, or imposing `int^`.)* The **boxed variant** serves this case, carrying the
-  union in the tagged Item. (This refines today's crude `get_effective_type` can_raise→ANY
-  rule into a precise `T | error`.)
+- `let x: T = e` checks `e`; success establishes `x: T`, while failure produces the error
+  outcome before `x` exists.
+- `let x = e` establishes `x` with `e`'s inferred effective type, including `T | error`.
+- A statically proven call to `fn a(b: int) int` has result `int`. A dynamically checked call
+  is open at the call boundary because parameter validation can fail, so that call expression
+  has effective type `int | error`; on success the callee body still sees `b: int`.
+- A declared plain-`T` return remains an effect firewall: an open body is a compile error,
+  resolved by containing, disclosing `T | error`, or imposing `T^`.
+
+Boxed storage is therefore required for inferred/open outcomes, not for a successfully
+established annotated `T`. A future native variant may exploit the clean proof, but the semantic
+rule does not depend on that optimization.
 
 **Error short-circuit rule.** An error value arriving at any subsequent DEFERRED boundary
 becomes that boundary's result without further checking — "error in, error out", the
 `GUARD_ERROR1` convention generalized. Propagation is therefore *implicit*; containment is
-*explicit* and placed where the user chooses (`let x^err = …`, `?`, `x is error`). This is what
-keeps the no-spill promise: nothing forces handling, and errors surface at the batch boundary
-where the user aggregates results.
+*explicit* and placed where the user chooses (`let x^err = …`, postfix `^`, `or`,
+`x is error`). This is what keeps the no-spill promise: nothing forces handling for an inferred
+`T | error`, and errors surface at the batch boundary where the user aggregates results.
 
 **Sys functions.** The normative convention (making §5.5's pattern 2 the rule): acceptive on
 input types, **error value returned for invalid types** — never silent wrong values, never
@@ -625,11 +745,9 @@ message-less deaths. The future perf split mirrors user functions: per-func clea
 (`len(non_error_data) int` vs `len(any) int | error`), selected by the caller's statically-known
 argument types, with registry metadata driving the selection.
 
-Note how this dissolves §5.2's structural constraint rather than fighting it: open results
-travel boxed, so no native error lane is needed; native lanes exist only where clean-ness
-proves no error can occur. The `RETURN_LANE_ERROR` dual-lane ABI remains the third point in the
-matrix (clean args × open return: native success value + side-channel error) — reconciling the
-three return shapes is an open ABI question (§10).
+Open results travel boxed, while a backend may use native lanes where cleanness and carrier
+proofs establish that no error can occupy the lane. The exact entry/return ABI is deferred to
+the implementation/performance stage (TE-14).
 
 For validation failures at named-type boundaries (TE-10), the error value carries the
 validator's path detail (`.field[3]: expected int, got string`) — which requires surfacing
@@ -639,22 +757,29 @@ validator's path detail (`.field[3]: expected int, got string`) — which requir
 
 At a DEFERRED B3/B9 boundary (`let q: Q = <dynamic>`), emit a call to the **existing** entry
 point `fn_is` already uses: `schema_validator_validate_type(ctx->validator, item,
-const_type_with_tl(type_index))`. On failure → a TE-9 error value carrying the path detail. No
-representation bridge is needed (§5.3: schema types and script types are the same `Type*` graph); this is an
-emission change plus validator hardening:
+const_type_with_tl(type_index))`. On failure → a TE-9 error value carrying the path detail,
+with no `q` binding established.
 
-- **Depth: deep, on first crossing** — Go `Unmarshal` semantics. The value either satisfies `Q`
-  in full or the binding traps. (Witness caching to skip re-validation of already-validated
-  subtrees is perf-stage work; correctness first.)
+No **type-graph** bridge is needed: schema types and script types are the same `Type*` graph.
+That does not imply that a parsed map already has the declared map's packed physical layout.
+Validation initially establishes the semantic named-type contract while reads continue through
+the value's runtime shape. Canonicalizing/repacking a validated generic map into a declared
+layout — including preservation of open extra fields — is a separate implementation/performance
+decision required before direct-offset field access can use that layout.
+
+- **Depth: deep, on first crossing.** The value either satisfies `Q` in full or the boundary
+  yields a rich error without establishing the binding. (Witness caching to skip re-validation
+  of already-validated subtrees is perf-stage work; correctness first.)
 - **Openness: named map types are open by default — DECIDED 2026-07-29 (user).** Extra fields
   pass, matching the validator's current behavior, Go's unmarshal, and structural-width
   subtyping. A closed form (wiring the already-parsed `allow_unknown_fields`/`strict_mode`
   flags to actual checks) remains a possible future opt-in.
 - **Constrained types (`T where …`) — DECIDED (§10.14)**: the validator is the checker and will
-  evaluate constraint predicates (the MIR-inlined `is` already does); implementation
-  deferrable. Until it lands, constrained checks are base-type-only as a *documented* deferral
-  — distinct from today's silent, undocumented pass in `fn_is` (`:1139-1163`).
-- Nominal `TypeObject` checking (today `fn_is`-only) folds into the same relation.
+  eventually evaluate constraint predicates (the MIR-inlined `is` already does). The accepted
+  interim scope is deliberately simpler: enforcement validates only the base `T`, and the
+  predicate refinement remains a clearly documented validator follow-up. This does not block
+  the base type-enforcement rollout.
+- Nominal `TypeObject` checking (today `fn_is`-only) reuses the shared subtype/match foundation.
 
 ### TE-11 — Null policy
 
@@ -662,7 +787,8 @@ Today `null` passes `types_compatible`'s escape hatch statically, while `null is
 `false` at runtime — the two halves disagree. **Decision: plain `T` does not admit `null`;
 optionality is spelled `T?`** (the occurrence form already exists in the grammar and the
 validator honors it via `is_type_optional`). ANY/NULL boundary values hitting a plain-`T`
-DEFERRED check trap. **DECIDED 2026-07-29 (user): ships in P0** together with the rest of the
+DEFERRED check yield an error and do not establish the binding. **DECIDED 2026-07-29 (user):
+ships in P0** together with the rest of the
 static layer — no warn-only interim release. Migration risk is handled by the P0 baseline gate:
 any code relying on null-through-annotation surfaces there and is fixed with `T?`.
 
@@ -674,8 +800,8 @@ checks on inferred-only paths. TS-9 (int→float overflow) stays as specified in
 region-producer gate (TS-6), the ANY-downgrade fast-path losses (TS-3), and the dead
 direct-field-offset path (TS-5) are all perf-stage items — though note TE-10 finally gives
 named map annotations a *meaning* (a validated contract), resolving TS-5's "cost without
-benefit" in the benefit direction, and TE-3's guarantees are exactly what will make the TS-3/
-TS-5 fast paths safe to re-enable.
+benefit" in the semantic direction. TE-3's local carrier proofs, plus an eventual layout
+canonicalization decision, are what can later make the TS-3/TS-5 fast paths safe to re-enable.
 
 ### TE-13 — Unified discharge surface over the two error forms (revised 2026-07-29, user)
 
@@ -702,7 +828,8 @@ value — `raise` there is a compile error (the existing plain-`T` raise restric
 the union form). Channel ↔ verb: `^` raises, `| error` returns — exactly §7.3's "fn return
 error; pn raise error" given surface spellings.
 
-**Acknowledgment forms (PROPOSED, elaborated 2026-07-29): must-handle = must-engage-explicitly.**
+**Acknowledgment forms (DECIDED 2026-07-29 — generalization ratified): must-handle =
+must-engage-explicitly, at the immediate expression.**
 E228 guards against *unawareness*, not against deferred branching — so it is satisfied whenever
 the enforcing call's result is received by a context that **textually** engages the error
 possibility:
@@ -712,7 +839,9 @@ possibility:
    `T^` (equivalent in value positions), or `error` itself. The binding carries the outcome as
    a union, and ordinary assignability already enforces engagement-before-plain-`T` for both
    spellings — the §7.3 wrapper idiom in one step, and the batch idiom for collecting
-   enforcing-call outcomes. **`any` never counts** — it admits error but acknowledges nothing;
+   enforcing-call outcomes. The declared-return form counts **only for the call in return/tail
+   position** (`return f()`, or the final expression) — see tightness below. **`any` never
+   counts** — it admits error but acknowledges nothing;
 3. a `match` with a `case error:` arm.
 
 Bare `let x = a()` remains an error — Lambda stays stricter than Zig/Rust/Go, all of which
@@ -720,6 +849,70 @@ accept an untyped capture. The §10.7 firewall backstops the demotion path: an a
 error still cannot silently escape a declared plain-`T` interface. Implementation: one added
 condition at the existing E228 site (`build_ast.cpp:5197` — "declared type explicitly admits
 error") plus a third suggestion in the diagnostic text.
+
+**Acknowledgment tightness (DECIDED 2026-07-29, user): tight everywhere for `^` — keyed on the
+form, not on fn vs pn.** The acknowledgment must be the **immediate expression surrounding the
+call**; never distant, never scope-level. In particular, a declared error-admitting return does
+*not* retroactively acknowledge non-tail calls:
+
+```lambda
+pn p() T | error {
+    f()        // compile error if f is enforcing — discarded outcome, no acknowledgment
+    g()        // same — and f's unhandled failure could be the very cause of g's
+    return r   // the declared return covers only THIS expression, not the calls above
+}
+```
+
+Rationale: the `^` channel is *designed* to demand explicit acknowledgment — primarily for pn
+code, where an unengaged failure invalidates every subsequent command (§7.3: "commands halt on
+failure"); fn may use `^` too, under the same discipline. No laxer rule for fn is needed,
+because the relaxed pattern **already has its own spelling**: a callee that wants callers to
+write `let a = b()` and let errors flow simply declares `T | error`. The two forms are the two
+intended design patterns — the callee author chooses the caller discipline by choosing the
+form:
+
+| Pattern | Declare | Caller experience |
+|---|---|---|
+| Urgent — must acknowledge | `T^` | engage at the immediate expression, everywhere |
+| Relaxed — value-flowing | `T \| error` | `let a = b()` is fine; the error propagates as a value |
+
+**The soft form's contract (decided 2026-07-29, user): flow through the interior, detect at
+the type boundary.** Softness is *desirable* for fn code — pipelines, batch processing,
+for-loops, composed containers — because one returned error cascades like a normal value and
+**does not abort** the surrounding computation. The cost, *by design*: the error is likely
+embedded in the eventual result rather than surfacing upfront. The mitigation is the type
+system itself — typed containers exclude error by element type (§10.6), so a type pattern
+harvests embedded errors at whatever boundary the user chooses. All three legs verified live
+2026-07-29:
+
+```lambda
+[123, error("m"), 456]              // → [123, error, 456] — composition holds the error
+for (x in [1, "abc", 3]) int(x)     // → [1, error, 3]     — one bad element, batch continues
+type IA = int[]
+[1, error("m"), 3] is IA            // → false             — the type pattern detects it
+[1, 2, 3] is IA                     // → true
+```
+
+So softness and enforcement are complementary halves, not a tension: errors flow freely
+through the interior, and are detected exactly where the user asserts a clean type — an `is`
+pattern, a `match` arm, an annotated (DEFERRED) binding, or the §10.7 firewall at a declared
+interface. *Side-finding (grammar-checked 2026-07-29):* the `is` RHS is plain **expression space** — `is`
+is a generic `binary_expr` table row with `operand = $._expr` (`grammar.js:76`, `:41-42`) —
+which is why its type forms are restricted by design (bare identifiers, base types, `[T]`
+literals; anything richer would collide with legal postfix parses: `x is int[3]` already
+parses as `(x is int)[3]`). Two in-grammar precedents show type-space RHS is workable where
+unambiguous: **`match` case patterns take the full `$._type_expr`** (`grammar.js:763`) —
+`case int[]:` works *today* and detects embedded errors (verified:
+`match(v){ case int[]: "clean" default: "has non-int" }` → `["clean", "has non-int"]`) — and
+the query operator takes `$.primary_type` (`:489`). **Noted only — OUT OF SCOPE for this
+proposal (user, 2026-07-29): supporting `x is (int[])` belongs to the pattern-grammar and
+validator design.** Hand-off note for that effort: the parenthesized form is strictly additive
+(`(int[])` is a syntax error everywhere today); mechanics would be a dedicated `is` rule with
+RHS `choice($._expr, seq('(', $._type_expr, ')'))`, one GLR conflict at the paren boundary
+(contents valid in both spaces, e.g. `(int)`) resolved by preferring the type parse — semantics
+coincide, since the AST already resolves identifier exprs to types. Direct unparenthesized
+`is int[]` should stay off the table (it would re-parse the currently-legal
+`(x is int)[…]` postfix form). Until then the spellings are: a named type, or a `match` arm.
 
 **`or`-rescue — RESOLVED 2026-07-29: no rule-bend needed; error-consuming `or` is already both
 the spec and the implementation.** Specified three times over — truthiness (errors are falsy,
@@ -733,7 +926,11 @@ special-cased `or` that breaks the identity. Two safety properties observed: **`
 in Lambda, so `int(s) or 0` has no JS-style zero-swallow footgun; and errors log at
 origination (`runtime error [318]: boom`), so an `or`-consumed diagnostic leaves a `log.txt`
 breadcrumb even though the program never sees it. `a() or 0` accordingly counts as E228
-engagement (textually explicit consumption handling both branches).
+engagement (textually explicit consumption handling both branches). Pitfall documented
+2026-07-29 in `Lambda_Error_Handling.md` §"Error Truthiness": bare `error` in expression
+position is the **type** (truthy, not an error value) — `error or 0` → the type,
+`error is error` → `false`, `error is type` → `true`; the `if`-condition lint catches the
+`if (error)` form but not the `or`-operand form (lint-extension candidate).
 
 **The `or`-typing rule (required by P0).** For the idiom to survive strict declarations, the
 static type of `a or b` must narrow the falsy poison/absence members out of the left side:
@@ -755,6 +952,44 @@ the error-ness of the value, so they work identically over both error forms:
 Emission differs invisibly by callee kind — can_raise dual-lane reads the side channel, boxed
 open results tag-test the Item — but the surface must never reveal which.
 
+**Destructuring across mixed channels (decided 2026-07-29, user).** `^err` is **total over
+error-ness and channel-agnostic**: it splits the outcome by whether the *value* is an error,
+regardless of which channel delivered it — the enforcing `^E` channel, an error type inside
+the value union, or an error hiding inside `any`. The two boundary cases that pin the rule:
+
+```lambda
+fn a() T | e1 ^ e2      // legal syntax (nobody would write it, but allowed):
+                        //   union error e1 AND channel error e2
+let b^err = a()         // b : T          — every error constituent stripped
+                        // err : e1 | e2  — errors from BOTH channels land in err
+
+fn c() any ^ e2
+let b^err = c()         // b : any \ error, guaranteed non-error
+                        // err : error | e2 — errors arriving via the any value or the channel
+```
+
+The general typing rule: `type(b)` = the success constituents of the source type (`T` in the
+first case; `any \ error` in the second); `type(err)` = the source's error constituents ∪ the
+channel's error type (∪ `null` on success). Note `any \ error` is exactly what the validator's
+`any` already means — it matches everything except ERROR (§5.3) — so the checker's refinement
+and validation positions agree. At runtime the split is one channel-agnostic test: `is error`
+on the outcome (dual-lane callees: side-lane check plus value-tag test; boxed callees: tag
+test alone). E228 applies whenever the signature carries any `^` channel, and the destructure
+engages *everything* at once. **Postfix `^` behaves identically on the same mixed forms —
+CONFIRMED 2026-07-29 (user):** it unwraps to the same stripped success type (`T`, or
+`any \ error`) and propagates the same combined error set (`e1 | e2`), which rides the
+enclosing function's error channel per the unified-channel rule. In binding position the
+stripping is manifest in the type — `b` is error-free in both forms:
+
+```lambda
+let b^err = a()   // b : T (stripped); err : e1 | e2
+let b = a()^      // b : T (stripped) — same type; errors propagated instead of captured
+```
+
+Postfix `^` is thus a *type-narrowing* operator in expression position: downstream of either
+form, `b` is statically clean and eligible for native lanes — the two forms differ only in
+where the error goes (captured locally vs propagated to the caller).
+
 **Obligations attach to the form.** Must-handle (E228) applies to `T^`/`T^E` — the enforcing
 spelling — and to pn/can_raise sys funcs; `T | error` never triggers it (the no-spill
 decision). This is the simplest possible keying: no provenance metadata needed, the type
@@ -770,7 +1005,7 @@ error-possibility came from, and enforcement keys on that provenance:
 
 ```lambda
 fn f(a: T^) { let b: T = a }   // compile error — explicit T^ must be discharged first
-fn g(a)     { let b: T = a }   // allowed — implicit/open error-ness; a DEFERRED boundary
+fn g(a)     { let b: T = a }   // DEFERRED: success binds b:T; failure exits before b exists
 ```
 
 An *explicitly declared* error possibility — either spelling, `T^` or `T | error` — must be
@@ -802,7 +1037,8 @@ errors ride the **same** channel: every `R^E` is operationally `R^(E | error)`. 
 error-possibility was in play and its cleanness is an *inference* result (an open-capable
 callee currently proven clean) → **warn only, or even silent** — a defensive `^` survives
 distant clean↔open flips; (2) the non-error nature is *explicit* (declared plain-`T`, no open
-capability in play) → **static error**, as today ("'add' does not return errors").
+capability in play) → **static error**, as today ("'add' does not return errors"). *(Reading
+of case 2 confirmed 2026-07-29.)*
 
 **Interaction with TE-11:** after a failed `let x^err = e`, `x` holds `null` (current spec), so
 the value binding is effectively `T?` until `err` is checked. Flow narrowing stays KIV; the
@@ -816,91 +1052,89 @@ error-transparency (spelled `T | error` for non-enforcing acceptance).
 **Implementation notes.** (1) The live propagation operator is postfix `^` (verified
 2026-07-29: `input(...)^` works; `input(...)?` parses as the *query* operator and does not
 propagate). The two E228 diagnostic texts advertising `d(...)?` are **fixed** (2026-07-29,
-`build_ast.cpp:5199`, `:9017` → `d(...)^`); the ❌/✅ duplicated example line in
-`Lambda_Error_Handling.md` §"Handling System Function Errors" still needs fixing. (2) The batch
+`build_ast.cpp:5199`, `:9017` → `d(...)^`); the error-handling guide is updated with TE-13's
+channel-agnostic discharge rules. (2) The batch
 idiom for per-item failures is simply a **plain array** holding successes and errors (§10.6's
 type-level framing); typed `int[]` stays clean-only, and no new `(int^)[]` spelling is needed.
 
-### TE-14 — Two-version compilation model (decided 2026-07-29, user)
+### TE-14 — Boxed/unboxed entry strategy is a later implementation decision
 
-Each `fn`/`pn` compiles to (up to) two versions, and **all fn-boundary checking consolidates
-into one of them**:
+Enforcement correctness requires a safe path for every dynamic call; it does not require this
+proposal to mandate a particular specialization topology. The simplest semantic anchor is a
+boxed checked entry. A later implementation/performance phase may add an unboxed entry whose
+parameters and returns use native carriers and whose body relies on TE-3's local proofs:
 
-- **Boxed version — always `Item… → Item`, regardless of annotations.** It performs the
-  argument type checks, conversions and unboxing *inside the callee*, and its Item return
-  carries `T | error` when open. Every dynamically-typed call site simply boxes its args and calls
-  this version — so the type-checking code is emitted **once per function, not once per call
-  site**. This is what keeps TE-8 from exploding combinatorially ("otherwise too many
-  combinations to check").
-- **Unboxed version — assumes the annotated types.** Raw native lanes, zero checks; callable
-  only from call sites whose static types are proven (TE-2 STATIC-PROVEN). Emitted when the
-  user annotates params/returns — and the transpiler may *additionally* specialize one from
-  usage even for `fn a(any) any` (e.g. an `a(int) int` variant): specialization is not limited
-  to annotations.
-- **Return types need special care:** even with a declared `int`, the *effective* return may be
-  `int^` (open body). The boxed version carries the union naturally; whether an open function
-  gets an unboxed variant at all is **implementation-discretionary** (§10.3, decided) — and the
-  current implementation already exercises that discretion, emitting unboxed *inferred*
-  variants especially for the recursive functions in the benchmarks.
+- only STATIC-PROVEN callers may enter an unchecked native version;
+- dynamic callers use a checked path, likely with argument checks consolidated in a boxed
+  prologue;
+- the same semantic function result is observed regardless of entry/carrier choice;
+- declared typed map slots likewise use unboxed physical storage only after the declared field
+  check has succeeded.
 
-Consequence for the emitter (revises TE-8's placement): call sites stop emitting argument
-conversions for open calls — the three-arm ladder at `transpile_call_raw` (`:10464-10502`)
-reduces to *entry selection* (proven → unboxed entry; otherwise box-and-call the boxed entry) —
-and the checked conversions land in the boxed version's prologue (today's unchecked
-`emit_unbox` at `:14691-14695` / `:14026-14030` becomes the checked form). Declaration,
-reassignment and return boundaries keep their site-local checks.
+Whether every function receives both versions, whether usage creates additional
+specializations, and how open returns use boxed or side-channel ABIs are deferred. They are
+performance decisions, not part of the language contract.
 
 ---
 
 ## 8. Phasing
 
-Each phase gates on `make test-lambda-baseline` at 100% plus new targeted tests (every new
-`*.ls` with its `*.txt` golden, per repo rule; negative compile-error cases assert the
-diagnostic text).
+Each phase gates on `make test-lambda-baseline` and `make test262-baseline` at 100% plus new
+targeted tests (every new `*.ls` with its `*.txt` golden, per repo rule; negative compile-error
+cases assert the diagnostic text). Performance measurements use `make release`, never a debug
+binary.
 
-**P0 — Static completion (front end only, no ABI/runtime risk).** TE-7 items 1–4: declaration
-reorder + scalar check (closes TS-1), extended-type survival, named-shape field checks, per-
-return checks, arity diagnostic, TS-7 compile diagnostic, new error codes. **TE-11 null
-strictness ships here too** (plain `T` rejects `null`; `T?` is the optional spelling — decided
-2026-07-29), and the **`or`-typing narrowing rule** (`type(a or b) = (type(a) − {error, null})
-| type(b)`, TE-13) so the `int(s) or 0` idiom passes the strict checker. Also delete the
-emitter's annotation re-derivation whitelist in favor of the recorded declared type. *Exit
-evidence:* t1/t3/t4/t6/t13/t14-family probes all become compile errors; baseline green.
+**P0 — Semantic foundation and static completion.** Establish TE-6's canonical
+`subtype`/`matches` primitives and truth tables first, then TE-7 items 1–4: declaration reorder
+and scalar check (closes TS-1), extended-type survival, named-shape field checks, per-return
+checks, arity diagnostic, B7b annotated-root member checks, and new error codes. Semantically valid
+typed arrays without packed carriers use generic storage rather than receiving a TS-7
+diagnostic. **TE-11 null strictness ships here too** (plain `T` rejects `null`; `T?` is the
+optional spelling), and the **`or`-typing narrowing rule**
+(`type(a or b) = (type(a) − {error, null}) | type(b)`, TE-13) keeps
+`let n: int = int(s) or 0` valid. Record declared/effective types explicitly; do not re-derive
+annotation-ness from emitter whitelists. *Exit evidence:* t1/t3/t4/t6/t13/t14-family probes
+become compile errors; the subtype/match truth-table tests and both baselines are green.
 
-**P1 — Checked-conversion infrastructure.** `lambda_type_error` constructor (emitting the
-inline code-form error item on hot paths, §10.4) +
-`emit_checked_unbox` with the error short-circuit arm; checks placed per TE-14 (argument
-checks once per function in the boxed-version prologue, call sites reduced to entry selection;
-declaration/reassignment/return sites checked locally); missing-arg
-padding removed (arity is P0-static where the callee is known; an error value otherwise);
-`cast2*` family for the boxed/slow paths; effective-type computation (`T | error` for open
-calls) plumbed through the front end. *Exit evidence:* the dynamic halves of the catalog
-(ANY-string arg, ANY return, t10, t16 field read) yield diagnostic-carrying error values; typed
-benchmark column within noise of pre-P1 (the perf guardrail — enforcement must be ~free on hot
-paths).
+**P1 — Checked-boundary infrastructure.** Add the rich `lambda_type_error` object constructor
+and `emit_checked_boundary` with a full expected `Type*`, error-preservation arm, and Go-like
+runtime match. Missing-argument padding is removed (arity is P0-static where the callee is
+known; an error value otherwise), and effective-type computation (`T | error` for dynamic call
+or inferred-open outcomes) is plumbed through the front end. Check placement may initially
+follow the safest boxed/site-local implementation; TE-14 optimization is not an exit
+dependency. *Exit evidence:* dynamic wrong arguments and t10 yield rich errors; annotated
+declarations never bind error, failed calls never enter the body, and both baselines are green.
 
-**P2 — Return honesty (closes TS-2's class).** Per-return checked conversion including boxed
+**P2 — Return honesty (closes TS-2's class).** Per-return checked boundary including boxed
 returns (`emit_coerce_boxed_to_declared` gains the check for INT/FLOAT/BOOL/STRING); audit the
 four ad-hoc `STRING` native-return widenings; a call expression's recorded static type is now
 honest for every consumer — the declared type when clean, `T | error` when open.
 
 **P3 — Named types at runtime (B3/B9).** TE-10: validator call emission at DEFERRED bindings;
-validator hardening (constrained-type decision, error-path surfacing, openness default);
-optionally the `input(url, {schema: Q})` convenience (insertion point `lambda-eval.cpp:
-2981-3018`) so parse-time failures carry file context. *Exit evidence:* t16 yields an error
-value carrying `.a: expected int, got string`; the §4.3 `Config` example works end-to-end.
+validator hardening (base-type enforcement for constrained types, error-path surfacing,
+openness default); optionally the `input(url, {schema: Q})` convenience (insertion point
+`lambda-eval.cpp:2981-3018`) so parse-time failures carry file context. *Exit evidence:* t16 yields an error
+value carrying `.a: expected int, got string`; no binding is established; the §4.3 `Config`
+example works end-to-end without assuming the parsed map has been repacked.
 
-**P4 — Container element enforcement (B7 + B2's hole).** Writes through an annotated `T[]`
-binding check the element (fast paths keep their guards; the fallback arm produces an error
-value instead of degrading via `convert_specialized_to_generic`); the ARRAY_NUM cross-convert path gets element
-checks; the B2 raw-pointer/ANY downgrade is replaced by an honest tagged value (which is also
-the TS-3 prerequisite). Unannotated arrays keep today's flexible degrade — it is inference, not
-contract (TE-12).
+**P4 — Container and member-write enforcement (B7a/B7b + B2's hole).** Writes through an
+annotated `T[]` check the element. A map write through an annotated root checks that the whole
+post-state still conforms to the root's declared `Type*`; all failures leave the destination
+unchanged. Open extra fields are allowed by an open contract, but still extend the map with an
+exact runtime shape/slot matching the stored value. Legal field-type transitions rebuild and
+repack the shape, with the COW replacement propagated to the root or parent. Fast-path fallback
+produces an error instead of degrading a typed contract; the ARRAY_NUM cross-convert path gets
+element checks; and the B2 raw-pointer/ANY downgrade is replaced by an honest tagged value.
+Unannotated containers keep today's flexible type/shape evolution — inference is not a binding
+contract (TE-12). *Exit evidence:* unannotated `int → string` map reshaping, annotated static
+and dynamic mismatch cases, union-field shape transitions, computed keys, open extra fields,
+COW snapshot isolation, and no-mutation-on-failure tests pass.
 
-**P5 — Relation consolidation (TE-6 refactor).** Fold the three numeric lattices and the
-constrained/nominal special cases into the shared `assignable`/`convertible` module consumed by
-checker, emitter, `fn_is`, and validator. Mechanical but wide; last so it lands on a
-fully-enforced, fully-tested surface.
+**P5 — Legacy-consumer consolidation and optimization hand-off.** Migrate remaining `fn_is`,
+validator, and emitter call sites onto P0's shared subtype/match foundation; delete superseded
+unchecked boundary paths. Then measure and design TE-14's boxed/unboxed entry strategy,
+validated-map canonicalization, direct field offsets, and witness caching without changing
+semantics.
 
 ---
 
@@ -915,6 +1149,9 @@ fully-enforced, fully-tested surface.
 - **XML schema-driven typing** — KIV per user decision; §4.2 records the substrate facts.
 - **Flow-sensitive narrowing** (`if (x is int)` refining `x`), **generics**, **checked-cast
   surface** (`as` / `as?` — no cast operator exists today, t7), **arity overloading** (TS-8).
+- **`x is (int[])` — parenthesized types on the `is` RHS**: noted with full grammar analysis in
+  TE-13's side-finding; belongs to the **pattern-grammar and validator design**, not this
+  proposal (user, 2026-07-29).
 - **TS-9** int→float overflow policy — owned by `Lambda_Formal_Semantics.md`.
 - Side-findings filed for separate handling: TOML datetime unsupported (§4.2); `it2l` missing
   ERROR arm and the `0`-vs-`INT64_MAX` asymmetry (§5.2) — both subsumed by TE-8 at boundaries
@@ -932,28 +1169,17 @@ fully-enforced, fully-tested surface.
    `^e`/`is error`, `or`-defaults) are value-directed and work identically over both.
    Residuals (a)/(b)/(c) all **DECIDED**: the obligation split is *type-directed* — attached
    to the `^` spelling itself, closing (a); `R^(E | error)` widening per the unified channel;
-   vacuous-`^` warn/silent when cleanness is inferred, static error when explicit. One
-   micro-item to confirm: `let x: int | error = a()` counting as E228 handling (TE-13).
-3. **Return ABI for open functions' unboxed variants — DECIDED 2026-07-29 (user):
-   implementation-discretionary.** Whether an open function gets an unboxed variant is not a
-   language-design question; the boxed version is the semantic anchor (always present, carries
-   `T^`). The current implementation already exercises the discretion — it emits unboxed
-   *inferred* variants, especially for the recursive functions in the benchmarks (the TCO
-   self-call native path, §5.2). Which error side-channel such a variant uses
-   (`RETURN_LANE_ERROR` dual-lane or otherwise) is likewise the implementation's choice.
-4. **Error payload cost — DECIDED 2026-07-29 (user): two-form error items.** Predefined system
-   errors are carried as a bare **code**, inline in the Item — layout
-   `[tag byte][…zeros…][16-bit error code]` — and an **error object** is constructed only when
-   elaborate info is needed: `[tag byte][error-object pointer]`. The two forms are
-   discriminated by payload magnitude (a sub-64K payload is a code; real pointers never live in
-   the low pages). Consequences: a hot-loop boundary failure allocates **nothing** — a
-   code-form item is a pure bit pattern, so it is interned by construction and its construction
-   is infallible by construction (closing both §10.4 remainders). `err.code` works on both
-   forms; `err.message` on a code form synthesizes from the static code table;
-   `err.file`/`line`/`column`/`source` are `null` on the code form; the `error()` constructor
-   always builds the object form. Accepted trade-off (TE-4 latitude): a code-only type error
-   surfacing uncontained at top level reports the code/category without boundary location —
-   callers wanting detail discharge near the boundary, and debug builds may always elaborate.
+   vacuous-`^` warn/silent when cleanness is inferred, static error when explicit.
+   **CONFIRMED 2026-07-30:** `let x: int | error = a()` counts as immediate E228 engagement.
+3. **Return ABI for open/native variants — DEFERRED 2026-07-30.** The language contract is
+   representation-independent. TE-14 leaves boxed/unboxed entry count, check placement, and
+   open-return side channels to the implementation/performance phase, subject to boxing
+   invisibility and TE-3's local proof invariant.
+4. **Error payload — DECIDED 2026-07-30 (user): proper rich error object/value.** Drop the
+   inline code-only form. Every type-enforcement failure constructs an error with at least
+   `code`, `message`, expected type, actual type/value summary, boundary/source location, and
+   validator path when applicable. Boundary failure is cold; preserving the diagnostic
+   contract takes precedence over allocation avoidance.
 5. **Value-domain semantics of error values — RESOLVED 2026-07-29: already fully specified in
    `Lambda_Formal_Semantics.md`.** Checked against the doc: **equality** (§5.1) — `nan` and
    `error` are the two designed poison carve-outs, never equal to anything including
@@ -997,18 +1223,19 @@ fully-enforced, fully-tested surface.
      compile error (`Lambda_Error_Handling.md`); implicit propagation slipping through would
      have been backwards. Zig (`catch` forced in non-`!T` fns), Swift (`do-catch` in
      non-throwing), Rust agree.
-   - **Emitter win** (ties §10.3/TE-14): declared-plain-`T` functions are clean-return *by
-     construction* — native return lanes never need an error path; return special-care applies
-     only to undeclared/`T^`/`any` functions.
+   - **Emitter consequence**: declared-plain-`T` function bodies are clean-return by
+     construction. A later native variant may exploit that fact; TE-14 deliberately leaves the
+     carrier/ABI choice out of the semantic phase.
    - **No E228 spill**: inference never produces `^` at all — it produces `| error`, which
      never triggers must-handle. A function pushed open by its arithmetic discloses as
      `T | error` with zero caller impact; `^` is reserved for authors *choosing* to impose
      handling. Must-handle stays exactly where it is today (declared `^` and pn/I-O raisers,
      §7.3).
-   - **Interior vs interface (settles §10.8's residual)**: binding annotations are
-     *checkpoints* — `let x: int = open_call()` stays legal, produces effective `int^`, flows;
-     declared returns are *contracts* — nothing undeclared escapes. Interiors flow, interfaces
-     enforce.
+   - **Interior vs interface (settles §10.8's residual)**: unannotated bindings flow —
+     `let x = open_call()` infers `T | error`. Annotated bindings are contracts —
+     `let x: int = dynamic_call()` checks at the boundary, establishes `x: int` on success,
+     and produces an error before `x` exists on failure. Declared returns remain effect
+     firewalls.
    - **Confirmed consequence**: error-*originating* operators make bodies open — notably
      division with a dynamic divisor (dynamic zero divisor returns `error()` per the formal
      semantics), so `fn avg(sum: int, count: int) int { sum / count }` errors until declared
@@ -1019,14 +1246,17 @@ fully-enforced, fully-tested surface.
      diagnostic part of the error UX rather than a nice-to-have.
    - TE-9's open-case wording is revised accordingly: the silent effective-`T | error`
      applies only to **undeclared** returns; declared returns enforce.
-8. **Declarations and reassignment — DECIDED 2026-07-29 (user): bindings are checkpoints, not
-   firewalls.** No return-style enforcement at `let`/`var` — interiors flow, interfaces
-   enforce (§10.7). `let b: T = a` is a **compile error** when `a`'s error possibility is
-   *explicit* — either spelling, `T^` or `T | error`, equivalent in value positions — and an
-   allowed DEFERRED boundary only when `a` is *implicitly* open. The deferred case's post-bind effective type
-   is `T | error` (the clean `T` guarantee obtains after discharge); an open `var` local takes
-   boxed storage — a native int lane cannot hold the error — an implementation consequence
-   touching the MIR narrowing invariant.
+8. **Declarations and reassignment — REVISED 2026-07-30 (user): annotations are contracts;
+   inference flows.** `let x: T = e` establishes only `x: T`: a DEFERRED success binds `T`, and
+   failure yields the boundary error before the binding exists. Reassignment checks before
+   commit and leaves the old value unchanged on failure. `let x = e` has no such declared
+   boundary and infers `e`'s effective type, including `T | error`.
+
+   An explicitly declared error possibility (`T^` or `T | error`) still cannot enter plain
+   `T` without visible discharge/narrowing; that is STATIC-REJECTED. A genuinely dynamic
+   `any` source is the DEFERRED case. Consequently a successfully established annotated
+   `var x: T` may use a `T` carrier; it never needs boxed storage merely to hold a failed
+   check, because the error is not stored in `x`.
 9. **Sys-func registry metadata for the clean/open split (extends B13) — DEFERRED 2026-07-29
    (user) to the perf-tuning stage**, where the clean/open sys-func versions are built anyway.
    The TE-9 convention (error values, never silent wrong values) is normative *now* for any new
@@ -1041,8 +1271,8 @@ fully-enforced, fully-tested surface.
    decision is only which branch it takes (present-but-invalid → `error()`, matching
    `int("abc")`, seems the natural reading). §7.3 also confirms `input`/`fetch` as pn-family
    raisers (E228 conformant) and supplies the wrapper idiom for set-oriented input.
-10. **Null strictness** (TE-11) — enforce `T?`-for-nullable immediately, or one release of
-   warn-only for null-through-annotation?
+10. **Null strictness — DECIDED 2026-07-29 (user):** enforce `T?`-for-nullable immediately in
+    P0; no warn-only release.
 11. **Openness default for named map types — DECIDED 2026-07-29 (user): open** (TE-10). Whether
    a closed form / `allow_unknown_fields` ever becomes user-visible syntax is left for the
    future.
@@ -1055,17 +1285,16 @@ fully-enforced, fully-tested surface.
    truncation — regarded as a defect; C++11 bans it as "narrowing" in brace-init, and
    `-Wconversion` exists to flag it) and SQL — which **rounds** rather than truncates
    (Postgres `CAST(3.5 AS int)` = 4). That the allow-camp cannot even agree on the semantics
-   is itself the argument against silent conversion. Lambda's rule: static reject for
-   float-typed initializers including `3.0` (the literal is user-controlled — write `3`; Go's
-   exact-constant nicety buys nothing here), while DEFERRED boundaries judge the value per
-   TE-6 (a dynamic exact `3.0` converts, `3.5` becomes an error value — the runtime analogue
-   of Swift's checked `Int(exactly:)`).
+   is itself the argument against silent conversion. Lambda's Go-like enforcement rule:
+   statically reject float-typed initializers including `3.0`, and reject an `any` value whose
+   actual runtime type is float at a deferred `int` boundary regardless of magnitude. Explicit
+   `int(...)` conversion owns any value-dependent conversion policy.
 13. **t2's `var`-path `null`** — mechanism narrowed but not step-verified (§5.1); verify while
    implementing P0 so the fix isn't aimed at a ghost.
-14. **Constrained types — DECIDED 2026-07-29 (user): the validator is the checker** for
-   `T where …`; the implementation may be deferred to a future stage. Interim honesty: until
-   predicate evaluation lands in the validator, constrained checks are base-type-only (today's
-   `fn_is` behavior) — acceptable as a *documented* deferral; no compile-reject needed.
+14. **Constrained types — CONFIRMED 2026-07-30 (user): base-only interim is accepted.** The
+    validator is the eventual predicate checker for `T where …`; until that validator work
+    lands, enforcement checks the base `T` only. This is a documented, deliberately narrow
+    validator deferral and does not block the core enforcement phases.
 15. **`STRING` in the native-return set** — P2 audits the four ad-hoc widenings; the clean fix
    (widen `mir_is_native_scalar_value_type` or stop widening ad hoc) interacts with the perf
    stage's ABI plans; decide there, enforce honestly here.
