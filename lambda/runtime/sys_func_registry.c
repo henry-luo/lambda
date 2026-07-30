@@ -1273,6 +1273,7 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
 
     // ========================================================================
@@ -1715,6 +1716,12 @@ JitImport jit_runtime_imports[] = {
     {"p2it", FPTR(p2it)},
     {"err2it", FPTR(err2it)},
     {"it2err", FPTR(it2err)},
+    {"lambda_type_check", FPTR(lambda_type_check)},
+    {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
+    {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
+    {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
+    {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
+    {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     // Ret* constructor helpers
     {"ri_ok", FPTR(ri_ok)},
     {"ri_err", FPTR(ri_err)},
@@ -2953,6 +2960,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_call3_into", FPTR(fn_call3_into)},
     {"lambda_function_mark_mir_public_abi", FPTR(lambda_function_mark_mir_public_abi)},
     {"lambda_function_mark_mir_context_abi", FPTR(lambda_function_mark_mir_context_abi)},
+    {"lambda_function_set_type", FPTR(lambda_function_set_type)},
     {"to_sys_fn_named", FPTR(to_sys_fn_named)},
 
     // ========================================================================

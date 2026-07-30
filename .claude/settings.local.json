@@ -37,7 +37,8 @@
       "Bash(clang -std=c11 -fsyntax-only -I lib lib/base64.c)",
       "Bash(clang -std=c11 -fsyntax-only -I lib lib/url.c)",
       "Bash(rm -rf test/tier_f_chromium/*/)",
-      "Bash(npx vite-node *)"
+      "Bash(npx vite-node *)",
+      "Bash(git -C /Users/henryluo/Projects/Lambda-opus show --stat 4a30bad79)"
     ]
   }
 }

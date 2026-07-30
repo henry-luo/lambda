@@ -76,6 +76,10 @@ struct VarEntry {
     bool cow_marked;
     bool cow_children_may_be_shared;
     bool cow_owned;
+    // An explicit `var` parameter is an in/out borrow of the caller's root.
+    // Checked stores must publish through that shared root, not retain a
+    // transactional replacement only in the callee's local register.
+    bool is_var_param;
     // A String buffer may be appended in place only by this local binding.
     // Any ordinary read clears this state before the value can become an alias.
     bool string_buffer_owned;
@@ -1143,33 +1147,20 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         }
     }
     if (entry_mode == MIR_ENTRY_CHECKED) {
-        MIR_var_t ensure_args[2] = {
+        MIR_var_t ensure_args[3] = {
+            {MIR_T_P, "runtime", 0},
             {MIR_T_I64, "root_slots", 0},
             {MIR_T_I64, "number_slots", 0},
         };
-        ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_tls",
-            MIR_T_I64, 2, ensure_args, 1, false);
-        MIR_reg_t bound = em_new_reg(em, "frame_bound", MIR_T_I64);
+        ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_for",
+            MIR_T_I64, 3, ensure_args, 1, false);
         MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
-        MIR_label_t bound_label = em_new_label(em);
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_reg_op(em->ctx, frame->root_base),
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)root_top_offset, frame->runtime, 0, 1)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_NE, MIR_new_reg_op(em->ctx, bound),
-                MIR_new_reg_op(em->ctx, frame->root_base),
-                MIR_new_int_op(em->ctx, 0)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_BT,
-                MIR_new_label_op(em->ctx, bound_label),
-                MIR_new_reg_op(em->ctx, bound)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_call_insn(em->ctx, 5,
+            MIR_new_call_insn(em->ctx, 6,
                 MIR_new_ref_op(em->ctx, ensure_import->proto),
                 MIR_new_ref_op(em->ctx, ensure_import->import),
                 MIR_new_reg_op(em->ctx, ensured),
+                MIR_new_reg_op(em->ctx, frame->runtime),
                 MIR_new_int_op(em->ctx, frame->root_slot_count),
                 MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
@@ -1181,14 +1172,40 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                 MIR_new_reg_op(em->ctx, frame->root_base),
                 MIR_new_mem_op(em->ctx, MIR_T_I64,
                     (MIR_disp_t)root_top_offset, frame->runtime, 0, 1)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            bound_label);
-    } else if (frame->root_slot_count > 0) {
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_reg_op(em->ctx, frame->root_base),
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)root_top_offset, frame->runtime, 0, 1)));
+    } else {
+        // A bound raw body inherits the caller's current tops, but its own
+        // roots and return scratch still need capacity. Skipping this reserve
+        // made a checked map write overflow at function entry and quietly
+        // bypass the write/error path before it executed.
+        if (frame->root_slot_count > 0 || frame->fixed_number_slots > 0) {
+            MIR_var_t ensure_args[3] = {
+                {MIR_T_P, "runtime", 0},
+                {MIR_T_I64, "root_slots", 0},
+                {MIR_T_I64, "number_slots", 0},
+            };
+            ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_for",
+                MIR_T_I64, 3, ensure_args, 1, false);
+            MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
+            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+                MIR_new_call_insn(em->ctx, 6,
+                    MIR_new_ref_op(em->ctx, ensure_import->proto),
+                    MIR_new_ref_op(em->ctx, ensure_import->import),
+                    MIR_new_reg_op(em->ctx, ensured),
+                    MIR_new_reg_op(em->ctx, frame->runtime),
+                    MIR_new_int_op(em->ctx, frame->root_slot_count),
+                    MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
+            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+                MIR_new_insn(em->ctx, MIR_BF,
+                    MIR_new_label_op(em->ctx, overflow_label),
+                    MIR_new_reg_op(em->ctx, ensured)));
+        }
+        if (frame->root_slot_count > 0) {
+            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+                MIR_new_insn(em->ctx, MIR_MOV,
+                    MIR_new_reg_op(em->ctx, frame->root_base),
+                    MIR_new_mem_op(em->ctx, MIR_T_I64,
+                        (MIR_disp_t)root_top_offset, frame->runtime, 0, 1)));
+        }
     }
 
     if (frame->number_base) {

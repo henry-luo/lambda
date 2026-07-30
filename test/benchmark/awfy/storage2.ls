@@ -3,7 +3,7 @@
 
 type SState = {count: int}
 
-pn random_next(seed_arr: int[]) {
+pn random_next(var seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
     s = s % 65536
@@ -11,7 +11,7 @@ pn random_next(seed_arr: int[]) {
     return s
 }
 
-pn build_tree_depth(state: SState, depth: int, seed_arr: int[]) {
+pn build_tree_depth(var state: SState, depth: int, var seed_arr: int[]) {
     state.count = state.count + 1
     if (depth == 1) {
         return fill((random_next(seed_arr) % 10) + 1, 0)
@@ -25,7 +25,7 @@ pn build_tree_depth(state: SState, depth: int, seed_arr: int[]) {
 
 pn benchmark() {
     var seed_arr:int[] = [74755]
-    let state = {count: 0}
+    var state: SState = {count: 0}
     build_tree_depth(state, 7, seed_arr)
     return state.count
 }

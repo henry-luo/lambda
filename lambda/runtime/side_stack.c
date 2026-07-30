@@ -108,9 +108,8 @@ bool lambda_side_stack_bind(void) {
     return lambda_side_stack_bind_for((Context*)eval_context_tls_runtime());
 }
 
-static bool lambda_side_stack_ensure_for(Context* runtime_context,
-                                         size_t root_slots,
-                                         size_t number_slots) {
+bool lambda_side_stack_ensure_for(Context* runtime_context, size_t root_slots,
+                                  size_t number_slots) {
     if (!runtime_context) return false;
     if (!runtime_context->side_root_base &&
             !lambda_side_stack_bind_for(runtime_context)) {

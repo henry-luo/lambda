@@ -13,10 +13,9 @@ overflow_add(2147483646, 1)
 fn strict_add(a: int, b: int) { a + b }
 // strict_add(1.5, 2.5)  // Compile error - not a runtime test
 
-// Test 3: Calling typed function with missing args
-// Missing int args default to 0
-fn optional_int(a: int, b: int) { a + b }
-optional_int(1)  // Missing second arg defaults to 0, result = 1
+// Test 3: Calling typed function with an explicit default argument
+fn optional_int(a: int, b: int = 0) { a + b }
+optional_int(1)  // Explicit default preserves the result = 1
 
 // Test 4: Deep recursion with unboxed version
 fn countdown(n: int) {

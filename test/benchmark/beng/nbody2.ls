@@ -39,7 +39,7 @@ pn format9(x: float) {
     return result
 }
 
-pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) {
+pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[], dt: float) {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
@@ -91,7 +91,7 @@ pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
     return e
 }
 
-pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
+pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[]) {
     var px: float = 0.0
     var py: float = 0.0
     var pz: float = 0.0

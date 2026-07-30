@@ -10,7 +10,7 @@ pn next_rand(seed: int) int {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn matmul(a: float[], b: float[], c: float[], n: int) {
+pn matmul(a: float[], b: float[], var c: float[], n: int) {
     var i: int = 0
     while (i < n) {
         var j: int = 0
@@ -31,11 +31,11 @@ pn matmul(a: float[], b: float[], c: float[], n: int) {
 pn main() {
     var __t0 = clock()
     let size: int = N * N
-    // fill(n, float) already infers a packed ArrayNum; a float[] annotation on
-    // the local would re-tag the var as ANY and lose the direct-index path
-    var a = fill(size, 0.0)
-    var b = fill(size, 0.0)
-    var c = fill(size, 0.0)
+    // The annotation binds the public contract; fill retains packed float
+    // storage until a checked write requires a representation change.
+    var a: float[] = fill(size, 0.0)
+    var b: float[] = fill(size, 0.0)
+    var c: float[] = fill(size, 0.0)
 
     // Initialize with pseudo-random values in [-1.0, 1.0)
     var seed: int = 42

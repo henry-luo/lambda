@@ -47,13 +47,13 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation.",
       "budgets": {
         "default": {
-          "module_insns": 175,
+          "module_insns": 178,
           "functions": {
             "_accumulate_#": {
-              "insns": 95
+              "insns": 94
             },
             "main": {
-              "insns": 46
+              "insns": 40
             }
           },
           "frames": [
@@ -235,16 +235,16 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "Tune4 M1 numeric-array load/store guards and their generic fallback emission cost.",
+      "description": "Typed numeric-array load guards plus the checked replacement write that preserves a declared array contract across widened aliases.",
       "budgets": {
         "default": {
-          "module_insns": 505,
+          "module_insns": 473,
           "functions": {
             "_guarded_load_#": {
-              "insns": 97
+              "insns": 95
             },
             "_guarded_store_#": {
-              "insns": 155
+              "insns": 87
             }
           },
           "frames": [
@@ -258,11 +258,11 @@
             },
             {
               "name": "_guarded_store_#",
-              "roots": 6,
+              "roots": 7,
               "root_stores": 0,
-              "scalar_homes": 2,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 7
+              "safepoints": 4
             }
           ]
         }

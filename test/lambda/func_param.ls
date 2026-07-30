@@ -1,13 +1,13 @@
 // Test function parameter handling
 
-// Test 1: Missing arguments - should fill with null
-fn two_params(a, b) { [a, b] }
+// Test 1: Optional arguments explicitly receive null when omitted
+fn two_params(a?, b?) { [a, b] }
 two_params(1)           // Expected: [1, null]
 two_params()            // Expected: [null, null]
 
-// Test 2: Extra arguments - should discard with warning
-fn one_param(a) { a }
-one_param(1, 2, 3)      // Expected: 1 (with warning in log)
+// Test 2: Extra arguments require an explicit variadic tail
+fn one_param(a, ...) { a }
+one_param(1, 2, 3)      // Expected: 1
 
 // Test 3: Type matching - compatible types (int → float coercion)
 fn takes_float(x: float) float { x * 2.0 }
@@ -29,8 +29,8 @@ returns_float()         // Expected: 3.14
 fn process(a: int, b: float) float { a + b }
 process(10, 2.5)        // Expected: 12.5
 
-// Test 7: Variadic-like behavior with null filling (optional params pattern)
-fn optional_params(required, opt1, opt2) {
+// Test 7: Optional parameter pattern
+fn optional_params(required, opt1?, opt2?) {
     if (opt1 == null) "no opt1"
     else if (opt2 == null) "no opt2"
     else "all present"

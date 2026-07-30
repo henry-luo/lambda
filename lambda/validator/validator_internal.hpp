@@ -229,6 +229,11 @@ static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
 }
 
 static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type* target) {
+    target = unwrap_type(target);
+    // Core `any` includes error, while validator `any` is intentionally the
+    // usable-data top type. A numeric ArrayNum cannot contain an error, so it
+    // always satisfies the validator form without requiring a numeric lane.
+    if (target && target->type_id == LMD_TYPE_ANY) return true;
     switch (elem_type) {
     case ELEM_INT:     return validator_numeric_type_embeds(LMD_TYPE_INT, NUM_INT8, target);
     case ELEM_INT64:   return validator_numeric_type_embeds(LMD_TYPE_INT64, NUM_INT8, target);

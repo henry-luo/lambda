@@ -642,6 +642,14 @@ void lambda_function_mark_mir_context_abi(Function* fn) {
     fn->runtime_context = runtime;
 }
 
+void lambda_function_set_type(Function* fn, void* fn_type) {
+    if (!fn) return;
+    // First-class calls need the semantic signature for optional and variadic
+    // arity checks. The source TypeFunc outlives the compiled module, so this
+    // records metadata only; it never changes the function's physical ABI.
+    fn->fn_type = fn_type;
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -705,6 +713,35 @@ static bool reject_missing_mir_result_home(Function* fn, const char* caller) {
     return true;
 }
 
+static Item function_argument_count_check(Function* fn, int actual, const char* caller) {
+    int required = fn ? fn->arity : 0;
+    int maximum = required;
+    bool variadic = false;
+    TypeFunc* signature = fn ? (TypeFunc*)fn->fn_type : NULL;
+    if (signature && signature->type_id == LMD_TYPE_FUNC) {
+        required = signature->required_param_count;
+        maximum = signature->param_count;
+        variadic = signature->is_variadic;
+    }
+    if (actual >= required && (variadic || actual <= maximum)) return ItemNull;
+    char message[256];
+    snprintf(message, sizeof(message),
+        "%s: function '%s' expects %d%s argument%s, got %d", caller,
+        fn && fn->name ? fn->name : "<anonymous>", required,
+        variadic ? " or more" : "", required == 1 && !variadic ? "" : "s", actual);
+    set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH, "%s", message);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) loc.file = context->current_file;
+        LambdaError* error = err_create_heap(ERR_ARGUMENT_COUNT_MISMATCH, message, &loc);
+        if (error) {
+            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            return err2it(error);
+        }
+    }
+    return ItemError;
+}
+
 // Dynamic function dispatch for first-class functions
 // For closures, env is passed as the first argument
 // Stack traces are captured via native stack walking (no push/pop needed)
@@ -724,6 +761,8 @@ Item fn_call(Function* fn, List* args) {
         return ItemError;
     }
     int arg_count = args ? (int)args->length : 0;
+    Item arity_error = function_argument_count_check(fn, arg_count, "fn_call");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     void* env = fn->closure_env;
 
     // For closures, env is passed as first argument (closures never have FN_FLAG_BOXED_RET)
@@ -794,6 +833,8 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
         }
         return fn_call(fn, args);
     }
+    Item arity_error = function_argument_count_check(fn, arg_count, "fn_call_into");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     if (!(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
         return fn_call(fn, args);
     }
@@ -805,47 +846,109 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     if (!fn->ptr || (fn->flags & FN_FLAG_SYS_REF)) {
         return fn_call(fn, args);
     }
-    if (fn->flags & FN_FLAG_MIR_CONTEXT_ABI) {
-        Context* runtime = fn->runtime_context;
+
+    // The public wrapper has a fixed physical ABI even where its Lambda
+    // signature is optional or variadic.  Marshal omitted fixed positions as
+    // a private marker and extras as its final List* before dispatching.  The
+    // wrapper resolves that marker before any typed unbox reaches the body.
+    Item physical_args[8] = {};
+    const Item* dispatch_args = args ? args->items : NULL;
+    int dispatch_count = arg_count;
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    bool needs_marshalling = signature && signature->type_id == LMD_TYPE_FUNC &&
+        (signature->is_variadic || arg_count < signature->param_count);
+    RootFrame roots(11);
+    Rooted<Item> rooted_fn(roots, {.function = fn});
+    Rooted<Item> rooted_arg0(roots, arg_count > 0 ? args->items[0] : ItemNull);
+    Rooted<Item> rooted_arg1(roots, arg_count > 1 ? args->items[1] : ItemNull);
+    Rooted<Item> rooted_arg2(roots, arg_count > 2 ? args->items[2] : ItemNull);
+    Rooted<Item> rooted_arg3(roots, arg_count > 3 ? args->items[3] : ItemNull);
+    Rooted<Item> rooted_arg4(roots, arg_count > 4 ? args->items[4] : ItemNull);
+    Rooted<Item> rooted_arg5(roots, arg_count > 5 ? args->items[5] : ItemNull);
+    Rooted<Item> rooted_arg6(roots, arg_count > 6 ? args->items[6] : ItemNull);
+    Rooted<Item> rooted_arg7(roots, arg_count > 7 ? args->items[7] : ItemNull);
+    Rooted<Item> rooted_extra(roots, ItemNull);
+    Rooted<List*> rooted_vargs(roots, (List*)NULL);
+    Rooted<Item>* rooted_args[] = {&rooted_arg0, &rooted_arg1, &rooted_arg2,
+        &rooted_arg3, &rooted_arg4, &rooted_arg5, &rooted_arg6, &rooted_arg7};
+
+    if (needs_marshalling) {
+        int fixed_count = signature->param_count;
+        dispatch_count = fixed_count + (signature->is_variadic ? 1 : 0);
+        if (dispatch_count > 8) {
+            set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
+                "fn_call_into: function '%s' needs %d ABI arguments; dynamic dispatch supports 8",
+                fn->name ? fn->name : "<anonymous>", dispatch_count);
+            return ItemError;
+        }
+        for (int i = 0; i < fixed_count; i++) {
+            physical_args[i] = i < arg_count ? rooted_args[i]->get() :
+                (Item){.item = ITEM_MISSING_ARGUMENT};
+        }
+        if (signature->is_variadic) {
+            if (arg_count > fixed_count) {
+                rooted_vargs.set(list());
+                for (int i = fixed_count; i < arg_count; i++) {
+                    rooted_extra.set(args->items[i]);
+                    list_push(rooted_vargs.get(), rooted_extra.get());
+                }
+            }
+            physical_args[fixed_count] = {.array = rooted_vargs.get()};
+        }
+        // list_push above may collect; reload the exact root homes immediately
+        // before the ABI call rather than retaining pre-GC Item copies.
+        for (int i = 0; i < fixed_count && i < 8; i++) {
+            physical_args[i] = i < arg_count ? rooted_args[i]->get() :
+                (Item){.item = ITEM_MISSING_ARGUMENT};
+        }
+        if (signature->is_variadic) {
+            physical_args[fixed_count] = {.array = rooted_vargs.get()};
+        }
+        dispatch_args = physical_args;
+    }
+
+    Function* dispatch_fn = rooted_fn.get().function;
+    if (dispatch_fn->flags & FN_FLAG_MIR_CONTEXT_ABI) {
+        Context* runtime = dispatch_fn->runtime_context;
         if (!runtime) {
             set_runtime_error(ERR_INVALID_CALL,
                 "fn_call_into: generated function has no owner context");
             return ItemError;
         }
-        void* env = fn->closure_env;
+        void* env = dispatch_fn->closure_env;
         // The context is the first physical ABI argument for every generated
         // entry. It is a direct Function-owned pointer, not a TLS lookup.
         if (env) {
-            switch (arg_count) {
-            case 0: return ((Item(*)(Context*, void*, uint64_t*))fn->ptr)(runtime, env, result_home);
-            case 1: return ((Item(*)(Context*, void*, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], result_home);
-            case 2: return ((Item(*)(Context*, void*, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], result_home);
-            case 3: return ((Item(*)(Context*, void*, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], result_home);
-            case 4: return ((Item(*)(Context*, void*, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], result_home);
-            case 5: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
-            case 6: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
-            case 7: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
+            switch (dispatch_count) {
+            case 0: return ((Item(*)(Context*, void*, uint64_t*))dispatch_fn->ptr)(runtime, env, result_home);
+            case 1: return ((Item(*)(Context*, void*, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], result_home);
+            case 2: return ((Item(*)(Context*, void*, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], result_home);
+            case 3: return ((Item(*)(Context*, void*, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], dispatch_args[2], result_home);
+            case 4: return ((Item(*)(Context*, void*, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], result_home);
+            case 5: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], result_home);
+            case 6: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], dispatch_args[5], result_home);
+            case 7: return ((Item(*)(Context*, void*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, env, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], dispatch_args[5], dispatch_args[6], result_home);
             default: break;
             }
         } else {
-            switch (arg_count) {
-            case 0: return ((Item(*)(Context*, uint64_t*))fn->ptr)(runtime, result_home);
-            case 1: return ((Item(*)(Context*, Item, uint64_t*))fn->ptr)(runtime, args->items[0], result_home);
-            case 2: return ((Item(*)(Context*, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], result_home);
-            case 3: return ((Item(*)(Context*, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], result_home);
-            case 4: return ((Item(*)(Context*, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], result_home);
-            case 5: return ((Item(*)(Context*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
-            case 6: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
-            case 7: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
-            case 8: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(runtime, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7], result_home);
+            switch (dispatch_count) {
+            case 0: return ((Item(*)(Context*, uint64_t*))dispatch_fn->ptr)(runtime, result_home);
+            case 1: return ((Item(*)(Context*, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], result_home);
+            case 2: return ((Item(*)(Context*, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], result_home);
+            case 3: return ((Item(*)(Context*, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], result_home);
+            case 4: return ((Item(*)(Context*, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], result_home);
+            case 5: return ((Item(*)(Context*, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], result_home);
+            case 6: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], dispatch_args[5], result_home);
+            case 7: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], dispatch_args[5], dispatch_args[6], result_home);
+            case 8: return ((Item(*)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*))dispatch_fn->ptr)(runtime, dispatch_args[0], dispatch_args[1], dispatch_args[2], dispatch_args[3], dispatch_args[4], dispatch_args[5], dispatch_args[6], dispatch_args[7], result_home);
             default: break;
             }
         }
         set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
-            "fn_call_into: unsupported generated argument count %d", arg_count);
+            "fn_call_into: unsupported generated argument count %d", dispatch_count);
         return ItemError;
     }
-    void* env = fn->closure_env;
+    void* env = dispatch_fn->closure_env;
     // The exact caller home must cross this forwarding boundary unchanged.
     if (env) {
         switch (arg_count) {
@@ -980,6 +1083,8 @@ Item fn_call0(Function* fn) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
         return ItemError;
     }
+    Item arity_error = function_argument_count_check(fn, 0, "fn_call0");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     if (reject_missing_mir_result_home(fn, "fn_call0")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
@@ -1004,6 +1109,8 @@ Item fn_call1(Function* fn, Item a) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call1: cannot call non-function value");
         return ItemError;
     }
+    Item arity_error = function_argument_count_check(fn, 1, "fn_call1");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     if (reject_missing_mir_result_home(fn, "fn_call1")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
@@ -1028,6 +1135,8 @@ Item fn_call2(Function* fn, Item a, Item b) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call2: cannot call non-function value");
         return ItemError;
     }
+    Item arity_error = function_argument_count_check(fn, 2, "fn_call2");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     if (reject_missing_mir_result_home(fn, "fn_call2")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
@@ -1052,6 +1161,8 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call3: cannot call non-function value");
         return ItemError;
     }
+    Item arity_error = function_argument_count_check(fn, 3, "fn_call3");
+    if (arity_error.item != ITEM_NULL) return arity_error;
     if (reject_missing_mir_result_home(fn, "fn_call3")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
@@ -1112,17 +1223,249 @@ static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
-Bool fn_is(Item a, Item b) {
-    TypeId b_type_id = get_type_id(b);
+static bool runtime_type_is_global_meta_type(Type* type) {
+    return type == &TYPE_TYPE || type == &TYPE_INTEGER || type == &TYPE_NUMBER;
+}
 
-    if (b_type_id != LMD_TYPE_TYPE) {
-        // RHS is a value, not a type — treat as equality comparison
-        return fn_eq(a, b);
+static Type* runtime_boundary_unwrap_type(Type* type) {
+    while (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_SIMPLE && !runtime_type_is_global_meta_type(type)) {
+        Type* inner = ((TypeType*)type)->type;
+        if (!inner) break;
+        type = inner;
+    }
+    if (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_CONSTRAINED) {
+        Type* base = ((TypeConstrained*)type)->base;
+        if (base) return runtime_boundary_unwrap_type(base);
+    }
+    return type;
+}
+
+static bool runtime_type_accepts_error(Type* expected) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected) return false;
+    if (expected->type_id == LMD_TYPE_ANY || expected->type_id == LMD_TYPE_ERROR) return true;
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)expected;
+        if (binary->op == OPERATOR_UNION) {
+            return runtime_type_accepts_error(binary->left) ||
+                runtime_type_accepts_error(binary->right);
+        }
+    }
+    return false;
+}
+
+static bool runtime_validate_value_against_type(Item item, Type* expected,
+        ValidationResult** validation) {
+    if (!context || !context->validator) return false;
+    ValidationResult* result = schema_validator_validate_type(context->validator,
+        item.to_const(), expected);
+    if (validation) *validation = result;
+    return result && result->valid;
+}
+
+bool lambda_type_matches(Item item, Type* expected) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected) return false;
+    TypeId actual_id = get_type_id(item);
+    if (actual_id == LMD_TYPE_ERROR) return runtime_type_accepts_error(expected);
+    if (expected->type_id == LMD_TYPE_ANY) return true;
+
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_PATTERN) {
+        if (!is_text_type_id(actual_id)) return false;
+        TypePattern* pattern = (TypePattern*)expected;
+        return pattern_full_match_chars(pattern, item.get_chars(), item.get_len());
+    }
+    if ((expected->type_id == LMD_TYPE_TYPE &&
+            (expected->kind == TYPE_KIND_BINARY || expected->kind == TYPE_KIND_UNARY)) ||
+            expected->type_id == LMD_TYPE_MAP || expected->type_id == LMD_TYPE_ELEMENT) {
+        return runtime_validate_value_against_type(item, expected, NULL);
     }
 
-    Type* b_type = b.type;  // all type variants now share type_id = LMD_TYPE_TYPE
+    Type actual_scratch = {.type_id = LMD_TYPE_NULL};
+    Type* actual_type = item_static_type_for_is(item, &actual_scratch);
+    switch (expected->type_id) {
+    case LMD_TYPE_TYPE:
+        if (expected == &TYPE_NUMBER) return numeric_type_subsumes(actual_type, expected);
+        if (expected == &TYPE_INTEGER) return item_type_is_integer_subtype(item, actual_id);
+        return actual_id == LMD_TYPE_TYPE;
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_UINT64:
+        return numeric_type_subsumes(actual_type, expected);
+    case LMD_TYPE_DTIME:
+        if (actual_id != LMD_TYPE_DTIME) return false;
+        if (expected == &TYPE_DATE) {
+            DateTime dt = item.get_datetime();
+            return dt.precision == DATETIME_PRECISION_DATE_ONLY ||
+                dt.precision == DATETIME_PRECISION_YEAR_ONLY;
+        }
+        if (expected == &TYPE_TIME) {
+            return item.get_datetime().precision == DATETIME_PRECISION_TIME_ONLY;
+        }
+        return true;
+    case LMD_TYPE_ARRAY:
+        return actual_id == LMD_TYPE_RANGE || actual_id == LMD_TYPE_ARRAY ||
+            actual_id == LMD_TYPE_ARRAY_NUM;
+    case LMD_TYPE_OBJECT:
+        if (expected == &TYPE_OBJECT) return actual_id == LMD_TYPE_OBJECT;
+        if (actual_id != LMD_TYPE_OBJECT) return false;
+        {
+            Object* obj = (Object*)(uintptr_t)item.item;
+            TypeObject* actual_object = obj ? (TypeObject*)obj->type : NULL;
+            TypeObject* wanted = (TypeObject*)expected;
+            for (TypeObject* walk = actual_object; walk; walk = walk->base) {
+                if (walk == wanted) {
+                    return !wanted->constraint_fn || wanted->constraint_fn(item.item);
+                }
+            }
+            return false;
+        }
+    default:
+        return actual_id == expected->type_id;
+    }
+}
 
-    // Handle pattern matching: "str" is pattern
+static void runtime_type_name(Type* type, char* buffer, size_t capacity) {
+    Type* unwrapped = runtime_boundary_unwrap_type(type);
+    if (!unwrapped) {
+        snprintf(buffer, capacity, "unknown");
+        return;
+    }
+    if (unwrapped->type_id == LMD_TYPE_MAP) {
+        TypeMap* map_type = (TypeMap*)unwrapped;
+        if (map_type->struct_name) {
+            snprintf(buffer, capacity, "%s", map_type->struct_name);
+            return;
+        }
+    }
+    if (unwrapped == &TYPE_NUMBER) {
+        snprintf(buffer, capacity, "number");
+        return;
+    }
+    if (unwrapped == &TYPE_INTEGER) {
+        snprintf(buffer, capacity, "integer");
+        return;
+    }
+    if (unwrapped->type_id == LMD_TYPE_TYPE && unwrapped->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)unwrapped)->op == OPERATOR_REPEAT) {
+        char element_name[96];
+        runtime_type_name(((TypeUnary*)unwrapped)->operand, element_name,
+            sizeof(element_name));
+        snprintf(buffer, capacity, "%s[]", element_name);
+        return;
+    }
+    if (unwrapped->type_id == LMD_TYPE_TYPE && unwrapped->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)unwrapped)->op == OPERATOR_UNION) {
+        char left_name[64];
+        char right_name[64];
+        runtime_type_name(((TypeBinary*)unwrapped)->left, left_name,
+            sizeof(left_name));
+        runtime_type_name(((TypeBinary*)unwrapped)->right, right_name,
+            sizeof(right_name));
+        snprintf(buffer, capacity, "%s | %s", left_name, right_name);
+        return;
+    }
+    snprintf(buffer, capacity, "%s", get_type_name(unwrapped->type_id));
+}
+
+static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        int shown = len > 80 ? 80 : (int)len;
+        snprintf(buffer, capacity, "%s '%.*s%s'", get_type_name(type_id), shown,
+            chars ? chars : "", len > 80 ? "…" : "");
+        return;
+    }
+    if (type_id == LMD_TYPE_INT) {
+        snprintf(buffer, capacity, "int %lld", (long long)item.get_int56());
+        return;
+    }
+    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+        snprintf(buffer, capacity, "float %.17g", item.get_double());
+        return;
+    }
+    snprintf(buffer, capacity, "%s", get_type_name(type_id));
+}
+
+static void runtime_validation_detail(ValidationResult* result, char* buffer,
+        size_t capacity) {
+    if (!result || !result->errors || !buffer || capacity == 0) return;
+    ValidationError* error = result->errors;
+    const char* message = error->message ? error->message->chars : "validation failed";
+    if (error->path && context && context->pool) {
+        String* path = format_validation_path(error->path, context->pool);
+        snprintf(buffer, capacity, "; validator at %s: %s",
+            path ? path->chars : "<value>", message);
+        return;
+    }
+    snprintf(buffer, capacity, "; validator: %s", message);
+}
+
+static Item lambda_type_error_with_validation(Item actual, Type* expected,
+        const char* boundary, ValidationResult* validation) {
+    char expected_name[128];
+    char actual_summary[192];
+    char message[512];
+    char validation_detail[320] = {};
+    runtime_type_name(expected, expected_name, sizeof(expected_name));
+    runtime_value_summary(actual, actual_summary, sizeof(actual_summary));
+    runtime_validation_detail(validation, validation_detail, sizeof(validation_detail));
+    snprintf(message, sizeof(message),
+        "type check at %s failed: expected %s, got %s%s",
+        boundary ? boundary : "typed boundary", expected_name, actual_summary,
+        validation_detail);
+    set_runtime_error(ERR_TYPE_MISMATCH, "%s", message);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) loc.file = context->current_file;
+        LambdaError* error = err_create_heap(ERR_TYPE_MISMATCH, message, &loc);
+        if (error) {
+            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            return err2it(error);
+        }
+    }
+    return ItemError;
+}
+
+Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
+    return lambda_type_error_with_validation(actual, expected, boundary, NULL);
+}
+
+Item lambda_type_check(Item value, Type* expected, const char* boundary) {
+    // Error-transparent contracts (`any`, `error`, or an explicit union) keep
+    // an incoming error value.  Plain T short-circuits it unchanged so callers
+    // retain the original diagnostic instead of receiving a misleading second
+    // type mismatch.
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    if (lambda_type_matches(value, expected)) return value;
+
+    // Shape/union/occurrence matching is delegated to the validator. Reuse its
+    // first concrete failure here so a rejected dynamic binding identifies the
+    // offending member/index instead of merely saying "got map".
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    ValidationResult* validation = NULL;
+    if (contract && ((contract->type_id == LMD_TYPE_TYPE &&
+            (contract->kind == TYPE_KIND_BINARY || contract->kind == TYPE_KIND_UNARY)) ||
+            contract->type_id == LMD_TYPE_MAP ||
+            contract->type_id == LMD_TYPE_ELEMENT)) {
+        (void)runtime_validate_value_against_type(value, contract, &validation);
+    }
+    return lambda_type_error_with_validation(value, expected, boundary, validation);
+}
+
+Bool fn_is(Item a, Item b) {
+    TypeId b_type_id = get_type_id(b);
+    if (b_type_id != LMD_TYPE_TYPE) return fn_eq(a, b);
+
+    Type* b_type = b.type;
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         if (!is_text_type_id(a_type_id)) {
@@ -1130,95 +1473,48 @@ Bool fn_is(Item a, Item b) {
             return BOOL_ERROR;
         }
         TypePattern* pattern = (TypePattern*)b_type;
-        const char* chars = a.get_chars();
-        uint32_t len = a.get_len();
-        return pattern_full_match_chars(pattern, chars, len) ? BOOL_TRUE : BOOL_FALSE;
+        return pattern_full_match_chars(pattern, a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    // Handle constrained type: base_type where (constraint)
+    // Constraints are intentionally base-type-only until validator predicate
+    // evaluation ships. `is` retains that interim rule independently from
+    // assignment-boundary matching, where runtime validation owns diagnostics.
     if (b_type->kind == TYPE_KIND_CONSTRAINED) {
         TypeConstrained* constrained = (TypeConstrained*)b_type;
-
-        // First check if value matches the base type
-        // Need to check against the inner base type directly
         TypeId a_type_id = get_type_id(a);
         Type* base = constrained->base;
-
-        // Simple base type check (for primitive types like int, string, etc.)
         if (base->type_id != LMD_TYPE_TYPE) {
-            // Base is a primitive type like int, string, etc.
             if (a_type_id != base->type_id) {
                 Type actual_scratch = {};
                 Type* actual_type = item_static_type_for_is(a, &actual_scratch);
-                if (!numeric_type_subsumes(actual_type, base)) {
-                    return BOOL_FALSE;
-                }
+                if (!numeric_type_subsumes(actual_type, base)) return BOOL_FALSE;
             }
         }
-        // TODO: handle complex base types (arrays, maps, etc.) via recursive fn_is call
-
-        // For now, return true if base type matches - full constraint eval requires context setup
-        // TODO: implement constraint evaluation by setting _pipe_item = a and evaluating constraint
         return BOOL_TRUE;
     }
 
-    // If b is a TypeUnary directly (kind = TYPE_KIND_UNARY), handle it directly
-    if (b_type->kind == TYPE_KIND_UNARY) {
-        // Use full type validation for occurrence types
+    if (b_type->kind == TYPE_KIND_UNARY || b_type->kind == TYPE_KIND_BINARY) {
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
-        if (result->error_count > 0) {
-            print_validation_result(result);
-        } else {
-        }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    // If b is a TypeBinary directly (kind = TYPE_KIND_BINARY), handle it via validator
-    if (b_type->kind == TYPE_KIND_BINARY) {
-        // Use full type validation for union/intersection types
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
-        if (result->error_count > 0) {
-            print_validation_result(result);
-        } else {
-        }
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
-    }
-
-    TypeType *type_b = (TypeType *)b_type;
+    TypeType* type_b = (TypeType*)b_type;
     TypeId a_type_id = get_type_id(a);
     Type actual_type_scratch = {.type_id = LMD_TYPE_NULL};
     Type* actual_type = item_static_type_for_is(a, &actual_type_scratch);
-
-    // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
-    // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
-    if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_UNARY) {
-        // Use full type validation for occurrence types
+    if (type_b->type->type_id != LMD_TYPE_NUM_SIZED &&
+            (type_b->type->kind == TYPE_KIND_UNARY || type_b->type->kind == TYPE_KIND_BINARY)) {
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-        if (result->error_count > 0) {
-            print_validation_result(result);
-        } else {
-        }
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
-    }
-
-    // Check if inner type is TypeBinary (union/intersection: |, &, \)
-    // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
-    if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_BINARY) {
-        // Use full type validation for union/intersection types
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-        if (result->error_count > 0) {
-            print_validation_result(result);
-        } else {
-        }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
+        // `is any` uses the validator form of top: errors remain inspectable
+        // values, but are not ordinary validated data.
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
     case LMD_TYPE_TYPE:
         if (type_b->type == &TYPE_NUMBER) {
-            // `number` is a type-language union, so match concrete numeric tags explicitly.
             return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_b->type == &TYPE_INTEGER) {
@@ -1229,24 +1525,15 @@ Bool fn_is(Item a, Item b) {
         }
         return a_type_id == LMD_TYPE_TYPE ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_INT:
-        // numeric `is` is exact-embedding subsumption, not exact tag identity.
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_INT64:
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_FLOAT:
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_FLOAT64:
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_DECIMAL:
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
-    case LMD_TYPE_NUM_SIZED: {
-        return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
-    }
+    case LMD_TYPE_NUM_SIZED:
     case LMD_TYPE_UINT64:
         return numeric_type_subsumes(actual_type, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_DTIME:
         if (a_type_id != LMD_TYPE_DTIME) return BOOL_FALSE;
-        // sub-type checks: date and time are sub-types of datetime
         if (type_b->type == &TYPE_DATE) {
             DateTime dt = a.get_datetime();
             return (dt.precision == DATETIME_PRECISION_DATE_ONLY || dt.precision == DATETIME_PRECISION_YEAR_ONLY)
@@ -1254,52 +1541,40 @@ Bool fn_is(Item a, Item b) {
         }
         if (type_b->type == &TYPE_TIME) {
             DateTime dt = a.get_datetime();
-            return (dt.precision == DATETIME_PRECISION_TIME_ONLY) ? BOOL_TRUE : BOOL_FALSE;
+            return dt.precision == DATETIME_PRECISION_TIME_ONLY ? BOOL_TRUE : BOOL_FALSE;
         }
-        return BOOL_TRUE;  // is datetime (any precision matches)
-    case LMD_TYPE_ARRAY: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-        if (type_b == &LIT_TYPE_ARRAY) {  // fast path
-            return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_NUM;
+        return BOOL_TRUE;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+        if (type_b == &LIT_TYPE_ARRAY) {
+            return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY ||
+                a_type_id == LMD_TYPE_ARRAY_NUM ? BOOL_TRUE : BOOL_FALSE;
         }
-        else if (type_b == &LIT_TYPE_LIST) {  // fast path for generic list type
-            return BOOL_FALSE;  // LMD_TYPE_LIST no longer exists; 'list' never matches
-        }
-        else if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
-            // Nominal type check for named object types (e.g., c is Calc)
+        if (type_b == &LIT_TYPE_LIST) return BOOL_FALSE;
+        if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
             if (a_type_id != LMD_TYPE_OBJECT) return BOOL_FALSE;
             Object* obj = (Object*)(uintptr_t)a.item;
-            TypeObject* obj_type = (TypeObject*)obj->type;
+            TypeObject* walk = (TypeObject*)obj->type;
             TypeObject* expected = (TypeObject*)type_b->type;
-            // walk inheritance chain
-            TypeObject* walk = obj_type;
             bool nominal_match = false;
             while (walk) {
                 if (walk == expected) { nominal_match = true; break; }
                 walk = walk->base;
             }
             if (!nominal_match) return BOOL_FALSE;
-            // check object constraint (field-level + object-level that constraints)
-            if (expected->constraint_fn) {
-                if (!expected->constraint_fn(a.item)) {
-                    return BOOL_FALSE;
-                }
-            }
-            return BOOL_TRUE;
+            return (!expected->constraint_fn || expected->constraint_fn(a.item)) ? BOOL_TRUE : BOOL_FALSE;
         }
-        else if (type_b->type == &TYPE_OBJECT) {
-            // Generic "object" type check — any object matches
+        if (type_b->type == &TYPE_OBJECT) {
             return a_type_id == LMD_TYPE_OBJECT ? BOOL_TRUE : BOOL_FALSE;
         }
-        else {  // full type validation
+        {
             ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-            if (result->error_count > 0) {
-                print_validation_result(result);
-            } else {
-            }
             return result->valid ? BOOL_TRUE : BOOL_FALSE;
         }
     default:
-        return a_type_id == type_b->type->type_id;
+        return a_type_id == type_b->type->type_id ? BOOL_TRUE : BOOL_FALSE;
     }
 }
 
@@ -6631,6 +6906,256 @@ Item cow_prepare_write(Item old) {
     return replacement;
 }
 
+static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr,
+    size_t key_len);
+Item cow_path_set(Item owner, Item path, Item value);
+
+static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected || expected->type_id != LMD_TYPE_MAP) return NULL;
+    const char* chars = NULL;
+    uint32_t length = 0;
+    TypeId key_type = get_type_id(key);
+    if (key_type == LMD_TYPE_STRING || key_type == LMD_TYPE_SYMBOL) {
+        chars = key.get_chars();
+        length = key.get_len();
+    }
+    if (!chars) return NULL;
+    return map_find_shape_entry((TypeMap*)expected, chars, length);
+}
+
+static bool map_extend_open_shape(Item map_item, Item key, Item value) {
+    if (get_type_id(map_item) != LMD_TYPE_MAP) {
+        return false;
+    }
+    Map* map = map_item.map;
+    if (!map || !map->type || !map->data || !context || !context->pool) return false;
+    const char* key_chars = NULL;
+    uint32_t key_length = 0;
+    TypeId key_type = get_type_id(key);
+    if (key_type == LMD_TYPE_STRING) {
+        String* key_string = key.get_safe_string();
+        key_chars = key_string ? key_string->chars : NULL;
+        key_length = key_string ? key_string->len : 0;
+    } else if (key_type == LMD_TYPE_SYMBOL) {
+        Symbol* key_symbol = key.get_safe_symbol();
+        key_chars = key_symbol ? key_symbol->chars : NULL;
+        key_length = key_symbol ? key_symbol->len : 0;
+    }
+    if (!key_chars) return false;
+
+    TypeMap* old_type = (TypeMap*)map->type;
+    int old_count = 0;
+    int64_t new_size = 0;
+    for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
+        old_count++;
+        new_size += type_info[entry->type->type_id].byte_size;
+    }
+    TypeId value_type = get_type_id(value);
+    new_size += type_info[value_type].byte_size;
+
+    RootFrame roots(2);
+    Rooted<Map*> rooted_map(roots, map);
+    Rooted<Item> rooted_value(roots, value);
+    TypeMap* new_type = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!new_type) return false;
+    void* new_data = heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
+    if (!new_data) return false;
+    map = rooted_map.get();
+    old_type = (TypeMap*)map->type;
+
+    ShapeEntry* first = NULL;
+    ShapeEntry* last = NULL;
+    int64_t offset = 0;
+    for (ShapeEntry* old = old_type->shape; old; old = old->next) {
+        ShapeEntry* entry = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
+        if (!entry) return false;
+        *entry = *old;
+        entry->byte_offset = offset;
+        entry->next = NULL;
+        int size = type_info[old->type->type_id].byte_size;
+        memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset, (size_t)size);
+        offset += size;
+        if (last) last->next = entry;
+        else first = entry;
+        last = entry;
+    }
+
+    ShapeEntry* added = (ShapeEntry*)pool_calloc(context->pool,
+        sizeof(ShapeEntry) + sizeof(StrView));
+    if (!added) return false;
+    StrView* name = (StrView*)((char*)added + sizeof(ShapeEntry));
+    char* name_copy = (char*)pool_calloc(context->pool, (size_t)key_length + 1);
+    if (!name_copy) return false;
+    memcpy(name_copy, key_chars, key_length);
+    name->str = name_copy;
+    name->length = key_length;
+    added->name = name;
+    added->name_id = typemap_name_id(name->str, (int)name->length);
+    added->type = type_info[value_type].type;
+    added->byte_offset = offset;
+    map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
+    if (last) last->next = added;
+    else first = added;
+
+    new_type->shape = first;
+    new_type->last = added;
+    new_type->length = old_count + 1;
+    new_type->byte_size = new_size;
+    new_type->type_index = ((ArrayList*)context->type_list)->length;
+    new_type->has_named_shape = old_type->has_named_shape;
+    new_type->struct_name = old_type->struct_name;
+    new_type->is_private_clone = true;
+    typemap_hash_build(new_type, context->pool);
+    arraylist_append((ArrayList*)context->type_list, new_type);
+
+    // The candidate is private. Publishing the new shape/data pair together
+    // makes the additional open field immediately match its physical slot.
+    map = rooted_map.get();
+    map->type = new_type;
+    map->data = new_data;
+    map->data_cap = (int)new_size;
+    return true;
+}
+
+static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* expected,
+        const char* boundary, bool publish_in_place) {
+    // Typed map writes are transactional at the root boundary. Clone first,
+    // then validate/store on the private candidate; a failed field check or
+    // post-state check therefore cannot corrupt the original map or a COW
+    // snapshot that still observes it.
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    ShapeEntry* field = runtime_named_map_field(contract, key);
+    Item checked_value = field ? lambda_type_check(value, field->type, boundary) : value;
+    if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
+
+    // A var parameter arrives after the caller has detached its writable root.
+    // Check the pre-state before a direct store: known members are already
+    // checked above and open members preserve map conformance, so this keeps
+    // the in/out write transactional without hiding the replacement in the
+    // callee's local binding.
+    if (publish_in_place && !lambda_type_matches(owner, contract)) {
+        return lambda_type_error(owner, contract, boundary);
+    }
+
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, checked_value);
+    Rooted<Item> rooted_candidate(roots, publish_in_place ? rooted_owner.get() :
+        cow_clone_one_level(rooted_owner.get()));
+    if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
+    if (!publish_in_place && rooted_candidate.get().item == rooted_owner.get().item) {
+        // Only VMap currently falls through the generic clone helper. Its
+        // separate COW implementation is already private-by-construction.
+        rooted_candidate.set(vmap_clone_for_cow(rooted_owner.get()));
+        if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
+    }
+    if (field) {
+        fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
+    } else if (!map_extend_open_shape(rooted_candidate.get(), rooted_key.get(),
+                   rooted_value.get())) {
+        return lambda_type_error(rooted_value.get(), contract, boundary);
+    }
+    if (!lambda_type_matches(rooted_candidate.get(), contract)) {
+        ValidationResult* validation = NULL;
+        (void)runtime_validate_value_against_type(rooted_candidate.get(), contract, &validation);
+        return lambda_type_error_with_validation(rooted_candidate.get(), contract, boundary, validation);
+    }
+    return rooted_candidate.get();
+}
+
+Item lambda_map_set_checked(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_map_set_checked_impl(owner, key, value, expected, boundary, false);
+}
+
+Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_map_set_checked_impl(owner, key, value, expected, boundary, true);
+}
+
+Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
+        const char* boundary) {
+    // Nested annotated writes validate the proposed root, not merely the final
+    // slot. Start from a detached top-level map so a failed post-state check
+    // cannot mutate the old root or a snapshot that still observes it.
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+        return lambda_type_error(value, expected, boundary);
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_candidate(roots, cow_clone_one_level(rooted_owner.get()));
+    if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR ||
+            rooted_candidate.get().item == rooted_owner.get().item) {
+        return lambda_type_error(rooted_owner.get(), contract, boundary);
+    }
+    Item write_result = cow_path_set(rooted_candidate.get(), rooted_path.get(),
+        rooted_value.get());
+    if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
+    if (!lambda_type_matches(rooted_candidate.get(), contract)) {
+        ValidationResult* validation = NULL;
+        (void)runtime_validate_value_against_type(rooted_candidate.get(), contract, &validation);
+        return lambda_type_error_with_validation(rooted_candidate.get(), contract, boundary, validation);
+    }
+    return rooted_candidate.get();
+}
+
+static Type* runtime_array_contract_element(Type* expected) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected || expected->type_id != LMD_TYPE_TYPE ||
+            expected->kind != TYPE_KIND_UNARY) return NULL;
+    TypeUnary* occurrence = (TypeUnary*)expected;
+    if (occurrence->op != OPERATOR_REPEAT) return NULL;
+    return runtime_boundary_unwrap_type(occurrence->operand);
+}
+
+static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary, bool publish_in_place) {
+    // An annotated array owns a clean element contract. Create the candidate
+    // before touching the original so a bad dynamic value cannot trigger
+    // ArrayNum-to-Array degradation or leak through a COW snapshot.
+    Type* element_type = runtime_array_contract_element(expected);
+    if (!element_type) return lambda_type_error(value, expected, boundary);
+    Item checked_value = lambda_type_check(value, element_type, boundary);
+    if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
+    if (publish_in_place && !lambda_type_matches(owner, expected)) {
+        return lambda_type_error(owner, expected, boundary);
+    }
+
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, checked_value);
+    Rooted<Item> rooted_candidate(roots, publish_in_place ? rooted_owner.get() :
+        fn_mutable_value(rooted_owner.get()));
+    TypeId candidate_type = get_type_id(rooted_candidate.get());
+    if (candidate_type != LMD_TYPE_ARRAY && candidate_type != LMD_TYPE_ARRAY_NUM &&
+            candidate_type != LMD_TYPE_ELEMENT) {
+        return lambda_type_error(rooted_owner.get(), expected, boundary);
+    }
+    Item set_result = fn_array_set(rooted_candidate.get().array, index, rooted_value.get());
+    if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
+    if (!lambda_type_matches(rooted_candidate.get(), expected)) {
+        ValidationResult* validation = NULL;
+        (void)runtime_validate_value_against_type(rooted_candidate.get(), expected, &validation);
+        return lambda_type_error_with_validation(rooted_value.get(), expected, boundary, validation);
+    }
+    return rooted_candidate.get();
+}
+
+Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false);
+}
+
+Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true);
+}
+
 Item array_set_cow(Item owner, int64_t index, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
@@ -6690,6 +7215,14 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
     }
     if (owner_type == LMD_TYPE_MAP || owner_type == LMD_TYPE_OBJECT ||
             owner_type == LMD_TYPE_ELEMENT || owner_type == LMD_TYPE_VMAP) {
+        if (owner_type == LMD_TYPE_MAP &&
+                !runtime_named_map_field((Type*)rooted_owner.get().map->type,
+                    rooted_key.get()) &&
+                !map_extend_open_shape(rooted_owner.get(), rooted_key.get(),
+                    rooted_value.get())) {
+            log_error("cow path mutation could not extend map shape");
+            return ItemError;
+        }
         fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
         return rooted_owner.get();
     }

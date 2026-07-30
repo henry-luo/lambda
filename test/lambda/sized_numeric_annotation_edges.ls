@@ -1,36 +1,45 @@
 // Test explicit sized numeric annotations and Go-like fixed-width numeric behavior.
 
 "=== scalar annotations ==="
-let a: i32 = 49734321
+let a_source = 49734321
+let a: i32 = i32(a_source)
 [a, type(a)]
-let b: i8 = 128
+let b_source = 128
+let b: i8 = i8(b_source)
 [b, type(b)]
-let c: u8 = 256
+let c_source = 256
+let c: u8 = u8(c_source)
 [c, type(c)]
-let d16: i16 = 32768
+let d16_source = 32768
+let d16: i16 = i16(d16_source)
 [d16, type(d16)]
-let e16: u16 = 65536
+let e16_source = 65536
+let e16: u16 = u16(e16_source)
 [e16, type(e16)]
-let d: u32 = -1
+let d: u32 = -1u32
 [d, type(d)]
 let e: u64 = 18446744073709551615u64
 [e, type(e)]
 
 "=== params ==="
 fn take_i32(x: i32) => [x, type(x)]
-let param_i32: i32 = 2147483648
+let param_i32_source = 2147483648
+let param_i32: i32 = i32(param_i32_source)
 take_i32(param_i32)
 fn take_u8(x: u8) => [x, type(x)]
-let param_u8: u8 = 256
+let param_u8_source = 256
+let param_u8: u8 = u8(param_u8_source)
 take_u8(param_u8)
 fn take_u16(x: u16) => [x, type(x)]
-let param_u16: u16 = 65536
+let param_u16_source = 65536
+let param_u16: u16 = u16(param_u16_source)
 take_u16(param_u16)
 
 "=== returns ==="
-fn ret_i8() i8 => 128
+let ret_i8_source = 128
+fn ret_i8() i8 => i8(ret_i8_source)
 [ret_i8(), type(ret_i8())]
-fn ret_u32() u32 => -1
+fn ret_u32() u32 => -1u32
 [ret_u32(), type(ret_u32())]
 
 "=== fixed-width arithmetic ==="
@@ -82,7 +91,8 @@ bnot(0u32)
 shr(-1i32, 1u8)
 
 "=== typed array store ==="
-let arr: u8[] = [255, 256, -1]
+let arr_second = 256
+let arr: u8[] = [255u8, u8(arr_second), -1u8]
 arr
 type(arr[0])
 type(arr[1])

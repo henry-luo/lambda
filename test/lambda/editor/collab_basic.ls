@@ -55,7 +55,7 @@ let d_final  = step_apply(rs, d_remote)
 // existing paragraph 0 -> 1 and paragraph 1 -> 2.
 let remote2 = [step_replace([], 0, 0, [node('paragraph', [text("Top")])])]
 // Local wants to bold the second-paragraph text leaf, originally [1,0].
-let local2  = [step_add_mark([1, 0], 'strong')]
+let local2  = [step_add_mark([1, 0], 'strong', true)]
 let r2 = rebase_steps(local2, remote2)
 "r2 kept:";        len(r2.kept) == 1
 let ms = r2.kept[0]
