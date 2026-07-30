@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="surface" contenteditable="true" data-source-path="0,0">selection closure</div>
+    <div id="log">init</div>
+    <script>
+      class Editor {
+        constructor() {
+          this.surface = document.getElementById('surface')
+          this.log = document.getElementById('log')
+          this.state = { selection: null }
+          this.btn = { one: this.log }
+          Object.defineProperty(this, 'listener', { writable: true,
+            value: () => {
+            const selection = window.getSelection()
+            if (!selection || selection.rangeCount === 0 ||
+                !this.surface.contains(selection.anchorNode)) return
+            const range = selection.getRangeAt(0)
+            const point = (node, offset) => {
+              const element = node.nodeType === 3 ? node.parentNode : node
+              const text = element.getAttribute('data-source-path')
+              return { path: text.split(',').map(part => parseInt(part, 10)), offset: offset }
+            }
+            const anchor = point(range.startContainer, range.startOffset)
+            const focus = point(range.endContainer, range.endOffset)
+            if (this.state.selection === null) {
+              this.state = { selection: { anchor: anchor, focus: focus } }
+            }
+            const same = JSON.stringify({ anchor: anchor, focus: focus }) ===
+              JSON.stringify(this.state.selection)
+            this.syncToolbar()
+            this.log.textContent = 'selection delivered:' + same
+          }})
+          document.addEventListener('selectionchange', this.listener)
+          this.log.textContent = 'mounted'
+        }
+        syncToolbar() {
+          const keys = Object.keys(this.btn).filter(key => key.length > 0)
+          if (keys.length === 0) this.log.textContent = 'missing'
+        }
+      }
+      new Editor()
+    </script>
+  </body>
+</html>

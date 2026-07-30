@@ -10,6 +10,7 @@
 #include "../../../lib/strbuf.h"
 #include "css_style.hpp"
 #include "css_style_node.hpp"
+#include "dom_lifecycle.hpp"
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 
@@ -246,6 +247,11 @@ struct DomDocument {
     DomElement* pending_scroll_into_view_target;
     uint32_t pending_scroll_into_view_target_id;
 
+    // Keep new editing state at the document tail: native/JIT consumers depend
+    // on the offsets of the long-lived DOM/JS members above.
+    uint64_t mutation_epoch;
+    void* editing_action_registry;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -262,7 +268,8 @@ struct DomDocument {
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
                     pending_scroll_into_view_target(nullptr),
-                    pending_scroll_into_view_target_id(0) {}
+                    pending_scroll_into_view_target_id(0),
+                    mutation_epoch(0), editing_action_registry(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -805,6 +812,21 @@ inline DomElement* element_to_dom_element(Element* e) {
 }
 inline const DomElement* element_to_dom_element(const Element* e) {
     return (const DomElement*)((const char*)e - offsetof(DomElement, elmt));
+}
+
+// Template render-map entries are keyed by the original Lambda element, not
+// a DOM wrapper's copied embedded value. The lifecycle registry preserves
+// that identity across wrapper rebuilds and is therefore authoritative for
+// event/template reverse lookup.
+inline Element* dom_element_render_source(DomElement* de) {
+    if (!de || de->is_synthetic()) return nullptr;
+    Element* source = de->doc
+        ? dom_node_registry_backing_source(de->doc, static_cast<DomNode*>(de))
+        : nullptr;
+    return source ? source : dom_element_to_element(de);
+}
+inline const Element* dom_element_render_source(const DomElement* de) {
+    return dom_element_render_source(const_cast<DomElement*>(de));
 }
 
 // DomElement* ↔ DomNode*: same address (DomNode is at offset 0 via inheritance)

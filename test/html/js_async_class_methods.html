@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+  class Block {
+    async save() { return "saved"; }
+    async validate(value) { return `valid:${value}`; }
+  }
+  const block = new Block();
+  Promise.all([block.save(), block.validate("data")]).then(([save, validate]) => {
+    document.getElementById("result").textContent = `${save}|${validate}`;
+  });
+</script>

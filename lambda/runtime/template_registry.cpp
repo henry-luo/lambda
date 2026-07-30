@@ -105,6 +105,15 @@ void template_entry_add_handler(TemplateEntry* entry,
               entry->name ? entry->name : "(anon)", event_name);
 }
 
+TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
+                                          const char* template_ref) {
+    if (!registry || !template_ref) return NULL;
+    for (TemplateEntry* entry = registry->first; entry; entry = entry->next) {
+        if (entry->template_ref == template_ref) return entry;
+    }
+    return NULL;
+}
+
 // ============================================================================
 // Pattern matching
 // ============================================================================

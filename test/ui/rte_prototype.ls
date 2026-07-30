@@ -311,8 +311,9 @@ on mouseup(evt) {
 }
 on beforeinput(evt) {
   if (evt.input_intent != null) {
-    editor = edit_dispatch(editor_with_event_selection(editor, evt), evt.input_intent)
-    set_selection(editor.selection)
+    let next_editor = edit_dispatch(editor_with_event_selection(editor, evt), evt.input_intent)
+    editor = next_editor
+    set_selection(next_editor.selection)
     status = evt.input_type
   } else {
     status = evt.input_type

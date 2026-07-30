@@ -5619,7 +5619,7 @@ static bool capture_lambda_focus_restore(DocState* state,
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
             if (!elem->is_synthetic()) {
-                Item item = {.element = dom_element_to_element(elem)};
+                Item item = {.element = dom_element_render_source(elem)};
                 RenderMapLookup lookup;
                 if (render_map_reverse_lookup(item, &lookup)) {
                     out->lookup = lookup;

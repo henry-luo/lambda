@@ -713,6 +713,15 @@ static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
     return thisArg_item;
 }
 
+static void js_install_callback_this(JsFunction* fn, Item this_arg) {
+    // Collection helpers invoke callbacks directly for their hot loops. An arrow
+    // owns its lexical `this`; replacing the ambient binding here makes a nested
+    // arrow created by the callback capture the helper's receiver instead.
+    if (fn && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
+        js_current_this = js_compute_callback_this(fn, this_arg);
+    }
+}
+
 // Forward declarations for collection types (defined here, used in js_property_get and js_dispatch_builtin)
 #define JS_COLLECTION_MAP 0
 #define JS_COLLECTION_SET 1
@@ -1758,51 +1767,54 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
 
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
 extern "C" Item js_constructor_create_object(Item callee) {
-    Item shape_callee = js_bound_function_ultimate_target(callee);
-    JsFunction* shape_fn = get_type_id(shape_callee) == LMD_TYPE_FUNC
-        ? (JsFunction*)shape_callee.function : NULL;
+    // Prototype lookup and builtin subclass allocation can compact the
+    // unpublished instance; native argument registers are not GC roots.
+    RootFrame roots(7);
+    Rooted<Item> callee_root(roots, callee);
+    Rooted<Item> shape_callee_root(roots,
+        js_bound_function_ultimate_target(callee_root.get()));
+    Rooted<Item> proto_source_root(roots, ItemNull);
+    Rooted<Item> instance_proto_root(roots, ItemNull);
+    Rooted<Item> object_root(roots, ItemNull);
+    Rooted<Item> aux_one_root(roots, ItemNull);
+    Rooted<Item> aux_two_root(roots, ItemNull);
+    if (!roots.valid()) return ItemNull;
+    JsFunction* shape_fn = get_type_id(shape_callee_root.get()) == LMD_TYPE_FUNC
+        ? (JsFunction*)shape_callee_root.get().function : NULL;
     // Compiled constructor bodies use fixed this.prop slots. A constructor
     // reached through an alias must receive the same pre-shaped object as a
     // statically resolved `new`, or those slot writes address an empty layout.
-    Item obj = shape_fn && shape_fn->ctor_prop_count > 0
+    object_root.set(shape_fn && shape_fn->ctor_prop_count > 0
         ? js_new_object_with_shape(shape_fn->ctor_prop_names,
             shape_fn->ctor_prop_lens, shape_fn->ctor_prop_count)
-        : js_new_object();
-    TypeId callee_type = get_type_id(callee);
-    if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee)) {
-        Item proto_source = callee;
-        Item original_callee = callee;
-        callee = js_bound_function_ultimate_target(callee);
+        : js_new_object());
+    TypeId callee_type = get_type_id(callee_root.get());
+    if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
+        proto_source_root.set(callee_root.get());
         if (js_has_pending_new_target) {
-            proto_source = js_bound_function_effective_new_target(original_callee, js_pending_new_target);
+            proto_source_root.set(js_bound_function_effective_new_target(
+                callee_root.get(), js_pending_new_target));
         }
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item instance_proto = js_property_get(proto_source, proto_key);
+        instance_proto_root.set(js_property_get(proto_source_root.get(), proto_key));
         if (js_exception_pending) return ItemNull;
-        TypeId instance_proto_type = get_type_id(instance_proto);
+        TypeId instance_proto_type = get_type_id(instance_proto_root.get());
         bool instance_proto_is_object = instance_proto_type == LMD_TYPE_MAP ||
             instance_proto_type == LMD_TYPE_FUNC ||
             instance_proto_type == LMD_TYPE_ARRAY ||
             instance_proto_type == LMD_TYPE_ELEMENT;
-        if (!instance_proto_is_object && js_is_proxy(proto_source)) {
-            JsProxyData* pd = js_get_proxy_data(proto_source);
+        if (!instance_proto_is_object && js_is_proxy(proto_source_root.get())) {
+            JsProxyData* pd = js_get_proxy_data(proto_source_root.get());
             if (pd && pd->revoked) {
                 return js_throw_type_error("Cannot perform operation on a revoked proxy");
             }
         }
-        static int cco_trace = 0;
-        if (instance_proto.item == ItemNull.item && cco_trace < 3) {
-            JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC ? (JsFunction*)callee.function : NULL;
-            log_error("js_constructor_create_object: prototype is NULL after lookup, fn=%p name='%.*s'",
-                (void*)fn, fn && fn->name ? (int)fn->name->len : 0, fn && fn->name ? fn->name->chars : "?");
-            cco_trace++;
-        }
-        if (instance_proto.item != ItemNull.item) {
+        if (instance_proto_root.get().item != ItemNull.item) {
             TypeId pt = instance_proto_type;
             if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_FUNC) {
                 // Subclass builtin detection: walk the prototype chain of instance_proto
                 // to find if a builtin class (Array, Map, Set, RegExp, Date, etc.) is in the ancestor chain.
-                Item proto = js_get_prototype(instance_proto);
+                Item proto = js_get_prototype(instance_proto_root.get());
                 int depth = 0;
                 while (proto.item != ItemNull.item && depth < 16) {
                     TypeId proto_t = get_type_id(proto);
@@ -1810,46 +1822,46 @@ extern "C" Item js_constructor_create_object(Item callee) {
                         bool created_builtin = false;
                         switch (js_class_id(proto)) {
                             case JS_CLASS_ARRAY:
-                                obj = js_array_new(0);
+                                object_root.set(js_array_new(0));
                                 created_builtin = true;
                                 break;
                             case JS_CLASS_MAP:
-                                obj = js_map_collection_new();
+                                object_root.set(js_map_collection_new());
                                 created_builtin = true;
                                 break;
                             case JS_CLASS_SET:
-                                obj = js_set_collection_new();
+                                object_root.set(js_set_collection_new());
                                 created_builtin = true;
                                 break;
                             case JS_CLASS_WEAK_MAP: {
                                 extern Item js_weakmap_new(void);
-                                obj = js_weakmap_new();
+                                object_root.set(js_weakmap_new());
                                 created_builtin = true;
                                 break;
                             }
                             case JS_CLASS_WEAK_SET: {
                                 extern Item js_weakset_new(void);
-                                obj = js_weakset_new();
+                                object_root.set(js_weakset_new());
                                 created_builtin = true;
                                 break;
                             }
                             case JS_CLASS_REGEXP: {
                                 extern Item js_regexp_construct(Item pattern, Item flags);
-                                Item empty = (Item){.item = s2it(heap_create_name("(?:)", 4))};
-                                Item no_flags = (Item){.item = s2it(heap_create_name("", 0))};
-                                obj = js_regexp_construct(empty, no_flags);
+                                aux_one_root.set((Item){.item = s2it(heap_create_name("(?:)", 4))});
+                                aux_two_root.set((Item){.item = s2it(heap_create_name("", 0))});
+                                object_root.set(js_regexp_construct(aux_one_root.get(), aux_two_root.get()));
                                 created_builtin = true;
                                 break;
                             }
                             case JS_CLASS_DATE: {
                                 extern Item js_date_new(void);
-                                obj = js_date_new();
+                                object_root.set(js_date_new());
                                 created_builtin = true;
                                 break;
                             }
                             case JS_CLASS_PROMISE: {
                                 extern Item js_promise_create_pending(void);
-                                obj = js_promise_create_pending();
+                                object_root.set(js_promise_create_pending());
                                 created_builtin = true;
                                 break;
                             }
@@ -1863,21 +1875,15 @@ extern "C" Item js_constructor_create_object(Item callee) {
                     }
                     depth++;
                 }
-                js_set_prototype(obj, instance_proto);
+                js_set_prototype(object_root.get(), instance_proto_root.get());
             } else if (pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
                 // ES OrdinaryCreateFromConstructor: when constructor's .prototype is
                 // any Object (incl. Array/Element), use it as instance's [[Prototype]].
-                js_set_prototype(obj, instance_proto);
+                js_set_prototype(object_root.get(), instance_proto_root.get());
             }
         }
-    } else {
-        static int cco_trace2 = 0;
-        if (cco_trace2 < 3) {
-            log_error("js_constructor_create_object: callee type=%d (not FUNC)", get_type_id(callee));
-            cco_trace2++;
-        }
     }
-    return obj;
+    return object_root.get();
 }
 
 // Dynamic class instantiation: new Type() where Type is a runtime variable.
@@ -2593,28 +2599,42 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     }
     // Case 2: callee is a class object (MAP with __ctor__ or __instance_proto__)
     if (get_type_id(callee) == LMD_TYPE_MAP) {
-        if (js_is_function_prototype_map(callee)) {
+        // Class construction allocates while the instance has no JavaScript
+        // owner yet. Keep the constructor graph and half-built instance rooted
+        // so compaction cannot return an object with an old prototype pointer.
+        RootFrame class_roots(7);
+        Rooted<Item> callee_root(class_roots, callee);
+        Rooted<Item> new_target_root(class_roots, effective_new_target);
+        Rooted<Item> ctor_root(class_roots, ItemNull);
+        Rooted<Item> proto_root(class_roots, ItemNull);
+        Rooted<Item> object_root(class_roots, ItemNull);
+        Rooted<Item> result_root(class_roots, ItemNull);
+        Rooted<Item> super_root(class_roots, ItemNull);
+        if (!class_roots.valid()) return ItemNull;
+
+        if (js_is_function_prototype_map(callee_root.get())) {
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
             return js_throw_type_error("Function.prototype is not a constructor");
         }
         bool ctor_own = false;
         bool instance_proto_own = false;
-        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &ctor_own);
-        Item instance_proto = js_map_get_fast(callee.map, "__instance_proto__", 18, &instance_proto_own);
-        if (instance_proto.item == ItemNull.item) {
+        ctor_root.set(js_map_get_fast(callee_root.get().map, "__ctor__", 8, &ctor_own));
+        proto_root.set(js_map_get_fast(callee_root.get().map, "__instance_proto__", 18,
+            &instance_proto_own));
+        if (proto_root.get().item == ItemNull.item) {
             Item prototype_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            Item public_proto = js_property_get(callee, prototype_key);
-            if (get_type_id(public_proto) == LMD_TYPE_MAP) {
+            result_root.set(js_property_get(callee_root.get(), prototype_key));
+            if (get_type_id(result_root.get()) == LMD_TYPE_MAP) {
                 Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                Item public_ctor = js_property_get(public_proto, constructor_key);
-                if (public_ctor.item == callee.item) {
-                    instance_proto = public_proto;
+                Item public_ctor = js_property_get(result_root.get(), constructor_key);
+                if (public_ctor.item == callee_root.get().item) {
+                    proto_root.set(result_root.get());
                 }
             }
         }
         // Only treat maps as constructable when they carry constructor/prototype class metadata.
-        if (ctor.item == ItemNull.item && instance_proto.item == ItemNull.item) {
+        if (ctor_root.get().item == ItemNull.item && proto_root.get().item == ItemNull.item) {
             // Plain object — not a constructor
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
@@ -2623,82 +2643,82 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             js_throw_value(js_new_error_with_name(tn, msg));
             return ItemNull;
         }
-        Item construction_proto = instance_proto;
-        if (effective_new_target.item != ItemNull.item && effective_new_target.item != callee.item) {
+        if (new_target_root.get().item != ItemNull.item &&
+                new_target_root.get().item != callee_root.get().item) {
             Item prototype_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            Item nt_proto = js_property_get(effective_new_target, prototype_key);
+            Item nt_proto = js_property_get(new_target_root.get(), prototype_key);
             if (js_exception_pending) return ItemNull;
             TypeId nt_proto_type = get_type_id(nt_proto);
             if (nt_proto_type == LMD_TYPE_MAP || nt_proto_type == LMD_TYPE_FUNC ||
                 nt_proto_type == LMD_TYPE_ARRAY || nt_proto_type == LMD_TYPE_ELEMENT) {
-                construction_proto = nt_proto;
+                proto_root.set(nt_proto);
             }
         }
-        int subclass_ta_type = js_resolve_ta_type_from_class_map(callee);
+        int subclass_ta_type = js_resolve_ta_type_from_class_map(callee_root.get());
         if (subclass_ta_type >= 0) {
             Item arg = (argc > 0 && args) ? args[0] : ItemNull;
             Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
             Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-            Item result = js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc);
-            if (get_type_id(result) == LMD_TYPE_MAP) {
-                js_set_prototype(result, construction_proto);
+            object_root.set(js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc));
+            if (get_type_id(object_root.get()) == LMD_TYPE_MAP) {
+                js_set_prototype(object_root.get(), proto_root.get());
             }
-            if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
-                js_pending_new_target = callee;
+            if (ctor_own && get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
+                js_pending_new_target = callee_root.get();
                 js_has_pending_new_target = true;
-                Item ctor_result = js_call_function(ctor, result, args, argc);
+                result_root.set(js_call_function(ctor_root.get(), object_root.get(), args, argc));
                 if (js_check_exception()) {
                     js_pending_new_target = ItemNull;
                     js_has_pending_new_target = false;
                     return ItemNull;
                 }
-                TypeId ctor_result_type = get_type_id(ctor_result);
+                TypeId ctor_result_type = get_type_id(result_root.get());
                 if (ctor_result_type == LMD_TYPE_MAP || ctor_result_type == LMD_TYPE_ARRAY || ctor_result_type == LMD_TYPE_ELEMENT ||
                     ctor_result_type == LMD_TYPE_FUNC || ctor_result_type == LMD_TYPE_OBJECT || ctor_result_type == LMD_TYPE_VMAP) {
                     js_pending_new_target = ItemNull;
                     js_has_pending_new_target = false;
-                    return ctor_result;
+                    return result_root.get();
                 }
             }
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
-            return result;
+            return object_root.get();
         }
         // No explicit constructor extending a builtin: run the implicit
         // `constructor(...args) { super(...args); }` by constructing via the base
         // builtin's [[Construct]], so the instance carries the base internal slot
         // (primitive wrapper / exotic Array) with the subclass prototype — instead
         // of a plain object (Boolean/String) or an empty array that drops args.
-        if (ctor.item == ItemNull.item || get_type_id(ctor) != LMD_TYPE_FUNC) {
+        if (ctor_root.get().item == ItemNull.item || get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
             bool super_own = false;
-            Item super_class = js_map_get_fast(callee.map, "__super_class__", 15, &super_own);
-            if (super_own && get_type_id(super_class) == LMD_TYPE_FUNC) {
-                js_pending_new_target = effective_new_target;
+            super_root.set(js_map_get_fast(callee_root.get().map, "__super_class__", 15, &super_own));
+            if (super_own && get_type_id(super_root.get()) == LMD_TYPE_FUNC) {
+                js_pending_new_target = new_target_root.get();
                 js_has_pending_new_target = true;
-                Item result = js_new_from_class_object(super_class, args, argc);
+                result_root.set(js_new_from_class_object(super_root.get(), args, argc));
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 if (js_check_exception()) return ItemNull;
-                TypeId rtt = get_type_id(result);
+                TypeId rtt = get_type_id(result_root.get());
                 if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
-                    js_init_class_instance_fields(callee, result);
+                    js_init_class_instance_fields(callee_root.get(), result_root.get());
                 }
-                return result;
+                return result_root.get();
             }
         }
-        Item obj = js_class_create_shaped_instance_object(callee);
+        object_root.set(js_class_create_shaped_instance_object(callee_root.get()));
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
         bool extends_promise_builtin = false;
-        if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
-            Item proto = js_get_prototype(construction_proto);
+        if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+            Item proto = js_get_prototype(proto_root.get());
             int depth = 0;
             while (proto.item != ItemNull.item && depth < 16) {
                 TypeId proto_t = get_type_id(proto);
                 if (proto_t == LMD_TYPE_MAP) {
                     if (js_class_id(proto) == JS_CLASS_ARRAY) {
-                        obj = js_array_new(0);
+                        object_root.set(js_array_new(0));
                         break;
                     }
                     if (js_class_id(proto) == JS_CLASS_PROMISE) {
@@ -2712,54 +2732,54 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 depth++;
             }
         }
-        if (extends_promise_builtin && get_type_id(ctor) != LMD_TYPE_FUNC) {
+        if (extends_promise_builtin && get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
             Item executor = (argc > 0 && args) ? args[0] : ItemNull;
-            Item result = js_promise_create(executor);
+            result_root.set(js_promise_create(executor));
             if (js_check_exception()) return ItemNull;
-            if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
-                js_set_prototype(result, construction_proto);
+            if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+                js_set_prototype(result_root.get(), proto_root.get());
             }
             Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-            js_property_set(result, ctor_key, callee);
-            js_mark_non_enumerable(result, ctor_key);
-            js_init_class_instance_fields(callee, result);
-            return result;
+            js_property_set(result_root.get(), ctor_key, callee_root.get());
+            js_mark_non_enumerable(result_root.get(), ctor_key);
+            js_init_class_instance_fields(callee_root.get(), result_root.get());
+            return result_root.get();
         }
         // v18c: Set constructor property (instance.constructor === Class)
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        js_property_set(obj, ctor_key, callee);
+        js_property_set(object_root.get(), ctor_key, callee_root.get());
         // Mark constructor as non-enumerable (per ES spec)
-        js_mark_non_enumerable(obj, ctor_key);
+        js_mark_non_enumerable(object_root.get(), ctor_key);
         // Set __proto__ so instance methods are accessible via prototype chain
-        if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
-            js_set_prototype(obj, construction_proto);
+        if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+            js_set_prototype(object_root.get(), proto_root.get());
         }
-        js_init_class_instance_fields(callee, obj);
+        js_init_class_instance_fields(callee_root.get(), object_root.get());
         // Call the constructor (__ctor__ property on the class object)
-        if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
+        if (ctor_root.get().item != ItemNull.item && get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
             // Set pending new.target for the constructor call
-            js_pending_new_target = effective_new_target;
+            js_pending_new_target = new_target_root.get();
             js_has_pending_new_target = true;
-            Item result = js_call_function(ctor, obj, args, argc);
+            result_root.set(js_call_function(ctor_root.get(), object_root.get(), args, argc));
             // Per ES spec §9.2.2: if constructor returns an Object, use that instead
-            TypeId rt = get_type_id(result);
+            TypeId rt = get_type_id(result_root.get());
             if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
                 rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
-                js_init_class_instance_fields(callee, result);
+                js_init_class_instance_fields(callee_root.get(), result_root.get());
                 // Js55 P11: clear pending new-target globals across this return
                 // path too, mirroring the P1 fix in the subclass-TA branch.
                 // Otherwise a user-class-extending-non-TA-builtin leaks state to
                 // the next `new <expr>(...)` call.
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                return result;
+                return result_root.get();
             }
             // ctor returned a primitive — `obj` will be returned below; still
             // need to clear pending globals.
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
         }
-        return obj;
+        return object_root.get();
     }
     // Not a function or class object — throw TypeError
     {
@@ -3346,20 +3366,8 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
                 entry->name->str, (int)entry->name->length))};
             return js_property_get(object, key);
         }
-        if (js_runtime_trace_enabled()) {
-            static int _gs_trace = 0;
-            ShapeEntry* e = tm->slot_entries[slot];
-            if (_gs_trace < 3 && e && e->name && e->name->length == 1 && e->name->str[0] == 'R') {
-                Item val = _map_read_field(e, m->data);
-                TypeId rt = get_type_id(val);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_NULL && rt != LMD_TYPE_UNDEFINED && rt != LMD_TYPE_FUNC) {
-                    log_error("TRACE get_shaped_slot R: type=%d entry_type=%d slot=%d total=%d",
-                        (int)rt, (int)e->type->type_id, (int)slot, _trace_total_calls);
-                    _gs_trace++;
-                }
-            }
-        }
-        return _map_read_field(tm->slot_entries[slot], m->data);
+        Item slot_value = _map_read_field(tm->slot_entries[slot], m->data);
+        return slot_value;
     }
     // Fallback: O(n) linked-list walk
     ShapeEntry* entry = tm->shape;
@@ -3389,6 +3397,14 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
         entry = tm->shape;
         for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
         if (!entry) return;
+    }
+    if (!typemap_entry_uses_fixed_slot(tm, entry)) {
+        // Object literals can use packed static entries; only constructor
+        // prefixes have the 8-byte invariant required by this fast writer.
+        Item key = (Item){.item = s2it(heap_create_name(
+            entry->name->str, (int)entry->name->length))};
+        fn_map_set(object, key, value);
+        return;
     }
     TypeId value_type = get_type_id(value);
     TypeId field_type = entry->type->type_id;
@@ -3492,6 +3508,10 @@ extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
             !entry->name->str) {
         return 0;
     }
+    // Transition shapes may expose slot_entries for lookup, but their packed
+    // fields are not 8-byte storage slots. Treating one as shaped overwrites
+    // the following field when a constructor assignment changes its type.
+    if (!typemap_entry_uses_fixed_slot(tm, entry)) return 0;
     if (map_ctor_offset_is_reserved(m, entry->byte_offset)) return 0;
     if (jspd_is_accessor(entry) || jspd_is_deleted(entry)) return 0;
     if (entry->name->length != (size_t)name_len) return 0;
@@ -3501,13 +3521,22 @@ extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
 
 extern "C" Item js_set_shaped_slot_guarded(Item object, int64_t slot,
         const char* name, int64_t name_len, Item value) {
+    // A guarded miss interns `name` and falls back to a potentially allocating
+    // property write. MIR registers are not native GC roots, so preserve both
+    // operands before that miss can compact a just-created constructor value.
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, ItemNull);
+    if (!roots.valid()) return ItemNull;
     int64_t byte_offset = slot * (int64_t)sizeof(void*);
-    if (js_shape_slot_guard(object, name, name_len, byte_offset)) {
-        js_set_shaped_slot(object, slot, value);
-        return value;
+    bool guard_matches = js_shape_slot_guard(object_root.get(), name, name_len, byte_offset);
+    if (guard_matches) {
+        js_set_shaped_slot(object_root.get(), slot, value_root.get());
+        return value_root.get();
     }
-    Item key = (Item){.item = s2it(heap_create_name(name, (int)name_len))};
-    return js_property_set(object, key, value);
+    key_root.set((Item){.item = s2it(heap_create_name(name, (int)name_len))});
+    return js_property_set(object_root.get(), key_root.get(), value_root.get());
 }
 
 static double js_get_slot_number(Item object, int64_t byte_offset) {
@@ -7337,6 +7366,10 @@ extern "C" Item js_property_access(Item object, Item key) {
             _ring[_ring_idx].obj_type = type;
             _ring[_ring_idx].result_type = get_type_id(result);
             _ring_idx = (_ring_idx + 1) % 8;
+            if (get_type_id(result) == LMD_TYPE_UNDEFINED) {
+                log_error("TRACE js_property_access: undefined .%.*s receiver_type=%d",
+                          (int)sk->len, sk->chars, (int)type);
+            }
         }
     }
     // TRACE: detect when .R on MAP returns a non-MAP type
@@ -7619,6 +7652,10 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
+        if (js_runtime_trace_enabled()) {
+            log_error("TRACE js_property_get_str: %s.%.*s", type_str,
+                      key_len, key ? key : "");
+        }
         // TRACE: log first few .y accesses on undefined for Box2D debugging
         static int y_trace2 = 0;
         if (js_runtime_trace_enabled() && y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
@@ -10790,6 +10827,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
 
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
+            // User-defined class expressions use callable maps; reporting them
+            // as objects makes constructor-detection utilities misclassify them.
+            if (js_is_class_constructor_map(this_val)) {
+                return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
+            }
             Map* m = this_val.map;
             if (m) {
                 // Check Symbol.toStringTag first (highest priority per spec)
@@ -13811,9 +13853,16 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         log_error("js-call-prerooted: argument span is outside the live side-root range");
         return ItemError;
     }
-    RootFrame call_roots((size_t)(2 + rooted_argc));
+    RootFrame call_roots((size_t)(5 + rooted_argc));
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
+    // A nested call may collect before this dispatcher restores its caller
+    // state. These exact roots keep a super() call from restoring a moved
+    // receiver into js_current_this.
+    Rooted<Item> saved_this_root(call_roots, js_current_this);
+    Rooted<Item> saved_new_target_root(call_roots, js_new_target);
+    Rooted<Item> saved_private_home_class_root(call_roots,
+        js_current_private_home_class);
     uint64_t** arg_roots = rooted_argc > 0
         ? LAMBDA_ALLOCA(rooted_argc, uint64_t*) : NULL;
     for (int i = 0; i < rooted_argc; i++) {
@@ -14123,8 +14172,12 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // v11: handle bound functions — use bound this and prepend bound args
     if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
         bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
-        bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
-            (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR);
+        // Arrow functions retain their creation environment's `this`. Installing
+        // an event target here overwrites a shared lexical-this scope slot when
+        // an arrow listener creates another closure during DOM dispatch.
+        // A normal call's receiver binding is observable through dynamic property
+        // operations; static reads-this analysis is not a sound eligibility test.
+        bool install_this = !(fn->flags & JS_FUNC_FLAG_ARROW);
         // A derived constructor implicitly observes new.target: SuperCall step 1
         // is GetNewTarget() and forwards it to the parent's [[Construct]]. Bodies
         // that never name `new.target` still need it installed, or js_new_target
@@ -14139,6 +14192,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
                 effective_this = js_function_get_bound_this(fn);
             }
             effective_this = js_compute_callback_this(fn, effective_this);
+            this_root.set(effective_this);
+            effective_this = this_root.get();
         }
         int total_argc = fn->bound_argc + arg_count;
         Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
@@ -14148,8 +14203,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         for (int i = 0; i < arg_count; i++) {
             merged_args[fn->bound_argc + i] = args ? args[i] : ItemNull;
         }
-        Item prev_this = js_current_this;
-        Item prev_nt = js_new_target;
+        Item prev_this = saved_this_root.get();
+        Item prev_nt = saved_new_target_root.get();
         bool prev_eval_initializer_context = js_eval_initializer_context;
         js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
         if (install_this) js_current_this = effective_this;
@@ -14208,7 +14263,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
             js_super_this_binding_push(effective_this);
             js_current_this = (Item){.item = ITEM_JS_TDZ};
         }
-        Item prev_private_home_class = js_current_private_home_class;
+        Item prev_private_home_class = saved_private_home_class_root.get();
         int prev_private_home_class_index = js_current_private_home_class_index;
         Item method_home_class = fn->home_class;
         if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
@@ -14219,9 +14274,11 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         bool pushed_vm_stack_source = js_function_push_vm_stack_source(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc, invoke_result_home);
         if (pushed_vm_stack_source) js_eval_source_pop();
-        js_current_private_home_class = prev_private_home_class;
+        js_current_private_home_class = saved_private_home_class_root.get();
         js_current_private_home_class_index = prev_private_home_class_index;
-        if (derived_ctor_call) result = js_super_this_binding_finish(result);
+        if (derived_ctor_call) {
+            result = js_super_this_binding_finish(result);
+        }
         js_generator_callee_proto = saved_gen_callee_proto_b;
         if (switched_with_stack) {
             js_with_set_stack(saved_with_stack, saved_with_depth);
@@ -14230,8 +14287,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         if (prev_module_state_id != UINT32_MAX) {
             js_set_active_module_state_id(prev_module_state_id);
         }
-        if (install_this) js_current_this = prev_this;
-        if (install_new_target) js_new_target = prev_nt;
+        if (install_this) js_current_this = saved_this_root.get();
+        if (install_new_target) js_new_target = saved_new_target_root.get();
         js_eval_initializer_context = prev_eval_initializer_context;
         return js_finish_borrowed_scalar_result(result, uses_local_result_home);
     }
@@ -14243,8 +14300,9 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     Item lane_entry_global = common_lane ? js_get_global_this() : ItemNull;
     bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
     bool derived_ctor_requested = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
-    bool install_this = !analysis_known || (fn->flags & JS_FUNC_FLAG_READS_THIS) ||
-        derived_ctor_requested;
+    // `this` for an arrow comes exclusively from its closure environment; the
+    // call receiver is intentionally ignored by ECMAScript.
+    bool install_this = !(fn->flags & JS_FUNC_FLAG_ARROW);
     // A derived constructor implicitly observes new.target: SuperCall step 1 is
     // GetNewTarget() and forwards it to the parent's [[Construct]]. Without this
     // term a ctor whose body never names `new.target` leaves js_new_target at
@@ -14257,12 +14315,14 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         derived_ctor_requested;
 
     // Bind 'this' for the duration of this call
-    Item prev_this = js_current_this;
-    Item prev_nt = js_new_target;
+    Item prev_this = saved_this_root.get();
+    Item prev_nt = saved_new_target_root.get();
     bool prev_eval_initializer_context = js_eval_initializer_context;
     js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
     if (install_this) {
         this_val = js_compute_callback_this(fn, this_val);
+        this_root.set(this_val);
+        this_val = this_root.get();
         js_current_this = this_val;
     }
     // v29: store callee for arguments.callee (used by js_build_arguments_object)
@@ -14314,7 +14374,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_super_this_binding_push(this_val);
         js_current_this = (Item){.item = ITEM_JS_TDZ};
     }
-    Item prev_private_home_class = js_current_private_home_class;
+    Item prev_private_home_class = saved_private_home_class_root.get();
     int prev_private_home_class_index = js_current_private_home_class_index;
     Item method_home_class = fn->home_class;
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
@@ -14325,9 +14385,11 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     bool pushed_vm_stack_source = !common_lane && js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
     if (pushed_vm_stack_source) js_eval_source_pop();
-    js_current_private_home_class = prev_private_home_class;
+    js_current_private_home_class = saved_private_home_class_root.get();
     js_current_private_home_class_index = prev_private_home_class_index;
-    if (derived_ctor_call) result = js_super_this_binding_finish(result);
+    if (derived_ctor_call) {
+        result = js_super_this_binding_finish(result);
+    }
     js_generator_callee_proto = saved_gen_callee_proto;
     if (switched_with_stack) {
         js_with_set_stack(saved_with_stack, saved_with_depth);
@@ -14336,8 +14398,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     if (prev_module_state_id != UINT32_MAX) {
         js_set_active_module_state_id(prev_module_state_id);
     }
-    if (install_this) js_current_this = prev_this;
-    if (install_new_target) js_new_target = prev_nt;
+    if (install_this) js_current_this = saved_this_root.get();
+    if (install_new_target) js_new_target = saved_new_target_root.get();
     js_eval_initializer_context = prev_eval_initializer_context;
     if (common_lane && js_call_lane_check_enabled() &&
         (js_current_this.item != prev_this.item || js_new_target.item != prev_nt.item ||
@@ -14507,9 +14569,15 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
     // body still receives the caller's own array, exactly as the generic path
     // does — these slots only keep the values reachable.
     int rooted_argc = (!args_prerooted && N > 0) ? N : 0;
-    RootFrame call_roots((size_t)(2 + rooted_argc));
+    RootFrame call_roots((size_t)(5 + rooted_argc));
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
+    // The specialized lane shares the generic lane's nested-call invariant:
+    // saved dispatch state must remain exact-rooted until it is restored.
+    Rooted<Item> saved_this_root(call_roots, js_current_this);
+    Rooted<Item> saved_new_target_root(call_roots, js_new_target);
+    Rooted<Item> saved_private_home_class_root(call_roots,
+        js_current_private_home_class);
     for (int i = 0; i < rooted_argc; i++) {
         uint64_t* slot = call_roots.take_slot();
         if (slot) *slot = args[i].item;
@@ -14536,12 +14604,16 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
     } array_mode_guard;
 
     uint16_t flags = fn->flags;
-    bool install_this = (flags & JS_FUNC_FLAG_READS_THIS) != 0;
+    // Keep specialized calls aligned with the generic dispatcher: an arrow
+    // must not replace the surrounding lexical-this binding with its receiver.
+    bool install_this = (flags & JS_FUNC_FLAG_ARROW) == 0;
     bool install_new_target = (flags & JS_FUNC_FLAG_READS_NEW_TARGET) != 0;
-    Item prev_this = js_current_this;
-    Item prev_nt = js_new_target;
+    Item prev_this = saved_this_root.get();
+    Item prev_nt = saved_new_target_root.get();
     if (install_this) {
         this_val = js_compute_callback_this(fn, this_val);
+        this_root.set(this_val);
+        this_val = this_root.get();
         js_current_this = this_val;
     }
     js_pending_args_callee = func_item;
@@ -14566,7 +14638,7 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
         get_type_id(fn->home_global) == LMD_TYPE_MAP;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
 
-    Item prev_private_home_class = js_current_private_home_class;
+    Item prev_private_home_class = saved_private_home_class_root.get();
     int prev_private_home_class_index = js_current_private_home_class_index;
     Item method_home_class = fn->home_class;
     bool installed_home_class = method_home_class.item != ItemNull.item &&
@@ -14586,15 +14658,15 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
         invoke_result_home);
 
     if (installed_home_class) {
-        js_current_private_home_class = prev_private_home_class;
+        js_current_private_home_class = saved_private_home_class_root.get();
         js_current_private_home_class_index = prev_private_home_class_index;
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
     if (prev_module_state_id != UINT32_MAX) {
         js_set_active_module_state_id(prev_module_state_id);
     }
-    if (install_this) js_current_this = prev_this;
-    if (install_new_target) js_new_target = prev_nt;
+    if (install_this) js_current_this = saved_this_root.get();
+    if (install_new_target) js_new_target = saved_new_target_root.get();
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 
@@ -21914,6 +21986,19 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
     Item fn = js_property_access(obj, method_name);
     // v37: Check for pending exception (e.g., private brand check TypeError)
     if (js_check_exception()) return ItemNull;
+    if (js_runtime_trace_enabled()) {
+        String* trace_method = it2s(method_name);
+        bool trace_relevant = trace_method &&
+            ((trace_method->len == 5 && memcmp(trace_method->chars, "close", 5) == 0) ||
+             (trace_method->len == 4 && memcmp(trace_method->chars, "hide", 4) == 0) ||
+             (trace_method->len == 4 && memcmp(trace_method->chars, "emit", 4) == 0) ||
+             (trace_method->len == 5 && memcmp(trace_method->chars, "reset", 5) == 0));
+        if (trace_relevant) {
+            log_error("TRACE js_map_method: %.*s receiver_class=%d fn_type=%d argc=%d",
+                      (int)trace_method->len, trace_method->chars,
+                      (int)js_class_id(obj), (int)get_type_id(fn), argc);
+        }
+    }
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         // ES spec: plain MAP objects with no Array prototype may still be used as
         // array-like receivers for Array.prototype methods (e.g., `f.every(cb)` where
@@ -23268,57 +23353,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc > 0) {
             Item sep = args[0];
             // check if separator is a regex (Map with __rd property)
-            JsRegexData* rd = js_get_regex_data(sep);
-            if (rd) {
-                if (lim == 0) return js_array_new(0);
-                // regex split
-                String* s = it2s(str);
-                if (!s || s->len == 0) {
-                    Item result = js_array_new(0);
-                    js_array_push(result, (Item){.item = s2it(heap_create_name(""))});
-                    return result;
-                }
-                Item result = js_array_new(0);
-                re2::StringPiece input(s->chars, s->len);
-                int total_groups = js_regex_num_groups(rd);
-                if (total_groups > JS_REGEX_MAX_GROUPS) total_groups = JS_REGEX_MAX_GROUPS;
-                re2::StringPiece match[JS_REGEX_MAX_GROUPS];
-                int p = 0; // last split position
-                int q = 0; // search start position
-                while (q <= (int)s->len) {
-                    bool found = js_regex_match_internal(rd, s->chars, (int)s->len, q,
-                        re2::RE2::UNANCHORED, match, total_groups);
-                    if (!found) break;
-                    int match_start = (int)(match[0].data() - s->chars);
-                    int match_end = match_start + (int)match[0].size();
-                    // ES spec @@split: if e == p, advance q and retry
-                    if (match_end == p) {
-                        q++;
-                        continue;
-                    }
-                    // add substring from p to match_start
-                    String* part = heap_strcpy(s->chars + p, match_start - p);
-                    js_array_push(result, (Item){.item = s2it(part)});
-                    if (result.array && (uint32_t)result.array->length >= lim) return result;
-                    // add capturing groups
-                    for (int g = 1; g < total_groups; g++) {
-                        if (match[g].data()) {
-                            String* gstr = heap_strcpy((char*)match[g].data(), (int)match[g].size());
-                            js_array_push(result, (Item){.item = s2it(gstr)});
-                        } else {
-                            js_array_push(result, make_js_undefined());
-                        }
-                        if (result.array && (uint32_t)result.array->length >= lim) return result;
-                    }
-                    p = match_end;
-                    q = match_end;
-                }
-                // add remainder
-                String* tail = heap_strcpy(s->chars + p, (int)s->len - p);
-                js_array_push(result, (Item){.item = s2it(tail)});
-                if (lim < 0xFFFFFFFF && result.array && result.array->length > (int)lim)
-                    result.array->length = (int)lim;
-                return result;
+            if (js_get_regex_data(sep)) {
+                // Keep zero-width matches on the spec @@split path; the retired
+                // direct loop advanced at every lookahead probe and split words
+                // into characters instead of respecting the matched boundary.
+                return js_regexp_symbol_split(sep, str,
+                    argc >= 2 ? args[1] : make_js_undefined());
             }
         }
         // v18n: non-regex path — coerce separator to string
@@ -25529,7 +25569,7 @@ static bool js_array_flatten_into(Item target, Item source, int64_t source_len, 
                 element = js_call_function_into(mapper, this_arg, cb_args, 3, &mapper_result_home);
             } else {
                 Item prev_this = js_current_this;
-                js_current_this = this_arg;
+                js_install_callback_this(fn, this_arg);
                 element = js_invoke_fn(fn, cb_args, 3, &mapper_result_home);
                 js_current_this = prev_this;
             }
@@ -27180,7 +27220,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_map = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_map);
+        js_install_callback_this(fn, thisArg_map);
         int len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         for (int i = 0; i < len; i++) {
@@ -27227,7 +27267,7 @@ includes_slow_path:
         JsFunction* fn = (JsFunction*)callback_root.get().function;
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item thisArg_filter = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_filter);
+        js_install_callback_this(fn, thisArg_filter);
         int len = src->length;  // spec: capture length before loop
         int out_idx = 0;
         bool check_proto = js_proto_chain_has_numeric_keys(array_root.get());
@@ -27315,7 +27355,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_forEach = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_forEach);
+        js_install_callback_this(fn, thisArg_forEach);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         JsArraySparseKeyCursor sparse_cursor;
@@ -27359,7 +27399,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_find = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_find);
+        js_install_callback_this(fn, thisArg_find);
         for (int i = 0; i < len; i++) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
@@ -27382,7 +27422,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_findIdx = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_findIdx);
+        js_install_callback_this(fn, thisArg_findIdx);
         for (int i = 0; i < len; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             LAMBDA_SCALAR_HOME(find_index_result_home);
@@ -27402,7 +27442,7 @@ includes_slow_path:
         JsFunction* fn = (JsFunction*)callback.function;
         Item prev_this = js_current_this;
         Item thisArg_fl = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_fl);
+        js_install_callback_this(fn, thisArg_fl);
         for (int i = src->length - 1; i >= 0; i--) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
@@ -27423,7 +27463,7 @@ includes_slow_path:
         JsFunction* fn = (JsFunction*)callback.function;
         Item prev_this = js_current_this;
         Item thisArg_fli = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_fli);
+        js_install_callback_this(fn, thisArg_fli);
         for (int i = src->length - 1; i >= 0; i--) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
@@ -27445,7 +27485,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_some = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_some);
+        js_install_callback_this(fn, thisArg_some);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         JsArraySparseKeyCursor sparse_cursor;
@@ -27493,7 +27533,7 @@ includes_slow_path:
         // v30: thisArg support with OrdinaryCallBindThis coercion
         Item prev_this = js_current_this;
         Item thisArg_every = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
-        js_current_this = js_compute_callback_this(fn, thisArg_every);
+        js_install_callback_this(fn, thisArg_every);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         JsArraySparseKeyCursor sparse_cursor;

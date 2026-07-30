@@ -1,0 +1,7 @@
+{
+  "name": "async closures retain captured DOM references across await",
+  "html": "test/html/js_async_capture_dom_property.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "ready"}
+  ]
+}

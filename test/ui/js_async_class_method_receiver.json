@@ -1,0 +1,6 @@
+{
+  "name": "async class methods preserve parameter and this across await",
+  "events": [
+    { "type": "assert_text", "target": { "selector": "#result" }, "equals": "true|true" }
+  ]
+}

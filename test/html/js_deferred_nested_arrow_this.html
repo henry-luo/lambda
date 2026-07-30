@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><style>#palette { margin-top: 60px; }</style></head><body>
+  <button id="open" type="button">open</button>
+  <div id="palette"></div>
+  <div id="result">idle</div>
+  <script>
+  "use strict";
+  function applyMark(state, name, value) { return `${state}:${name}:${value}`; }
+  function createSwatch(attrs) {
+    const swatch = document.createElement("button");
+    swatch.id = "swatch";
+    swatch.textContent = attrs.title;
+    swatch.addEventListener("click", attrs.onclick);
+    return swatch;
+  }
+  class DeferredListener {
+    constructor() {
+      this.state = "base";
+      this.run = command => { this.state = command(this.state); };
+    }
+    install() {
+      const palette = document.getElementById("palette");
+      const openPalette = () => {
+        const swatches = ["#ef4444", "#3b82f6"].map(value =>
+          createSwatch({ title: String(value), onclick: () => {
+            this.run(state => applyMark(state, "color", value));
+            document.getElementById("result").textContent = this.state;
+          } })
+        );
+        palette.appendChild(swatches[0]);
+      };
+      document.getElementById("open").addEventListener("click", () => openPalette());
+    }
+  }
+  new DeferredListener().install();
+  </script>
+</body></html>

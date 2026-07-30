@@ -1,0 +1,7 @@
+{
+  "name": "duplicate class-expression names retain their separate aliases",
+  "html": "test/html/js_duplicate_class_expression_aliases.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "ok|label:next|base"}
+  ]
+}

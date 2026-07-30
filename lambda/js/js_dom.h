@@ -71,6 +71,13 @@ bool js_dom_commit_headless_layout_checkpoint(void);
 // accept `document` (or a foreign-doc wrapper) as a node container.
 void* js_dom_get_or_create_doc_node(void* dom_doc);
 
+/**
+ * Focus a contenteditable host through the shared DOM Selection state without
+ * constructing a JavaScript return value. Used by native automation for
+ * Lambda template documents, which do not own a JS runtime.
+ */
+bool js_dom_focus_editing_host_for_automation(void* dom_elem);
+
 // =============================================================================
 // Named Element Access on Window
 // =============================================================================
@@ -319,6 +326,9 @@ Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
  */
 Item js_classlist_method(Item elem, Item method_name, Item* args, int argc);
 
+/** Dispatch classList.method(...argsArray) after spread expansion. */
+Item js_classlist_method_apply(Item elem, Item method_name, Item args_array);
+
 /**
  * Get a classList property.
  * Supported: length, value
@@ -372,6 +382,12 @@ Item js_location_get_property(Item prop_name);
  * @return Boolean Item
  */
 Item js_dom_contains(Item elem, Item other);
+
+/**
+ * Compare two wrapped DOM nodes using the DOM structural-equality algorithm.
+ * @return Boolean Item
+ */
+Item js_dom_is_equal_node(Item node, Item other);
 
 // =============================================================================
 // style.setProperty() / style.removeProperty() (v12b)

@@ -1039,11 +1039,17 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             }
         }
         ref.base_reg = jm_transpile_box_item(mt, mem->object);
+        // An assignment reference is evaluated before its RHS. Keep both parts
+        // exact: a nested RHS write can collect before `bucket[index] = value`
+        // consumes the earlier receiver, otherwise the stale MIR register may
+        // turn a valid array bucket into undefined after compaction.
+        jm_create_gc_root_slot(mt, ref.base_reg);
         int obj_spill = -1;
         if (mt->in_generator && mem->computed && jm_has_yield(mem->property)) {
             obj_spill = jm_gen_spill_save(mt, ref.base_reg);
         }
         ref.key_reg = jm_emit_member_key(mt, mem);
+        jm_create_gc_root_slot(mt, ref.key_reg);
         if (obj_spill >= 0) {
             jm_gen_spill_load(mt, ref.base_reg, obj_spill);
         }
@@ -4389,6 +4395,32 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
     jm_emit_label(mt, skip_destr);
 }
 
+static bool jm_expression_can_suspend(JsMirTranspiler* mt, JsAstNode* expr) {
+    return mt && mt->in_generator && expr &&
+        (jm_has_yield(expr) || (mt->in_async && jm_count_awaits(expr) > 0));
+}
+
+static void jm_spill_reference_for_suspending_rhs(JsMirTranspiler* mt,
+                                                   const JsMirReference* ref,
+                                                   JsAstNode* rhs,
+                                                   int* out_base_slot,
+                                                   int* out_key_slot) {
+    *out_base_slot = -1;
+    *out_key_slot = -1;
+    if (!jm_expression_can_suspend(mt, rhs) || !ref) return;
+    if (ref->base_reg) *out_base_slot = jm_gen_spill_save(mt, ref->base_reg);
+    if (ref->key_reg) *out_key_slot = jm_gen_spill_save(mt, ref->key_reg);
+}
+
+static void jm_restore_suspended_reference(JsMirTranspiler* mt,
+                                           const JsMirReference* ref,
+                                           int base_slot,
+                                           int key_slot) {
+    if (!ref) return;
+    if (base_slot >= 0) jm_gen_spill_load(mt, ref->base_reg, base_slot);
+    if (key_slot >= 0) jm_gen_spill_load(mt, ref->key_reg, key_slot);
+}
+
 // Assignment expression
 MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
     if (!asgn->left || !asgn->right) return jm_emit_null(mt);
@@ -5635,8 +5667,15 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     jm_emit_exc_propagate_check(mt);
                     return undef;
                 }
+                int base_spill = -1;
+                int key_spill = -1;
+                jm_spill_reference_for_suspending_rhs(mt, &ref, asgn->right,
+                                                       &base_spill, &key_spill);
                 MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
                 jm_emit_exc_propagate_check(mt);
+                // await resumes in a new state-machine invocation, so the
+                // pre-RHS super reference must come back from its precise env home.
+                jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
                 MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
                 jm_emit_exc_propagate_check(mt);
                 return super_set_result;
@@ -5645,6 +5684,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
 
         JsMirReference ref = jm_emit_reference(mt, asgn->left);
         jm_emit_exc_propagate_check(mt);
+        int base_spill = -1;
+        int key_spill = -1;
+        jm_spill_reference_for_suspending_rhs(mt, &ref, asgn->right,
+                                               &base_spill, &key_spill);
         MIR_reg_t new_val;
         if (asgn->op == JS_OP_ASSIGN) {
             new_val = jm_transpile_box_item(mt, asgn->right);
@@ -5688,6 +5731,9 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             // Evaluate RHS, set property, return RHS
             jm_emit_label(mt, l_assign);
             new_val = jm_transpile_box_item(mt, asgn->right);
+            // An awaited RHS destroys raw MIR registers; restore the original
+            // Reference so `obj.key ||= await value` writes its pre-await base.
+            jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
             jm_emit_profile_property_set_site(mt, member);
             jm_emit_put_value(mt, &ref, new_val);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5706,6 +5752,9 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
         }
 
+        // A property Reference is evaluated before its RHS by the language;
+        // preserve that receiver/key across await instead of using dead MIR regs.
+        jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
         jm_emit_profile_property_set_site(mt, member);
         MIR_reg_t result = jm_emit_put_value(mt, &ref, new_val);
 
@@ -6813,10 +6862,8 @@ static void jm_transpile_discard_call_args(JsMirTranspiler* mt, JsAstNode* arg) 
 // registers do not survive suspend/resume. When this gate trips the
 // caller must fall back to the env-spilling path inside jm_build_args_array.
 static bool jm_call_yield_blocks_direct(JsMirTranspiler* mt, JsAstNode* first_arg) {
-    if (!mt->in_generator) return false;
     for (JsAstNode* a = first_arg; a; a = a->next) {
-        if (jm_has_yield(a)) return true;
-        if (mt->in_async && jm_count_awaits(a) > 0) return true;
+        if (jm_expression_can_suspend(mt, a)) return true;
     }
     return false;
 }
@@ -7425,6 +7472,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (mid->name && mid->name->len == 9 && strncmp(mid->name->chars, "classList", 9) == 0) {
                     MIR_reg_t obj = jm_transpile_box_item(mt, inner->object);
                     MIR_reg_t method_str = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+                    bool has_spread = false;
+                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                            has_spread = true;
+                            break;
+                        }
+                    }
+                    if (has_spread) {
+                        // The direct DOM fast path used the syntactic argument
+                        // count, which dropped tokens expanded by classList.add(...tokens).
+                        MIR_reg_t args_array = jm_build_spread_args_array(mt, call->arguments);
+                        return jm_call_3(mt, "js_classlist_method_apply", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
+                    }
                     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                     return jm_call_4(mt, "js_classlist_method", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -8900,15 +8963,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         }
                         jm_transpile_discard_call_args(mt, p3_arg);
 
-                        // Runtime semantic slots are touched only when immutable
-                        // body analysis proves the direct callee can observe them.
-                        MIR_reg_t p3_prev_this = 0;
-                        if (p3_method->fc->observes_this) {
-                            // ambient-binding save: keep the TDZ sentinel unresolved.
-                            p3_prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-                            jm_call_void_1(mt, "js_set_this",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
-                        }
+                        // A direct method call bypasses js_call_function, but it still
+                        // establishes the receiver binding. Nested arrows can capture
+                        // `this` even when body analysis cannot see a direct read.
+                        MIR_reg_t p3_prev_this = jm_call_0(mt,
+                            "js_get_lexical_this_binding", MIR_T_I64);
+                        jm_call_void_1(mt, "js_set_this",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
                         MIR_reg_t p3_prev_nt = 0;
                         if (p3_method->fc->observes_new_target) {
                             p3_prev_nt = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
@@ -8925,7 +8986,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
                         if (p3_saved_wd) jm_call_void_1(mt, "js_with_restore_depth",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_saved_wd));
-                        if (p3_prev_this) jm_call_void_1(mt, "js_set_this",
+                        jm_call_void_1(mt, "js_set_this",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_prev_this));
                         if (p3_prev_nt) jm_call_void_1(mt, "js_set_direct_new_target",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_prev_nt));
@@ -10782,6 +10843,10 @@ static MIR_reg_t jm_emit_guarded_shaped_slot_get(JsMirTranspiler* mt,
                                                   MIR_reg_t obj_reg,
                                                   String* key_name,
                                                   int slot) {
+    // The guarded slow path materializes a property key. Keep its receiver in
+    // the precise frame so a compacting collection cannot leave the later
+    // property access with the pre-move MIR register value.
+    jm_create_gc_root_slot(mt, obj_reg);
     MIR_label_t l_fast = jm_new_label(mt);
     MIR_label_t l_slow = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -11148,6 +11213,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 p4_prop->name->chars, (int)p4_prop->name->len);
             if (p4_slot >= 0) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                jm_create_gc_root_slot(mt, obj_reg);
                 TypeId field_type = p1_ce->constructor->fc->ctor_prop_types[p4_slot];
                 int64_t byte_offset = (int64_t)p4_slot * (int64_t)sizeof(void*);
 
@@ -11308,6 +11374,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         if (key_name && !jm_is_private_name(key_name) &&
             jm_find_unique_ctor_prop_slot(mt, key_name, &ctor_slot)) {
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+            jm_create_gc_root_slot(mt, obj_reg);
             jm_emit_exc_propagate_check(mt);
 
             log_debug("P4g: guarded shaped load expr.%.*s -> slot %d",
@@ -11319,11 +11386,10 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
 
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
-    if (mem->object && mem->object->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-        // A call-result receiver has no lexical binding. Root it before key
-        // materialization can collect and relocate it on the way to property access.
-        jm_create_gc_root_slot(mt, obj);
-    }
+    // A chained receiver (for example `this.toolInstance.validate`) is held
+    // only in a MIR register while its key is boxed; root every receiver so
+    // compaction updates that temporary before the access consumes it.
+    jm_create_gc_root_slot(mt, obj);
     jm_emit_exc_propagate_check(mt);
 
     // Generator spill: if computed key contains yield, obj reg will be stale after resume
@@ -12405,7 +12471,7 @@ static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
 static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         JsFuncCollected* fc, MIR_reg_t env, int env_alloc_size, bool has_remapped) {
     if (!mt || !fc || env == 0 || mt->scope_env_reg == 0) return;
-    if (!has_remapped) return;
+    if (!has_remapped && !fc->closure_env_has_parent_link) return;
     bool needs_parent_link = false;
     for (int ci = 0; ci < fc->capture_count; ci++) {
         if (fc->captures[ci].grandparent_slot >= 0) {
@@ -12426,9 +12492,9 @@ static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, parent_env),
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             parent_env_link_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1)));
-    // only remapped closure envs reserve the parent's scope-env layout; dense
-    // copied envs use this slot for real captures, so writing the link there
-    // corrupts values later coerced by callbacks.
+    // A dense copied env normally uses this slot for a capture. A mixed closure
+    // explicitly reserves its parent-link tail, so it must forward the inherited
+    // link or nested arrows read the immediate loop value as lexical `this`.
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             parent_env_link_slot * (int)sizeof(uint64_t), env, 0, 1),
@@ -12457,6 +12523,20 @@ static bool jm_force_copied_env_for_field_initializer(JsMirTranspiler* mt,
         if (jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return true;
     }
     return false;
+}
+
+static void jm_capture_arrow_lexical_home_class(JsMirTranspiler* mt,
+                                                 MIR_reg_t fn_reg,
+                                                 JsFunctionNode* fn) {
+    if (!mt || !fn_reg || !fn || !fn->is_arrow || !mt->current_class) return;
+    // `super` in an arrow is lexical. Without the defining class on the arrow,
+    // a callback invoked from another method inherits that caller's home class
+    // and resolves `super` against the wrong prototype.
+    jm_create_gc_root_slot(mt, fn_reg);
+    MIR_reg_t home_class = jm_emit_class_object_for_entry(mt, mt->current_class);
+    if (!home_class) return;
+    jm_create_gc_root_slot(mt, home_class);
+    jm_emit_set_function_home_class(mt, fn_reg, home_class);
 }
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
@@ -12662,6 +12742,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
     }
     jm_emit_finalize_function(mt, fn_reg, fc, fc->node);
+    jm_capture_arrow_lexical_home_class(mt, fn_reg, fc->node);
     return fn_reg;
 }
 
@@ -12920,7 +13001,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                         }
                     }
                     if (!found_const) {
-                        log_error("js-mir: captured variable '%s' not found in scope (in function '%s')", fc->captures[i].name, fc->name);
+                        log_error("js-mir: captured variable '%s' not found in scope (in function '%s')",
+                            fc->captures[i].name, fc->name);
                         MIR_reg_t undef_val = jm_new_reg(mt, "missing_cap", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, undef_val),
@@ -12956,6 +13038,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     }
 
     jm_emit_finalize_function(mt, fn_reg, fc, fn);
+    jm_capture_arrow_lexical_home_class(mt, fn_reg, fn);
     return fn_reg;
 }
 
@@ -13707,12 +13790,10 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     JsClassEntry* sc = static_superclass;
                     MIR_reg_t last_proto = proto_obj;
                     if (sc) {
-                        // Link prototype to parent's actual .prototype for identity correctness
-                        JsIdentifierNode tmp_id;
-                        memset(&tmp_id, 0, sizeof(tmp_id));
-                        tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
-                        tmp_id.name = sc->name;
-                        MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
+                        // A synthetic identifier cannot resolve a nested superclass binding;
+                        // use its definition-time class slot so lexical inheritance stays intact.
+                        MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, sc);
+                        if (!super_val) super_val = jm_emit_undefined(mt);
                         MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                         MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),

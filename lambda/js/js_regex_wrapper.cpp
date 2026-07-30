@@ -2144,15 +2144,16 @@ static bool js_regex_assert_marker_matches(JsRegexFilter& f, const char* input, 
     int check_offset = (int)(check_start - input);
     if (check_offset < 0 || check_offset > input_len) return false;
 
-    int check_len = input_len - check_offset;
     if (f.reject_wrapper) {
         int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
-        return js_regex_wrapper_exec(f.reject_wrapper, check_start, check_len, 0, true,
+        // Keep the whole subject: slicing at the marker makes \b treat the
+        // slice boundary as a word boundary and accepts a false lookahead.
+        return js_regex_wrapper_exec(f.reject_wrapper, input, input_len, check_offset, true,
                                      starts, ends, JS_REGEX_MAX_GROUPS) > 0;
     }
     if (f.reject_pattern) {
-        re2::StringPiece check_text(check_start, check_len);
-        return f.reject_pattern->Match(check_text, 0, check_len,
+        re2::StringPiece check_text(input, input_len);
+        return f.reject_pattern->Match(check_text, check_offset, input_len,
                                        re2::RE2::ANCHOR_START, nullptr, 0);
     }
     return false;

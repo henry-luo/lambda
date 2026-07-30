@@ -460,27 +460,11 @@ static void validate_transient_ui_target(View* view, const char* name,
     }
 }
 
-static View* find_live_view_by_id(DomNode* node, uint32_t view_id) {
-    if (!node || view_id == 0) return NULL;
-    View* view = static_cast<View*>(node);
-    if (view->id == view_id) return view;
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        DomNode* child = element->first_child;
-        while (child) {
-            View* found = find_live_view_by_id(child, view_id);
-            if (found) return found;
-            child = child->next_sibling;
-        }
-    }
-    return NULL;
-}
-
 static View* find_doc_live_view_by_id(DocState* state, uint32_t view_id) {
     if (!state || !state->owner_store || !state->owner_store->document || view_id == 0) return NULL;
     DomDocument* doc = state->owner_store->document;
     DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
-    return find_live_view_by_id(root, view_id);
+    return view_tree_find_live_id(root, view_id);
 }
 
 static void validate_focus_node(DocState* state, View* node, View* focused,

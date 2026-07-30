@@ -2482,41 +2482,16 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     return removed;
 }
 
-static View* view_state_find_live_id(DomNode* node, uint32_t view_id) {
-    if (!node || view_id == 0) return NULL;
-    if (node->id == view_id) return static_cast<View*>(node);
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-            View* found = view_state_find_live_id(child, view_id);
-            if (found) return found;
-        }
-    }
-    return NULL;
-}
-
-static bool view_state_tree_contains_view(DomNode* node, View* view) {
-    if (!node || !view) return false;
-    if (static_cast<View*>(node) == view) return true;
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-            if (view_state_tree_contains_view(child, view)) return true;
-        }
-    }
-    return false;
-}
-
 static bool state_store_tree_contains_node(DomNode* root, void* node) {
-    return node && view_state_tree_contains_view(root, static_cast<View*>(node));
+    return node && view_tree_contains_view(root, static_cast<View*>(node));
 }
 
 static bool editing_surface_is_stale(DomNode* root,
                                      const EditingSurface* surface) {
     if (!surface || surface->kind == EDIT_SURFACE_NONE) return false;
     if (!surface->owner || !surface->view) return true;
-    if (!view_state_tree_contains_view(root, static_cast<View*>(surface->owner)) ||
-        !view_state_tree_contains_view(root, surface->view)) {
+    if (!view_tree_contains_view(root, static_cast<View*>(surface->owner)) ||
+        !view_tree_contains_view(root, surface->view)) {
         return true;
     }
 
@@ -2637,7 +2612,7 @@ static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* 
         ViewState* view_state = entry ? entry->state : NULL;
         if (!view_state) continue;
 
-        View* live_view = view_state_find_live_id(root, entry->view_id);
+        View* live_view = view_tree_find_live_id(root, entry->view_id);
         bool expected = target && live_view &&
             view_state_target_path_contains(target, live_view);
         if (strcmp(name, "hover") == 0) {
@@ -2671,7 +2646,7 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
     uint32_t changed = 0;
 
     if (state->focus && state->focus->current &&
-        !view_state_tree_contains_view(root, state->focus->current)) {
+        !view_tree_contains_view(root, state->focus->current)) {
         View* old_focus = state->focus->current;
         state->focus->previous = NULL;
         state->focus->current = NULL;
@@ -2689,7 +2664,7 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         changed += state_map_delete_entries_for_name(state, STATE_FOCUS_VISIBLE);
     }
 
-    if (state->hover_target && !view_state_tree_contains_view(root, state->hover_target)) {
+    if (state->hover_target && !view_tree_contains_view(root, state->hover_target)) {
         doc_state_log_view_target_transition(state, "hover.target", state->hover_target, NULL);
         state->hover_target = NULL;
         changed++;
@@ -2700,7 +2675,7 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         changed += view_state_sync_interaction_flag_path(state, root, state->hover_target, "hover");
     }
 
-    if (state->active_target && !view_state_tree_contains_view(root, state->active_target)) {
+    if (state->active_target && !view_tree_contains_view(root, state->active_target)) {
         doc_state_log_view_target_transition(state, "active.target", state->active_target, NULL);
         state->active_target = NULL;
         changed++;
@@ -2711,20 +2686,20 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         changed += view_state_sync_interaction_flag_path(state, root, state->active_target, "active");
     }
 
-    if (state->drag_target && !view_state_tree_contains_view(root, state->drag_target)) {
+    if (state->drag_target && !view_tree_contains_view(root, state->drag_target)) {
         doc_state_log_view_target_transition(state, "drag.target", state->drag_target, NULL);
         state->drag_target = NULL;
         state->is_dragging = false;
         changed++;
     }
-    if (state->open_dropdown && !view_state_tree_contains_view(root, state->open_dropdown)) {
+    if (state->open_dropdown && !view_tree_contains_view(root, state->open_dropdown)) {
         doc_state_log_dropdown_owner_transition(state, state->open_dropdown, NULL);
         state->open_dropdown = NULL;
         state->dropdown_width = 0.0f;
         state->dropdown_height = 0.0f;
         changed++;
     }
-    if (state->context_menu_target && !view_state_tree_contains_view(root, state->context_menu_target)) {
+    if (state->context_menu_target && !view_tree_contains_view(root, state->context_menu_target)) {
         doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
         state->context_menu_target = NULL;
         state->context_menu_hover = -1;
@@ -2733,8 +2708,8 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         changed++;
     }
     if (state->drag_drop) {
-        bool stale_source = state->drag_drop->source_view && !view_state_tree_contains_view(root, state->drag_drop->source_view);
-        bool stale_target = state->drag_drop->drop_target && !view_state_tree_contains_view(root, state->drag_drop->drop_target);
+        bool stale_source = state->drag_drop->source_view && !view_tree_contains_view(root, state->drag_drop->source_view);
+        bool stale_target = state->drag_drop->drop_target && !view_tree_contains_view(root, state->drag_drop->drop_target);
         if (stale_source) {
             memset(state->drag_drop, 0, sizeof(DragDropState));
             changed++;
@@ -2750,11 +2725,11 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
             changed++;
         }
     }
-    if (state->active_text_control && !view_state_tree_contains_view(root, static_cast<View*>(state->active_text_control))) {
+    if (state->active_text_control && !view_tree_contains_view(root, static_cast<View*>(state->active_text_control))) {
         state->active_text_control = NULL;
         changed++;
     }
-    if (state->last_focused_text_control && !view_state_tree_contains_view(root, static_cast<View*>(state->last_focused_text_control))) {
+    if (state->last_focused_text_control && !view_tree_contains_view(root, static_cast<View*>(state->last_focused_text_control))) {
         state->last_focused_text_control = NULL;
         changed++;
     }
@@ -2763,13 +2738,13 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
     bool stale_composition_surface = state->editing.composition.active &&
         (editing_surface_is_stale(root, &state->editing.composition.surface) ||
          (state->editing.composition.anchor_view &&
-          !view_state_tree_contains_view(root, state->editing.composition.anchor_view)));
+          !view_tree_contains_view(root, state->editing.composition.anchor_view)));
     if (stale_active_surface || stale_composition_surface) {
         doc_state_clear_editing_interaction_surface(state);
         changed++;
     }
     if (state->focus && state->focus->current &&
-        view_state_tree_contains_view(root, state->focus->current)) {
+        view_tree_contains_view(root, state->focus->current)) {
         (void)state_map_sync_focus_path(state, state->focus->current,
             state->focus->focus_visible);
     }
@@ -2792,8 +2767,8 @@ uint32_t view_state_prune_orphans(DocState* state) {
         while (hashmap_iter(state->view_state_map, &iter, &item)) {
             ViewStateEntry* entry = (ViewStateEntry*)item;
             uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
-            View* key_live = view_state_find_live_id(root, entry->view_id);
-            View* state_live = view_state_find_live_id(root, state_view_id);
+            View* key_live = view_tree_find_live_id(root, entry->view_id);
+            View* state_live = view_tree_find_live_id(root, state_view_id);
             bool invalid_live_kind = false;
             if (entry->state && key_live && entry->kind == VIEW_STATE_FORM_CONTROL) {
                 DomElement* elem = key_live->is_element() ? lam::dom_require_element(key_live) : NULL;
@@ -2870,7 +2845,7 @@ uint32_t state_store_prune_after_reflow(DocState* state) {
     removed += state_map_prune_orphans(state, root);
 
     if (state->cursor && state->cursor->view &&
-        !view_state_tree_contains_view(root, state->cursor->view)) {
+        !view_tree_contains_view(root, state->cursor->view)) {
         state->cursor->view = NULL;
         removed++;
     }
@@ -4814,6 +4789,14 @@ static void state_sync_selection_before_assert(DocState* state) {
     selection_refresh_presentation(state);
 }
 
+static void state_sync_editing_before_assert(DocState* state) {
+    if (!state) return;
+    // Script-owned editors can move focus while an input transaction is still
+    // open; refresh the projection before publishing the batch so the active
+    // surface cannot remain attached to the block that just lost focus.
+    editing_interaction_sync_projection(state);
+}
+
 static void state_sync_dirty_flags_before_assert(DocState* state) {
     if (!state) return;
 
@@ -4833,6 +4816,7 @@ void state_end_batch(DocState* state) {
     state->state_batch_depth--;
     if (state->state_batch_depth > 0) return;
     state_sync_selection_before_assert(state);
+    state_sync_editing_before_assert(state);
     state_sync_dirty_flags_before_assert(state);
     // TODO: trigger deferred callbacks
     radiant_state_assert_valid(state, "state_end_batch");

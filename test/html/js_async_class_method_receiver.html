@@ -1,0 +1,54 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  class Tool {
+    validate(data) {
+      return data.text === "ok";
+    }
+  }
+
+  class Block {
+    constructor() {
+      this.toolInstance = new Tool();
+    }
+
+    async validate(data) {
+      let valid = true;
+      return this.toolInstance.validate instanceof Function &&
+        (valid = await this.toolInstance.validate(data)), valid;
+    }
+
+    async save() {
+      return Promise.resolve().then(() => ({ data: { text: "ok" } }));
+    }
+  }
+
+  class OptionalTool {}
+
+  class OptionalBlock {
+    constructor() {
+      this.toolInstance = new OptionalTool();
+    }
+
+    async validate(data) {
+      let valid = true;
+      return this.toolInstance.validate instanceof Function &&
+        (valid = await this.toolInstance.validate(data)), valid;
+    }
+
+    async save() {
+      return Promise.resolve().then(() => ({ data: { text: "ok" } }));
+    }
+  }
+
+  async function saveAndValidate(block) {
+    const saved = await block.save(), valid = saved && await block.validate(saved.data);
+    return valid;
+  }
+
+  Promise.all([saveAndValidate(new Block()), saveAndValidate(new OptionalBlock())]).then((results) => {
+    document.getElementById("result").textContent = results.join("|");
+  });
+})();
+</script>

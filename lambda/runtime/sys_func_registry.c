@@ -2334,6 +2334,7 @@ JitImport jit_runtime_imports[] = {
     {"js_symbol_well_known", FPTR(js_symbol_well_known)},
     // v12: DOM extensions
     {"js_classlist_method", FPTR(js_classlist_method)},
+    {"js_classlist_method_apply", FPTR(js_classlist_method_apply)},
     {"js_classlist_get_property", FPTR(js_classlist_get_property)},
     {"js_dataset_get_property", FPTR(js_dataset_get_property)},
     {"js_dataset_set_property", FPTR(js_dataset_set_property)},

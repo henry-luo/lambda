@@ -23,7 +23,10 @@
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lambda/runtime/render_map.h"
+#include "../lambda/runtime/template_state.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -2862,6 +2865,12 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         // a later context-free layout cleanup.
         jm_cleanup_deferred_mir();
     }
+    // The document runtime owns the reactive edit/template side stores. They
+    // allocate outside the GC heap, so heap destruction alone would retain
+    // their context capsules after every interactive document teardown.
+    edit_bridge_destroy();
+    render_map_destroy();
+    tmpl_state_destroy();
     lambda_module_state_destroy();
 
     // Destroy retained heap and GC metadata.

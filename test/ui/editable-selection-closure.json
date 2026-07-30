@@ -1,0 +1,10 @@
+{
+  "name": "editable selection listener retains lexical editor state",
+  "html": "test/html/editable-selection-closure.html",
+  "viewport": {"width": 640, "height": 360},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#surface"}, "min": 1},
+    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "selection delivered"}
+  ]
+}

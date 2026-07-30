@@ -1,0 +1,18 @@
+{
+  "name": "upstream CodeMirror owns structural Enter and history",
+  "html": "test/editable-editors/fixtures/codemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".cm-content"}, "min": 1},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "XY"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seedXY"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "Z"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed\\nZ"}
+  ]
+}

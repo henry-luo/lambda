@@ -506,8 +506,9 @@ static void build_node_path(const DomNode* node, char* buf, size_t buf_sz) {
     buf[buf_sz - 1] = '\0';
 }
 
-static void build_stable_id(const DomNode* node, const char* path,
-                            char* buf, size_t buf_sz) {
+// Replay starts from a new document, so view and node allocation IDs cannot
+// identify a recorded target across the two runs.
+void event_state_log_node_stable_id(const DomNode* node, char* buf, size_t buf_sz) {
     if (!buf || buf_sz == 0) return;
     buf[0] = '\0';
     if (!node) return;
@@ -517,10 +518,14 @@ static void build_stable_id(const DomNode* node, const char* path,
         snprintf(buf, buf_sz, "id:%s", el->id);
     } else if (node->source_line > 0) {
         snprintf(buf, buf_sz, "src:line=%d:%s", node->source_line, node->node_name());
-    } else if (path && path[0]) {
-        snprintf(buf, buf_sz, "path:%s", path);
     } else {
-        snprintf(buf, buf_sz, "node:%u", node->id);
+        char path[256];
+        build_node_path(node, path, sizeof(path));
+        if (path[0]) {
+            snprintf(buf, buf_sz, "path:%s", path);
+        } else {
+            snprintf(buf, buf_sz, "node:%u", node->id);
+        }
     }
 }
 
@@ -535,7 +540,7 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
     char path[256];
     char stable_id[320];
     build_node_path(node, path, sizeof(path));
-    build_stable_id(node, path, stable_id, sizeof(stable_id));
+    event_state_log_node_stable_id(node, stable_id, sizeof(stable_id));
 
     jw_obj_begin(w);
         jw_kv_uint(w, "id", node->id);

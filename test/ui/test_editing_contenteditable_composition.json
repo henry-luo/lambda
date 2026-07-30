@@ -1,0 +1,21 @@
+{
+  "name": "Contenteditable composition replaces one provisional range",
+  "html": "test/html/editable-dom-composition.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_composition ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
+    {"type": "ime_compose", "phase": "update", "preedit": "next", "caret": 2},
+    {"type": "ime_compose", "phase": "commit", "commit": "done"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "done"},
+    {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 4, "end": 4},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "input:insertCompositionText:pre:1|compositionupdate:next|beforeinput:insertCompositionText:next:1|input:insertCompositionText:next:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "cancel", "caret": 3},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "done"},
+    {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 4, "end": 4}
+  ]
+}

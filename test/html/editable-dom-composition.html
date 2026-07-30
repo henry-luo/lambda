@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable composition</title>
+<style>
+  #surface { border: 1px solid #777; min-height: 28px; padding: 6px; }
+  #events { margin-top: 8px; white-space: pre-wrap; }
+</style>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<div id="drag-source" draggable="true">drag source</div>
+<div id="events"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var events = [];
+  surface.addEventListener('compositionstart', function(event) {
+    events.push('compositionstart:' + (event.data || ''));
+  });
+  surface.addEventListener('compositionupdate', function(event) {
+    events.push('compositionupdate:' + (event.data || ''));
+  });
+  surface.addEventListener('compositionend', function(event) {
+    events.push('compositionend:' + (event.data || ''));
+  });
+  surface.addEventListener('keydown', function() {
+    events.push('keydown');
+  });
+  surface.addEventListener('beforeinput', function(event) {
+    // Keep the listener observational: mutation before the action intentionally
+    // transfers ownership to script and suppresses the DOM compatibility action.
+    events.push('beforeinput:' + event.inputType + ':' + (event.data || '') +
+      ':' + (event.isComposing ? '1' : '0'));
+  });
+  surface.addEventListener('input', function(event) {
+    events.push('input:' + event.inputType + ':' + (event.data || '') +
+      ':' + (event.isComposing ? '1' : '0'));
+    document.getElementById('events').textContent = events.join('|');
+  });
+</script>

@@ -1,0 +1,7 @@
+{
+  "name": "Node.isEqualNode compares DOM structure rather than wrapper identity",
+  "html": "test/html/js_dom_is_equal_node.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "true|true|false|function"}
+  ]
+}

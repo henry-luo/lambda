@@ -1,0 +1,7 @@
+{
+  "name": "async class methods remain callable",
+  "html": "test/html/js_async_class_methods.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "saved|valid:data"}
+  ]
+}

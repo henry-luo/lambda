@@ -1,5 +1,10 @@
 # Radiant Rich Text Editing — Design Proposal
 
+> **Superseded — 2026-07-29.** References to `data-editable` in this record
+> describe an earlier design. Current editable routing is based solely on the
+> canonical `contenteditable` host and live template ownership; see
+> [`vibe/radiant/Radiant_Design_Editable.md`](../radiant/Radiant_Design_Editable.md).
+
 **Date:** 2026-05-04
 **Status:** Proposal
 **Prerequisites:** Reactive_UI Phases 1–26 (Reactive_UI.md … Reactive_UI5.md), MarkEditor (Mark_Editor2.md), DomRange (Radiant_Design_Selection.md), text_control (`textarea`/`input` editing).

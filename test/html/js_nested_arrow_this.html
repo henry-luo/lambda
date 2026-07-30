@@ -1,0 +1,23 @@
+<!doctype html>
+<html><body>
+  <button id="run" type="button">run</button>
+  <div id="result">idle</div>
+  <script>
+  "use strict";
+  class NestedListener {
+    constructor() { this.total = 0; }
+    run(command) { this.total += command(); }
+    install() {
+      let closed = 0;
+      const close = () => { closed++; };
+      const listener = [7].map(value => () => {
+        this.run(() => value);
+        close();
+        document.getElementById("result").textContent = String(this.total);
+      })[0];
+      document.getElementById("run").addEventListener("click", listener);
+    }
+  }
+  new NestedListener().install();
+  </script>
+</body></html>

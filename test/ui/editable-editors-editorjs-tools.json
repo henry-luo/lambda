@@ -1,0 +1,22 @@
+{
+  "name": "upstream Editor.js saves header, list, and atomic media Tool data",
+  "html": "test/editable-editors/fixtures/editorjs/typing.html",
+  "viewport": {"width": 720, "height": 520},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "\"type\":\"header\""},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "\"type\":\"list\""},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "atomic-media"},
+    {"type": "focus", "target": {"selector": ".ce-header"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ce-header"}, "text": "-tool"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "heading-tool"},
+    {"type": "focus", "target": {"selector": ".cdx-list__item"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".cdx-list__item"}, "text": "-tool"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "list-item-tool"},
+    {"type": "focus", "target": {"selector": ".image-tool__caption"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".image-tool__caption"}, "text": "-tool"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "atomic-media-tool"}
+  ]
+}

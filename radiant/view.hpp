@@ -1769,6 +1769,32 @@ static_assert(sizeof(DomElement) <= 368, "DomElement size ratchet regressed");
 static_assert(sizeof(DomText) <= 120, "DomText size ratchet regressed");
 static_assert(sizeof(DomNode) <= 80, "DomNode size ratchet regressed");
 
+// View pools are rebuilt independently from the source DOM, so async state
+// must re-resolve logical nodes by their retained ID instead of retaining a
+// view-pool address across a dispatch boundary.
+inline View* view_tree_find_live_id(DomNode* node, uint32_t view_id) {
+    if (!node || view_id == 0) return nullptr;
+    if (node->id == view_id) return static_cast<View*>(node);
+    if (!node->is_element()) return nullptr;
+    DomElement* element = static_cast<DomElement*>(node);
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        View* found = view_tree_find_live_id(child, view_id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+inline bool view_tree_contains_view(DomNode* node, View* view) {
+    if (!node || !view) return false;
+    if (static_cast<View*>(node) == view) return true;
+    if (!node->is_element()) return false;
+    DomElement* element = static_cast<DomElement*>(node);
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (view_tree_contains_view(child, view)) return true;
+    }
+    return false;
+}
+
 typedef enum HtmlVersion {
     HTML5 = 1,              // HTML5
     HTML4_01_STRICT,        // HTML4.01 Strict

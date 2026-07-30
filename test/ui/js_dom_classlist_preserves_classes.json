@@ -1,0 +1,7 @@
+{
+  "name": "classList additions preserve existing DOM classes",
+  "html": "test/html/js_dom_classlist_preserves_classes.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "base modifier|true|true|true"}
+  ]
+}

@@ -485,7 +485,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
@@ -546,6 +546,10 @@ help:
 	@echo "  test-layout-baseline - Run the shared layout baseline suites only"
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
+	@echo "  editable-unit        - Run focused editable gate, DOM action, and cancellation fixtures"
+	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
+	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
+	@echo "  test-editable        - Run all focused editable and upstream editor checks"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
 	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
@@ -2181,6 +2185,37 @@ test-reactive-ui: build
 	echo "=============================================================="; \
 	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
+# The upstream packages are checked-in offline artifacts. These targets never
+# run npm and exercise the same public event route as platform input.
+editable-unit: build
+	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
+	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
+	@./lambda.exe view test/ui/editable-template-gate.ls --event-file test/ui/editable-template-gate.json --headless --no-log
+
+editable-ui: build
+	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_composition.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
+	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
+	@./lambda.exe view test/ui/editing/contenteditable.html --event-file test/ui/test_editing_paired_false_island_contenteditable.json --headless --no-log
+	@./lambda.exe view test/ui/rte_prototype.ls --event-file test/ui/rte_typing_at_caret.json --headless --no-log
+	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
+
+editable-editor-e2e: build
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-operations.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-full.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-operations.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-tools.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-lifecycle.json --headless --no-log
+
+test-editable: editable-unit editable-ui editable-editor-e2e
 
 # Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
 # The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group

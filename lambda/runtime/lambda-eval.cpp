@@ -6022,30 +6022,6 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     }
 }
 
-static int map_fixed_slot_prefix_count(TypeMap* map_type) {
-    if (!map_type || !map_type->slot_entries || map_type->slot_count <= 0 ||
-        map_type->byte_size < (int64_t)map_type->slot_count * (int64_t)sizeof(void*)) {
-        return 0;
-    }
-    ShapeEntry* entry = map_type->shape;
-    for (int i = 0; i < map_type->slot_count; i++) {
-        if (!entry || map_type->slot_entries[i] != entry ||
-            entry->byte_offset != (int64_t)i * (int64_t)sizeof(void*)) {
-            return 0;
-        }
-        entry = entry->next;
-    }
-    return map_type->slot_count;
-}
-
-static bool map_entry_uses_fixed_slot(TypeMap* map_type, ShapeEntry* entry) {
-    int fixed_count = map_fixed_slot_prefix_count(map_type);
-    for (int i = 0; i < fixed_count; i++) {
-        if (map_type->slot_entries[i] == entry) return true;
-    }
-    return false;
-}
-
 struct MutableCloneEntry {
     void* src;
     Item dst;
@@ -6778,7 +6754,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
                                         ShapeEntry* changed_entry,
                                         TypeId new_value_type, Item new_value) {
     TypeMap* old_map_type = (TypeMap*)*type_slot;
-    void* old_data = *data_slot;
+    void* old_data = NULL;
 
     // count existing fields
     int field_count = 0;
@@ -6793,7 +6769,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
 
     // Constructor fields form a fixed-width prefix; properties appended later
     // remain packed and must not inherit the prefix's 8-byte write invariant.
-    int fixed_slot_count = map_fixed_slot_prefix_count(old_map_type);
+    int fixed_slot_count = typemap_fixed_slot_prefix_count(old_map_type);
 
     // build new shape chain with updated type for the changed field
     ShapeEntry* first = NULL;
@@ -7209,7 +7185,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
             // slot_entries for slot-indexed access.  Do not run the generic
             // Lambda map rebuild here: it packs fields by type byte size and
             // breaks the slot*8 layout used by compiled JS accessors.
-            if (map_entry_uses_fixed_slot(map_type, entry)) {
+            if (typemap_entry_uses_fixed_slot(map_type, entry)) {
                 map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
                 if (shape_entry_retag_is_safe(map_type, value_type)) {

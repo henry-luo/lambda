@@ -131,16 +131,6 @@
           "end": "struct TargetRangeJoinContent"
         },
         {
-          "file": "radiant/editing_dispatch.cpp",
-          "start": "static bool editing_history_intent_is_recordable(",
-          "end": "static bool editing_history_intent_is_boundary("
-        },
-        {
-          "file": "radiant/editing_dispatch.cpp",
-          "start": "static bool editing_history_intent_is_boundary(",
-          "end": "static const char* editing_history_boundary_reason("
-        },
-        {
           "file": "radiant/tile_pool.cpp",
           "start": "// vector ops are handled before this switch by dl_replay_vector_item().",
           "end": "// -- Direct-pixel operations: manual tile-local coordinate translation --"
@@ -945,23 +935,6 @@
           "file": "radiant/cmd_layout.cpp",
           "start": "DomDocument* load_wiki_doc(",
           "end": "DomDocument* load_latex_doc("
-        }
-      ]
-    },
-    {
-      "id": "independent_dom_path_encodings",
-      "modules": ["radiant"],
-      "reason": "State dumps encode absolute child indexes and omit non-elements, while event logs encode same-tag sibling indexes; their shared bounded ancestor-buffer loop cannot be reused without conflating externally visible path formats.",
-      "regions": [
-        {
-          "file": "radiant/state_store.cpp",
-          "start": "static void state_dump_node_ref(",
-          "end": "static bool state_dump_float_changed("
-        },
-        {
-          "file": "radiant/event_state_log.cpp",
-          "start": "static void build_node_path(",
-          "end": "static void build_stable_id("
         }
       ]
     },

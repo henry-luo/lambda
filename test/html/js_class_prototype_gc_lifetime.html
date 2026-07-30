@@ -1,0 +1,14 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  class Tool {
+    validate(value) { return `valid:${value}`; }
+  }
+
+  const tool = new Tool();
+  const noise = [];
+  for (let i = 0; i < 4000; i++) noise.push({ i, text: `value-${i}` });
+  document.getElementById("result").textContent = tool.validate("ok");
+})();
+</script>

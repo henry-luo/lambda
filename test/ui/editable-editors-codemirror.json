@@ -1,0 +1,12 @@
+{
+  "name": "upstream CodeMirror publishes authoritative state after physical typing",
+  "html": "test/editable-editors/fixtures/codemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".cm-content"}, "min": 1},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "!"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed!"}
+  ]
+}

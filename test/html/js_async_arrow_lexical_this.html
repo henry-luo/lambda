@@ -1,0 +1,26 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+class ReadyController {
+  constructor() {
+    this.calls = 0;
+    this.ready = new Promise((resolve) => {
+      Promise.resolve().then(async () => {
+        this.validate();
+        await Promise.resolve();
+        this.validate();
+        resolve(this.calls);
+      });
+    });
+  }
+
+  validate() {
+    this.calls++;
+  }
+}
+
+const controller = new ReadyController();
+controller.ready.then((calls) => {
+  document.getElementById("result").textContent = calls;
+});
+</script>

@@ -1,0 +1,6 @@
+{
+  "name": "async arrow callbacks retain constructor lexical this",
+  "events": [
+    { "type": "assert_text", "target": { "selector": "#result" }, "equals": "2" }
+  ]
+}

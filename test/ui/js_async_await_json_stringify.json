@@ -1,0 +1,7 @@
+{
+  "name": "async await keeps a nested JSON.stringify result alive",
+  "html": "test/html/js_async_await_json_stringify.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "contains": "seed"}
+  ]
+}

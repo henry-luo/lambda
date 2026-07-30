@@ -2,6 +2,7 @@
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "view.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #endif
 
 #include "../lambda/lambda.h"
@@ -27,6 +28,7 @@ struct DomDocument;
 struct DomElement;
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
+extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
@@ -315,6 +317,10 @@ void event_state_log_finish_record(EventStateLog* log, JsonWriter* w);
 void event_state_log_write_node_ref(JsonWriter* w, const char* key,
                                     const struct DomNode* node);
 
+/* Builds the same document-stable identity carried in a serialized node ref. */
+void event_state_log_node_stable_id(const struct DomNode* node,
+                                    char* buf, size_t buf_sz);
+
 void editing_log_write_surface_core_fields(JsonWriter* w,
                                            const struct EditingSurface* surface,
                                            bool include_state_flags);
@@ -423,6 +429,7 @@ typedef struct InputIntent {
 typedef InputIntent EditingIntent;
 
 void input_intent_dispose(InputIntent* intent);
+bool input_intent_clone(const InputIntent* source, InputIntent* destination);
 
 const char* input_intent_type_name(InputIntentType type);
 bool input_intent_is_dispatchable(InputIntentType type);
@@ -447,8 +454,7 @@ struct DocState;
 enum EditingSurfaceKind {
     EDIT_SURFACE_NONE = 0,
     EDIT_SURFACE_TEXT_CONTROL,
-    EDIT_SURFACE_CONTENTEDITABLE,
-    EDIT_SURFACE_LAMBDA_TEMPLATE
+    EDIT_SURFACE_CONTENTEDITABLE
 };
 
 enum EditingMode {
@@ -482,7 +488,7 @@ const char* editing_mode_name(EditingMode mode);
 
 // Layer-A helper (formerly in the retired editing_rich_transaction.cpp):
 // `find_text_descendant` backs click-to-place-caret in a rich host.
-DomText* editing_rich_find_text_descendant(DomNode* node, bool last);
+DomText* editing_find_text_descendant(DomNode* node, bool last);
 
 
 // ===== DOM ranges and selection =====
@@ -697,6 +703,15 @@ typedef struct DomSelection {
     DomRange*     ranges[DOM_SELECTION_MAX_RANGES];
     uint32_t      range_count;          // 0 through DOM_SELECTION_MAX_RANGES
     DomSelectionDirection direction;
+
+    // Last externally-observable selection state delivered to the JS bridge.
+    // DOM mutations adjust every live range, including ranges unrelated to the
+    // mutation; retaining this snapshot prevents an unrelated write in a
+    // selectionchange listener from queuing itself forever.
+    DomBoundary   notified_starts[DOM_SELECTION_MAX_RANGES];
+    DomBoundary   notified_ends[DOM_SELECTION_MAX_RANGES];
+    uint32_t      notified_range_count;
+    DomSelectionDirection notified_direction;
 
     // Document root captured when the current range was added (or its
     // boundaries first set). Used by Range mutators to detect the
@@ -1103,70 +1118,199 @@ bool editing_geometry_caret_rect(UiContext* uicon,
 // ===== editing dispatch =====
 
 // shared editing event dispatch policy for form text controls and
-// contenteditable/data-editable hosts.
+// standard contenteditable hosts.
 
+
+// Contenteditable action routing is independent of surface classification.
+// A JavaScript-created host in a Lambda document remains DOM-script owned.
+enum EditingRouteKind {
+    EDITING_ROUTE_NONE = 0,
+    EDITING_ROUTE_DOM_SCRIPT,
+    EDITING_ROUTE_RADIANT_TEMPLATE,
+};
+
+enum EditingActionRouteMask {
+    EDITING_ACTION_ROUTE_DOM_SCRIPT = 1u << EDITING_ROUTE_DOM_SCRIPT,
+    EDITING_ACTION_ROUTE_RADIANT_TEMPLATE = 1u << EDITING_ROUTE_RADIANT_TEMPLATE,
+};
+
+struct EditingRouteSnapshot {
+    EditingRouteKind kind;
+    void* owner;
+    uint64_t owner_generation;
+};
+
+struct EditingSelectionSnapshot {
+    EditingSelectionKind kind;
+    DomSelectionDirection direction;
+    uint32_t mutation_seq;
+    bool collapsed;
+    uint32_t range_count;
+    DomBoundary anchor;
+    DomBoundary focus;
+    DomElement* control;
+    uint32_t start_u16;
+    uint32_t end_u16;
+};
+
+// The gate owns the intent copy and captures only immutable range/selection
+// data so notification listeners cannot redirect the selected action.
+struct EditingPreparedTransaction {
+    uint64_t transaction_id;
+    EditingSurface surface;
+    EditingRouteSnapshot route;
+    EditingIntent intent;
+    EditingTargetRange target_ranges[4];
+    uint32_t target_range_count;
+    EditingSelectionSnapshot selection_before;
+    // DOM-backed hosts use their lifecycle reference. View-backed Lambda
+    // hosts live in a separately rebuilt pool, so retain the logical ID too.
+    DomNodeRef host_ref;
+    uint32_t host_view_id;
+    uint64_t mutation_epoch_before_notification;
+    uint64_t registry_generation;
+    uint64_t selected_registration_id;
+    const char* selected_handler_id;
+};
+
+void editing_prepared_transaction_dispose(EditingPreparedTransaction* prepared);
+
+// Re-resolve the prepared rich host after notification code. This is shared
+// by the transaction gate and the narrow DOM action so neither trusts a
+// view-pool pointer across a synchronous event callback.
+DomElement* editing_prepared_live_host(DomDocument* document,
+                                       const EditingPreparedTransaction* prepared);
+
+struct EditingTransactionResult {
+    uint64_t transaction_id;
+    EditingRouteKind route;
+    bool prepared;
+    bool beforeinput_dispatched;
+    bool beforeinput_prevented;
+    bool beforeinput_mutated_dom;
+    bool contract_violation;
+    bool action_selected;
+    bool action_invoked;
+    bool action_claimed;
+    bool dom_mutated;
+    bool model_reconciled;
+    bool selection_changed;
+    bool input_dispatched;
+    bool unsupported_fallthrough;
+    bool failed;
+    const char* action_handler_id;
+};
+
+enum EditingActionStatus {
+    EDITING_ACTION_PASS = 0,
+    EDITING_ACTION_CLAIMED,
+    EDITING_ACTION_ERROR,
+};
+
+struct EditingActionOutcome {
+    EditingActionStatus status;
+    bool model_reconciled;
+    bool selection_changed;
+};
 
 struct EventContext;
 struct DocState;
 
+// Form controls retain this callback bridge because their value-store mutation
+// is owned by text_edit.cpp rather than the contenteditable action registry.
 typedef bool (*EditingDispatchInputEventFn)(EventContext* evcon, View* target,
                                             const char* type,
                                             const EditingIntent* intent,
                                             void* user);
-typedef bool (*EditingDispatchLambdaEventFn)(EventContext* evcon, View* target,
-                                             const char* type,
-                                             const EditingIntent* intent,
-                                             void* user);
-typedef bool (*EditingCopySelectionFn)(DocState* state, const char* prefix,
-                                       void* user);
-typedef bool (*EditingTransactionMutateFn)(EventContext* evcon,
-                                           DocState* state,
-                                           const EditingSurface* surface,
-                                           const EditingIntent* intent,
-                                           void* user);
-
-struct EditingDispatchHooks {
+struct EditingFormNotificationHooks {
     EditingDispatchInputEventFn dispatch_input_event;
-    EditingDispatchLambdaEventFn dispatch_lambda_event;
-    EditingCopySelectionFn copy_selection;
     void* user;
 };
 
-struct EditingTransaction {
-    const EditingSurface* surface;
-    const EditingIntent* intent;
-    const EditingDispatchHooks* hooks;
-    EditingTransactionMutateFn mutate;
-    void* mutate_user;
-    const char* operation;
-    bool dispatch_input_without_mutation;
-    bool mutation_invalidates_layout;
-    bool mutation_invalidates_paint;
+typedef bool (*EditingActionMatchesFn)(const EditingPreparedTransaction* prepared,
+                                       void* user);
+typedef EditingActionOutcome (*EditingActionHandleFn)(
+        EventContext* evcon, const EditingPreparedTransaction* prepared,
+        void* user);
+typedef void (*EditingActionDestroyUserFn)(void* user);
+
+struct EditingActionRegistration {
+    uint64_t registration_id;
+    const char* handler_id;
+    uint32_t route_mask;
+    int32_t priority;
+    EditingActionMatchesFn matches;
+    EditingActionHandleFn handle;
+    EditingActionDestroyUserFn destroy_user;
+    void* user;
+    bool tombstoned;
 };
 
-bool editing_run_transaction(EventContext* evcon,
-                             const EditingTransaction* tx,
-                             bool* out_prevented,
-                             bool* out_mutated,
-                             bool* out_lambda_handled);
+struct EditingActionRegistry;
+struct EditingActionSnapshot {
+    EditingActionRegistry* registry;
+    void* entry;
+    uint64_t registration_id;
+    const char* handler_id;
+};
 
-bool editing_dispatch_beforeinput(EventContext* evcon,
-                                  const EditingSurface* surface,
-                                  const EditingIntent* intent,
-                                  const EditingDispatchHooks* hooks);
+EditingActionRegistry* editing_action_registry_get(DomDocument* document);
+uint64_t editing_action_registry_register(
+        DomDocument* document, const EditingActionRegistration* registration);
+bool editing_action_registry_unregister(DomDocument* document,
+                                        uint64_t registration_id);
+bool editing_action_registry_select(DomDocument* document,
+                                    const EditingPreparedTransaction* prepared,
+                                    EditingActionSnapshot* out_snapshot,
+                                    bool* out_configuration_error);
+EditingActionOutcome editing_action_snapshot_invoke(
+        EditingActionSnapshot* snapshot, EventContext* evcon,
+        const EditingPreparedTransaction* prepared);
+void editing_action_snapshot_release(EditingActionSnapshot* snapshot);
+uint64_t editing_action_registry_generation(const DomDocument* document);
 
-bool editing_dispatch_beforeinput_ex(EventContext* evcon,
-                                     const EditingSurface* surface,
-                                     const EditingIntent* intent,
-                                     const EditingDispatchHooks* hooks,
-                                     bool dispatch_input_after,
-                                     bool* out_prevented,
-                                     bool* out_lambda_handled);
+// Installs the narrow native DOM fallback once per document. It deliberately
+// covers text-only editing; editor-owned structural commands remain PASS.
+void editing_dom_action_register(DomDocument* document);
 
-void editing_dispatch_input(EventContext* evcon,
-                            const EditingSurface* surface,
-                            const EditingIntent* intent,
-                            const EditingDispatchHooks* hooks);
+typedef bool (*EditingNotifyBeforeinputFn)(
+        EventContext* evcon, const EditingPreparedTransaction* prepared,
+        void* user);
+typedef void (*EditingNotifyInputFn)(
+        EventContext* evcon, const EditingPreparedTransaction* prepared,
+        void* user);
+
+struct EditingNotificationHooks {
+    EditingNotifyBeforeinputFn dispatch_beforeinput;
+    EditingNotifyInputFn dispatch_input;
+    void* user;
+};
+
+bool editing_notify_beforeinput(EventContext* evcon,
+                                const EditingPreparedTransaction* prepared,
+                                const EditingNotificationHooks* hooks,
+                                bool* out_prevented);
+void editing_notify_input(EventContext* evcon,
+                          const EditingPreparedTransaction* prepared,
+                          const EditingNotificationHooks* hooks);
+
+bool editing_run_contenteditable_transaction(
+        EventContext* evcon, const EditingSurface* surface,
+        const EditingIntent* intent, const EditingRouteSnapshot* route,
+        const EditingNotificationHooks* notifications,
+        EditingTransactionResult* out_result);
+
+// Template routing/action logic is separate from the generic transaction
+// gate. The resolver is read-only and snapshots the owner before beforeinput.
+EditingRouteSnapshot editing_route_snapshot(const EditingSurface* surface);
+void editing_template_action_register(DomDocument* document);
+bool editing_template_invoke_handler(EventContext* evcon, View* target,
+                                     const char* event_name,
+                                     const InputIntent* intent,
+                                     bool* out_model_reconciled);
+
+
+struct EventContext;
 
 void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
@@ -1175,13 +1319,13 @@ void editing_dispatch_log_intent(EventContext* evcon,
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
-                                       const EditingDispatchHooks* hooks,
+                                       const EditingFormNotificationHooks* hooks,
                                        bool* out_prevented);
 
 void editing_dispatch_form_input(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent,
-                                 const EditingDispatchHooks* hooks);
+                                 const EditingFormNotificationHooks* hooks);
 
 
 // ===== editing controller =====
@@ -2202,6 +2346,12 @@ typedef struct EditingInteractionState {
     bool composing;
     EditingCompositionState composition;
     EditingScrollState autoscroll;
+    // A physical printable key and its later text callback are separate
+    // platform events. Keep their cancellation decision in the document so a
+    // prevented keydown cannot leak into a second contenteditable transaction.
+    bool pending_text_input;
+    bool pending_text_input_prevented;
+    int pending_text_input_key;
     EditingRichTransactionPhase rich_transaction_phase;
     View* rich_transaction_target;
     // Set while the substrate is synchronously dispatching a `beforeinput`
@@ -3953,6 +4103,11 @@ Item source_text_selection_to_item(MarkBuilder& mb,
 
 // Build a `selection = { kind:'node', path: [int...] }` Item.
 Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path);
+
+// Decode a source position emitted by a template editor. Exact Decimal
+// coordinates are accepted when they fit the corresponding DOM index type.
+bool source_pos_from_item(Item pos_item, SourcePosC* out);
+bool source_path_from_item(Item path_item, SourcePathC* out);
 
 extern "C" {
 #endif

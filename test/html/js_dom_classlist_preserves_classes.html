@@ -1,0 +1,11 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  const element = document.createElement("div");
+  element.classList.add(...["base"]);
+  element.classList.add("modifier");
+  document.getElementById("result").textContent =
+    `${element.className}|${element.classList.contains("base")}|${element.classList.contains("modifier")}|${element.matches(".base.modifier")}`;
+})();
+</script>

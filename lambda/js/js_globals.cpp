@@ -15695,6 +15695,40 @@ static Item js_global_gc(void) {
     return make_js_undefined();
 }
 
+static Item js_node_filter_new(void) {
+    RootFrame roots(1);
+    Rooted<Item> filter_root(roots, js_new_object());
+    if (filter_root.get().item == ItemNull.item) return ItemNull;
+    struct NodeFilterConstant {
+        const char* name;
+        int value;
+    };
+    static const NodeFilterConstant constants[] = {
+        {"FILTER_ACCEPT", 1},
+        {"FILTER_REJECT", 2},
+        {"FILTER_SKIP", 3},
+        {"SHOW_ELEMENT", 1},
+        {"SHOW_ATTRIBUTE", 2},
+        {"SHOW_TEXT", 4},
+        {"SHOW_CDATA_SECTION", 8},
+        {"SHOW_ENTITY_REFERENCE", 16},
+        {"SHOW_ENTITY", 32},
+        {"SHOW_PROCESSING_INSTRUCTION", 64},
+        {"SHOW_COMMENT", 128},
+        {"SHOW_DOCUMENT", 256},
+        {"SHOW_DOCUMENT_TYPE", 512},
+        {"SHOW_DOCUMENT_FRAGMENT", 1024},
+        {"SHOW_NOTATION", 2048},
+        {"SHOW_ALL", -1},
+    };
+    for (int i = 0; i < (int)(sizeof(constants) / sizeof(constants[0])); i++) {
+        js_property_set(filter_root.get(), make_string_item(constants[i].name),
+                        (Item){.item = i2it(constants[i].value)});
+    }
+    js_mark_all_non_enumerable(filter_root.get());
+    return filter_root.get();
+}
+
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         if (!js_global_bindings_ensure_roots()) return ItemNull;
@@ -15830,6 +15864,12 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj,
             (Item){.item = s2it(heap_create_name("MutationObserver", 16))},
             js_new_function((void*)js_mutation_observer_new, 1));
+        // Editor sanitizers use the standard NodeFilter mask with a detached
+        // document TreeWalker; expose the shared DOM constants rather than
+        // giving an editor-specific traversal path.
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("NodeFilter", 10))},
+            js_node_filter_new());
         js_property_set(js_global_this_obj,
             (Item){.item = s2it(heap_create_name("ResizeObserver", 14))},
             js_new_function((void*)js_resize_observer_new, 1));

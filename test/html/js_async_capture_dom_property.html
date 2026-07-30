@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  const target = document.getElementById("result");
+  const write = async () => {
+    const value = await Promise.resolve("ready");
+    target.textContent = value;
+  };
+  write();
+})();
+</script>

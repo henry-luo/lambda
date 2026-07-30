@@ -1,0 +1,27 @@
+{
+  "name": "radiant-editable-editor-compatibility",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6",
+    "@editorjs/editorjs": "2.31.6",
+    "@editorjs/header": "2.8.9",
+    "@editorjs/image": "2.10.3",
+    "@editorjs/list": "2.0.9",
+    "@editorjs/paragraph": "2.11.7",
+    "esbuild": "0.25.9",
+    "prosemirror-commands": "1.7.1",
+    "prosemirror-history": "1.5.0",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.11",
+    "prosemirror-schema-basic": "1.2.4",
+    "prosemirror-schema-list": "1.5.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.2"
+  }
+}

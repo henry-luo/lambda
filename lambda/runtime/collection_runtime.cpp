@@ -3,9 +3,11 @@
 #include "../core/collection_storage.h"
 #include "../io/input-allocation-context.h"
 #include "heap_api.h"
+#include "render_map.h"
 #include "../js/js_exec_profile_weak.h"
 #include "../../lib/checked_math.hpp"
 #include "../../lib/log.h"
+#include <limits.h>
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
@@ -262,10 +264,19 @@ void list_push(List* list, Item item) {
             RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
+            int64_t first_child_index = list->length;
             for (int64_t i = 0; i < nested->length; i++) {
                 list = rooted_list.get();
                 nested = rooted_source.get().array;
                 list_push(list, nested->items[i]);
+            }
+            list = rooted_list.get();
+            int64_t child_count = list->length - first_child_index;
+            if (first_child_index <= INT_MAX && child_count <= INT_MAX) {
+                // Content lists are flattened into the parent, so preserve
+                // their concrete range for template retransform replacement.
+                render_map_bind_fragment_parent(rooted_source.get(), {.array = list},
+                                                (int)first_child_index, (int)child_count);
             }
             return;
         }

@@ -1,0 +1,19 @@
+{
+  "name": "Contenteditable DOM action replaces and deletes text",
+  "html": "test/html/editable-dom-composition.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_dom_action ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 1, "end": 3},
+    {"type": "type_physical", "text": "Y"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "sYd"},
+    {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 2},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "sd"},
+    {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 1, "end": 1},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "s"},
+    {"type": "assert_editing_selection", "target": {"selector": "#surface"}, "start": 1, "end": 1},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "keydown|beforeinput:insertText:Y:0|input:insertText:Y:0|keydown|beforeinput:deleteContentBackward::0|input:deleteContentBackward::0|keydown|beforeinput:deleteContentForward::0|input:deleteContentForward::0"}
+  ]
+}

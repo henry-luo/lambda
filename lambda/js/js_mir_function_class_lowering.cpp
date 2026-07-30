@@ -1091,8 +1091,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int param_offset = fc->capture_count;
         int local_offset = fc->capture_count + param_count;
         gen_env_total_slots = local_offset + local_count;
-        gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
-        gen_env_total_slots += 1;
+        if (!fn->is_arrow) {
+            gen_this_slot = gen_env_total_slots;  // reserve slot for dynamic this
+            gen_env_total_slots += 1;
+        }
         if (fc->uses_arguments) {
             gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
             gen_env_total_slots += 1;
@@ -1722,8 +1724,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int param_offset_sm = fc->capture_count;
             int local_offset = fc->capture_count + param_count;
             gen_env_total_slots = local_offset + local_count;
-            gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
-            gen_env_total_slots += 1;
+            if (!fn->is_arrow) {
+                // An async arrow already serializes lexical this in its capture
+                // env; a dynamic slot would overwrite it with the microtask receiver.
+                gen_this_slot = gen_env_total_slots;
+                gen_env_total_slots += 1;
+            }
             if (fc->uses_arguments) {
                 gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
                 gen_env_total_slots += 1;

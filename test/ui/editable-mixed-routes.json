@@ -1,0 +1,14 @@
+{
+  "name": "Template and DOM contenteditable hosts keep separate action routes",
+  "html": "test/ui/editable-mixed-routes.ls",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#template-host", "offset_x": 4, "offset_y": 8}},
+    {"type": "type_physical", "target": {"selector": "#template-host"}, "text": "T"},
+    {"type": "assert_text", "target": {"selector": "#template-state"}, "equals": "insertText:T"},
+    {"type": "click", "target": {"selector": "#dom-host", "offset_x": 26, "offset_y": 8}},
+    {"type": "type_physical", "target": {"selector": "#dom-host"}, "text": "D"},
+    {"type": "assert_text", "target": {"selector": "#dom-host"}, "equals": "domDlocked"},
+    {"type": "assert_text", "target": {"selector": "#template-state"}, "equals": "insertText:T"}
+  ]
+}

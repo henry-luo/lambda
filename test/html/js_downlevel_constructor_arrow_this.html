@@ -1,0 +1,22 @@
+<!doctype html>
+<html><body>
+  <button id="run" type="button">run</button>
+  <div id="result">idle</div>
+  <script>
+  "use strict";
+  function defineField(object, key, value) { object[key] = value; }
+  class DownlevelListener {
+    constructor() {
+      this.total = 0;
+      defineField(this, "run", command => { this.total += command(); });
+    }
+    install() {
+      document.getElementById("run").addEventListener("click", () => {
+        this.run(() => 7);
+        document.getElementById("result").textContent = String(this.total);
+      });
+    }
+  }
+  new DownlevelListener().install();
+  </script>
+</body></html>

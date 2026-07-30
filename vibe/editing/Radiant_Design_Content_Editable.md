@@ -1,5 +1,11 @@
 # Radiant `contenteditable` — DOM-level interactive editable HTML
 
+> **Superseded — 2026-07-29.** This historical proposal predates the registered
+> contenteditable action gate and preserves `data-editable` discussion only as
+> design history. Current behavior is specified by
+> [`vibe/radiant/Radiant_Design_Editable.md`](../radiant/Radiant_Design_Editable.md)
+> and documented in `doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md`.
+
 **Date:** 2026-05-19
 **Status:** Proposal
 **Layer:** DOM (between [Radiant_Design_Selection.md](Radiant_Design_Selection.md) / [Radiant_Design_Selection2.md](Radiant_Design_Selection2.md) below and the rich-text editor [../Radiant_Rich_Text_Editor3.md](../Radiant_Rich_Text_Editor3.md) / [../Radiant_Rich_Text_Editing.md](../Radiant_Rich_Text_Editing.md) above).

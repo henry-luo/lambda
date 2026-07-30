@@ -1,0 +1,7 @@
+{
+  "name": "class prototype methods survive collection pressure",
+  "html": "test/html/js_class_prototype_gc_lifetime.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "valid:ok"}
+  ]
+}
