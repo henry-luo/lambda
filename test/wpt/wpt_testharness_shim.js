@@ -5052,69 +5052,6 @@ if (typeof test_driver !== "undefined" && test_driver) {
     }
 }
 
-// document.execCommand('copy'|'cut'|'paste') shim --------------------------
-// Lambda's `document` is a sealed native proxy — `document.execCommand = X`
-// from JS is a no-op. Native `document.execCommand()` instead delegates to
-// the global `__lambda_execCommand_handler(cmd, ...)` function installed
-// here. We dispatch a synthetic ClipboardEvent on document and, if the
-// page's handler called `e.preventDefault()` and populated `clipboardData`,
-// transfer those representations onto the WPT clipboard store.
-globalThis.__lambda_execCommand_handler = function(cmd) {
-    cmd = String(cmd || "").toLowerCase();
-    if (cmd === "delete") {
-        try {
-            var sel = (typeof getSelection === "function") ? getSelection() : null;
-            if (sel && sel.deleteFromDocument) sel.deleteFromDocument();
-            return true;
-        } catch (_) {
-            return false;
-        }
-    }
-    if (cmd !== "copy" && cmd !== "cut" && cmd !== "paste") return false;
-    var dt;
-    try { dt = new DataTransfer(); } catch (_) { dt = null; }
-    var ev;
-    try {
-        ev = new ClipboardEvent(cmd, { bubbles: true, cancelable: true,
-                                       clipboardData: dt });
-    } catch (_) {
-        ev = { type: cmd, defaultPrevented: false, clipboardData: dt,
-               preventDefault: function() { this.defaultPrevented = true; } };
-    }
-    // Fire registered listeners and on<cmd> attribute (dispatchEvent
-    // already invokes both addEventListener listeners and the legacy IDL
-    // attribute handler, so we only call it once).
-    try { document.dispatchEvent(ev); } catch (_) {}
-    if (cmd === "paste") return true; // headless paste no-op
-    if (ev.defaultPrevented && dt) {
-        var rec = {};
-        var any = false;
-        try {
-            var types = dt.types || [];
-            for (var i = 0; i < types.length; i++) {
-                var t = String(types[i]);
-                if (t === "Files") continue;
-                var v = dt.getData(t);
-                if (v != null && v !== "") { rec[t] = v; any = true; }
-            }
-        } catch (_) {}
-        if (any) {
-            _wpt_clipboard_write_items([rec]);
-        }
-        return true;
-    }
-    // Default: copy the current selection's text.
-    var sel = null;
-    try { sel = (typeof getSelection === "function") ? getSelection() : null; }
-    catch (_) {}
-    var text = "";
-    try { text = sel ? sel.toString() : ""; } catch (_) {}
-    if (text != null && text !== "") {
-        _wpt_clipboard_write_items([{ "text/plain": String(text) }]);
-    }
-    return true;
-};
-
 // Convenience helpers exposed by some tests via resources/user-activation.js;
 // we provide no-op fallbacks so missing inlines don't crash.
 if (typeof tryGrantReadPermission !== "function") {
