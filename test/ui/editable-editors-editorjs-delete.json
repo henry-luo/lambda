@@ -1,0 +1,19 @@
+{
+  "name": "upstream Editor.js Delete merges a following paragraph block",
+  "html": "test/editable-editors/fixtures/editorjs/clipboard.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph", "index": 1}, "text": "next"},
+    {"type": "assert_count", "target": {"selector": ".ce-paragraph"}, "equals": 2},
+    {"type": "click", "target": {"selector": ".ce-paragraph", "index": 0, "offset_x": 3, "offset_y": 8}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_count", "target": {"selector": ".ce-paragraph"}, "equals": 1},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seednext"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "contains": "block-removed"}
+  ]
+}

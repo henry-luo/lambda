@@ -1,0 +1,17 @@
+{
+  "name": "upstream Editor.js copies and cuts selected blocks",
+  "html": "test/editable-editors/fixtures/editorjs/clipboard.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "assert_clipboard", "contains": "seed"},
+    {"type": "key_combo", "key": "x", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#editor"}, "not_contains": "seed"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "contains": "block-removed"}
+  ]
+}

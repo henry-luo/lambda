@@ -15,7 +15,7 @@ Usage examples:
   python3 test/benchmark/run_benchmarks.py                          # Run ALL time benchmarks
   python3 test/benchmark/run_benchmarks.py -s jetstream             # JetStream suite only
   python3 test/benchmark/run_benchmarks.py -s awfy,beng             # AWFY + BENG
-  python3 test/benchmark/run_benchmarks.py -b nbody,richards        # nbody & richards across all suites
+  python3 test/benchmark/run_benchmarks.py -b nbody,richards        # canonical nbody & richards rows
   python3 test/benchmark/run_benchmarks.py -s awfy -b mandelbrot    # AWFY mandelbrot only
   python3 test/benchmark/run_benchmarks.py -b deltablue -n 5        # 5 runs per engine
   python3 test/benchmark/run_benchmarks.py -e mir,nodejs            # MIR + Node.js only
@@ -206,6 +206,17 @@ STANDARD_SUITES = [
 
 ALL_SUITE_NAMES = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream"]
 
+# These benchmark names represent the same standardized workloads in multiple
+# suites. Keep one authoritative row so timing and report populations do not
+# depend on a later best-value deduplication pass.
+CANONICAL_DUPLICATE_SUITES = {
+    "mandelbrot": "awfy",
+    "nbody": "awfy",
+    "richards": "awfy",
+    "deltablue": "awfy",
+    "primes": "kostya",
+}
+
 # QuickJS polyfill
 QJS_POLYFILL = """
 if (typeof process === 'undefined') {
@@ -264,6 +275,12 @@ def match_filter(name, filters):
         return True
     name_lower = name.lower()
     return any(f.lower() in name_lower for f in filters)
+
+
+def is_canonical_benchmark(suite_name, bench_name):
+    """Return whether this suite owns the benchmark's canonical result row."""
+    canonical_suite = CANONICAL_DUPLICATE_SUITES.get(bench_name)
+    return canonical_suite is None or canonical_suite == suite_name
 
 
 def fmt_ms(ms):
@@ -365,6 +382,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "fresh": fresh,
         "suite_filters": suite_filters or [],
         "bench_filters": bench_filters or [],
+        "canonical_duplicate_suites": CANONICAL_DUPLICATE_SUITES,
         "platform": f"{platform.system()} {platform.machine()}",
         "lambda_exe": LAMBDA_EXE,
         "lambda_exe_size_bytes": exe_size,
@@ -390,6 +408,22 @@ def update_run_metadata(results, metadata):
     existing = results.get("_metadata", {})
     existing.update(metadata)
     results["_metadata"] = existing
+
+
+def remove_noncanonical_result_rows(results):
+    """Remove stale duplicate rows when an existing result file is merged."""
+    removed = []
+    for suite_name, suite_results in list(results.items()):
+        if suite_name not in ALL_SUITE_NAMES or not isinstance(suite_results, dict):
+            continue
+        for bench_name, canonical_suite in CANONICAL_DUPLICATE_SUITES.items():
+            if suite_name == canonical_suite or bench_name not in suite_results:
+                continue
+            del suite_results[bench_name]
+            removed.append(f"{suite_name}/{bench_name}")
+        if not suite_results:
+            del results[suite_name]
+    return removed
 
 
 def record_status(results, suite, name, engine, status, detail=None):
@@ -533,6 +567,8 @@ def build_benchmark_list(suite_filters, bench_filters):
             continue
         for entry in suite_benchmarks:
             bench_name, category, ls_path, js_path, py_path = entry
+            if not is_canonical_benchmark(suite_name, bench_name):
+                continue
             if not match_filter(bench_name, bench_filters):
                 continue
             benchmarks.append({
@@ -549,6 +585,8 @@ def build_benchmark_list(suite_filters, bench_filters):
     if match_filter("jetstream", suite_filters):
         for entry in JETSTREAM_LS:
             bench_name, category, ls_path = entry
+            if not is_canonical_benchmark("jetstream", bench_name):
+                continue
             if not match_filter(bench_name, bench_filters):
                 continue
             benchmarks.append({
@@ -936,6 +974,9 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path
     if os.path.exists(output_path) and not fresh:
         with open(output_path) as f:
             results = json.load(f)
+        removed = remove_noncanonical_result_rows(results)
+        if removed:
+            print("  removed stale noncanonical benchmark rows: " + ", ".join(removed))
     else:
         results = {}
     update_run_metadata(results, metadata)

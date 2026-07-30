@@ -1,0 +1,17 @@
+{
+  "name": "upstream Editor.js does not mutate saved blocks in read-only mode",
+  "html": "test/editable-editors/fixtures/editorjs/readonly.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "equals": "[]"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "-blocked"},
+    {"type": "paste_text", "target": {"selector": ".ce-paragraph"}, "text": "-paste"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "not_contains": "blocked"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "equals": "[]"}
+  ]
+}

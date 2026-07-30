@@ -555,6 +555,39 @@ static bool observer_attribute_filter_matches(JsObserverTarget* registration,
     return false;
 }
 
+static void observer_queue_child_record(JsObserverState* observer,
+                                        JsObserverTarget* registration,
+                                        DomNode* parent,
+                                        DomNode* added,
+                                        DomNode* removed) {
+    Item record = js_new_object();
+    js_property_set(record, observer_key("type"), js_make_string("childList"));
+    js_property_set(record, observer_key("target"), js_dom_wrap_element(parent));
+    Item added_nodes = js_array_new(0);
+    Item removed_nodes = js_array_new(0);
+    if (added) js_array_push(added_nodes, js_dom_wrap_element(added));
+    if (removed) js_array_push(removed_nodes, js_dom_wrap_element(removed));
+    js_property_set(record, observer_key("addedNodes"), added_nodes);
+    js_property_set(record, observer_key("removedNodes"), removed_nodes);
+    js_property_set(record, observer_key("previousSibling"), ItemNull);
+    js_property_set(record, observer_key("nextSibling"), ItemNull);
+    js_property_set(record, observer_key("attributeName"), ItemNull);
+    js_property_set(record, observer_key("attributeNamespace"), ItemNull);
+    js_property_set(record, observer_key("oldValue"), ItemNull);
+    observer_queue_record(observer, record);
+
+    // A removed subtree remains observed through the microtask checkpoint,
+    // which is why mutations made before delivery still belong to this observer's batch.
+    if (removed && registration->subtree && registration->transient_root_count < 8) {
+        int transient_index = registration->transient_root_count;
+        if (observer_pin_node(registration->owner_doc, removed,
+                &registration->transient_refs[transient_index])) {
+            registration->transient_roots[transient_index] = removed;
+            registration->transient_root_count++;
+        }
+    }
+}
+
 extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
     void* target_ptr, void* parent_ptr, const char* attribute_name, const char* old_value)
 {
@@ -581,17 +614,19 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                 (character && !registration->character_data)) continue;
             if (attribute &&
                 !observer_attribute_filter_matches(registration, attribute_name)) continue;
+            if (child) {
+                DomNode* added = kind == DOM_JS_MUTATION_CHILD_INSERT ? target : nullptr;
+                DomNode* removed = kind == DOM_JS_MUTATION_CHILD_REMOVE ? target : nullptr;
+                observer_queue_child_record(observer, registration, observed_node,
+                                            added, removed);
+                break;
+            }
             Item record = js_new_object();
             js_property_set(record, observer_key("type"),
                 js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"));
             js_property_set(record, observer_key("target"), js_dom_wrap_element(observed_node));
             Item added = js_array_new(0);
             Item removed = js_array_new(0);
-            if (kind == DOM_JS_MUTATION_CHILD_INSERT && target) {
-                js_array_push(added, js_dom_wrap_element(target));
-            } else if (kind == DOM_JS_MUTATION_CHILD_REMOVE && target) {
-                js_array_push(removed, js_dom_wrap_element(target));
-            }
             js_property_set(record, observer_key("addedNodes"), added);
             js_property_set(record, observer_key("removedNodes"), removed);
             js_property_set(record, observer_key("previousSibling"), ItemNull);
@@ -604,18 +639,27 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
             js_property_set(record, observer_key("oldValue"),
                 include_old && old_value ? js_make_string(old_value) : ItemNull);
             observer_queue_record(observer, record);
-            // A removed subtree remains observed through the microtask
-            // checkpoint, which is why mutations made before delivery still
-            // belong to this observer's batch.
-            if (kind == DOM_JS_MUTATION_CHILD_REMOVE && registration->subtree && target &&
-                registration->transient_root_count < 8) {
-                int transient_index = registration->transient_root_count;
-                if (observer_pin_node(registration->owner_doc, target,
-                        &registration->transient_refs[transient_index])) {
-                    registration->transient_roots[transient_index] = target;
-                    registration->transient_root_count++;
-                }
-            }
+            break;
+        }
+    }
+}
+
+extern "C" void js_dom_observers_child_replace_notify(void* parent_ptr,
+                                                         void* added_ptr,
+                                                         void* removed_ptr) {
+    DomNode* parent = (DomNode*)parent_ptr;
+    DomNode* added = (DomNode*)added_ptr;
+    DomNode* removed = (DomNode*)removed_ptr;
+    if (!parent) return;
+    for (int i = 0; i < observer_count; i++) {
+        JsObserverState* observer = &observers[i];
+        if (observer->kind != JS_OBSERVER_MUTATION) continue;
+        for (int j = 0; j < observer->target_count; j++) {
+            JsObserverTarget* registration = &observer->targets[j];
+            if (!registration->child_list ||
+                !observer_registration_matches(registration, parent)) continue;
+            observer_queue_child_record(observer, registration, parent,
+                                        added, removed);
             break;
         }
     }

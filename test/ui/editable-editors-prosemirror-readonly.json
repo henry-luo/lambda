@@ -1,0 +1,13 @@
+{
+  "name": "upstream ProseMirror ignores physical changes in read-only mode",
+  "html": "test/editable-editors/fixtures/prosemirror/readonly.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".ProseMirror"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ProseMirror"}, "text": "-blocked"},
+    {"type": "paste_text", "target": {"selector": ".ProseMirror"}, "text": "-paste"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "\"text\":\"seed\""}
+  ]
+}

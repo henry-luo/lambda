@@ -1,0 +1,23 @@
+{
+  "name": "upstream ProseMirror selected replacement and empty-paragraph composition cancellation",
+  "html": "test/editable-editors/fixtures/prosemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".ProseMirror"}, "min": 1},
+    {"type": "focus", "target": {"selector": ".ProseMirror"}},
+    {"type": "set_editing_selection", "target": {"selector": ".ProseMirror"}, "start": 1, "end": 3},
+    {"type": "type_physical", "target": {"selector": ".ProseMirror"}, "text": "XY"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "sXYd"},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "に", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "sXYd"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "日本"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "仮", "caret": 1},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "not_contains": "仮"}
+  ]
+}

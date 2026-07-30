@@ -1,0 +1,19 @@
+{
+  "name": "upstream Editor.js accepts plain and HTML clipboard block content",
+  "html": "test/editable-editors/fixtures/editorjs/clipboard.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "paste_text", "target": {"selector": ".ce-paragraph"}, "text": "-plain"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed-plain"},
+    {"type": "paste_text", "target": {"selector": ".ce-paragraph"}, "text": "First heading\nSecond block", "html": "<h2>First heading</h2><p>Second block</p>"},
+    {"type": "assert_text", "target": {"selector": "h2.ce-header"}, "contains": "First heading"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "First heading"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "Second block"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "\"type\":\"header\""},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "contains": "block-added"}
+  ]
+}

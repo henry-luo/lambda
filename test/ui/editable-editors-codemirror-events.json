@@ -1,0 +1,18 @@
+{
+  "name": "upstream CodeMirror public DOM event handlers observe physical editing",
+  "html": "test/editable-editors/fixtures/codemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#events"}, "equals": "[]"},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "!"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "keydown"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "beforeinput:insertText"},
+    {"type": "paste_text", "target": {"selector": ".cm-content"}, "text": "-paste"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "paste"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "copy"}
+  ]
+}

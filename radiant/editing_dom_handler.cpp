@@ -175,13 +175,18 @@ static bool editing_dom_replace_text(DocState* state, DomSelection* selection,
 static bool editing_dom_insert_at_boundary(DocState* state, DomSelection* selection,
                                            DomElement* host,
                                            DomBoundary boundary,
-                                           const char* text_data) {
+                                           const char* text_data,
+                                           DomText** out_inserted = nullptr) {
     if (!state || !selection || !host || !text_data || !boundary.node) return false;
+    if (out_inserted) *out_inserted = nullptr;
     uint32_t byte_len = (uint32_t)strlen(text_data);
     if (boundary.node->is_text()) {
-        return editing_dom_replace_text(state, selection,
-            lam::dom_require_text(boundary.node), boundary.offset, boundary.offset,
+        DomText* text = lam::dom_require_text(boundary.node);
+        bool changed = editing_dom_replace_text(state, selection,
+            text, boundary.offset, boundary.offset,
             text_data, byte_len, tc_utf8_to_utf16_length(text_data, byte_len));
+        if (changed && out_inserted) *out_inserted = text;
+        return changed;
     }
     if (!boundary.node->is_element() ||
         !editing_dom_host_contains_boundary(host, boundary)) {
@@ -201,8 +206,10 @@ static bool editing_dom_insert_at_boundary(DocState* state, DomSelection* select
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, inserted, inserted->parent);
     uint32_t u16_len = tc_utf8_to_utf16_length(text_data, byte_len);
-    return dom_selection_collapse(selection, static_cast<DomNode*>(inserted),
-                                  u16_len, &exception);
+    bool collapsed = dom_selection_collapse(selection, static_cast<DomNode*>(inserted),
+                                            u16_len, &exception);
+    if (collapsed && out_inserted) *out_inserted = inserted;
+    return collapsed;
 }
 
 static uint32_t editing_dom_codepoint_byte_offset(const char* text,
@@ -253,12 +260,16 @@ static bool editing_dom_composition_target(
         return false;
     }
     EditingTargetRange target = prepared->target_ranges[0];
-    if (!target.start.node || target.start.node != target.end.node ||
-        !target.start.node->is_text() || target.end.offset < target.start.offset ||
+    if (!target.start.node || !target.end.node ||
         !editing_dom_host_contains_boundary(host, target.start) ||
         !editing_dom_host_contains_boundary(host, target.end)) {
         return false;
     }
+    bool text_range = target.start.node == target.end.node &&
+        target.start.node->is_text() && target.end.offset >= target.start.offset;
+    bool collapsed_element_boundary = editing_dom_boundary_equal(target.start, target.end) &&
+        target.start.node->is_element();
+    if (!text_range && !collapsed_element_boundary) return false;
     *out_target = target;
     return true;
 }
@@ -281,7 +292,6 @@ static EditingActionOutcome editing_dom_handle_composition(
 
     EditingTargetRange target = {};
     if (!editing_dom_composition_target(host, prepared, &target)) return outcome;
-    DomText* text = lam::dom_require_text(target.start.node);
     const char* replacement = intent->data ? intent->data : "";
     uint32_t replacement_len = (uint32_t)strlen(replacement);
     uint32_t caret_bytes = intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT
@@ -289,17 +299,35 @@ static EditingActionOutcome editing_dom_handle_composition(
                                             intent->composition_caret)
         : replacement_len;
     uint32_t caret_u16 = tc_utf8_to_utf16_length(replacement, caret_bytes);
-    bool unchanged = editing_dom_text_range_equals(text, target.start.offset,
-                                                   target.end.offset, replacement,
-                                                   replacement_len);
     bool changed = false;
-    if (unchanged) {
-        changed = editing_dom_collapse_selection(selection, text,
-                                                 target.start.offset + caret_u16);
+    DomText* text = nullptr;
+    uint32_t anchor_offset = target.start.offset;
+    if (target.start.node->is_element()) {
+        if (replacement_len == 0) {
+            outcome.status = EDITING_ACTION_CLAIMED;
+            return outcome;
+        }
+        // Empty contenteditable blocks expose a collapsed element boundary
+        // (often a <br>), so composition must first materialize a text node.
+        changed = editing_dom_insert_at_boundary(state, selection, host,
+                                                 target.start, replacement, &text);
+        if (changed) {
+            changed = editing_dom_collapse_selection(selection, text, caret_u16);
+        }
+        anchor_offset = 0;
     } else {
-        changed = editing_dom_replace_text(state, selection, text,
-            target.start.offset, target.end.offset, replacement, replacement_len,
-            caret_u16);
+        text = lam::dom_require_text(target.start.node);
+        bool unchanged = editing_dom_text_range_equals(text, target.start.offset,
+                                                       target.end.offset, replacement,
+                                                       replacement_len);
+        if (unchanged) {
+            changed = editing_dom_collapse_selection(selection, text,
+                                                     target.start.offset + caret_u16);
+        } else {
+            changed = editing_dom_replace_text(state, selection, text,
+                target.start.offset, target.end.offset, replacement, replacement_len,
+                caret_u16);
+        }
     }
     if (!changed) {
         outcome.status = EDITING_ACTION_ERROR;
@@ -311,7 +339,7 @@ static EditingActionOutcome editing_dom_handle_composition(
         // later update replaces it instead of appending independent text edits.
         composition->anchor_view = static_cast<View*>(text);
         composition->anchor_offset = (int)dom_text_utf16_to_utf8(
-            text, target.start.offset); // INT_CAST_OK: DOM text offsets fit the controller's signed anchor field.
+            text, anchor_offset); // INT_CAST_OK: DOM text offsets fit the controller's signed anchor field.
         composition->dom_preedit_len = replacement_len;
     }
     outcome.status = EDITING_ACTION_CLAIMED;

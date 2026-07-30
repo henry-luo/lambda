@@ -353,7 +353,7 @@ python3 test/benchmark/run_benchmarks.py -s jetstream
 # Run AWFY + BENG suites
 python3 test/benchmark/run_benchmarks.py -s awfy,beng
 
-# Run nbody & richards across all suites that have them
+# Run the canonical nbody & richards rows (AWFY)
 python3 test/benchmark/run_benchmarks.py -b nbody,richards
 
 # Combine: AWFY mandelbrot + nbody only
@@ -409,7 +409,7 @@ fallback value with `*`.
 ### Listing and dry-run
 
 ```bash
-# List all 62 benchmarks across 6 suites
+# List all 56 canonical benchmarks across 6 suites
 python3 test/benchmark/run_benchmarks.py --list
 
 # Preview what would run without executing
@@ -531,8 +531,8 @@ Reads the selected benchmark JSON and writes a chosen `Overall_ResultN.md` with:
 - Run metadata: current date, platform, Lambda commit hash, Node.js version, and QuickJS version
 - Per-suite tables for the selected engines
 - Geometric mean ratios against Node.js per suite and overall
-- A default deduplicated overall metric: duplicate benchmark names across suites are counted once, using the best timed value per engine
-- A raw overall metric: every suite row is counted, kept for auditability
+- A single overall metric for current runner snapshots, because known duplicate workloads are filtered before execution
+- Legacy deduplicated/raw overall metrics when reporting historical JSON files without runner policy metadata
 - A Notable Results section with missing timings, largest LambdaJS/Node.js ratios, and LambdaJS wins
 - The standardized JetStream x8 workload note
 
@@ -559,7 +559,7 @@ prepare scripts  →  run benchmarks  →  report
 - **Fresh vs merge mode**: `run_standard_benchmarks.py` uses `--fresh` by default for checked-in snapshots. Direct `run_benchmarks.py` invocations remain merge-mode unless `--fresh` is passed.
 - **Status metadata**: Time-mode JSON stores `_metadata` at top level and `_status` per benchmark row so missing timings can be distinguished from successful timings.
 - **Snapshot logs**: Standard snapshot runs write logs to `temp/benchmark_vN/`. Logs are not committed, but they preserve build, profile-check, benchmark, and report-generation output for local diagnosis.
-- **Deduplicated overall metric**: The report's headline `Overall dedup` row groups rows with the same benchmark name across different suites and counts that name once. For each engine, the best timed value in the group is used before computing the geometric mean against Node.js. The `Overall raw` row is also shown and counts every suite row.
+- **Canonical duplicate workloads**: The runner keeps one row for mandelbrot, nbody, richards, and deltablue from AWFY, and primes from Kostya. New snapshots therefore report one `Overall` population without a deduplication pass; historical JSON files without the runner policy metadata retain the legacy `Overall dedup`/`Overall raw` report.
 - **Process-group kill**: The runner uses `os.setsid` + `os.killpg` for reliable timeout handling, ensuring child processes don't leak.
 - **Timeout**: 120 seconds per run (configurable via `-t`). MIR-vs-C mode auto-raises to 300s.
 - **QuickJS wrappers** are auto-generated in `temp/` and not committed.

@@ -1,0 +1,20 @@
+{
+  "name": "upstream Editor.js moves right across a paragraph boundary",
+  "html": "test/editable-editors/fixtures/editorjs/clipboard.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph", "index": 1}, "text": "next"},
+    {"type": "click", "target": {"selector": ".ce-paragraph", "index": 0, "offset_x": 3, "offset_y": 8}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#selection"}, "equals": "next:0"},
+    {"type": "key_press", "key": "Left"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#selection"}, "equals": "seed:4"}
+  ]
+}

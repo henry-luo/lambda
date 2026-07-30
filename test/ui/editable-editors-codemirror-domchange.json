@@ -1,0 +1,27 @@
+{
+  "name": "upstream CodeMirror handles physical deletes, multiline paste, and selected-word composition",
+  "html": "test/editable-editors/fixtures/codemirror/typing.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "set_editing_selection", "target": {"selector": ".cm-content"}, "start": 1, "end": 3},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "XY"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "sXYd"},
+    {"type": "set_editing_selection", "target": {"selector": ".cm-content"}, "start": 1},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "sYd"},
+    {"type": "set_editing_selection", "target": {"selector": ".cm-content"}, "start": 2},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "sd"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "paste_text", "target": {"selector": ".cm-content"}, "text": "one two three"},
+    {"type": "set_editing_selection", "target": {"selector": ".cm-content"}, "start": 4, "end": 7},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "五", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "one 日本 three"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "paste_text", "target": {"selector": ".cm-content"}, "text": "first\nsecond"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "first\\nsecond"}
+  ]
+}

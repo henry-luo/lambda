@@ -1,0 +1,17 @@
+{
+  "name": "upstream Editor.js reports block insertion above the current block",
+  "html": "test/editable-editors/fixtures/editorjs/typing.html",
+  "default_timeout": 30000,
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".ce-block"}, "equals": 5},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "contains": "\"type\":\"block-added\",\"index\":0"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "before"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "before"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "contains": "block-changed"}
+  ]
+}

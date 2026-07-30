@@ -1,0 +1,13 @@
+{
+  "name": "upstream CodeMirror ignores physical changes in read-only mode",
+  "html": "test/editable-editors/fixtures/codemirror/readonly.html",
+  "viewport": {"width": 720, "height": 360},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".cm-content"}, "text": "-blocked"},
+    {"type": "paste_text", "target": {"selector": ".cm-content"}, "text": "-paste"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "{\"doc\":\"seed\",\"anchor\":4,\"head\":4}"}
+  ]
+}

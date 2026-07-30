@@ -552,6 +552,8 @@ bool editing_run_contenteditable_transaction(
 
     EditingTargetRangeScope target_range_scope(evcon, &target_status);
     prepared.mutation_epoch_before_notification = js_dom_mutation_epoch(document);
+    uint32_t mutation_sequence_before_notification = document->js.mutation_sequence;
+    DomElement* notification_host = editing_prepared_live_host(document, &prepared);
     bool beforeinput_prevented = false;
     bool notification_required = input_intent_is_dispatchable(prepared.intent.type);
     // Script-owned editors can replace the selected subtree while handling
@@ -566,8 +568,12 @@ bool editing_run_contenteditable_transaction(
     result.beforeinput_dispatched = beforeinput_dispatched;
     result.beforeinput_prevented = beforeinput_prevented;
     uint64_t mutation_epoch_after_notification = js_dom_mutation_epoch(document);
+    // Status observers may write outside the editing host during beforeinput;
+    // only host-affecting mutations invalidate its prepared target ranges.
     result.beforeinput_mutated_dom = mutation_epoch_after_notification !=
-        prepared.mutation_epoch_before_notification;
+        prepared.mutation_epoch_before_notification &&
+        js_dom_mutation_since_affects_subtree(document,
+            mutation_sequence_before_notification, notification_host);
 
     if (beforeinput_prevented) {
         EditingSurface host_surface;

@@ -56,6 +56,34 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
 # known-failure inventories are not part of the fast Radiant baseline gate.
 RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
+# These are the native projects selected by test-lambda-baseline. The
+# concurrency and Node preliminary projects remain excluded by that runner.
+LAMBDA_BASELINE_TEST_PROJECTS := \
+	test_lambda_gtest \
+	test_mir_gc_stress_gtest \
+	test_mir_ratchet_gtest \
+	test_mir_emission_gtest \
+	test_js_mir_emission_gtest \
+	test_item_repr_gtest \
+	test_lambda_typed \
+	test_scalar_compare_gtest \
+	test_binary_storage_gtest \
+	test_lambda_errors_gtest \
+	test_lambda_repl_gtest \
+	test_lambda_proc_gtest \
+	test_js_gtest \
+	test_js_bt_regex_gtest \
+	test_js_coerce_gtest \
+	test_lambda_std_gtest \
+	test_ts_gtest
+# test-input-baseline invokes these five binaries directly, so keep their
+# build separate from the full test aggregate and reusable by both targets.
+INPUT_BASELINE_TEST_PROJECTS := \
+	test_wpt_html_parser_gtest \
+	test_markdown_gtest \
+	test_yaml_suite_gtest \
+	test_math_ascii_gtest \
+	test_math_gtest
 # GoogleTest emits pass/skip records and suite summaries unrelated to failures;
 # retain runtime diagnostics and failure records so baseline output stays actionable.
 GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^  YOU HAVE [0-9]+ DISABLED TESTS|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
@@ -481,7 +509,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
     lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
-	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
+	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
@@ -523,6 +551,8 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test executables using Premake"
+	@echo "  build-input-baseline - Build only native input baseline test executables"
+	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build hosted Python compatibility bundle and test executables"
@@ -1417,7 +1447,7 @@ test-all-baseline: build-test
 # consumed by test_run.js so execution and final-summary accounting stay under
 # one runner.
 test-lambda-baseline: TEST_BUILD_QUIET := 1
-test-lambda-baseline: build-test test-input-baseline
+test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
@@ -1663,7 +1693,7 @@ ensure-yaml-submodule:
 		git submodule update --init test/yaml; \
 	fi
 
-test-input-baseline: build-test ensure-yaml-submodule
+test-input-baseline: build-input-baseline ensure-yaml-submodule
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@mkdir -p test_output
@@ -2204,16 +2234,36 @@ editable-ui: build
 	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
 
 editable-editor-e2e: build
+	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-selection-composition.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-domchange.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-events.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/readonly.html --event-file test/ui/editable-editors-codemirror-readonly.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/codemirror/direction.html --event-file test/ui/editable-editors-codemirror-direction.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-full.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-selection-composition.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-domchange.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/marked.html --event-file test/ui/editable-editors-prosemirror-marked-composition.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-clipboard-html.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/prosemirror/readonly.html --event-file test/ui/editable-editors-prosemirror-readonly.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-tools.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-lifecycle.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-onchange.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-block-ids.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/empty.html --event-file test/ui/editable-editors-editorjs-dataempty.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-paste.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-delete.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-arrow.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-clipboard.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-onchange-index.json --headless --no-log
+	@./lambda.exe view test/editable-editors/fixtures/editorjs/readonly.html --event-file test/ui/editable-editors-editorjs-readonly.json --headless --no-log
 
 test-editable: editable-unit editable-ui editable-editor-e2e
 
@@ -2989,6 +3039,27 @@ build-lambda-static: build-radiant
 	$(PYTHON) utils/patch_static_module_makefile.py
 	$(call run_make_with_error_summary,lambda-exe,debug_native,,lambda-exe)
 	@echo "✅ static-module Lambda executable built successfully!"
+
+# Build only the native binaries invoked by test-input-baseline. Keeping this
+# separate prevents that prerequisite from pulling the all-tests target back
+# into test-lambda-baseline transitively.
+build-input-baseline: build-lambda-data
+	@echo "Building input baseline test executables..."
+	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
+
+# Build the Lambda host and only the native projects selected by the Lambda
+# baseline runner. The release-host branch preserves the existing convention
+# that baseline tests use an already-selected release host when available.
+build-lambda-baseline: build-input-baseline
+	@echo "Building the Lambda baseline runtime and native test executables..."
+	@if [ -f .lambda_release_build ]; then \
+		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
+		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
+	else \
+		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
+		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
+	fi
+	$(call run_make_with_error_summary,lambda-baseline,debug_native,,$(LAMBDA_BASELINE_TEST_PROJECTS))
 
 check-module-boundary:
 	@echo "Building static-module validation DSOs..."
