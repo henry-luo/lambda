@@ -46,6 +46,12 @@ bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
     return entry && entry->const_type == MCONST_MODVAR;
 }
 
+bool jm_capture_is_lexical_meta_binding(const char* name) {
+    return name && (strcmp(name, "_js_this") == 0 ||
+        strcmp(name, "_js_new.target") == 0 ||
+        strcmp(name, "_js_arguments") == 0);
+}
+
 int jm_capture_env_slot(FnCapture* capture, int dense_slot) {
     if (!capture) return dense_slot;
     if (capture->private_env_slot >= 0) return capture->private_env_slot;

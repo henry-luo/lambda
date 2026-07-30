@@ -5618,6 +5618,34 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (child->capture_count == 0) continue;
 
             for (int k = 0; k < child->capture_count; k++) {
+                bool field_initializer_arrow = false;
+                if (child->node && child->node->is_arrow &&
+                    !ts_node_is_null(child->node->node)) {
+                    for (TSNode enclosing = ts_node_parent(child->node->node);
+                         !ts_node_is_null(enclosing);
+                         enclosing = ts_node_parent(enclosing)) {
+                        const char* enclosing_type = ts_node_type(enclosing);
+                        if (!enclosing_type) break;
+                        if (strcmp(enclosing_type, "field_definition") == 0 ||
+                            strcmp(enclosing_type, "public_field_definition") == 0) {
+                            field_initializer_arrow = true;
+                            break;
+                        }
+                        if (strcmp(enclosing_type, "function_declaration") == 0 ||
+                            strcmp(enclosing_type, "function") == 0 ||
+                            strcmp(enclosing_type, "method_definition") == 0) {
+                            break;
+                        }
+                    }
+                }
+                if (field_initializer_arrow &&
+                    jm_capture_is_lexical_meta_binding(child->captures[k].name)) {
+                    // field initializer arrows own a snapshot of lexical this;
+                    // following the enclosing closure's parent link loses the instance.
+                    child->captures[k].grandparent_slot = -1;
+                    child->captures[k].parent_env_link_slot_override = -1;
+                    continue;
+                }
                 // Check if this capture name is a LOCAL of the parent — if so, skip
                 JsNameSetEntry ll;
                 snprintf(ll.name, sizeof(ll.name), "%s", child->captures[k].name);

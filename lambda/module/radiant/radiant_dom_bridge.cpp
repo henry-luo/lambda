@@ -4596,19 +4596,8 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "execCommand") == 0 ||
-        strcmp(method, "queryCommandSupported") == 0 ||
-        strcmp(method, "queryCommandEnabled") == 0 ||
-        strcmp(method, "queryCommandIndeterm") == 0 ||
-        strcmp(method, "queryCommandState") == 0) {
-        *out = (Item){.item = b2it(0)};
-        return 1;
-    }
-
-    if (strcmp(method, "queryCommandValue") == 0) {
-        *out = radiant_dom_string_item("");
-        return 1;
-    }
+    // Legacy editing commands remain unsupported. Advertising inert member
+    // stubs bypasses the document feature gate and makes `typeof` report them.
 
     if (strcmp(method, "createRange") == 0) {
         *out = js_dom_create_range();

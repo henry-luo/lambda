@@ -1099,6 +1099,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
             gen_env_total_slots += 1;
         }
+        int gen_dynamic_start = gen_env_total_slots;
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
         int gen_spill_start = gen_env_total_slots;  // spill slots start here
         gen_env_total_slots += 128;  // padding for generator yield spill slots (temporaries across yields)
@@ -1163,7 +1164,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_capture_offset = cap_offset;
         mt->gen_param_offset = param_offset;
         mt->gen_local_offset = local_offset;
-        mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
+        // An arrow without `arguments` has neither a this nor arguments slot;
+        // starting at zero would overwrite its persisted captures and locals.
+        mt->gen_local_slot_count = gen_dynamic_start;
         mt->gen_dynamic_slot_limit = gen_spill_start;
         mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
@@ -1734,6 +1737,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
                 gen_env_total_slots += 1;
             }
+            int gen_dynamic_start = gen_env_total_slots;
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
             int gen_spill_start = gen_env_total_slots;  // spill slots start here
             gen_env_total_slots += 128;  // padding for async yield spill slots
@@ -1799,7 +1803,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_capture_offset = cap_offset;
             mt->gen_param_offset = param_offset_sm;
             mt->gen_local_offset = local_offset;
-            mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
+            // An arrow without `arguments` has neither a this nor arguments slot;
+            // starting at zero would overwrite its persisted captures and locals.
+            mt->gen_local_slot_count = gen_dynamic_start;
             mt->gen_dynamic_slot_limit = gen_spill_start;
             mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
             mt->gen_active_iterator_slot = gen_active_iterator_slot;

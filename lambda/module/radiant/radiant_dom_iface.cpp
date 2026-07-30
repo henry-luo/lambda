@@ -330,12 +330,6 @@ const char radiant_dom_interface_decl[] =
     "    write: fn(a0: any) any,\n"
     "    writeln: fn(a0: any) any,\n"
     "    element_from_point: fn(a0: any, a1: any) any,\n"
-    "    exec_command: fn(a0: any) any,\n"
-    "    query_command_supported: fn(a0: any) any,\n"
-    "    query_command_enabled: fn(a0: any) any,\n"
-    "    query_command_indeterm: fn(a0: any) any,\n"
-    "    query_command_state: fn(a0: any) any,\n"
-    "    query_command_value: fn(a0: any) any,\n"
     "    create_range: fn() any,\n"
     "    get_selection: fn() any,\n"
     "    get_element_by_id: fn(a0: any) any,\n"
@@ -1383,12 +1377,6 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_close, "close")
 RADIANT_DOC_CALL_FN(radiant_doc_call_write, "write")
 RADIANT_DOC_CALL_FN(radiant_doc_call_writeln, "writeln")
 RADIANT_DOC_CALL_FN(radiant_doc_call_element_from_point, "elementFromPoint")
-RADIANT_DOC_CALL_FN(radiant_doc_call_exec_command, "execCommand")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_supported, "queryCommandSupported")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_enabled, "queryCommandEnabled")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_indeterm, "queryCommandIndeterm")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_state, "queryCommandState")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_value, "queryCommandValue")
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_range, "createRange")
 RADIANT_DOC_CALL_FN(radiant_doc_call_get_selection, "getSelection")
 RADIANT_DOC_CALL_FN(radiant_doc_call_get_element_by_id, "getElementById")
@@ -1462,12 +1450,6 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("write", NULL, radiant_doc_call_write),
     DOC_METHOD("writeln", NULL, radiant_doc_call_writeln),
     DOC_METHOD("element_from_point", "elementFromPoint", radiant_doc_call_element_from_point),
-    DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),
-    DOC_METHOD("query_command_supported", "queryCommandSupported", radiant_doc_call_query_command_supported),
-    DOC_METHOD("query_command_enabled", "queryCommandEnabled", radiant_doc_call_query_command_enabled),
-    DOC_METHOD("query_command_indeterm", "queryCommandIndeterm", radiant_doc_call_query_command_indeterm),
-    DOC_METHOD("query_command_state", "queryCommandState", radiant_doc_call_query_command_state),
-    DOC_METHOD("query_command_value", "queryCommandValue", radiant_doc_call_query_command_value),
     DOC_METHOD("create_range", "createRange", radiant_doc_call_create_range),
     DOC_METHOD("get_selection", "getSelection", radiant_doc_call_get_selection),
     DOC_METHOD("get_element_by_id", "getElementById", radiant_doc_call_get_element_by_id),

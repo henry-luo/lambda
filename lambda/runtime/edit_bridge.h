@@ -20,6 +20,10 @@ void edit_bridge_destroy(void);
 // Check if the global editor is active
 bool edit_bridge_active(void);
 
+// Monotonically increases after an inline editor mutation. Event dispatch uses
+// this to distinguish a model write from a no-op template handler.
+uint64_t edit_bridge_mutation_epoch(void);
+
 // ========================================================================
 // Edit session API for rich-text editing
 // ========================================================================

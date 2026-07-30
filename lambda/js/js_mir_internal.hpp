@@ -474,6 +474,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
 MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode* tt);
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture);
+bool jm_capture_is_lexical_meta_binding(const char* name);
 int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);

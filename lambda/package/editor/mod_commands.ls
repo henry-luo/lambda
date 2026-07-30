@@ -332,6 +332,11 @@ fn list_slice(arr, start, end) => list_take_range(arr, start, end, start, [])
 fn nonempty_or_empty_text(nodes, marks) =>
   if (len(nodes) == 0) { [text_marked("", marks)] } else { nodes }
 
+fn split_block_content_or_empty_text(state, tag, content, marks) =>
+  // A split inline block needs a text leaf even when one side is empty;
+  // otherwise the rendered paragraph has no boundary for caret restoration.
+  if (block_allows_inline(state, tag)) { nonempty_or_empty_text(content, marks) } else { content }
+
 fn same_parent_text_span_parts(state) {
   let sel = state.selection
   if (sel == null or not sel_same_parent_leaves(sel)) { null }
@@ -2083,9 +2088,11 @@ fn split_block_text_selection(state) {
     let block_idx = last_index(block_path)
     let left_prefix = list_slice(block.content, 0, span.lo_index)
     let right_suffix = list_slice(block.content, span.hi_index + 1, len(block.content))
-    let left_content = list_concat(left_prefix, span.before_edge)
-    let right_content = list_concat(span.after_edge, right_suffix)
+    let left_content0 = list_concat(left_prefix, span.before_edge)
+    let right_content0 = list_concat(span.after_edge, right_suffix)
     let right_tag = split_right_tag(state, block, 0, len(span.hi_leaf.text))
+    let left_content = split_block_content_or_empty_text(state, block.tag, left_content0, span.lo_leaf.marks)
+    let right_content = split_block_content_or_empty_text(state, right_tag, right_content0, span.hi_leaf.marks)
     let left_block = node_attrs(block.tag, block.attrs, left_content)
     let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
     let tx0 = tx_begin(state.doc, state.selection)
@@ -2144,9 +2151,11 @@ fn split_block_collapsed_selection(state) {
       let block_idx = last_index(block_path)
       let left_prefix = list_slice(block.content, 0, top_index)
       let right_suffix = list_slice(block.content, top_index + 1, len(block.content))
-      let left_content = list_concat(left_prefix, split.left)
-      let right_content = list_concat(split.right, right_suffix)
+      let left_content0 = list_concat(left_prefix, split.left)
+      let right_content0 = list_concat(split.right, right_suffix)
       let right_tag = split_right_tag(state, block, 0, len(leaf.text))
+      let left_content = split_block_content_or_empty_text(state, block.tag, left_content0, leaf.marks)
+      let right_content = split_block_content_or_empty_text(state, right_tag, right_content0, leaf.marks)
       let left_block = node_attrs(block.tag, block.attrs, left_content)
       let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
       let tx0 = tx_begin(state.doc, sel)
@@ -2165,9 +2174,12 @@ fn split_block_node_selection(state) {
   else {
     let grand_path = parent_path(block_path)
     let block_idx = last_index(block_path)
-    let left_content = list_slice(block.content, 0, p.offset)
-    let right_content = list_slice(block.content, p.offset, len(block.content))
+    let left_content0 = list_slice(block.content, 0, p.offset)
+    let right_content0 = list_slice(block.content, p.offset, len(block.content))
     let right_tag = split_right_tag(state, block, 0, 0)
+    let marks = block_boundary_marks(block, p.offset)
+    let left_content = split_block_content_or_empty_text(state, block.tag, left_content0, marks)
+    let right_content = split_block_content_or_empty_text(state, right_tag, right_content0, marks)
     let left_block = node_attrs(block.tag, block.attrs, left_content)
     let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
     let tx0 = tx_begin(state.doc, sel)

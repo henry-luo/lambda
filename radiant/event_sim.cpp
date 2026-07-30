@@ -938,11 +938,32 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
 }
 
 // Extract visible text from a view tree recursively
+static void sim_append_visible_text(StrBuf* buf, const char* text) {
+    if (!buf || !text) return;
+    const char* cursor = text;
+    const char* end = text + strlen(text);
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        int byte_count = str_utf8_decode(cursor, (size_t)(end - cursor),
+                                         &codepoint);
+        if (byte_count <= 0) {
+            strbuf_append_char(buf, *cursor++);
+            continue;
+        }
+        // Empty rich-text leaves use ZWSP only as a caret anchor; it has no
+        // visible glyph and must not change a user-visible text assertion.
+        if (codepoint != 0x200B) {
+            strbuf_append_str_n(buf, cursor, (size_t)byte_count);
+        }
+        cursor += byte_count;
+    }
+}
+
 static void sim_extract_text(View* view, StrBuf* buf) {
     if (!view) return;
     if (view->view_type == RDT_VIEW_TEXT) {
         DomText* text = view->as_text();
-        if (text && text->text) strbuf_append_str(buf, text->text);
+        if (text && text->text) sim_append_visible_text(buf, text->text);
         return;
     }
     DomElement* elem = view->as_element();

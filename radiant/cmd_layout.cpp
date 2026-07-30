@@ -5687,6 +5687,23 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
                                   const LambdaFocusRestore* restore) {
     if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
     View* focused = resolve_lambda_focus_restore(doc, restore);
+    if (focused && (!doc->root || !view_tree_contains_view(
+                        static_cast<DomNode*>(doc->root), focused))) {
+        // A retransform may retain a render-map entry for the retired DOM
+        // wrapper; never restore focus to a node detached from the live tree.
+        focused = nullptr;
+    }
+    if (focused && restore->fallback_tag) {
+        DomElement* elem = focused->is_element()
+            ? lam::dom_require_element(focused) : nullptr;
+        bool is_matching_text_control = elem && elem->form_control() && elem->form &&
+            elem->form->control_type == FORM_CONTROL_TEXT && elem->tag_name &&
+            strcmp(elem->tag_name, restore->fallback_tag) == 0 &&
+            (!restore->fallback_class || elem->has_class(restore->fallback_class));
+        // The render-map path can resolve to the template root instead of the
+        // focused descendant; only a matching control may retain text focus.
+        if (!is_matching_text_control) focused = nullptr;
+    }
     if (!focused && restore->fallback_tag) {
         focused = find_matching_input(
             doc->view_tree->root, restore->fallback_tag, restore->fallback_class);
@@ -5953,6 +5970,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
         DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
+        DomNode* old_previous = old_dom->prev_sibling;
+        DomNode* old_next = old_dom->next_sibling;
 
         // Build new DOM subtree from the new Lambda element (not linked to parent yet)
         DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
@@ -5962,8 +5981,28 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
-        // Replace old DOM child with new subtree in parent's linked list
-        dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
+        // UI-mode retransforms can reuse the same fat DomElement storage for
+        // old and new output. create_in clears its links, so self-replacement
+        // would detach the live subtree and invalidate focus after each input.
+        if (new_dom == old_dom) {
+            new_dom->parent = parent_dom;
+            new_dom->prev_sibling = old_previous;
+            new_dom->next_sibling = old_next;
+            if (old_previous) {
+                old_previous->next_sibling = static_cast<DomNode*>(new_dom);
+            } else {
+                parent_dom->first_child = static_cast<DomNode*>(new_dom);
+            }
+            if (old_next) {
+                old_next->prev_sibling = static_cast<DomNode*>(new_dom);
+            } else {
+                parent_dom->last_child = static_cast<DomNode*>(new_dom);
+            }
+        } else if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
+                                                static_cast<DomNode*>(new_dom))) {
+            log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
+            continue;
+        }
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty

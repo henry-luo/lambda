@@ -12501,12 +12501,6 @@ static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, parent_env)));
 }
 
-static bool jm_capture_is_lexical_meta_binding(const char* name) {
-    return name && (strcmp(name, "_js_this") == 0 ||
-        strcmp(name, "_js_new.target") == 0 ||
-        strcmp(name, "_js_arguments") == 0);
-}
-
 static bool jm_force_copied_env_for_field_initializer(JsMirTranspiler* mt,
         JsFuncCollected* fc) {
     if (!mt || !fc || !mt->force_closure_env_copy) return false;
@@ -12898,6 +12892,26 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                     (nfe_self_name[0] && fc->captures[i].is_nfe_binding &&
                      strcmp(fc->captures[i].name, nfe_self_name) == 0)) {
                     self_ref_slot_fe = slot;
+                    continue;
+                }
+                if (force_copied_field_env &&
+                    jm_capture_is_lexical_meta_binding(fc->captures[i].name)) {
+                    // field initializer arrows snapshot the construction binding;
+                    // a transitive parent-env slot belongs to the enclosing closure.
+                    MIR_reg_t value_to_store;
+                    if (strcmp(fc->captures[i].name, "_js_this") == 0) {
+                        value_to_store = jm_call_0(mt,
+                            "js_get_lexical_this_binding", MIR_T_I64);
+                    } else if (strcmp(fc->captures[i].name, "_js_new.target") == 0) {
+                        value_to_store = jm_emit_current_new_target(mt);
+                    } else {
+                        JsMirVarEntry* arguments_var = jm_find_var(mt, "_js_arguments");
+                        value_to_store = arguments_var ? arguments_var->reg : jm_emit_undefined(mt);
+                    }
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            slot * (int)sizeof(uint64_t), env, 0, 1),
+                        MIR_new_reg_op(mt->ctx, value_to_store)));
                     continue;
                 }
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);

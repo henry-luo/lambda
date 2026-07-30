@@ -18,6 +18,15 @@ extern __thread EvalContext* context;
 #define s_editor_input (context->edit_editor_input)
 #define active_runtime ((Context*)context)
 
+// Inline MarkEditor updates mutate the model in place, so callers cannot
+// discover them by comparing the Item identity before and after a handler.
+static uint64_t s_mutation_epoch = 0;
+
+static void edit_bridge_note_mutation(void) {
+    s_mutation_epoch++;
+    if (s_mutation_epoch == 0) s_mutation_epoch = 1;
+}
+
 typedef struct EditSubscription {
     EditEventKind kind;
     EditCallback callback;
@@ -674,6 +683,10 @@ bool edit_bridge_active(void) {
     return s_editor != NULL;
 }
 
+uint64_t edit_bridge_mutation_epoch(void) {
+    return s_mutation_epoch;
+}
+
 // ============================================================================
 // Map operations
 // ============================================================================
@@ -687,9 +700,13 @@ Item edit_map_update(Item map, const char* key, Item value) {
     // runtime type at compile time (model typed as ANY)
     TypeId tid = get_type_id(map);
     if (tid == LMD_TYPE_ELEMENT) {
-        return s_editor->elmt_update_attr(map, key, value);
+        Item result = s_editor->elmt_update_attr(map, key, value);
+        edit_bridge_note_mutation();
+        return result;
     }
-    return s_editor->map_update(map, key, value);
+    Item result = s_editor->map_update(map, key, value);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_map_delete(Item map, const char* key) {
@@ -697,7 +714,9 @@ Item edit_map_delete(Item map, const char* key) {
         log_error("edit_map_delete: no editor active");
         return map;
     }
-    return s_editor->map_delete(map, key);
+    Item result = s_editor->map_delete(map, key);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 // ============================================================================
@@ -709,7 +728,9 @@ Item edit_elmt_update_attr(Item element, const char* attr_name, Item value) {
         log_error("edit_elmt_update_attr: no editor active");
         return element;
     }
-    return s_editor->elmt_update_attr(element, attr_name, value);
+    Item result = s_editor->elmt_update_attr(element, attr_name, value);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_elmt_delete_attr(Item element, const char* attr_name) {
@@ -717,7 +738,9 @@ Item edit_elmt_delete_attr(Item element, const char* attr_name) {
         log_error("edit_elmt_delete_attr: no editor active");
         return element;
     }
-    return s_editor->elmt_delete_attr(element, attr_name);
+    Item result = s_editor->elmt_delete_attr(element, attr_name);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_elmt_insert_child(Item element, int index, Item child) {
@@ -725,7 +748,9 @@ Item edit_elmt_insert_child(Item element, int index, Item child) {
         log_error("edit_elmt_insert_child: no editor active");
         return element;
     }
-    return s_editor->elmt_insert_child(element, index, child);
+    Item result = s_editor->elmt_insert_child(element, index, child);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_elmt_delete_child(Item element, int index) {
@@ -733,7 +758,9 @@ Item edit_elmt_delete_child(Item element, int index) {
         log_error("edit_elmt_delete_child: no editor active");
         return element;
     }
-    return s_editor->elmt_delete_child(element, index);
+    Item result = s_editor->elmt_delete_child(element, index);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_elmt_replace_child(Item element, int index, Item new_child) {
@@ -741,7 +768,9 @@ Item edit_elmt_replace_child(Item element, int index, Item new_child) {
         log_error("edit_elmt_replace_child: no editor active");
         return element;
     }
-    return s_editor->elmt_replace_child(element, index, new_child);
+    Item result = s_editor->elmt_replace_child(element, index, new_child);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 // ============================================================================
@@ -753,7 +782,9 @@ Item edit_array_set(Item array, int64_t index, Item value) {
         log_error("edit_array_set: no editor active");
         return array;
     }
-    return s_editor->array_set(array, index, value);
+    Item result = s_editor->array_set(array, index, value);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_array_insert(Item array, int64_t index, Item value) {
@@ -761,7 +792,9 @@ Item edit_array_insert(Item array, int64_t index, Item value) {
         log_error("edit_array_insert: no editor active");
         return array;
     }
-    return s_editor->array_insert(array, index, value);
+    Item result = s_editor->array_insert(array, index, value);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_array_delete(Item array, int64_t index) {
@@ -769,7 +802,9 @@ Item edit_array_delete(Item array, int64_t index) {
         log_error("edit_array_delete: no editor active");
         return array;
     }
-    return s_editor->array_delete(array, index);
+    Item result = s_editor->array_delete(array, index);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 Item edit_array_append(Item array, Item value) {
@@ -777,7 +812,9 @@ Item edit_array_append(Item array, Item value) {
         log_error("edit_array_append: no editor active");
         return array;
     }
-    return s_editor->array_append(array, value);
+    Item result = s_editor->array_append(array, value);
+    edit_bridge_note_mutation();
+    return result;
 }
 
 // ============================================================================

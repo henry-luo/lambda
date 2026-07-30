@@ -132,9 +132,10 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
 
     ReverseMapEntry query = {};
     query.result_item_bits = result_node.item;
-    // A nested apply owns its own rendered subtree. Preserve that more
-    // specific reverse ownership when an outer template returns a fragment.
-    if (!hashmap_get(reverse_map, &query)) {
+    // A direct template result can reuse a fat-element address after a
+    // retransform. Refresh that root mapping; nested apply() results below
+    // it still retain their more specific reverse ownership.
+    if (depth == 0 || !hashmap_get(reverse_map, &query)) {
         ReverseMapEntry entry = {};
         entry.result_item_bits = result_node.item;
         entry.key = key;

@@ -238,6 +238,28 @@ TEST(SourcePosBridgePathTable, MissingPathStillReturnsLookup) {
     render_map_reset();
 }
 
+TEST(SourcePosBridgePathTable, ReusedResultRefreshesDirectOwner) {
+    source_pos_bridge_reset();
+    render_map_reset();
+
+    Item old_source; old_source.item = 0x4100ULL;
+    Item new_source; new_source.item = 0x4200ULL;
+    Item reused_result; reused_result.item = 0x4300ULL;
+    const char* tref = "reused_template";
+    render_map_record(old_source, tref, reused_result, Item{0}, 0);
+    render_map_record(new_source, tref, reused_result, Item{0}, 0);
+
+    RenderMapLookup lookup;
+    SourcePathC path;
+    ASSERT_TRUE(render_map_reverse_lookup_with_path(reused_result, &lookup, &path));
+    EXPECT_EQ(lookup.source_item.item, new_source.item);
+    EXPECT_STREQ(lookup.template_ref, tref);
+    source_path_free(&path);
+
+    source_pos_bridge_reset();
+    render_map_reset();
+}
+
 TEST(SourcePosBridgePathTable, MissOnUnknownResultItem) {
     source_pos_bridge_reset();
     render_map_reset();
@@ -309,6 +331,7 @@ protected:
         // uniqueness. Use the same bits as the result items.
         source_pos_bridge_reset();
         render_map_reset();
+        render_map_set_source_doc_root(root_item);
         render_map_record(root_item, tref, root_item, Item{0}, 0);
         render_map_record(para_item, tref, para_item, root_item, 0);
         render_map_record(hr_item,   tref, hr_item,   root_item, 1);
@@ -375,6 +398,30 @@ TEST_F(SourcePosBridgeRoundTrip, DomElementBoundaryToSourcePos) {
 
 TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextBoundary) {
     // Build a SourcePos pointing at offset 4 inside "hello".
+    SourcePosC pos;
+    source_path_init(&pos.path);
+    pos.path.indices = (int*)malloc(sizeof(int) * 2);
+    pos.path.indices[0] = 0;
+    pos.path.indices[1] = 0;
+    pos.path.depth = 2;
+    pos.offset = 4;
+    pos.kind = SOURCE_POS_TEXT;
+    DomBoundary out{ nullptr, 0 };
+    ASSERT_TRUE(dom_boundary_from_source_pos((DomNode*)root, &pos, &out));
+    EXPECT_EQ(out.node, (DomNode*)hello);
+    EXPECT_EQ(out.offset, 4u);
+    source_pos_free(&pos);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextUsesRecordedAncestor) {
+    // A retransform can retain only the doc-level render-map entry while an
+    // intermediate apply() result is rebuilt. The source bridge must still
+    // follow the remaining child path to restore the editor caret.
+    source_pos_bridge_reset();
+    render_map_reset();
+    render_map_record(root_item, tref, root_item, Item{0}, 0);
+    render_map_record_path(root_item, tref, nullptr, 0);
+
     SourcePosC pos;
     source_path_init(&pos.path);
     pos.path.indices = (int*)malloc(sizeof(int) * 2);

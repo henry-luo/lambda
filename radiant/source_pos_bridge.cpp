@@ -433,6 +433,21 @@ static DomText* first_text_descendant(DomNode* node) {
     return NULL;
 }
 
+static DomNode* source_descendant_at(DomElement* root,
+                                     const SourcePathC* path,
+                                     int start_depth) {
+    if (!root || !path || start_depth < 0 || start_depth > path->depth) {
+        return NULL;
+    }
+    DomNode* node = static_cast<DomNode*>(root);
+    for (int i = start_depth; i < path->depth; i++) {
+        if (node->node_type != DOM_NODE_ELEMENT) return NULL;
+        node = source_child_at(lam::dom_require_element(node), path->indices[i]);
+        if (!node) return NULL;
+    }
+    return node;
+}
+
 // Resolve a SourcePos against a single DomElement candidate. Reads its
 // recorded source path; on a match, fills `*out` and returns true.
 static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
@@ -443,6 +458,13 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     RenderMapLookup lookup;
     SourcePathC recorded;
     if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {
+        return false;
+    }
+    Item source_root = render_map_get_source_doc_root();
+    if (recorded.depth == 0 && lookup.source_item.item != source_root.item) {
+        // The outer app template can retain an earlier empty relative path;
+        // only the current editor document root may resolve source path [].
+        source_path_free(&recorded);
         return false;
     }
     bool matched = false;
@@ -460,18 +482,18 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
                 out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
                 matched = true;
             }
-        } else if (pos->path.depth > 0 &&
-            path_equals_prefix(&pos->path, pos->path.depth - 1, &recorded)) {
-            // Locate the text child at the recorded index.
-            int target_idx = pos->path.indices[pos->path.depth - 1];
-            DomNode* child = source_child_at(de, target_idx);
-            if (child) {
-                DomText* tn = first_text_descendant(child);
-                if (tn) {
-                    out->node = static_cast<DomNode*>(tn);
-                    out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
-                    matched = true;
-                }
+        } else if (recorded.depth < pos->path.depth &&
+                   path_equals_prefix(&pos->path, recorded.depth, &recorded)) {
+            // Nested apply() output can omit render-map entries for an
+            // intermediate source node, so resolve the remaining path below
+            // its recorded ancestor instead of abandoning the caret update.
+            DomNode* child = source_descendant_at(de, &pos->path,
+                                                   recorded.depth);
+            DomText* tn = first_text_descendant(child);
+            if (tn) {
+                out->node = static_cast<DomNode*>(tn);
+                out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                matched = true;
             }
         }
     }

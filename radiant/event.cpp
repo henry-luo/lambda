@@ -21,6 +21,7 @@
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/runtime/template_registry.h"
 #include "../lambda/runtime/render_map.h"
+#include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/runtime/transpiler.hpp"   // Runtime (heap and name_pool)
@@ -2052,12 +2053,14 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                                     log_debug("dispatch_emit: found '%s' handler on parent tmpl=%s",
                                              event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
 
+                                    uint64_t mutation_epoch = edit_bridge_mutation_epoch();
+
                                     // invoke parent handler with (parent_source_item, event_data)
                                     call_template_event_handler(h->handler_func,
                                         lookup.source_item, event_data);
 
-                                    // For edit handlers, mark dirty after in-place mutation
-                                    if (tmpl->is_edit) {
+                                    if (tmpl->is_edit &&
+                                        edit_bridge_mutation_epoch() != mutation_epoch) {
                                         render_map_mark_dirty(lookup.source_item, lookup.template_ref);
                                     }
 
@@ -2095,10 +2098,9 @@ extern "C" Item dispatch_set_selection(Item selection) {
     g_emit_handler_ctx->pending_selection = selection;
     g_emit_handler_ctx->has_pending_selection = true;
 
-    UiContext* uicon = g_emit_handler_ctx->evcon ? g_emit_handler_ctx->evcon->ui_context : NULL;
-    if (!apply_source_selection_to_doc(uicon, g_emit_handler_ctx->doc, selection)) {
-        log_debug("dispatch_set_selection: deferred selection until after rebuild");
-    }
+    // Editor handlers update their source model before requesting a caret.
+    // Applying that new path to the old DOM can target a shifted sibling, so
+    // wait until dispatch finishes rebuilding the live tree.
     return ItemNull;
 }
 
@@ -2216,6 +2218,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
                                 g_emit_handler_ctx = &emit_ctx;
 
+                                uint64_t mutation_epoch = edit_bridge_mutation_epoch();
+
                                 // invoke handler: Item handler(Item model, Item event)
                                 call_template_event_handler(h->handler_func,
                                     lookup.source_item, event_item);
@@ -2225,10 +2229,12 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 // restore emit context
                                 g_emit_handler_ctx = saved_emit_ctx;
 
-                                // For edit handlers, the model was mutated in-place
-                                // via edit_map_update (inline mode). Mark the entry
-                                // dirty so retransform re-renders with updated data.
-                                if (tmpl->is_edit) {
+                                // A bubbled form-control click can be a no-op; rebuilding its
+                                // edit template drops the focus just established by mouse down.
+                                // State writes mark themselves dirty, while inline MarkEditor
+                                // writes advance this epoch and need this explicit invalidation.
+                                if (tmpl->is_edit &&
+                                    edit_bridge_mutation_epoch() != mutation_epoch) {
                                     render_map_mark_dirty(lookup.source_item, lookup.template_ref);
                                 }
 
@@ -8722,11 +8728,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             (RDT_MOD_SUPER | RDT_MOD_CTRL)) &&
             (key_event->key == RDT_KEY_V || key_event->key == RDT_KEY_C ||
              key_event->key == RDT_KEY_X);
-        if (rich_keydown_dispatched && focused && key_event->key != RDT_KEY_TAB) {
+        if (rich_keydown_dispatched && key_event->key != RDT_KEY_TAB) {
+            // Selection can still identify the rich surface after a template
+            // rebuild clears focus; do not drop its beforeinput transaction.
             // Contenteditable keymaps own structural commands. Dispatch the
             // public keydown first so preventDefault suppresses this key's
             // mapped beforeinput transaction instead of racing it afterward.
-            bool prevented = radiant_dispatch_keyboard_event(&evcon, focused,
+            bool prevented = radiant_dispatch_keyboard_event(&evcon, intent_target,
                 "keydown", key_event->key, key_event->mods, false);
             if (editing_key_may_emit_text(key_event)) {
                 state->editing.pending_text_input = true;
@@ -8737,7 +8745,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.default_prevented = true;
                 break;
             }
-            focused = focus_get(state);
             if (!rich_clipboard_shortcut) {
                 InputIntent intent;
                 if (input_intent_from_key_event(key_event, &intent)) {
@@ -8811,10 +8818,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             EditingSurface clip_surface;
             if (intent_target &&
                 editing_surface_from_target(intent_target, &clip_surface) &&
-                editing_surface_is_rich(&clip_surface) && focused) {
+                editing_surface_is_rich(&clip_surface)) {
                 const char* clip_type = key_event->key == RDT_KEY_V ? "paste" :
                     (key_event->key == RDT_KEY_X ? "cut" : "copy");
-                if (radiant_dispatch_clipboard_event(&evcon, focused, clip_type)) {
+                if (radiant_dispatch_clipboard_event(&evcon, intent_target, clip_type)) {
                     evcon.default_prevented = true;
                     evcon.need_repaint = true;
                     break;
@@ -8829,6 +8836,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         break;
                     }
                 } else if (key_event->key == RDT_KEY_X) {
+                    copy_current_selection_to_clipboard(state, "rich cut");
                     InputIntent cut_intent;
                     if (input_intent_from_key_event(key_event, &cut_intent)) {
                         EditingTransactionResult transaction = {};
@@ -8837,6 +8845,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         evcon.need_repaint = true;
                         break;
                     }
+                } else {
+                    copy_current_selection_to_clipboard(state, "rich copy");
+                    evcon.need_repaint = true;
+                    break;
                 }
             }
         }
