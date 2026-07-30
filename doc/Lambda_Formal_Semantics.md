@@ -3,7 +3,10 @@
 **Status:** normative — an Architecture Decision Record for the Lambda language
 **Basis:** decision records C1–C13 (with findings A1–A10 and the probe evidence) in
 [`vibe/Lambda_Semantics_Formal.md`](../vibe/Lambda_Semantics_Formal.md) and
-[`vibe/Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md).
+[`vibe/Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md); type-enforcement
+decisions TE-1–TE-14 (with the boundary inventory and measured evidence) in
+[`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md),
+summarized in §11.4.
 **Scope:** this document specifies what Lambda's semantics **is by decision** — not
 what any given build implements. Where the implementation disagrees, the
 implementation is wrong; the conformance work is tracked in
@@ -136,9 +139,9 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
   are total.
 - **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
   **wraps** (two's complement); constant/literal overflow is a **compile
-  error**; division by zero returns `error()` (a deliberate divergence from
-  Go's panic — the §7.3 fn-return rule overrides the Go alignment on this
-  corner); `MinInt div -1` wraps.
+  error**; division by zero yields float `inf`/`nan` per C14c (a deliberate
+  divergence from Go's panic — number math stays in number); `MinInt div -1`
+  wraps.
 
 *Rationale.* `int ⊂ float64` makes each int↔float operand conversion
 lossless and lets the JIT hold ints in double registers with zero observable
@@ -278,20 +281,24 @@ Division by zero never raises, at any width or tier:
   Sized integer operands first enter the non-sized domains from §4.3, so
   `i8 / u8 → float` while `i64 / u64 → decimal`. Float-domain division
   follows IEEE: `1/0` → `inf`, `0.0/0.0` → `nan`.
-- `div` and `%` are integer operations; integers have no `inf`/`nan`, so a zero
-  divisor **returns `error()`** (§7.3 poison — flows through pipelines,
-  rescued by `or`, never aborts). Applies to flex `int` and machine ints alike.
-- Vectorized integer division over numeric arrays: a zero divisor poisons the
-  **whole operation's result with a single `error`** (carrying the first
-  offending index), never per-lane `[error, …]` — a fixed-width lane cannot
-  hold poison, a boxed escape would make the result's type depend on runtime
-  data (P6/type stability), and one operation has one failure. Partial-result
-  salvage is explicit: pre-mask divisors with `b eq 0`, substitute or filter,
-  then divide.
+- `div` and `%` are integer *operations* but number *math* — **C14c
+  (2026-07-30), superseding C14b's `error()` arm**: their results follow the
+  same domain-selection table as `/` (`int div int → float`; large-integer
+  domains → decimal), and a computed zero divisor yields the domain's
+  `inf`/`nan` exactly as `/` does. Integer math stays in number and never
+  returns `error()`. Staying in the int lane is the user's explicit choice —
+  `if (b != 0) a div b else 0` — and note the `or`-rescue does not apply
+  (inf/nan are truthy): guard the divisor or test `is nan`.
+- Vectorized integer division follows the scalar rule: the result is a float
+  array with per-lane `inf`/`nan` at offending lanes — representable and
+  type-stable, so C14b's whole-op single-`error` is retired. The pre-mask
+  idiom (`b eq 0`) remains available for salvage but is no longer required.
+  Decimal-domain division by zero likewise yields decimal `inf`/`nan`
+  (requires the decimal inf/nan unblock — see the enforcement impl plan).
 
 `div` truncates toward zero; `%` takes the dividend's sign (C convention;
 contrast Python's flooring — relevant when modeling guest languages).
-[A2, C3, C14b]
+[A2, C3, C14b (historical), C14c]
 
 ---
 
@@ -482,8 +489,9 @@ the caller to know which representation delivered the error.
   set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
   chosen by one principle: *absence in / no answer → `null`*
   (`int(null)`, `avg([])`, lookups); *present but invalid → `error()`*
-  (`int("abc")`, `1 div 0`). Both are falsy, so `f(x) or default` rescues
-  both uniformly.
+  (`int("abc")`). Both are falsy, so `f(x) or default` rescues
+  both uniformly. (Division by zero is *not* in this class — number math
+  yields `inf`/`nan`, C14c.)
 - **`input`/`fetch` are effectful readers — pn-family, and they raise**
   (`T^E`, compile-enforced), though permitted in expression position.
   Reading the filesystem/network is an effect at the head of a pipeline, so
@@ -992,6 +1000,60 @@ key lookup by name — order-insensitive) and nominal for object types. Type
 matching and value equality answer different questions with different order
 sensitivities (§2.3, §5.4) — both by design.
 
+### 11.4 Type enforcement: declared types are contracts
+
+Detailed decision record:
+[`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md)
+(TE-1–TE-14, the boundary inventory, evidence, and the phased plan). This
+section distills its semantic decisions; several are captured nowhere else.
+
+- **Three outcomes, never a fourth.** Every typed boundary resolves to
+  statically proven, statically rejected, or a deferred runtime check; a failed
+  deferred check produces a rich error value (boundary, expected type, actual
+  value, location) — never null, never a wrong value, never silence. [TE-2,
+  TE-4]
+- **Signatures spell both failure dimensions.** Plain `T` excludes null *and*
+  error: absence is `T?`, failure is `T | error` (soft) or `T^E` (enforcing).
+  An unannotated fn is implicitly contracted `(any \ error, …) -> any \ error`
+  and enforced like a declaration — inference finding an error-possible return
+  is a compile error, resolved by containing it, disclosing `| error`, or
+  imposing `^`. Declared returns are effect firewalls; there is no silent
+  signature tier and no effect fixpoint. [TE-5, enforcement §10.7]
+- **Three failure channels** (the taxonomy behind §7.3): value errors
+  (`T | error`) flow as data; raised errors (`T^E`) demand engagement at the
+  immediate expression and alone license `raise`; system faults (stack
+  exhaustion, out-of-memory, the `==` depth limit) are unchecked — never in
+  types, transparent through fn frames, caught at a pn `^err` boundary or the
+  global handler. In value positions `T^` ≡ `T | error`; `^` is semantically
+  distinctive only on fn returns. [TE-13, C14]
+- **The top and its default.** `any` includes error; `any \ error` is the
+  non-error top and the *unwritten default* of the untyped world (dynamic
+  reads, unannotated params). Explicit `any` is the opt-in to carry errors; a
+  bare `var` is true `any`. An error argument reaching an `any \ error`
+  parameter never enters the function — the call's result is that error.
+  Validation-space `any` (`is`, the validator) reads as `any \ error`: usable
+  data. [TE-5]
+- **Interiors flow, interfaces enforce.** Annotated bindings are contracts: a
+  deferred success establishes a clean `x: T`; failure yields the boundary
+  error *before the binding exists* — `x` never holds an error. Unannotated
+  bindings infer freely, including `T | error`; soft errors cascade through
+  pipelines, loops, and containers, and are detected at type boundaries (`is`,
+  `match`, annotated bindings, firewalls).
+  `type(a or b) = (type(a) \ {error, null}) | type(b)`, so `int(s) or 0 : int`.
+  [enforcement §10.8, TE-13]
+- **Deferred numeric checks are value-aware.** An exactly-embedding value
+  passes and is re-represented (`float 3.0` → `int 3`); an inexact one fails
+  with the error. Static positions reject the whole class (`let x: int = 3.5`
+  *and* `3.0` are compile errors); `is`/`match` stay type-directional
+  (`3.0 is int` is false). [TE-5, TE-6]
+
+*Rationale.* Error is as dangerous as null, or more — a stray null yields
+absence, while a mishandled error is a poisoned computation carrying a
+diagnosis nobody read — so failure receives the same signature-level
+explicitness as absence (`T` vs `T?` ↔ `T` vs `T | error`). Enforcement is
+also the prerequisite for performance: an annotation may drive representation
+only if its boundary is enforced. [TE-3]
+
 ---
 
 ## 12. Metaprogramming
@@ -1082,6 +1144,7 @@ a semantics change:
 | §9 mutability, covariance | C4, C4.2a, C12 | both |
 | §10 operators | C6, C10 | `Lambda_Semantics_Formal2.md` |
 | §11 patterns | C7 | ibid. |
+| §11.4 type enforcement | TE-1–TE-14, B1–B13, enforcement §10 | `Lambda_Design_Type_Enforcement.md` |
 | §12 metaprogramming | C9, C9a | ibid. |
 
 The decision records preserve the full deliberations — including every

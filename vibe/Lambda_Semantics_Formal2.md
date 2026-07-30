@@ -1759,3 +1759,54 @@ Details pinned:
   operands) = **compile error** with the teaching message ("no magnitude —
   `sort`/`order by` use the total order"); dynamically-arising = returned
   `error()`.
+
+#### C14c Application (designer ruling, 2026-07-30): integer division stays in number — `div`/`%` by zero yield float, not `error()`
+
+Supersedes the `div`/`%` arm of **C14b, now historical**; C14b's `/` rulings,
+the literal-zero compile error, and the NumPy prior-art note stand unchanged.
+
+**Ruling.** `int div int` (and `%`) is inferred **float**, mirroring `/`'s
+result-domain selection; a computed zero divisor yields the domain's
+`inf`/`nan` exactly as `/` does. Integer math is number math: its results are
+int, float, or decimal — in general it **stays in number, and never returns
+`error()`**. The implementation adapts wholesale (scalar flex and machine
+tiers, vectorized lanes). A user who wants to stay in the int lane guards
+explicitly — `if (b != 0) a div b else 0` — the default/handling is the
+user's, not the language's.
+
+**Arguments (assistant's case, adopted by designer):**
+1. `div → error()` was the outlier in Lambda's own philosophy: flex-int
+   arithmetic already leaves int at an edge (overflow promotes to float,
+   spec §4.1); div-by-zero → float is the same move at a different edge.
+2. Consistency with `/` (verified live: `1 / 0 → inf` in the current build)
+   and with float generally — float div float returns float, never error.
+3. Restores C14a's invariant "every error value is deliberate": operators
+   produce poison *numbers*; `error()` remains the mark of conversions and
+   parsing (`int("abc")` stays §7.3's canonical example; `1 div 0` leaves
+   that list). Teachable line: **number math is closed over numbers ∪
+   {inf, nan}; only conversions/parsing produce `error()`.**
+4. IEEE-754 settled this exact debate in 1985 with inf/nan — Kahan's
+   keep-computing rationale is the same as the spec's own §7.1 batch
+   philosophy.
+5. Enforcement dividend: arithmetic is no longer error-originating, so the
+   type-enforcement firewalls never fire on pure math, unannotated numeric
+   fns are clean by construction, and the division-openness corpus sweep is
+   deleted from the enforcement plan.
+6. C14b's vectorized representability objection dissolves: float lanes hold
+   inf/nan, so packed int-array division returns a float array with per-lane
+   poison — type-stable, no whole-op single-`error`, no data-dependent result
+   type.
+
+**Accepted costs (designer-acknowledged):**
+- The `or`-rescue dies for integer division: inf/nan are **truthy**
+  (verified), so `a div b or 0` no longer falls to the default. Users guard
+  the divisor or test `is nan`/finiteness; the pre-mask idiom remains for
+  vectors.
+- The "division by zero" diagnostic disappears (the IEEE trade).
+- `div` results flowing into int-typed contexts become static type errors
+  (float ↛ int) — corpus sweep required.
+- Large-integer domains: mirror `/`'s table (`i64 / u64 → decimal`) so
+  exactness-preserving division lands in decimal — which requires **decimal
+  `inf`/`nan` support** (mpdecimal supports them natively; the Lambda wrapper
+  currently filters them — unblock tracked in the enforcement impl plan,
+  including distinct printing, tentatively `decimal.inf` / `decimal.nan`).

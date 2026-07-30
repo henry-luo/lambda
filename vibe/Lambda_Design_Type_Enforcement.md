@@ -1,7 +1,10 @@
 # Lambda — Type Support Design: Enforcement First
 
-**Status:** IMPLEMENTED — correctness scope complete; the annotation-performance work explicitly
-deferred by §1/§9 remains a separate follow-on.
+**Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
+round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
+firewall, E228 acknowledgment forms, `or`-narrowing, fault channel), tracked in
+[`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
+work explicitly deferred by §1/§9 remains a separate follow-on.
 **Date:** 2026-07-29; revised 2026-07-30
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
@@ -114,6 +117,71 @@ packing) without enforcement (§5.4), and annotations *downgrade* proven inferen
 ANY-downgrade). This document fixes the first half; the perf stage collects the winnings on the
 second.
 
+### 2.5 The `any` × error intersection (added 2026-07-30, backing TE-5)
+
+How each design handles the meeting point of the dynamic/top type and failure — the question
+TE-5's untyped-defaults decision answers for Lambda.
+
+**TypeScript and Python never face the question**, because both keep failure out of the value
+domain: errors are thrown exceptions, and neither type system tracks them anywhere — TS has no
+`throws` clause (deliberately, permanently rejected) and Python has no `raises` annotation
+(repeatedly proposed, rejected). Their `any`/`Any` trivially contain error *objects* as inert
+data, but "failure" as a state never inhabits the value space. The instructive fragments:
+
+- **TS's one failure-boundary type migrated from trusting to safe**: the `catch` variable was
+  `any`; TS 4.4 strict made it **`unknown`**, forcing narrowing (`instanceof Error`) — the
+  engage-explicitly instinct. Promise rejections remain untyped, which is why the ecosystem
+  reinvented errors-as-values in userland (`neverthrow`, fp-ts `Either`).
+- **Python's `except ValueError as e:` types the caught error precisely** (the clause filters
+  by class) — engagement-at-the-boundary types the error. And Python's *batch* world is the
+  strongest witness: pandas/NumPy abandoned exceptions for propagating data-level failure
+  (NaN/NA flow; `fillna(0)` is Lambda's `or 0`; `np.seterr` demotes raise→propagate) — and
+  replayed §10.6's packed-container problem with a worse resolution: an `int64` column meeting
+  NA silently flips to `float64`, where Lambda's `int[]` refuses with a typed error.
+
+**Koka answers it rigorously — with inference instead of a top type.** Every function type
+carries an effect row (`total` = empty, `exn`, `div`, … up to `io`); **total is the inferred
+default**, and `exn` is *earned* by code that raises — effects are never ambient. Declared
+signatures are firewalls (annotating `: total` rejects a raising body — §10.7 independently
+discovered), and the two channels exist with a first-class converter: `try : (() -> <exn|e> a)
+-> e error<a>` reifies the effect into a value — literally Lambda's wrapper idiom (`^err`).
+Koka has **no `any`**: the unknown is an effect-row *variable* (`map : (list<a>, f : a -> e b)
+-> e list<b>`), solved rather than assumed. Lambda, being gradual, cannot row-track through
+dynamic data — TE-5's `any \ error` default is the gradual approximation of Koka's row
+variable defaulting empty, with checked boundaries (R3) standing in for Koka's proofs.
+
+**Pony answers it structurally — a data-only top by construction.** Partial functions are
+marked `?` on the signature *and at every call site* (`divide(a, b)?` inside `try…else…end`) —
+tightness one notch beyond Lambda's immediate-expression rule. The soft alternative is a union
+return (`(Item | None)`), giving authors the same enforced-vs-flowing menu as `T^` vs
+`T | error`. Pony's `error` carries **no payload at all** (a bare control signal — the polar
+opposite of §10.4's rich objects, and unavailable to Lambda's batch-diagnostics domain), and
+because failure is never reified as a value, Pony's `Any` contains only data: "any excludes
+error" achieved by never letting error be a value. Lambda cannot take that route — C4/C14 make
+errors genuine data (they sit in arrays, flow through pipelines) — so the top splits instead:
+`any` includes error; `any \ error` is the unwritten default. (Pony also bans partiality on
+actor behaviours — across the async boundary, failure must become values/messages.)
+
+Family footnote: **Unison** (abilities in signatures only when used, total otherwise) and
+**Flix** (Boolean effect formulas, pure by default) confirm the pattern; **OCaml 5** is the
+cautionary tale — effect *handlers* without effect *types*, so nothing tracks what performs
+effects.
+
+| Design point | TypeScript | Python | Koka | Pony | Lambda (decided) |
+|---|---|---|---|---|---|
+| Failure is… | thrown, untracked | raised, untracked | `exn` effect row | `?` partiality signal | a value (`error`) + `^` channel |
+| Fn types carry failure? | no (`throws` rejected) | no (`raises` rejected) | yes, inferred rows | yes, `?` marked | yes — `T^` / `T \| error`, inferred `\| error` |
+| Unannotated default | n/a (untracked) | n/a (untracked) | `total` (inferred) | total (`?` opt-in) | clean / `any \ error` (TE-5) |
+| Top/dynamic type vs error | `any` incl. Error objects; `catch` → `unknown` | `Any`/`object` incl. exception objects | no top — row variables track | `Any` data-only (error not a value) | `any` includes error; `any \ error` default |
+| Engage boundary | `catch` (narrow `unknown`) | `except T as e` (typed) | handlers; `try` → `error<a>` | call-site `?` + `try…else` | `^err`, `^`, `match`, `or`, typed binding |
+| Error payload | Error objects | exception objects | exception values | **none** | rich object (§10.4) |
+| Batch failure | userland Result libs | pandas NA + `fillna` | `error<a>`/`maybe` values | union returns | soft `\| error` flow + `or` rescue |
+
+The family's consistent lesson, which TE-5 instantiates gradually: **the absence of failure
+must be the unmarked case, and its presence must be spelled at a boundary someone can point
+to** — Koka proves it by inference, Pony by syntax, Lambda by optimistic defaults over checked
+boundaries.
+
 ---
 
 ## 3. Lambda's model: type is binding
@@ -181,9 +249,10 @@ code-only error form is rejected: a bare code cannot satisfy this diagnostic con
 
 **TE-5 — `any` is the top type and the gradual gate.** `any` includes `error`; `T → any` is
 always assignable (though boxing need not be physically cost-free). `any → T` is DEFERRED and
-uses a Go-like runtime type assertion: the value must already match `T` under the same
-type/subtype rules; the boundary does not perform value-dependent narrowing such as
-`float(3.0) → int`. Explicit conversion functions own those conversions.
+uses a runtime type assertion that is **value-aware for numerics** (corrected 2026-07-30 —
+see TE-6): a value whose mathematical value exactly embeds in the target passes and is
+re-represented (`float(3.0) → int` succeeds as int 3); inexact values fail with the rich
+error. Explicit conversion functions own lossy conversions.
 
 `any \ error` is the non-error top type. It is the success type produced when channel-agnostic
 `^err` destructuring or postfix `^` strips errors from an `any` outcome. The schema validator's
@@ -191,6 +260,94 @@ historical `any` pattern is intentionally treated as this non-error validation p
 (`any \ error`): validation asks whether a value is usable data, while the core language type
 `any` remains the true top type. This validator-specific spelling is documented until the
 validator gains a distinct surface alias.
+
+**Untyped defaults are `any \ error` — DECIDED 2026-07-30 (user restatement).** Error-ness
+must always be *explicit* in a type: it enters only via `T | error`, `T^`, `error`, or an
+explicitly written `any` (which includes error, above). The implicit world defaults total —
+and, the restatement's sharpening, **function interfaces enforce the default**:
+
+```lambda
+fn f(a, b) { ... }         // implicitly f(a: any\error, b: any\error) -> any\error — ENFORCED:
+                           //   if inference finds the return may be an error, that is a
+                           //   reported type error (contain it, or declare `| error` / `any`)
+fn f(a: any, b: any) any   // explicit any — the deliberate opt-in to accept/return errors
+let a = ...                // a takes whatever the expression's inferred type is (incl. T | error)
+var b                      // bare mutable declaration: truly `any`, error allowed
+```
+
+Calls enforce the default too: **if an argument bound to an `any \ error` param is an error,
+the function is not entered — the call's result is that error** (the TE-8 short-circuit as
+call semantics). Consequently, inside such a function a `match a { case error: … }` arm is
+provably dead (lint candidate); a function that wants to *receive* errors declares `a: any`.
+
+Rules that make it precise (revised 2026-07-30 after re-examination):
+- **R1 — this is a rule about dynamic *reads*, and bindings inherit it.** `let x = a()` with
+  `a` declared `int | error` still infers `x : int | error` — precise unions propagate (the
+  decided binding rule and batch soft-flow are unchanged). The `any \ error` default is the
+  inferred type of expressions that previously inferred `any`: untyped params, member access
+  on dynamic maps, elements of opaque containers.
+- **R2 — untyped positions are not error-transparent, and that is the right batch default.**
+  TE-8's short-circuit opt-in list is *explicit* forms only (`T^`, `T | error`, `any`,
+  `error`); an error dynamically reaching an untyped position short-circuits through. Pleasant
+  consequence: mapping an untyped `fn` over `[1, error, 3]` yields `[f(1), error, f(3)]` —
+  errors pass through unprocessed, values process; a handler that wants to *receive* the error
+  opts in with `p: any` / `match`.
+- **R3 — `any \ error` is a static-ledger optimism only; it never drives representation.** It
+  feeds signatures, clean/open inference, and the §10.7 firewall — but every transition of an
+  any-provenance value into a native lane remains a TE-8 checked boundary. So a laundered
+  error (the *mainline* batch lifecycle: soft errors stored into containers/maps per §10.6,
+  shuttled through dynamic structures, read back out through these very reads) degrades
+  gracefully into an ordinary error value at the next check — never a sentinel, never
+  corruption. The gap is confined to the ledger: some expressions typed `int` are dynamically
+  `int | error`, surfaced at the next checked boundary or the script result. (This is the same
+  shape as the validator's usable-data `any` policy: optimistic reading, safe because
+  enforcement sits underneath. It also means the perf stage must NOT use `any \ error` to
+  choose error-incapable representations on faith — only behind the same checks.)
+- **R4 — container literals keep error-ness visible.** `[1, error("m"), 3]` infers element
+  type `int | error`; the default applies to *opaque* containers only.
+- **R5 (to confirm) — sticky `any` for explicit-`any` flows.** Reads through an
+  explicitly-`any` value yield `any`, not `any \ error`, keeping that provenance
+  type-visible. Note its correct size: stickiness cannot close the mainline stored-error leak
+  (no explicit `any` is involved there) — R3's ledger-optimism + checked transitions carry the
+  safety; stickiness just keeps deliberate `any` honest.
+
+Rationale: without this, `any`-includes-error poisons the untyped world — everything touching
+dynamic data types as `… | error`, every undeclared function infers open, and §10.7's firewall
+fires on essentially all declared-plain-`T` code. With it, the provenance principle reaches the
+lattice top (every error-admitting type is human-written), the validator's usable-data reading
+of `any` becomes an instance of the general rule rather than a boundary exception, and
+`any \ error`'s missing surface spelling is largely moot — it is the unwritten default.
+Precedent: effect systems default total (Koka's effect rows, Pony's partial `?`); no design
+defaults the unknown to "might fail" — full five-way comparison in §2.5. Follow-up to settle:
+whether the validator's *explicit* schema-`any` flips to include error for uniformity with
+annotation-`any`, or stays documented as the validation-space reading.
+
+### The three-channel taxonomy — the error model in one statement (2026-07-30, user)
+
+> **Lambda has exactly three failure channels. Two are types — always visible in the
+> signature, always enforced. The third is never a type — the system owns it.**
+
+| Channel | Spelling | Discipline | Designed for |
+|---|---|---|---|
+| **Value errors** | `T \| error` | soft — errors flow as data, no caller obligation; detected at type boundaries (`is`, `match`, annotated bindings, firewalls) | fn code: pipelines, batch, for-loops, containers |
+| **Raised errors** | `T^` / `T^E` | enforcing — engaged at the immediate expression (`^err`, `^`, `match`, `or`, error-admitting destination); `raise` licensed only here | pn code, I/O boundaries |
+| **System faults** | *(none — never in types)* | unchecked — stack exhaustion, out-of-memory, `==` depth-limit; transparent through fn frames; caught at a pn `^err` boundary or the global handler (C14) | the runtime |
+
+**Why the clean default is enforced at every fn boundary — the null parallel (user,
+2026-07-30).** Lambda already makes *absence* explicit at signatures: plain `T` excludes
+`null`, and nullable must be spelled `T?` (TE-11, ships in P0). Error is as dangerous as null
+— arguably more: a stray null yields absence, while a mishandled error is a poisoned
+computation carrying a diagnosis nobody read. So error receives exactly the same treatment:
+plain `T` (and the implicit `any \ error` default) excludes `error`, and error-possibility
+must be spelled. **Null and error are the two failure dimensions of a signature — both
+explicit, both visible, both enforced:**
+
+```lambda
+fn f() T             // present and valid — no null, no error; enforced
+fn f() T?            // may be absent
+fn f() T | error     // may have failed — soft, value-flowing
+fn f() T^            // may have failed — handling enforced at call sites
+```
 
 ---
 
@@ -633,21 +790,39 @@ operations:
    `lambda_numeric_kind_exactly_embeds` with shape/union/occurrence walking.
 2. `matches(item, T)` — runtime membership used by DEFERRED checks and `is`/`match`; it asks
    whether the value's actual runtime type is a subtype of `T`.
-3. `checked_convert(item, T)` — explicit conversion semantics owned by conversion functions,
-   not implicitly by an annotated boundary.
+3. `checked_convert(item, T)` — explicit conversion semantics owned by conversion functions
+   (lossy and value-changing conversions live only here).
 
-This is Go-like: if an `any` holds `float(3.0)`, binding it to `int` fails the runtime type
-assertion; the boundary does not inspect the magnitude and silently turn it into an int.
-Value-dependent conversions remain available through explicit functions. Lossless
-representation conversion after a successful subtype/match — for example, placing an `int` in
-a proven `float` carrier where the numeric model says it exactly embeds — is an emitter detail,
-not a fourth type relation.
+**Numeric boundary checks are value-aware — CORRECTED 2026-07-30 (user; overrides this
+section's earlier Go-like-assertion wording).** At a DEFERRED boundary, a numeric value whose
+*mathematical value* exactly embeds in the target is **allowed** and re-represented: an `any`
+holding `float(3.0)` binds to `int` (as int 3); an integral `decimal` likewise
+(`decimal_to_int64_exact` is the in-tree precedent). Inexact values fail with the rich TE-4
+error (`3.5 → int`). This restores the original exact-value rule — the runtime analogue of
+Swift's `Int(exactly:)`: *static knowledge rejects the class* (`let x: int = 3.0` stays a
+compile error, §10.12), *dynamic checks judge the value*. Operationally the boundary check is
+`matches(item, T)` extended with a value-aware numeric arm; `is`/`match` use plain `matches`
+and remain type-directional (`3.0 is int` → `false`, verified 2026-07-30) — membership answers
+"what is this value's type," the boundary answers "may this value satisfy this contract."
+Whether `is` should also become value-aware is deliberately left undecided. Representation
+conversion after the value-match (the check returns the re-represented value) is a check/
+emitter detail, not a fourth relation.
+
+*Implementation status (2026-07-30):* the freshly landed runtime check implements the
+superseded reject version — `lambda_type_matches`'s numeric arm delegates to the
+type-directional `numeric_type_subsumes` (`lambda-eval.cpp:1293-1300`), and `lambda_type_check`
+(`:1442`) has no convert step; verified: an ANY-held `3.0` into `fn f(x: int)` errors
+"type check at argument 1 … expected int, got float 3". Needs the value-aware numeric arm
+(existing machinery: `validator_numeric_item_embeds`, `decimal_to_int64_exact`), with the
+pass path returning the converted representation.
 
 The shared foundation consolidates `numeric_type_subsumes` (`fn_is`),
 `validator_numeric_type_embeds` (validator), and
 `lambda_numeric_kind_exactly_embeds` (checker), while keeping the validator's documented
-`any`-means-`any \ error` policy at its validation boundary. `FLOAT→INT` is never a subtype,
-which removes the declaration ladder's `MIR_D2I` arm (t13).
+`any`-means-`any \ error` policy at its validation boundary. `FLOAT→INT` is never a *subtype*
+(static, and `is`), which removes the declaration ladder's `MIR_D2I` arm (t13) — while the
+value-aware boundary arm above may still admit an exactly-integral float *value* at DEFERRED
+boundaries.
 
 ### TE-7 — Complete the static layer (fix the four root causes)
 
@@ -688,9 +863,13 @@ shapes, occurrences, and named types remain expressible. Emission shape:
 
 ```
 actual = item_type_id(item)                 // canonical tag-0-aware query
-if fast_simple_match(actual, expected) → establish proof and convert carrier if needed
+if actual == error                     → pass it through unchanged — "error in, error out":
+                                          the boundary's result IS that error (original
+                                          diagnosis preserved; error-admitting targets keep it
+                                          as a value, clean targets propagate it onward)
+elif fast_simple_match(actual, expected) → establish proof and convert carrier if needed
 elif item matches expected_type        → establish proof; preserve/normalize carrier as required
-elif actual == error and T admits error → pass the error as a value
+elif exact-value numeric admission (TE-6) → convert and return the re-represented value
 else                                   → lambda_type_error(expected, item, site)
 ```
 
@@ -731,8 +910,9 @@ Three options existed; two are rejected by decision:
 - A statically proven call to `fn a(b: int) int` has result `int`. A dynamically checked call
   is open at the call boundary because parameter validation can fail, so that call expression
   has effective type `int | error`; on success the callee body still sees `b: int`.
-- A declared plain-`T` return remains an effect firewall: an open body is a compile error,
-  resolved by containing, disclosing `T | error`, or imposing `T^`.
+- Every fn return is an effect firewall — a declared plain-`T`, or the implicit `any \ error`
+  contract of an unannotated fn (2026-07-30 restatement): an error-possible body is a compile
+  error, resolved by containing, disclosing `T | error`, or imposing `T^`.
 
 Boxed storage is therefore required for inferred/open outcomes, not for a successfully
 established annotated `T`. A future native variant may exploit the clean proof, but the semantic
@@ -919,13 +1099,22 @@ RHS `choice($._expr, seq('(', $._type_expr, ')'))`, one GLR conflict at the pare
 coincide, since the AST already resolves identifier exprs to types. Direct unparenthesized
 `is int[]` should stay off the table (it would re-parse the currently-legal
 `(x is int)[…]` postfix form). Until then the spellings are: a named type, or a `match` arm.
+Same bucket, found 2026-07-30: the **`!` exclusion operator is broken for general types** —
+`type NE = any ! error` fails at pattern compilation (`compile_pattern_to_regex: unknown node
+type`, `invalid perl operator: (?!`): the exclusion is routed through the string-pattern regex
+compiler. Consequence: the non-error top `any \ error` (TE-5, `Lambda_Formal_Semantics.md`
+§7.3) currently has **no working surface spelling** — another item for the pattern-grammar
+and validator design (aligned with TE-5's "until the validator gains a distinct surface
+alias").
 
 **`or`-rescue — RESOLVED 2026-07-29: no rule-bend needed; error-consuming `or` is already both
 the spec and the implementation.** Specified three times over — truthiness (errors are falsy,
 `Lambda_Formal_Semantics.md` §3), §7.3 ("both are falsy, so `f(x) or default` rescues both
 uniformly"), and `Lambda_Error_Handling.md`'s falsy-errors section (`divide(10, x) or 0`) —
 and verified live 2026-07-29: `int("abc") or 0` → `0`, `error("boom") or 5` → `5`,
-`f(0) or 5` → `5` (user-fn div-by-zero), `if (int("abc"))` → falsy. The coherence argument:
+`f(0) or 5` → `5` (user-fn div-by-zero — *historical: pre-C14c; `div 0` now yields `inf`,
+which is truthy, so the `or`-rescue no longer applies to division*), `if (int("abc"))` →
+falsy. The coherence argument:
 `or` *is* truthy-select, and errors are falsy, so consumption follows from the definitions —
 error-propagating `or` would require either error-truthy (absurd: `if` would enter) or a
 special-cased `or` that breaks the identity. Two safety properties observed: **`0` is truthy**
@@ -1001,8 +1190,9 @@ spelling — and to pn/can_raise sys funcs; `T | error` never triggers it (the n
 decision). This is the simplest possible keying: no provenance metadata needed, the type
 spelling *is* the obligation. Doc consequences for `Lambda_Error_Handling.md`: the `T` row of
 the return-type table ("always succeeds — no error possible") holds for clean functions; an
-open **undeclared** function is effectively `T | error`; a *declared* plain-`T` function with
-an open body is a compile error per §10.7's firewall rule; and "raise is the **only** way to
+open *expression or binding* is effectively `T | error`; every fn return — declared plain-`T`
+or the implicit `any \ error` contract of an unannotated fn (2026-07-30 restatement) — is a
+firewall, so an error-possible body is a compile error per §10.7; and "raise is the **only** way to
 return an error from a function" becomes `^`-channel-specific — the `| error` form returns
 `error(...)` values directly.
 
@@ -1147,8 +1337,9 @@ annotation-ness from emitter whitelists. *Exit evidence:* t1/t3/t4/t6/t13/t14-fa
 become compile errors; the subtype/match truth-table tests and both baselines are green.
 
 **P1 — Checked-boundary infrastructure.** Add the rich `lambda_type_error` object constructor
-and `emit_checked_boundary` with a full expected `Type*`, error-preservation arm, and Go-like
-runtime match. Missing-argument padding is removed (arity is P0-static where the callee is
+and `emit_checked_boundary` with a full expected `Type*`, error-preservation arm, and the
+TE-6 runtime match (type-directional, plus exact-value numeric admission with
+re-representation). Missing-argument padding is removed (arity is P0-static where the callee is
 known; an error value otherwise), and effective-type computation (`T | error` for dynamic call
 or inferred-open outcomes) is plumbed through the front end. Check placement may initially
 follow the safest boxed/site-local implementation; TE-14 optimization is not an exit
@@ -1262,11 +1453,14 @@ semantics.
    the openness locally (`^err` + handling, `or` default), **disclose** it as `T | error`
    (non-enforcing — callers see it, owe nothing), or **impose** it as `T^` (enforcing —
    callers must handle). Inference itself only ever produces `| error`, never `^` (TE-13
-   two-form model). `-> any` (and undeclared returns) stay
-   silent: `any`/absence-of-declaration is the absence of a promise. Consequences:
+   two-form model). `-> any` is the explicit error-admitting escape (TE-5). **REVISED
+   2026-07-30 (user restatement): undeclared returns are no longer silent** — an unannotated
+   fn is implicitly contracted `(any \ error, …) -> any \ error` and enforced exactly like a
+   declaration: inference finding an error-possible return is a reported type error. The
+   firewall thus covers *every* function; the default contract is `any \ error`. Consequences:
    - **§10.7 mostly dissolves.** Silent clean→open cascades stop at the first declared frame
-     (stability); declared-return recursion needs no fixpoint (assume the declaration, check
-     the body — only undeclared recursion iterates); declared-return `pub` fns need no effect
+     (stability); recursion needs no fixpoint at all — every fn now has a contract, declared
+     or the implicit `any \ error`, so assume it and check the body; `pub` fns need no effect
      metadata (recommend, not require, declared returns on `pub`). A function *value* invoked
      dynamically remains per-call-site open, as before.
    - **Fixes an inversion**: explicit `open_call()^` inside a plain-`T` fn is *already* a
@@ -1286,16 +1480,36 @@ semantics.
      `let x: int = dynamic_call()` checks at the boundary, establishes `x: int` on success,
      and produces an error before `x` exists on failure. Declared returns remain effect
      firewalls.
-   - **Confirmed consequence**: error-*originating* operators make bodies open — notably
-     division with a dynamic divisor (dynamic zero divisor returns `error()` per the formal
-     semantics), so `fn avg(sum: int, count: int) int { sum / count }` errors until declared
-     `int | error` (or `int^`, or contained). Literal-nonzero divisors stay clean via trivial
-     value analysis.
+   - **Consequence, REVISED by C14c (2026-07-30)**: division no longer error-originates at
+     all — `/`, `div`, and `%` stay in number (`int div int → float`, IEEE `inf`/`nan` on a
+     computed zero; `Lambda_Formal_Semantics.md` §4.7). The firewall's error-originating class
+     is therefore exactly the set of `| error`/`^`-declared calls; pure-math bodies are clean
+     by construction. (`fn avg(a: int, b: int) int { a div b }` still fails — but as a plain
+     E208 return mismatch, body float vs declared int; the `float`-returning form passes.)
      Joins the D2I sweep as a pre-P0 audit, and the diagnostic must state *why* the body is
      open (first cause, e.g. "call to 'g' may return error"), making the "why open?"
      diagnostic part of the error UX rather than a nice-to-have.
    - TE-9's open-case wording is revised accordingly: the silent effective-`T | error`
-     applies only to **undeclared** returns; declared returns enforce.
+     applies to *expressions and bindings* only; every fn return — declared, or implicitly
+     `any \ error` — enforces (2026-07-30 restatement).
+   - **Recursion and system faults — DECIDED 2026-07-30 (reaffirming C14, 2026-07-06): we
+     handle it for the user.** `fn f() T` with recursive `f` does *not* force
+     `T | recur_error`: infinite recursion / stack exhaustion is a **system/resource fault**,
+     and per the C14 semantics ruling such faults are the **unchecked third channel** —
+     raisable from anywhere including `fn`, invisible to fn types, transparent through frames,
+     caught at a pn `^err` boundary or the global handler (Java `Error`-class precedent; the
+     `==` depth-limit raise is the same class; the runtime hook `lambda_stack_overflow_error`
+     already exists). Forcing a declared `recur_error` would be checked-exception spill for a
+     fault no local caller can meaningfully handle. This also resolves a flagged tension:
+     C14's "`T | error ^ E` must never exist" is *system-channel-specific* — the fault channel
+     never appears in types — while TE-13's user-declared mixed form `T | e1 ^ e2` remains
+     legal. *Implementation note (added 2026-07-30): the next implementation phase must handle
+     the fault channel explicitly — stack exhaustion **and out-of-memory** (and the `==`
+     depth-limit raise) route as unchecked faults: transparent unwind through fn frames,
+     catchable at pn `^err` or the global handler, never typed error values. Detail that
+     matters: OOM cannot allocate its own diagnostic, so fault objects must be
+     pre-reserved/static — the §10.4 rich-error contract applies to the *checked* channels
+     only.*
 8. **Declarations and reassignment — REVISED 2026-07-30 (user): annotations are contracts;
    inference flows.** `let x: T = e` establishes only `x: T`: a DEFERRED success binds `T`, and
    failure yields the boundary error before the binding exists. Reassignment checks before
@@ -1335,10 +1549,11 @@ semantics.
    truncation — regarded as a defect; C++11 bans it as "narrowing" in brace-init, and
    `-Wconversion` exists to flag it) and SQL — which **rounds** rather than truncates
    (Postgres `CAST(3.5 AS int)` = 4). That the allow-camp cannot even agree on the semantics
-   is itself the argument against silent conversion. Lambda's Go-like enforcement rule:
-   statically reject float-typed initializers including `3.0`, and reject an `any` value whose
-   actual runtime type is float at a deferred `int` boundary regardless of magnitude. Explicit
-   `int(...)` conversion owns any value-dependent conversion policy.
+   is itself the argument against silent conversion. Lambda's rule (per TE-5/TE-6 as
+   corrected 2026-07-30): statically reject float-typed initializers including `3.0`; at a
+   *deferred* `int` boundary the check is value-aware — an `any` value holding an
+   exactly-integral float (`3.0`) passes and is re-represented, an inexact one (`3.5`) fails
+   with the rich error. Explicit `int(...)` conversion owns lossy conversion policy.
 13. **t2's `var`-path `null`** — mechanism narrowed but not step-verified (§5.1); verify while
    implementing P0 so the fix isn't aimed at a ghost.
 14. **Constrained types — CONFIRMED 2026-07-30 (user): base-only interim is accepted.** The
