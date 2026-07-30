@@ -223,6 +223,7 @@ def write_report(args, data):
     qjs_help = metadata.get("quickjs_version") or read_cmd(["qjs", "--help"])
     qjs_version = qjs_help.splitlines()[0].replace("QuickJS version ", "") if qjs_help != "unavailable" else "unavailable"
     profile_check = metadata.get("profile_check", "not_recorded")
+    test262_baseline = metadata.get("test262_baseline") or {}
     runs = metadata.get("runs", 3)
     timeout_s = metadata.get("timeout_s")
 
@@ -237,8 +238,12 @@ def write_report(args, data):
     w(f"- **Date:** {date}")
     w(f"- **Platform:** {platform.system()} {platform.machine()}")
     w(f"- **Lambda commit:** `{commit}`")
-    lambda_exe = metadata.get("lambda_exe")
-    exe_size = metadata.get("lambda_exe_size_bytes")
+    lambda_exe = metadata.get("lambda_archive") or metadata.get("lambda_exe")
+    exe_size = metadata.get("lambda_archive_size_bytes") or metadata.get("lambda_exe_size_bytes")
+    try:
+        exe_size = int(exe_size) if exe_size is not None else None
+    except (TypeError, ValueError):
+        exe_size = None
     if lambda_exe and "/exe/" in lambda_exe:
         # an archived binary from test/benchmark/exe/ — name it, so the reader knows
         # these numbers are re-measurable rather than tied to a since-changed build
@@ -247,6 +252,29 @@ def write_report(args, data):
     else:
         w("- **Lambda build:** clean release build (`make release`)")
     w(f"- **Instrumentation check:** {profile_check}")
+    if test262_baseline.get("status") == "passed":
+        duration_s = test262_baseline.get("duration_s")
+        duration_text = f" in {duration_s:.2f}s" if isinstance(duration_s, (int, float)) else ""
+        fully_passed = test262_baseline.get("fully_passed")
+        baseline_tests = test262_baseline.get("baseline_tests")
+        pass_text = (f"{fully_passed:,} / {baseline_tests:,} passed"
+                     if isinstance(fully_passed, int) and isinstance(baseline_tests, int) else "passed")
+        test262_context = ("required pre-benchmark gate" if test262_baseline.get("gate")
+                           else "post-snapshot archived-binary verification")
+        w(f"- **Test262 baseline:** {pass_text}{duration_text} (harness time; {test262_context})")
+        timing_s = test262_baseline.get("timing_s")
+        if isinstance(timing_s, dict):
+            def phase(name):
+                value = timing_s.get(name)
+                return f"{value:.1f}s" if isinstance(value, (int, float)) else "n/a"
+            w("- **Test262 phases:** "
+              f"prep {phase('prep')}; batch {phase('batch')} "
+              f"(batched {phase('batched')}: sync {phase('sync')}, async {phase('async')}; "
+              f"non-batched {phase('non_batched')}); retry {phase('retry')}; "
+              f"partial {phase('partial')}; timing {phase('timing')}; "
+              f"memory {phase('memory')}; eval {phase('eval')}")
+    elif test262_baseline.get("status") and test262_baseline.get("status") != "not_run":
+        w(f"- **Test262 baseline:** {test262_baseline['status']}")
     w(f"- **Node.js:** {node_version}")
     w(f"- **QuickJS:** {qjs_version}")
     timeout_text = f", timeout {timeout_s}s per run" if timeout_s else ""

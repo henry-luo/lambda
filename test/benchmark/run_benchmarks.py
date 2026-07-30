@@ -330,6 +330,20 @@ def get_command_output(args):
 def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters,
                        bench_filters, suite_cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
+    archive_size = os.environ.get("LAMBDA_BENCH_ARCHIVE_SIZE_BYTES")
+    try:
+        archive_size = int(archive_size) if archive_size is not None else None
+    except ValueError:
+        archive_size = None
+    test262_baseline = {"status": "not_run"}
+    test262_raw = os.environ.get("LAMBDA_BENCH_TEST262_RESULT")
+    if test262_raw:
+        try:
+            parsed_test262 = json.loads(test262_raw)
+            if isinstance(parsed_test262, dict):
+                test262_baseline = parsed_test262
+        except json.JSONDecodeError:
+            test262_baseline = {"status": "unparseable_metadata"}
     quickjs_output = get_command_output([QJS_EXE, "--help"])
     # A present QuickJS executable can still emit no version banner; metadata
     # collection must not prevent a filtered MIR-only benchmark run.
@@ -354,6 +368,10 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "platform": f"{platform.system()} {platform.machine()}",
         "lambda_exe": LAMBDA_EXE,
         "lambda_exe_size_bytes": exe_size,
+        "lambda_archive": os.environ.get("LAMBDA_BENCH_ARCHIVE"),
+        "lambda_archive_size_bytes": archive_size,
+        "lambda_archive_sha256": os.environ.get("LAMBDA_BENCH_ARCHIVE_SHA256"),
+        "test262_baseline": test262_baseline,
         "lambda_commit": get_command_output(["git", "rev-parse", "HEAD"]),
         "node_version": get_command_output([NODE_EXE, "--version"]),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),

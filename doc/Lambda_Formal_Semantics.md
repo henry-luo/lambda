@@ -446,60 +446,76 @@ An out-of-bounds write is a **raised error** — not null, not a silent no-op.
 Reads ask a question; writes issue a command, and a command that silently does
 nothing hides bugs. Growth is explicit (`push`/`splice`). [C5]
 
-### 7.3 The two error channels: fn return, pn raise
+### 7.3 Two error forms, one discharge surface: fn return, pn raise
 
-**The general rule of Lambda error design: `fn` return error; `pn` raise
-error.**
+**The general style remains: `fn` returns error data; `pn` raises failures.**
+The two forms retain different caller obligations, but `^err` and postfix `^`
+are channel-agnostic: they operate on the combined outcome rather than forcing
+the caller to know which representation delivered the error.
 
-- **`pn` failures raise**: `T^E` signatures, `^` propagation, `let v^err`
-  destructuring, compile-enforced call sites. Commands halt on failure
-  (`output`, `io.*`, `cmd`).
-- **System `fn` failures are values** — fns never raise, keeping them chainable
-  and set-friendly (a raise aborts a whole set operation; a value flows
-  per-item). The channel is declared in the signature — `T?` or `T | error`,
-  never `T^E` on a system fn — and chosen by one principle:
-  *absence in / no answer → `null`* (`int(null)`, `avg([])`, lookups);
-  *present but invalid → `error()`* (`int("abc")`, `1 div 0`) — loud poison
-  with a diagnostic. Both are falsy, so `f(x) or default` rescues both
-  uniformly.
+- **Returned errors are data.** `T | error` is an ordinary union and never
+  triggers must-handle checking. It is the natural result of set-friendly
+  computations and of inference when an undeclared expression can produce an
+  error. `let x = e` therefore infers `T | error` when appropriate. The core
+  top type `any` includes error; removing error produces the non-error top
+  `any \ error`.
+- **Raised errors are an enforcing channel.** `T^E` is explicit-only:
+  inference never creates `^`. Calls carrying a `^` channel must engage the
+  error possibility immediately through `^err`, postfix `^`, an explicitly
+  error-admitting destination, an error arm in `match`, or an explicit
+  `or` rescue. `raise` is licensed only inside a function with a declared
+  `T^E` result. `E` constrains user-raised errors.
+- **`let value^err = e` is total over error-ness and channel-agnostic.** It
+  receives both error values returned in the value lane and errors delivered
+  through a raised channel. On any error, `value = null` and `err` receives
+  that error; on success, `value` receives the error-free success value and
+  `err = null`. Its typing removes every error constituent from the success
+  side: an `any` outcome becomes `any \ error`; a
+  `T | E1 ^ E2` outcome produces success `T` and error
+  `E1 | E2` (plus `null` on the successful branch).
+- **Postfix `e^` applies the same split but propagates instead of capturing.**
+  It yields the error-free success type and forwards the combined error set to
+  the enclosing function's declared channel. Using it in a declared plain-`T`
+  function is a compile error; an undeclared function may infer a returned
+  `T | error`. Prefix `^e` and `e is error` remain boolean tests.
+- **System `fn` failures are returned values.** They remain chainable and
+  set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
+  chosen by one principle: *absence in / no answer → `null`*
+  (`int(null)`, `avg([])`, lookups); *present but invalid → `error()`*
+  (`int("abc")`, `1 div 0`). Both are falsy, so `f(x) or default` rescues
+  both uniformly.
 - **`input`/`fetch` are effectful readers — pn-family, and they raise**
-  (`T^E`, compile-enforced), though permitted in expression position. This is
-  classification, not exception: reading the filesystem/network is an effect,
-  so these were never computational fns; the rule stays absolute while the
-  taxonomy tells the truth. Rationale: batch input that "hopes it goes
-  through" is too optimistic — I/O failure must be consciously handled, and it
-  strikes at the *head* of a pipeline (loading the set), where aborting loses
-  nothing and unacknowledged poison would surface far from its cause.
-  *Boundary → raise; interior → return.* Set-oriented input is a deliberate
-  opt-in via the **wrapper idiom** — `let d^err = input(f)` inside a user fn
-  converts the raised channel to a returned value
-  (`fn my_input(f) { let d^err = input(f); if (^err) err else d }`), then map
-  over the wrapper. No `try` construct exists or is needed.
-- **System/resource faults are unchecked exceptions**: stack overflow, memory
-  exhaustion, the `==` depth limit raise from anywhere — including inside
-  `fn` — but are invisible to fn signatures, propagate transparently through
-  fn frames, and are handled at an enclosing `pn`'s `^err` boundary or a
-  global handler; unhandled, the script aborts with a report. (Java's
-  `Error`-class split; the type `T | error ^ E` cannot arise, by design.)
-- **The channels in one line**: *raised errors are control flow; returned
-  errors are data.* `^err` binds only raised errors; returned `error()` is
-  caught by falsiness or `is error`.
-- **The error invariant: every error value is deliberate** — constructed by
-  `error()`, returned by a declared `T | error` builtin, or raised in a
-  `T^E` context. Accidental emission is a bug. System exceptions never appear
-  as values in fn results.
-- User fns *may* declare `T^E` and `raise`; the documented style follows the
-  system rule (fns return, pns raise).
+  (`T^E`, compile-enforced), though permitted in expression position.
+  Reading the filesystem/network is an effect at the head of a pipeline, so
+  failure must be consciously engaged. Set-oriented input remains an explicit
+  wrapper: `fn my_input(f) { let d^err = input(f); if (^err) err else d }`,
+  then map over the wrapper.
+- **System/resource faults are implicit system errors.** Stack overflow,
+  memory exhaustion, comparison-depth exhaustion, and compiler-inserted
+  boundary defects may propagate through frames without being enumerated in a
+  user error type. Operationally every `R^E` can therefore deliver
+  `R^(E | error)`: `E` describes user-raised errors, while `error` covers
+  system defects. Channel-agnostic `^err` captures both. Unhandled resource
+  faults still abort with a report.
+- **Every error value is deliberate.** It is constructed by `error()`,
+  returned by a `T | error` computation, raised in a `T^E` context, or
+  constructed by an explicit runtime contract check such as a failed deferred
+  type boundary. Silent `0`, `null`, pointer reinterpretation, or anonymous
+  error emission remains a bug.
+
+The two forms in one line: *raised errors impose an immediate engagement
+obligation; returned errors are data; discharge operators inspect the combined
+outcome.* The mixed type `T | E1 ^ E2` is legal, and callers need only the one
+value-directed discharge surface.
 
 *Rationale.* C5's read/write asymmetry lifted to functions: fn is the query
-world (failures are data), pn is the command world (failures halt). IEEE is the
-precedent — float ops return poison (`nan`) rather than trapping so pipelines
-continue; `error()` is the universal nan, and the poison machinery (§5.1
-never-equal, §3 falsy, §6.2 sorts-last, arithmetic tainting) was built for it.
-Accepted cost: poison-returning fns forgo compile-time handling enforcement —
-the price of chainability, softened by poison being loud rather than silent.
-Note: resource-fault timing is exempt from P6 — when a stack limit fires may
-differ across execution tiers. [C5, C14]
+world (failures flow per item), while pn is the command world (failures demand
+immediate engagement). Channel-agnostic discharge keeps that author-selected
+discipline without making callers depend on the runtime ABI or on whether an
+error arrived in a value lane or raised lane. IEEE is the poison precedent:
+returned `error()` values preserve set processing, and their falsiness,
+never-equality, sorting, and arithmetic tainting make them loud rather than
+silent. Resource-fault timing remains exempt from P6. [C5, C14]
 
 ### 7.4 Array indexing and the `last` keyword
 
@@ -1041,10 +1057,12 @@ a semantics change:
 6. **Printer injectivity** — distinct floats print distinctly; print→parse is
    exact; two numbers print the same iff equal.
 7. **Error containment** — every error value is deliberate: constructed by
-   `error()`, returned by a declared `T | error` signature, or raised in a
-   `T^E` context. No accidental emission; system exceptions never appear as
-   values in `fn` results. (Resource-fault *timing* is exempt from invariant 3
-   — when a stack limit fires may differ across tiers.)
+   `error()`, returned by a `T | error` computation, raised in a `T^E`
+   context, or constructed by an explicit runtime contract check. Discharge
+   (`^err` or postfix `^`) is channel-agnostic and strips all error
+   constituents from its success result. No boundary may silently substitute
+   `0`, `null`, or reinterpreted bits. (Resource-fault *timing* is exempt from
+   invariant 3 — when a stack limit fires may differ across tiers.)
 
 ---
 

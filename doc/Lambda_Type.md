@@ -139,10 +139,23 @@ f16  f32  f64        // Sized floats
 
 ```lambda
 // Special type values
-any         // Top type (supertype of all)
+any         // Top type (supertype of all values, including error)
 error       // Error type
 number      // Union: all numeric value types and sized-storage types
 ```
+
+`any \ error` is the non-error top type. Channel-agnostic error discharge
+produces this refinement when the source success type was `any`:
+
+```lambda
+let value^err = expression_returning_any()
+// value: any \ error
+// err: error? (plus any declared channel-specific error type)
+```
+
+The schema validator historically spells its catch-all *valid data* pattern as
+`any`; in validation position that pattern intentionally means
+`any \ error`. Core language `any` itself remains the true top type.
 
 ### Type Examples
 
