@@ -88,7 +88,7 @@ static const char* SKIP_SUBSTRINGS[] = {
     "drag-multiple-urls",
     // Selection copy line-break variants depend on browser-grade default
     // selection serialization for pre/paragraph whitespace. The current
-    // headless execCommand bridge cannot complete these promise tests.
+    // headless clipboard model cannot complete these promise tests.
     "clipboard-copy-selection-line-break",
     // DOMParser-based unsanitised HTML round-trip with computed-style
     // expansion -- this test expects browsers to inject the full
