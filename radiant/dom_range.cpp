@@ -653,21 +653,56 @@ static inline void notify_selection_changed(DomSelection* s) {
     js_dom_queue_selectionchange(s);
 }
 
+static bool selection_notification_snapshot_matches(const DomSelection* s,
+                                                    DomSelectionDirection direction) {
+    if (!s || s->notified_range_count != s->range_count ||
+        s->notified_direction != direction) {
+        return false;
+    }
+    for (uint32_t i = 0; i < s->range_count; i++) {
+        const DomRange* range = s->ranges[i];
+        if (!range ||
+            s->notified_starts[i].node != range->start.node ||
+            s->notified_starts[i].offset != range->start.offset ||
+            s->notified_ends[i].node != range->end.node ||
+            s->notified_ends[i].offset != range->end.offset) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void selection_notification_snapshot_store(DomSelection* s,
+                                                  DomSelectionDirection direction) {
+    if (!s) return;
+    s->notified_range_count = s->range_count;
+    s->notified_direction = direction;
+    for (uint32_t i = 0; i < s->range_count; i++) {
+        const DomRange* range = s->ranges[i];
+        s->notified_starts[i] = range ? range->start : DomBoundary{NULL, 0};
+        s->notified_ends[i] = range ? range->end : DomBoundary{NULL, 0};
+    }
+}
+
 // Sync direction/is_collapsed from ranges[0]. Anchor/focus are derived from
 // ranges[0] + direction by the public accessors.
 static void sync_anchor_focus(DomSelection* s, bool forward) {
+    if (!s) return;
+    DomSelectionDirection direction = DOM_SEL_DIR_NONE;
     if (s->range_count == 0) {
-        s->direction = DOM_SEL_DIR_NONE;
-        notify_selection_changed(s);
-        if (s->state) selection_refresh_presentation(s->state);
-        return;
+        direction = DOM_SEL_DIR_NONE;
+    } else {
+        DomRange* r = s->ranges[0];
+        bool collapsed = dom_range_collapsed(r);
+        if (!collapsed) direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
     }
-    DomRange* r = s->ranges[0];
-    bool collapsed = dom_range_collapsed(r);
-    if (collapsed) s->direction = DOM_SEL_DIR_NONE;
-    else s->direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
 
-    notify_selection_changed(s);
+    bool changed = !selection_notification_snapshot_matches(s, direction);
+    s->direction = direction;
+    if (changed) {
+        selection_notification_snapshot_store(s, direction);
+        notify_selection_changed(s);
+    }
     if (s->state) selection_refresh_presentation(s->state);
 }
 

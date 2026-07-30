@@ -3370,6 +3370,8 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
     TSNode handler_node = ts_node_child_by_field_name(try_node, "handler", 7);
     if (!ts_node_is_null(handler_node)) {
         JsCatchNode* catch_clause = (JsCatchNode*)alloc_js_ast_node(tp, JS_AST_NODE_CATCH_CLAUSE, handler_node, sizeof(JsCatchNode));
+        JsScope* catch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+        js_scope_push(tp, catch_scope);
 
         // Get catch parameter (optional in modern JS)
         // Can be a simple identifier or a destructuring pattern ({msg} or [a, b])
@@ -3381,6 +3383,9 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
             } else {
                 catch_clause->param = build_js_identifier(tp, param_node);
             }
+            // The catch parameter owns the handler environment; building the
+            // body without this binding turns its local references into captures.
+            js_bind_pattern_names(tp, catch_clause->param, JS_VAR_LET);
         }
 
         // Get catch body
@@ -3391,6 +3396,7 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
 
         catch_clause->type = &TYPE_NULL;
         try_stmt->handler = (JsAstNode*)catch_clause;
+        js_scope_pop(tp);
     }
 
     // Get finally block (optional)

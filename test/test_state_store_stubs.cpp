@@ -4,6 +4,7 @@
 
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/template_registry.h"
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
@@ -75,6 +76,27 @@ extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* ba
 extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
     (void)base;
 }
+
+// render_map's retransform branch is not exercised by the standalone
+// StateStore target. Its runtime-only helpers must stay inert here because
+// this fixture intentionally has no Lambda execution context.
+void expand_list(List*, Arena*) {}
+
+extern "C" Context* eval_context_tls_runtime(void) {
+    return (Context*)context;
+}
+
+extern "C" bool lambda_root_frame_begin(LambdaRootFrame*, size_t) {
+    return false;
+}
+
+extern "C" uint64_t* lambda_root_frame_take_slot(LambdaRootFrame*) {
+    return NULL;
+}
+
+extern "C" void lambda_root_frame_end(LambdaRootFrame*) {}
+
+extern "C" void lambda_root_frame_overflow_error(void) {}
 
 extern "C" bool js_dom_option_is_selected(void* dom_elem) {
     DomElement* option = (DomElement*)dom_elem;

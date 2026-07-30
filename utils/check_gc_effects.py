@@ -39,8 +39,13 @@ SKIP_SOURCE_PARTS = {
 # or generated code.  Adding an entry is a security-relevant review action.
 VERIFIED_EXTERNAL_LEAVES = {
     "abort",
+    # Process configuration and teardown registration are C-runtime calls.
+    # They neither invoke a registered callback synchronously nor enter the
+    # Lambda heap, so they are safe leaves for a NO_GC import path.
+    "atexit",
     "d2it",
     "fmod",
+    "getenv",
     "isnan",
     "k2it",
     "l2it",
@@ -54,6 +59,7 @@ VERIFIED_EXTERNAL_LEAVES = {
     "mpd_qget_ssize",
     "mpd_to_sci",
     "strtod",
+    "strcmp",
     "u2it",
 }
 

@@ -1,0 +1,7 @@
+{
+  "name": "nested duplicate class names retain their lexical constructor and prototype",
+  "html": "test/html/js_duplicate_nested_class_bindings.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "validated|other:second|base"}
+  ]
+}

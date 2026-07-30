@@ -1,0 +1,19 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  const left = document.createElement("article");
+  const right = document.createElement("article");
+  left.setAttribute("data-kind", "note");
+  right.setAttribute("data-kind", "note");
+  left.textContent = "same child";
+  right.textContent = "same child";
+
+  const same = left.isEqualNode(left);
+  const equal = left.isEqualNode(right);
+  right.setAttribute("data-kind", "changed");
+  const distinct = left.isEqualNode(right);
+  document.getElementById("result").textContent =
+    `${same}|${equal}|${distinct}|${typeof left.isEqualNode}`;
+})();
+</script>

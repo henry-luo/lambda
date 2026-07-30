@@ -37,9 +37,12 @@ PUBLIC_HEADERS = {
     "lambda/lambda.h": "frozen-c2mir-compatibility",
     "lambda/lambda.hpp": "mixed-active-core-io-rt",
     "lambda/lambda-data.hpp": "mixed-active-core-rt",
-    "lambda/mark_reader.hpp": "core-candidate",
-    "lambda/mark_builder.hpp": "io-candidate",
-    "lambda/mark_editor.hpp": "io-candidate",
+    # Source regrouping moved the public Mark APIs into their owning modules;
+    # inventory their canonical paths so this report does not fail before
+    # evaluating the current module boundary.
+    "lambda/core/mark_reader.hpp": "core-candidate",
+    "lambda/io/mark_builder.hpp": "io-candidate",
+    "lambda/io/mark_editor.hpp": "io-candidate",
     "lambda/input/input.hpp": "io-candidate",
     "lambda/format/format.h": "io-candidate",
     "lambda/validator/validator.hpp": "rt-candidate",

@@ -532,8 +532,15 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             } else if (cls->name && var_id->name &&
                 (cls->name->len != var_id->name->len ||
                  strncmp(cls->name->chars, var_id->name->chars, cls->name->len) != 0)) {
-                // Names differ — find the just-collected class and set alias
-                JsClassEntry* ce = jm_find_class(mt, cls->name->chars, (int)cls->name->len);
+                // Minified bundles reuse inner class names; bind this alias to
+                // the exact AST entry instead of another same-named class.
+                JsClassEntry* ce = NULL;
+                for (int i = mt->class_count - 1; i >= 0; i--) {
+                    if (mt->class_entries[i].node == cls) {
+                        ce = &mt->class_entries[i];
+                        break;
+                    }
+                }
                 if (ce) {
                     ce->alias_name = var_id->name;
                     log_debug("js-mir: class '%.*s' aliased as '%.*s'",

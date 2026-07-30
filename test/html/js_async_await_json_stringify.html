@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  const target = document.getElementById("result");
+  const save = async () => ({ blocks: [{ text: "seed" }] });
+  const publish = async () => {
+    target.textContent = JSON.stringify(await save());
+  };
+  publish();
+})();
+</script>

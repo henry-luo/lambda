@@ -1,17 +1,17 @@
 # Radiant — Editing, Selection & DOM Ranges
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the 50-plus `inputType` intent taxonomy, the `editing_run_transaction` state machine, and — the load-bearing decision — the **C++/JS seam (Stage 4B)** where rich contenteditable input is routed to script and the native rich-text engine is retired. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the `inputType` intent taxonomy, and the one registered-action gate for `contenteditable`. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
 >
-> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/event.hpp` / `dom_range_resolver.cpp` (layout cache, hit-testing, selection rects), `radiant/event.hpp` / `editing.cpp` (`EditingSurface` + retired-engine Layer-A helpers), `radiant/event.hpp` / `editing_dispatch.cpp` (`editing_run_transaction`, the beforeinput/JS seam), `radiant/event.hpp` / `editing_intent.cpp` (`InputIntentType`), `radiant/event.hpp` / `editing_host.cpp` (contenteditable recognition), `radiant/event.hpp` / `editing_controller.cpp` (navigation/history/composition hooks), `radiant/event.hpp` / `editing_geometry.cpp` (caret rects, hit-test), `radiant/event.hpp` / `editing_target_range.cpp` (StaticRange target ranges), `radiant/event.hpp` / `clipboard.cpp` (multi-MIME store).
+> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/editing_dispatch.cpp` (prepared transaction and notification/action/notification gate), `radiant/editing_action_registry.cpp` (per-document action registry), `radiant/editing_dom_handler.cpp` (narrow DOM action), `radiant/editing_template_handler.cpp` (template adapter), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name. The historical design docs `vibe/radiant/Radiant_Design_Editing*.md` and `Radiant_Design_Selection.md` are rationale only and are explicitly marked phased-out.
 
 ---
 
 ## 1. Scope and the central decision
 
-The editing subsystem is a **WHATWG-aligned editing model** layered over the unified DOM/view tree, where a `DomText` *is* its own `ViewText` and a `DomElement` *is* its own `ViewElement` ([RAD_01](RAD_01_View_and_DOM_Model.md)). It resolves four editing surfaces uniformly — text form controls, `contenteditable`, and Lambda `data-editable` templates — through one `EditingSurface` abstraction, maps raw key/text/composition events to spec `inputType` intents, and dispatches them through a single transaction state machine.
+The editing subsystem is a **WHATWG-aligned editing model** layered over the unified DOM/view tree, where a `DomText` is its own `ViewText` and a `DomElement` is its own `ViewElement` ([RAD_01](RAD_01_View_and_DOM_Model.md)). It resolves text controls and standard `contenteditable` hosts through one `EditingSurface` abstraction, maps raw key/text/composition events to `inputType` intents, and routes every contenteditable edit through one transaction gate.
 
-The one decision that shapes everything else is **Stage 4B**: the native C++ rich-text engine has been retired. For any rich editing host, Radiant no longer mutates the DOM itself; it fires `beforeinput` to script (JS `addEventListener` and Lambda `on` handlers) and returns without native mutation. `contenteditable` is now a "pure routing flag." The native mutation path survives only for **form text controls**, which is the non-rich branch documented in [RAD_19 — Form Controls](RAD_19_Form_Controls.md). This split — rich is script-owned, form is native — is the recurring context for the rest of this document.
+The gate has a strict notification/action/notification contract. It resolves a canonical host and route, snapshots at most one per-document action handler, sends cancelable `beforeinput`, validates the monotonic mutation epoch, invokes the selected action only when allowed, verifies the observable outcome, then sends non-cancelable `input` only after a claim or change. `beforeinput` and `input` never select a handler or perform mutation themselves. A direct DOM host uses the deliberately narrow `dom-compat` action; a live Radiant template owner uses `radiant-template`. `data-editable` is not a routing signal. Form controls retain their separate value-store action between the same kind of notifications, as documented by [RAD_19](RAD_19_Form_Controls.md).
 
 ---
 
@@ -39,7 +39,7 @@ The atom is `struct DomBoundary { DomNode* node; uint32_t offset; }` (`event.hpp
 
 ## 3. Editing surfaces and hosts
 
-Raw input never touches a range directly; it is first resolved to an `EditingSurface` (`event.hpp`). `EditingSurfaceKind` (`event.hpp`) is `NONE`/`TEXT_CONTROL`/`CONTENTEDITABLE`/`LAMBDA_TEMPLATE`, and `EditingMode` (`event.hpp`) refines it (`RICH`, `PLAINTEXT_ONLY`, and the three text-control modes). `editing_surface_from_target`/`_from_focus` resolve a surface from a hit-tested view or the focused node; `editing_surface_is_rich`/`_is_text_control` (`event.hpp`) are the predicates the dispatcher branches on. The `target_in_false_island` bit flags a `contenteditable="false"` widget nested inside an editable host — input must no-op there even though the selection may cross the boundary.
+Raw input never touches a range directly; it is first resolved to an `EditingSurface` (`event.hpp`). `EditingSurfaceKind` is `NONE`/`TEXT_CONTROL`/`CONTENTEDITABLE`; `EditingMode` refines contenteditable to rich or `plaintext-only` and text controls to their value modes. `editing_surface_from_target`/`_from_focus` resolve a surface from a hit-tested view or the focused node; `editing_surface_is_rich`/`_is_text_control` are the predicates the dispatcher branches on. The `target_in_false_island` bit flags a `contenteditable="false"` widget nested inside an editable host — input must no-op there even though the selection may cross the boundary.
 
 Recognition of `contenteditable` is centralized in `event.hpp` / `editing_host.cpp`: `editing_host_lookup` (`event.hpp`) walks ancestors for the nearest `contenteditable="true"|""|"plaintext-only"` element and reports its `EditingHost::mode` (Rich vs PlaintextOnly) and the `="false"` island flag. This is deliberately "one concept, one resolver" (`event.hpp`) — it replaced ad-hoc `contenteditable` reads formerly scattered across `event.cpp` and `dom_range.cpp`. The IDL surface (`html_element_get_contentEditable`, `_get_isContentEditable`, `_set_contentEditable`, `event.hpp`) reflects the HTML spec attribute, including the `SyntaxError`-on-bad-value setter contract.
 
@@ -55,23 +55,15 @@ The carrier `struct InputIntent` (`event.hpp`, aliased `EditingIntent`) bundles 
 
 ---
 
-## 5. The transaction state machine and the C++/JS seam
+## 5. The contenteditable transaction gate
 
-<img alt="Intent to dispatch flow showing the Stage 4B native-apply-bypassed branch" src="diagram/rad18_dispatch_seam.svg" width="627">
+<img alt="Prepared contenteditable transaction passes through one selected action" src="diagram/rad18_dispatch_seam.svg" width="720">
 
-`editing_run_transaction` (`editing_dispatch.cpp:805`) is the unified state machine, driven by an `EditingTransaction` (`event.hpp`) that bundles the surface, intent, the decoupling `EditingDispatchHooks`, and an optional native `mutate` callback. It first normalizes the transaction, then reaches the decision point.
+`editing_run_contenteditable_transaction` in `editing_dispatch.cpp` uses `EditingPreparedTransaction` and `EditingTransactionResult` instead of ambiguous handled/mutated booleans. The prepared value owns intent payload, immutable target ranges, a selection snapshot, a generation-bearing host reference, route, registry generation, and selected handler identity. The result records cancellation, mutation before notification, action invocation/claim, DOM/model/selection outcome, post-input delivery, unsupported fall-through, and failure.
 
-### 5.1 The seam — `editing_dispatch.cpp:832-860`
+The order is fixed: canonical host and route → target/selection snapshot → one registry snapshot → epoch E0 → cancelable `beforeinput` → epoch E1 → action (only if uncanceled and E0 equals E1) → epoch E2/outcome validation → non-cancelable `input` on claim/change. A listener that mutates without canceling is a contract violation; the action and synthetic `input` do not run. Registry mutations during notification are deferred by dispatch-depth tombstones, so the pre-notification snapshot remains safe and deterministic.
 
-If `editing_surface_is_rich(&current_surface)` **and** `input_intent_is_dispatchable(intent->type)`, the transaction takes the Stage 4B path: it calls `editing_dispatch_beforeinput_ex` to fire `beforeinput` to the script handlers, then **returns `true` with `out_mutated = false`** — logging `"script-managed surface — routed ... to script, native apply bypassed"` (`editing_dispatch.cpp:852-855`). No native mutation runs. The comment block (`editing_dispatch.cpp:832-841`) is explicit that the native rich-edit behavior layer "is retired and never runs," and that Phase 5 made this unconditional (Phase 3 had gated it on a `data-script-edit` attribute). This is **the C++/JS seam**: `EditingDispatchHooks` (`event.hpp`) is three function pointers — `dispatch_input_event` (JS `InputEvent`), `dispatch_lambda_event` (Lambda `on`), and `copy_selection` — so the core editing code carries no direct dependency on the JS or Lambda runtimes; the bridge in [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) plugs in through them.
-
-### 5.2 The native branch (form controls / non-dispatchable)
-
-When the surface is not rich (or the intent is non-dispatchable), the transaction runs the full native machine (`editing_dispatch.cpp:862-1011`): it computes StaticRange target ranges, snapshots the selection, logs the transaction, and drives an `SmTransitionGuard` sequence in the `SM_FAMILY_RICH_EDIT` family — BEGIN → BEFOREINPUT → (mutate via `tx.mutate`) → SET_SELECTION → INPUT → COMMIT. `beforeinput` is dispatched through `editing_dispatch_beforeinput_ex` (`editing_dispatch.cpp:1022`); a `preventDefault` aborts the native mutation. A subtle Stage-4B guard sits at `editing_dispatch.cpp:901-920`: if a rich host's `beforeinput` was prevented (JS applied the edit and may have reconciled/detached the leaf view this transaction referenced), the transaction re-anchors to the surviving editing host (`editing_surface_from_target` on the host owner) so the target-range invariant keeps pointing at a live surface. The re-entrant window flag `rich_transaction_in_script_dispatch` (`editing_dispatch.cpp:1077-1085`) suppresses target-range asserts while the script mid-reconciles the subtree.
-
-The actual entry points are in `event.cpp`, which builds the transaction from GLFW key/text/paste events and calls `editing_run_transaction`, or the form variants `editing_dispatch_form_beforeinput`/`_form_input` (`event.hpp`) that share intent logging and beforeinput/input ordering while keeping value-store mutation in the form path.
-
-The retired engine leaves only two **Layer-A helpers** in `editing.cpp:123`: `editing_rich_find_text_descendant` (backs click-to-place-caret) and `editing_rich_is_composition_intent` (IME classification). Both are pure navigation/classification, not editing apply.
+The built-ins deliberately have disjoint routes. `dom-compat` handles only text insertion/replacement, selected text-run deletion, one text-run backward/forward deletion, and provisional composition. Structural line/paragraph, format, history, and first-gate clipboard/drop intents return `PASS`; editors own those commands. `radiant-template` invokes the existing template editing/retransform machinery and reports model reconciliation without pretending that handler existence was a claim. `event.cpp` runs the entire gate inside one retained JS dispatch batch, so MutationObserver delivery occurs after post-action `input`, not between action and notification.
 
 ---
 
@@ -95,7 +87,7 @@ Because the DOM *is* the layout tree, every `DomText` carries a `TextRect` chain
 
 ## 8. Clipboard
 
-`event.hpp` / `clipboard.cpp` is a global multi-MIME store (`g_store`, `clipboard.cpp:48`) serving both the synchronous DOM clipboard-event path and the async `navigator.clipboard` API. A `ClipboardItem` (`event.hpp`) is a set of alternative `ClipboardEntry` representations (e.g. `text/plain` + `text/html`) of one payload. The store writes/reads text, MIME, HTML, and full multi-MIME item lists (`event.hpp`), gated by `ClipboardPermission` state for `navigator.permissions.query`. The backend is a `ClipboardBackend` vtable (`event.hpp`): only two exist — the in-memory backend for tests/headless (`clipboard_backend_inmemory`, `clipboard.cpp:169`) and a GLFW plain-text bridge (`clipboard_backend_glfw`, compiled only under `RADIANT_CLIPBOARD_GLFW`, `clipboard.cpp:194-230`) that falls back to the in-memory backend when GLFW is absent (`:232`). Per-OS rich-MIME backends (NSPasteboard/Win32/X11) are a later phase. `clipboard_store_sanitize` (`clipboard.cpp`, declared `event.hpp`) is a near-no-op that only strips `<script>`/`<style>` for `text/html`. Cut/copy/paste orchestration lives in `event.cpp` via the `copy_selection` hook and the `deleteByCut`/`insertFromPaste` intents; `editing_dispatch_beforeinput_ex` invokes `copy_selection` for `INPUT_INTENT_DELETE_BY_CUT` before dispatch (`editing_dispatch.cpp:1061-1066`).
+`event.hpp` / `clipboard.cpp` is a global multi-MIME store serving both the synchronous DOM clipboard-event path and the async `navigator.clipboard` API. A `ClipboardItem` is a set of alternative `ClipboardEntry` representations (for example `text/plain` plus `text/html`) of one payload. The store writes/reads text, MIME, HTML, and full multi-MIME item lists, gated by `ClipboardPermission` state. The first contenteditable gate exposes the event payload but intentionally does not perform a general native cut, paste, or drop mutation; a selected editor or template action owns those operations. Form controls retain their value-specific paste action.
 
 ---
 
@@ -113,7 +105,7 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 4. **Pattern-regex validation TODO (F5).** Form constraint validation `te_validate` cannot enforce `pattern="..."` without a lazy-compiled regex. (Detail belongs to [RAD_19](RAD_19_Form_Controls.md), noted here because it is a spec-coverage gap in the editing surface.)
 5. **LTR-only `Selection.modify`.** Direction mapping assumes LTR and word granularity uses a simplistic alphanumeric-vs-other classifier rather than a Unicode word-segmentation algorithm — RTL and complex-script editing will misbehave.
 6. **Single-range selection by design.** `DOM_SELECTION_MAX_RANGES == 1`; extra `addRange()` calls are silently ignored. This matches Chromium but is not the full spec, so multi-range selection WPTs cannot pass.
-7. **In-flux native-vs-JS mental model.** Two models coexist — rich is script-owned (Stage 4B), form is native — and the code carries many `retired`/`phased out`/`Stage 4B` markers. The historical design docs remain on disk but are marked dead, which invites confusion.
+7. **Editor matrix boundary.** CodeMirror, ProseMirror light DOM, and Editor.js have pinned offline authoritative-state probes. The capability manifest is the source of truth for their supported configurations and explicit exclusions, including Editor.js ordinary paragraph paste, which upstream delegates to browser-native structural editing and this gate intentionally does not restore. An editor render or one typing probe is not treated as blanket compatibility.
 
 ---
 
@@ -123,8 +115,10 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 |---|---|
 | `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
 | `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, and glyph-precise X resolvers. |
-| `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and the surviving Layer-A helpers. |
-| `radiant/event.hpp` / `editing_dispatch.cpp` | `editing_run_transaction`, the beforeinput/JS seam, dispatch hooks, and form dispatch variants. |
+| `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and canonical-host helpers. |
+| `radiant/event.hpp` / `editing_dispatch.cpp` | Prepared/result contracts and the contenteditable notification/action/notification gate. |
+| `radiant/editing_action_registry.cpp` | Per-document deterministic action selection, snapshots, and tombstone lifetime. |
+| `radiant/editing_dom_handler.cpp` / `editing_template_handler.cpp` | The narrow DOM fallback and the template model-reconciliation action. |
 | `radiant/event.hpp` / `editing_intent.cpp` | Input-intent taxonomy and key/text/composition mapping. |
 | `radiant/event.hpp` / `editing_host.cpp` | Centralized `contenteditable` recognition, `="false"` islands, and the `contentEditable` IDL. |
 | `radiant/event.hpp` / `editing_controller.cpp` | Rich navigation, history, composition, and drag-autoscroll hooks. |
@@ -136,7 +130,7 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 
 - [RAD_00 — Overview](RAD_00_Overview.md) — the set index and architecture.
 - [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) — the unified DOM/view tree these ranges point into, and the source-position bridge to the Lambda editor doc tree.
-- [RAD_15 — Events & Input](RAD_15_Events_Input.md) — the GLFW key/text/composition/paste pipeline that produces the intents fed to `editing_run_transaction`.
+- [RAD_15 — Events & Input](RAD_15_Events_Input.md) — the GLFW key/text/composition/paste pipeline that produces the intents fed to the common gate.
 - [RAD_17 — Interaction State](RAD_17_Interaction_State.md) — `DocState`/StateStore, canonical selection accessors, and the presentation-only geometry cache.
 - [RAD_19 — Form Controls](RAD_19_Form_Controls.md) — the native (non-rich) text-control editing path: value/selection IDL, undo/redo, IME, constraint validation, caret/selection rendering.
-- [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) — the JS/Lambda `beforeinput` handlers that own rich-host editing after the Stage 4B seam.
+- [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) — the JS/Lambda event bridge and template action context.

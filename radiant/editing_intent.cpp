@@ -33,6 +33,36 @@ void input_intent_dispose(InputIntent* intent) {
     intent->owned_html_data = nullptr;
     intent->data = nullptr;
     intent->html_data = nullptr;
+    intent->data_mime = nullptr;
+}
+
+bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
+    if (!source || !destination) return false;
+    input_intent_dispose(destination);
+    destination->type = source->type;
+    destination->key = source->key;
+    destination->mods = source->mods;
+    destination->is_composing = source->is_composing;
+    destination->composition_caret = source->composition_caret;
+    if (source->data) {
+        destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
+        if (!destination->owned_data) goto fail;
+        destination->data = destination->owned_data;
+    }
+    if (source->html_data) {
+        destination->owned_html_data = mem_strdup(source->html_data, MEM_CAT_TEMP);
+        if (!destination->owned_html_data) goto fail;
+        destination->html_data = destination->owned_html_data;
+    }
+    destination->data_mime = source->data_mime;
+    return true;
+
+fail:
+    // The prepared transaction owns its payload across arbitrary listeners;
+    // do not leave a half-copied DataTransfer snapshot reachable on failure.
+    input_intent_dispose(destination);
+    destination->type = INPUT_INTENT_NONE;
+    return false;
 }
 
 static void input_intent_reset(InputIntent* intent) {

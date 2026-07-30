@@ -1,0 +1,9 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+  const regex = /\s*(?=\b|\W|$)/y;
+  const subject = "block+";
+  regex.lastIndex = 1;
+  const match = regex.exec(subject);
+  document.getElementById("result").textContent = `${regex.source}|${regex.flags}|${regex.sticky}|${match === null ? "null" : match.index}:${regex.lastIndex}`;
+</script>

@@ -24,6 +24,7 @@ typedef struct RenderMapEntry {
     Item result_node;          // the result node produced by this template invocation
     Item parent_result;        // parent node in the result tree (ItemNull if root)
     int child_index;           // position within parent's children (-1 if unknown)
+    int child_count;           // rendered children occupying that parent range
     bool dirty;                // needs re-transformation
 } RenderMapEntry;
 
@@ -36,6 +37,11 @@ void render_map_destroy(void);
 // Record a source→result mapping (called during apply())
 void render_map_record(Item source_item, const char* template_ref,
                        Item result_node, Item parent_result, int child_index);
+
+// Record where a content-list template result was flattened into a parent
+// result. Called by list_push after it has appended the fragment's children.
+void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,
+                                     int child_index, int child_count);
 
 // Mark an entry dirty by key (called after state/model mutation)
 void render_map_mark_dirty(Item source_item, const char* template_ref);
@@ -57,6 +63,7 @@ typedef struct RetransformResult {
     Item new_result;        // new Lambda result element (after re-execution)
     Item old_result;        // old Lambda result element (before re-execution)
     int child_index;        // position within parent's children
+    int child_count;        // number of old rendered children replaced
     const char* template_ref;
 } RetransformResult;
 

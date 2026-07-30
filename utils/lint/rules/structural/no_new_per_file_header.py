@@ -24,6 +24,10 @@ ALLOW_LIST = {
     "render_glyph_run_raster_lower.hpp",
     "state_store_internal.hpp",
     "event_sim.hpp",
+    # These are the public Radiant network-provider seams introduced by the
+    # static-module split, not private source-file mirrors.
+    "network_integration.h",
+    "resource_loaders.h",
 }
 
 HEADER_COUNT_MAX = 24

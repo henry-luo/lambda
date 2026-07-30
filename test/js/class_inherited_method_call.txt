@@ -1,0 +1,13 @@
+emit:close
+emit:expression
+emit:minified
+emit:alias
+toolbox-close
+1
+true
+true
+true
+true
+true
+true
+safe

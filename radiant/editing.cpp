@@ -6,10 +6,6 @@
 
 #include <strings.h>
 
-static bool element_has_data_editable(DomElement* elem) {
-    return elem && elem->has_attribute("data-editable");
-}
-
 static bool element_is_password_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name || strcasecmp(elem->tag_name, "input") != 0) {
         return false;
@@ -64,19 +60,6 @@ bool editing_surface_from_target(View* target, EditingSurface* out) {
             return true;
         }
 
-        if (element_has_data_editable(elem)) {
-            if (out) {
-                out->kind = EDIT_SURFACE_LAMBDA_TEMPLATE;
-                out->mode = EDIT_MODE_RICH;
-                out->owner = elem;
-                out->view = target;
-                out->readonly = false;
-                out->disabled = false;
-                out->target_in_false_island = false;
-            }
-            return true;
-        }
-
         EditingHost host;
         if (editing_host_lookup(elem, &host)) {
             if (out) {
@@ -106,17 +89,16 @@ bool editing_surface_from_focus(DocState* state, EditingSurface* out) {
 }
 
 bool editing_surface_is_rich(const EditingSurface* surface) {
-    return surface &&
-        (surface->kind == EDIT_SURFACE_CONTENTEDITABLE ||
-         surface->kind == EDIT_SURFACE_LAMBDA_TEMPLATE);
+    return surface && surface->kind == EDIT_SURFACE_CONTENTEDITABLE;
 }
 
 bool editing_surface_is_text_control(const EditingSurface* surface) {
     return surface && surface->kind == EDIT_SURFACE_TEXT_CONTROL;
 }
 
-// Layer-A helpers retained from the retired editing_rich_transaction.cpp.
-DomText* editing_rich_find_text_descendant(DomNode* node, bool last) {
+// Target-range normalization and fallback mutation must agree on which nested
+// text node represents an element boundary.
+DomText* editing_find_text_descendant(DomNode* node, bool last) {
     if (!node) return nullptr;
     if (node->is_text()) return lam::dom_require_text(node);
     if (!node->is_element()) return nullptr;
@@ -124,7 +106,7 @@ DomText* editing_rich_find_text_descendant(DomNode* node, bool last) {
     DomElement* elem = lam::dom_require_element(node);
     DomText* found = nullptr;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        DomText* text = editing_rich_find_text_descendant(child, last);
+        DomText* text = editing_find_text_descendant(child, last);
         if (!text) continue;
         if (!last) return text;
         found = text;
@@ -137,7 +119,6 @@ const char* editing_surface_kind_name(EditingSurfaceKind kind) {
         case EDIT_SURFACE_NONE: return "none";
         case EDIT_SURFACE_TEXT_CONTROL: return "text_control";
         case EDIT_SURFACE_CONTENTEDITABLE: return "contenteditable";
-        case EDIT_SURFACE_LAMBDA_TEMPLATE: return "lambda_template";
         default: return "unknown";
     }
 }

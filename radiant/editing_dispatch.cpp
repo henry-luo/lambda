@@ -1,6 +1,7 @@
 #include "event.hpp"
 
 #include "view.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lib/log.h"
 
 #include <string.h>
@@ -48,139 +49,6 @@ static bool editing_intent_needs_target_range_validation(
     }
 }
 
-static bool editing_history_intent_can_coalesce(const EditingIntent* intent) {
-    return intent && intent->type == INPUT_INTENT_INSERT_TEXT;
-}
-
-static bool editing_history_intent_is_recordable(const EditingIntent* intent) {
-    if (!intent) return false;
-    switch (intent->type) {
-        case INPUT_INTENT_NONE:
-        case INPUT_INTENT_COMPOSITION_START:
-        case INPUT_INTENT_INSERT_COMPOSITION_TEXT:
-        case INPUT_INTENT_INSERT_IMAGE:
-        case INPUT_INTENT_FORMAT_UNLINK:
-        case INPUT_INTENT_FORMAT_BOLD:
-        case INPUT_INTENT_FORMAT_ITALIC:
-        case INPUT_INTENT_FORMAT_UNDERLINE:
-        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
-        case INPUT_INTENT_FORMAT_SUBSCRIPT:
-        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
-        case INPUT_INTENT_FORMAT_FORE_COLOR:
-        case INPUT_INTENT_FORMAT_BACK_COLOR:
-        case INPUT_INTENT_FORMAT_HILITE_COLOR:
-        case INPUT_INTENT_FORMAT_FONT_NAME:
-        case INPUT_INTENT_FORMAT_FONT_SIZE:
-        case INPUT_INTENT_FORMAT_REMOVE:
-        case INPUT_INTENT_FORMAT_BLOCK:
-        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
-        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
-        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
-        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
-        case INPUT_INTENT_FORMAT_ORDERED_LIST:
-        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
-        case INPUT_INTENT_FORMAT_INDENT:
-        case INPUT_INTENT_FORMAT_OUTDENT:
-        case INPUT_INTENT_SELECT_ALL:
-        case INPUT_INTENT_HISTORY_UNDO:
-        case INPUT_INTENT_HISTORY_REDO:
-            return false;
-        default:
-            return true;
-    }
-}
-
-static bool editing_history_intent_is_boundary(const EditingIntent* intent) {
-    if (!intent) return false;
-    switch (intent->type) {
-        case INPUT_INTENT_INSERT_PARAGRAPH:
-        case INPUT_INTENT_INSERT_LINE_BREAK:
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:
-        case INPUT_INTENT_INSERT_HORIZONTAL_RULE:
-        case INPUT_INTENT_INSERT_LINK:
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
-        case INPUT_INTENT_INSERT_FROM_YANK:
-        case INPUT_INTENT_INSERT_FROM_DROP:
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
-        case INPUT_INTENT_DELETE_WORD_BACKWARD:
-        case INPUT_INTENT_DELETE_WORD_FORWARD:
-        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
-        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:
-        case INPUT_INTENT_DELETE_BY_CUT:
-        case INPUT_INTENT_DELETE_BY_DRAG:
-        case INPUT_INTENT_INSERT_FROM_COMPOSITION:
-        case INPUT_INTENT_DELETE_COMPOSITION_TEXT:
-        case INPUT_INTENT_HISTORY_UNDO:
-        case INPUT_INTENT_HISTORY_REDO:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static const char* editing_history_boundary_reason(const EditingIntent* intent) {
-    if (!intent) return "none";
-    switch (intent->type) {
-        case INPUT_INTENT_INSERT_PARAGRAPH:
-        case INPUT_INTENT_INSERT_LINE_BREAK:
-            return "enter";
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
-        case INPUT_INTENT_INSERT_FROM_YANK:
-            return "paste";
-        case INPUT_INTENT_INSERT_FROM_DROP:
-            return "drop";
-        case INPUT_INTENT_DELETE_BY_CUT:
-            return "cut";
-        case INPUT_INTENT_DELETE_BY_DRAG:
-            return "drag";
-        case INPUT_INTENT_INSERT_FROM_COMPOSITION:
-        case INPUT_INTENT_DELETE_COMPOSITION_TEXT:
-            return "ime_commit";
-        case INPUT_INTENT_HISTORY_UNDO:
-        case INPUT_INTENT_HISTORY_REDO:
-            return "history";
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:
-        case INPUT_INTENT_INSERT_HORIZONTAL_RULE:
-        case INPUT_INTENT_INSERT_LINK:
-            return "structural";
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
-        case INPUT_INTENT_DELETE_WORD_BACKWARD:
-        case INPUT_INTENT_DELETE_WORD_FORWARD:
-        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
-        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:
-            return "delete";
-        default:
-            return "none";
-    }
-}
-
-static const char* editing_transaction_transfer_kind(
-        const EditingIntent* intent) {
-    if (!intent) return "none";
-    switch (intent->type) {
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
-        case INPUT_INTENT_INSERT_FROM_YANK:
-            return "paste";
-        case INPUT_INTENT_INSERT_FROM_DROP:
-            return "drop";
-        case INPUT_INTENT_DELETE_BY_CUT:
-            return "cut";
-        case INPUT_INTENT_DELETE_BY_DRAG:
-            return "drag";
-        default:
-            return "none";
-    }
-}
-
 static bool editing_dispatch_plaintext_filters_payload(
         const EditingIntent* intent) {
     if (!intent) return false;
@@ -220,20 +88,6 @@ static bool editing_dispatch_plaintext_normalize_intent(
     return changed;
 }
 
-static bool editing_dispatch_normalize_transaction(
-        const EditingTransaction* tx,
-        EditingTransaction* normalized_tx,
-        EditingIntent* normalized_intent) {
-    if (!tx || !normalized_tx || !normalized_intent) return false;
-    if (!editing_dispatch_plaintext_normalize_intent(tx->surface, tx->intent,
-                                                     normalized_intent)) {
-        return false;
-    }
-    *normalized_tx = *tx;
-    normalized_tx->intent = normalized_intent;
-    return true;
-}
-
 static bool editing_dispatch_boundary_in_false_island(
         const EditingSurface* surface,
         const DomBoundary* boundary) {
@@ -251,19 +105,6 @@ struct EditingTargetRangeStatus {
     bool valid;
     uint32_t count;
     EditingTargetRange ranges[4];
-};
-
-struct EditingSelectionSnapshot {
-    EditingSelectionKind kind;
-    DomSelectionDirection direction;
-    uint32_t mutation_seq;
-    bool collapsed;
-    uint32_t range_count;
-    DomBoundary anchor;
-    DomBoundary focus;
-    DomElement* control;
-    uint32_t start_u16;
-    uint32_t end_u16;
 };
 
 static EditingTargetRangeStatus editing_dispatch_target_range_status(
@@ -296,7 +137,8 @@ static EditingTargetRangeStatus editing_dispatch_target_range_status(
     return status;
 }
 
-static EditingSelectionSnapshot editing_dispatch_selection_snapshot(DocState* state) {
+static EditingSelectionSnapshot editing_dispatch_selection_snapshot(
+        DocState* state, const EditingSurface* surface) {
     EditingSelectionSnapshot snapshot;
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.kind = EDIT_SEL_NONE;
@@ -304,7 +146,8 @@ static EditingSelectionSnapshot editing_dispatch_selection_snapshot(DocState* st
     snapshot.mutation_seq = state ? state->selection_mutation_seq : 0;
 
     if (!state) return snapshot;
-    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+    bool rich_surface = editing_surface_is_rich(surface);
+    if (!rich_surface && state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
         snapshot.kind = EDIT_SEL_TEXT_CONTROL;
         snapshot.direction = state->sel.direction;
         snapshot.mutation_seq = state->sel.mutation_seq;
@@ -316,6 +159,10 @@ static EditingSelectionSnapshot editing_dispatch_selection_snapshot(DocState* st
         return snapshot;
     }
 
+    // A script-owned editor can keep auxiliary form controls (such as a
+    // toolbar search field) alive while focus remains in its contenteditable
+    // host. Rich transactions must snapshot their DOM range, never that
+    // unrelated text-control projection.
     DomSelection* selection = state->dom_selection;
     if (!selection || selection->range_count == 0) {
         return snapshot;
@@ -354,164 +201,6 @@ struct EditingTargetRangeScope {
         evcon->editing_target_range_count = previous_count;
     }
 };
-
-static void editing_dispatch_clear_rich_target_ranges(DocState* state) {
-    if (!state) return;
-    state->editing.rich_transaction_target_ranges_active = false;
-    state->editing.rich_transaction_target_ranges_required = false;
-    state->editing.rich_transaction_target_ranges_valid = true;
-    state->editing.rich_transaction_input_type = (uint32_t)INPUT_INTENT_NONE;
-    state->editing.rich_transaction_selection_seq = 0;
-    state->editing.rich_transaction_target_range_count = 0;
-    memset(state->editing.rich_transaction_target_ranges, 0,
-           sizeof(state->editing.rich_transaction_target_ranges));
-}
-
-static void editing_dispatch_set_rich_target_ranges(
-        DocState* state,
-        const EditingTargetRangeStatus* status,
-        const EditingIntent* intent) {
-    if (!state) return;
-    if (!status) {
-        editing_dispatch_clear_rich_target_ranges(state);
-        return;
-    }
-
-    state->editing.rich_transaction_target_ranges_active = true;
-    state->editing.rich_transaction_target_ranges_required = status->required;
-    state->editing.rich_transaction_target_ranges_valid = status->valid;
-    state->editing.rich_transaction_input_type =
-        intent ? (uint32_t)intent->type : (uint32_t)INPUT_INTENT_NONE;
-    state->editing.rich_transaction_selection_seq =
-        state->selection_mutation_seq;
-    uint32_t count = status->count;
-    if (count > 4) count = 4;
-    state->editing.rich_transaction_target_range_count = count;
-    memset(state->editing.rich_transaction_target_ranges, 0,
-           sizeof(state->editing.rich_transaction_target_ranges));
-    for (uint32_t i = 0; i < count; i++) {
-        state->editing.rich_transaction_target_ranges[i].start =
-            status->ranges[i].start;
-        state->editing.rich_transaction_target_ranges[i].end =
-            status->ranges[i].end;
-    }
-}
-
-static void editing_dispatch_set_rich_phase(DocState* state,
-                                            EditingRichTransactionPhase phase,
-                                            View* target) {
-    if (!state) return;
-    state->editing.rich_transaction_phase = phase;
-    state->editing.rich_transaction_target =
-        phase == EDITING_RICH_TX_IDLE ? nullptr : target;
-    if (phase == EDITING_RICH_TX_IDLE) {
-        editing_dispatch_clear_rich_target_ranges(state);
-    }
-}
-
-static void editing_dispatch_commit_phase(DocState* state,
-                                          SmEvent event,
-                                          View* target,
-                                          EditingRichTransactionPhase phase,
-                                          uint32_t action,
-                                          const char* context) {
-    if (!state) return;
-    SmTransitionGuard phase_guard(state, SM_FAMILY_RICH_EDIT, event, target);
-    if (action != SM_ACT_NONE) {
-        sm_observe_action(state, action);
-    }
-    editing_dispatch_set_rich_phase(state, phase, target);
-    phase_guard.commit();
-    radiant_state_assert_valid(state, context);
-}
-
-static bool editing_dispatch_surface_same(const EditingSurface* a,
-                                          const EditingSurface* b) {
-    return a && b &&
-        a->kind == b->kind &&
-        a->mode == b->mode &&
-        a->owner == b->owner &&
-        a->view == b->view;
-}
-
-static bool editing_dispatch_surface_contains_dom_boundary(
-        const EditingSurface* surface,
-        const DomBoundary* boundary) {
-    if (!surface || !boundary || !boundary->node) return false;
-
-    EditingBoundary edit_boundary;
-    editing_boundary_clear(&edit_boundary);
-    edit_boundary.kind = EDITING_BOUNDARY_DOM;
-    edit_boundary.surface = *surface;
-    edit_boundary.dom = *boundary;
-    edit_boundary.view = static_cast<View*>(boundary->node);
-    return editing_geometry_surface_contains_boundary(surface, &edit_boundary);
-}
-
-static bool editing_dispatch_live_surface_from_selection(DocState* state,
-                                                         EditingSurface* out) {
-    if (out) editing_surface_clear(out);
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0) {
-        return false;
-    }
-
-    DomSelection* selection = state->dom_selection;
-    DomBoundary anchor = dom_selection_anchor_boundary(selection);
-    DomBoundary focus = dom_selection_focus_boundary(selection);
-    DomBoundary target = focus.node ? focus : anchor;
-    if (!target.node) return false;
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(static_cast<View*>(target.node), &surface) ||
-        !editing_surface_is_rich(&surface) ||
-        surface.target_in_false_island) {
-        return false;
-    }
-    if (!editing_dispatch_surface_contains_dom_boundary(&surface, &anchor) ||
-        !editing_dispatch_surface_contains_dom_boundary(&surface, &focus)) {
-        return false;
-    }
-
-    if (out) *out = surface;
-    return true;
-}
-
-static bool editing_dispatch_sync_rich_transaction_to_selection(
-        DocState* state,
-        EditingSurface* surface,
-        View** tx_target) {
-    if (!state || !surface || !tx_target ||
-        !editing_surface_is_rich(surface)) {
-        return false;
-    }
-
-    EditingSurface live_surface;
-    if (!editing_dispatch_live_surface_from_selection(state, &live_surface)) {
-        return false;
-    }
-    if (editing_dispatch_surface_same(surface, &live_surface) &&
-        *tx_target == live_surface.view) {
-        return false;
-    }
-
-    *surface = live_surface;
-    *tx_target = live_surface.view;
-    editing_interaction_set_active_surface(state, &live_surface);
-    if (state->editing.rich_transaction_phase != EDITING_RICH_TX_IDLE) {
-        state->editing.rich_transaction_target = live_surface.view;
-    }
-    log_debug("editing_dispatch: synced rich transaction target after selection handoff");
-    return true;
-}
-
-static bool editing_dispatch_target_ranges_are_valid(DocState* state,
-                                                     const EditingSurface* surface,
-                                                     const EditingIntent* intent) {
-    EditingTargetRangeStatus status =
-        editing_dispatch_target_range_status(state, surface, intent);
-    return status.valid;
-}
 
 static void editing_log_write_surface(JsonWriter* w,
                                       const EditingSurface* surface) {
@@ -614,27 +303,6 @@ static void editing_log_write_selection(JsonWriter* w,
     jw_obj_end(w);
 }
 
-static void editing_log_write_history_metadata(JsonWriter* w,
-                                               const EditingSurface* surface,
-                                               const EditingIntent* intent) {
-    bool can_coalesce = editing_history_intent_can_coalesce(intent);
-    bool is_boundary = editing_history_intent_is_boundary(intent);
-    jw_key(w, "history");
-    jw_obj_begin(w);
-        jw_kv_str(w, "owned_by",
-                  editing_surface_is_text_control(surface) ? "radiant" : "consumer");
-        jw_kv_bool(w, "owned_by_form",
-                   editing_surface_is_text_control(surface));
-        jw_kv_bool(w, "recordable",
-                   editing_history_intent_is_recordable(intent));
-        jw_kv_bool(w, "history_boundary", is_boundary);
-        jw_kv_str(w, "boundary_reason",
-                  editing_history_boundary_reason(intent));
-        jw_kv_bool(w, "coalescable", can_coalesce);
-        jw_kv_str(w, "coalesce_key", can_coalesce ? "insertText" : "");
-    jw_obj_end(w);
-}
-
 static bool editing_selection_snapshot_changed(
         const EditingSelectionSnapshot* before,
         const EditingSelectionSnapshot* after) {
@@ -653,66 +321,321 @@ static bool editing_selection_snapshot_changed(
         before->control != after->control;
 }
 
-static void editing_dispatch_commit_visual_invalidation(
-        EventContext* evcon,
-        DocState* state,
-        const EditingTransaction* tx) {
-    if (!state || !tx) return;
-    if (tx->mutation_invalidates_layout) {
-        doc_state_request_reflow(state);
-    }
-    if (tx->mutation_invalidates_layout || tx->mutation_invalidates_paint) {
-        doc_state_request_repaint(state);
-        if (evcon) evcon->need_repaint = true;
+static const char* editing_log_route_name(EditingRouteKind route) {
+    switch (route) {
+        case EDITING_ROUTE_DOM_SCRIPT: return "dom_script";
+        case EDITING_ROUTE_RADIANT_TEMPLATE: return "radiant_template";
+        case EDITING_ROUTE_NONE:
+        default: return "none";
     }
 }
 
-static void editing_log_write_transaction_summary(
-        JsonWriter* w,
-        const EditingSurface* surface,
-        const EditingIntent* intent,
+static void editing_log_contenteditable_result(
+        EventContext* evcon, const EditingPreparedTransaction* prepared,
         const EditingTargetRangeStatus* target_ranges,
-        const EditingSelectionSnapshot* selection_before,
-        const EditingSelectionSnapshot* selection_after,
-        bool prevented,
-        bool lambda_handled,
-        bool mutated,
-        bool committed) {
-    bool redacted = editing_log_redact(surface);
-    jw_key(w, "summary");
-    jw_obj_begin(w);
-        jw_kv_bool(w, "beforeinput_prevented", prevented);
-        jw_kv_bool(w, "lambda_handled", lambda_handled);
-        jw_kv_bool(w, "dom_mutated", mutated);
-        jw_kv_bool(w, "input_event_dispatched", committed);
-        jw_kv_bool(w, "selection_changed",
-                   editing_selection_snapshot_changed(selection_before,
-                                                      selection_after));
-        jw_kv_bool(w, "target_ranges_valid",
-                   target_ranges ? target_ranges->valid : true);
-        jw_kv_uint(w, "target_range_count",
-                   target_ranges ? target_ranges->count : 0);
-        jw_kv_bool(w, "is_composing",
-                   intent ? intent->is_composing : false);
-        jw_kv_str(w, "transfer_kind",
-                  editing_transaction_transfer_kind(intent));
-        jw_kv_str(w, "transfer_mime",
-                  redacted || !intent || !intent->data_mime
-                      ? ""
-                      : intent->data_mime);
-        jw_kv_uint(w, "transfer_text_len",
-                   redacted || !intent ? 0 : editing_log_cstr_len(intent->data));
-        jw_kv_uint(w, "transfer_html_len",
-                   redacted || !intent ? 0 : editing_log_cstr_len(intent->html_data));
-    jw_obj_end(w);
+        const EditingTransactionResult* result) {
+    DocState* state = editing_dispatch_doc_state(evcon);
+    if (!state || !prepared || !result ||
+        !event_state_log_enabled(state->active_event_log)) {
+        return;
+    }
+    EditingSelectionSnapshot selection_after =
+        editing_dispatch_selection_snapshot(state, &prepared->surface);
+    char buf[8192];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.transaction", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_uint(&w, "transaction_id", prepared->transaction_id);
+        jw_kv_str(&w, "route", editing_log_route_name(prepared->route.kind));
+        jw_kv_uint(&w, "route_owner_generation",
+                   prepared->route.owner_generation);
+        jw_kv_uint(&w, "registry_generation", prepared->registry_generation);
+        jw_kv_uint(&w, "registration_id",
+                   prepared->selected_registration_id);
+        jw_kv_str(&w, "action_handler",
+                  result->action_handler_id ? result->action_handler_id : "");
+        event_state_log_write_node_ref(&w, "host", prepared->host_ref.address);
+        editing_log_write_surface(&w, &prepared->surface);
+        editing_log_write_intent(&w, &prepared->surface, &prepared->intent);
+        editing_log_write_target_ranges(&w, target_ranges);
+        editing_log_write_selection(&w, "selection_before",
+                                    &prepared->selection_before);
+        editing_log_write_selection(&w, "selection_after", &selection_after);
+        jw_key(&w, "result");
+        jw_obj_begin(&w);
+            jw_kv_bool(&w, "prepared", result->prepared);
+            jw_kv_bool(&w, "beforeinput_dispatched",
+                       result->beforeinput_dispatched);
+            jw_kv_bool(&w, "beforeinput_prevented",
+                       result->beforeinput_prevented);
+            jw_kv_bool(&w, "beforeinput_mutated_dom",
+                       result->beforeinput_mutated_dom);
+            jw_kv_bool(&w, "contract_violation",
+                       result->contract_violation);
+            jw_kv_bool(&w, "action_selected", result->action_selected);
+            jw_kv_bool(&w, "action_invoked", result->action_invoked);
+            jw_kv_bool(&w, "action_claimed", result->action_claimed);
+            jw_kv_bool(&w, "dom_mutated", result->dom_mutated);
+            jw_kv_bool(&w, "model_reconciled", result->model_reconciled);
+            jw_kv_bool(&w, "selection_changed", result->selection_changed);
+            jw_kv_bool(&w, "input_dispatched", result->input_dispatched);
+            jw_kv_bool(&w, "unsupported_fallthrough",
+                       result->unsupported_fallthrough);
+            jw_kv_bool(&w, "failed", result->failed);
+        jw_obj_end(&w);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+void editing_prepared_transaction_dispose(EditingPreparedTransaction* prepared) {
+    if (!prepared) return;
+    input_intent_dispose(&prepared->intent);
+    prepared->selected_handler_id = nullptr;
+    prepared->target_range_count = 0;
+}
+
+bool editing_notify_beforeinput(EventContext* evcon,
+                                const EditingPreparedTransaction* prepared,
+                                const EditingNotificationHooks* hooks,
+                                bool* out_prevented) {
+    if (out_prevented) *out_prevented = false;
+    if (!evcon || !prepared || !hooks || !hooks->dispatch_beforeinput ||
+        !prepared->surface.view || !input_intent_is_dispatchable(prepared->intent.type)) {
+        return false;
+    }
+    // This boundary constructs and dispatches the notification only. Action
+    // selection, Lambda execution, and DOM mutation stay in the gate stages.
+    bool prevented = hooks->dispatch_beforeinput(evcon, prepared, hooks->user);
+    if (out_prevented) *out_prevented = prevented;
+    return true;
+}
+
+void editing_notify_input(EventContext* evcon,
+                          const EditingPreparedTransaction* prepared,
+                          const EditingNotificationHooks* hooks) {
+    if (!evcon || !prepared || !hooks || !hooks->dispatch_input ||
+        !prepared->surface.view || !input_intent_is_dispatchable(prepared->intent.type)) {
+        return;
+    }
+    // input is a post-action notification and its cancellation state is never
+    // read back into default processing.
+    hooks->dispatch_input(evcon, prepared, hooks->user);
+}
+
+static bool editing_node_is_connected(DomDocument* document, DomNode* node) {
+    if (!document || !node) return false;
+    if (document->root && view_tree_contains_view(
+            static_cast<DomNode*>(document->root), static_cast<View*>(node))) {
+        return true;
+    }
+    return document->view_tree && document->view_tree->root &&
+        view_tree_contains_view(static_cast<DomNode*>(document->view_tree->root),
+                                static_cast<View*>(node));
+}
+
+DomElement* editing_prepared_live_host(
+        DomDocument* document, const EditingPreparedTransaction* prepared) {
+    if (!document || !prepared) return nullptr;
+    DomNode* live_host = nullptr;
+    if (prepared->host_view_id && document->view_tree &&
+            document->view_tree->root) {
+        // Event selection and target ranges belong to the current view tree.
+        // A retained source-DOM record can be valid yet detached from that
+        // tree after relayout, so prefer the logical view identity first.
+        live_host = static_cast<DomNode*>(view_tree_find_live_id(
+            static_cast<DomNode*>(document->view_tree->root),
+            prepared->host_view_id));
+    }
+    if (!live_host && prepared->host_ref.address) {
+        live_host = dom_node_ref_validate(document, prepared->host_ref);
+    }
+    if (!live_host) {
+        return nullptr;
+    }
+    if (!live_host->is_element()) {
+        return nullptr;
+    }
+    if (!editing_node_is_connected(document, live_host)) {
+        return nullptr;
+    }
+    EditingSurface current_surface;
+    if (!editing_surface_from_target(static_cast<View*>(live_host),
+                                     &current_surface)) {
+        return nullptr;
+    }
+    // A listener may detach the host, but it may not cause this transaction to
+    // reroute to another editable owner after its action snapshot was chosen.
+    if (!editing_surface_is_rich(&current_surface) ||
+            current_surface.owner != live_host->as_element()) {
+        return nullptr;
+    }
+    return current_surface.owner;
+}
+
+bool editing_run_contenteditable_transaction(
+        EventContext* evcon, const EditingSurface* surface,
+        const EditingIntent* intent, const EditingRouteSnapshot* route,
+        const EditingNotificationHooks* notifications,
+        EditingTransactionResult* out_result) {
+    EditingTransactionResult result = {};
+    if (out_result) *out_result = result;
+    if (!evcon || !surface || !intent || !notifications ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        intent->type == INPUT_INTENT_NONE) {
+        return false;
+    }
+
+    DomDocument* document = evcon->target_document
+        ? evcon->target_document : surface->owner->doc;
+    DocState* state = document ? (DocState*)document->state : nullptr;
+    if (!document || !state) return false;
+
+    EditingPreparedTransaction prepared = {};
+    prepared.transaction_id = editing_dispatch_next_transaction_id(state);
+    prepared.surface = *surface;
+    prepared.route = route ? *route : EditingRouteSnapshot{EDITING_ROUTE_NONE, nullptr, 0};
+    prepared.host_ref = dom_node_ref(static_cast<DomNode*>(surface->owner));
+    prepared.host_view_id = static_cast<DomNode*>(surface->owner)->id;
+    result.transaction_id = prepared.transaction_id;
+    result.route = prepared.route.kind;
+
+    EditingIntent normalized_intent = {};
+    const EditingIntent* prepared_intent = intent;
+    if (editing_dispatch_plaintext_normalize_intent(surface, intent,
+                                                    &normalized_intent)) {
+        prepared_intent = &normalized_intent;
+    }
+    if (!input_intent_clone(prepared_intent, &prepared.intent)) {
+        result.failed = true;
+        editing_log_contenteditable_result(evcon, &prepared, nullptr, &result);
+        if (out_result) *out_result = result;
+        return false;
+    }
+    EditingTargetRangeStatus target_status = editing_dispatch_target_range_status(
+        state, surface, &prepared.intent);
+    if (!target_status.valid || target_status.count > 4) {
+        // A false-island or structurally stale target has no native fallback.
+        result.failed = true;
+        editing_log_contenteditable_result(evcon, &prepared, &target_status, &result);
+        editing_prepared_transaction_dispose(&prepared);
+        if (out_result) *out_result = result;
+        return true;
+    }
+    prepared.target_range_count = target_status.count;
+    memcpy(prepared.target_ranges, target_status.ranges,
+           sizeof(EditingTargetRange) * target_status.count);
+    prepared.selection_before = editing_dispatch_selection_snapshot(state, surface);
+    editing_interaction_set_active_surface(state, surface);
+    result.prepared = true;
+
+    if (prepared.route.kind == EDITING_ROUTE_DOM_SCRIPT) {
+        editing_dom_action_register(document);
+    }
+    prepared.registry_generation = editing_action_registry_generation(document);
+    EditingActionSnapshot action_snapshot = {};
+    bool configuration_error = false;
+    if (editing_action_registry_select(document, &prepared, &action_snapshot,
+                                       &configuration_error)) {
+        prepared.selected_registration_id = action_snapshot.registration_id;
+        prepared.selected_handler_id = action_snapshot.handler_id;
+        result.action_selected = true;
+        result.action_handler_id = action_snapshot.handler_id;
+    } else if (configuration_error) {
+        result.failed = true;
+        editing_log_contenteditable_result(evcon, &prepared, &target_status, &result);
+        editing_prepared_transaction_dispose(&prepared);
+        if (out_result) *out_result = result;
+        return true;
+    }
+
+    EditingTargetRangeScope target_range_scope(evcon, &target_status);
+    prepared.mutation_epoch_before_notification = js_dom_mutation_epoch(document);
+    bool beforeinput_prevented = false;
+    bool notification_required = input_intent_is_dispatchable(prepared.intent.type);
+    // Script-owned editors can replace the selected subtree while handling
+    // beforeinput; selection/focus observers must defer rich invariants until
+    // the notification returns and the host can be re-anchored below.
+    bool previous_in_script_dispatch = state->editing.rich_transaction_in_script_dispatch;
+    state->editing.rich_transaction_in_script_dispatch = true;
+    bool beforeinput_dispatched = notification_required &&
+        editing_notify_beforeinput(evcon, &prepared, notifications,
+                                   &beforeinput_prevented);
+    state->editing.rich_transaction_in_script_dispatch = previous_in_script_dispatch;
+    result.beforeinput_dispatched = beforeinput_dispatched;
+    result.beforeinput_prevented = beforeinput_prevented;
+    uint64_t mutation_epoch_after_notification = js_dom_mutation_epoch(document);
+    result.beforeinput_mutated_dom = mutation_epoch_after_notification !=
+        prepared.mutation_epoch_before_notification;
+
+    if (beforeinput_prevented) {
+        EditingSurface host_surface;
+        DomElement* live_host = editing_prepared_live_host(document, &prepared);
+        if (live_host && editing_surface_from_target(static_cast<View*>(live_host),
+                                        &host_surface) &&
+            editing_surface_is_rich(&host_surface)) {
+            // A canceled listener may synchronously rebuild its host. Keep the
+            // interaction projection anchored to the surviving host instead of
+            // retaining the detached leaf until queued selectionchange runs.
+            editing_interaction_set_active_surface(state, &host_surface);
+        }
+    }
+
+    if (notification_required && !beforeinput_dispatched) {
+        result.failed = true;
+    } else if (result.beforeinput_mutated_dom) {
+        // Prepared target ranges cannot be safely reinterpreted after an
+        // uncancelled listener mutates the DOM in the same transaction.
+        result.contract_violation = !beforeinput_prevented;
+    } else if (beforeinput_prevented) {
+        // Cancellation is a complete action result; do not synthesize input.
+    } else if (!result.action_selected) {
+        result.unsupported_fallthrough = true;
+    } else if (prepared.route.kind == EDITING_ROUTE_DOM_SCRIPT &&
+            !editing_prepared_live_host(document, &prepared)) {
+        result.failed = true;
+    } else {
+        // A template click can retransform its source DOM before the next
+        // layout pass replaces the old view tree. Its frozen model route is
+        // still valid here; DOM actions instead require a live native host.
+        result.action_invoked = true;
+        EditingActionOutcome outcome = editing_action_snapshot_invoke(
+            &action_snapshot, evcon, &prepared);
+        uint64_t mutation_epoch_after_action = js_dom_mutation_epoch(document);
+        result.dom_mutated = mutation_epoch_after_action !=
+            mutation_epoch_after_notification;
+        result.action_claimed = outcome.status == EDITING_ACTION_CLAIMED;
+        result.model_reconciled = outcome.model_reconciled;
+        EditingSelectionSnapshot selection_after =
+            editing_dispatch_selection_snapshot(state, surface);
+        result.selection_changed = outcome.selection_changed ||
+            editing_selection_snapshot_changed(&prepared.selection_before,
+                                               &selection_after);
+        result.failed = outcome.status == EDITING_ACTION_ERROR;
+        result.unsupported_fallthrough = outcome.status == EDITING_ACTION_PASS;
+        bool composition_cancel =
+            prepared.intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+        if (!result.failed && notification_required && !composition_cancel &&
+            (result.action_claimed || result.dom_mutated ||
+             result.model_reconciled)) {
+            editing_notify_input(evcon, &prepared, notifications);
+            result.input_dispatched = true;
+        }
+    }
+
+    editing_log_contenteditable_result(evcon, &prepared, &target_status, &result);
+    editing_action_snapshot_release(&action_snapshot);
+    editing_prepared_transaction_dispose(&prepared);
+    if (out_result) *out_result = result;
+    return true;
 }
 
 static void editing_log_record(EventContext* evcon,
                                const EditingSurface* surface,
                                const EditingIntent* intent,
                                const char* record_type,
-                               bool prevented,
-                               bool lambda_handled) {
+                               bool prevented) {
     DocState* state = editing_dispatch_doc_state(evcon);
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
 
@@ -725,52 +648,6 @@ static void editing_log_record(EventContext* evcon,
         editing_log_write_surface(&w, surface);
         editing_log_write_intent(&w, surface, intent);
         jw_kv_bool(&w, "prevented", prevented);
-        jw_kv_bool(&w, "lambda_handled", lambda_handled);
-    jw_obj_end(&w);
-    event_state_log_finish_record(state->active_event_log, &w);
-}
-
-static void editing_log_transaction(EventContext* evcon,
-                                    const EditingTransaction* tx,
-                                    uint64_t transaction_id,
-                                    const EditingTargetRangeStatus* target_ranges,
-                                    const EditingSelectionSnapshot* selection_before,
-                                    const EditingSelectionSnapshot* selection_after,
-                                    const char* phase,
-                                    bool prevented,
-                                    bool lambda_handled,
-                                    bool mutated,
-                                    bool committed) {
-    DocState* state = editing_dispatch_doc_state(evcon);
-    if (!state || !event_state_log_enabled(state->active_event_log)) return;
-
-    const EditingSurface* surface = tx ? tx->surface : nullptr;
-    const EditingIntent* intent = tx ? tx->intent : nullptr;
-    char buf[8192];
-    JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "editing.transaction", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        jw_kv_uint(&w, "transaction_id", transaction_id);
-        jw_kv_str(&w, "phase", phase ? phase : "");
-        jw_kv_str(&w, "operation",
-                  tx && tx->operation ? tx->operation : "default");
-        editing_log_write_surface(&w, surface);
-        editing_log_write_intent(&w, surface, intent);
-        editing_log_write_target_ranges(&w, target_ranges);
-        editing_log_write_selection(&w, "selection_before", selection_before);
-        editing_log_write_selection(&w, "selection_after", selection_after);
-        editing_log_write_history_metadata(&w, surface, intent);
-        editing_log_write_transaction_summary(&w, surface, intent,
-            target_ranges, selection_before, selection_after,
-            prevented, lambda_handled, mutated, committed);
-        jw_kv_bool(&w, "prevented", prevented);
-        jw_kv_bool(&w, "lambda_handled", lambda_handled);
-        jw_kv_bool(&w, "mutated", mutated);
-        jw_kv_bool(&w, "committed", committed);
-        jw_kv_bool(&w, "dispatch_input_without_mutation",
-                   tx ? tx->dispatch_input_without_mutation : false);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
 }
@@ -778,311 +655,13 @@ static void editing_log_transaction(EventContext* evcon,
 void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent) {
-    editing_log_record(evcon, surface, intent, "editing.intent", false, false);
-}
-
-bool editing_run_transaction(EventContext* evcon,
-                             const EditingTransaction* tx,
-                             bool* out_prevented,
-                             bool* out_mutated,
-                             bool* out_lambda_handled) {
-    if (out_prevented) *out_prevented = false;
-    if (out_mutated) *out_mutated = false;
-    if (out_lambda_handled) *out_lambda_handled = false;
-    if (!evcon || !tx || !tx->surface || !tx->intent || !tx->hooks ||
-        tx->intent->type == INPUT_INTENT_NONE) {
-        return false;
-    }
-
-    EditingIntent normalized_intent;
-    EditingTransaction normalized_tx;
-    const EditingTransaction* run_tx = tx;
-    if (editing_dispatch_normalize_transaction(tx, &normalized_tx,
-                                               &normalized_intent)) {
-        run_tx = &normalized_tx;
-    }
-
-    EditingSurface current_surface = *run_tx->surface;
-    EditingTransaction current_tx = *run_tx;
-    current_tx.surface = &current_surface;
-
-    DocState* state = editing_dispatch_doc_state(evcon);
-
-    if (state) {
-        radiant_state_assert_valid(state, "editing_transaction_preflight");
-    }
-    EditingTargetRangeStatus target_ranges =
-        editing_dispatch_target_range_status(state, current_tx.surface,
-                                             current_tx.intent);
-    EditingSelectionSnapshot selection_before =
-        editing_dispatch_selection_snapshot(state);
-    uint64_t transaction_id = editing_dispatch_next_transaction_id(state);
-    editing_log_transaction(evcon, &current_tx, transaction_id, &target_ranges,
-                            &selection_before, nullptr, "begin",
-                            false, false, false, false);
-    EditingTargetRangeScope target_range_scope(evcon, &target_ranges);
-    View* tx_target = current_surface.view;
-    if (state) {
-        editing_interaction_set_active_surface(state, current_tx.surface);
-        editing_dispatch_set_rich_target_ranges(state, &target_ranges,
-                                                current_tx.intent);
-    }
-
-    editing_dispatch_commit_phase(state, SM_EV_EDIT_TX_BEGIN, tx_target,
-                                  EDITING_RICH_TX_OPEN, SM_ACT_NONE,
-                                  "editing_transaction_begin");
-
-    bool prevented = false;
-    bool lambda_handled = false;
-    bool dispatched = false;
-    if (state) {
-        SmTransitionGuard before_guard(state, SM_FAMILY_RICH_EDIT,
-                                       SM_EV_EDIT_BEFOREINPUT, tx_target);
-        uint32_t beforeinput_selection_seq = state->selection_mutation_seq;
-        dispatched = editing_dispatch_beforeinput_ex(evcon, current_tx.surface,
-            current_tx.intent, current_tx.hooks, false, &prevented, &lambda_handled);
-        if (dispatched) {
-            sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
-            if (state->selection_mutation_seq != beforeinput_selection_seq) {
-                editing_dispatch_sync_rich_transaction_to_selection(
-                    state, &current_surface, &tx_target);
-            }
-            if (prevented && current_surface.owner) {
-                // Stage 4B: the script (JS preventDefault) applied the edit and
-                // may have reconciled the editable subtree — splitting/merging
-                // blocks (e.g. Enter) detaches the leaf view this transaction
-                // referenced, and the script restores the selection
-                // asynchronously. No native mutation runs for a prevented edit,
-                // so re-anchor the transaction to the editing host (which
-                // survives reconcile) instead of leaving it pointed at a
-                // detached view; this keeps the rich-transaction phase and its
-                // target-range invariant referencing a live surface.
-                EditingSurface host_surface;
-                if (editing_surface_from_target(
-                        static_cast<View*>(current_surface.owner),
-                        &host_surface) &&
-                    editing_surface_is_rich(&host_surface)) {
-                    current_surface = host_surface;
-                    tx_target = host_surface.view;
-                    editing_interaction_set_active_surface(state, &host_surface);
-                }
-            }
-            editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_BEFOREINPUT,
-                                            tx_target);
-            before_guard.commit();
-            radiant_state_assert_valid(state, "editing_transaction_beforeinput");
-        }
-    } else {
-        dispatched = editing_dispatch_beforeinput_ex(evcon, current_tx.surface,
-            current_tx.intent, current_tx.hooks, false, &prevented, &lambda_handled);
-    }
-    if (!dispatched) {
-        editing_dispatch_commit_phase(state, SM_EV_EDIT_TX_ABORT, tx_target,
-                                      EDITING_RICH_TX_IDLE, SM_ACT_NONE,
-                                      "editing_transaction_abort");
-        EditingSelectionSnapshot selection_after =
-            editing_dispatch_selection_snapshot(state);
-        editing_log_transaction(evcon, &current_tx, transaction_id,
-                                &target_ranges, &selection_before,
-                                &selection_after, "abort", prevented,
-                                lambda_handled, false, false);
-        if (out_prevented) *out_prevented = prevented;
-        if (out_lambda_handled) *out_lambda_handled = lambda_handled;
-        return false;
-    }
-
-    bool mutated = false;
-    uint32_t selection_seq_before = state ? state->selection_mutation_seq : 0;
-    if (!prevented && !lambda_handled && current_tx.mutate) {
-        if (state) {
-            SmTransitionGuard mutate_guard(state, SM_FAMILY_RICH_EDIT,
-                                           SM_EV_EDIT_MUTATE_DOM, tx_target);
-            mutated = current_tx.mutate(evcon, state, current_tx.surface,
-                                        current_tx.intent, current_tx.mutate_user);
-            if (mutated) {
-                sm_observe_action(state, SM_ACT_MUTATE_DOM);
-                editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_MUTATED,
-                                                tx_target);
-                mutate_guard.commit();
-                radiant_state_assert_valid(state, "editing_transaction_mutate");
-            }
-        } else {
-            mutated = current_tx.mutate(evcon, state, current_tx.surface,
-                                        current_tx.intent, current_tx.mutate_user);
-        }
-    }
-
-    if (mutated && state) {
-        editing_dispatch_commit_visual_invalidation(evcon, state, &current_tx);
-    }
-
-    if (mutated && state &&
-        state->selection_mutation_seq != selection_seq_before) {
-        editing_dispatch_commit_phase(state, SM_EV_EDIT_SET_SELECTION,
-                                      tx_target,
-                                      EDITING_RICH_TX_SELECTION_SET,
-                                      SM_ACT_SET_SELECTION,
-                                      "editing_transaction_set_selection");
-    }
-
-    bool should_input = input_intent_is_dispatchable(current_tx.intent->type) &&
-        !prevented &&
-        (lambda_handled || mutated || current_tx.dispatch_input_without_mutation);
-    if (should_input) {
-        if (state) {
-            SmTransitionGuard input_guard(state, SM_FAMILY_RICH_EDIT,
-                                          SM_EV_EDIT_INPUT, tx_target);
-            editing_dispatch_input(evcon, current_tx.surface, current_tx.intent,
-                                   current_tx.hooks);
-            sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
-            editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_INPUT,
-                                            tx_target);
-            input_guard.commit();
-            radiant_state_assert_valid(state, "editing_transaction_input");
-        } else {
-            editing_dispatch_input(evcon, current_tx.surface, current_tx.intent,
-                                   current_tx.hooks);
-        }
-    }
-
-    editing_dispatch_commit_phase(state, SM_EV_EDIT_TX_COMMIT, tx_target,
-                                  EDITING_RICH_TX_IDLE, SM_ACT_NONE,
-                                  "editing_transaction_commit");
-    EditingSelectionSnapshot selection_after =
-        editing_dispatch_selection_snapshot(state);
-    editing_log_transaction(evcon, &current_tx, transaction_id, &target_ranges,
-                            &selection_before, &selection_after,
-                            prevented ? "cancel" : "commit",
-                            prevented, lambda_handled, mutated, should_input);
-    if (out_prevented) *out_prevented = prevented;
-    if (out_mutated) *out_mutated = mutated;
-    if (out_lambda_handled) *out_lambda_handled = lambda_handled;
-    return true;
-}
-
-bool editing_dispatch_beforeinput(EventContext* evcon,
-                                  const EditingSurface* surface,
-                                  const EditingIntent* intent,
-                                  const EditingDispatchHooks* hooks) {
-    return editing_dispatch_beforeinput_ex(evcon, surface, intent, hooks,
-                                           true, nullptr, nullptr);
-}
-
-bool editing_dispatch_beforeinput_ex(EventContext* evcon,
-                                     const EditingSurface* surface,
-                                     const EditingIntent* intent,
-                                     const EditingDispatchHooks* hooks,
-                                     bool dispatch_input_after,
-                                     bool* out_prevented,
-                                     bool* out_lambda_handled) {
-    if (out_prevented) *out_prevented = false;
-    if (out_lambda_handled) *out_lambda_handled = false;
-    if (!evcon || !surface || !surface->view || !intent ||
-        intent->type == INPUT_INTENT_NONE || !hooks) {
-        return false;
-    }
-
-    // rich hosts use this full dispatcher because their model mutation is
-    // consumer-owned. Form text controls use the sibling form dispatcher below,
-    // which shares intent logging and beforeinput/input ordering while keeping
-    // value-store mutation in text_edit.cpp.
-    if (!editing_surface_is_rich(surface)) {
-        return false;
-    }
-
-    // §9: format* and selectAll are never fired as `beforeinput
-    // { inputType: "formatBold" }` etc. Keep the intent flowing to Lambda
-    // template handlers, but do not dispatch a JS InputEvent and do not
-    // signal handled to the lower input pipeline.
-    bool dispatchable = input_intent_is_dispatchable(intent->type);
-    editing_dispatch_log_intent(evcon, surface, intent);
-    DocState* state = editing_dispatch_doc_state(evcon);
-
-    if (!editing_dispatch_target_ranges_are_valid(state, surface, intent)) {
-        editing_log_record(evcon, surface, intent, "editing.beforeinput",
-                           true, false);
-        if (out_prevented) *out_prevented = true;
-        log_debug("editing_dispatch_beforeinput: rejected mixed-surface target range for %s",
-                  input_intent_type_name(intent->type));
-        return true;
-    }
-
-    if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-        if (!state || !selection_has(state)) return false;
-        if (hooks->copy_selection) {
-            hooks->copy_selection(state, "rich cut", hooks->user);
-        }
-    }
-
-    // JS `beforeinput` runs before Lambda template handlers so JS
-    // preventDefault() remains the cancellation surface for Input Events.
-    bool js_prevented = false;
-    if (dispatchable && hooks->dispatch_input_event) {
-        // The script handler may synchronously reconcile the editable subtree
-        // (Stage 4B). Mark the re-entrant window so a focus/selection
-        // transition triggered by that reconcile does not assert the native
-        // rich-transaction target-range invariant against a surface the script
-        // is mid-replacing (it re-syncs once dispatch returns, below).
-        bool prev_in_dispatch = state &&
-            state->editing.rich_transaction_in_script_dispatch;
-        if (state) state->editing.rich_transaction_in_script_dispatch = true;
-        js_prevented = hooks->dispatch_input_event(evcon, surface->view,
-                                                   "beforeinput", intent,
-                                                   hooks->user);
-        if (state) {
-            state->editing.rich_transaction_in_script_dispatch = prev_in_dispatch;
-        }
-    }
-
-    bool lambda_handled = false;
-    if (hooks->dispatch_lambda_event) {
-        lambda_handled = hooks->dispatch_lambda_event(evcon, surface->view,
-                                                      "beforeinput", intent,
-                                                      hooks->user);
-    }
-    editing_log_record(evcon, surface, intent, "editing.beforeinput",
-                       js_prevented, lambda_handled);
-    if (out_prevented) *out_prevented = js_prevented;
-    if (out_lambda_handled) *out_lambda_handled = lambda_handled;
-    if (!lambda_handled && !js_prevented) {
-        log_debug("editing_dispatch_beforeinput: no beforeinput handler on %s surface",
-                  editing_surface_kind_name(surface->kind));
-    }
-
-    // `input` is the post-mutation notification and is not cancelable.
-    if (dispatch_input_after && !js_prevented) {
-        editing_dispatch_input(evcon, surface, intent, hooks);
-    }
-
-    // Rich editing hosts own the default action. Callers that pass
-    // dispatch_input_after=false perform the default mutation themselves and
-    // then emit `input`; older rich paths keep the legacy event-only behavior.
-    return true;
-}
-
-void editing_dispatch_input(EventContext* evcon,
-                            const EditingSurface* surface,
-                            const EditingIntent* intent,
-                            const EditingDispatchHooks* hooks) {
-    if (!evcon || !surface || !surface->view || !intent ||
-        intent->type == INPUT_INTENT_NONE || !hooks) {
-        return;
-    }
-    if (!input_intent_is_dispatchable(intent->type)) {
-        return;
-    }
-    if (hooks->dispatch_input_event) {
-        hooks->dispatch_input_event(evcon, surface->view, "input", intent,
-                                    hooks->user);
-        editing_log_record(evcon, surface, intent, "editing.input",
-                           false, false);
-    }
+    editing_log_record(evcon, surface, intent, "editing.intent", false);
 }
 
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
-                                       const EditingDispatchHooks* hooks,
+                                       const EditingFormNotificationHooks* hooks,
                                        bool* out_prevented) {
     if (out_prevented) *out_prevented = false;
     if (!evcon || !surface || !surface->view || !intent ||
@@ -1103,7 +682,7 @@ bool editing_dispatch_form_beforeinput(EventContext* evcon,
     }
     if (out_prevented) *out_prevented = js_prevented;
     editing_log_record(evcon, surface, intent, "editing.beforeinput",
-                       js_prevented, false);
+                       js_prevented);
     log_debug("editing_dispatch_form_beforeinput: surface=%s inputType=%s prevented=%d",
               editing_mode_name(surface->mode),
               input_intent_type_name(intent->type),
@@ -1114,7 +693,7 @@ bool editing_dispatch_form_beforeinput(EventContext* evcon,
 void editing_dispatch_form_input(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent,
-                                 const EditingDispatchHooks* hooks) {
+                                 const EditingFormNotificationHooks* hooks) {
     if (!evcon || !surface || !surface->view || !intent ||
         intent->type == INPUT_INTENT_NONE || !hooks) {
         return;
@@ -1129,6 +708,6 @@ void editing_dispatch_form_input(EventContext* evcon,
         hooks->dispatch_input_event(evcon, surface->view, "input", intent,
                                     hooks->user);
         editing_log_record(evcon, surface, intent, "editing.input",
-                           false, false);
+                           false);
     }
 }

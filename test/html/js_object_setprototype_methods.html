@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+  function Block() {
+    Object.setPrototypeOf(this, {
+      save() { return "saved"; },
+      validate(value) { return `valid:${value}`; }
+    });
+  }
+  const block = new Block();
+  document.getElementById("result").textContent = `${block.save()}|${block.validate("data")}`;
+</script>

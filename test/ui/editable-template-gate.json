@@ -1,0 +1,11 @@
+{
+  "name": "Radiant template action owns physical contenteditable input",
+  "html": "test/ui/editable-template-gate.ls",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "focus", "target": {"selector": "#surface"}},
+    {"type": "type_physical", "target": {"selector": "#surface"}, "text": "Q"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "insertText:Q"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "Q"}
+  ]
+}

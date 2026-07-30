@@ -373,6 +373,7 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
 
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
+    doc->mutation_epoch++;
 
     bool has_pending_structural_record = false;
     if (doc->js.mutation_record_count > 0) {
@@ -423,6 +424,10 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
                                                 const char* old_value) {
     js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent,
                            attribute_name, old_value);
+}
+
+extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc) {
+    return doc ? doc->mutation_epoch : 0;
 }
 
 extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
@@ -495,180 +500,7 @@ extern "C" Item js_dom_set_editing_behavior(Item behavior_item) {
     return make_js_undefined();
 }
 
-static bool js_dom_testdriver_selection_noncollapsed(DocState* state) {
-    return state && state->dom_selection &&
-        state->dom_selection->range_count > 0 &&
-        !dom_selection_is_collapsed(state->dom_selection);
-}
-
-static View* js_dom_testdriver_current_target(DocState* state,
-                                              int* fallback_offset) {
-    if (fallback_offset) *fallback_offset = 0;
-    if (state && state->dom_selection &&
-        state->dom_selection->range_count > 0 &&
-        state->dom_selection->ranges[0]) {
-        DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
-        if (!focus.node) focus = dom_selection_anchor_boundary(state->dom_selection);
-        if (focus.node) {
-            if (fallback_offset && focus.node->is_text()) {
-                DomText* text = focus.node->as_text();
-                *fallback_offset = (int)dom_text_utf16_to_utf8(
-                    text, focus.offset); // INT_CAST_OK: fallback byte offsets use int in the editing API.
-            }
-            return static_cast<View*>(focus.node);
-        }
-    }
-    if (state) {
-        View* focused = focus_get(state);
-        if (focused) return focused;
-    }
-    return js_document_active_element
-        ? static_cast<View*>(js_document_active_element)
-        : nullptr;
-}
-
-static bool js_dom_testdriver_rich_surface(View* target,
-                                           EditingSurface* surface) {
-    if (!target || !surface) return false;
-    if (editing_surface_from_target(target, surface) &&
-        editing_surface_is_rich(surface)) {
-        if (surface->owner) surface->view = static_cast<View*>(surface->owner);
-        return true;
-    }
-    DomNode* node = static_cast<DomNode*>(target);
-    for (DomNode* cur = node ? node->parent : nullptr; cur; cur = cur->parent) {
-        if (!cur->is_element()) continue;
-        if (editing_surface_from_target(static_cast<View*>(cur), surface) &&
-            editing_surface_is_rich(surface)) {
-            if (surface->owner) surface->view = static_cast<View*>(surface->owner);
-            return true;
-        }
-    }
-    return false;
-}
-
-static InputIntentType js_dom_testdriver_delete_intent(uint32_t wpt_key,
-                                                       int mods,
-                                                       bool has_range) {
-    bool line_modifier = (mods & RDT_MOD_SUPER) != 0;
-    bool word_modifier = (mods & (RDT_MOD_CTRL | RDT_MOD_ALT)) != 0;
-    if (wpt_key == 0xE003) {
-        if (has_range) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-        if (line_modifier) return INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD;
-        if (!word_modifier) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-        return INPUT_INTENT_DELETE_WORD_BACKWARD;
-    }
-    if (wpt_key == 0xE017) {
-        if (has_range) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
-        if (line_modifier) return INPUT_INTENT_DELETE_SOFT_LINE_FORWARD;
-        if (!word_modifier) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
-        return INPUT_INTENT_DELETE_WORD_FORWARD;
-    }
-    return INPUT_INTENT_NONE;
-}
-
-static Item js_dom_testdriver_static_range_item(const EditingTargetRange* r) {
-    Item obj = js_new_object();
-    Item start = (r && r->start.node) ? js_dom_wrap_element(r->start.node) : ItemNull;
-    Item end = (r && r->end.node) ? js_dom_wrap_element(r->end.node) : ItemNull;
-    js_property_set(obj, js_string_key("startContainer"), start);
-    js_property_set(obj, js_string_key("endContainer"), end);
-    js_property_set(obj, js_string_key("startOffset"),
-        (Item){.item = i2it(r ? (int64_t)r->start.offset : 0)});
-    js_property_set(obj, js_string_key("endOffset"),
-        (Item){.item = i2it(r ? (int64_t)r->end.offset : 0)});
-    bool collapsed = r && r->start.node == r->end.node &&
-        r->start.offset == r->end.offset;
-    js_property_set(obj, js_string_key("collapsed"), (Item){.item = b2it(collapsed)});
-    return obj;
-}
-
-static DomElement* js_dom_testdriver_input_event_target(View* target) {
-    if (!target) return nullptr;
-    EditingSurface surface;
-    if (editing_surface_from_target(target, &surface) &&
-        editing_surface_is_rich(&surface) && surface.owner) {
-        return surface.owner;
-    }
-    DomNode* node = static_cast<DomNode*>(target);
-    while (node && !node->is_element()) {
-        node = node->parent;
-    }
-    return node ? node->as_element() : nullptr;
-}
-
-static bool js_dom_input_intent_uses_transfer_payload(InputIntentType type) {
-    switch (type) {
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
-        case INPUT_INTENT_INSERT_FROM_DROP:
-        case INPUT_INTENT_DELETE_BY_DRAG:
-        case INPUT_INTENT_DELETE_BY_CUT:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static bool js_dom_testdriver_dispatch_input_event(EventContext* evcon,
-                                                   View* target,
-                                                   const char* type,
-                                                   const EditingIntent* intent,
-                                                   void* user) {
-    (void)user;
-    DomElement* dom_target = js_dom_testdriver_input_event_target(target);
-    if (!evcon || !dom_target || !type || !intent) return false;
-
-    Item ranges_arr = js_array_new(0);
-    if (strcmp(type, "beforeinput") == 0 && evcon->editing_target_ranges_active) {
-        for (uint32_t i = 0; i < evcon->editing_target_range_count; i++) {
-            js_array_push(ranges_arr,
-                js_dom_testdriver_static_range_item(&evcon->editing_target_ranges[i]));
-        }
-    }
-
-    EditingSurface surface;
-    bool has_surface = editing_surface_from_target(target, &surface);
-    bool rich_transfer = has_surface && editing_surface_is_rich(&surface) &&
-        js_dom_input_intent_uses_transfer_payload(intent->type);
-    const char* data = rich_transfer ? nullptr : intent->data;
-    Item data_transfer = rich_transfer
-        ? js_data_transfer_new_with_strings(intent->data, intent->html_data)
-        : ItemNull;
-
-    Item ev = js_create_native_input_event(type,
-        input_intent_type_name(intent->type),
-        data,
-        intent->is_composing,
-        data_transfer,
-        ranges_arr);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    return js_event_is_default_prevented(ev);
-}
-
-struct JsDomTestdriverMutationArgs {
-    View* fallback_view;
-    int fallback_offset;
-};
-
-static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
-                                          DocState* state,
-                                          const EditingSurface* surface,
-                                          const EditingIntent* intent,
-                                          void* user) {
-    // Stage 4B Phase 5 (step 1 — sever js_dom → editing_rich_transaction):
-    // the native rich-editing apply layer is being retired. Editing is
-    // script-owned (script handlers apply via `beforeinput`); the WPT
-    // testdriver/`execCommand` path no longer drives native edits. Inert no-op
-    // so the testdriver transaction reports "no native mutation". The native
-    // editing-conformance suites that exercised this path retire with the
-    // engine (see vibe/editing/Radiant_Editor_Stage4B.md §5.2).
-    (void)evcon; (void)state; (void)surface; (void)intent; (void)user;
-    return false;
-}
-
-static uint32_t js_dom_testdriver_u32(Item value) {
+static uint32_t js_dom_to_u32(Item value) {
     Item num = js_to_number(value);
     TypeId t = get_type_id(num);
     if (t == LMD_TYPE_INT) return (uint32_t)it2i(num);
@@ -684,10 +516,11 @@ static Item js_dom_testdriver_key(Item key_item,
                                   Item alt_item,
                                   Item meta_item) {
     if (!_js_current_document) return (Item){.item = ITEM_FALSE};
-    DocState* state = js_dom_testdriver_state();
-    if (!state) return (Item){.item = ITEM_FALSE};
+    if (!js_dom_testdriver_state() || !_js_current_ui_context) {
+        return (Item){.item = ITEM_FALSE};
+    }
 
-    uint32_t wpt_key = js_dom_testdriver_u32(key_item);
+    uint32_t wpt_key = js_dom_to_u32(key_item);
     int mods = 0;
     if (js_is_truthy(shift_item)) mods |= RDT_MOD_SHIFT;
     if (js_is_truthy(ctrl_item)) mods |= RDT_MOD_CTRL;
@@ -697,79 +530,16 @@ static Item js_dom_testdriver_key(Item key_item,
     if (wpt_key >= 'a' && wpt_key <= 'z') {
         wpt_key -= ('a' - 'A');
     }
-    bool primary_shortcut = (mods & (RDT_MOD_CTRL | RDT_MOD_SUPER)) != 0;
-    if (primary_shortcut &&
-        (wpt_key == RDT_KEY_C || wpt_key == RDT_KEY_V || wpt_key == RDT_KEY_X) &&
-        _js_current_ui_context) {
-        // WPT shortcuts must enter the platform event path; synthesizing only a
-        // ClipboardEvent skips the default editing transaction and loses the
-        // target-specific InputEvent data/DataTransfer contract.
-        RdtEvent event;
-        memset(&event, 0, sizeof(event));
-        event.key.type = RDT_EVENT_KEY_DOWN;
-        event.key.key = (int)wpt_key;
-        event.key.mods = mods;
-        handle_event(_js_current_ui_context, _js_current_document, &event);
-        return (Item){.item = ITEM_TRUE};
-    }
-
-    InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
-    intent.type = js_dom_testdriver_delete_intent(
-        wpt_key, mods, js_dom_testdriver_selection_noncollapsed(state));
-    if (intent.type == INPUT_INTENT_NONE) return (Item){.item = ITEM_FALSE};
-    intent.key = wpt_key == 0xE003 ? RDT_KEY_BACKSPACE : RDT_KEY_DELETE;
-    intent.mods = mods;
-
-    int fallback_offset = 0;
-    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
-    if (!target) return (Item){.item = ITEM_FALSE};
-
-    EditingSurface surface;
-    if (!js_dom_testdriver_rich_surface(target, &surface)) {
-        return (Item){.item = ITEM_FALSE};
-    }
-
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.target_document = _js_current_document;
-    evcon.event.key.type = RDT_EVENT_KEY_DOWN;
-    evcon.event.key.key = intent.key;
-    evcon.event.key.mods = mods;
-
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = js_dom_testdriver_dispatch_input_event;
-    hooks.dispatch_lambda_event = nullptr;
-    hooks.copy_selection = nullptr;
-    hooks.user = nullptr;
-
-    JsDomTestdriverMutationArgs mutate_args;
-    mutate_args.fallback_view = target;
-    mutate_args.fallback_offset = fallback_offset;
-
-    EditingTransaction tx;
-    memset(&tx, 0, sizeof(tx));
-    tx.surface = &surface;
-    tx.intent = &intent;
-    tx.hooks = &hooks;
-    tx.mutate = js_dom_testdriver_rich_mutate;
-    tx.mutate_user = &mutate_args;
-    tx.operation = "testdriver-key";
-    tx.dispatch_input_without_mutation = false;
-    tx.mutation_invalidates_layout = true;
-    tx.mutation_invalidates_paint = true;
-
-    bool prevented = false;
-    bool mutated = false;
-    bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
-    if (ok && mutated && _js_current_document) {
-        js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
-        js_dom_queue_selectionchange(state->dom_selection);
-    }
-    log_debug("js_dom_testdriver_key: key=%u inputType=%s ok=%d prevented=%d mutated=%d",
-              wpt_key, input_intent_type_name(intent.type),
-              ok ? 1 : 0, prevented ? 1 : 0, mutated ? 1 : 0);
-    return (Item){.item = b2it(ok && (prevented || mutated))};
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.key.type = RDT_EVENT_KEY_DOWN;
+    event.key.key = wpt_key == 0xE003 ? RDT_KEY_BACKSPACE :
+        (wpt_key == 0xE017 ? RDT_KEY_DELETE : (int)wpt_key); // INT_CAST_OK: platform key enum stores code points.
+    event.key.mods = mods;
+    // Testdriver input must traverse the public platform event path so the
+    // same route snapshot, notifications, and DOM fallback serve tests/users.
+    handle_event(_js_current_ui_context, _js_current_document, &event);
+    return (Item){.item = ITEM_TRUE};
 }
 
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
@@ -2692,6 +2462,11 @@ static Item js_dom_has_attribute_method(Item name) {
 static Item js_dom_contains_method(Item other) {
     Item self = js_get_this();
     Item method = (Item){.item = s2it(heap_create_name("contains"))};
+    return js_dom_element_method(self, method, &other, 1);
+}
+static Item js_dom_is_equal_node_method(Item other) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("isEqualNode"))};
     return js_dom_element_method(self, method, &other, 1);
 }
 
@@ -4999,6 +4774,11 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
     bool have_empty_prefix = false;
     uint32_t empty_prefix_index = 0;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling, index++) {
+        if (js_dom_is_generated_pseudo_node(child)) {
+            // Generated ::before/::after trees are layout artifacts; a DOM
+            // editing host must place its selection in authored content.
+            continue;
+        }
         if (child->is_text()) {
             uint32_t offset = 0;
             if (js_dom_text_initial_offset(child->as_text(), child_preserve_ws, &offset)) {
@@ -5752,6 +5532,143 @@ static Item js_dom_create_document_fragment(DomDocument* doc) {
     return fragment ? js_dom_wrap_element(fragment) : ItemNull;
 }
 
+static const char* JS_TREE_WALKER_ROOT = "__lambda_tree_walker_root";
+static const char* JS_TREE_WALKER_CURRENT = "currentNode";
+static const char* JS_TREE_WALKER_WHAT_TO_SHOW = "whatToShow";
+
+enum JsDomTreeWalkerStep {
+    JS_TREE_WALKER_STEP_NEXT_NODE = 0,
+    JS_TREE_WALKER_STEP_FIRST_CHILD,
+    JS_TREE_WALKER_STEP_NEXT_SIBLING,
+};
+
+static uint32_t js_dom_tree_walker_node_mask(DomNode* node) {
+    if (!node) return 0;
+    uint32_t node_type = node->is_text() ? 3u : (uint32_t)node->node_type;
+    if (node_type == 0 || node_type > 32) return 0;
+    return 1u << (node_type - 1u);
+}
+
+static bool js_dom_tree_walker_accepts(DomNode* node, uint32_t what_to_show) {
+    return (js_dom_tree_walker_node_mask(node) & what_to_show) != 0;
+}
+
+static DomNode* js_dom_tree_walker_first_child_raw(DomNode* node) {
+    if (!node || !node->is_element()) return nullptr;
+    return js_dom_first_script_visible_child(node->as_element());
+}
+
+static DomNode* js_dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
+    if (!root || !current) return nullptr;
+    DomNode* child = js_dom_tree_walker_first_child_raw(current);
+    if (child) return child;
+    for (DomNode* node = current; node && node != root; node = node->parent) {
+        if (node->next_sibling) return node->next_sibling;
+    }
+    return nullptr;
+}
+
+static DomNode* js_dom_tree_walker_next_matching(DomNode* root,
+                                                  DomNode* current,
+                                                  uint32_t what_to_show) {
+    for (DomNode* node = js_dom_tree_walker_next_raw(root, current);
+         node;
+         node = js_dom_tree_walker_next_raw(root, node)) {
+        if (js_dom_tree_walker_accepts(node, what_to_show)) return node;
+    }
+    return nullptr;
+}
+
+static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
+    RootFrame roots(3);
+    Rooted<Item> walker_root(roots, walker_item);
+    Rooted<Item> node_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Item root_item = js_property_get(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
+    Item current_item = js_property_get(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
+    DomNode* root = (DomNode*)js_dom_unwrap_element(root_item);
+    DomNode* current = (DomNode*)js_dom_unwrap_element(current_item);
+    if (!root || !current) return ItemNull;
+
+    uint32_t what_to_show = js_dom_to_u32(
+        js_property_get(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW)));
+    DomNode* next = nullptr;
+    if (step == JS_TREE_WALKER_STEP_FIRST_CHILD) {
+        for (DomNode* node = js_dom_tree_walker_first_child_raw(current);
+             node;
+             node = js_dom_tree_walker_next_raw(root, node)) {
+            if (js_dom_tree_walker_accepts(node, what_to_show)) {
+                next = node;
+                break;
+            }
+        }
+    } else if (step == JS_TREE_WALKER_STEP_NEXT_SIBLING) {
+        for (DomNode* node = current->next_sibling;
+             node;
+             node = node->next_sibling) {
+            if (js_dom_tree_walker_accepts(node, what_to_show)) {
+                next = node;
+                break;
+            }
+        }
+    } else {
+        next = js_dom_tree_walker_next_matching(root, current, what_to_show);
+    }
+    if (!next) return ItemNull;
+
+    // Sanitizer walks detached editor documents; keep the wrapper rooted while
+    // publishing it as currentNode so a compacting collection cannot leave the
+    // walker pointing at the pre-move wrapper during the next traversal step.
+    node_root.set(js_dom_wrap_element(next));
+    if (node_root.get().item == ItemNull.item) return ItemNull;
+    js_property_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT),
+                    node_root.get());
+    result_root.set(node_root.get());
+    return result_root.get();
+}
+
+static Item js_dom_tree_walker_next_node_method(Item walker_item) {
+    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_NEXT_NODE);
+}
+
+static Item js_dom_tree_walker_first_child_method(Item walker_item) {
+    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_FIRST_CHILD);
+}
+
+static Item js_dom_tree_walker_next_sibling_method(Item walker_item) {
+    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_NEXT_SIBLING);
+}
+
+static Item js_dom_create_tree_walker(Item root_item, Item what_to_show_item) {
+    if (!js_dom_unwrap_element(root_item)) return ItemNull;
+    RootFrame roots(4);
+    Rooted<Item> root_root(roots, root_item);
+    Rooted<Item> walker_root(roots, js_new_object());
+    Rooted<Item> method_root(roots, ItemNull);
+    if (walker_root.get().item == ItemNull.item) return ItemNull;
+    uint32_t what_to_show = js_dom_to_u32(what_to_show_item);
+    js_property_set(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT), root_root.get());
+    js_property_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT), root_root.get());
+    js_property_set(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW),
+                    (Item){.item = i2it((int64_t)what_to_show)});
+    Item bound_args[1] = {walker_root.get()};
+    method_root.set(js_bind_function(
+        js_new_function((void*)js_dom_tree_walker_next_node_method, 1),
+        make_js_undefined(), bound_args, 1));
+    js_property_set(walker_root.get(), js_string_key("nextNode"), method_root.get());
+    bound_args[0] = walker_root.get();
+    method_root.set(js_bind_function(
+        js_new_function((void*)js_dom_tree_walker_first_child_method, 1),
+        make_js_undefined(), bound_args, 1));
+    js_property_set(walker_root.get(), js_string_key("firstChild"), method_root.get());
+    bound_args[0] = walker_root.get();
+    method_root.set(js_bind_function(
+        js_new_function((void*)js_dom_tree_walker_next_sibling_method, 1),
+        make_js_undefined(), bound_args, 1));
+    js_property_set(walker_root.get(), js_string_key("nextSibling"), method_root.get());
+    return walker_root.get();
+}
+
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (!method) {
@@ -5788,6 +5705,11 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // MIR lowers direct document.method() calls here, bypassing the proxy entry.
     if (radiant_dom_document_method(method_name, args, argc, &module_result)) {
         return module_result;
+    }
+
+    if (strcmp(method, "createTreeWalker") == 0) {
+        if (argc < 2) return ItemNull;
+        return js_dom_create_tree_walker(args[0], args[1]);
     }
 
     // Location methods on document.location/window.location proxy.
@@ -6128,25 +6050,6 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return (Item){.item = ITEM_FALSE};
     }
 
-    // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
-    // Radiant keeps this surface for feature detection only; standard editing
-    // lives in test/editor-js and should not flow through native DOM mutation.
-    if (strcmp(method, "execCommand") == 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    if (strcmp(method, "queryCommandSupported") == 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    if (strcmp(method, "queryCommandEnabled") == 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    if (strcmp(method, "queryCommandIndeterm") == 0 ||
-        strcmp(method, "queryCommandState") == 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    if (strcmp(method, "queryCommandValue") == 0) {
-        return (Item){.item = s2it(heap_create_name(""))};
-    }
     // document.contains(node) — true iff node is document or a descendant.
     if (strcmp(method, "contains") == 0) {
         if (argc >= 1) {
@@ -6681,14 +6584,9 @@ static bool js_dom_document_method_feature_name(const char* prop) {
         strcmp(prop, "blur") == 0 ||
         strcmp(prop, "hasFocus") == 0 ||
         strcmp(prop, "createRange") == 0 ||
+        strcmp(prop, "createTreeWalker") == 0 ||
         strcmp(prop, "getSelection") == 0 ||
-        strcmp(prop, "createEvent") == 0 ||
-        strcmp(prop, "execCommand") == 0 ||
-        strcmp(prop, "queryCommandSupported") == 0 ||
-        strcmp(prop, "queryCommandEnabled") == 0 ||
-        strcmp(prop, "queryCommandIndeterm") == 0 ||
-        strcmp(prop, "queryCommandState") == 0 ||
-        strcmp(prop, "queryCommandValue") == 0;
+        strcmp(prop, "createEvent") == 0;
 }
 
 static bool js_dom_form_named_getter_reserved_name(const char* prop) {
@@ -6733,6 +6631,7 @@ static bool js_dom_node_method_feature_name(const char* prop) {
         strcmp(prop, "attachShadow") == 0 ||
         strcmp(prop, "cloneNode") == 0 ||
         strcmp(prop, "contains") == 0 ||
+        strcmp(prop, "isEqualNode") == 0 ||
         strcmp(prop, "hasChildNodes") == 0 ||
         strcmp(prop, "normalize") == 0 ||
         strcmp(prop, "addEventListener") == 0 ||
@@ -6976,6 +6875,23 @@ extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
         if (focus_get(state) == (View*)elem) focus_clear(state);
     }
     return make_js_undefined();
+}
+
+extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !js_dom_is_editing_host(elem) ||
+        !js_dom_is_script_focusable(elem)) {
+        return false;
+    }
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    if (!state) return false;
+    // Template documents have no JS runtime, so returning a JS Item through
+    // focus() would dereference an unbound interpreter context. The common
+    // focus and Selection writers are sufficient for physical input routing.
+    js_document_active_element = elem;
+    focus_set_programmatic(state, (View*)elem);
+    js_dom_focus_set_selection_for_element(state, elem);
+    return true;
 }
 
 extern "C" Item js_dom_click_method_bridge(Item elem_item) {
@@ -10337,6 +10253,8 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_new_function((void*)js_dom_has_attribute_method, 1);
     if (strcmp(prop, "contains") == 0)
         return js_new_function((void*)js_dom_contains_method, 1);
+    if (strcmp(prop, "isEqualNode") == 0)
+        return js_new_function((void*)js_dom_is_equal_node_method, 1);
 
     // DOM method names accessed as properties (not calls) return ITEM_TRUE
     // only for names not already declared by the Jube record table.
@@ -12491,6 +12409,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return js_dom_contains(elem_item, args[0]);
     }
 
+    // Structural equality is a Node operation, so it must remain available to
+    // text and comment wrappers before the Element-only method handling below.
+    if (strcmp(method, "isEqualNode") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        return js_dom_is_equal_node(elem_item, args[0]);
+    }
+
     // CharacterData.replaceData(offset, count, data) — text nodes only.
     if (node->is_text() && strcmp(method, "replaceData") == 0) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
@@ -13657,6 +13582,15 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     return ItemNull;
 }
 
+extern "C" Item js_classlist_method_apply(Item elem_item, Item method_name,
+                                            Item args_array) {
+    if (get_type_id(args_array) != LMD_TYPE_ARRAY || !args_array.array) {
+        return js_classlist_method(elem_item, method_name, NULL, 0);
+    }
+    return js_classlist_method(elem_item, method_name, args_array.array->items,
+                               (int)args_array.array->length);
+}
+
 extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
@@ -13851,6 +13785,90 @@ extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
         current = current->parent;
     }
     return (Item){.item = ITEM_FALSE};
+}
+
+// ============================================================================
+// Node.isEqualNode()
+// ============================================================================
+
+static bool js_dom_equal_cstr(const char* left, const char* right) {
+    if (left == right) return true;
+    if (!left || !right) return false;
+    return strcmp(left, right) == 0;
+}
+
+static bool js_dom_equal_children(DomElement* left, DomElement* right);
+
+static bool js_dom_nodes_are_equal(DomNode* left, DomNode* right) {
+    if (left == right) return true;
+    if (!left || !right || left->node_type != right->node_type) return false;
+
+    if (left->is_text()) {
+        DomText* left_text = left->as_text();
+        DomText* right_text = right->as_text();
+        return left_text->length == right_text->length &&
+            (left_text->length == 0 ||
+             (left_text->text && right_text->text &&
+              memcmp(left_text->text, right_text->text, left_text->length) == 0));
+    }
+
+    if (left->is_comment()) {
+        DomComment* left_comment = left->as_comment();
+        DomComment* right_comment = right->as_comment();
+        return js_dom_equal_cstr(left_comment->tag_name, right_comment->tag_name) &&
+            left_comment->length == right_comment->length &&
+            (left_comment->length == 0 ||
+             (left_comment->content && right_comment->content &&
+              memcmp(left_comment->content, right_comment->content,
+                     left_comment->length) == 0));
+    }
+
+    if (!left->is_element()) return false;
+
+    DomElement* left_elem = left->as_element();
+    DomElement* right_elem = right->as_element();
+    if (!js_dom_equal_cstr(left_elem->tag_name, right_elem->tag_name)) return false;
+
+    int left_attr_count = 0;
+    const char** left_attr_names = left_elem->attribute_names(&left_attr_count);
+    int right_visible_attr_count = 0;
+    int right_attr_count = 0;
+    const char** right_attr_names = right_elem->attribute_names(&right_attr_count);
+    for (int i = 0; right_attr_names && i < right_attr_count; i++) {
+        if (!js_dom_is_internal_attr(right_attr_names[i])) right_visible_attr_count++;
+    }
+
+    int left_visible_attr_count = 0;
+    for (int i = 0; left_attr_names && i < left_attr_count; i++) {
+        const char* name = left_attr_names[i];
+        if (js_dom_is_internal_attr(name)) continue;
+        left_visible_attr_count++;
+        if (!right_elem->has_attribute(name)) return false;
+        if (!js_dom_equal_cstr(left_elem->get_attribute(name),
+                               right_elem->get_attribute(name))) return false;
+    }
+    if (left_visible_attr_count != right_visible_attr_count) return false;
+
+    return js_dom_equal_children(left_elem, right_elem);
+}
+
+static bool js_dom_equal_children(DomElement* left, DomElement* right) {
+    DomNode* left_child = left->first_child;
+    DomNode* right_child = right->first_child;
+    while (left_child && right_child) {
+        if (!js_dom_nodes_are_equal(left_child, right_child)) return false;
+        left_child = left_child->next_sibling;
+        right_child = right_child->next_sibling;
+    }
+    return !left_child && !right_child;
+}
+
+extern "C" Item js_dom_is_equal_node(Item node_item, Item other_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
+    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+    // Node equality is structural: separately created but matching trees must
+    // compare equal so editor ownership checks do not depend on wrapper identity.
+    return (Item){.item = b2it(js_dom_nodes_are_equal(node, other))};
 }
 
 // ============================================================================

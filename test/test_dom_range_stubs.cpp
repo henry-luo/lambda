@@ -9,8 +9,34 @@
 // the operation is genuinely a no-op here. Provide a no-op definition so these
 // deliberately-minimal tests link without the view-pool dependency chain.
 
+#include "../lambda/lambda-data.hpp"
+#include "../lambda/runtime/side_stack.h"
+
 struct DomNode;
+
+__thread EvalContext* context = nullptr;
 
 void view_pool_release_detached_subtree(DomNode* root) {
     (void)root;
 }
+
+// render_map's retransform branch is linked into this focused bridge target,
+// but none of these non-collecting tests invoke it. Keep its runtime-only
+// dependencies unavailable so an accidental call cannot mutate test storage.
+void expand_list(List*, Arena*) {}
+
+extern "C" Context* eval_context_tls_runtime(void) {
+    return (Context*)context;
+}
+
+extern "C" bool lambda_root_frame_begin(LambdaRootFrame*, size_t) {
+    return false;
+}
+
+extern "C" uint64_t* lambda_root_frame_take_slot(LambdaRootFrame*) {
+    return nullptr;
+}
+
+extern "C" void lambda_root_frame_end(LambdaRootFrame*) {}
+
+extern "C" void lambda_root_frame_overflow_error(void) {}

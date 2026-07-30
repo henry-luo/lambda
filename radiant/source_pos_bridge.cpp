@@ -24,6 +24,8 @@
 
 #include "event.hpp"
 
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,6 +33,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -331,7 +334,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
             DomElement* de = lam::dom_require_element(node);
             if (!de->is_synthetic()) {
                 Item result_item;
-                result_item.element = dom_element_to_element(de);
+                result_item.element = dom_element_render_source(de);
                 if (render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
                     found_base = true;
                     break;
@@ -436,7 +439,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
                                    DomBoundary* out) {
     if (!de || de->is_synthetic()) return false;
     Item result_item;
-    result_item.element = dom_element_to_element(de);
+    result_item.element = dom_element_render_source(de);
     RenderMapLookup lookup;
     SourcePathC recorded;
     if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {
@@ -554,6 +557,50 @@ Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path) {
 
 namespace {
 
+// Source positions cross the Lambda/Radiant ABI as ordinary Lambda numbers.
+// Editor arithmetic promotes coordinates to Decimal, so only an exact,
+// non-negative integer may become a DOM path index or text offset.
+static bool source_position_index_from_item(ItemReader value,
+                                            uint32_t max_value,
+                                            uint32_t* out) {
+    if (!out) return false;
+    TypeId type = value.getType();
+    if (type == LMD_TYPE_DECIMAL) {
+        int64_t signed_value = 0;
+        if (!decimal_to_int64_exact(value.item(), &signed_value) ||
+            signed_value < 0 || (uint64_t)signed_value > max_value) {
+            return false;
+        }
+        *out = (uint32_t)signed_value; // INT_CAST_OK: exact source coordinate is uint32_t-bounded.
+        return true;
+    }
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        int64_t signed_value = value.asInt();
+        if (signed_value < 0 || (uint64_t)signed_value > max_value) return false;
+        *out = (uint32_t)signed_value; // INT_CAST_OK: validated source coordinate is uint32_t-bounded.
+        return true;
+    }
+    if (type == LMD_TYPE_UINT64) {
+        uint64_t unsigned_value = value.asUInt64();
+        if (unsigned_value > max_value) return false;
+        *out = (uint32_t)unsigned_value; // INT_CAST_OK: validated source coordinate is uint32_t-bounded.
+        return true;
+    }
+    if (type != LMD_TYPE_FLOAT && type != LMD_TYPE_FLOAT64 &&
+        type != LMD_TYPE_NUM_SIZED) {
+        return false;
+    }
+    double numeric_value = it2d(value.item());
+    if (!isfinite(numeric_value) || numeric_value < 0.0 ||
+        numeric_value > (double)max_value || floor(numeric_value) != numeric_value) {
+        return false;
+    }
+    *out = (uint32_t)numeric_value; // INT_CAST_OK: finite integral source coordinate is uint32_t-bounded.
+    return true;
+}
+
+} // namespace
+
 // Pull `{ path: [int...], offset: int }` out of an Item; treat it as a
 // SOURCE_POS_TEXT position (the only kind editor selections produce).
 // Caller must source_pos_free() the result.
@@ -567,7 +614,7 @@ bool source_pos_from_item(Item pos_item, SourcePosC* out) {
     if (!m.isValid()) return false;
 
     ItemReader off = m.get("offset");
-    if (off.isInt()) out->offset = (uint32_t)off.asInt();
+    if (!source_position_index_from_item(off, UINT32_MAX, &out->offset)) return false;
 
     ItemReader path = m.get("path");
     if (!path.isArray()) return true;  // empty path — root
@@ -579,7 +626,12 @@ bool source_pos_from_item(Item pos_item, SourcePosC* out) {
     out->path.depth = depth;
     for (int i = 0; i < depth; i++) {
         ItemReader idx = arr.get(i);
-        out->path.indices[i] = idx.isInt() ? (int)idx.asInt() : 0;
+        uint32_t path_index = 0;
+        if (!source_position_index_from_item(idx, INT_MAX, &path_index)) {
+            source_path_free(&out->path);
+            return false;
+        }
+        out->path.indices[i] = (int)path_index; // INT_CAST_OK: validated source path index is INT_MAX-bounded.
     }
     return true;
 }
@@ -596,7 +648,12 @@ bool source_path_from_item(Item path_item, SourcePathC* out) {
     out->depth = depth;
     for (int i = 0; i < depth; i++) {
         ItemReader idx = arr.get(i);
-        out->indices[i] = idx.isInt() ? (int)idx.asInt() : 0;
+        uint32_t path_index = 0;
+        if (!source_position_index_from_item(idx, INT_MAX, &path_index)) {
+            source_path_free(out);
+            return false;
+        }
+        out->indices[i] = (int)path_index; // INT_CAST_OK: validated source path index is INT_MAX-bounded.
     }
     return true;
 }
@@ -604,7 +661,7 @@ bool source_path_from_item(Item path_item, SourcePathC* out) {
 // Resolve a SOURCE_POS_ELEMENT path to the DomElement it refers to, by
 // walking the DOM (via dom_boundary_from_source_pos with offset 0 and
 // kind=ELEMENT). Returns NULL on failure.
-DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* path) {
+static DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* path) {
     if (!dom_root || !path) return NULL;
     SourcePosC p;
     p.path = *path;          // borrow indices — caller still owns
@@ -615,7 +672,7 @@ DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* path) {
     return b.node;
 }
 
-uint32_t source_selection_child_count(DomNode* node) {
+static uint32_t source_selection_child_count(DomNode* node) {
     uint32_t child_count = 0;
     if (node && node->is_element()) {
         for (DomNode* child = node->as_element()->first_child; child;
@@ -625,8 +682,6 @@ uint32_t source_selection_child_count(DomNode* node) {
     }
     return child_count;
 }
-
-} // namespace
 
 extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
                                                      DomNode* dom_root,

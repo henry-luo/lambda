@@ -1,0 +1,7 @@
+{
+  "name": "sticky lookahead honors lastIndex",
+  "html": "test/html/js_array_string_forof.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "\\s*(?=\\b|\\W|$)|y|true|null:0"}
+  ]
+}

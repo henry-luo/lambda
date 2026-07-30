@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Physical editable input ordering</title>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<output id="events"></output>
+<script>
+  var surface = document.getElementById('surface');
+  var events = [];
+  function record(name) {
+    events.push(name);
+    document.getElementById('events').textContent = events.join('|');
+  }
+  surface.addEventListener('keydown', function(event) {
+    record('keydown:' + event.key + ':' + event.code + ':' + event.keyCode);
+    event.preventDefault();
+  });
+  surface.addEventListener('beforeinput', function() { record('beforeinput'); });
+  surface.addEventListener('input', function() { record('input'); });
+</script>

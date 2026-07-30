@@ -1,0 +1,7 @@
+{
+  "name": "large inherited classes retain late async methods",
+  "html": "test/html/js_large_inherited_class_methods.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "20|saved|valid:data|true|true"}
+  ]
+}

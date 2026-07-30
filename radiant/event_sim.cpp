@@ -74,6 +74,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
 // Stage 4C: seed the next window.prompt() answer (headless has no dialog UI).
 extern "C" void js_window_dialog_push_response(const char* value);
 extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
+extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 
@@ -83,11 +84,17 @@ void parse_json(Input* input, const char* json_string);
 static bool g_replay_assert_state = false;
 
 static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
-    if (!doc || !target || !doc->js.runtime) {
+    if (!doc || !target) {
         return false;
     }
 
     Runtime* runtime = doc->js.runtime;
+    if (!runtime) {
+        // Lambda template documents do not own a JavaScript runtime, but their
+        // contenteditable hosts still use the shared DOM focus/Selection path.
+        return js_dom_focus_editing_host_for_automation(target);
+    }
+
     EvalContext* focus_ctx = runtime_get_eval_context(runtime);
     if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
     focus_ctx->heap = runtime->heap;
@@ -110,6 +117,21 @@ static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
     js_dom_restore_active_document(saved_doc);
     input_context = saved_input_ctx;
     return true;
+}
+
+static bool sim_target_is_rich_editing_surface(View* target) {
+    EditingSurface surface;
+    return target && editing_surface_from_target(target, &surface) &&
+        editing_surface_is_rich(&surface);
+}
+
+static bool sim_focus_is_within_target(const DomDocument* doc, const View* target) {
+    if (!doc || !doc->state || !target) return false;
+    View* focused = focus_get(doc->state);
+    for (DomNode* node = static_cast<DomNode*>(focused); node; node = node->parent) {
+        if (node == static_cast<const DomNode*>(target)) return true;
+    }
+    return false;
 }
 
 static bool sim_event_is_assertion(SimEventType type) {
@@ -1425,6 +1447,13 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->clear_first = reader.get("clear").asBool();
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "type_physical") == 0) {
+        ev->type = SIM_EVENT_TYPE_PHYSICAL;
+        const char* text = reader.get("text").cstring();
+        if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        ev->clear_first = reader.get("clear").asBool();
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "focus") == 0) {
         ev->type = SIM_EVENT_FOCUS;
         parse_target(reader, ev);
@@ -2163,6 +2192,11 @@ static void replay_parse_expected_snapshot(EventSimContext* ctx, MapReader& root
         if (target_item.isMap()) {
             MapReader target = target_item.asMap();
             ctx->replay_expected_focus_id = target.get("id").asInt32();
+            const char* stable_id = target.get("stable_id").cstring();
+            if (stable_id) {
+                if (ctx->replay_expected_focus_stable_id) mem_free(ctx->replay_expected_focus_stable_id);
+                ctx->replay_expected_focus_stable_id = mem_strdup(stable_id, MEM_CAT_LAYOUT);
+            }
         }
     }
 
@@ -2174,6 +2208,11 @@ static void replay_parse_expected_snapshot(EventSimContext* ctx, MapReader& root
         if (target_item.isMap()) {
             MapReader target = target_item.asMap();
             ctx->replay_expected_caret_id = target.get("id").asInt32();
+            const char* stable_id = target.get("stable_id").cstring();
+            if (stable_id) {
+                if (ctx->replay_expected_caret_stable_id) mem_free(ctx->replay_expected_caret_stable_id);
+                ctx->replay_expected_caret_stable_id = mem_strdup(stable_id, MEM_CAT_LAYOUT);
+            }
         }
         if (caret.has("offset")) {
             ctx->replay_expected_caret_offset = caret.get("offset").asInt32();
@@ -2366,6 +2405,8 @@ void event_sim_free(EventSimContext* ctx) {
     }
 
     if (ctx->test_name) mem_free(ctx->test_name);
+    if (ctx->replay_expected_focus_stable_id) mem_free(ctx->replay_expected_focus_stable_id);
+    if (ctx->replay_expected_caret_stable_id) mem_free(ctx->replay_expected_caret_stable_id);
     if (ctx->result_file) fclose(ctx->result_file);
     if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
     if (ctx->event_pool) mem_pool_destroy(ctx->event_pool);
@@ -3640,6 +3681,122 @@ static View* resolve_assert_element(EventSimContext* ctx, UiContext* uicon,
     return nullptr;
 }
 
+static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
+    if (!uicon || !ev || (!ev->target_selector && !ev->target_text)) return;
+    View* target_elem = resolve_target_element(ev, uicon->document);
+    DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
+    bool already_focused = target_elem && target_elem->is_element() &&
+        state_get_pseudo_state(state, target_elem, PSEUDO_STATE_FOCUS);
+    if (already_focused) return;
+
+    if (sim_target_is_rich_editing_surface(target_elem) &&
+        sim_focus_element_with_js_runtime(uicon->document, target_elem)) {
+        sim_input_turn_mark_pending();
+        return;
+    }
+
+    int x, y;
+    if (resolve_target(ev, uicon->document, &x, &y)) {
+        sim_mouse_button(uicon, x, y, 0, 0, true);
+        sim_mouse_button(uicon, x, y, 0, 0, false);
+    }
+
+    // A hover handler may reconcile an upstream editor between the selector
+    // lookup and mouse dispatch. Re-resolve before the programmatic fallback
+    // so physical keys cannot remain on a detached previous editing host.
+    target_elem = resolve_target_element(ev, uicon->document);
+    state = uicon->document ? (DocState*)uicon->document->state : nullptr;
+    if (target_elem && target_elem->is_element() &&
+        (!state || focus_get(state) != target_elem) &&
+        sim_focus_element_with_js_runtime(uicon->document, target_elem)) {
+        sim_input_turn_mark_pending();
+    }
+}
+
+static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods) {
+    if (out_mods) *out_mods = 0;
+    if (codepoint >= 'a' && codepoint <= 'z') {
+        return GLFW_KEY_A + (int)(codepoint - 'a'); // INT_CAST_OK: GLFW key codes are int.
+    }
+    if (codepoint >= 'A' && codepoint <= 'Z') {
+        if (out_mods) *out_mods = RDT_MOD_SHIFT;
+        return GLFW_KEY_A + (int)(codepoint - 'A'); // INT_CAST_OK: GLFW key codes are int.
+    }
+    if (codepoint >= '0' && codepoint <= '9') {
+        return GLFW_KEY_0 + (int)(codepoint - '0'); // INT_CAST_OK: GLFW key codes are int.
+    }
+    if (codepoint == ' ') return GLFW_KEY_SPACE;
+
+    switch (codepoint) {
+    case '!': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_1;
+    case '@': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_2;
+    case '#': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_3;
+    case '$': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_4;
+    case '%': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_5;
+    case '^': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_6;
+    case '&': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_7;
+    case '*': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_8;
+    case '(': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_9;
+    case ')': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_0;
+    case '-': return GLFW_KEY_MINUS;
+    case '_': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_MINUS;
+    case '=': return GLFW_KEY_EQUAL;
+    case '+': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_EQUAL;
+    case '[': return GLFW_KEY_LEFT_BRACKET;
+    case '{': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_LEFT_BRACKET;
+    case ']': return GLFW_KEY_RIGHT_BRACKET;
+    case '}': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_RIGHT_BRACKET;
+    case '\\': return GLFW_KEY_BACKSLASH;
+    case '|': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_BACKSLASH;
+    case ';': return GLFW_KEY_SEMICOLON;
+    case ':': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_SEMICOLON;
+    case '\'': return GLFW_KEY_APOSTROPHE;
+    case '"': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_APOSTROPHE;
+    case ',': return GLFW_KEY_COMMA;
+    case '<': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_COMMA;
+    case '.': return GLFW_KEY_PERIOD;
+    case '>': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_PERIOD;
+    case '/': return GLFW_KEY_SLASH;
+    case '?': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_SLASH;
+    case '`': return GLFW_KEY_GRAVE_ACCENT;
+    case '~': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_GRAVE_ACCENT;
+    default: return GLFW_KEY_UNKNOWN;
+    }
+}
+
+static void sim_type_physical_text(UiContext* uicon, const char* text) {
+    if (!uicon || !text) return;
+    const char* cursor = text;
+    const char* end = text + strlen(text);
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+        if (bytes <= 0) {
+            codepoint = (uint32_t)(unsigned char)*cursor;
+            bytes = 1;
+        }
+        int mods = 0;
+        int key = sim_physical_key_for_codepoint(codepoint, &mods);
+        // The editor gate must see the ordinary platform sequence; invoking
+        // its text action directly would bypass keydown cancellation and input
+        // cascade correlation.
+        sim_key(uicon, key, mods, true);
+        sim_text_input(uicon, codepoint);
+        sim_key(uicon, key, mods, false);
+        cursor += bytes;
+    }
+}
+
+static void sim_type_legacy_text(UiContext* uicon, const char* text) {
+    if (!uicon || !text) return;
+    const char* cursor = text;
+    while (*cursor) {
+        // Keep the historical `type` fixture contract byte-oriented.
+        sim_text_input(uicon, (uint32_t)(unsigned char)*cursor);
+        cursor++;
+    }
+}
+
 // Process a single simulated event
 static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     switch (ev->type) {
@@ -4020,23 +4177,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
-        case SIM_EVENT_TYPE: {
-            // Click target first to focus it — but skip the click if the target
-            // is already focused, otherwise the click would collapse any existing
-            // text selection (e.g. from a preceding tripleclick).
-            if (ev->target_selector || ev->target_text) {
-                View* target_elem = resolve_target_element(ev, uicon->document);
-                DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
-                bool already_focused = target_elem && target_elem->is_element() &&
-                    state_get_pseudo_state(state, target_elem, PSEUDO_STATE_FOCUS);
-                if (!already_focused) {
-                    int x, y;
-                    if (resolve_target(ev, uicon->document, &x, &y)) {
-                        sim_mouse_button(uicon, x, y, 0, 0, true);
-                        sim_mouse_button(uicon, x, y, 0, 0, false);
-                    }
-                }
-            }
+        case SIM_EVENT_TYPE:
+        case SIM_EVENT_TYPE_PHYSICAL: {
+            // Clicking an already focused target would collapse a selection
+            // made by the preceding test step.
+            sim_focus_typing_target(uicon, ev);
             // If clear_first, send Cmd+A then Delete
             if (ev->clear_first) {
                 #ifdef __APPLE__
@@ -4049,15 +4194,16 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_key(uicon, GLFW_KEY_DELETE, 0, true);
                 sim_key(uicon, GLFW_KEY_DELETE, 0, false);
             }
-            // Type each character
+            // `type` remains the legacy text-input shorthand; physical typing
+            // is opt-in so existing fixtures do not acquire keyboard events.
             if (ev->input_text) {
-                log_info("event_sim: type '%s'", ev->input_text);
-                const char* p = ev->input_text;
-                while (*p) {
-                    // Simple ASCII handling - treat each byte as a codepoint
-                    uint32_t cp = (uint32_t)(unsigned char)*p;
-                    sim_text_input(uicon, cp);
-                    p++;
+                log_info("event_sim: %s '%s'",
+                         ev->type == SIM_EVENT_TYPE_PHYSICAL ? "type_physical" : "type",
+                         ev->input_text);
+                if (ev->type == SIM_EVENT_TYPE_PHYSICAL) {
+                    sim_type_physical_text(uicon, ev->input_text);
+                } else {
+                    sim_type_legacy_text(uicon, ev->input_text);
                 }
             }
             break;
@@ -4065,6 +4211,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_FOCUS: {
             View* target = resolve_target_element(ev, uicon->document);
+            // Rich editor blocks can install document-level pointer selection.
+            // A stale layout hit from the focus harness must not select a
+            // different block before this explicit focus operation runs.
+            if (sim_target_is_rich_editing_surface(target) &&
+                sim_focus_element_with_js_runtime(uicon->document, target)) {
+                sim_input_turn_mark_pending();
+                break;
+            }
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             // Focus fixtures historically model pointer focus. Preserve that
@@ -4073,6 +4227,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: focus via click at (%d, %d)", x, y);
             sim_mouse_button(uicon, x, y, 0, 0, true);
             sim_mouse_button(uicon, x, y, 0, 0, false);
+            // The click can cause an editor to rebuild its block subtree;
+            // never call focus() through the view captured before that turn.
+            target = resolve_target_element(ev, uicon->document);
             if (target && target->is_element() &&
                 (!uicon->document->state || focus_get(uicon->document->state) != target) &&
                 sim_focus_element_with_js_runtime(uicon->document, target)) {
@@ -4196,10 +4353,22 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         // user pressing Cmd+V after the OS clipboard has the given text.
         case SIM_EVENT_PASTE_TEXT: {
             if (ev->target_selector || ev->target_text) {
-                int x, y;
-                if (resolve_target(ev, uicon->document, &x, &y)) {
-                    sim_mouse_button(uicon, x, y, 0, 0, true);
-                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                View* target = resolve_target_element(ev, uicon->document);
+                // A pointer click can open an editor toolbar and steal focus before
+                // Cmd/Ctrl+V; JS-backed rich hosts require the same direct focus path
+                // used by physical typing so clipboard input reaches their owner.
+                if (sim_focus_is_within_target(uicon->document, target)) {
+                    // The preceding focus/selection is the caller's intended paste
+                    // position. Re-focusing can activate editor chrome instead.
+                } else if (sim_target_is_rich_editing_surface(target) &&
+                    sim_focus_element_with_js_runtime(uicon->document, target)) {
+                    sim_input_turn_mark_pending();
+                } else {
+                    int x, y;
+                    if (resolve_target(ev, uicon->document, &x, &y)) {
+                        sim_mouse_button(uicon, x, y, 0, 0, true);
+                        sim_mouse_button(uicon, x, y, 0, 0, false);
+                    }
                 }
             }
             const char* text = ev->input_text ? ev->input_text : "";
@@ -5890,16 +6059,33 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     char expected[64];
     char actual[64];
     View* focus = focus_get(state);
-    int actual_focus_id = focus ? (int)(static_cast<DomNode*>(focus))->id : 0;
-    if (ctx->replay_expected_focus_id >= 0 && actual_focus_id != ctx->replay_expected_focus_id) {
+    DomNode* focus_node = focus ? static_cast<DomNode*>(focus) : NULL;
+    int actual_focus_id = focus_node ? (int)focus_node->id : 0;
+    char actual_focus_stable_id[320];
+    event_state_log_node_stable_id(focus_node, actual_focus_stable_id, sizeof(actual_focus_stable_id));
+    // Re-transforms rebuild View ids, so replay must preserve author/source identity over allocations.
+    if (ctx->replay_expected_focus_stable_id &&
+        strcmp(actual_focus_stable_id, ctx->replay_expected_focus_stable_id) != 0) {
+        replay_emit_mismatch(ctx, uicon, "focus.target.stable_id",
+            ctx->replay_expected_focus_stable_id, actual_focus_stable_id);
+    } else if (!ctx->replay_expected_focus_stable_id &&
+               ctx->replay_expected_focus_id >= 0 && actual_focus_id != ctx->replay_expected_focus_id) {
         snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_focus_id);
         snprintf(actual, sizeof(actual), "%d", actual_focus_id);
         replay_emit_mismatch(ctx, uicon, "focus.target.id", expected, actual);
     }
 
     View* caret = caret_get_view(state);
-    int actual_caret_id = caret ? (int)(static_cast<DomNode*>(caret))->id : 0;
-    if (ctx->replay_expected_caret_id >= 0 && actual_caret_id != ctx->replay_expected_caret_id) {
+    DomNode* caret_node = caret ? static_cast<DomNode*>(caret) : NULL;
+    int actual_caret_id = caret_node ? (int)caret_node->id : 0;
+    char actual_caret_stable_id[320];
+    event_state_log_node_stable_id(caret_node, actual_caret_stable_id, sizeof(actual_caret_stable_id));
+    if (ctx->replay_expected_caret_stable_id &&
+        strcmp(actual_caret_stable_id, ctx->replay_expected_caret_stable_id) != 0) {
+        replay_emit_mismatch(ctx, uicon, "caret.target.stable_id",
+            ctx->replay_expected_caret_stable_id, actual_caret_stable_id);
+    } else if (!ctx->replay_expected_caret_stable_id &&
+               ctx->replay_expected_caret_id >= 0 && actual_caret_id != ctx->replay_expected_caret_id) {
         snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_caret_id);
         snprintf(actual, sizeof(actual), "%d", actual_caret_id);
         replay_emit_mismatch(ctx, uicon, "caret.target.id", expected, actual);

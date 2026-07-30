@@ -1,0 +1,9 @@
+{
+  "name": "deferred nested command closure survives DOM listener dispatch",
+  "events": [
+    {"type": "click", "target": {"selector": "#open"}},
+    {"type": "assert_count", "target": {"selector": "#swatch"}, "count": 1},
+    {"type": "click", "target": {"selector": "#swatch"}},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "base:color:#ef4444"}
+  ]
+}

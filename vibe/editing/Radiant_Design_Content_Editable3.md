@@ -1,5 +1,10 @@
 # Radiant `contenteditable` 3 - structural Chrome editing corpus plan
 
+> **Superseded — 2026-07-29.** This is a historical structural-editing corpus
+> plan. The current supported scope is the explicit minimal DOM action and
+> registered owner gate in
+> [`vibe/radiant/Radiant_Design_Editable.md`](../radiant/Radiant_Design_Editable.md).
+
 **Date:** 2026-06-18
 **Status:** Active implementation - CE3-0 structured artifacts and current
 all-import pass set promoted to RUNNABLE; CE3-H harness parity is the next

@@ -1,0 +1,12 @@
+{
+  "name": "Contenteditable clipboard and drop fall through without native mutation",
+  "html": "test/html/editable-dom-composition.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "focus", "target": {"selector": "#surface"}},
+    {"type": "paste_text", "target": {"selector": "#surface"}, "text": "paste"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "drag_and_drop", "target": {"selector": "#drag-source"}, "to_target": {"selector": "#surface"}},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"}
+  ]
+}

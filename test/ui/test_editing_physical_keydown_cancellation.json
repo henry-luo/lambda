@@ -1,0 +1,11 @@
+{
+  "name": "Physical typing honors keydown cancellation before contenteditable input",
+  "html": "test/html/editable-physical-keydown.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "focus", "target": {"selector": "#surface"}},
+    {"type": "type_physical", "target": {"selector": "#surface"}, "text": "x"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "equals": "keydown:x:KeyX:88"}
+  ]
+}

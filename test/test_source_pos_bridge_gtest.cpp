@@ -51,7 +51,7 @@ static TemplateRegistry* test_template_registry = nullptr;
 extern "C" TemplateRegistry** template_registry_current_slot(void) {
     return &test_template_registry;
 }
-__thread EvalContext* context = nullptr;
+extern __thread EvalContext* context;
 static Heap source_pos_test_heap = {};
 static EvalContext source_pos_test_context = {};
 
@@ -433,6 +433,7 @@ TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {
 // ---------------------------------------------------------------------------
 
 #include "../lambda/lambda.h"
+#include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/mark_reader.hpp"
 
 namespace {
@@ -486,6 +487,46 @@ TEST(SourcePosBridgeMarkBuilder, PosToItemEmptyPath) {
     EXPECT_EQ(path.asArray().length(), 0);
 
     source_pos_free(&p);
+}
+
+TEST(SourcePosBridgeMarkBuilder, ExactDecimalCoordinatesPreserveSourcePosition) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder mb(input);
+
+    // Template editor arithmetic promotes path/offset coordinates to Decimal.
+    // The C bridge must retain exact integral coordinates instead of treating
+    // them as absent and rebinding a later edit to offset zero.
+    ArrayBuilder path = mb.array();
+    path.append(decimal_from_int64_arena(1, mb.arena()));
+    path.append(decimal_from_int64_arena(0, mb.arena()));
+    MapBuilder pos_map = mb.map();
+    pos_map.put("path", path.final());
+    pos_map.put("offset", decimal_from_int64_arena(47, mb.arena()));
+
+    SourcePosC pos;
+    ASSERT_TRUE(source_pos_from_item(pos_map.final(), &pos));
+    EXPECT_EQ(pos.kind, SOURCE_POS_TEXT);
+    EXPECT_EQ(pos.offset, 47u);
+    ASSERT_EQ(pos.path.depth, 2);
+    EXPECT_EQ(pos.path.indices[0], 1);
+    EXPECT_EQ(pos.path.indices[1], 0);
+    source_pos_free(&pos);
+}
+
+TEST(SourcePosBridgeMarkBuilder, RejectsFractionalDecimalCoordinate) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder mb(input);
+
+    ArrayBuilder path = mb.array();
+    path.append(decimal_from_string_arena("0.5", mb.arena()));
+    MapBuilder pos_map = mb.map();
+    pos_map.put("path", path.final());
+    pos_map.put("offset", decimal_from_int64_arena(0, mb.arena()));
+
+    SourcePosC pos;
+    EXPECT_FALSE(source_pos_from_item(pos_map.final(), &pos));
 }
 
 TEST(SourcePosBridgeMarkBuilder, TextSelectionShape) {

@@ -1,0 +1,31 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  class Base {
+    constructor() { this.kind = "base"; }
+  }
+
+  function makeValidatedBlock(value) {
+    var R = class _R extends Base {
+      constructor({ text }) { super(), this.text = text; }
+      save() { return { data: { text: this.text } }; }
+      validate(data) { return data.text; }
+    };
+    return new R({ text: value });
+  }
+
+  function makeLabelledBlock(value) {
+    var R = class _R extends Base {
+      constructor(value) { super(), this.value = value; }
+      label() { return `label:${this.value}`; }
+    };
+    return new R(value);
+  }
+
+  const first = makeValidatedBlock("ok");
+  const second = makeLabelledBlock("next");
+  document.getElementById("result").textContent =
+    `${first.validate(first.save().data)}|${second.label()}|${first.kind}`;
+})();
+</script>

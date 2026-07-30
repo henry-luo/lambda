@@ -1,0 +1,133 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+(() => {
+  class Base {
+    constructor() {
+      this.baseOne = 1;
+      this.baseTwo = 2;
+    }
+  }
+  function BlockApi(block) {
+    Object.setPrototypeOf(this, {
+      save() { return block.save(); },
+      validate(value) { return block.validate(value); }
+    });
+  }
+  var R = class _R extends Base {
+    static get CSS() { return { marker: "many" }; }
+    constructor() {
+      super(), this.firstOwn = 1, this.secondOwn = 2, this.thirdOwn = 3,
+      this.fourthOwn = 4, this.fifthOwn = 5,
+      this.blockApi = new BlockApi(this),
+      this.readOwn = () => this.firstOwn,
+      this.writeOwn = (value) => { this.firstOwn = value; };
+    }
+    get first() { return "first"; }
+    set first(value) { this._first = value; }
+    method01() { return 1; }
+    method02() { return 2; }
+    method03() { return 3; }
+    method04() { return 4; }
+    method05() { return 5; }
+    method06() { return 6; }
+    method07() { return 7; }
+    method08() { return 8; }
+    method09() { return 9; }
+    method10() { return 10; }
+    method11() { return 11; }
+    method12() { return 12; }
+    method13() { return 13; }
+    method14() { return 14; }
+    method15() { return 15; }
+    method16() { return 16; }
+    async save() {
+      const pressure = [];
+      for (let index = 0; index < 3000; index++) {
+        pressure.push({ index, text: `entry-${index}` });
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      return { data: "data", saved: "saved" };
+    }
+    method18() { return 18; }
+    method19() { return 19; }
+    method20() { return 20; }
+    async validate(value) { return `valid:${value}`; }
+    method21() { return 21; }
+    method22() { return 22; }
+    method23() { return 23; }
+    method24() { return 24; }
+    method25() { return 25; }
+    method26() { return 26; }
+    method27() { return 27; }
+    method28() { return 28; }
+    method29() { return 29; }
+    method30() { return 30; }
+    method31() { return 31; }
+    method32() { return 32; }
+    method33() { return 33; }
+    method34() { return 34; }
+    method35() { return 35; }
+  }
+
+  class Factory {
+    make() { return new R(); }
+  }
+  const block = new Factory().make();
+  block.first = "written";
+  class ServiceBase {
+    constructor() {
+      this.Editor = {};
+    }
+  }
+  class Blocks {
+    constructor(block) {
+      this.blocks = [block];
+    }
+    get array() { return this.blocks; }
+  }
+  class BlockManager {
+    constructor(block) {
+      this._blocks = new Blocks(block);
+    }
+    get blocks() { return this._blocks.array; }
+  }
+  const externalTools = {
+    Paragraph: (() => class Paragraph {
+      validate(data) { return data.text === "external"; }
+    })()
+  };
+  const externalTool = new externalTools.Paragraph();
+  const DynamicTool = class DynamicTool {
+    validate(data) { return data.text === "dynamic"; }
+  };
+  class DynamicToolFactory {
+    constructor() { this.constructable = DynamicTool; }
+    create() { return new this.constructable(); }
+  }
+  const dynamicTool = new DynamicToolFactory().create();
+  class Saver extends ServiceBase {
+    constructor(manager) {
+      super(), this.Editor = { BlockManager: manager };
+    }
+    async save() {
+      const { BlockManager: e } = this.Editor, o = e.blocks, saved = [];
+      o.forEach((block) => {
+        saved.push(this.getSavedData(block));
+      });
+      return Promise.all(saved);
+    }
+    async getSavedData(e) {
+      const t = await e.save(), o = t && await e.validate(t.data);
+      return { ...t, isValid: o };
+    }
+  }
+  const manager = new BlockManager(block.blockApi);
+  Promise.resolve(new Saver(manager).save()).then(([{ saved, isValid }]) => {
+    const external = externalTool.validate({ text: "external" });
+    const dynamic = dynamicTool.validate({ text: "dynamic" });
+    document.getElementById("result").textContent =
+      `${block.method20()}|${saved}|${isValid}|${external}|${dynamic}`;
+  });
+})();
+</script>

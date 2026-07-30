@@ -85,6 +85,12 @@ TemplateEntry* template_registry_match(TemplateRegistry* registry,
                                        Item target, bool edit_mode,
                                        const char* template_name);
 
+// Resolve a stable template reference recorded by RenderMap reverse lookup.
+// The registry owns references for its full lifetime, so callers must not
+// retain the returned entry after the active document/runtime is destroyed.
+TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
+                                          const char* template_ref);
+
 // Add an event handler to an existing template entry
 void template_entry_add_handler(TemplateEntry* entry,
                                 const char* event_name,

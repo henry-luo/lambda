@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
+#include <limits.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -66,6 +67,9 @@ static void render_map_register_roots(RenderMapState* state) {
 
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
+static Item render_map_find_tree_parent(RenderMapEntry saved, int* out_child_index);
+static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_parent,
+                                           int tree_child_index, Item new_result);
 
 static Item render_map_read_field(ShapeEntry* field, void* map_data) {
     if (!field || !field->type || !map_data) return ItemNull;
@@ -118,6 +122,41 @@ static HashMap* ensure_reverse_map(void) {
         );
     }
     return s_reverse_map;
+}
+
+static void render_map_record_reverse_result_tree(HashMap* reverse_map,
+                                                  Item result_node,
+                                                  RenderMapKey key,
+                                                  int depth) {
+    if (!reverse_map || !result_node.item || depth > 128) return;
+
+    ReverseMapEntry query = {};
+    query.result_item_bits = result_node.item;
+    // A nested apply owns its own rendered subtree. Preserve that more
+    // specific reverse ownership when an outer template returns a fragment.
+    if (!hashmap_get(reverse_map, &query)) {
+        ReverseMapEntry entry = {};
+        entry.result_item_bits = result_node.item;
+        entry.key = key;
+        hashmap_set(reverse_map, &entry);
+    }
+
+    TypeId result_type = get_type_id(result_node);
+    if (result_type == LMD_TYPE_ELEMENT) {
+        Element* element = result_node.element;
+        if (!element || !element->items) return;
+        for (int64_t i = 0; i < element->length; i++) {
+            render_map_record_reverse_result_tree(reverse_map, element->items[i],
+                                                  key, depth + 1);
+        }
+    } else if (result_type == LMD_TYPE_ARRAY) {
+        Array* array = result_node.array;
+        if (!array || !array->items) return;
+        for (int64_t i = 0; i < array->length; i++) {
+            render_map_record_reverse_result_tree(reverse_map, array->items[i],
+                                                  key, depth + 1);
+        }
+    }
 }
 
 HASHMAP_DEFINE_FIELD2_KEY(render_map, RenderMapEntry, key.source_item.item, key.template_ref)
@@ -183,24 +222,43 @@ void render_map_record(Item source_item, const char* template_ref,
     entry.result_node = result_node;
     entry.parent_result = parent_result;
     entry.child_index = child_index;
+    entry.child_count = result_node.item ? 1 : 0;
     entry.dirty = false;
     hashmap_set(map, &entry);
 
-    // also record in reverse map: result_node → (source_item, template_ref)
+    // Also record every DOM-reachable result node. Template bodies may return
+    // a fragment list that the parent flattens, so registering only the outer
+    // list leaves all rendered descendants without route ownership.
     if (result_node.item) {
         HashMap* rmap = ensure_reverse_map();
-        ReverseMapEntry rentry;
-        memset(&rentry, 0, sizeof(rentry));
-        rentry.result_item_bits = result_node.item;
-        rentry.key.source_item = source_item;
-        rentry.key.template_ref = template_ref;
-        hashmap_set(rmap, &rentry);
+        render_map_record_reverse_result_tree(rmap, result_node, entry.key, 0);
     }
 
     log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
               template_ref ? template_ref : "(anon)",
               (unsigned long long)result_node.item,
               s_reverse_map ? hashmap_count(s_reverse_map) : 0);
+}
+
+void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,
+                                     int child_index, int child_count) {
+    // Collection construction is also used outside a template evaluation.
+    // Never create context-owned reconciliation state for those plain lists.
+    if (!context || !context->render_map_state || !fragment_result.item ||
+            child_index < 0 || child_count < 0) return;
+    HashMap* map = s_render_map;
+    if (!map) return;
+
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(map, &iter, &item)) {
+        RenderMapEntry* entry = (RenderMapEntry*)item;
+        if (entry->result_node.item != fragment_result.item) continue;  // RAW_ITEM_EQ_OK: render results are identity-tracked.
+        entry->parent_result = parent_result;
+        entry->child_index = child_index;
+        entry->child_count = child_count;
+        return;
+    }
 }
 
 void render_map_mark_dirty(Item source_item, const char* template_ref) {
@@ -283,19 +341,8 @@ int render_map_retransform(void) {
         }
 
         Item old_result = saved.result_node;
-
-        // Find parent in element tree BEFORE fn() re-executes, because fn()
-        // may trigger GC which reuses memory of old elements in the tree.
-        Item tree_parent = saved.parent_result;
         int tree_child_index = saved.child_index;
-        if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
-            if (s_doc_root.item == old_result.item) {  // RAW_ITEM_EQ_OK: render tree replacement is container identity.
-                // old result IS the doc root — will be replaced directly
-            } else {
-                // Walk tree to find parent while tree is still valid
-                tree_parent = find_parent_of(s_doc_root, old_result, &tree_child_index);
-            }
-        }
+        Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
 
         // re-execute template body with the source item
         // NOTE: fn() may call apply() which modifies this hashmap — after this
@@ -310,35 +357,11 @@ int render_map_retransform(void) {
         Item new_result = fn((Context*)context, saved.key.source_item);
 
         // update reverse map
-        if (s_reverse_map) {
-            if (new_result.item) {
-                ReverseMapEntry rentry;
-                memset(&rentry, 0, sizeof(rentry));
-                rentry.result_item_bits = new_result.item;
-                rentry.key = saved.key;
-                hashmap_set(s_reverse_map, &rentry);
-            }
+        if (s_reverse_map && new_result.item) {
+            render_map_record_reverse_result_tree(s_reverse_map, new_result, saved.key, 0);
         }
 
-        // Replace old result with new result in the element tree
-        if (get_type_id(tree_parent) != LMD_TYPE_NULL && tree_child_index >= 0) {
-            TypeId parent_type = get_type_id(tree_parent);
-            if (parent_type == LMD_TYPE_ELEMENT) {
-                Element* parent_elmt = it2elmt(tree_parent);
-                if (parent_elmt && tree_child_index < (int)parent_elmt->length) {
-                    parent_elmt->items[tree_child_index] = new_result;
-                }
-            } else if (parent_type == LMD_TYPE_ARRAY) {
-                Array* parent_arr = it2arr(tree_parent);
-                if (parent_arr && tree_child_index < (int)parent_arr->length) {
-                    parent_arr->items[tree_child_index] = new_result;
-                }
-            }
-        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
-            s_doc_root = new_result;
-            log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
-                      (unsigned long long)new_result.item);
-        }
+        render_map_replace_tree_result(saved, tree_parent, tree_child_index, new_result);
 
         // write back the updated entry to the map (re-lookup since entry may be stale)
         RenderMapEntry updated = saved;
@@ -393,19 +416,8 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         }
 
         Item old_result = saved.result_node;
-
-        // Find parent in element tree BEFORE fn() re-executes, because fn()
-        // may trigger GC which reuses memory of old elements in the tree.
-        Item tree_parent = saved.parent_result;
         int tree_child_index = saved.child_index;
-        if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
-            if (s_doc_root.item == old_result.item) {  // RAW_ITEM_EQ_OK: render tree replacement is container identity.
-                // old result IS the doc root — will be replaced directly
-            } else {
-                // Walk tree to find parent while tree is still valid
-                tree_parent = find_parent_of(s_doc_root, old_result, &tree_child_index);
-            }
-        }
+        Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
 
         // re-execute template body with the source item
         // NOTE: fn() may call apply() which modifies this hashmap — after this
@@ -425,37 +437,15 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
             out_results[count].new_result = new_result;
             out_results[count].old_result = old_result;
             out_results[count].child_index = tree_child_index;
+            out_results[count].child_count = saved.child_count;
             out_results[count].template_ref = saved.key.template_ref;
         }
 
-        // update reverse map
         if (s_reverse_map && new_result.item) {
-            ReverseMapEntry rentry;
-            memset(&rentry, 0, sizeof(rentry));
-            rentry.result_item_bits = new_result.item;
-            rentry.key = saved.key;
-            hashmap_set(s_reverse_map, &rentry);
+            render_map_record_reverse_result_tree(s_reverse_map, new_result, saved.key, 0);
         }
 
-        // Replace old result with new result in the element tree
-        if (get_type_id(tree_parent) != LMD_TYPE_NULL && tree_child_index >= 0) {
-            TypeId parent_type = get_type_id(tree_parent);
-            if (parent_type == LMD_TYPE_ELEMENT) {
-                Element* parent_elmt = it2elmt(tree_parent);
-                if (parent_elmt && tree_child_index < (int)parent_elmt->length) {
-                    parent_elmt->items[tree_child_index] = new_result;
-                }
-            } else if (parent_type == LMD_TYPE_ARRAY) {
-                Array* parent_arr = it2arr(tree_parent);
-                if (parent_arr && tree_child_index < (int)parent_arr->length) {
-                    parent_arr->items[tree_child_index] = new_result;
-                }
-            }
-        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
-            s_doc_root = new_result;
-            log_debug("render_map_retransform_with_results: updated s_doc_root to new result 0x%llx",
-                      (unsigned long long)new_result.item);
-        }
+        render_map_replace_tree_result(saved, tree_parent, tree_child_index, new_result);
 
         // write back the updated entry to the map (re-lookup since entry may be stale)
         RenderMapEntry updated = saved;
@@ -555,6 +545,151 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
         }
     }
     return ItemNull;
+}
+
+static int render_map_flattened_child_count(Item node, int depth) {
+    if (!node.item || get_type_id(node) == LMD_TYPE_NULL) return 0;
+    if (depth > 128) return -1;
+    if (get_type_id(node) != LMD_TYPE_ARRAY || !node.array || !node.array->is_content) {
+        return 1;
+    }
+    int total = 0;
+    Array* fragment = node.array;
+    for (int64_t i = 0; i < fragment->length; i++) {
+        int child_count = render_map_flattened_child_count(fragment->items[i], depth + 1);
+        if (child_count < 0 || total > INT_MAX - child_count) return -1;
+        total += child_count;
+    }
+    return total;
+}
+
+static int render_map_flattened_scalar_tail_count(Item node, int depth) {
+    if (!node.item || get_type_id(node) == LMD_TYPE_NULL) return 0;
+    if (depth > 128) return -1;
+    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_content) {
+        int total = 0;
+        Array* fragment = node.array;
+        for (int64_t i = 0; i < fragment->length; i++) {
+            int child_count = render_map_flattened_scalar_tail_count(fragment->items[i], depth + 1);
+            if (child_count < 0 || total > INT_MAX - child_count) return -1;
+            total += child_count;
+        }
+        return total;
+    }
+    TypeId type_id = get_type_id(node);
+    return type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
+           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ? 1 : 0;
+}
+
+static int64_t render_map_store_flattened_children(List* parent, int64_t index,
+                                                    Item node, int depth) {
+    if (!node.item || get_type_id(node) == LMD_TYPE_NULL || depth > 128) return index;
+    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_content) {
+        Array* fragment = node.array;
+        for (int64_t i = 0; i < fragment->length; i++) {
+            index = render_map_store_flattened_children(parent, index,
+                                                        fragment->items[i], depth + 1);
+        }
+        return index;
+    }
+    array_set((Array*)parent, index, node);
+    return index + 1;
+}
+
+static void render_map_shift_bound_sibling_indices(Item parent_result,
+                                                    int first_shifted_child,
+                                                    int child_delta,
+                                                    RenderMapKey replaced_key) {
+    if (!child_delta || !s_render_map) return;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(s_render_map, &iter, &item)) {
+        RenderMapEntry* entry = (RenderMapEntry*)item;
+        bool is_replaced_entry = entry->key.source_item.item == replaced_key.source_item.item &&
+            entry->key.template_ref == replaced_key.template_ref;  // RAW_ITEM_EQ_OK: render-map keys use source identity.
+        if (!is_replaced_entry && entry->parent_result.item == parent_result.item &&
+                entry->child_index >= first_shifted_child) {  // RAW_ITEM_EQ_OK: bound fragments share their exact parent result.
+            entry->child_index += child_delta;
+        }
+    }
+}
+
+static bool render_map_replace_child_range(RenderMapEntry saved, Item parent_result,
+                                           int child_index, Item new_result) {
+    TypeId parent_type = get_type_id(parent_result);
+    if ((parent_type != LMD_TYPE_ELEMENT && parent_type != LMD_TYPE_ARRAY) ||
+            child_index < 0) return false;
+
+    int old_child_count = saved.child_count;
+    if (old_child_count < 0) return false;
+    int new_child_count = render_map_flattened_child_count(new_result, 0);
+    int new_scalar_tail_count = render_map_flattened_scalar_tail_count(new_result, 0);
+    if (new_child_count < 0 || new_scalar_tail_count < 0) return false;
+
+    RootFrame roots(2);
+    Rooted<Item> rooted_parent(roots, parent_result);
+    Rooted<Item> rooted_result(roots, new_result);
+    List* parent = (List*)rooted_parent.get().array;
+    if (!parent || child_index > parent->length ||
+            old_child_count > parent->length - child_index) return false;
+
+    int64_t new_length = parent->length - old_child_count + new_child_count;
+    if (new_length < 0 || new_length > INT64_MAX - parent->extra - new_scalar_tail_count) {
+        return false;
+    }
+    int64_t required_capacity = new_length + parent->extra + new_scalar_tail_count;
+    while (parent->capacity < required_capacity) {
+        int64_t previous_capacity = parent->capacity;
+        expand_list(parent, nullptr);
+        parent = (List*)rooted_parent.get().array;
+        // Allocation failure leaves capacity unchanged; retrying would spin
+        // forever while a template transaction still owns the live document.
+        if (!parent || parent->capacity <= previous_capacity) return false;
+    }
+
+    int64_t tail_count = parent->length - child_index - old_child_count;
+    if (tail_count > 0 && new_child_count != old_child_count) {
+        memmove(parent->items + child_index + new_child_count,
+                parent->items + child_index + old_child_count,
+                (size_t)tail_count * sizeof(Item));
+    }
+    parent->length = new_length;
+
+    // Rendered fragment items are copied through array_set so tagged wide
+    // scalars retain destination-owned tail storage when templates emit text.
+    int64_t stored_end = render_map_store_flattened_children(
+        parent, child_index, rooted_result.get(), 0);
+    if (stored_end != child_index + new_child_count) return false;
+
+    render_map_shift_bound_sibling_indices(parent_result,
+                                           child_index + old_child_count,
+                                           new_child_count - old_child_count,
+                                           saved.key);
+    return true;
+}
+
+static Item render_map_find_tree_parent(RenderMapEntry saved, int* out_child_index) {
+    Item tree_parent = saved.parent_result;
+    if (get_type_id(tree_parent) != LMD_TYPE_NULL || !s_doc_root.item) return tree_parent;
+    if (s_doc_root.item == saved.result_node.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
+        return ItemNull;
+    }
+    return find_parent_of(s_doc_root, saved.result_node, out_child_index);
+}
+
+static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_parent,
+                                           int tree_child_index, Item new_result) {
+    if (get_type_id(tree_parent) != LMD_TYPE_NULL && tree_child_index >= 0) {
+        return render_map_replace_child_range(saved, tree_parent, tree_child_index, new_result);
+    }
+    if (s_doc_root.item == saved.result_node.item &&
+            saved.result_node.item != new_result.item) {  // RAW_ITEM_EQ_OK: render tree root replacement is identity-based.
+        s_doc_root = new_result;
+        log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
+                  (unsigned long long)new_result.item);
+        return true;
+    }
+    return false;
 }
 
 // ============================================================================

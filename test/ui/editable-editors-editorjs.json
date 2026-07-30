@@ -1,0 +1,13 @@
+{
+  "name": "upstream Editor.js exposes saved block data after physical typing",
+  "html": "test/editable-editors/fixtures/editorjs/typing.html",
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "assert_count", "target": {"selector": ".ce-block"}, "min": 1},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "!"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed!"}
+  ]
+}

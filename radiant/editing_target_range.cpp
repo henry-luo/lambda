@@ -98,9 +98,10 @@ static uint32_t compute_rich_composition_target_ranges(
     }
     if (!state->editing.composition.active ||
         state->editing.composition.dom_preedit_len == 0) {
-        if (intent->type != INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
-            return 0;
-        }
+        // The first preedit update must retain the live Selection so it can
+        // replace an initially selected text run; later updates use the
+        // recorded provisional range below.
+        return 0;
     }
     if (state->editing.composition.surface.kind != EDIT_SURFACE_NONE &&
         state->editing.composition.surface.owner &&
@@ -317,22 +318,6 @@ static uint32_t target_range_leading_space_len(const char* text,
     return count;
 }
 
-static DomText* target_range_find_text_descendant(DomNode* node, bool last) {
-    if (!node) return nullptr;
-    if (node->is_text()) return node->as_text();
-    if (!node->is_element()) return nullptr;
-
-    DomElement* elem = node->as_element();
-    DomText* found = nullptr;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        DomText* text = target_range_find_text_descendant(child, last);
-        if (!text) continue;
-        if (!last) return text;
-        found = text;
-    }
-    return found;
-}
-
 static bool target_range_node_is_inside(DomNode* node, DomElement* owner) {
     DomNode* owner_node = static_cast<DomNode*>(owner);
     for (DomNode* cur = node; cur; cur = cur->parent) {
@@ -418,7 +403,7 @@ static DomText* target_range_last_text_before_child(DomElement* parent,
     DomText* found = nullptr;
     for (DomNode* child = parent->first_child; child && child != stop_child;
          child = child->next_sibling) {
-        DomText* text = target_range_find_text_descendant(child, true);
+        DomText* text = editing_find_text_descendant(child, true);
         if (text) found = text;
     }
     return found;
@@ -626,7 +611,7 @@ static bool target_range_backspace_block_join(DomBoundary caret,
         return false;
     }
 
-    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    DomText* prev_text = editing_find_text_descendant(prev_node, true);
     TargetRangeJoinContent prev_content;
     if (!prev_text ||
         !target_range_simple_text_content(prev_block, prev_text,
@@ -678,7 +663,7 @@ static bool target_range_backspace_inline_fragment_block_join(
         return false;
     }
     DomNode* current_node = static_cast<DomNode*>(current_block);
-    if (target_range_find_text_descendant(current_node, false) != text) {
+    if (editing_find_text_descendant(current_node, false) != text) {
         return false;
     }
 
@@ -691,7 +676,7 @@ static bool target_range_backspace_inline_fragment_block_join(
         return false;
     }
 
-    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    DomText* prev_text = editing_find_text_descendant(prev_node, true);
     if (!prev_text) return false;
     out[0].start = {
         static_cast<DomNode*>(prev_text),
@@ -799,7 +784,7 @@ static bool target_range_backspace_child_block_parent_join(
         return false;
     }
 
-    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    DomText* prev_text = editing_find_text_descendant(prev_node, true);
     TargetRangeJoinContent prev_content;
     if (!prev_text ||
         !target_range_simple_text_content(prev_block, prev_text,
@@ -870,7 +855,7 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
     DomElement* current_li = target_range_text_block_parent(text);
     if (!current_li || current_li->tag() != HTM_TAG_LI) return false;
     DomNode* current_li_node = static_cast<DomNode*>(current_li);
-    if (target_range_find_text_descendant(current_li_node, false) != text) {
+    if (editing_find_text_descendant(current_li_node, false) != text) {
         return false;
     }
 
@@ -949,7 +934,7 @@ static bool target_range_backspace_table_cross_row_join(DomBoundary caret,
 
     DomElement* prev_cell = prev_row->last_child->as_element();
     if (!target_range_table_cell_without_span(prev_cell)) return false;
-    DomText* prev_text = target_range_find_text_descendant(
+    DomText* prev_text = editing_find_text_descendant(
         static_cast<DomNode*>(prev_cell), true);
     TargetRangeJoinContent prev_content;
     if (!prev_text || !target_range_simple_text_content(prev_cell, prev_text,

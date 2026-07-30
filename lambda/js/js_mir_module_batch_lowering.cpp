@@ -4757,7 +4757,13 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // parent must also capture it
                     for (int ci = 0; ci < child->capture_count; ci++) {
                         const char* cap_name = child->captures[ci].name;
-                        if (strcmp(cap_name, "_js_this") == 0) continue; // handled specially
+                        bool cap_is_lexical_this = strcmp(cap_name, "_js_this") == 0;
+                        if (cap_is_lexical_this && (!parent->node || !parent->node->is_arrow)) {
+                            // A normal function supplies the lexical binding when it
+                            // creates its direct arrow child. Only arrow ancestors
+                            // must forward the binding through their closure env.
+                            continue;
+                        }
                         if (jm_name_set_has(parent_own, cap_name)) continue; // parent already has it
 
                         // Skip self-reference captures: a named function expression's name
@@ -5444,6 +5450,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         for (int k = 0; k < child->capture_count; k++) {
                             if (strcmp(child->captures[k].name, sname) == 0) {
                                 child->captures[k].scope_env_slot = grandparent_slot;
+                                // Mixed loop closures record this same binding as
+                                // grandparent_slot; leaving its pre-reuse slot here
+                                // makes nested arrows read an unrelated parent value.
+                                if (child->captures[k].grandparent_slot >= 0) {
+                                    child->captures[k].grandparent_slot = grandparent_slot;
+                                }
                                 break;
                             }
                         }
@@ -7008,11 +7020,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_reg_t last_proto = proto_obj;
                             if (sc) {
                                 // Link prototype to parent's actual .prototype for identity correctness
-                                JsIdentifierNode tmp_id2;
-                                memset(&tmp_id2, 0, sizeof(tmp_id2));
-                                tmp_id2.node_type = JS_AST_NODE_IDENTIFIER;
-                                tmp_id2.name = sc->name;
-                                MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id2);
+                                // A synthetic identifier cannot resolve a nested superclass binding;
+                                // use its definition-time class slot so lexical inheritance stays intact.
+                                MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, sc);
+                                if (!super_val) super_val = jm_emit_undefined(mt);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                                 MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),

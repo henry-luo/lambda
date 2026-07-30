@@ -54,6 +54,10 @@ struct VarEntry {
     bool in_scope_env;
     int scope_env_slot;
     MIR_reg_t scope_env_reg;
+    // This local mirrors a direct binding promoted out of a synchronous IIFE.
+    // Name matches alone are insufficient because a nested lexical declaration
+    // can legally shadow the promoted variable.
+    bool is_iife_module_var_binding;
     int typed_array_type;
     bool is_js_array;
     JsClassEntry* class_entry;

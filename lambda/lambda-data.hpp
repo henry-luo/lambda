@@ -381,6 +381,34 @@ static inline bool typemap_is_shared_shape(const TypeMap* tm) {
     return tm && (tm->is_shared_constructor_shape || tm->is_transition_shared_shape);
 }
 
+// slot_entries also accelerates ordinary transition shapes. A slot-indexed
+// write is valid only for the leading constructor prefix whose storage really
+// is laid out as contiguous pointer-width slots.
+static inline int typemap_fixed_slot_prefix_count(const TypeMap* tm) {
+    if (!tm || !tm->slot_entries || tm->slot_count <= 0 ||
+            tm->byte_size < (int64_t)tm->slot_count * (int64_t)sizeof(void*)) {
+        return 0;
+    }
+    ShapeEntry* entry = tm->shape;
+    for (int i = 0; i < tm->slot_count; i++) {
+        if (!entry || tm->slot_entries[i] != entry ||
+                entry->byte_offset != (int64_t)i * (int64_t)sizeof(void*)) {
+            return 0;
+        }
+        entry = entry->next;
+    }
+    return tm->slot_count;
+}
+
+static inline bool typemap_entry_uses_fixed_slot(const TypeMap* tm,
+        const ShapeEntry* entry) {
+    int fixed_count = typemap_fixed_slot_prefix_count(tm);
+    for (int i = 0; i < fixed_count; i++) {
+        if (tm->slot_entries[i] == entry) return true;
+    }
+    return false;
+}
+
 // Retag safety for in-place shaped-slot writes. Upgrading a slot's tag is always
 // required so GC traces the pointer that was just stored, and leaving a stale tag
 // on a T->NULL write makes the null word read back as a zero-valued T (`false`,

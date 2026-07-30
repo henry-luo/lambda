@@ -1,0 +1,19 @@
+{
+  "name": "upstream Editor.js creates and merges blocks through public keyboard input",
+  "html": "test/editable-editors/fixtures/editorjs/typing.html",
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seed"},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "xy"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seedxy"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": "Z"},
+    {"type": "assert_count", "target": {"selector": ".ce-block"}, "equals": 5},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_count", "target": {"selector": ".ce-block"}, "equals": 4},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "seedxyZ"}
+  ]
+}

@@ -570,6 +570,15 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         is_modvar = true;
                         modvar_index = (int)mc->int_val;
                     }
+                    if (is_modvar && mc->is_iife_var) {
+                        JsMirVarEntry* direct_binding = jm_find_var(mt, vname);
+                        if (direct_binding) {
+                            // A later `for (let name ...)` is a distinct binding;
+                            // only this direct IIFE binding may reload from the
+                            // promoted module slot.
+                            direct_binding->is_iife_module_var_binding = true;
+                        }
+                    }
                 }
 
                 bool with_var_init_handled = false;
@@ -769,7 +778,12 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     if (var->kind == JS_VAR_VAR) {
                         JsMirVarEntry* existing_var = jm_find_var(mt, vname);
                         if (existing_var && existing_var->reg && existing_var->from_hoist) {
+                            const char* saved_assign_target = mt->assign_target_vname;
+                            // Hoisted initializers still define this binding; anonymous class
+                            // expressions use the target name to recover their class metadata.
+                            mt->assign_target_vname = vname;
                             MIR_reg_t val = jm_transpile_box_item(mt, d->init);
+                            mt->assign_target_vname = saved_assign_target;
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, existing_var->reg),
                                 MIR_new_reg_op(mt->ctx, val)));
@@ -1605,7 +1619,8 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
                 memset(&lookup, 0, sizeof(lookup));
                 snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) {
+                if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var &&
+                    e->var.is_iife_module_var_binding) {
                     MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
                     if (e->var.type_id == LMD_TYPE_INT) {
@@ -2348,8 +2363,14 @@ static bool jm_class_name_is_unique(JsMirTranspiler* mt, const char* name, int l
     int found = 0;
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
-        if (!ce->name || (int)ce->name->len != len) continue;
-        if (strncmp(ce->name->chars, name, len) != 0) continue;
+        bool matches_name = ce->name && (int)ce->name->len == len &&
+            strncmp(ce->name->chars, name, len) == 0;
+        bool matches_alias = ce->alias_name && (int)ce->alias_name->len == len &&
+            strncmp(ce->alias_name->chars, name, len) == 0;
+        // A class expression's outer variable is its usable constructor
+        // binding; excluding it forces `new Alias()` through an unrelated
+        // dynamic path even when that lexical binding is unambiguous.
+        if (!matches_name && !matches_alias) continue;
         found++;
         if (found > 1) return false;
     }
@@ -3198,6 +3219,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
         }
 
+        // The class-prototype lookup below can allocate. Keep the unpublished
+        // instance in the exact root frame so a compacting GC cannot leave the
+        // later js_set_prototype call holding its pre-move address.
+        jm_create_gc_root_slot(mt, obj);
+
         // v20: Set __proto__ to the class's prototype object (which already has all
         // methods and superclass __proto__ chain from class declaration).
         // This avoids copying methods onto each instance — methods live on the prototype
@@ -3205,10 +3231,12 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         {
             MIR_reg_t cls_val = jm_emit_class_object_for_entry(mt, ce);
             if (!cls_val) cls_val = jm_transpile_box_item(mt, call->callee);
+            jm_create_gc_root_slot(mt, cls_val);
             MIR_reg_t proto_key = jm_box_string_literal(mt, "prototype", 9);
             MIR_reg_t class_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_val),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_key));
+            jm_create_gc_root_slot(mt, class_proto);
             jm_call_void_2(mt, "js_set_prototype",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, class_proto));
@@ -5267,11 +5295,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             JsClassEntry* sc = static_superclass;
                             MIR_reg_t last_proto = proto_obj;
                             if (sc) {
-                                JsIdentifierNode tmp_id2;
-                                memset(&tmp_id2, 0, sizeof(tmp_id2));
-                                tmp_id2.node_type = JS_AST_NODE_IDENTIFIER;
-                                tmp_id2.name = sc->name;
-                                MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)&tmp_id2);
+                                // A synthetic identifier cannot resolve a nested superclass binding;
+                                // use its definition-time class slot so lexical inheritance stays intact.
+                                MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, sc);
+                                if (!super_val) super_val = jm_emit_undefined(mt);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                                 MIR_reg_t sp_obj = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),

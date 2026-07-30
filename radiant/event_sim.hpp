@@ -3,7 +3,7 @@
  * 
  * Allows loading and replaying events from a JSON file for automated testing.
  * Supports primitive events (mouse_down, key_press, etc.) and high-level
- * actions (click, dblclick, type) plus assertions for verification.
+ * actions (click, dblclick, type, type_physical) plus assertions for verification.
  * 
  * JSON Format:
  * {
@@ -14,6 +14,7 @@
  *     {"type": "click", "target": {"text": "Click here"}},
  *     {"type": "dblclick", "target": {"text": "Select word"}},
  *     {"type": "type", "target": {"selector": "input"}, "text": "hello"},
+ *     {"type": "type_physical", "target": {"selector": "[contenteditable]"}, "text": "hello"},
  *     {"type": "mouse_move", "x": 100, "y": 200},
  *     {"type": "mouse_down", "x": 100, "y": 200, "button": 0, "mods": 0},
  *     {"type": "mouse_down", "target_text": "Click here"},
@@ -99,7 +100,8 @@ enum SimEventType {
     // High-level actions
     SIM_EVENT_CLICK,           // click (mouse_down + mouse_up)
     SIM_EVENT_DBLCLICK,        // double-click
-    SIM_EVENT_TYPE,            // type text into focused element
+    SIM_EVENT_TYPE,            // legacy text-input events into focused element
+    SIM_EVENT_TYPE_PHYSICAL,   // keydown -> text-input -> keyup per Unicode code point
     SIM_EVENT_FOCUS,           // focus an element (via click)
     SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
@@ -405,6 +407,8 @@ struct EventSimContext {
     bool replay_has_expected_state;
     int replay_expected_focus_id;
     int replay_expected_caret_id;
+    char* replay_expected_focus_stable_id;
+    char* replay_expected_caret_stable_id;
     int replay_expected_caret_offset;
     bool replay_has_caret_offset;
     bool replay_expected_selection_collapsed;

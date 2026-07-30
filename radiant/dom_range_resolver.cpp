@@ -684,10 +684,9 @@ static bool editable_boundary_hit_empty(EditableBoundaryHit* hit) {
 static bool is_rich_editable_host(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
-    if (elem->has_attribute("data-editable")) return true;
-    if (!elem->has_attribute("contenteditable")) return false;
-    const char* ce = elem->get_attribute("contenteditable");
-    return !ce || *ce == '\0' || strcasecmp(ce, "false") != 0;
+    EditingHost host;
+    return editing_host_lookup(static_cast<DomNode*>(elem), &host) &&
+        host.host == elem && !host.target_in_false_island;
 }
 
 static bool is_vertical_selection_writing_mode(CssEnum mode) {
