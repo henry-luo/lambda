@@ -283,7 +283,9 @@ def write_report(args, data):
     # in prose that the runner did not actually perform
     if cooldown_s:
         order = metadata.get("suite_order") or SUITE_ORDER
-        timeout_text += (f"; suites run in order `{" -> ".join(order)}`"
+        # keep the join outside the f-string because Python 3.9 parses its nested quotes as syntax
+        order_text = " -> ".join(order)
+        timeout_text += (f"; suites run in order `{order_text}`"
                          f" with a {cooldown_s}s idle gap between suites")
     w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
@@ -338,19 +340,31 @@ def write_report(args, data):
         cells.extend(fmt_ratio(geo_mean(suite_ratios.get(engine, []))) for engine in ratio_engines)
         w("| " + " | ".join(cells) + " |")
 
-    dedup = compute_dedup_summary(data, engines)
-    dedup_counts = dedup["counts"]
-    dedup_ratios = dedup["ratios"]
-    dedup_cells = ["**Overall dedup**", f"**{dedup['total']}**"]
-    dedup_cells.extend(f"**{dedup_counts.get(engine, 0)}**" for engine in engines)
-    dedup_cells.extend(f"**{fmt_ratio(geo_mean(dedup_ratios.get(engine, [])))}**" for engine in ratio_engines)
-    w("| " + " | ".join(dedup_cells) + " |")
-    raw_cells = ["Overall raw", str(total_rows)]
-    raw_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
-    raw_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
-    w("| " + " | ".join(raw_cells) + " |")
-    w()
-    w("> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.")
+    # New runner snapshots already contain one canonical row per duplicate workload;
+    # retain the legacy best-value pass only for historical JSON files without policy metadata.
+    canonicalized = bool(metadata.get("canonical_duplicate_suites"))
+    if canonicalized:
+        dedup = {"duplicates": []}
+        overall_cells = ["**Overall**", str(total_rows)]
+        overall_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
+        overall_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
+        w("| " + " | ".join(overall_cells) + " |")
+        w()
+        w("> The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.")
+    else:
+        dedup = compute_dedup_summary(data, engines)
+        dedup_counts = dedup["counts"]
+        dedup_ratios = dedup["ratios"]
+        dedup_cells = ["**Overall dedup**", f"**{dedup['total']}**"]
+        dedup_cells.extend(f"**{dedup_counts.get(engine, 0)}**" for engine in engines)
+        dedup_cells.extend(f"**{fmt_ratio(geo_mean(dedup_ratios.get(engine, [])))}**" for engine in ratio_engines)
+        w("| " + " | ".join(dedup_cells) + " |")
+        raw_cells = ["Overall raw", str(total_rows)]
+        raw_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
+        raw_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
+        w("| " + " | ".join(raw_cells) + " |")
+        w()
+        w("> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.")
     w("> Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.")
     w()
     write_historical_comparisons(w, metadata)
