@@ -9,8 +9,8 @@ runner.
 Phase 3 (`any \ error`, honest inference, and fn firewalls) now includes the package-source
 migrations and final MIR carrier fixes needed to honor inferred contracts without changing
 the public procedural Item ABI. The former 232 package-script failures are resolved: all 643
-Lambda GTests now pass. The standing Lambda baseline is 3,685/3,686; its sole failure is the
-documented, unrelated `dom_module_props` DOM expectation. Phase 4 is complete: its E228
+Lambda GTests now pass. The standing Lambda baseline passes 3,691/3,691, including all 490
+JavaScript tests. Phase 4 is complete: its E228
 acknowledgment, literal bracket-map-write, `input`-schema, dynamic-ABI, and diagnostic
 hardening slices are implemented and verified.
 Round 1 landed in commit `274625d56` (`type enforcement impl`). This plan covers the
@@ -1364,6 +1364,15 @@ pass.
   After a release rebuild, `make test262-baseline` passed 40,261/40,261 fully passing
   tests, with 0 non-fully-passing tests, 0 failures, 0 retries, and 0 regressions
   (42,889 total; 2,628 skipped; 119.2s).
+
+### 2026-07-31 — DOM baseline closeout
+
+- `dom_module_props` correctly required the retired legacy editing-command APIs to be absent.
+  A stale `execCommand` direct-dispatch branch and feature sentinel instead made the property a
+  boolean. The branch and its private fragment-mutation helper are removed; feature detection
+  now observes `document.execCommand` and `queryCommand*` as `undefined`.
+- `make test-lambda-baseline` passes 3,691/3,691: input 2,104/2,104, Lambda runtime
+  1,587/1,587, JavaScript 490/490, and all 648 Lambda-script tests passed.
 
 Each phase appends a dated evidence block here when implemented. Record:
 
