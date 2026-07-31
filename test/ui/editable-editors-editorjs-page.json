@@ -1,0 +1,13 @@
+{
+  "name": "Editor.js manual page starts as one unfocused paragraph",
+  "html": "test/html/editable-editorjs.html",
+  "viewport": {"width": 1000, "height": 800},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".ce-block"}, "count": 1, "assert_timeout": 1000},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "Click here to start an Editor.js block."},
+    {"type": "focus", "target": {"selector": ".ce-paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": ".ce-paragraph"}, "text": " test"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "contains": "block. test"}
+  ]
+}

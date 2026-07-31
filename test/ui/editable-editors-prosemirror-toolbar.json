@@ -1,0 +1,20 @@
+{
+  "name": "upstream ProseMirror toolbar preserves selection and applies rich-text commands",
+  "html": "test/html/editable-prosemirror.html",
+  "viewport": {"width": 1000, "height": 800},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#toolbar button[data-command]"}, "count": 8},
+    {"type": "focus", "target": {"selector": ".ProseMirror"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "click", "target": {"selector": "#toolbar button[data-command=\"bold\"]"}},
+    {"type": "assert_count", "target": {"selector": ".ProseMirror strong"}, "min": 1},
+    {"type": "assert_attribute", "target": {"selector": "#toolbar button[data-command=\"bold\"]"}, "attribute": "aria-pressed", "equals": "true"},
+    {"type": "click", "target": {"selector": "#toolbar button[data-command=\"undo\"]"}},
+    {"type": "assert_count", "target": {"selector": ".ProseMirror strong"}, "count": 0},
+    {"type": "assert_attribute", "target": {"selector": "#toolbar button[data-command=\"bold\"]"}, "attribute": "aria-pressed", "equals": "false"},
+    {"type": "click", "target": {"selector": "#toolbar button[data-command=\"redo\"]"}},
+    {"type": "assert_count", "target": {"selector": ".ProseMirror strong"}, "min": 1},
+    {"type": "assert_attribute", "target": {"selector": "#toolbar button[data-command=\"bold\"]"}, "attribute": "aria-pressed", "equals": "true"},
+    {"type": "assert_focus", "target": {"selector": ".ProseMirror"}}
+  ]
+}

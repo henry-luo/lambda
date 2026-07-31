@@ -10,7 +10,7 @@
     <main class="editor-page">
       <header>
         <h1>Editor.js editable surface</h1>
-        <p class="hint">Click a block, type, press Enter to create a block, merge with Backspace/Delete, move across blocks with the arrows, and try block selection or paste.</p>
+        <p class="hint">Click the paragraph to start editing. Press Enter to create a block, use Backspace/Delete and arrows across blocks, then open the + control to exercise Editor.js tools and paste.</p>
       </header>
 
       <div class="controls">
@@ -19,7 +19,7 @@
       </div>
 
       <section class="editor-card" aria-label="Editor.js editor">
-        <div id="editor"></div>
+        <div id="editor" data-editor-mode="single-block" data-no-autofocus data-doc="Click here to start an Editor.js block."></div>
       </section>
 
       <section class="telemetry" aria-label="Editor.js telemetry">
@@ -41,7 +41,7 @@
         </article>
       </section>
 
-      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm ci &amp;&amp; npm run build</code></p>
+      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm install &amp;&amp; npm run build</code></p>
     </main>
     <script src="../editable-editors/build/editorjs.js"></script>
   </body>

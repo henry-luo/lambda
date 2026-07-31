@@ -66,6 +66,35 @@ button {
 
 button:hover { background: #f8fafc; }
 
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.editor-toolbar button {
+  min-width: 32px;
+  font-weight: 600;
+}
+
+.editor-toolbar button[aria-pressed="true"] {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+}
+
 .editor-card {
   min-height: 260px;
   padding: 16px;

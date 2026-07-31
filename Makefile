@@ -2251,6 +2251,7 @@ editable-editor-e2e: build
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/marked.html --event-file test/ui/editable-editors-prosemirror-marked-composition.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-clipboard-html.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/prosemirror/readonly.html --event-file test/ui/editable-editors-prosemirror-readonly.json --headless --no-log
+	@./lambda.exe view test/html/editable-prosemirror.html --event-file test/ui/editable-editors-prosemirror-toolbar.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-tools.json --headless --no-log
@@ -2264,6 +2265,7 @@ editable-editor-e2e: build
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-clipboard.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-onchange-index.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/editorjs/readonly.html --event-file test/ui/editable-editors-editorjs-readonly.json --headless --no-log
+	@./lambda.exe view test/html/editable-editorjs.html --event-file test/ui/editable-editors-editorjs-page.json --headless --no-log
 
 test-editable: editable-unit editable-ui editable-editor-e2e
 
