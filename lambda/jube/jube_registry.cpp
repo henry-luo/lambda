@@ -1739,6 +1739,7 @@ struct JubeGuestExecution {
     Context* frame_runtime;
     bool reusing_context;
     bool activation_active;
+    bool faulted;
     bool import_execution;
     bool import_retained;
     Input* input;
@@ -1757,6 +1758,15 @@ static JubeGuestExecution* jube_guest_execution_from_handle(void* execution_cont
 
 static Runtime* jube_guest_execution_runtime(JubeGuestExecution* execution) {
     return execution ? execution->runtime_owner : NULL;
+}
+
+static void jube_guest_execution_poison(JubeGuestExecution* execution) {
+    if (!execution) return;
+    // A non-local landing skips guest epilogues, so no later guest helper may
+    // observe a runtime slot or scalar home from the abandoned activation.
+    execution->faulted = true;
+    execution->frame_runtime = NULL;
+    execution->result_scalar_home = 0;
 }
 
 static void jube_host_execution_finish_guest(void* execution_context);
@@ -2809,6 +2819,7 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
         return -1;
     }
     execution->activation_active = true;
+    execution->faulted = false;
     execution->previous_active_execution = jube_active_guest_execution;
     jube_active_guest_execution = execution;
     *out_input = execution->input;
@@ -2834,31 +2845,42 @@ static int jube_host_execution_run_main(void* execution_context, void* entry_fun
                                         Item* out_result) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     JubeGuestMainFn entry = (JubeGuestMainFn)entry_function;
-    if (!execution || !execution->activation_active || !entry || !out_result) return -1;
+    if (!execution || !execution->activation_active || execution->faulted || !entry || !out_result) return -1;
 
     LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
-        (Context*)execution->active_context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+        (Context*)execution->active_context,
+        LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY |
+            LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
     if (!recovery_frame) {
         log_error("jube-guest: failed to allocate recovery frame");
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = lambda_recovery_publish_fault_item(
+            (Context*)execution->active_context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
         return -1;
     }
     if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        Item recovered = ItemError;
         if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
             log_error("jube-guest: recovery frame landing invariant failed");
+            recovered = lambda_recovery_publish_fault_item((Context*)execution->active_context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+        } else {
+            recovered = lambda_recovery_frame_fault_item((Context*)execution->active_context,
+                recovery_frame);
         }
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
-        // The recovery boundary, not the language module, owns converting a
-        // JIT stack escape into the runtime's standard error result.
-        lambda_stack_overflow_error("hosted-guest");
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = recovered;
         return -1;
     }
     if (!lambda_recovery_frame_arm(recovery_frame)) {
         log_error("jube-guest: failed to arm recovery frame");
         lambda_recovery_frame_end(recovery_frame);
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = lambda_recovery_publish_fault_item(
+            (Context*)execution->active_context,
+            LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         return -1;
     }
     *out_result = entry((Context*)context);
@@ -2870,29 +2892,42 @@ static int jube_host_execution_run_main_into(void* execution_context,
         void* entry_function, Item* out_result) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     JubeGuestMainIntoFn entry = (JubeGuestMainIntoFn)entry_function;
-    if (!execution || !execution->activation_active || !entry || !out_result) return -1;
+    if (!execution || !execution->activation_active || execution->faulted || !entry || !out_result) return -1;
 
     LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
-        (Context*)execution->active_context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+        (Context*)execution->active_context,
+        LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY |
+            LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
     if (!recovery_frame) {
         log_error("jube-guest: failed to allocate result-home recovery frame");
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = lambda_recovery_publish_fault_item(
+            (Context*)execution->active_context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
         return -1;
     }
     if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        Item recovered = ItemError;
         if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
             log_error("jube-guest: result-home recovery frame landing invariant failed");
+            recovered = lambda_recovery_publish_fault_item((Context*)execution->active_context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+        } else {
+            recovered = lambda_recovery_frame_fault_item((Context*)execution->active_context,
+                recovery_frame);
         }
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
-        lambda_stack_overflow_error("hosted-guest");
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = recovered;
         return -1;
     }
     if (!lambda_recovery_frame_arm(recovery_frame)) {
         log_error("jube-guest: failed to arm result-home recovery frame");
         lambda_recovery_frame_end(recovery_frame);
-        *out_result = ItemError;
+        jube_guest_execution_poison(execution);
+        *out_result = lambda_recovery_publish_fault_item(
+            (Context*)execution->active_context,
+            LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         return -1;
     }
     // The execution owns this slot until its caller has consumed the result.
@@ -2913,13 +2948,15 @@ static void jube_host_execution_finish_guest(void* execution_context) {
     execution->input = NULL;
     execution->active_context = NULL;
     execution->frame_runtime = NULL;
+    execution->faulted = false;
     execution->reusing_context = false;
     execution->activation_active = false;
 }
 
 static void* jube_host_execution_frame_runtime_slot(void* execution_context) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
-    if (!execution || !execution->activation_active || execution != jube_active_guest_execution) {
+    if (!execution || !execution->activation_active || execution->faulted ||
+            execution != jube_active_guest_execution) {
         return NULL;
     }
     // The slot preserves the proven load-before-frame-prologue order while
@@ -2929,7 +2966,7 @@ static void* jube_host_execution_frame_runtime_slot(void* execution_context) {
 
 static Input* jube_host_data_input(void* session) {
     JubeGuestExecution* execution = jube_active_guest_execution;
-    if (!execution || !execution->activation_active || !execution->input ||
+    if (!execution || !execution->activation_active || execution->faulted || !execution->input ||
         session != execution->input) {
         return NULL;
     }

@@ -1285,6 +1285,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
     {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
     {"lambda_recovery_frame_arm", FPTR(lambda_recovery_frame_arm)},
+    {"lambda_recovery_frame_raise_fault", FPTR(lambda_recovery_frame_raise_fault)},
     {"lambda_recovery_frame_restore_landing", FPTR(lambda_recovery_frame_restore_landing)},
     {"lambda_recovery_frame_end", FPTR(lambda_recovery_frame_end)},
     {"lambda_recovery_frame_fault_item", FPTR(lambda_recovery_frame_fault_item)},

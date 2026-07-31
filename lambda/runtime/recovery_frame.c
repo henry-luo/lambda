@@ -16,6 +16,13 @@ extern void* eval_context_tls_runtime(void);
 RECOVERY_FRAME_TLS LambdaRecoveryFrame* lambda_recovery_frame_tls_top = NULL;
 static RECOVERY_FRAME_TLS LambdaFaultRecord lambda_recovery_fault_fallback;
 
+uint64_t lambda_recovery_frame_static_fault_item_for(
+        LambdaFaultReason reason, LambdaErrorCode prior_error_code) {
+    lambda_fault_record_prepare(&lambda_recovery_fault_fallback, reason,
+                                prior_error_code);
+    return (uint64_t)err2it(&lambda_recovery_fault_fallback.error);
+}
+
 uint64_t lambda_recovery_frame_static_fault_item(LambdaRecoveryFrame* frame) {
     if (!frame || !frame->fault.active) return ITEM_ERROR;
     // A landed local frame must be popped before its handler executes. Copying
@@ -76,6 +83,65 @@ bool lambda_recovery_frame_prepare_fault(LambdaRecoveryFrame* frame,
     return true;
 }
 
+static LambdaRecoveryFrame* lambda_recovery_frame_select_fault_target(
+        uint32_t accepted_capabilities) {
+    LambdaRecoveryFrame* candidate = NULL;
+    for (LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top; frame;
+            frame = frame->previous) {
+        if (!frame->signal_armed) continue;
+        // A transaction barrier dominates an inner local handler. Resuming an
+        // initializer after its generated epilogue was skipped is unsound.
+        if (frame->capabilities & LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER) {
+            return frame;
+        }
+        if (!candidate && (frame->capabilities & accepted_capabilities)) {
+            candidate = frame;
+        }
+    }
+    return candidate;
+}
+
+static bool lambda_recovery_frame_select_for_landing(LambdaRecoveryFrame* frame) {
+    if (!frame || frame->state != LAMBDA_RECOVERY_FRAME_ARMED ||
+        !frame->signal_armed) return false;
+    if (frame == lambda_recovery_frame_tls_top) return true;
+    if (!lambda_recovery_frame_tls_top || frame->discarded_inner) return false;
+    // The selected target becomes TLS top before landing. Its checkpoint
+    // restores shared state, after which restore_landing retires this exact
+    // abandoned inner chain without ever exposing it to a user handler.
+    frame->discarded_inner = lambda_recovery_frame_tls_top;
+    lambda_recovery_frame_tls_top = frame;
+    return true;
+}
+
+bool lambda_recovery_frame_raise_fault(LambdaFaultReason reason,
+                                       LambdaErrorCode prior_error_code) {
+    if (reason == LAMBDA_FAULT_NONE) return false;
+    LambdaRecoveryFrame* frame = lambda_recovery_frame_select_fault_target(
+        LAMBDA_RECOVERY_CAP_LOCAL_FAULT | LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!lambda_recovery_frame_select_for_landing(frame) ||
+            !lambda_recovery_frame_prepare_fault(frame, reason, prior_error_code)) {
+        return false;
+    }
+    // The landing restores precise watermarks before inspecting this record,
+    // so no origin may continue after its required resource failed.
+    LAMBDA_RECOVERY_FRAME_LONGJMP(frame);
+    return false;
+}
+
+bool lambda_recovery_frame_raise_local_fault(LambdaFaultReason reason,
+                                             LambdaErrorCode prior_error_code) {
+    if (reason == LAMBDA_FAULT_NONE) return false;
+    LambdaRecoveryFrame* frame = lambda_recovery_frame_select_fault_target(
+        LAMBDA_RECOVERY_CAP_LOCAL_FAULT);
+    if (!lambda_recovery_frame_select_for_landing(frame) ||
+            !lambda_recovery_frame_prepare_fault(frame, reason, prior_error_code)) {
+        return false;
+    }
+    LAMBDA_RECOVERY_FRAME_LONGJMP(frame);
+    return false;
+}
+
 bool lambda_recovery_frame_restore_landing(LambdaRecoveryFrame* frame) {
     if (!frame || lambda_recovery_frame_tls_top != frame ||
         frame->state != LAMBDA_RECOVERY_FRAME_ARMED ||
@@ -91,6 +157,16 @@ bool lambda_recovery_frame_restore_landing(LambdaRecoveryFrame* frame) {
     // Landing must restore every tracked watermark before its caller inspects
     // the fault or allocates, because the jump skipped generated epilogues.
     lambda_recovery_checkpoint_restore_for(frame->context, &frame->checkpoint);
+    LambdaRecoveryFrame* discarded = frame->discarded_inner;
+    frame->discarded_inner = NULL;
+    while (discarded && discarded != frame) {
+        LambdaRecoveryFrame* next = discarded->previous;
+        discarded->signal_armed = 0;
+        discarded->state = LAMBDA_RECOVERY_FRAME_DISARMED;
+        lambda_recovery_checkpoint_disarm(&discarded->checkpoint);
+        if (discarded->heap_owned) mem_free(discarded);
+        discarded = next;
+    }
     frame->state = LAMBDA_RECOVERY_FRAME_LANDED;
     return true;
 }
@@ -121,6 +197,7 @@ LambdaRecoveryFrame* lambda_recovery_frame_begin_for(Context* runtime_context,
         mem_free(frame);
         return NULL;
     }
+    frame->heap_owned = true;
     return frame;
 }
 

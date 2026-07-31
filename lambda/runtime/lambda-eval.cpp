@@ -42,10 +42,10 @@
 extern __thread EvalContext* context;
 extern "C" void cow_profile_note_mutable_value(void);
 
-extern "C" Item lambda_recovery_frame_fault_item(
-        Context* runtime_context, LambdaRecoveryFrame* frame) {
-    if (!runtime_context || !frame || !frame->fault.active) return ItemError;
-    Item fault_item{.item = lambda_recovery_frame_static_fault_item(frame)};
+static Item publish_recovery_fault_item(Context* runtime_context,
+                                        uint64_t raw_fault_item) {
+    if (!runtime_context || raw_fault_item == ITEM_ERROR) return ItemError;
+    Item fault_item{.item = raw_fault_item};
     LambdaError* fallback = it2err(fault_item);
     if (!fallback) return ItemError;
     if (context && (Context*)context == runtime_context) {
@@ -55,6 +55,27 @@ extern "C" Item lambda_recovery_frame_fault_item(
         context->last_error = fallback;
     }
     return fault_item;
+}
+
+extern "C" Item lambda_recovery_frame_fault_item(
+        Context* runtime_context, LambdaRecoveryFrame* frame) {
+    if (!frame || !frame->fault.active) return ItemError;
+    return publish_recovery_fault_item(runtime_context,
+        lambda_recovery_frame_static_fault_item(frame));
+}
+
+extern "C" Item lambda_recovery_publish_fault_item(
+        Context* runtime_context, LambdaFaultReason reason,
+        LambdaErrorCode prior_error_code) {
+    return publish_recovery_fault_item(runtime_context,
+        lambda_recovery_frame_static_fault_item_for(reason, prior_error_code));
+}
+
+extern "C" void lambda_recovery_publish_fault(
+        Context* runtime_context, LambdaFaultReason reason,
+        LambdaErrorCode prior_error_code) {
+    (void)lambda_recovery_publish_fault_item(runtime_context, reason,
+        prior_error_code);
 }
 
 Item vmap_get_by_item(VMap* vm, Item key);
@@ -113,6 +134,14 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     }
 
     LambdaError* error = err_create(code, message, &loc);
+    if (!error) {
+        // A rich diagnostic must not allocate a second error when memory is
+        // already exhausted; an armed C14 frame owns the static OOM landing.
+        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
+        (void)lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_OUT_OF_MEMORY, code);
+        return;
+    }
 
     // capture native stack trace via FP walking
     error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
@@ -139,6 +168,12 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
     }
 
     LambdaError* error = err_create(code, message, &loc);
+    if (!error) {
+        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
+        (void)lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_OUT_OF_MEMORY, code);
+        return;
+    }
     // Skip stack trace capture - may be called in low-stack conditions
 
     if (context->last_error) {
@@ -1837,6 +1872,12 @@ static Bool function_eq(Function* a, Function* b, int depth) {
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     if (depth > EQ_MAX_DEPTH) {
+        // Functional `let ^err` keeps its established returned-error flow;
+        // only a live procedural local handler owns this static C14 landing.
+        if (lambda_recovery_frame_raise_local_fault(
+                LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_OK)) {
+            return BOOL_ERROR;
+        }
         set_runtime_error(ERR_RUNTIME_ERROR,
             "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
         return BOOL_ERROR;

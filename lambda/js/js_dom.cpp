@@ -5463,94 +5463,6 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     return true;
 }
 
-static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
-                                              const char* html_str) {
-    if (!doc || !doc->input || !html_str) return nullptr;
-
-    Html5Parser* parser = html5_fragment_parser_create(
-        doc->document_pool, doc->node_arena, doc->input);
-    if (!parser) return nullptr;
-    html5_fragment_parse(parser, html_str);
-    Element* body_elem = html5_fragment_get_body(parser);
-    if (!body_elem) return nullptr;
-
-    DomElement* fragment = dom_document_fragment_create(doc);
-    if (!fragment) return nullptr;
-    for (int64_t i = 0; i < body_elem->length; i++) {
-        TypeId type = get_type_id(body_elem->items[i]);
-        if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
-            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
-        } else if (type == LMD_TYPE_STRING) {
-            String* text = js_dom_fragment_text(body_elem->items[i]);
-            if (!text) continue;
-            DomText* child = dom_text_create_detached(text, doc);
-            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
-        }
-    }
-    return fragment;
-}
-
-static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
-    if (!doc || !html_str) return false;
-    DocState* state = doc->state ? doc->state : js_dom_current_state();
-    DomSelection* selection = state ? state->dom_selection : nullptr;
-    if (!selection || selection->range_count == 0 || !selection->ranges[0]) {
-        return false;
-    }
-    DomRange* range = selection->ranges[0];
-    if (!range->start.node || !range->end.node) return false;
-
-    DomElement* fragment = js_dom_parse_html_fragment(doc, html_str);
-    if (!fragment) return false;
-
-    ArrayList* inserted = arraylist_new(8);
-    if (!inserted) return false;
-    for (DomNode* child = fragment->first_child; child; child = child->next_sibling) {
-        if (!arraylist_append(inserted, child)) {
-            arraylist_free(inserted);
-            return false;
-        }
-    }
-
-    bool replaced_selection = !dom_range_collapsed(range);
-    DomNode* replace_root = replaced_selection ? dom_range_common_ancestor(range) : nullptr;
-    const char* exception = nullptr;
-    if (replaced_selection && !dom_range_delete_contents(range, &exception)) {
-        arraylist_free(inserted);
-        return false;
-    }
-    if (inserted->length > 0 &&
-        !dom_range_insert_node(range, (DomNode*)fragment, &exception)) {
-        arraylist_free(inserted);
-        return false;
-    }
-
-    // Editor.js delegates inline paste to execCommand; report the live Range
-    // mutation so its MutationObserver saves the same state as a browser.
-    if (replaced_selection && replace_root) {
-        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
-                               replace_root, replace_root);
-    }
-    for (int i = 0; i < inserted->length; i++) {
-        DomNode* child = (DomNode*)inserted->data[i];
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, child->parent);
-    }
-
-    if (inserted->length > 0) {
-        DomNode* last = (DomNode*)inserted->data[inserted->length - 1];
-        uint32_t end = dom_node_boundary_length(last);
-        if (!dom_selection_collapse(selection, last, end, &exception)) {
-            arraylist_free(inserted);
-            return false;
-        }
-        js_dom_queue_selectionchange(selection);
-    }
-    arraylist_free(inserted);
-    return true;
-}
-
 // ============================================================================
 // Helper: get uppercase tag name (per DOM spec)
 // ============================================================================
@@ -5844,15 +5756,6 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         return make_js_undefined();
-    }
-
-    if (strcmp(method, "execCommand") == 0) {
-        const char* command = argc >= 1 ? fn_to_cstr(args[0]) : nullptr;
-        const char* value = argc >= 3 ? js_dom_to_dom_string_cstr(args[2]) : "";
-        if (!command || !value || strcasecmp(command, "insertHTML") != 0) {
-            return (Item){.item = ITEM_FALSE};
-        }
-        return (Item){.item = b2it(js_dom_exec_insert_html(doc, value) ? 1 : 0)};
     }
 
     if (strcmp(method, "open") == 0) {
@@ -6705,7 +6608,8 @@ static bool js_dom_document_method_feature_name(const char* prop) {
         strcmp(prop, "removeEventListener") == 0 ||
         strcmp(prop, "focus") == 0 ||
         strcmp(prop, "blur") == 0 ||
-        strcmp(prop, "execCommand") == 0 ||
+        // Keep legacy editing commands out of this feature list: the editable
+        // contract requires feature detection to see an absent API, not a stub.
         strcmp(prop, "hasFocus") == 0 ||
         strcmp(prop, "createRange") == 0 ||
         strcmp(prop, "createTreeWalker") == 0 ||

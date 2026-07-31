@@ -32,8 +32,7 @@
 #include <windows.h>
 #endif
 
-// External function from lambda-eval.cpp to set runtime error without stack trace
-extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
+extern "C" void* eval_context_tls_runtime(void);
 
 // ============================================================================
 // Thread-local state
@@ -171,23 +170,40 @@ static void stack_overflow_signal_handler(int sig, siginfo_t *info, void *ctx) {
     // handler reads the TLS LIFO directly because logging or helper calls are
     // not safe on the alternate signal stack.
     LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
-    while (frame &&
-           (!frame->signal_armed ||
-            !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
-                                     LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
+    LambdaRecoveryFrame* candidate = NULL;
+    while (frame) {
+        if (frame->signal_armed) {
+            // An active transaction owns all of its inner local frames: a
+            // stack landing cannot resume a half-initialized module or guest.
+            if (frame->capabilities & LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER) {
+                candidate = frame;
+                break;
+            }
+            if (!candidate && (frame->capabilities &
+                    (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
+                     LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY))) {
+                candidate = frame;
+            }
+        }
         frame = frame->previous;
     }
-    if (!frame) {
+    if (!candidate || (candidate != lambda_recovery_frame_tls_top &&
+            candidate->discarded_inner)) {
         // An unarmed target has no valid native activation to receive a jump.
         signal(sig, SIG_DFL);
         raise(sig);
         return;  // unreachable
     }
 
+    if (candidate != lambda_recovery_frame_tls_top) {
+        candidate->discarded_inner = lambda_recovery_frame_tls_top;
+        lambda_recovery_frame_tls_top = candidate;
+    }
+
     _lambda_stack_overflow_flag = true;
-    frame->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
-    frame->signal_armed = 0;
-    siglongjmp(frame->jump_buffer, 1);
+    candidate->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
+    candidate->signal_armed = 0;
+    siglongjmp(candidate->jump_buffer, 1);
 }
 
 static void install_signal_handler(void) {
@@ -252,19 +268,33 @@ static void install_signal_handler(void) {
 static LONG WINAPI stack_overflow_seh_handler(EXCEPTION_POINTERS *ep) {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
         LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
-        while (frame &&
-               (!frame->signal_armed ||
-                !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
-                                         LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
+        LambdaRecoveryFrame* candidate = NULL;
+        while (frame) {
+            if (frame->signal_armed) {
+                if (frame->capabilities & LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER) {
+                    candidate = frame;
+                    break;
+                }
+                if (!candidate && (frame->capabilities &
+                        (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
+                         LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY))) {
+                    candidate = frame;
+                }
+            }
             frame = frame->previous;
         }
-        if (!frame) return EXCEPTION_CONTINUE_SEARCH;
+        if (!candidate || (candidate != lambda_recovery_frame_tls_top &&
+                candidate->discarded_inner)) return EXCEPTION_CONTINUE_SEARCH;
+        if (candidate != lambda_recovery_frame_tls_top) {
+            candidate->discarded_inner = lambda_recovery_frame_tls_top;
+            lambda_recovery_frame_tls_top = candidate;
+        }
         _lambda_stack_overflow_flag = true;
-        frame->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
-        frame->signal_armed = 0;
+        candidate->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
+        candidate->signal_armed = 0;
         // Reset the stack overflow state so the thread can continue
         _resetstkoflw();
-        longjmp(frame->jump_buffer, 1);
+        longjmp(candidate->jump_buffer, 1);
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -329,46 +359,22 @@ void lambda_stack_cleanup(void) {
 }
 
 extern "C" void lambda_stack_overflow_error(const char* func_name) {
-    // Log error with diagnostics
-    log_error("stack overflow in function '%s' - possible infinite recursion",
-              func_name ? func_name : "<unknown>");
-
-    size_t usage = lambda_stack_usage();
-    size_t total = lambda_stack_size();
-    if (total > 0) {
-        log_error("stack usage: %zu KB / %zu KB (%.1f%%)",
-                  usage / 1024,
-                  total / 1024,
-                  100.0 * usage / total);
-    }
-
-    // Create error message
-    char message[256];
-    snprintf(message, sizeof(message),
-             "Stack overflow in '%s' - likely infinite recursion (stack: %zuKB/%zuKB)",
-             func_name ? func_name : "<unknown>",
-             usage / 1024, total / 1024);
-
-    // Set runtime error using the no-trace version (safe after recovery)
-    set_runtime_error_no_trace(ERR_STACK_OVERFLOW, message);
+    (void)func_name;
+    _lambda_stack_overflow_flag = true;
+    // Generated side-stack and TCO guards run below local `^err` frames. They
+    // must transfer the pre-reserved reason, never format an ordinary error
+    // after the resource invariant has already failed.
+    if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_STACK_OVERFLOW, ERR_OK)) return;
+    lambda_recovery_publish_fault((Context*)eval_context_tls_runtime(),
+        LAMBDA_FAULT_STACK_OVERFLOW, ERR_OK);
 }
 
 extern "C" void lambda_root_frame_overflow_error(void) {
     _lambda_stack_overflow_flag = true;
     // Continuing after a failed reservation would turn every Rooted home in
     // the frame into a null slot and make precise collection unsound.
-    LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
-    while (frame &&
-           (!frame->signal_armed ||
-            !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
-                                     LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
-        frame = frame->previous;
-    }
-    if (frame) {
-        frame->signal_fault_reason = LAMBDA_FAULT_SIDE_STACK_EXHAUSTION;
-        frame->signal_armed = 0;
-        LAMBDA_RECOVERY_FRAME_LONGJMP(frame);
-    }
+    if (lambda_recovery_frame_raise_fault(
+            LAMBDA_FAULT_SIDE_STACK_EXHAUSTION, ERR_OK)) return;
     log_error("native-root-frame: reservation failed without an armed recovery point");
     abort();
 }

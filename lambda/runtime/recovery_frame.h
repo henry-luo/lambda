@@ -33,6 +33,9 @@ typedef enum LambdaRecoveryFrameState {
 // that will receive a non-local jump; no helper may set it and then return.
 typedef struct LambdaRecoveryFrame {
     struct LambdaRecoveryFrame* previous;
+    // Frames skipped when an enclosing transaction barrier lands. They are
+    // retired after the selected checkpoint restores the shared watermarks.
+    struct LambdaRecoveryFrame* discarded_inner;
     Context* context;
     LambdaRecoveryCheckpoint checkpoint;
     LambdaFaultRecord fault;
@@ -43,6 +46,7 @@ typedef struct LambdaRecoveryFrame {
 #endif
     uint32_t capabilities;
     LambdaRecoveryFrameState state;
+    bool heap_owned;
     // The stack-fault origin reads only these signal-safe fields before it
     // jumps; reporting and fault-record construction stay at the landing.
     volatile sig_atomic_t signal_armed;
@@ -51,7 +55,8 @@ typedef struct LambdaRecoveryFrame {
 
 // POSIX signal handling cannot call a helper to discover the target. The
 // stack-overflow origin reads this TLS top directly, then follows `previous`
-// to the nearest armed execution boundary.
+// to the selected armed frame. An enclosing transaction barrier takes priority
+// over an inner local handler so abandoned initialization cannot resume.
 #if defined(_MSC_VER)
 extern __declspec(thread) LambdaRecoveryFrame* lambda_recovery_frame_tls_top;
 #else
@@ -81,6 +86,15 @@ bool lambda_recovery_frame_arm(LambdaRecoveryFrame* frame);
 bool lambda_recovery_frame_prepare_fault(LambdaRecoveryFrame* frame,
                                          LambdaFaultReason reason,
                                          LambdaErrorCode prior_error_code);
+// Raises through the nearest eligible native frame without allocating. It
+// returns false only when the current thread has no armed recovery target.
+bool lambda_recovery_frame_raise_fault(LambdaFaultReason reason,
+                                       LambdaErrorCode prior_error_code);
+// Equality remains an ordinary returned error outside procedural local `^err`
+// lowering. This variant selects a local handler, unless an enclosing
+// transaction barrier must own the fault.
+bool lambda_recovery_frame_raise_local_fault(LambdaFaultReason reason,
+                                             LambdaErrorCode prior_error_code);
 bool lambda_recovery_frame_restore_landing(LambdaRecoveryFrame* frame);
 bool lambda_recovery_frame_pop(LambdaRecoveryFrame* frame);
 
@@ -89,10 +103,21 @@ bool lambda_recovery_frame_pop(LambdaRecoveryFrame* frame);
 // setjmp call site.
 uint64_t lambda_recovery_frame_static_fault_item(LambdaRecoveryFrame* frame);
 
+// Builds a durable TLS static fault Item when setup failed before a frame could
+// be armed. The evaluator-side helper below publishes it to `last_error`.
+uint64_t lambda_recovery_frame_static_fault_item_for(
+    LambdaFaultReason reason, LambdaErrorCode prior_error_code);
+
 // Publishes that durable fault Item to the current evaluator after a restored
 // landing, then returns it for the local `^err` binding.
 Item lambda_recovery_frame_fault_item(Context* context,
                                       LambdaRecoveryFrame* frame);
+Item lambda_recovery_publish_fault_item(Context* context,
+                                        LambdaFaultReason reason,
+                                        LambdaErrorCode prior_error_code);
+void lambda_recovery_publish_fault(Context* context,
+                                   LambdaFaultReason reason,
+                                   LambdaErrorCode prior_error_code);
 
 // Execution entries use heap-backed frame storage because a non-local jump
 // leaves automatic objects modified after setjmp indeterminate. The caller's
