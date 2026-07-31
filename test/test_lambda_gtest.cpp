@@ -470,6 +470,10 @@ TEST(LambdaNegativeTests, test_type_enforcement_dynamic_arity) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls");
 }
 
+TEST(LambdaNegativeTests, test_type_enforcement_dynamic_abi) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforce_dynamic_abi.ls");
+}
+
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_declaration) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls");
 }
@@ -484,6 +488,10 @@ TEST(LambdaNegativeTests, test_type_enforcement_dynamic_parameter) {
 
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_return) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_return.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_input_schema) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforce_input_schema.ls");
 }
 
 TEST(LambdaBinaryTests, output_writes_decoded_bytes) {

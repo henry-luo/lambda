@@ -4,7 +4,7 @@ import graph_model: lambda.package.graph.model
 
 fn children(value, wanted) => [
   for (child in graph_model.element_children(value) where graph_model.tag(child) == wanted) child
-]
+] or []
 
 fn tags(value) => [for (tag in children(value, "tag")) string(tag.name)]
 

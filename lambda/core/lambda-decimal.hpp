@@ -212,6 +212,9 @@ int64_t decimal_to_int64(Item item);
 // Extract an exactly integral in-range int64 without truncation or clamping.
 bool decimal_to_int64_exact(Item item, int64_t* out);
 
+// Extract an exactly integral non-negative uint64 without truncation or wrapping.
+bool decimal_to_uint64_exact(Item item, uint64_t* out);
+
 // ─────────────────────────────────────────────────────────────────────
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
@@ -226,6 +229,12 @@ int decimal_cmp_items(Item a, Item b);
 
 // Check if decimal item is zero
 bool decimal_item_is_zero(Item item);
+
+// Decimal poison predicates and canonical Lambda source spelling. The returned
+// spelling is static and is NULL for finite decimals.
+bool decimal_item_is_nan(Item item);
+bool decimal_item_is_infinite(Item item);
+const char* decimal_special_literal(Decimal* decimal);
 
 // Check if mpd_t* is zero
 bool decimal_is_zero(mpd_t* dec);

@@ -4,8 +4,12 @@ fn leaf_at(text, close) => if (close > 1)
   {text: trim(slice(text, close + 1, len(text))), port: slice(text, 1, close), fields: null}
 else {text: text, port: null, fields: null}
 
-fn leaf(raw) => leaf_at(trim(raw),
-  if (starts_with(trim(raw), "<")) index_of(trim(raw), ">") else -1)
+fn leaf(raw) =>
+  // An unreadable label contributes an empty record cell rather than aborting
+  // the containing graph normalization.
+  leaf_at(trim(raw),
+    if (starts_with(trim(raw), "<")) index_of(trim(raw), ">") else -1) or
+  {text: "", port: null, fields: null}
 
 fn scan_result(fields, next, valid) => map(["fields", fields, "next", next, "valid", valid])
 
@@ -79,5 +83,8 @@ fn lowered(parsed, vertical) => {
   content: record_table(parsed.fields, vertical)
 }
 
-pub fn lower(raw, vertical = false) => lowered(
-  parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical)
+pub fn lower(raw, vertical = false) =>
+  // Preserve a renderable, explicitly invalid record when dynamic label text
+  // cannot be parsed; callers use valid to decide whether to trust its ports.
+  lowered(parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical) or
+  {valid: false, content: record_table([], vertical)}

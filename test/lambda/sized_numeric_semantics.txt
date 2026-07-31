@@ -29,8 +29,8 @@ float
 f32
 float
 "=== div mod shift ==="
-error
-error
+inf
+inf
 error
 error
 0

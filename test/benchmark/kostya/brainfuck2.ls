@@ -4,10 +4,8 @@
 // Interprets BF Hello World 10000 times to stress the interpreter loop
 // Expected output: "Hello World!\n"
 
-// NOTE: no `string` return-type annotation on run_bf — it currently segfaults the
-// MIR JIT once the returned string spans a GC (repro: temp/repro_string_return_segv.ls).
-// jumps/tape/stack locals stay unannotated: fill(n, int) already infers a packed
-// ArrayNum, and a bracket annotation on a local re-tags the var as ANY.
+// The local buffers use packed ArrayNum storage; main records the jump table's
+// int[] contract before it crosses run_bf's checked parameter boundary.
 // Precompute matching brackets
 pn build_jump_table(prog: string, prog_len: int) {
     var jumps = fill(prog_len, 0)
@@ -33,7 +31,7 @@ pn build_jump_table(prog: string, prog_len: int) {
     return jumps
 }
 
-pn run_bf(prog: string, prog_len: int, jumps: int[]) {
+pn run_bf(prog: string, prog_len: int, jumps: int[]) string {
     var tape = fill(30000, 0)
     var dp: int = 0
     var ip: int = 0
@@ -43,11 +41,11 @@ pn run_bf(prog: string, prog_len: int, jumps: int[]) {
         var op: int = ord(prog[ip])
         if (op == 43) {
             // '+'
-            tape[dp] = (tape[dp] + 1) % 256
+            tape[dp] = int((tape[dp] + 1) % 256)
         }
         if (op == 45) {
             // '-'
-            tape[dp] = (tape[dp] + 255) % 256
+            tape[dp] = int((tape[dp] + 255) % 256)
         }
         if (op == 62) {
             // '>'
@@ -83,7 +81,7 @@ pn main() {
     // BF Hello World! program
     let prog: string = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
     let prog_len: int = len(prog)
-    var jumps = build_jump_table(prog, prog_len)
+    var jumps: int[] = build_jump_table(prog, prog_len)
 
     var output: string = ""
     var iter: int = 0

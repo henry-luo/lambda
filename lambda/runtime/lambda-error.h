@@ -97,6 +97,7 @@ typedef enum LambdaErrorCode {
     ERR_CONTINUE_OUTSIDE_LOOP = 226,  // continue used outside loop
     ERR_RETURN_OUTSIDE_FUNCTION = 227,// return used outside function
     ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ? or ^err
+    ERR_UNSUPPORTED_DYNAMIC_ABI = 229,// valid dynamic call exceeds physical dispatch ABI
     
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors
@@ -182,13 +183,33 @@ typedef struct StackFrame {
 typedef struct LambdaError {
     LambdaErrorCode code;       // error code (e.g., 201)
     bool is_heap;               // true when allocated on the Lambda GC heap
-    char* message;              // human-readable message (owned)
+    bool is_static;             // true for pre-reserved fault storage; never free payload
+    char* message;              // human-readable message (owned unless is_static)
     SourceLocation location;    // where the error occurred
     StackFrame* stack_trace;    // call stack (if enabled)
     char* help;                 // suggestion text (owned, optional)
     void* details;              // error-specific details (optional)
     struct LambdaError* cause;  // chained error (optional)
 } LambdaError;
+
+// C14 system faults use non-allocating records until a recovery frame can
+// deliver them to a pn boundary or execution handler. They are intentionally
+// separate from ordinary typed ItemError construction.
+typedef enum LambdaFaultReason {
+    LAMBDA_FAULT_NONE = 0,
+    LAMBDA_FAULT_STACK_OVERFLOW,
+    LAMBDA_FAULT_SIDE_STACK_EXHAUSTION,
+    LAMBDA_FAULT_OUT_OF_MEMORY,
+    LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION,
+    LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT,
+} LambdaFaultReason;
+
+typedef struct LambdaFaultRecord {
+    LambdaError error;
+    LambdaFaultReason reason;
+    LambdaErrorCode prior_error_code;
+    bool active;
+} LambdaFaultRecord;
 
 // ============================================================================
 // Debug Info for Stack Trace Mapping (Native Stack Walking)
@@ -232,6 +253,17 @@ LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocatio
 LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLocation* location);
 LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const char* format, ...);
 LambdaError* err_create_simple(LambdaErrorCode code, const char* message);
+
+// Fault-record setup performs no allocation and may be called after an
+// ordinary rich-error allocation has already failed.
+void lambda_fault_record_init(LambdaFaultRecord* record);
+void lambda_fault_record_prepare(LambdaFaultRecord* record,
+                                 LambdaFaultReason reason,
+                                 LambdaErrorCode prior_error_code);
+void lambda_fault_record_from_error_allocation_failure(
+    LambdaFaultRecord* record, LambdaErrorCode prior_error_code);
+const char* lambda_fault_reason_name(LambdaFaultReason reason);
+LambdaError* lambda_fault_record_error(LambdaFaultRecord* record);
 
 // Error enrichment
 void err_set_location(LambdaError* error, const char* file, uint32_t line, uint32_t col);

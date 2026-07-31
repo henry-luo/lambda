@@ -11,7 +11,7 @@ float:1.5
 float:1.5
 float:3.5
 decimal:3.5
-integer:3
+decimal:3
 int:2
 int64:2
 integer:18446744073709551616

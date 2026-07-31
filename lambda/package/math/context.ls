@@ -140,11 +140,11 @@ pub fn is_script(ctx) => ctx.style == "script" or ctx.style == "scriptscript"
 // get the scale for the current style relative to text size
 pub fn context_scale(ctx) => met.style_scale(ctx.style) * ctx.size
 
-// get the metric index for the current style
-pub fn metric_index(ctx) => met.style_index(ctx.style)
+// get the metric index for the current style; an invalid dynamic style uses text metrics
+pub fn metric_index(ctx) => met.style_index(ctx.style) or 0
 
 // get a font metric value for the current style
-pub fn get_metric(ctx, metric_arr) => metric_arr[met.style_index(ctx.style)]
+pub fn get_metric(ctx, metric_arr) => metric_arr[met.style_index(ctx.style) or 0]
 
 // get rule thickness for current context
 pub fn rule_thickness(ctx) => get_metric(ctx, met.defaultRuleThickness)

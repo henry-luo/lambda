@@ -1,5 +1,5 @@
 // Test refined sized scalar semantics: subtype checks, f64 spelling,
-// Go-style runtime errors, shifts, conversions, and mixed sized-float promotion.
+// C14c division poison, shifts, conversions, and mixed sized-float promotion.
 
 "=== subtype is ==="
 1u8 is u8

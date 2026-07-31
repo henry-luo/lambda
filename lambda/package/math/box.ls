@@ -12,13 +12,15 @@ import metrics_data: .metrics_data
 // ============================================================
 
 // create a box from an element with specified metrics
-pub fn make_box(el, height, depth, width, box_type) =>
+pub fn make_box(el: any, height: any, depth: any, width: any, box_type: any) =>
     ml_box(el, height, depth, width, box_type)
 
 // create a MathLive-model box. Its height/depth are full-precision layout
 // dimensions; visual CSS extents must live in the element tree, not in render_*
 // side channels.
-pub fn ml_box(el, height, depth, width, box_type) => {
+// These generic field constructors preserve Item values without interpreting
+// them, so their explicit `any` inputs remain error-transparent.
+pub fn ml_box(el: any, height: any, depth: any, width: any, box_type: any) => {
     element: el,
     height: height,
     depth: depth,
@@ -29,7 +31,8 @@ pub fn ml_box(el, height, depth, width, box_type) => {
     max_font_size: height
 }
 
-pub fn ml_box_full(el, height, depth, width, box_type, italic, skew, max_font_size) => {
+pub fn ml_box_full(el: any, height: any, depth: any, width: any, box_type: any,
+        italic: any, skew: any, max_font_size: any) => {
     element: el,
     height: height,
     depth: depth,

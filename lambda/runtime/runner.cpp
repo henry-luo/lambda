@@ -14,6 +14,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "lambda-stack.h"
+#include "recovery_frame.h"
 #include "side_stack.h"
 #include "concurrency.h"
 #include "module_registry.h"
@@ -1588,34 +1589,37 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     ctx->run_main = run_main;
     log_debug("Set context run_main = %s", run_main ? "true" : "false");
 
-    // Phase 2: Set recovery point for signal-based stack overflow handling.
-    // If a stack overflow occurs during execution, the signal handler will
-    // siglongjmp back here. No per-call overhead — detection is OS-level.
-    Item result;
-    LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture();
-#if defined(__APPLE__) || defined(__linux__)
-    if (sigsetjmp(_lambda_recovery_point, 1)) {
-#elif defined(_WIN32)
-    if (setjmp(_lambda_recovery_point)) {
-#else
-    if (0) {
-#endif
-        // Stack overflow was caught — we land here after siglongjmp
-        _lambda_recovery_armed = 0;   // recovery consumed; disarm
+    // Keep the frame outside automatic storage: siglongjmp makes automatic
+    // objects modified after setjmp indeterminate, but this boundary must
+    // inspect and restore its checkpoint after the jump.
+    Item result = ItemError;
+    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+        (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!recovery_frame) {
+        log_error("exec: failed to allocate recovery frame");
+        // No recovery target exists yet, so an OOM here cannot safely build a
+        // second rich diagnostic before ER-S4 publishes the static fault.
+        result = context->result = ItemError;
+    } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+            log_error("exec: recovery frame landing invariant failed");
+        }
         log_error("exec: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
-        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
+        lambda_recovery_frame_end(recovery_frame);
         lambda_stack_overflow_error("<signal>");
         result = context->result = ItemError;
     } else {
-        // Normal execution path — zero per-call overhead
-        _lambda_recovery_armed = 1;    // arm only for the duration of user code
-        log_debug("exec main func");
-        result = context->result = runner->script->main_func(context);
-        _lambda_recovery_armed = 0;
-        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
-        log_debug("after main func, result type_id=%d", get_type_id(result));
+        if (!lambda_recovery_frame_arm(recovery_frame)) {
+            log_error("exec: failed to arm recovery frame");
+            lambda_recovery_frame_end(recovery_frame);
+            result = context->result = ItemError;
+        } else {
+            log_debug("exec main func");
+            result = context->result = runner->script->main_func(context);
+            lambda_recovery_frame_end(recovery_frame);
+            log_debug("after main func, result type_id=%d", get_type_id(result));
+        }
     }
     if ((!runner->runtime || !runner->runtime->no_task_drain) && context->scheduler) {
         lambda_scheduler_drain(context->scheduler);

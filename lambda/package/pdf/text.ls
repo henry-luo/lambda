@@ -133,11 +133,13 @@ fn _with(st, tm, tlm, name, size, info, leading, in_text) {
     }
 }
 
-fn _set_tm(st, m) {
+// Rebuilding from decoded PDF state can fail for malformed dynamic input; keep
+// that value error observable rather than silently resetting text positioning.
+fn _set_tm(st, m) map | error {
     _with(st, m, m, st.font_name, st.font_size, st.font_info, st.leading, st.in_text)
 }
 
-fn _set_in_text(st, flag) {
+fn _set_in_text(st, flag) map | error {
     _with(st, st.tm, st.tlm, st.font_name, st.font_size, st.font_info, st.leading, flag)
 }
 
@@ -165,7 +167,7 @@ pub fn set_font_info(st, name, size, info) {
     _with(base, base.tm, base.tlm, name, size, info, base.leading, base.in_text)
 }
 
-fn _set_leading(st, l) {
+fn _set_leading(st, l) map | error {
     _with(st, st.tm, st.tlm, st.font_name, st.font_size, st.font_info, l, st.in_text)
 }
 

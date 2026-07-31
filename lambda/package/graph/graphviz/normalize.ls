@@ -456,7 +456,8 @@ fn engine_diagnostic(source, layout) =>
     "graph.layout", source)]
 
 fn engine_diagnostics(source, state) =>
-  engine_diagnostic(source, attributes.value(state.graph_properties, "layout"))
+  // Missing dynamic graph properties mean no engine diagnostic, not a failed graph.
+  engine_diagnostic(source, attributes.value(state.graph_properties, "layout")) or []
 
 fn ordering_diagnostic(entry, context) =>
   if (entry == null or attributes.ordering(entry.value) != null) []

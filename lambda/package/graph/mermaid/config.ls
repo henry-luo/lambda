@@ -38,7 +38,11 @@ pub fn options(graph) {
   let family = string(if (graph["diagram-type"] != null) graph["diagram-type"] else "flowchart");
   let front_options = diagram_config(front, "config", family);
   let init_options = diagram_config(init, "init", family);
-  let combined = {*:front_options, *:init_options};
+  // Absent metadata contributes no options; spreading its null/error sentinel
+  // would create an invalid anonymous map slot before graph layout can start.
+  let clean_front_options = front_options or {};
+  let clean_init_options = init_options or {};
+  let combined = {*:clean_front_options, *:clean_init_options};
   let curve = if (combined.curve != null) string(combined.curve) else null;
   {
     title: if (front != null and front.title != null) string(front.title) else null,

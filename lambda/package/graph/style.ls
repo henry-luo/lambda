@@ -176,7 +176,13 @@ fn parse_declarations(parts, i, state) {
   }
 }
 
-pub fn parse(raw) => parse_declarations(split_declarations(raw), 0, empty_style())
+// This sanitizer always substitutes a map-shaped empty style on a failed parse;
+// expose that closed success shape so downstream CSS helpers do not accept a
+// spurious open/error-capable value.
+pub fn parse(raw) map =>
+  // A malformed style declaration must not prevent graph layout; retain the
+  // historical empty-style fallback instead of leaking a dynamic parse error.
+  parse_declarations(split_declarations(raw), 0, empty_style()) or empty_style()
 
 pub fn node_css(parsed) =>
   (if (parsed.fill != null) "background:" ++ parsed.fill ++ ";" else "") ++

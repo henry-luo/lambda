@@ -6,7 +6,7 @@ type SState = {count: int}
 pn random_next(var seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
-    s = s % 65536
+    s = int(s % 65536)
     seed_arr[0] = s
     return s
 }
@@ -14,7 +14,7 @@ pn random_next(var seed_arr: int[]) {
 pn build_tree_depth(var state: SState, depth: int, var seed_arr: int[]) {
     state.count = state.count + 1
     if (depth == 1) {
-        return fill((random_next(seed_arr) % 10) + 1, 0)
+        return fill(int((random_next(seed_arr) % 10) + 1), 0)
     }
     var arr = fill(4, null)
     for i in 0 to 3 {

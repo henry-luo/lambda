@@ -15,19 +15,19 @@
 // Expected: matches OEIS A000602
 //           nb(17) = 24894, nb(23) = 5731580
 
-// rcount is an int[] parameter so callees index it directly; the local in nb()
-// stays unannotated because fill(n, int) already infers a packed ArrayNum
+// rcount is an int[] parameter so callees index it directly; nb() records the
+// same contract before it crosses the checked call boundary.
 // Multiset coefficients: choose k items from n with repetition
 pn ms2(r: int) int {
-    return r * (r + 1) div 2
+    return int(r * (r + 1) div 2)
 }
 
 pn ms3(r: int) int {
-    return r * (r + 1) * (r + 2) div 6
+    return int(r * (r + 1) * (r + 2) div 6)
 }
 
 pn ms4(r: int) int {
-    return r * (r + 1) * (r + 2) * (r + 3) div 24
+    return int(r * (r + 1) * (r + 2) * (r + 3) div 24)
 }
 
 // Count radicals of size k given rcount[] (radical counts for smaller sizes)
@@ -136,7 +136,7 @@ pn nb(n: int) int {
         return 0
     }
     var half: int = shr(n, 1)
-    var rcount = fill(half + 1, 0)
+    var rcount: int[] = fill(half + 1, 0)
     rcount[0] = 1
 
     var k: int = 1

@@ -8,7 +8,7 @@ import style_rules: lambda.package.graph.structurizr.styles
 fn children(value, wanted = null) => [
   for (child in graph_model.element_children(value)
     where wanted == null or graph_model.tag(child) == wanted) child
-]
+] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
 

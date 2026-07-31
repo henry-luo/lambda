@@ -21,6 +21,7 @@
 
 #include "emit_sexpr.h"
 #include "transpiler.hpp"
+#include "type_contract.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -2134,6 +2135,26 @@ static void emit_dump_strview_field(const char* label, StrView view) {
     printf(")");
 }
 
+static void emit_dump_type_field(const char* label, const Type* type) {
+    if (!type) return;
+    const char* name = type_contract_display_name(type);
+    printf(" (%s ", label);
+    emit_escaped_string(name, (int)strlen(name));
+    printf(")");
+}
+
+static void emit_dump_value_effect_field(const Type* type) {
+    if (!type) return;
+    printf(" (value_may_error %s)", lambda_type_accepts_error((Type*)type)
+        ? "true" : "false");
+}
+
+static void emit_dump_contract_field(const char* label, const Type* type,
+        bool is_explicit) {
+    emit_dump_type_field(label, type);
+    if (type) printf(" (%s_explicit %s)", label, is_explicit ? "true" : "false");
+}
+
 static void emit_dump_source_field(const char* source, TSNode node) {
     int len = 0;
     const char* src = node_src(source, node, &len);
@@ -2177,9 +2198,27 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_SCRIPT:
             emit_lambda_dump_list(source, "child", ((AstScript*)node)->child, indent + 1);
             break;
-        case AST_NODE_IDENT:
-            emit_dump_string_field("name", ((AstIdentNode*)node)->name);
+        case AST_NODE_IDENT: {
+            AstIdentNode* ident = (AstIdentNode*)node;
+            emit_dump_string_field("name", ident->name);
+            AstNode* declaration = ident->entry ? ident->entry->node : NULL;
+            if (declaration && (declaration->node_type == AST_NODE_FUNC ||
+                    declaration->node_type == AST_NODE_FUNC_EXPR ||
+                    declaration->node_type == AST_NODE_PROC)) {
+                TypeFunc* signature = (TypeFunc*)declaration->type;
+                if (signature && signature->return_contract) {
+                    emit_dump_contract_field("function_return_contract",
+                        signature->return_contract,
+                        signature->has_explicit_return_contract);
+                }
+                Type* inferred_return = signature && signature->inferred_return
+                    ? signature->inferred_return : signature ? signature->returned : NULL;
+                if (inferred_return) {
+                    emit_dump_type_field("function_effective_return", inferred_return);
+                }
+            }
             break;
+        }
         case AST_NODE_PRIMARY:
             if (((AstPrimaryNode*)node)->expr) {
                 emit_lambda_dump_field(source, "expr", ((AstPrimaryNode*)node)->expr, indent + 1);
@@ -2200,6 +2239,10 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_BINARY_TYPE: {
             AstBinaryNode* bin = (AstBinaryNode*)node;
             emit_dump_strview_field("op", bin->op_str);
+            if (node->node_type == AST_NODE_BINARY) {
+                emit_dump_type_field("value_type", node->type);
+                emit_dump_value_effect_field(node->type);
+            }
             emit_lambda_dump_field(source, "left", bin->left, indent + 1);
             emit_lambda_dump_field(source, "right", bin->right, indent + 1);
             break;
@@ -2230,11 +2273,22 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
         case AST_NODE_ASSIGN:
         case AST_NODE_KEY_EXPR:
-        case AST_NODE_PARAM:
         case AST_NODE_NAMED_ARG: {
             AstNamedNode* named = (AstNamedNode*)node;
             emit_dump_string_field("name", named->name);
             emit_dump_string_field("error", named->error_name);
+            emit_lambda_dump_field(source, "as", named->as, indent + 1);
+            break;
+        }
+        case AST_NODE_PARAM: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            TypeParam* parameter = (TypeParam*)named->type;
+            emit_dump_string_field("name", named->name);
+            emit_dump_string_field("error", named->error_name);
+            if (parameter && parameter->contract_type) {
+                emit_dump_contract_field("contract", parameter->contract_type,
+                    parameter->has_explicit_contract);
+            }
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
             break;
         }
@@ -2362,6 +2416,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)node;
+            emit_dump_type_field("value_type", node->type);
+            emit_dump_value_effect_field(node->type);
             emit_lambda_dump_field(source, "function", call->function, indent + 1);
             emit_lambda_dump_list(source, "argument", call->argument, indent + 1);
             break;
@@ -2372,6 +2428,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
                 printf(" (name ");
                 emit_escaped_string(sys->fn_info->name, (int)strlen(sys->fn_info->name));
                 printf(")");
+                emit_dump_type_field("success_type", sys->fn_info->success_type);
+                printf(" (may_return_error %s)",
+                    sys->fn_info->may_return_error ? "true" : "false");
             }
             break;
         }
@@ -2380,7 +2439,18 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_PROC:
         case AST_NODE_FUNC_TYPE: {
             AstFuncNode* fn = (AstFuncNode*)node;
+            TypeFunc* signature = fn->type && fn->type->type_id == LMD_TYPE_FUNC
+                ? (TypeFunc*)fn->type : NULL;
             emit_dump_string_field("name", fn->name);
+            if (signature && signature->return_contract) {
+                emit_dump_contract_field("return_contract", signature->return_contract,
+                    signature->has_explicit_return_contract);
+            }
+            Type* inferred_return = signature && signature->inferred_return
+                ? signature->inferred_return : signature ? signature->returned : NULL;
+            if (inferred_return) {
+                emit_dump_type_field("effective_return", inferred_return);
+            }
             emit_lambda_dump_list(source, "param", (AstNode*)fn->param, indent + 1);
             emit_lambda_dump_field(source, "body", fn->body, indent + 1);
             break;
@@ -2507,6 +2577,34 @@ int emit_ast_dump_file(const char* script_path) {
         return 1;
     }
 
+    Runtime runtime;
+    runtime_init(&runtime);
+    // Imported modules build through load_script(), which needs the normal
+    // runtime ownership/index state even though this command stops before
+    // execution. A zeroed Transpiler made import-bearing AST dumps dereference
+    // a null Runtime in load_script().
+    runtime.use_mir_direct = true;
+
+    char* directory = file_path_dirname(script_path);
+    size_t directory_length = directory ? strlen(directory) : 0;
+    bool needs_separator = directory_length > 0 &&
+        directory[directory_length - 1] != '/' && directory[directory_length - 1] != '\\';
+    char* import_directory = (char*)mem_alloc(directory_length + (needs_separator ? 2 : 1),
+        MEM_CAT_TEMP);
+    if (!import_directory) {
+        if (directory) mem_free(directory);
+        runtime_cleanup(&runtime);
+        pool_destroy(input_base->pool);
+        ts_tree_delete(tree);
+        mem_free(source);
+        ts_parser_delete(parser);
+        return 1;
+    }
+    if (directory_length) memcpy(import_directory, directory, directory_length);
+    if (needs_separator) import_directory[directory_length++] = '/';
+    import_directory[directory_length] = '\0';
+    if (directory) mem_free(directory);
+
     Transpiler tp;
     memset(&tp, 0, sizeof(Transpiler));
     tp.source = source;
@@ -2518,10 +2616,15 @@ int emit_ast_dump_file(const char* script_path) {
     tp.const_list = arraylist_new(16);
     tp.decimal_ctx = decimal_fixed_context();
     tp.reference = script_path;
+    tp.directory = import_directory;
+    tp.runtime = &runtime;
 
     tp.ast_root = build_script(&tp, root);
     if (!tp.ast_root) {
         fprintf(stderr, "Error: Failed to build AST for '%s'\n", script_path);
+        arraylist_free(tp.const_list);
+        mem_free(import_directory);
+        runtime_cleanup(&runtime);
         pool_destroy(tp.pool);
         ts_tree_delete(tree);
         mem_free(source);
@@ -2531,6 +2634,9 @@ int emit_ast_dump_file(const char* script_path) {
 
     if (tp.error_count > 0) {
         fprintf(stderr, "Error: %d errors building AST for '%s'\n", tp.error_count, script_path);
+        arraylist_free(tp.const_list);
+        mem_free(import_directory);
+        runtime_cleanup(&runtime);
         pool_destroy(tp.pool);
         ts_tree_delete(tree);
         mem_free(source);
@@ -2542,6 +2648,9 @@ int emit_ast_dump_file(const char* script_path) {
     emit_lambda_dump_node(source, tp.ast_root, 1);
     printf(")\n");
 
+    arraylist_free(tp.const_list);
+    mem_free(import_directory);
+    runtime_cleanup(&runtime);
     pool_destroy(tp.pool);
     ts_tree_delete(tree);
     mem_free(source);

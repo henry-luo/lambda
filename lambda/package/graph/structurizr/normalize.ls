@@ -12,12 +12,12 @@ fn resolved_include(value) => graph_model.tag(value) == "statement" and
 fn expanded_children(value) => [
   for (child in graph_model.element_children(value),
     expanded in if (resolved_include(child)) expanded_children(child) else [child]) expanded
-]
+] or []
 
 fn children(value, wanted = null) => [
   for (child in expanded_children(value)
     where wanted == null or graph_model.tag(child) == wanted) child
-]
+] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
@@ -206,7 +206,10 @@ fn relationship_tags(value, definition) {
 fn unknown_archetype(name, target_kind, value) => diagnostic.for_value(
   "structurizr.unknown-archetype", "error",
   "Unknown " ++ target_kind ++ " archetype '" ++ string(name) ++ "'",
-  target_kind ++ "-archetype:" ++ string(name), value)
+  target_kind ++ "-archetype:" ++ string(name), value) or {
+    code: "structurizr.unknown-archetype", severity: "error",
+    message: "Unknown Structurizr archetype", path: null, source: null
+  }
 
 fn append_relation(state, value, parent_identifier, definitions) {
   // both relationship endpoints may use the scoped `this` identifier.

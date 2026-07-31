@@ -4,7 +4,7 @@
 pn random_next(var seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
-    s = s % 65536
+    s = int(s % 65536)
     seed_arr[0] = s
     return s
 }
@@ -20,10 +20,10 @@ pn benchmark() {
     var byv:int[] = fill(ball_count, 0)
 
     for i in 0 to ball_count - 1 {
-        bx[i] = random_next(seed_arr) % 500
-        by[i] = random_next(seed_arr) % 500
-        bxv[i] = (random_next(seed_arr) % 300) - 150
-        byv[i] = (random_next(seed_arr) % 300) - 150
+        bx[i] = int(random_next(seed_arr) % 500)
+        by[i] = int(random_next(seed_arr) % 500)
+        bxv[i] = int((random_next(seed_arr) % 300) - 150)
+        byv[i] = int((random_next(seed_arr) % 300) - 150)
     }
 
     for i in 0 to 49 {

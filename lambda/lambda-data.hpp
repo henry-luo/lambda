@@ -424,11 +424,18 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
     return (uint8_t*)map_data + field->byte_offset;
 }
 
+static inline TypeId type_field_storage_type_id(const Type* type);
+
+static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
+    return field ? type_field_storage_type_id(field->type) : LMD_TYPE_NULL;
+}
+
 Item map_field_to_item(void* field_ptr, TypeId type_id);
 Item scalar_storage_read(Item item, bool immortal);
 
 static inline Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
-    return map_field_to_item(map_field_ptr(map_data, field), field->type->type_id);
+    return map_field_to_item(map_field_ptr(map_data, field),
+        shape_entry_storage_type_id(field));
 }
 
 static inline Map* map_shape_field_to_map(void* map_data, const ShapeEntry* field) {
@@ -708,11 +715,18 @@ typedef struct TypeParam : Type {
     bool is_var_param;          // whether this is an inout `var` parameter
     struct AstNode* default_value;  // default value expression (NULL if none)
     Type* full_type;            // for complex types (TypeBinary etc), points to full type; NULL for simple types
+    // Signature contracts retain source semantics independently from the compact
+    // Type prefix used by native carrier selection. In particular, implicit
+    // parameters use TYPE_ANY_NO_ERROR while explicit `any` uses TYPE_ANY.
+    Type* contract_type;
+    bool has_explicit_contract;
 } TypeParam;
 
 typedef struct TypeFunc : Type {
     TypeParam* param;
-    Type* returned;         // return type on success
+    Type* returned;         // established success type used by the current call ABI
+    Type* inferred_return;  // precise body success type retained independently of that ABI
+    Type* return_contract;  // declared or implicit success contract
     Type* error_type;       // error type (NULL if function cannot raise errors)
     int param_count;
     int required_param_count;   // count of required (non-optional) parameters
@@ -722,6 +736,8 @@ typedef struct TypeFunc : Type {
     bool is_proc;
     bool is_variadic;           // function accepts variadic args (...)
     bool can_raise;             // true if function may raise errors (T^ or T^E)
+    bool may_return_error;      // true if an Item-valued call may contain an ordinary error
+    bool has_explicit_return_contract;
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {
@@ -798,6 +814,59 @@ extern Type TYPE_TYPE;
 extern Type TYPE_FUNC;
 extern Type TYPE_ANY;
 extern Type TYPE_ERROR;
+// Internal contract tops carry exclusions by pointer identity only. They do
+// not add a value-level Item tag and must not be compacted into TypeParam's
+// carrier prefix.
+extern Type TYPE_ANY_NO_ERROR;
+extern Type TYPE_ANY_NO_NULL;
+extern Type TYPE_ANY_NO_ERROR_OR_NULL;
+
+// These three values use LMD_TYPE_TYPE as a compact semantic category, not a
+// TypeType payload. Callers must test this before reading extended Type fields.
+static inline bool type_is_global_meta_type(const Type* type) {
+    return type == &TYPE_TYPE || type == &TYPE_INTEGER || type == &TYPE_NUMBER;
+}
+
+static inline bool type_is_any_without_error(const Type* type) {
+    return type == &TYPE_ANY_NO_ERROR || type == &TYPE_ANY_NO_ERROR_OR_NULL;
+}
+
+static inline bool type_is_any_without_null(const Type* type) {
+    return type == &TYPE_ANY_NO_NULL || type == &TYPE_ANY_NO_ERROR_OR_NULL;
+}
+
+static inline bool type_is_any_without_error_or_null(const Type* type) {
+    return type == &TYPE_ANY_NO_ERROR_OR_NULL;
+}
+
+static inline const char* type_contract_display_name(const Type* type) {
+    if (type == &TYPE_ANY_NO_ERROR) return "any \\ error";
+    if (type == &TYPE_ANY_NO_NULL) return "any \\ null";
+    if (type == &TYPE_ANY_NO_ERROR_OR_NULL) return "any \\ {error, null}";
+    // Abstract numeric contracts share LMD_TYPE_TYPE with the `type` value,
+    // so contract diagnostics must preserve their canonical pointer identity.
+    if (type == &TYPE_INTEGER) return "integer";
+    if (type == &TYPE_NUMBER) return "number";
+    return type ? get_type_name(type->type_id) : "unknown";
+}
+
+// TypeBinary/TypeUnary/TypeConstrained use LMD_TYPE_TYPE as an internal
+// carrier, not as a value representation. A shaped field with one of those
+// contracts must retain its boxed Item; dispatching it through the `type`
+// pointer lane corrupts unions such as string | error.
+static inline TypeId type_field_storage_type_id(const Type* type) {
+    if (!type) return LMD_TYPE_NULL;
+    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
+        return LMD_TYPE_NULL;
+    }
+    return type->type_id;
+}
+
+static inline bool shape_entry_uses_raw_item_storage(const ShapeEntry* field) {
+    return field && field->type && field->type->type_id != LMD_TYPE_NULL &&
+        shape_entry_storage_type_id(field) == LMD_TYPE_NULL;
+}
 
 extern Type CONST_BOOL;
 extern Type CONST_INT;

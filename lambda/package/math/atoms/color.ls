@@ -286,7 +286,9 @@ fn split_on_bang(text, i, current, parts) {
 }
 
 fn mix_channel(base, target, pct) {
-    int(round((float(base) * float(pct) + float(target) * float(100 - pct)) / 100.0))
+    // A malformed dynamic color channel renders as black rather than making
+    // the surrounding presentation tree an error value.
+    int(round((float(base) * float(pct) + float(target) * float(100 - pct)) / 100.0)) or 0
 }
 
 fn hex_color_to_rgb(raw) =>

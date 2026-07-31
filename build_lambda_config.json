@@ -637,6 +637,7 @@
         "lambda/runtime/lambda-error.cpp",
         "lambda/runtime/sys_func_registry.c",
         "lambda/runtime/side_stack.c",
+        "lambda/runtime/recovery_frame.c",
         "lambda/runtime/emit_sexpr.cpp",
         "lambda/runtime/mem_factory_rt.cpp"
       ],
@@ -4551,7 +4552,8 @@
             "source": "test/test_lambda_errors_gtest.cpp",
             "name": "Lambda Error System Tests",
             "dependencies": [
-              "lambda-rt"
+              "lambda-rt",
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/lambda-error.cpp"
@@ -4563,6 +4565,26 @@
               "tree-sitter",
               "rpmalloc"
             ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "icon": "⚠️"
           },
           {

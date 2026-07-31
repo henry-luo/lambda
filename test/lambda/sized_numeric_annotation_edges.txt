@@ -37,13 +37,13 @@ int64
 u64
 "=== integer operators ==="
 2
-i8
+float
 1
-i8
+float
 127
-u8
+float
 1
-u8
+float
 "=== unary wrap ==="
 -128
 i8

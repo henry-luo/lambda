@@ -1,1 +1,1 @@
-
+error[E201]: type check at declaration 'person' failed: expected Person, got map; validator at .age: Expected type 'int', but got 'string'

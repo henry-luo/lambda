@@ -234,6 +234,8 @@ static void print_complex(StrBuf* strbuf, Complex* value) {
 
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
+    const char* special = decimal_special_literal(decimal);
+    if (special) { strbuf_append_str(strbuf, special); return; }
     // Use centralized decimal_to_string function
     char *decimal_str = decimal_to_string(decimal);
     if (!decimal_str) { strbuf_append_str(strbuf, "error");  return; }

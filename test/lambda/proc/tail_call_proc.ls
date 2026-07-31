@@ -20,7 +20,7 @@ pn sum_to(n: int, acc: int) int {
 // GCD — tail recursion in both branches
 pn gcd(a: int, b: int) int {
     if (b == 0) { return a }
-    return gcd(b, a % b)
+    return gcd(b, int(a % b))
 }
 
 // ==============================================================================

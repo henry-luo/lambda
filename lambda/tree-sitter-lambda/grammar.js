@@ -289,8 +289,11 @@ module.exports = grammar({
     datetime: _ => token(seq( "t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'" )),
 
     // Note: 'null' is now part of $.base_type, no separate rule needed
-    // named_value combines true/false/inf/nan into a single token to reduce SYMBOL_COUNT
-    named_value: _ => token(choice('true', 'false', 'inf', 'nan')),
+    // named_value combines scalar poison spellings into one token. Decimal poison
+    // remains visibly decimal and round-trips through the canonical source form.
+    named_value: _ => token(choice(
+      'decimal.inf', 'decimal.nan', 'true', 'false', 'inf', 'nan'
+    )),
 
     // Containers: list, array, map, element
 
@@ -558,13 +561,13 @@ module.exports = grammar({
         field('var', $.var_param_marker),
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
-        optional(seq(':', field('type', $._type_expr))),
+        optional(seq(':', field('type', $._value_type_expr))),
         optional(seq('=', field('default', $._expr))),
       ),
       seq(
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
-        optional(seq(':', field('type', $._type_expr))),
+        optional(seq(':', field('type', $._value_type_expr))),
         optional(seq('=', field('default', $._expr))),
       ),
       field('variadic', $.variadic),  // variadic marker (must be last parameter)
@@ -702,7 +705,7 @@ module.exports = grammar({
       // single variable assignment
       seq(
         field('name', choice($.identifier, $.symbol)),
-        optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expr),
+        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
@@ -956,15 +959,15 @@ module.exports = grammar({
     // AST builder rejects comma-separated multi-element list_type in pattern context.
     list_type: $ => prec.dynamic(2, seq(
       // list cannot be empty
-      '(', seq($._type_expr, repeat(seq(',', $._type_expr))), ')',
+      '(', seq($._value_type_expr, repeat(seq(',', $._value_type_expr))), ')',
     )),
 
     array_type: $ => seq(
-      '[', comma_sep($._type_expr), ']',
+      '[', comma_sep($._value_type_expr), ']',
     ),
 
     map_type_item: $=> seq(
-      field('name', choice($.identifier, $.symbol)), ':', field('as', $._type_expr)
+      field('name', choice($.identifier, $.symbol)), ':', field('as', $._value_type_expr)
     ),
 
     map_type: $ => seq('{',
@@ -973,20 +976,20 @@ module.exports = grammar({
 
     attr_type: $ => prec(1, seq(
       field('name', choice($.symbol, $.identifier)),
-      ':', field('as', $._type_expr),
+      ':', field('as', $._value_type_expr),
       optional(seq('=', field('default', $._attr_expr))),
     )),
 
     content_type: $ => seq(
-      $._type_expr,
-      repeat(seq(',', $._type_expr)),
+      $._value_type_expr,
+      repeat(seq(',', $._value_type_expr)),
     ),
 
     element_type: $ => seq('<', $.identifier, _attr_content_type($), '>'),
 
     fn_param: $ => seq(
       // param type is required
-      field('name', $.identifier), seq(':', field('type', $._type_expr)),
+      field('name', $.identifier), seq(':', field('type', $._value_type_expr)),
     ),
 
     fn_type: $ => seq(
@@ -1063,6 +1066,21 @@ module.exports = grammar({
       $.binary_type,           // alternation: T | U, T & U, T ! U
       $.fn_type,
     ),
+
+    // In value annotations, T^ is ordinary data-flow shorthand for T | error.
+    // It deliberately does not reuse return_type: that rule carries the raised
+    // channel metadata which is meaningful only on a function return.
+    _value_type_expr: $ => choice(
+      $._type_expr,
+      $.value_error_type,
+    ),
+
+    value_error_type: $ => prec.right(seq(
+      field('ok', $._type_expr),
+      '^',
+      // Keep the error arm within the same simple grammar as return T^E.
+      optional(field('error', $.return_type_pattern)),
+    )),
 
     //  String/Symbol Pattern Definitions ----------------------
 

@@ -450,9 +450,9 @@ pub fn resolve_font(pdf, page, name: string) {
 fn _hex_to_codes(hex: string) {
     let clean = util.clean_hex(hex)
     let n = len(clean)
-    // Pair count is an integer ceiling; true division now preserves the
-    // fractional decimal result and must not be used as an implicit floor.
-    let pairs = (n + 1) div 2
+    // C14c makes `div` produce a float; this loop bound needs the integer
+    // ceiling count so retain that boundary explicitly.
+    let pairs: int = int((n + 1) div 2)
     if (pairs == 0) { [] }
     else {
         for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)

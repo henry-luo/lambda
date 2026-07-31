@@ -1,0 +1,1 @@
+error[E206]: fn_call_into: function 'add' expects 2 arguments, got 1

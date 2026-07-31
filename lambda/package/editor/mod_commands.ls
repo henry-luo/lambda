@@ -49,7 +49,9 @@ fn state_schema(state) =>
 fn state_default_block(state) =>
   if (state.default_block != null) { state.default_block } else { schema_default_block(state_schema(state)) }
 
-fn state_hard_break(state) => schema_hard_break(state_schema(state))
+// Schema and document values originate at the editor boundary; preserve a
+// failed lookup so commands never synthesize a structurally valid edit.
+fn state_hard_break(state) symbol | error => schema_hard_break(state_schema(state))
 
 // True iff a block's schema content permits inline content (text leaves) — e.g.
 // p/heading/li/td. Used so typing into an empty []-block inserts a text leaf
@@ -93,7 +95,7 @@ fn insert_marks_for_leaf(state, leaf) =>
   else if (leaf != null and is_text(leaf)) { leaf.marks }
   else { [] }
 
-fn replacement_block(state, txt) =>
+fn replacement_block(state, txt) map | error =>
   node(state_default_block(state), [text_marked(txt, replacement_marks(state))])
 
 fn replace_all_with_text(state, txt) {
@@ -510,7 +512,7 @@ pub fn cmd_insert_text(state, txt) {
 
 pub fn cmd_paste_text(state, txt) => cmd_insert_text(state, txt)
 
-pub fn cmd_select_all(state) =>
+pub fn cmd_select_all(state) map | error =>
   tx_set_meta(tx_set_selection(tx_begin(state.doc, state.selection), all_selection()), "addToHistory", false)
 
 fn nonempty_text_leaf(s, marks) =>
@@ -641,7 +643,7 @@ fn fnl_split_item(content, i, n, own, subs) {
   }
 }
 
-fn fnl_flatten_list(lst, base) => node_attrs(lst.tag, lst.attrs, fnl_flatten_items(lst.content, base, 0, len(lst.content), []))
+fn fnl_flatten_list(lst, base) map | error => node_attrs(lst.tag, lst.attrs, fnl_flatten_items(lst.content, base, 0, len(lst.content), []))
 
 fn fnl_append_subs(subs, level, i, n, acc) {
   if (i >= n) { acc }
@@ -1398,7 +1400,7 @@ fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) {
 fn mark_list_for(marks, mark, adding) =>
   if (adding) { with_mark(marks, mark.name, mark.value) } else { without_mark(marks, mark.name) }
 
-fn mark_text_leaf_node(leaf, mark, adding) =>
+fn mark_text_leaf_node(leaf, mark, adding) map | error =>
   text_marked(leaf.text, mark_list_for(leaf.marks, mark, adding))
 
 fn mark_text_leaf_range(leaf, from, to, mark, adding) {

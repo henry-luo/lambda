@@ -20,6 +20,9 @@ enum TypeKind {
     TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
     TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
     TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
+    // TypeParam keeps a compact carrier Type prefix plus its full source
+    // contract. Mark it so identifier typing can safely recover that contract.
+    TYPE_KIND_PARAM,
 };
 
 // Name - a qualified name with optional namespace

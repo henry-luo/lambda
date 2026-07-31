@@ -6,12 +6,9 @@
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // NOTE: locals initialised from a len() expression stay unannotated — len() is
-// int64, and a declared `int` there either hard-errors or silently narrows in the
-// MIR JIT (repro: temp/repro_declared_int_len_concat.ls). `string` return types are
-// also avoided: they segfault the JIT once the result spans a GC
-// (repro: temp/repro_string_return_segv.ls).
+// int64, and a declared `int` would require an explicit conversion.
 // extract >THREE section from fasta input
-pn extract_three(text: string) {
+pn extract_three(text: string) string {
     let lines = split(text, "\n")
     var num_lines = len(lines)
     var seq: string = ""
@@ -119,7 +116,7 @@ pn print_count(seq: string, kmer: string) {
 
 pn main() {
     var __t0 = clock()
-    let text^err = input(INPUT_PATH, 'text')
+    let text^err = io.read(INPUT_PATH)
     let seq: string = extract_three(text)
 
     // print frequency tables for 1-mers and 2-mers

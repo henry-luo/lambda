@@ -26,7 +26,10 @@ void name_pool_release(NamePool* pool);
 // registered name pool's mem_node. Set by the factory; NULL by default (no-op).
 void name_pool_set_node_release_hook(void (*fn)(void* node));
 
-// Name management - all return String* with incremented ref_count
+// Name management - all return an interned String* owned by this pool (or a
+// parent pool). Pooled name strings are static data: immutable, outside GC,
+// never individually ref-counted. Lifetime is pool-scoped - NamePool.ref_count
+// (name_pool_retain/name_pool_release) governs when the backing memory dies.
 String* name_pool_create_name(NamePool* pool, const char* name);
 String* name_pool_create_len(NamePool* pool, const char* name, size_t len);
 String* name_pool_create_strview(NamePool* pool, StrView name);
@@ -40,7 +43,7 @@ String* name_pool_create_symbol_strview(NamePool* pool, StrView symbol);
 // Check if a string qualifies for symbol pooling
 bool name_pool_is_poolable_symbol(size_t length);
 
-// Lookup functions - return existing String* or nullptr, no ref_count increment
+// Lookup functions - return existing String* or nullptr; never intern
 String* name_pool_lookup(NamePool* pool, const char* name);
 String* name_pool_lookup_len(NamePool* pool, const char* name, size_t len);
 String* name_pool_lookup_strview(NamePool* pool, StrView name);

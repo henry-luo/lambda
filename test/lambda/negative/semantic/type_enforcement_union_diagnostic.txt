@@ -1,0 +1,1 @@
+error[E201]: cannot initialize 'wrong_union' of type int | string with bool

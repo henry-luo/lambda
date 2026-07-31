@@ -1,1 +1,1 @@
-
+error[E201]: type check at declaration 'value' failed: expected int, got decimal

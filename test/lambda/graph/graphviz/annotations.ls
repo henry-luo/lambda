@@ -34,7 +34,9 @@ fn label_box(result, spec) {
   box(value.x, value.y, spec.width, spec.height)
 }
 
-fn segment_box(a, b) => box(min([a.x, b.x]) - 1.9, min([a.y, b.y]) - 1.9,
+// Route points are dynamically shaped; preserve a failed box calculation as
+// data instead of silently substituting geometry in this valid-route fixture.
+fn segment_box(a, b) map | error => box(min([a.x, b.x]) - 1.9, min([a.y, b.y]) - 1.9,
   abs(b.x - a.x) + 3.8, abs(b.y - a.y) + 3.8)
 
 let source^source_error = input(

@@ -140,8 +140,9 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
 - **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
   **wraps** (two's complement); constant/literal overflow is a **compile
   error**; division by zero yields float `inf`/`nan` per C14c (a deliberate
-  divergence from Go's panic — number math stays in number); `MinInt div -1`
-  wraps.
+  divergence from Go's panic — number math stays in number). Ordinary machine
+  arithmetic wraps; `div` and `%` leave the machine lane under §4.7 rather
+  than applying a machine `MinInt div -1` rule.
 
 *Rationale.* `int ⊂ float64` makes each int↔float operand conversion
 lossless and lets the JIT hold ints in double registers with zero observable
@@ -178,8 +179,10 @@ Promotion is type-directed, never selected from the operands' current
 magnitudes. Sized-integer arithmetic has two cases:
 
 - **sized × sized:** select the smallest Lambda machine lane that contains both
-  operand type domains, then stay in that lane for `+`, `-`, `*`, `div`, `%`,
-  bitwise operations, and shifts. Same-signed operands use the wider width; a
+  operand type domains, then stay in that lane for `+`, `-`, `*`, bitwise
+  operations, and shifts. `div` and `%` are the deliberate §4.7 exceptions:
+  they leave the machine lane and follow number-domain division semantics.
+  Same-signed operands use the wider width; a
   signed/unsigned pair uses a containing signed width when one exists,
   otherwise the next wider signed width, otherwise the wider unsigned width.
   Thus `i8 + u8 → i16`, `i32 + u32 → i64`, and `i64 + u64 → u64`.
@@ -258,14 +261,19 @@ blesses (`BigDecimal.valueOf`) and what serialization does universally; and it
 is cheaper than the exact-binary-expansion alternative (≤ 17 digits always fits
 decimal128). [C8.5a]
 
-### 4.6 Float printing
+### 4.6 Float and decimal printing
 
 `print`/`format` render a float as its shortest round-trip decimal
 (`print(0.3)` → `0.3`; `print(0.1 + 0.2)` → `0.30000000000000004`). The printer
 is **injective**: distinct doubles print distinctly — artifacts are visible,
 never hidden — and print→parse round-trips are exact. With §4.5, WYSIWYG
 equality holds literally: **two numbers are equal iff they print the same.**
-[C8.5a]
+except for the NaN poison carve-out in §5.
+
+Decimal finite values print in their decimal form. Decimal poison uses the distinct,
+parseable Lambda spellings `decimal.inf`, `-decimal.inf`, and `decimal.nan`; bare
+`inf`/`nan` remain float. Decimal poison participates in arithmetic as decimal poison,
+so `0m * decimal.inf` is `decimal.nan`, never an error or process fault. [C8.5a, C14c]
 
 ### 4.7 Division and modulo
 
@@ -293,8 +301,9 @@ Division by zero never raises, at any width or tier:
   array with per-lane `inf`/`nan` at offending lanes — representable and
   type-stable, so C14b's whole-op single-`error` is retired. The pre-mask
   idiom (`b eq 0`) remains available for salvage but is no longer required.
-  Decimal-domain division by zero likewise yields decimal `inf`/`nan`
-  (requires the decimal inf/nan unblock — see the enforcement impl plan).
+  Decimal-domain division by zero likewise yields decimal `decimal.inf`,
+  `-decimal.inf`, or `decimal.nan`; these spellings round-trip through the Lambda
+  grammar and remain visibly distinct from float poison.
 
 `div` truncates toward zero; `%` takes the dividend's sign (C convention;
 contrast Python's flooring — relevant when modeling guest languages).
@@ -335,7 +344,9 @@ an `if` branch silently; `error == error → false` mirrors `nan` by design.
 
 Numeric equality is by mathematical value across all representations:
 `1 == 1.0 == 1n == 1m`; `0.1m == 0.1` per §4.5; `-0.0 == 0.0`. Decimal storage width
-is representation, not value identity. `nan != nan` (IEEE, and the poison rule).
+is representation, not value identity. `decimal.inf == inf` and
+`-decimal.inf == -inf`; every float or decimal NaN remains unequal to every value
+(IEEE, and the poison rule).
 
 ### 5.3 Sequences
 
@@ -414,7 +425,8 @@ two-relation split as IEEE `totalOrder` vs `<`, Java `compare` vs `<`, and SQL
 - **The governing principle: the total order totally refines `==`** — equal
   values always tie; ties are resolved by stability.
 - Numbers order by mathematical value across all representations — no
-  representation ranks.
+  representation ranks. Decimal infinities stay in that numeric band; float and decimal
+  NaNs both occupy the final `nan` band.
 - Within-band: `false < true`; strings/symbols/binaries bytewise UTF-8
   (= codepoint order; no locale collation); sequences lexicographic; maps via
   canonically sorted keys; elements by tag, attributes, children; datetimes by
@@ -483,8 +495,10 @@ the caller to know which representation delivered the error.
 - **Postfix `e^` applies the same split but propagates instead of capturing.**
   It yields the error-free success type and forwards the combined error set to
   the enclosing function's declared channel. Using it in a declared plain-`T`
-  function is a compile error; an undeclared function may infer a returned
-  `T | error`. Prefix `^e` and `e is error` remain boolean tests.
+  function is a compile error. An unannotated `fn` has the implicit clean
+  contract in §11.4, so an error-possible inferred return is likewise a
+  compile error until it is contained or the signature explicitly admits the
+  error. Prefix `^e` and `e is error` remain boolean tests.
 - **System `fn` failures are returned values.** They remain chainable and
   set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
   chosen by one principle: *absence in / no answer → `null`*

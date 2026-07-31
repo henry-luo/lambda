@@ -47,7 +47,7 @@ show(0 / 5)
 show(6 / 3)
 show(9007199254740991 / 1)
 
-"=== M2: idiv and mod stay integral ==="
+"=== M2: idiv and mod share the float result domain ==="
 show(7 div 2)
 show(-7 div 2)
 show(7 % 2)
