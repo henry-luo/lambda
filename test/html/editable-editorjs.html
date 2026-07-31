@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Radiant editable test — Editor.js</title>
+    <link rel="stylesheet" href="editable-editors.css">
+  </head>
+  <body>
+    <main class="editor-page">
+      <header>
+        <h1>Editor.js editable surface</h1>
+        <p class="hint">Click a block, type, press Enter to create a block, merge with Backspace/Delete, move across blocks with the arrows, and try block selection or paste.</p>
+      </header>
+
+      <div class="controls">
+        <button id="reload" type="button">Reload editor</button>
+        <button id="destroy" type="button">Destroy editor</button>
+      </div>
+
+      <section class="editor-card" aria-label="Editor.js editor">
+        <div id="editor"></div>
+      </section>
+
+      <section class="telemetry" aria-label="Editor.js telemetry">
+        <article class="telemetry-card">
+          <h2>Saved block data</h2>
+          <pre id="state"></pre>
+        </article>
+        <article class="telemetry-card">
+          <h2>onChange log</h2>
+          <pre id="changes"></pre>
+        </article>
+        <article class="telemetry-card">
+          <h2>DOM selection</h2>
+          <pre id="selection"></pre>
+        </article>
+        <article class="telemetry-card">
+          <h2>Block IDs</h2>
+          <pre id="ids"></pre>
+        </article>
+      </section>
+
+      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm ci &amp;&amp; npm run build</code></p>
+    </main>
+    <script src="../editable-editors/build/editorjs.js"></script>
+  </body>
+</html>

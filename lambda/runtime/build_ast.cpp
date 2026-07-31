@@ -8354,15 +8354,25 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
     return (AstNode*)for_node;
 }
 
+// shared guard for the procedural-only statements (var/assign/while/break/continue/return).
+// Recording a semantic error rather than only logging it is load-bearing: each guard returns
+// NULL, leaving a hole in the AST (a rejected `var` never enters its name into the scope), and
+// runner.cpp:730 only returns before MIR when error_count > 0. With a bare log_error the build
+// looked clean, MIR ran against the holey AST, and the real diagnostic was buried under invented
+// follow-on errors such as "mir: undefined variable 'x'".
+static bool require_proc_scope(Transpiler* tp, TSNode node, const char* subject) {
+    if (tp->current_scope && tp->current_scope->is_proc) return true;
+    record_semantic_error(tp, node, ERR_PROC_IN_FN,
+        "%s is only allowed inside a procedure (pn)", subject);
+    return false;
+}
+
 // while statement (procedural only)
 AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     log_debug("build while stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: 'while' statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, while_node, "`while`")) return NULL;
 
     AstWhileNode* ast_node = (AstWhileNode*)alloc_ast_node(tp, AST_NODE_WHILE_STAM, while_node, sizeof(AstWhileNode));
 
@@ -8392,10 +8402,7 @@ AstNode* build_break_stam(Transpiler* tp, TSNode break_node) {
     log_debug("build break stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: 'break' statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, break_node, "`break`")) return NULL;
 
     AstNode* ast_node = alloc_ast_node(tp, AST_NODE_BREAK_STAM, break_node, sizeof(AstNode));
     ast_node->type = &TYPE_ANY;
@@ -8407,10 +8414,7 @@ AstNode* build_continue_stam(Transpiler* tp, TSNode continue_node) {
     log_debug("build continue stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: 'continue' statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, continue_node, "`continue`")) return NULL;
 
     AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CONTINUE_STAM, continue_node, sizeof(AstNode));
     ast_node->type = &TYPE_ANY;
@@ -8422,10 +8426,7 @@ AstNode* build_return_stam(Transpiler* tp, TSNode return_node) {
     log_debug("build return stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: 'return' statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, return_node, "`return`")) return NULL;
 
     AstReturnNode* ast_node = (AstReturnNode*)alloc_ast_node(tp, AST_NODE_RETURN_STAM, return_node, sizeof(AstReturnNode));
 
@@ -8501,10 +8502,7 @@ AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
     log_debug("build var stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: 'var' statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, var_node, "`var`")) return NULL;
 
     // Reuse the let statement builder but mark as VAR_STAM
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_VAR_STAM, var_node, sizeof(AstLetNode));
@@ -8551,10 +8549,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
     log_debug("build assign stam");
 
     // Check if we're in a procedural context
-    if (!tp->current_scope->is_proc) {
-        log_error("Error: assignment statement is only allowed in procedural functions (pn)");
-        return NULL;
-    }
+    if (!require_proc_scope(tp, assign_node, "assignment")) return NULL;
 
     // get target node — could be identifier, index_expr, or member_expr
     TSNode target_node = ts_node_child_by_field_id(assign_node, FIELD_TARGET);

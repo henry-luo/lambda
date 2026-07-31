@@ -864,6 +864,28 @@ TEST_F(NegativeScriptTest, StaticUnionContractsDisplayTheirFullExpectedType) {
         "cannot initialize 'wrong_union' of type int | string with bool");
 }
 
+TEST_F(NegativeScriptTest, ProceduralStatementsOutsidePnReportE224WithoutCascade) {
+    const char* script = "test/lambda/negative/semantic/proc_stam_outside_pn.ls";
+    ScriptResult result = run_lambda_script(script);
+
+    EXPECT_NE(result.exit_code, 0) << "Expected script to fail: " << script;
+
+    // every procedural-only statement at module scope reports, and reports as E224
+    for (const char* subject : {"`var`", "assignment", "`while`",
+                                "`break`", "`continue`", "`return`"}) {
+        std::string expected = std::string("error[E224]: ") + subject
+            + " is only allowed inside a procedure (pn)";
+        EXPECT_NE(result.output.find(expected), std::string::npos)
+            << "Missing diagnostic: " << expected << "\nOutput: " << result.output;
+    }
+
+    // the guards must record a semantic error, not just log one: with error_count still 0 the
+    // build looked clean and MIR ran against the AST hole left by the refused binding, inventing
+    // follow-on errors about the very name the guard declined to create.
+    EXPECT_EQ(result.output.find("undefined variable"), std::string::npos)
+        << "Cascade from holey AST reached MIR:\n" << result.output;
+}
+
 TEST_F(NegativeScriptTest, TypeValuedOrExplainsTheUnionOperator) {
     ExpectErrorMessage("test/lambda/negative/semantic/type_valued_or.ls",
         "operator `or` cannot combine type values; use `|` to form a union type");

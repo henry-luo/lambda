@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Radiant editable test — ProseMirror</title>
+    <link rel="stylesheet" href="editable-editors.css">
+  </head>
+  <body>
+    <main class="editor-page">
+      <header>
+        <h1>ProseMirror editable surface</h1>
+        <p class="hint">Click into a paragraph, type, select and replace text, press Enter, use Backspace/Delete and Cmd/Ctrl-Z, then try copy/paste or IME composition.</p>
+      </header>
+
+      <div class="controls">
+        <button id="destroy" type="button">Destroy editor</button>
+      </div>
+
+      <section class="editor-card" aria-label="ProseMirror editor">
+        <div id="editor">
+          <h2>ProseMirror document</h2>
+          <p>This paragraph is the initial editable content. Select part of it and replace the selection.</p>
+          <blockquote><p>Block boundaries, caret movement, and history are useful Radiant checks.</p></blockquote>
+          <p>Type at the end of this paragraph to check ordinary contenteditable input.</p>
+        </div>
+      </section>
+
+      <section class="telemetry" aria-label="ProseMirror telemetry">
+        <article class="telemetry-card">
+          <h2>EditorState</h2>
+          <pre id="state"></pre>
+        </article>
+      </section>
+
+      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm ci &amp;&amp; npm run build</code></p>
+    </main>
+    <script src="../editable-editors/build/prosemirror.js"></script>
+  </body>
+</html>

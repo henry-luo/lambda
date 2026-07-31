@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Radiant editable test — CodeMirror</title>
+    <link rel="stylesheet" href="editable-editors.css">
+  </head>
+  <body>
+    <main class="editor-page">
+      <header>
+        <h1>CodeMirror editable surface</h1>
+        <p class="hint">Click the code, type, select and replace text, use Backspace/Delete and Cmd/Ctrl-Z, then try copy/paste or IME composition.</p>
+      </header>
+
+      <div class="controls">
+        <button id="destroy" type="button">Destroy editor</button>
+      </div>
+
+      <section class="editor-card" aria-label="CodeMirror editor">
+        <div id="editor" data-doc="function greet(name) {&#10;  return &quot;hello, &quot; + name;&#10;}&#10;&#10;// type here"></div>
+      </section>
+
+      <section class="telemetry" aria-label="CodeMirror telemetry">
+        <article class="telemetry-card">
+          <h2>EditorState</h2>
+          <pre id="state"></pre>
+        </article>
+        <article class="telemetry-card">
+          <h2>DOM events</h2>
+          <pre id="events"></pre>
+        </article>
+      </section>
+
+      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm ci &amp;&amp; npm run build</code></p>
+    </main>
+    <script src="../editable-editors/build/codemirror.js"></script>
+  </body>
+</html>

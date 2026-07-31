@@ -1,0 +1,148 @@
+:root {
+  --border: #cbd5e1;
+  --panel: #ffffff;
+  --page: #eef2f7;
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #2563eb;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--page);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.editor-page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.editor-page > header,
+.editor-card,
+.telemetry-card {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.editor-page > header {
+  padding: 20px 24px;
+  border-radius: 10px 10px 0 0;
+}
+
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 6px; font-size: 24px; }
+h2 { margin-bottom: 8px; font-size: 15px; }
+
+.hint {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+button {
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover { background: #f8fafc; }
+
+.editor-card {
+  min-height: 260px;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+#editor {
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+#editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.cm-editor {
+  min-height: 220px;
+  border-radius: 6px;
+}
+
+.cm-scroller { min-height: 220px; }
+
+.ProseMirror {
+  min-height: 220px;
+  padding: 14px 16px;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ProseMirror h2 { margin: 0 0 12px; }
+.ProseMirror p { margin: 0 0 12px; }
+.ProseMirror blockquote {
+  margin: 12px 0;
+  padding-left: 14px;
+  border-left: 3px solid #94a3b8;
+  color: var(--muted);
+}
+
+.codex-editor { min-height: 220px; }
+.ce-block__content, .ce-toolbar__content { max-width: none; }
+.ce-paragraph, .ce-header { overflow-wrap: anywhere; }
+
+.telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.telemetry-card {
+  flex: 1 1 260px;
+  min-width: 260px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+pre {
+  min-height: 24px;
+  max-height: 220px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #1e293b;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.build-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}

@@ -91,6 +91,85 @@ pn example() {
 
 Variables with explicit type annotations (`var x: int`) enforce the declared type and reject mismatched assignments.
 
+### No Global Variables
+
+`var` is only valid inside a `pn` body (or a `view` event handler). **Lambda has no global mutable state** — a `var` at script/module scope is a compile error, and this is true for `lambda script.ls`, `lambda run script.ls`, and the REPL alike. `pn main()` does not change it: `main` is an ordinary `pn` inside an otherwise functional module.
+
+```lambda
+var count = 0        // ERROR: 'var' statement is only allowed in procedural functions (pn)
+
+let base = 10        // OK — module bindings are immutable
+
+pn main() {
+    var count = 0    // OK — mutable state lives in the pn
+    count = count + base
+    print(count)
+}
+```
+
+Module-level `let` bindings cannot be mutated indirectly either — E211 rejects writes through an immutable binding, so a module-scope container or object instance is read-only for the whole program:
+
+```lambda
+let arr = [1, 2, 3]
+
+pn main() {
+    arr[0] = 99      // ERROR E211: cannot mutate through immutable binding 'arr'
+}
+```
+
+This means every mutable root in a Lambda program is owned by a single activation:
+
+- **Script state** lives in `main`'s `var`s, and reaches other `pn`s only as arguments.
+- **Worker state** lives in the `var`s of the `pn` that starts the worker. A spawned task cannot capture a mutable `var` (see [Concurrency](#concurrency)) — copy it to a `let` or use message passing.
+- **Template state** lives in a `view`'s `state` entries, isolated per template instance.
+- **Object state** lives in instance fields, reachable only through a `var` receiver.
+- **`fn` functions** hold no mutable state at all.
+
+The practical consequence is that a module exposes no mutable cell, so importing it can never couple two parts of a program through hidden shared state.
+
+#### State outside the value model
+
+Two kinds of state exist in a running program but are not Lambda values, so the rule above does not describe them.
+
+**External resources** — file handles from `open()`, sockets, and similar OS objects. These hold state in the operating system, not in the Lambda heap. They are scoped rather than immutable: a handle is bound in a block and closed automatically when that block exits, so its lifetime is bounded by an activation just as a `var` is.
+
+**Guest runtime state — an explicit exemption.** When a Lambda program imports a module written in another language, that language keeps its own rules. LambdaJS has a genuinely mutable `globalThis` and mutable module-level bindings; the Python, Bash, and Ruby guests carry their own module state. Importing such a module gives Lambda a handle on state Lambda itself could not have declared:
+
+```javascript
+// guest_counter.js
+let hits = 0;                      // module-level mutable state — legal in JS
+export function bump() { return ++hits; }
+```
+
+```lambda
+import .guest_counter
+
+pn main() {
+    print(bump())    // 1
+    print(bump())    // 2 — the guest module remembers
+}
+```
+
+Lambda's scope rules say nothing about this. Guest state is isolated per evaluation context, so two contexts still cannot observe each other — but within one context it is global, and a Lambda program that imports a guest module does have global mutable state. It is simply the guest's, not Lambda's.
+
+#### No global mutable state ≠ no global effect
+
+The rule constrains *shared mutable cells*, not *effects*. Module-level `let` bindings are evaluated when the module is instantiated, and that evaluation can read the outside world — `input()` is an `fn`, so it is legal at module scope:
+
+```lambda
+let config = input('./config.json', 'json')   // OK — but this reads a file at import time
+let base    = 10                              // pure
+
+pn main() { print(config.name) }
+```
+
+`config` is immutable and safe to share, but producing it touched the filesystem. Two consequences worth keeping in mind:
+
+- Importing a module is not free of side effects, and the order in which modules are instantiated can matter if their initializers read state that something else writes.
+- The read happens **once per module instance**. If the same module instance is shared, later readers see the value as of instantiation time, not as of their own execution.
+
+Prefer to keep module-level bindings pure and take the effectful read inside `main` when the timing of the read matters.
+
 ---
 
 ## Assignment Statement
@@ -462,12 +541,16 @@ type Counter {
     pn reset() { count = 0 }               // Mutates field in-place
 }
 
-let c = <Counter>
-c.increment()       // c.count is now 1
-c.increment()       // c.count is now 2
-c.value()           // 2
-c.reset()           // c.count is now 0
+pn main() {
+    var c = <Counter>   // must be `var` — a mutating method needs a mutable receiver
+    c.increment()       // c.count is now 1
+    c.increment()       // c.count is now 2
+    c.value()           // 2
+    c.reset()           // c.count is now 0
+}
 ```
+
+A `pn` method requires a `var` binding as its receiver; calling one on a `let` binding produces error E211. Since [`var` cannot appear at module scope](#no-global-variables), an object held by a module-level `let` is immutable for the whole program.
 
 Inside `pn` methods, bare field names resolve to the object's fields (same as in `fn` methods). When a parameter name shadows a field name, use `~` to disambiguate:
 

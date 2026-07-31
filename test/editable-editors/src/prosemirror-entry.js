@@ -10,6 +10,7 @@ const host = document.getElementById("editor");
 const state = document.getElementById("state");
 const editorSchema = schema;
 const read_only = host.hasAttribute("data-readonly");
+const initial_doc = DOMParser.fromSchema(editorSchema).parse(host);
 let view = null;
 
 function publish() {
@@ -20,9 +21,13 @@ function publish() {
   });
 }
 
+// editorview appends its live root to the mount, so remove the parsed seed DOM
+// before mounting to avoid showing a static duplicate beside the editable view.
+host.textContent = "";
+
 view = new EditorView(host, {
   state: EditorState.create({
-    doc: DOMParser.fromSchema(editorSchema).parse(host),
+    doc: initial_doc,
     plugins: [
       history(),
       keymap({ "Mod-z": undo, "Mod-y": redo, "Mod-Shift-z": redo }),
