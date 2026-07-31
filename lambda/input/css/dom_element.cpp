@@ -517,9 +517,9 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         element->mark_specified_style_owned();
         changed = true;
     } else if (element->specified_style_borrowed()) {
-        element->specified_style = style_tree_create(element->doc->document_pool);
-        element->mark_specified_style_owned();
-        changed = true;
+        // retained pseudo boxes must keep borrowing the source pseudo-style tree;
+        // detaching here leaves reused boxes with an empty tree after recascade.
+        return;
     } else if (element->specified_style) {
         if (style_tree_has_inline_declarations(element->specified_style)) {
             // Inline declarations are live DOM state. Reparse-on-recascade both

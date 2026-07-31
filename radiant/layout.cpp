@@ -3375,6 +3375,18 @@ void layout_cleanup(LayoutContext* lycon) {
     (void)lycon;
 }
 
+static void reset_float_prelaid_flags(DomNode* node) {
+    if (!node) return;
+    if (!node->is_element()) return;
+
+    DomElement* elem = node->as_element();
+    // float_prelaid belongs to one layout pass; retaining it across incremental reflows makes the new BFC miss that float.
+    elem->set_float_prelaid(false);
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        reset_float_prelaid_flags(child);
+    }
+}
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -3448,6 +3460,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         log_error("Failed to get root_node");
         return;
     }
+
+    reset_float_prelaid_flags(root_node);
 
     log_debug("calling layout_init...");
     LayoutPassScope layout_scope(&lycon, doc, uicon);

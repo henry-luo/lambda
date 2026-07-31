@@ -95,6 +95,15 @@ static bool event_view_pointer_events_none(View* view) {
     return false;
 }
 
+static bool event_view_is_float(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    CssEnum float_value = elem->position
+        ? elem->positionp()->float_prop
+        : layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+    return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
+}
+
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
@@ -826,29 +835,48 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 }
 
 void target_children(EventContext* evcon, View* view) {
-    do {
-        if (view->is_block()) {
-            ViewBlock* block = lam::view_require_block(view);
-            if (radiant_stack_is_deferred_from_normal_flow(view)) {
+    if (!evcon || !view) return;
+
+    bool has_float_child = false;
+    for (View* child = view; child; child = child->next()) {
+        if (event_view_is_float(child)) {
+            has_float_child = true;
+            break;
+        }
+    }
+
+    View* last = view;
+    if (has_float_child) {
+        while (last->next()) last = last->next();
+    }
+
+    // floating siblings can overlap after shrink-to-fit; later floats paint on
+    // top of earlier ones, so their normal-flow hit order must be reversed.
+    for (View* child = has_float_child ? last : view;
+         child && !evcon->target;
+         child = has_float_child
+             ? (child == view ? nullptr : static_cast<View*>(child->prev_sibling))
+             : child->next()) {
+        if (child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            if (radiant_stack_is_deferred_from_normal_flow(child)) {
                 // skip deferred stacking entries; target_block_view walks them in reverse paint order.
             } else {
                 target_block_view(evcon, block);
             }
         }
-        else if (view->view_type == RDT_VIEW_INLINE) {
-            if (radiant_stack_is_deferred_from_normal_flow(view)) {
-                view = view->next();
+        else if (child->view_type == RDT_VIEW_INLINE) {
+            if (radiant_stack_is_deferred_from_normal_flow(child)) {
                 continue;
             }
-            ViewSpan* span = lam::view_require_element(view);
+            ViewSpan* span = lam::view_require_element(child);
             target_inline_view(evcon, span);
         }
-        else if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
+        else if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(child);
             target_text_view(evcon, text);
         }
-        view = view->next();
-    } while (view && !evcon->target);
+    }
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
@@ -1081,8 +1109,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = event_view_owner_state(static_cast<View*>(block));
         if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
-                                           &scroll_x, &scroll_y, NULL, NULL);
+        // overflow-visible boxes may allocate a pane to record intrinsic overflow,
+        // but that pane does not establish a scrolling coordinate space for hits.
+        if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
+            scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
+                                               &scroll_x, &scroll_y, NULL, NULL);
+        }
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
     }

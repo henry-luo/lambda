@@ -1135,6 +1135,10 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
                         log_debug("[PSEUDO] Setting display: block for ::%s", is_before ? "before" : "after");
                     } else if (val->data.keyword == CSS_VALUE_INLINE_BLOCK) {
                         pseudo_elem->display.outer = CSS_VALUE_INLINE_BLOCK;
+                    } else if (val->data.keyword == CSS_VALUE_TABLE) {
+                        // css table pseudo-elements must establish a block-level formatting context so clear:both contains preceding floats.
+                        pseudo_elem->display.outer = CSS_VALUE_BLOCK;
+                        pseudo_elem->display.inner = CSS_VALUE_TABLE;
                     }
                 }
             }
@@ -4387,9 +4391,17 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     // inline content flow
                     do {
                         float pre_advance_y = lycon->block.advance_y;
+                        bool child_is_floated = false;
+                        if (child->is_element()) {
+                            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+                            CssEnum child_float = get_element_float_value(child_elem);
+                            child_is_floated = child_float == CSS_VALUE_LEFT || child_float == CSS_VALUE_RIGHT;
+                        }
                         // Phase 16: skip unchanged block elements in incremental layout
+                        // floated children must rerun so their parent BFC receives the new float contribution.
                         if (lycon->doc && lycon->doc->incremental_layout
                             && child->is_element() && !child->layout_dirty
+                            && !child_is_floated
                             && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
                             DomElement* skip_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
                             verify_incremental_layout_skip(lycon, child, pre_advance_y);
