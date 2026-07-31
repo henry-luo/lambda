@@ -8,7 +8,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/arraylist.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "../../lib/log.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"

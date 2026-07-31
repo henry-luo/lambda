@@ -2,7 +2,7 @@
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "heap_api.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "recovery_frame.h"
