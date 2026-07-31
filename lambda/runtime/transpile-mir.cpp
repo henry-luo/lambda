@@ -15,7 +15,7 @@
 #include "../../lib/url.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "../validator/validator.hpp"
 #include "lambda-stack.h"
 #include "heap_api.h"

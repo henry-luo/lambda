@@ -35,7 +35,7 @@ extern "C" {
 
 #include "lambda-error.h"
 #include "../lambda.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "../../lib/log.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/arraylist.h"

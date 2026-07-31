@@ -5,7 +5,7 @@
 #include "../../lib/str.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "mem_factory_rt.h"
 #include "lambda-error.h"
 #include "../jube/jube_registry.h"

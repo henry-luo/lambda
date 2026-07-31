@@ -22,7 +22,7 @@
 #include "../../lib/mem_context.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 
 // ---- GC heap ----
 gc_heap_t* mem_gc_heap_create(MemContext* ctx, MemRole role, const char* label);

@@ -157,7 +157,7 @@ total_files=$((total_files + lambda_files))
 total_lines=$((total_lines + lambda_lines))
 
 # Count subdirectories of lambda (excluding tree-sitter)
-for subdir in format input validator; do
+for subdir in core format input io js jube network runtime ts validator; do
     if [ -d "./lambda/$subdir" ]; then
         echo -e "${YELLOW}  ./lambda/$subdir${NC}"
 

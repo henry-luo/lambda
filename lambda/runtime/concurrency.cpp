@@ -4,7 +4,7 @@
 #include "../lambda-data.hpp"
 #include "lambda-error.h"
 #include "transpiler.hpp"
-#include "gc/gc_heap.h"
+#include "lambda/runtime/gc/gc_heap.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
