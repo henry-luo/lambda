@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Radiant editable test — ProseMirror</title>
+    <link rel="stylesheet" href="editable-editors.css">
+  </head>
+  <body>
+    <main class="editor-page">
+      <header>
+        <h1>ProseMirror editable surface</h1>
+        <p class="hint">Select text or place the caret in a block, then use the toolbar or keyboard to test formatting, block changes, history, ordinary input, clipboard, and IME composition.</p>
+      </header>
+
+      <div class="controls">
+        <button id="destroy" type="button">Destroy editor</button>
+      </div>
+
+      <div id="toolbar" class="editor-toolbar" role="toolbar" aria-label="ProseMirror rich-text actions">
+        <button type="button" data-command="paragraph" title="Paragraph" aria-label="Paragraph">P</button>
+        <button type="button" data-command="heading" title="Heading 2" aria-label="Heading 2">H2</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-command="bold" title="Bold" aria-label="Bold">B</button>
+        <button type="button" data-command="italic" title="Italic" aria-label="Italic"><em>I</em></button>
+        <button type="button" data-command="code" title="Code" aria-label="Code">&lt;/&gt;</button>
+        <button type="button" data-command="quote" title="Block quote" aria-label="Block quote">❝</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-command="undo" title="Undo" aria-label="Undo">↶</button>
+        <button type="button" data-command="redo" title="Redo" aria-label="Redo">↷</button>
+      </div>
+
+      <section class="editor-card" aria-label="ProseMirror editor">
+        <div id="editor">
+          <h2>ProseMirror document</h2>
+          <p>This paragraph is the initial editable content. Select part of it and replace the selection.</p>
+          <blockquote><p>Block boundaries, caret movement, and history are useful Radiant checks.</p></blockquote>
+          <p>Type at the end of this paragraph to check ordinary contenteditable input.</p>
+        </div>
+      </section>
+
+      <section class="telemetry" aria-label="ProseMirror telemetry">
+        <article class="telemetry-card">
+          <h2>EditorState</h2>
+          <pre id="state"></pre>
+        </article>
+      </section>
+
+      <p class="build-note">Bundle prerequisite: <code>cd test/editable-editors &amp;&amp; npm install &amp;&amp; npm run build</code></p>
+    </main>
+    <script src="../editable-editors/build/prosemirror.js"></script>
+  </body>
+</html>

@@ -624,6 +624,18 @@ design pass must reconcile this document with `Lambda_Design_MIR_Cache.md` and
 Until that reconciliation is complete, §3–§5 describe the required logical
 interfaces, not an approved lambda-ELF/cache layout.
 
+`vibe/Lambda_Design_Const_Pool.md` (MarkPack, rev 4) is the companion draft on
+the serialization side of that boundary and proposes answers to several bullets
+above: a four-section container (names / types / data / code) serving script
+caches, binary document caches, interchange, and cross-isolate messages. It is
+an **input to the reconciliation, not an approved layout**. Division of
+authority: this document governs runtime name/property-key identity; that one
+governs the serialized data encoding. Two couplings must be settled together
+rather than independently — the `String`/`NameMeta` ABI versioning (NI3 here,
+CP12/OI-CP5 there) and how a serialized name reference is tagged as a generated
+global NameId versus a module-local SectionNameId (NI5 here; that doc currently
+assumes the `[slot][offset]` form only).
+
 ## 9. Routing cleanups that ride on this (workstreams + phasing)
 
 - **W1 — builtin method dispatch by id end-to-end.** Convert the

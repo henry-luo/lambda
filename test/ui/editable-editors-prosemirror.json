@@ -3,7 +3,7 @@
   "html": "test/editable-editors/fixtures/prosemirror/typing.html",
   "viewport": {"width": 720, "height": 360},
   "events": [
-    {"type": "assert_count", "target": {"selector": ".ProseMirror"}, "min": 1},
+    {"type": "assert_count", "target": {"selector": ".ProseMirror"}, "count": 1, "comment": "The parsed seed DOM is replaced by one live ProseMirror root."},
     {"type": "focus", "target": {"selector": ".ProseMirror"}},
     {"type": "key_press", "key": "End"},
     {"type": "type_physical", "target": {"selector": ".ProseMirror"}, "text": "!"},

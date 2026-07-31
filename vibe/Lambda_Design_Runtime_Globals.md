@@ -773,6 +773,160 @@ struct ContextModuleState {     // EvalContext-owned; owner-thread mutation
 both slabs once and registers Item ranges before execution. Generated code loads this state only
 for functions that use it; all repeated mutation stays within the context-owned structure.
 
+### RG14 — Lambda script has no global mutable state
+
+Everything above governs *runtime* state written in C/C++. This decision states the matching
+property of the *language*, which is what makes the runtime rules cheap to hold:
+
+> **Lambda script cannot declare a mutable binding at module scope.** There is no script-level
+> global variable. Every mutable root in a Lambda program is owned by one `pn` activation, one
+> view/template instance, or one object instance reachable from such a root.
+
+This is not a convention; it falls out of the scope model and is enforced at compile time.
+
+**Enforcement.** The grammar is deliberately permissive — `var_stam` is an ordinary member of
+`_statement` ([grammar.js:326](../lambda/tree-sitter-lambda/grammar.js)), so `content`, and hence
+`document`, parse it anywhere. The restriction is semantic. `build_script` allocates the root
+scope with `pool_calloc` ([build_ast.cpp:11456](../lambda/runtime/build_ast.cpp)), so
+`global_vars->is_proc` is zero, and nothing ever sets it: the only `is_proc = true` assignments in
+the tree are the `while` body scope ([build_ast.cpp:8371](../lambda/runtime/build_ast.cpp)), event
+handlers ([build_ast.cpp:9643](../lambda/runtime/build_ast.cpp)), and the `fn`/`pn` keyword
+([build_ast.cpp:9330](../lambda/runtime/build_ast.cpp)); every other site inherits from the
+enclosing scope. `build_var_stam` therefore always fails at module scope
+([build_ast.cpp:8503](../lambda/runtime/build_ast.cpp)), as do the sibling guards for `while`,
+`break`, `continue`, `return`, `raise`, and assignment
+([build_ast.cpp:8362–8556](../lambda/runtime/build_ast.cpp)). The `run` entry point does **not**
+lift this: `pn main()` is an ordinary `pn` inside a functional module, so `lambda script.ls`,
+`lambda run script.ls`, and the REPL all reject a top-level `var` identically.
+
+A second check closes the transitive path. E211
+([build_ast.cpp:3061](../lambda/runtime/build_ast.cpp)) rejects mutation *through* an immutable
+binding, so a module-level `let` holding a container or object instance cannot be written either:
+
+```lambda
+let arr = [1, 2, 3]
+let m   = {a: 1}
+let c   = <Counter>          // type Counter { count: int = 0; pn increment() {...} }
+
+pn main() {
+    arr[0] = 99              // E211: cannot mutate through immutable binding 'arr'
+    m.a = 99                 // E211: cannot mutate through immutable binding 'm'
+    c.increment()            // E211: mutating method 'increment' needs a `var` binding receiver
+}
+```
+
+Together the two rules give the property structurally: no mutable root at module scope, and no
+write path from an immutable module-scope root to anything below it.
+
+**The complete state taxonomy.** Every mutable state class a Lambda program can hold:
+
+| # | Class | Root | Lifetime / isolation |
+|---|---|---|---|
+| 1 | Module bindings (`let`, `pub`, `fn`, `pn`, `type`) | module scope | immutable after instantiation; safe to share |
+| 2 | Entry-point state | `var` in the `main` `pn` | one process/run; passed down explicitly to callees |
+| 3 | Worker state | `var` in the `pn` that the worker starts | one task/thread/process |
+| 4 | View/template state | `state` entries in a `view` ([build_ast.cpp:9600](../lambda/runtime/build_ast.cpp)) | one template instance; handlers are `pn` scopes inheriting it ([build_ast.cpp:9643](../lambda/runtime/build_ast.cpp)) |
+| 5 | Object instance state | fields of an object reachable from a `var` root | reachable only via a `var` receiver (E211) |
+| 6 | External resources | `open()` handles, sockets | scoped, block-exit auto-close (see Lambda resource-cleanup decisions) |
+| 7 | Guest state | guest runtime capsules — see RG9 | **exempt from this rule**; see below |
+| — | `fn` bodies | — | no mutable state by construction |
+
+Rows 1–5 are the user-facing model; rows 6–7 are the two classes that exist but sit outside the
+value model, and both need naming so the rule is not read as stronger than it is.
+
+**What the property buys.**
+
+1. *Modules are shareable.* A module exposes no mutable cell, so two contexts that resolve the
+   same module cannot observe each other. This is what lets RG13's "shared and immutable after
+   publication" class actually cover module-level bindings, and it is why the `_gvar_*` →
+   `rt->module_states[mod_id]->vars[slot]` migration in §5.5 is a *representation* change rather
+   than a semantics change.
+2. *Entry state is explicit.* Root state lives in `main`'s `var`s and reaches callees only as
+   arguments, so the call graph is the dataflow graph. There is no ambient cell a `pn` can reach
+   without it appearing in its signature.
+3. *Workers are isolated by construction.* A spawned task's root state is the `var` set of the
+   `pn` that started it. The enforcement backing this is the `start` capture rule
+   ([build_ast.cpp:11340](../lambda/runtime/build_ast.cpp)): `start` cannot capture a mutable
+   `var`, forcing a copy to a `let` value or message passing. Combined with the absence of module
+   globals, a worker has no shared-mutable surface at all.
+4. *Templates are isolated.* View state is per-instance, so two live instances of a template
+   never alias.
+5. *`fn` is genuinely pure with respect to the value model.* No mutable root is in scope for it,
+   and it cannot call a `pn`.
+
+**Two caveats that this rule does not cover, and must not be read as covering.**
+
+- **Module instantiation is effectful, not merely immutable.** `input` is registered with
+  `is_proc = false` ([sys_func_registry.c:533](../lambda/runtime/sys_func_registry.c)), i.e. it is
+  an `fn`, so a module-level `let data = input('f.json', 'json')` performs file/network IO during
+  instantiation. "No global mutable state" therefore means *no shared mutable cell*, not *no
+  global effect*. When a module instance is shared across contexts, that read happened once, in
+  whichever context instantiated it. Anything that changes module instantiation from per-context
+  to shared must treat this as an observable, not as a pure computation.
+- **Guests are exempt.** LambdaJS has a real mutable `globalThis`, and the Python/Bash/Ruby guests
+  carry their own module-level state. The Lambda scope rules say nothing about them; RG9 is what
+  bounds them, by moving each into a per-context capsule. A Lambda program that embeds JS has
+  global mutable state — it is just JS's, owned by the context, not the module.
+
+**Open defects (G-items).** The rule is stated normatively above; the implementation has three
+holes, all found while auditing this decision.
+
+- **G1 — `push`/`splice` bypass E211 on a module-level binding.** Verified: a module-level `let`
+  bound to a growable array is mutated *in place* by `push` called from a `pn`, with no
+  diagnostic, and the change is observable afterwards from a pure `fn`:
+
+  ```lambda
+  let arr = [1, "two"]
+  fn  peek()   => len(arr)
+  pn  helper() { push(arr, "x") }
+  pn  main()   { print(peek())   // 2
+                 helper() helper()
+                 print(peek())   // 4  ← module-level state changed
+                 print(arr) }    // [1, "two", "x", "x"]
+  ```
+
+  `splice` behaves the same way (`splice(arr, 0, 2)` on a module-level `let` destructively
+  shortens it). Root cause: the COW path in
+  [transpile-mir.cpp:9955–9985](../lambda/runtime/transpile-mir.cpp) only fires when
+  `mir_direct_root_binding()` finds a `MirVarEntry` with `cow_marked` set. A module-level binding
+  referenced from inside a `pn` is not a local var entry in that function, so the lookup returns
+  `NULL` and emission falls through to the raw in-place `pn_push`
+  ([collection_runtime.cpp:179](../lambda/runtime/collection_runtime.cpp)). This is the one case
+  that genuinely violates RG14 today, and it breaks the `fn`-purity claim as a side effect. The
+  fix belongs with the E211 receiver check, not in the COW selector: the mutating-builtin owner
+  argument should be subject to the same immutable-binding rule as an assignment target, so that
+  `push` on a `let` is a compile error rather than a silent in-place write. Tracked as **LR_12 #8**
+  in [`Lambda_Issues_Outstanding.md`](Lambda_Issues_Outstanding.md).
+- **G2 — the `is_proc` guards did not record a semantic error. FIXED 2026-07-31.** The six guards
+  (`var`, assignment, `while`, `break`, `continue`, `return`) called bare `log_error()` rather than
+  `record_semantic_error()`, so `tp->error_count` stayed 0. Since
+  [runner.cpp:730](../lambda/runtime/runner.cpp) only returns before MIR when `error_count > 0`,
+  the build looked clean and MIR ran against the hole each guard's `return NULL` had left in the
+  AST — a refused `var` never enters its name into the scope. The user saw a cascade ending in
+  `mir: undefined variable 'x'`, an invented error about the binding the guard had just declined to
+  create, with the real message scrolled off above it. (`raise` was never one of these: its
+  non-proc branch only `log_debug`s and falls through by design.)
+
+  Fixed by extracting one `require_proc_scope()` helper
+  ([build_ast.cpp:8363](../lambda/runtime/build_ast.cpp)) that routes all six through
+  `record_semantic_error(..., ERR_PROC_IN_FN, ...)` — E224, already the established code for this
+  condition at six other call sites. No change to the `return NULL` behavior was needed: recording
+  the error is sufficient, because compilation now stops before anything walks the holey AST.
+  Diagnostics are now framed spans with codes, and the cascade is gone. Regression guard:
+  `NegativeScriptTest.ProceduralStatementsOutsidePnReportE224WithoutCascade`, which asserts all six
+  diagnostics *and* the absence of `undefined variable` in the output. Baseline 3691/3691.
+
+  A stale golden fell out of this: `test/std/negative/immutable_reassign.expected` pinned the
+  output `5`, which the script only produced *because* the errors were being swallowed. It is a
+  compile-failure case and the std harness asserts a zero exit status, so the golden was removed —
+  matching the convention already used by `mutation_in_fn.ls` and nine other compile-failure
+  negatives in that directory, whose coverage lives in the gtest suites instead.
+- **G3 — `doc/Lambda_Procedural.md` shows a top-level mutating call.** The object-method example
+  around [Lambda_Procedural.md:452](../doc/Lambda_Procedural.md) writes `let c = <Counter>`
+  followed by bare `c.increment()` at module scope, which is two errors (top-level statement in a
+  functional scope, and E211 on an immutable receiver). The example needs a `pn main()` wrapper and
+  a `var` receiver.
+
 ---
 
 ## 4. Inventory

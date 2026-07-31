@@ -68,7 +68,21 @@ MAJOR items in bold; selected moderates. Per-doc numbering = the doc's own Known
 - **LR_09 (builtins)**: #1 replace-in-file procedures disabled (registry key collision; needs `first_param_type` disambiguation); #2 `SysFuncInfo` lacks data-driven native-arg conventions (forces inline special-casing; also blocks #1); #5 `fn_index` swallows invalid indices.
 - **LR_10 (errors)**: #3 `err_free_stack_trace` leaks strdup'd frame names; #4 hard-coded 64 KB last-function span mis-attributes deep frames; #2 error-code/table drift renders UNKNOWN_ERROR.
 - **LR_11 (Mark API)**: **#2 MarkReader traversal stubbed** (leaks state, direct-children-only scan → silently wrong deep selections); **#4 ui_mode arena-provenance landmine** (wrong `pool_free` corrupts rpmalloc, no diagnostic); #3 render_map mutates while iterating; #5 truncate-vs-error cap inconsistency; #6 shallow PATH deep_copy.
-- **LR_12 (procedural)**: #1 `fetch` returns bare String (drops status/headers); #2 `pn_push`/`pn_splice` swallow type errors invisibly; #3 TCO fully implemented but hard-disabled + unconditional stack checks; #7 ad-hoc effect surface (no capability system).
+- **LR_12 (procedural)**: **#8 `push`/`splice` mutate a module-level `let` in place — breaks the no-global-mutable-state invariant** *(new, verified 2026-07-31)*; #1 `fetch` returns bare String (drops status/headers); #2 `pn_push`/`pn_splice` swallow type errors invisibly; #3 TCO fully implemented but hard-disabled + unconditional stack checks; #7 ad-hoc effect surface (no capability system).
+
+  **LR_12 #8 detail.** Lambda's language-level invariant (`vibe/Lambda_Design_Runtime_Globals.md` RG14) is that no mutable root exists at module scope: `var` is rejected there, and E211 (`build_ast.cpp:3061`) rejects mutation *through* an immutable binding — index-assign, member-assign, and mutating-`pn`-method calls are all caught. `push`/`splice` are not. A module-level `let` bound to a growable array is mutated destructively, with no diagnostic, and the change is observable afterwards from a pure `fn`:
+
+  ```lambda
+  let arr = [1, "two"]
+  fn  peek()   => len(arr)
+  pn  helper() { push(arr, "x") }
+  pn  main()   { print(peek())            // 2
+                 helper() helper()
+                 print(peek())            // 4  ← module-level state changed
+                 print(arr) }             // [1, "two", "x", "x"]
+  ```
+
+  `splice(arr, 0, 2)` on a module-level `let` likewise shortens it in place. **Root cause:** the COW path in `transpile-mir.cpp:9955–9985` fires only when `mir_direct_root_binding()` finds a local `MirVarEntry` with `cow_marked` set. A module-level binding referenced from inside a `pn` is not a local var entry in that function, so the lookup returns `NULL` and emission falls through to the raw in-place `pn_push`/`pn_splice` (`collection_runtime.cpp:179/195`). **Fix belongs with the E211 receiver check, not the COW selector:** a mutating builtin's owner argument should be subject to the same immutable-binding rule as an assignment target, so `push` on a `let` is a compile error rather than a silent write. Doing it in the COW selector instead would silently copy where the program means to mutate, which is a different wrong answer. Note this also falsifies `fn` purity — `peek()` above takes no arguments and returns two different values — so it is a semantics bug, not only a hygiene one. Related: #2 (same two functions, error-reporting gap) and `vibe/Lambda_Design_COW.md` (the ownership boundary this sits on).
 - **LR_13 (validator)**: **#6 advertised options unenforced** (`strict_mode`, `--allow-unknown`, warnings never emitted); #2 suggestions built but never surfaced (small high-value fix); #4 fragile strstr root-type selection; #5 `MAX_UNION_TYPES=32` drops members silently; #7 placeholder helpers.
 
 ## 4. LambdaJS — per-doc outstanding (from the JS_01–16 sweep)

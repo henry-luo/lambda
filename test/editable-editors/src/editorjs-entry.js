@@ -12,12 +12,16 @@ const ids_output = document.getElementById("ids");
 const is_read_only = holder.hasAttribute("data-readonly");
 const is_single_block = holder.getAttribute("data-editor-mode") === "single-block";
 const starts_empty = holder.hasAttribute("data-initial-empty");
+// manual pages can defer Editor.js focus so its block toolbox opens only after
+// the user intentionally enters an editable block.
+const autofocus = !holder.hasAttribute("data-no-autofocus");
+const initial_text = holder.getAttribute("data-doc") || "seed";
 let editor = null;
 const change_log = [];
 changes.textContent = JSON.stringify(change_log);
 const initial_data = starts_empty ? { blocks: [] } : is_single_block ? {
   blocks: [
-    { type: "paragraph", data: { text: "seed" } }
+    { type: "paragraph", data: { text: initial_text } }
   ]
 } : {
   blocks: [
@@ -90,7 +94,7 @@ function publish_selection() {
 async function create_editor(data) {
   editor = new EditorJS({
     holder: "editor",
-    autofocus: true,
+    autofocus,
     readOnly: is_read_only,
     tools: {
       paragraph: Paragraph,
