@@ -54,19 +54,19 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
         if (block->embedp()->img->width > 0) width = (float)block->embedp()->img->width;
         if (block->embedp()->img->height > 0) height = (float)block->embedp()->img->height;
     }
-    uintptr_t tag = block->tag();
+    NameId tag = block->tag();
     if (width <= 0.0f || height <= 0.0f) {
-        if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS ||
-            tag == HTM_TAG_OBJECT || tag == HTM_TAG_EMBED || tag == HTM_TAG_SVG) {
+        if (tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS ||
+            tag == MARKUP_NAME_OBJECT || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_SVG) {
             if (width <= 0.0f) width = 300.0f;
             if (height <= 0.0f) height = 150.0f;
-        } else if (tag == HTM_TAG_AUDIO) {
+        } else if (tag == MARKUP_NAME_AUDIO) {
             if (width <= 0.0f) width = 300.0f;
             if (height <= 0.0f) height = 54.0f;
-        } else if (tag == HTM_TAG_METER) {
+        } else if (tag == MARKUP_NAME_METER) {
             if (width <= 0.0f) width = FormDefaults::METER_WIDTH;
             if (height <= 0.0f) height = FormDefaults::METER_HEIGHT;
-        } else if (tag == HTM_TAG_PROGRESS) {
+        } else if (tag == MARKUP_NAME_PROGRESS) {
             if (width <= 0.0f) width = FormDefaults::PROGRESS_WIDTH;
             if (height <= 0.0f) height = FormDefaults::PROGRESS_HEIGHT;
         }

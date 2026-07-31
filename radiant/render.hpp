@@ -1720,7 +1720,7 @@ struct RenderBackend {
     void (*render_image)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
 
     // ── Inline SVG subscene ────────────────────────────────────────────
-    // Called for HTM_TAG_SVG blocks. If NULL, skipped.
+    // Called for MARKUP_NAME_SVG blocks. If NULL, skipped.
     void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
     void (*render_svg_subscene)(void* ctx, const PaintSvgSubscene* subscene);
@@ -3627,7 +3627,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 
 /**
  * Render inline SVG element in document context
- * Called by raster and vector render walkers when element is HTM_TAG_SVG.
+ * Called by raster and vector render walkers when element is MARKUP_NAME_SVG.
  *
  * @param rdcon Render context with canvas, scale, clip, etc.
  * @param view ViewBlock for the SVG element

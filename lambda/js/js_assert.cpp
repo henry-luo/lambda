@@ -136,7 +136,7 @@ static bool js_assert_has_date_prototype(Item value) {
         Item date_proto = js_property_get(date_ctor, assert_make_string("prototype"));
         if (proto.item == date_proto.item) return true;
     }
-    Item tag = js_property_get(proto, assert_make_string("__sym_4"));
+    Item tag = js_property_get(proto, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag, "Date");
 }
 
@@ -1200,7 +1200,7 @@ static bool js_assert_deep_values_same(Item actual, Item expected) {
 static bool js_assert_is_arguments_value(Item value) {
     if (get_type_id(value) == LMD_TYPE_MAP) {
         if (js_class_id(value) == JS_CLASS_ARGUMENTS) return true;
-        Item tag = js_property_get(value, assert_make_string("__sym_4"));
+        Item tag = js_property_get(value, js_well_known_symbol_key(4));
         return js_assert_string_equals(tag, "Arguments");
     }
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
@@ -1208,9 +1208,8 @@ static bool js_assert_is_arguments_value(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    bool found = false;
-    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
-    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* s = it2s(tag);
     return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
 }
@@ -4052,7 +4051,7 @@ static bool js_assert_has_enumerable_own_key(Item object, Item key) {
 
 static bool js_assert_tag_equals(Item value, const char* tag) {
     if (get_type_id(value) != LMD_TYPE_MAP || !tag) return false;
-    Item tag_value = js_property_get(value, assert_make_string("__sym_4"));
+    Item tag_value = js_property_get(value, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag_value, tag);
 }
 
@@ -4073,7 +4072,7 @@ static bool js_assert_has_constructor_prototype(Item value, const char* ctor_nam
         Item ctor_proto = js_property_get(ctor, assert_make_string("prototype"));
         if (proto.item == ctor_proto.item) return true;
     }
-    Item tag = js_property_get(proto, assert_make_string("__sym_4"));
+    Item tag = js_property_get(proto, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag, ctor_name);
 }
 
@@ -5854,8 +5853,8 @@ static Item node_test_make_event_stream(Item events) {
     js_property_set(stream, assert_make_string("next"),
                     js_new_function((void*)node_test_event_stream_next, 0));
     Item identity = js_new_function((void*)node_test_event_stream_identity, 0);
-    Item async_key = assert_make_string("__sym_5");
-    Item iter_key = assert_make_string("__sym_1");
+    Item async_key = js_well_known_symbol_key(5);
+    Item iter_key = js_well_known_symbol_key(1);
     // node:test run() returns an async iterable stream, not a materialized array.
     js_property_set(stream, async_key, identity);
     js_property_set(stream, iter_key, identity);

@@ -169,7 +169,7 @@ static int intrinsic_count_grid_template_tracks(const CssValue* value,
     return total_tracks > 0 ? total_tracks : list_count;
 }
 
-static bool intrinsic_style_keyword_declaration(StyleTree* style, CssPropertyId property,
+static bool intrinsic_style_keyword_declaration(StyleTree* style, CssPropertyCode property,
                                                 CssEnum* keyword) {
     if (!style) return false;
     CssDeclaration* decl = style_tree_get_declaration(style, property);
@@ -239,8 +239,8 @@ static int intrinsic_grid_template_column_count(DomElement* element, ViewBlock* 
 }
 
 static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* style,
-                                               CssPropertyId property,
-                                               CssPropertyId resolve_property,
+                                               CssPropertyCode property,
+                                               CssPropertyCode resolve_property,
                                                float* out_value) {
     if (!style || !out_value) return false;
 
@@ -252,9 +252,9 @@ static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* 
 }
 
 static bool intrinsic_style_length_declaration_or_fallback(LayoutContext* lycon, StyleTree* style,
-                                                           CssPropertyId property,
-                                                           CssPropertyId fallback_property,
-                                                           CssPropertyId resolve_property,
+                                                           CssPropertyCode property,
+                                                           CssPropertyCode fallback_property,
+                                                           CssPropertyCode resolve_property,
                                                            float* out_value) {
     if (!style || !out_value) return false;
 
@@ -353,13 +353,13 @@ static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
               original_size, font->font_size);
 }
 
-static bool intrinsic_has_ua_font_defaults(uintptr_t tag) {
-    return tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH ||
-           (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) ||
-           tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
-           tag == HTM_TAG_DFN || tag == HTM_TAG_VAR || tag == HTM_TAG_CODE ||
-           tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP || tag == HTM_TAG_TT ||
-           tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP;
+static bool intrinsic_has_ua_font_defaults(NameId tag) {
+    return tag == MARKUP_NAME_B || tag == MARKUP_NAME_STRONG || tag == MARKUP_NAME_TH ||
+           (tag >= MARKUP_NAME_H1 && tag <= MARKUP_NAME_H6) ||
+           tag == MARKUP_NAME_I || tag == MARKUP_NAME_EM || tag == MARKUP_NAME_CITE ||
+           tag == MARKUP_NAME_DFN || tag == MARKUP_NAME_VAR || tag == MARKUP_NAME_CODE ||
+           tag == MARKUP_NAME_KBD || tag == MARKUP_NAME_SAMP || tag == MARKUP_NAME_TT ||
+           tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP;
 }
 
 static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font,
@@ -377,19 +377,19 @@ static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font
     bool specified_style = specified_shorthand ||
         style_tree_get_declaration(style, CSS_PROPERTY_FONT_STYLE) != nullptr;
     bool changed = false;
-    uintptr_t tag = element->tag();
+    NameId tag = element->tag();
 
     // UA font declarations remain the cascade base when an unrelated author
     // font longhand forces temporary intrinsic-measurement font resolution.
-    if ((tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) &&
+    if ((tag == MARKUP_NAME_B || tag == MARKUP_NAME_STRONG || tag == MARKUP_NAME_TH) &&
         !specified_weight) {
         font->font_weight = CSS_VALUE_BOLD;
         font->font_weight_numeric = 700;
         changed = true;
-    } else if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+    } else if (tag >= MARKUP_NAME_H1 && tag <= MARKUP_NAME_H6) {
         if (!specified_size && parent_font) {
             static const float heading_scale[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
-            font->font_size = parent_font->font_size * heading_scale[tag - HTM_TAG_H1];
+            font->font_size = parent_font->font_size * heading_scale[tag - MARKUP_NAME_H1];
             font->font_size_from_medium = false;
             changed = true;
         }
@@ -398,14 +398,14 @@ static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font
             font->font_weight_numeric = 700;
             changed = true;
         }
-    } else if ((tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
-                tag == HTM_TAG_DFN || tag == HTM_TAG_VAR) &&
+    } else if ((tag == MARKUP_NAME_I || tag == MARKUP_NAME_EM || tag == MARKUP_NAME_CITE ||
+                tag == MARKUP_NAME_DFN || tag == MARKUP_NAME_VAR) &&
                !specified_style) {
         font->font_style = CSS_VALUE_ITALIC;
         changed = true;
-    } else if ((tag == HTM_TAG_CODE || tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP ||
-                tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
-                tag == HTM_TAG_XMP) && !specified_family) {
+    } else if ((tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD || tag == MARKUP_NAME_SAMP ||
+                tag == MARKUP_NAME_TT || tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING ||
+                tag == MARKUP_NAME_XMP) && !specified_family) {
         radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
         changed = true;
     }
@@ -443,7 +443,7 @@ static bool css_has_horizontal_box_decl(StyleTree* style) {
            style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
 }
 
-static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, CssPropertyId property,
+static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, CssPropertyCode property,
                                                          const CssValue* value) {
     if (!value) return 0.0f;
 
@@ -487,7 +487,7 @@ static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, C
     return border_width > 0.0f ? border_width : 0.0f;
 }
 
-static float intrinsic_border_width_from_spacing_value(LayoutContext* lycon, CssPropertyId property,
+static float intrinsic_border_width_from_spacing_value(LayoutContext* lycon, CssPropertyCode property,
                                                        const CssValue* value, bool right_side) {
     if (!value) return 0.0f;
 
@@ -575,7 +575,7 @@ static void get_horizontal_border_widths_from_css(LayoutContext* lycon, DomEleme
     *border_right = right_width;
 }
 
-static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyId property,
+static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyCode property,
                                           const CssValue* value, float inline_base) {
     if (!value) return 0.0f;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -879,15 +879,15 @@ static bool node_is_table_cell_like(DomNode* node) {
 
 static bool intrinsic_is_table_box(DomElement* elem) {
     if (!elem) return false;
-    return elem->tag() == HTM_TAG_TABLE ||
+    return elem->tag() == MARKUP_NAME_TABLE ||
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE) ||
            intrinsic_element_matches_display(elem, CSS_VALUE_INLINE_TABLE);
 }
 
 static bool intrinsic_is_table_row_group_box(DomElement* elem) {
     if (!elem) return false;
-    uintptr_t tag = elem->tag();
-    return tag == HTM_TAG_TBODY || tag == HTM_TAG_THEAD || tag == HTM_TAG_TFOOT ||
+    NameId tag = elem->tag();
+    return tag == MARKUP_NAME_TBODY || tag == MARKUP_NAME_THEAD || tag == MARKUP_NAME_TFOOT ||
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
@@ -895,7 +895,7 @@ static bool intrinsic_is_table_row_group_box(DomElement* elem) {
 
 static bool intrinsic_is_table_row_box(DomElement* elem) {
     if (!elem) return false;
-    return elem->tag() == HTM_TAG_TR ||
+    return elem->tag() == MARKUP_NAME_TR ||
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW);
 }
 
@@ -1486,7 +1486,7 @@ static bool intrinsic_pseudo_border_width_pair(LayoutContext* lycon, StyleTree* 
 }
 
 static bool intrinsic_pseudo_positive_length_decl(LayoutContext* lycon, StyleTree* pseudo_style,
-                                                  CssPropertyId property, float* out_value,
+                                                  CssPropertyCode property, float* out_value,
                                                   bool require_length_value) {
     if (!pseudo_style || !out_value) return false;
 
@@ -1503,8 +1503,8 @@ static bool intrinsic_pseudo_positive_length_decl(LayoutContext* lycon, StyleTre
 
 static float intrinsic_pseudo_border_side_shorthand(LayoutContext* lycon,
                                                     StyleTree* pseudo_style,
-                                                    CssPropertyId side_property,
-                                                    CssPropertyId side_width_property) {
+                                                    CssPropertyCode side_property,
+                                                    CssPropertyCode side_width_property) {
     if (!pseudo_style) return 0.0f;
 
     CssDeclaration* side_decl = style_tree_get_declaration(pseudo_style, side_property);
@@ -1806,15 +1806,15 @@ static bool intrinsic_element_is_replaced(DomElement* element) {
     if (!element) return false;
 
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    uintptr_t tag = element->tag();
+    NameId tag = element->tag();
     // HTML object/audio elements are replaced only when they expose external content.
     return view->display.inner == RDT_DISPLAY_REPLACED ||
-        tag == HTM_TAG_IMG || tag == HTM_TAG_VIDEO || tag == HTM_TAG_IFRAME ||
-        tag == HTM_TAG_HR || tag == HTM_TAG_SVG || tag == HTM_TAG_CANVAS ||
-        (tag == HTM_TAG_OBJECT && element->get_attribute("data")) ||
-        (tag == HTM_TAG_AUDIO && element->has_attribute("controls")) ||
-        tag == HTM_TAG_EMBED || tag == HTM_TAG_INPUT || tag == HTM_TAG_SELECT ||
-        tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_METER || tag == HTM_TAG_PROGRESS ||
+        tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_IFRAME ||
+        tag == MARKUP_NAME_HR || tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_CANVAS ||
+        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
+        (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
+        tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_SELECT ||
+        tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
         (view->form_control());
 }
 
@@ -1975,7 +1975,7 @@ static bool intrinsic_table_inherit_border_spacing(LayoutContext* lycon, DomElem
             *spacing = anc_elem->tb->border_spacing_h;
             return true;
         }
-        if (anc_elem->tag() == HTM_TAG_TABLE) {
+        if (anc_elem->tag() == MARKUP_NAME_TABLE) {
             float inherited_spacing = 2.0f;
             const char* cellspacing_attr = anc_elem->get_attribute("cellspacing");
             if (cellspacing_attr) {
@@ -2325,12 +2325,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
-    uintptr_t intrinsic_tag = element->tag();
+    NameId intrinsic_tag = element->tag();
     bool intrinsic_needs_resolved_style =
-        intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT ||
-        intrinsic_tag == HTM_TAG_UL || intrinsic_tag == HTM_TAG_OL ||
-        intrinsic_tag == HTM_TAG_MENU || intrinsic_tag == HTM_TAG_RUBY ||
-        intrinsic_tag == HTM_TAG_RT;
+        intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
+        intrinsic_tag == MARKUP_NAME_UL || intrinsic_tag == MARKUP_NAME_OL ||
+        intrinsic_tag == MARKUP_NAME_MENU || intrinsic_tag == MARKUP_NAME_RUBY ||
+        intrinsic_tag == MARKUP_NAME_RT;
     if (!element->styles_resolved() && intrinsic_needs_resolved_style) {
         // Form controls and list containers have UA box metrics that participate
         // in intrinsic sizing, so resolve the cascade before measuring their box.
@@ -2351,7 +2351,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool spacing_font_ready = false;
         const char* css_family = NULL;
 
-        if (intrinsic_tag == HTM_TAG_TABLE && lycon->doc && lycon->doc->view_tree &&
+        if (intrinsic_tag == MARKUP_NAME_TABLE && lycon->doc && lycon->doc->view_tree &&
             is_quirks_mode(lycon->doc->view_tree->html_version)) {
             // the quirks UA table reset is a cascade base for descendant intrinsic metrics.
             temp_font_prop->font_size = 16.0f;
@@ -2656,7 +2656,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 element, tview, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
             is_table_display = true;
         }
-        if (!is_table_display && element->tag() == HTM_TAG_TABLE) is_table_display = true;
+        if (!is_table_display && element->tag() == MARKUP_NAME_TABLE) is_table_display = true;
     }
 
     // Check for explicit CSS width first
@@ -2828,12 +2828,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_block_replaced = lam::unsafe_view_block_element_storage(element);
     // Detection also uses HTML tag semantics because early intrinsic passes may
     // run before display and form-control state are fully resolved.
-    uintptr_t replaced_tag = element->tag();
+    NameId replaced_tag = element->tag();
     bool is_replaced_element = intrinsic_element_is_replaced(element);
     if (is_replaced_element) {
         float replaced_width = -1;
 
-        if (replaced_tag == HTM_TAG_IMG) {
+        if (replaced_tag == MARKUP_NAME_IMG) {
             // Try to get image dimensions - first check if already loaded
             if (view_block_replaced->embed && view_block_replaced->embedp()->img) {
                 replaced_width = view_block_replaced->embedp()->img->width;
@@ -2896,13 +2896,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 log_debug("  -> replaced IMG fallback width: 0 (no image or attributes)");
             }
         }
-        else if (replaced_tag == HTM_TAG_IFRAME) {
+        else if (replaced_tag == MARKUP_NAME_IFRAME) {
             replaced_width = 300;
             log_debug("  -> replaced IFRAME intrinsic width: 300");
         }
-        else if (replaced_tag == HTM_TAG_VIDEO || replaced_tag == HTM_TAG_CANVAS) {
+        else if (replaced_tag == MARKUP_NAME_VIDEO || replaced_tag == MARKUP_NAME_CANVAS) {
             // try actual video dimensions first
-            if (replaced_tag == HTM_TAG_VIDEO && view_block_replaced->embed && view_block_replaced->embedp()->video) {
+            if (replaced_tag == MARKUP_NAME_VIDEO && view_block_replaced->embed && view_block_replaced->embedp()->video) {
                 int vw = rdt_video_get_width(view_block_replaced->embedp()->video);
                 if (vw > 0) {
                     replaced_width = (float)vw;
@@ -2916,27 +2916,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
             }
         }
-        else if (replaced_tag == HTM_TAG_AUDIO) {
+        else if (replaced_tag == MARKUP_NAME_AUDIO) {
             replaced_width = 300;
             log_debug("  -> replaced AUDIO intrinsic width: 300");
         }
-        else if (replaced_tag == HTM_TAG_SVG) {
+        else if (replaced_tag == MARKUP_NAME_SVG) {
             replaced_width = intrinsic_svg_size(element).width;
             log_debug("  -> replaced SVG intrinsic width: %.0f", replaced_width);
         }
-        else if (replaced_tag == HTM_TAG_HR) {
+        else if (replaced_tag == MARKUP_NAME_HR) {
             replaced_width = 0;
         }
-        else if (replaced_tag == HTM_TAG_EMBED ||
-                 (replaced_tag == HTM_TAG_OBJECT && element->get_attribute("data"))) {
+        else if (replaced_tag == MARKUP_NAME_EMBED ||
+                 (replaced_tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA))) {
             replaced_width = 300;
             log_debug("  -> replaced OBJECT/EMBED intrinsic width: 300");
         }
-        else if (replaced_tag == HTM_TAG_METER) {
+        else if (replaced_tag == MARKUP_NAME_METER) {
             replaced_width = FormDefaults::METER_WIDTH;
             log_debug("  -> replaced METER intrinsic width: %.0f", replaced_width);
         }
-        else if (replaced_tag == HTM_TAG_PROGRESS) {
+        else if (replaced_tag == MARKUP_NAME_PROGRESS) {
             replaced_width = FormDefaults::PROGRESS_WIDTH;
             log_debug("  -> replaced PROGRESS intrinsic width: %.0f", replaced_width);
         }
@@ -2951,7 +2951,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // value as "already includes pad+border" and skip the bottom addition.
         bool input_button_has_native_label = view_block_replaced->form &&
             view_block_replaced->form->control_type == FORM_CONTROL_BUTTON &&
-            replaced_tag == HTM_TAG_INPUT &&
+            replaced_tag == MARKUP_NAME_INPUT &&
             form_button_label_text(view_block_replaced,
                                    view_block_replaced->form);
         bool has_measurable_form_control = view_block_replaced->form &&
@@ -2968,7 +2968,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         // Tag-based fallback: form prop not yet allocated during early intrinsic sizing
         if (replaced_width < 0) {
-            if (replaced_tag == HTM_TAG_INPUT) {
+            if (replaced_tag == MARKUP_NAME_INPUT) {
                 const char* input_type = element->get_attribute("type");
                 if (input_type && (strcmp(input_type, "checkbox") == 0 || strcmp(input_type, "radio") == 0)) {
                     replaced_width = FormDefaults::CHECK_SIZE;
@@ -2993,7 +2993,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
                 log_debug("  -> replaced INPUT (tag fallback, type=%s) intrinsic width: %.1f",
                     input_type ? input_type : "text", replaced_width);
-            } else if (replaced_tag == HTM_TAG_SELECT) {
+            } else if (replaced_tag == MARKUP_NAME_SELECT) {
                 // SELECT (combo box): measure max option text + arrow overhead.
                 // calc_select_size in layout_form.cpp may never run when SELECT is a
                 // flex/grid item (laid out via measurement path rather than layout_form_control).
@@ -3035,7 +3035,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     };
                     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                         DomElement* ce = child->as_element();
-                        if (ce && ce->tag() == HTM_TAG_OPTGROUP) {
+                        if (ce && ce->tag() == MARKUP_NAME_OPTGROUP) {
                             const char* lbl = ce->get_attribute("label");
                             include_text(lbl, lbl ? strlen(lbl) : 0, 0.0f);
                         }
@@ -3043,7 +3043,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     for (DomElement* option = dom_select_next_option(element, nullptr); option;
                          option = dom_select_next_option(element, option)) {
                         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
-                        float indent = parent && parent->tag() == HTM_TAG_OPTGROUP
+                        float indent = parent && parent->tag() == MARKUP_NAME_OPTGROUP
                             ? FormDefaults::OPTGROUP_OPTION_INDENT : 0.0f;
                         bool has_text = false;
                         for (DomNode* child = option->first_child; child; child = child->next_sibling) {
@@ -3077,7 +3077,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
                 log_debug("  -> replaced SELECT (measured) intrinsic width: %.1f", replaced_width);
-            } else if (replaced_tag == HTM_TAG_TEXTAREA) {
+            } else if (replaced_tag == MARKUP_NAME_TEXTAREA) {
                 // Textarea default: 20 cols * ~8px average char width + padding
                 replaced_width = FormDefaults::TEXTAREA_COLS * 8.0f + FormDefaults::TEXTAREA_PADDING * 2;
                 log_debug("  -> replaced TEXTAREA (tag fallback) intrinsic width: %.1f", replaced_width);
@@ -3092,7 +3092,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
-    if (!replaced_intrinsic_set && element->tag() == HTM_TAG_SVG) {
+    if (!replaced_intrinsic_set && element->tag() == MARKUP_NAME_SVG) {
         float svg_width = intrinsic_svg_size(element).width;
         sizes.min_content = svg_width;
         sizes.max_content = svg_width;
@@ -3109,7 +3109,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         ViewBlock* tbl_view = lam::unsafe_view_block_element_storage(element);
         bool is_table_element = intrinsic_element_display_matches(
             element, tbl_view, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
-        if (!is_table_element && element->tag() == HTM_TAG_TABLE) is_table_element = true;
+        if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
             float border_spacing = 0;
@@ -3133,7 +3133,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         }
                     }
                 }
-                if (!found_css && element->tag() == HTM_TAG_TABLE) {
+                if (!found_css && element->tag() == MARKUP_NAME_TABLE) {
                     // HTML UA default: 2px border-spacing for <table>
                     border_spacing = 2.0f;
                     // Check cellspacing attribute override
@@ -3655,9 +3655,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                 if (!child->is_element()) continue;
                 DomElement* child_elem = child->as_element();
-                uintptr_t ctag = child_elem->tag();
+                NameId ctag = child_elem->tag();
                 DisplayValue child_display = resolve_display_value((void*)child_elem);
-                bool is_caption = (child_display.inner == CSS_VALUE_TABLE_CAPTION || ctag == HTM_TAG_CAPTION);
+                bool is_caption = (child_display.inner == CSS_VALUE_TABLE_CAPTION || ctag == MARKUP_NAME_CAPTION);
                 if (is_caption) {
                     IntrinsicSizes cap = measure_element_intrinsic_widths(lycon, child_elem);
                     sizes.min_content = max(sizes.min_content, cap.min_content);
@@ -3681,7 +3681,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             // Fallback: read border from HTML border attribute if still not found
             // WHATWG 15.3.10: table[border] → border-width = N pixels
-            if (bdr_left == 0 && bdr_right == 0 && element->tag() == HTM_TAG_TABLE) {
+            if (bdr_left == 0 && bdr_right == 0 && element->tag() == MARKUP_NAME_TABLE) {
                 const char* border_attr = element->get_attribute("border");
                 if (border_attr) {
                     float bw = (float)str_to_double_default(border_attr, strlen(border_attr), 0.0);
@@ -3708,7 +3708,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         specified_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, wd->value);
                     }
                 }
-                if (specified_width <= 0 && element->tag() == HTM_TAG_TABLE) {
+                if (specified_width <= 0 && element->tag() == MARKUP_NAME_TABLE) {
                     const char* w_attr = element->get_attribute("width");
                     if (w_attr) {
                         size_t wlen = strlen(w_attr);
@@ -5244,8 +5244,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     // CSS 2.1 §10.6.2: Replaced element intrinsic height
     if (view->display.inner == RDT_DISPLAY_REPLACED) {
-        uintptr_t elem_tag = element->tag();
-        if (elem_tag == HTM_TAG_IMG) {
+        NameId elem_tag = element->tag();
+        if (elem_tag == MARKUP_NAME_IMG) {
             if (view->embed && view->embedp()->img) {
                 ImageSurface* img = view->embedp()->img;
                 float img_height = intrinsic_image_height(img, width);
@@ -5281,9 +5281,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             return 0.0f;  // no image loaded, no dimensions specified
         }
-        else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
+        else if (elem_tag == MARKUP_NAME_IFRAME || elem_tag == MARKUP_NAME_VIDEO || elem_tag == MARKUP_NAME_CANVAS) {
             // try actual video dimensions for aspect-correct height
-            if (elem_tag == HTM_TAG_VIDEO && view->embed && view->embedp()->video) {
+            if (elem_tag == MARKUP_NAME_VIDEO && view->embed && view->embedp()->video) {
                 int vw = rdt_video_get_width(view->embedp()->video);
                 int vh = rdt_video_get_height(view->embedp()->video);
                 if (vw > 0 && vh > 0) {
@@ -5298,10 +5298,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             return 150.0f;  // CSS default 300x150
         }
-        else if (elem_tag == HTM_TAG_AUDIO) {
+        else if (elem_tag == MARKUP_NAME_AUDIO) {
             return 54.0f;  // audio controls default height
         }
-        else if (elem_tag == HTM_TAG_SVG) {
+        else if (elem_tag == MARKUP_NAME_SVG) {
             float svg_height = intrinsic_svg_size(element, width).height;
             log_debug("calculate_max_content_height: SVG intrinsic height=%.1f", svg_height);
             return svg_height;
@@ -5309,7 +5309,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
-    if (element->tag() == HTM_TAG_SVG) {
+    if (element->tag() == MARKUP_NAME_SVG) {
         float svg_height = intrinsic_svg_size(element, width).height;
         log_debug("calculate_max_content_height: SVG (tag-based) intrinsic height=%.1f", svg_height);
         return svg_height;
@@ -5322,15 +5322,15 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool is_form_control_replaced = false;
     {
         uintptr_t etag = element->tag();
-        if (etag == HTM_TAG_INPUT || etag == HTM_TAG_SELECT || etag == HTM_TAG_TEXTAREA) {
+        if (etag == MARKUP_NAME_INPUT || etag == MARKUP_NAME_SELECT || etag == MARKUP_NAME_TEXTAREA) {
             float font_size = 16.0f;
             if (lycon->font.style && lycon->font.style->font_size > 0)
                 font_size = lycon->font.style->font_size;
 
-            if (etag == HTM_TAG_TEXTAREA) {
+            if (etag == MARKUP_NAME_TEXTAREA) {
                 int rows = FormDefaults::TEXTAREA_ROWS;
                 height = rows * font_size * 1.2f + 2 * FormDefaults::TEXTAREA_PADDING;
-            } else if (etag == HTM_TAG_INPUT) {
+            } else if (etag == MARKUP_NAME_INPUT) {
                 const char* type_attr = element->get_attribute("type");
                 if (type_attr && (strcmp(type_attr, "checkbox") == 0 || strcmp(type_attr, "radio") == 0)) {
                     return FormDefaults::CHECK_SIZE;  // fixed size, no CSS padding/border

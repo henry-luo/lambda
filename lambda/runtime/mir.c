@@ -491,8 +491,7 @@ bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list) 
             if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr ||
                     strcmp(item->u.bss->name, "_mod_layout") != 0) continue;
             LambdaModuleLayout* layout = (LambdaModuleLayout*)item->addr;
-            if (!lambda_module_state_prepare(layout->module_id,
-                    layout->var_count, layout->member_ic_count)) return false;
+            if (!lambda_module_state_prepare_layout(layout)) return false;
             return lambda_module_state_bind_static(layout->module_id, consts, type_list);
         }
     }

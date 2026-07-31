@@ -16,7 +16,7 @@
 namespace {
 struct ResolveCapture {
     int call_count = 0;
-    CssPropertyId last_prop = (CssPropertyId)0;
+    CssPropertyCode last_prop = (CssPropertyCode)0;
     const CssValue* last_value = nullptr;
     CssValueType last_value_type = (CssValueType)0;
     int last_list_count = 0;
@@ -26,7 +26,7 @@ ResolveCapture g_capture;
 
 // Test-local definition matching the forward declaration. The real engine
 // definition lives in radiant/resolve_css_style.cpp and is not linked here.
-void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* /*lycon*/) {
+void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* /*lycon*/) {
     g_capture.call_count++;
     g_capture.last_prop = prop_id;
     g_capture.last_value = decl ? decl->value : nullptr;
@@ -42,7 +42,7 @@ namespace {
 
 CssDeclaration make_base_decl() {
     CssDeclaration decl = {};
-    decl.property_id = CSS_PROPERTY_BACKGROUND;
+    decl.property_code = CSS_PROPERTY_BACKGROUND;
     decl.value = nullptr;
     return decl;
 }

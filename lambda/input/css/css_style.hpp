@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "css_value.hpp"
+#include "../../core/name_identity.h"
 
 // Forward declarations
 typedef struct CssSelectorComponent CssSelectorComponent;
@@ -177,7 +178,7 @@ typedef enum CssValueType : uint8_t {
 // CSS Property IDs (comprehensive CSS specification)
 // ============================================================================
 
-typedef enum CssPropertyId {
+typedef enum CssPropertyCode {
     // Layout Properties
     CSS_PROPERTY_DISPLAY = 1,
     CSS_PROPERTY_POSITION,
@@ -602,7 +603,7 @@ typedef enum CssPropertyId {
 
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
-} CssPropertyId;
+} CssPropertyCode;
 
 // ============================================================================
 // CSS Value Structures
@@ -765,7 +766,8 @@ typedef enum CssOrigin {
 
 // CSS Declaration with metadata
 typedef struct CssDeclaration {
-    CssPropertyId property_id;
+    CssPropertyCode property_code;
+    NameId name_id;               // sparse generated identity; custom/unknown names use NONE
     CssValue* value;
     CssSpecificity specificity;
     CssOrigin origin;
@@ -788,8 +790,8 @@ typedef struct CssDeclaration {
 
 // CSS Style Node for cascade resolution
 typedef struct CssStyleNode {
-    AvlNode base;             // AVL tree node (key is property_id)
-    CssPropertyId property_id;
+    AvlNode base;             // AVL tree node (key is property_code)
+    CssPropertyCode property_code;
     CssDeclaration* winning_declaration;
     CssDeclaration** losing_declarations;
     size_t losing_count;
@@ -942,7 +944,7 @@ typedef struct CssStylesheet {
 
 // Property information
 typedef struct CssPropertyInfo {
-    CssPropertyId id;
+    CssPropertyCode id;
     const char* name;
     bool inherited;
     CssValue* initial_value;
@@ -957,9 +959,9 @@ CssComputedStyle* css_computed_style_create(Pool* pool);
 void css_computed_style_destroy(CssComputedStyle* style);
 
 // Property management
-CssValue* css_style_get_property(CssComputedStyle* style, CssPropertyId property_id);
-bool css_style_has_property(CssComputedStyle* style, CssPropertyId property_id);
-void css_style_remove_property(CssComputedStyle* style, CssPropertyId property_id);
+CssValue* css_style_get_property(CssComputedStyle* style, CssPropertyCode property_code);
+bool css_style_has_property(CssComputedStyle* style, CssPropertyCode property_code);
+void css_style_remove_property(CssComputedStyle* style, CssPropertyCode property_code);
 
 // Declaration management
 void css_style_cascade_resolve(CssComputedStyle* style);
@@ -1004,8 +1006,8 @@ CssValue* css_value_compute(const CssValue* value, const CssComputedStyle* paren
 
 // Inheritance and cascade
 void css_cascade_declarations(CssStyleNode* node);
-bool css_property_is_inherited(CssPropertyId property_id);
-CssValue* css_get_initial_value(CssPropertyId property_id, Pool* pool);
+bool css_property_is_inherited(CssPropertyCode property_code);
+CssValue* css_get_initial_value(CssPropertyCode property_code, Pool* pool);
 void css_inherit_properties(CssComputedStyle* style, const CssComputedStyle* parent);
 
 
@@ -1054,14 +1056,14 @@ typedef enum PropertyInheritance {
 // ============================================================================
 
 typedef struct CssProperty {
-    CssPropertyId id;            // Unique property ID
+    CssPropertyCode code;          // dense dispatch code, never semantic name identity
     const char* name;            // Property name (e.g., "color", "margin-top")
     PropertyValueType type;      // Primary value type
     PropertyInheritance inheritance; // Inheritance behavior
     const char* initial_value;   // Initial value as string
     bool animatable;             // Whether property can be animated
     bool shorthand;              // Whether this is a shorthand property
-    CssPropertyId* longhand_props; // Array of longhand properties (for shorthands)
+    CssPropertyCode* longhand_props; // Array of longhand properties (for shorthands)
     int longhand_count;          // Number of longhand properties
 
     // Validation function pointer
@@ -1069,6 +1071,7 @@ typedef struct CssProperty {
 
     // Value computation function
     void* (*compute_value)(void* specified_value, void* parent_value, Pool* pool);
+    NameId name_id;                // generated identity for predefined property spelling
 } CssProperty;
 
 // ============================================================================
@@ -1088,11 +1091,11 @@ bool css_property_system_init(Pool* pool);
 void css_property_system_cleanup(void);
 
 /**
- * Get property by ID
- * @param property_id Property ID to look up
+ * Get property by dense dispatch code
+ * @param property_code Property code to look up
  * @return Property definition or NULL if not found
  */
-const CssProperty* css_property_get_by_id(CssPropertyId property_id);
+const CssProperty* css_property_get_by_code(CssPropertyCode property_code);
 
 /**
  * Get property by name
@@ -1102,42 +1105,44 @@ const CssProperty* css_property_get_by_id(CssPropertyId property_id);
 const CssProperty* css_property_get_by_name(const char* name);
 
 /**
- * Get property ID by name
+ * Get dense property code by name
  * @param name Property name to look up
- * @return Property ID or 0 if not found
+ * @return Property code or 0 if not found
  */
-CssPropertyId css_property_get_id_by_name(const char* name);
+CssPropertyCode css_property_code_from_name(const char* name);
+CssPropertyCode css_property_code_from_name_id(NameId name_id);
+NameId css_property_name_id(CssPropertyCode property_code);
 
-const char* css_get_property_name(CssPropertyId property_id);
+const char* css_property_spelling_from_code(CssPropertyCode property_code);
 
 
 /**
  * Check if a property exists
- * @param property_id Property ID to check
+ * @param property_code Property code to check
  * @return true if property exists, false otherwise
  */
-bool css_property_exists(CssPropertyId property_id);
+bool css_property_exists(CssPropertyCode property_code);
 
 /**
  * Check if a property is inherited by default
- * @param property_id Property ID to check
+ * @param property_code Property ID to check
  * @return true if inherited, false otherwise
  */
-bool css_property_is_inherited(CssPropertyId property_id);
+bool css_property_is_inherited(CssPropertyCode property_code);
 
 /**
  * Check if a property is animatable
- * @param property_id Property ID to check
+ * @param property_code Property ID to check
  * @return true if animatable, false otherwise
  */
-bool css_property_is_animatable(CssPropertyId property_id);
+bool css_property_is_animatable(CssPropertyCode property_code);
 
 /**
  * Check if a property is a shorthand
- * @param property_id Property ID to check
+ * @param property_code Property ID to check
  * @return true if shorthand, false otherwise
  */
-bool css_property_is_shorthand(CssPropertyId property_id);
+bool css_property_is_shorthand(CssPropertyCode property_code);
 
 /**
  * Get longhand properties for a shorthand property
@@ -1146,40 +1151,40 @@ bool css_property_is_shorthand(CssPropertyId property_id);
  * @param max_count Maximum number of longhand properties to return
  * @return Number of longhand properties returned
  */
-int css_property_get_longhand_properties(CssPropertyId shorthand_id,
-                                        CssPropertyId* longhand_ids,
+int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
+                                        CssPropertyCode* longhand_ids,
                                         int max_count);
 
 /**
  * Get the initial value for a property
- * @param property_id Property ID
+ * @param property_code Property ID
  * @param pool Memory pool for allocation
  * @return Initial value or NULL if not available
  */
-void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool);
+void* css_property_get_initial_value(CssPropertyCode property_code, Pool* pool);
 
 /**
  * Validate a property value
- * @param property_id Property ID
+ * @param property_code Property ID
  * @param value_str Value string to validate
  * @param parsed_value Output parsed value (allocated from pool)
  * @param pool Memory pool for allocations
  * @return true if valid, false otherwise
  */
-bool css_property_validate_and_parse(CssPropertyId property_id,
+bool css_property_validate_and_parse(CssPropertyCode property_code,
                                      const char* value_str,
                                      void** parsed_value,
                                      Pool* pool);
 
 /**
  * Compute a property value (resolve relative units, inheritance, etc.)
- * @param property_id Property ID
+ * @param property_code Property ID
  * @param specified_value Specified value from CSS
  * @param parent_value Parent element's computed value (for inheritance)
  * @param pool Memory pool for allocations
  * @return Computed value
  */
-void* css_property_compute_value(CssPropertyId property_id,
+void* css_property_compute_value(CssPropertyCode property_code,
                                 void* specified_value,
                                 void* parent_value,
                                 Pool* pool);
@@ -1194,21 +1199,21 @@ void* css_property_compute_value(CssPropertyId property_id,
  * @param pool Memory pool for allocations
  * @return Property ID for the custom property
  */
-CssPropertyId css_property_register_custom(const char* name, Pool* pool);
+CssPropertyCode css_property_register_custom(const char* name, Pool* pool);
 
 /**
  * Get custom property ID by name
  * @param name Custom property name (including --)
  * @return Property ID or 0 if not found
  */
-CssPropertyId css_property_get_custom_id(const char* name);
+CssPropertyCode css_property_get_custom_id(const char* name);
 
 /**
  * Check if a property ID represents a custom property
- * @param property_id Property ID to check
+ * @param property_code Property ID to check
  * @return true if custom property, false otherwise
  */
-bool css_property_is_custom(CssPropertyId property_id);
+bool css_property_is_custom(CssPropertyCode property_code);
 
 // ============================================================================
 // Property Value Parsing Utilities
@@ -1236,16 +1241,16 @@ bool css_parse_color(const char* value_str, CssColor* color);
 
 /**
  * Get property name by ID
- * @param property_id Property ID
+ * @param property_code Property ID
  * @return Property name or NULL if not found
  */
-const char* css_property_get_name(CssPropertyId property_id);
+const char* css_property_spelling_from_code(CssPropertyCode property_code);
 
 /**
  * Print property information for debugging
- * @param property_id Property ID to print
+ * @param property_code Property ID to print
  */
-void css_property_print_info(CssPropertyId property_id);
+void css_property_print_info(CssPropertyCode property_code);
 
 /**
  * Get total number of registered properties
@@ -1274,7 +1279,6 @@ int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context
  */
 
 // Compatibility aliases for legacy code
-typedef CssPropertyId CSSPropertyID;
 typedef CssValue CSSPropertyValue;
 typedef CssValueType CSSPropertyType;
 
@@ -1325,11 +1329,9 @@ typedef CssValueType CSSPropertyType;
 typedef CssDeclaration CSSProperty;
 
 // Function declarations (compatibility layer using css_style.h types)
-CssPropertyId css_property_id_from_name(const char* name);
-const char* css_property_name_from_id(CssPropertyId id);
-CssValueType css_property_get_expected_type(CssPropertyId id);
-bool css_property_validate_value(CssPropertyId id, CssValue* value);
-bool css_property_validate_value_from_string(CssPropertyId property_id,
+CssValueType css_property_get_expected_type(CssPropertyCode property_code);
+bool css_property_validate_value(CssPropertyCode id, CssValue* value);
+bool css_property_validate_value_from_string(CssPropertyCode property_code,
     const char* value_str, void** parsed_value, Pool* pool);
 
 #endif // CSS_STYLE_H

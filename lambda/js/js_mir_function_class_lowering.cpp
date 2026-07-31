@@ -14,6 +14,21 @@ static MIR_reg_t jm_emit_keyed_scope_env_tdz(JsMirTranspiler* mt) {
     return value;
 }
 
+bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce) {
+    for (JsClassEntry* current = ce; current; current = current->superclass) {
+        for (int i = 0; i < current->method_count; i++) {
+            if (jm_is_private_name(current->methods[i].name)) return true;
+        }
+        for (int i = 0; i < current->static_field_count; i++) {
+            if (jm_is_private_name(current->static_fields[i].name)) return true;
+        }
+        for (int i = 0; i < current->instance_field_count; i++) {
+            if (jm_is_private_name(current->instance_fields[i].name)) return true;
+        }
+    }
+    return false;
+}
+
 static JsMirVarEntry* jm_scope_env_entry_binding_at_function_entry(JsMirTranspiler* mt,
         const char* scope_name, const char* lookup_name) {
     JsMirVarEntry* candidate = jm_find_var(mt, lookup_name);
@@ -183,16 +198,25 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     // computed entries retain a parser name and must not replace that key.
     if (!method_key && method->name) {
         String* key_name = method->name;
-        if (policy->mode == JS_MIR_CLASS_METHOD_OWN_INSTANCE) {
-            key_name = jm_class_private_name(mt, policy->owner_class, method->name);
-        }
         method_key = jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
+        if (jm_is_private_name(key_name)) {
+            method_key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, policy->home_class),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_key));
+        }
     }
     if (!method_key) return false;
     jm_create_gc_root_slot(mt, method_key);
 
     jm_emit_install_method_or_accessor(mt, policy->destination, method_key, function_item,
         method->is_getter, method->is_setter);
+    if (policy->mode == JS_MIR_CLASS_METHOD_OWN_INSTANCE) {
+        // The prototype's constructor is the evaluated class identity; refresh
+        // after installation so repeated class expressions never retain a prior home.
+        jm_call_void_2(mt, "js_set_method_home_from_target",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, policy->destination),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, function_item));
+    }
     if (policy->mode == JS_MIR_CLASS_METHOD_OWN_STATIC && method->name &&
         jm_is_private_name(method->name) &&
         !jm_private_static_method_brand_seen(policy->owner_class, policy->method_index)) {

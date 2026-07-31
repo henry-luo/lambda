@@ -657,6 +657,19 @@ ElementReader ElementReader::findChildElement(const char* tag_name) const {
     return ElementReader();
 }
 
+ElementReader ElementReader::findChildElement(NameId tag_id) const {
+    if (!element_ || tag_id == NAME_ID_NONE) return ElementReader();
+    const List* list = (const List*)element_;
+    for (int64_t i = 0; i < list->length; i++) {
+        if (auto child_item = lam::as<LMD_TYPE_ELEMENT>(list->items[i])) {
+            Element* child = child_item.ptr();
+            TypeElmt* type = (TypeElmt*)child->type;
+            if (type && type->name_id == tag_id) return ElementReader(child);
+        }
+    }
+    return ElementReader();
+}
+
 bool ElementReader::hasChildElements() const {
     if (!element_) return false;
 

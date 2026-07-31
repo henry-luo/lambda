@@ -167,7 +167,7 @@ bool css_apply_stylesheet(CssEngine* engine, CssStylesheet* stylesheet, CssCompu
 
 // Value computation and resolution
 CssValue* css_compute_value(CssEngine* engine, CssValue* declared_value,
-                           CssPropertyId property_id, const CssComputedStyle* parent_style);
+                           CssPropertyCode property_code, const CssComputedStyle* parent_style);
 double css_resolve_length(CssEngine* engine, const CssValue* value,
                          double container_size, double font_size);
 

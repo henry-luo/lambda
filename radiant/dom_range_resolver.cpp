@@ -1148,11 +1148,11 @@ static void find_text_edge_boundary_hit(View* node, float vx, float vy,
 // click on one resolves to a caret in the parent, before or after the element.
 static bool is_non_caret_container_element(DomElement* el) {
     if (!el) return true;
-    uintptr_t tag = el->tag();
-    return tag == HTM_TAG_IMG || tag == HTM_TAG_HR || tag == HTM_TAG_BR ||
-        tag == HTM_TAG_INPUT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_SELECT ||
-        tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS || tag == HTM_TAG_EMBED ||
-        tag == HTM_TAG_OBJECT || tag == HTM_TAG_IFRAME || tag == HTM_TAG_AUDIO;
+    NameId tag = el->tag();
+    return tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_HR || tag == MARKUP_NAME_BR ||
+        tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_SELECT ||
+        tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS || tag == MARKUP_NAME_EMBED ||
+        tag == MARKUP_NAME_OBJECT || tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_AUDIO;
 }
 
 // True if the subtree holds any non-empty text — used to keep this fallback

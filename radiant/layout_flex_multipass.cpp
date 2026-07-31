@@ -45,7 +45,7 @@ static CssEnum flex_inherited_text_transform(ViewBlock* container) {
 static bool flex_child_is_br(DomNode* child) {
     if (!child || !child->is_element()) return false;
     DomElement* elem = child->as_element();
-    return elem && elem->tag() == HTM_TAG_BR;
+    return elem && elem->tag() == MARKUP_NAME_BR;
 }
 
 static bool flex_container_has_only_direct_text_and_br(ViewBlock* flex_container) {
@@ -1130,8 +1130,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // They don't have children to lay out - they need their embedded content loaded
         // IMPORTANT: For flex items, the width/height are already determined by the flex algorithm.
         // We should NOT change them based on content. We only load the content and set up scrolling.
-        uintptr_t elmt_name = flex_item->tag();
-        if (elmt_name == HTM_TAG_IFRAME) {
+        NameId elmt_name = flex_item->tag();
+        if (elmt_name == MARKUP_NAME_IFRAME) {
             // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
             // Keep this low since each HTTP download can take seconds
             if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {

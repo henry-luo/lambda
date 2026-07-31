@@ -4,12 +4,14 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strview.h"
 #include "../../lib/hashmap.h"
+#include "name_identity.h"
 
 typedef struct NamePool {
     Pool* pool;
     struct hashmap* names;      // C hashmap for String* storage
     struct NamePool* parent;    // Parent name pool for hierarchical lookup
     uint32_t ref_count;         // Reference counting for pool lifecycle
+    uint32_t next_unique_key_hash;  // diagnostic spelling must not route SYMBOL/PRIVATE identity
     void* mem_node;             // MemContext registration node (NULL if untracked)
 } NamePool;
 
@@ -40,6 +42,11 @@ String* name_pool_create_symbol(NamePool* pool, const char* symbol);
 String* name_pool_create_symbol_len(NamePool* pool, const char* symbol, size_t len);
 String* name_pool_create_symbol_strview(NamePool* pool, StrView symbol);
 
+// Unique property keys are intentionally not content-interned. They represent
+// ECMAScript Symbol/private identity, not Lambda Symbol spelling reuse.
+PropertyKeyRef name_pool_create_unique_symbol(NamePool* pool, StrView diagnostic_name);
+PropertyKeyRef name_pool_create_unique_private(NamePool* pool, StrView diagnostic_name);
+
 // Check if a string qualifies for symbol pooling
 bool name_pool_is_poolable_symbol(size_t length);
 
@@ -54,6 +61,7 @@ bool name_pool_contains(NamePool* pool, const char* name);
 bool name_pool_contains_strview(NamePool* pool, StrView name);
 size_t name_pool_count(NamePool* pool);
 void name_pool_print_stats(NamePool* pool);
+bool name_pool_verify(NamePool* pool);
 
 #ifdef __cplusplus
 }

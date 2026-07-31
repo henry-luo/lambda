@@ -67,7 +67,18 @@ static TypeMap* js_obj_typemap(Item obj) {
 extern "C" ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len) {
     TypeMap* tm = js_obj_typemap(obj);
     if (!tm) return nullptr;
+    if (name && name_len >= 0) {
+        PropertyKeyRef key = heap_create_name(name, (size_t)name_len);
+        // Raw callers are an API boundary; canonicalize before probing so they
+        // cannot bypass runtime PropertyKeyRef equality through matching bytes.
+        if (key) return typemap_hash_lookup_key(tm, key);
+    }
     return typemap_hash_lookup(tm, name, name_len);
+}
+
+extern "C" ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key) {
+    TypeMap* tm = js_obj_typemap(obj);
+    return tm ? typemap_hash_lookup_key(tm, key) : nullptr;
 }
 
 // Locate the underlying Map* whose `type` field would receive a cloned TypeMap
@@ -135,7 +146,9 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
         dst->next = nullptr;
         dst->ns = src->ns;
         dst->default_value = src->default_value;
-        dst->name_id = src->name_id;
+        dst->name_hash = src->name_hash;
+        dst->predefined_id = src->predefined_id;
+        dst->key_ref = src->key_ref;
         dst->flags = src->flags;
         if (!first_clone) first_clone = dst;
         if (prev_clone) prev_clone->next = dst;
@@ -170,8 +183,8 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     return clone;
 }
 
-extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
-                                            uint8_t set_mask, uint8_t clear_mask) {
+static void js_shape_entry_update_flags_impl(Item obj, PropertyKeyRef key,
+        const char* name, int name_len, uint8_t set_mask, uint8_t clear_mask) {
     if (set_mask == 0 && clear_mask == 0) return;
     // Probe first: if the entry doesn't exist or the mutation is a no-op,
     // skip cloning entirely. This avoids replacing m->type with a fresh
@@ -179,7 +192,9 @@ extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name
     // length==0) — which would later strand map_put because it only
     // initializes mp->data/data_cap when `!mp->type` and our non-null clone
     // bypasses that init path.
-    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    bool identity_key = key && property_key_requires_identity(key);
+    ShapeEntry* se = identity_key ? js_find_shape_entry_key(obj, key) :
+        js_find_shape_entry(obj, name, name_len);
     if (!se) return;
     uint8_t new_flags = (uint8_t)((se->flags | set_mask) & ~clear_mask);
     if (new_flags == se->flags) return;
@@ -188,11 +203,24 @@ extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name
     // mutable underlying Map), fall back to in-place mutation — preserves
     // pre-clone behavior on edge paths.
     if (js_typemap_clone_for_mutation(obj)) {
-        se = js_find_shape_entry(obj, name, name_len);
+        se = identity_key ? js_find_shape_entry_key(obj, key) :
+            js_find_shape_entry(obj, name, name_len);
         if (!se) return;
     }
     js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
     se->flags = new_flags;
+}
+
+extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
+                                            uint8_t set_mask, uint8_t clear_mask) {
+    js_shape_entry_update_flags_impl(obj, NULL, name, name_len, set_mask, clear_mask);
+}
+
+extern "C" void js_shape_entry_update_flags_key(Item obj, PropertyKeyRef key,
+        uint8_t set_mask, uint8_t clear_mask) {
+    if (!key) return;
+    js_shape_entry_update_flags_impl(obj, key, key->chars, (int)key->len,
+        set_mask, clear_mask);
 }
 
 // Public wrapper around the file-static js_typemap_clone_for_mutation. Exposed
@@ -514,7 +542,13 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         uint8_t set_mask = JSPD_IS_ACCESSOR | JSPD_NON_ENUMERABLE;
         if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
         ns = it2s(name_root.get());
-        js_shape_entry_update_flags(obj_root.get(), ns->chars, nl, set_mask, JSPD_DELETED);
+        if (property_key_requires_identity(ns)) {
+            // A Symbol/private accessor slot is addressed only by its record;
+            // a byte update would leave the raw pair visible to ordinary get.
+            js_shape_entry_update_flags_key(obj_root.get(), ns, set_mask, JSPD_DELETED);
+        } else {
+            js_shape_entry_update_flags(obj_root.get(), ns->chars, nl, set_mask, JSPD_DELETED);
+        }
     }
 
     // NON_CONFIGURABLE is encoded in the shape entry flags above.
@@ -593,16 +627,17 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     fn = js_accessor_half_storage_value(fn);
 
     // Look up any existing accessor pair under name X.
+    bool identity_key = property_key_requires_identity(ns);
     JsAccessorPair* pair = nullptr;
-    ShapeEntry* se = js_find_shape_entry(obj, ns->chars, (int)ns->len);
+    ShapeEntry* se = identity_key ? js_find_shape_entry_key(obj, ns) :
+        js_find_shape_entry(obj, ns->chars, (int)ns->len);
     if (se && jspd_is_accessor(se)) {
-        Map* m = js_obj_underlying_map(obj);
-        if (m) {
-            bool found = false;
-            Item slot_val = js_map_get_fast_ext(m, ns->chars, (int)ns->len, &found);
-            if (found && slot_val.item != ItemNull.item) {
-                pair = js_item_to_accessor_pair(slot_val);
-            }
+        Item slot_val = ItemNull;
+        JsShapeSlotStatus status = identity_key
+            ? js_own_shape_slot_status_key(obj, ns, &slot_val, NULL)
+            : js_own_shape_slot_status(obj, ns->chars, (int)ns->len, &slot_val, NULL);
+        if (status == JS_SHAPE_SLOT_ACCESSOR && slot_val.item != ItemNull.item) {
+            pair = js_item_to_accessor_pair(slot_val);
         }
     }
     if (se && !jspd_is_configurable(se)) {
@@ -639,8 +674,13 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     uint8_t set_mask = JSPD_IS_ACCESSOR;
     if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
     if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-    js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
-    js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
+    if (identity_key) {
+        // Symbol text is diagnostic-only; mutate the exact installed key.
+        js_shape_entry_update_flags_key(obj, ns, set_mask, JSPD_DELETED);
+    } else {
+        js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
+        js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
+    }
 }
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites

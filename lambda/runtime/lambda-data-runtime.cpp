@@ -2262,7 +2262,7 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
                     result = nested_result;
                 }
             }
-        } else if (typemap_shape_name_equals_id(field, key, key_len, key_id)) {
+        } else if (typemap_shape_name_equals_hash(field, key, key_len, key_id)) {
             *is_found = true;
             result = map_read_field_for_owner(owner, field, map_data);
         }
@@ -2275,7 +2275,7 @@ static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_dat
     if (!key) { *is_found = false; return ItemNull; }
     int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
     return map_get_for_owner_keyed(owner, map_type, map_data, key, key_len,
-                                   typemap_name_id(key, key_len), is_found);
+                                   typemap_name_hash(key, key_len), is_found);
 }
 
 // last-writer-wins: scan all entries in declaration order, keep the last match
@@ -2300,7 +2300,7 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
             }
         } else {
             // named field — direct match
-            if (typemap_shape_name_equals_id(field, key, key_len, key_id)) {
+            if (typemap_shape_name_equals_hash(field, key, key_len, key_id)) {
                 *is_found = true;
                 result = _map_read_field(field, map_data);
                 // don't return — later entries may override
@@ -2314,7 +2314,7 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
     if (!key) { *is_found = false; return ItemNull; }
     int key_len = (int)strlen(key);  // INT_CAST_OK: map key length
     return _map_get_keyed(map_type, map_data, key, key_len,
-                          typemap_name_id(key, key_len), is_found);
+                          typemap_name_hash(key, key_len), is_found);
 }
 
 // A shape is cacheable only when a plain last-writer-wins scan over its named
@@ -2351,8 +2351,8 @@ extern "C" Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic) {
                 const char* key_str = (const char*)key.get_chars();
                 if (key_str && member_ic_shape_is_cacheable(shape)) {
                     int key_len = (int)strlen(key_str);  // INT_CAST_OK: map key length
-                    ShapeEntry* found = typemap_shape_lookup_last_by_id(shape,
-                        key_str, key_len, typemap_name_id(key_str, key_len));
+                    ShapeEntry* found = typemap_shape_lookup_last_by_hash(shape,
+                        key_str, key_len, typemap_name_hash(key_str, key_len));
                     if (found) {
                         ic->shape = (void*)shape;
                         ic->entry = (void*)found;

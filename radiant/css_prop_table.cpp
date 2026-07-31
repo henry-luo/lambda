@@ -62,8 +62,8 @@ static const void* prop_group_base(const DomElement* element, PropGroupKind grou
     }
 }
 
-static const char* property_initial(CssPropertyId id) {
-    const CssProperty* property = css_property_get_by_id(id);
+static const char* property_initial(CssPropertyCode id) {
+    const CssProperty* property = css_property_get_by_code(id);
     return property && property->initial_value ? property->initial_value : "";
 }
 
@@ -99,7 +99,7 @@ static bool serialize_direct(const CssPropAccessor* accessor, DomElement* elemen
     }
 }
 
-static CssDeclaration* computed_decl(DomElement* element, CssPropertyId id, int pseudo_type) {
+static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, int pseudo_type) {
     if (!element) return nullptr;
     if (pseudo_type == 1 || pseudo_type == 2) {
         return dom_element_get_pseudo_element_value(element, id, pseudo_type);
@@ -142,7 +142,7 @@ static bool format_decl_color(DomElement* element, const CssValue* value,
     }
 }
 
-static bool format_css_value(DomElement* element, CssPropertyId id,
+static bool format_css_value(DomElement* element, CssPropertyCode id,
                              const CssValue* value, char* out, size_t out_size) {
     if (!value) return copy_text(out, out_size, property_initial(id));
     if (id == CSS_PROPERTY_COLOR || id == CSS_PROPERTY_BACKGROUND_COLOR ||
@@ -167,7 +167,7 @@ static DomElement* parent_element(DomElement* element) {
         ? static_cast<DomElement*>(element->parent) : nullptr;
 }
 
-static bool serialize_decl_recursive(DomElement* element, CssPropertyId id,
+static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, int depth,
                                      char* out, size_t out_size) {
     if (!element || depth > 16) return false;
@@ -371,7 +371,7 @@ static bool serialize_transition(const CssPropAccessor* accessor, DomElement* el
                                  int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
     CssTransitionProp transition = {};
-    CssPropertyId properties[8];
+    CssPropertyCode properties[8];
     CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_TRANSITION, 0);
     CssDeclaration* duration = computed_decl(element, CSS_PROPERTY_TRANSITION_DURATION, 0);
     CssDeclaration* delay = computed_decl(element, CSS_PROPERTY_TRANSITION_DELAY, 0);
@@ -396,7 +396,7 @@ static bool serialize_transition(const CssPropAccessor* accessor, DomElement* el
     out[0] = '\0';
     size_t used = 0;
     for (int i = 0; i < transition.property_count && used + 1 < out_size; i++) {
-        const CssProperty* item = css_property_get_by_id(transition.properties[i]);
+        const CssProperty* item = css_property_get_by_code(transition.properties[i]);
         if (!item || !item->name) continue;
         int count = snprintf(out + used, out_size - used, "%s%s",
                              used ? ", " : "", item->name);
@@ -507,13 +507,13 @@ struct CssPropIndex {
     CssPropIndex() : rows{} {
         size_t count = sizeof(CSS_PROP_ROWS) / sizeof(CSS_PROP_ROWS[0]);
         for (size_t i = 0; i < count; i++) {
-            CssPropertyId id = CSS_PROP_ROWS[i].id;
+            CssPropertyCode id = CSS_PROP_ROWS[i].id;
             if (id > CSS_PROPERTY_UNKNOWN && id < CSS_PROPERTY_COUNT) rows[id] = &CSS_PROP_ROWS[i];
         }
     }
 };
 
-const CssPropAccessor* css_prop_accessor(CssPropertyId id) {
+const CssPropAccessor* css_prop_accessor(CssPropertyCode id) {
     static const CssPropIndex index;
     return id > CSS_PROPERTY_UNKNOWN && id < CSS_PROPERTY_COUNT ? index.rows[id] : nullptr;
 }
@@ -540,7 +540,7 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     return false;
 }
 
-bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,
+bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size) {
     if (!out || out_size == 0) return false;
     out[0] = '\0';
@@ -549,7 +549,7 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,
         static bool logged[CSS_PROPERTY_COUNT] = {};
         if (id > CSS_PROPERTY_UNKNOWN && id < CSS_PROPERTY_COUNT && !logged[id]) {
             logged[id] = true;
-            const CssProperty* property = css_property_get_by_id(id);
+            const CssProperty* property = css_property_get_by_code(id);
             log_debug("computed-style table: unsupported property '%s'",
                       property && property->name ? property->name : "?");
             (void)property;

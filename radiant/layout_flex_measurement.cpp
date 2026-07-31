@@ -248,11 +248,11 @@ static void flex_accumulate_intrinsic_child_height(bool is_row_flex, float heigh
 }
 
 static float get_explicit_css_length(LayoutContext* lycon, ViewElement* elem,
-                                     CssPropertyId property_id) {
+                                     CssPropertyCode property_code) {
     if (!elem || !elem->specified_style) return -1.0f;
-    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
+    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_code);
     if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return -1.0f;
-    float size = resolve_length_value(lycon, property_id, decl->value);
+    float size = resolve_length_value(lycon, property_code, decl->value);
     return !isnan(size) && size > 0.0f ? size : -1.0f;
 }
 
@@ -311,13 +311,13 @@ static float get_explicit_dom_css_height(LayoutContext* lycon, DomElement* elem)
     return elem ? get_explicit_css_height(lycon, lam::view_as_element(elem)) : -1.0f;
 }
 
-static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId property_id) {
+static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyCode property_code) {
     int side = 0;
-    if (property_id == CSS_PROPERTY_MARGIN_TOP) {
+    if (property_code == CSS_PROPERTY_MARGIN_TOP) {
         side = 0;
-    } else if (property_id == CSS_PROPERTY_MARGIN_RIGHT) {
+    } else if (property_code == CSS_PROPERTY_MARGIN_RIGHT) {
         side = 1;
-    } else if (property_id == CSS_PROPERTY_MARGIN_BOTTOM) {
+    } else if (property_code == CSS_PROPERTY_MARGIN_BOTTOM) {
         side = 2;
     } else {
         side = 3;
@@ -325,7 +325,7 @@ static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId pro
     return (CssValue*)css_box_shorthand_side_value(value, side);
 }
 
-static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId property_id,
+static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyCode property_code,
                                       CssValue* value, float inline_base, float* out) {
     if (!value || !out) return false;
     if (layout_resolve_percentage_value(value, inline_base, out)) return true;
@@ -336,7 +336,7 @@ static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId proper
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER ||
         value->type == CSS_VALUE_TYPE_KEYWORD) {
-        float val = resolve_length_value(lycon, property_id, value);
+        float val = resolve_length_value(lycon, property_code, value);
         if (!isnan(val) && val >= 0.0f) {
             *out = val;
             return true;
@@ -349,28 +349,28 @@ static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId proper
 // margins resolve against the containing block inline size, which may differ
 // from any earlier style-resolution context during intrinsic flex measurement.
 static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
-                            CssPropertyId property_id, float inline_base) {
+                            CssPropertyCode property_code, float inline_base) {
     if (!elem) return 0.0f;
 
     if (elem->specified_style && lycon) {
         float val = 0.0f;
-        CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
+        CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_code);
         if (decl && decl->value &&
-            resolve_flex_margin_value(lycon, property_id, decl->value, inline_base, &val)) {
+            resolve_flex_margin_value(lycon, property_code, decl->value, inline_base, &val)) {
             return val;
         }
 
         CssDeclaration* short_decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
-        CssValue* side_value = short_decl ? flex_margin_side_value(short_decl->value, property_id) : nullptr;
+        CssValue* side_value = short_decl ? flex_margin_side_value(short_decl->value, property_code) : nullptr;
         if (side_value &&
-            resolve_flex_margin_value(lycon, property_id, side_value, inline_base, &val)) {
+            resolve_flex_margin_value(lycon, property_code, side_value, inline_base, &val)) {
             return val;
         }
     }
 
     if (elem->bound) {
         float val = 0.0f;
-        switch (property_id) {
+        switch (property_code) {
             case CSS_PROPERTY_MARGIN_LEFT:   val = elem->boundary()->margin.left; break;
             case CSS_PROPERTY_MARGIN_RIGHT:  val = elem->boundary()->margin.right; break;
             case CSS_PROPERTY_MARGIN_TOP:    val = elem->boundary()->margin.top; break;
@@ -492,14 +492,14 @@ static bool has_flex_item_prop(ViewElement* item) {
     return item && item->flex_item();
 }
 
-static bool flex_measurement_tag_is_inline(uintptr_t tag) {
+static bool flex_measurement_tag_is_inline(NameId tag) {
     switch (tag) {
-    case HTM_TAG_A: case HTM_TAG_SPAN: case HTM_TAG_EM: case HTM_TAG_STRONG:
-    case HTM_TAG_B: case HTM_TAG_I: case HTM_TAG_SMALL: case HTM_TAG_SUB:
-    case HTM_TAG_SUP: case HTM_TAG_ABBR: case HTM_TAG_CODE: case HTM_TAG_KBD:
-    case HTM_TAG_MARK: case HTM_TAG_Q: case HTM_TAG_S: case HTM_TAG_SAMP:
-    case HTM_TAG_VAR: case HTM_TAG_TIME: case HTM_TAG_U: case HTM_TAG_CITE:
-    case HTM_TAG_BDI: case HTM_TAG_BDO: case HTM_TAG_BR:
+    case MARKUP_NAME_A: case MARKUP_NAME_SPAN: case MARKUP_NAME_EM: case MARKUP_NAME_STRONG:
+    case MARKUP_NAME_B: case MARKUP_NAME_I: case MARKUP_NAME_SMALL: case MARKUP_NAME_SUB:
+    case MARKUP_NAME_SUP: case MARKUP_NAME_ABBR: case MARKUP_NAME_CODE: case MARKUP_NAME_KBD:
+    case MARKUP_NAME_MARK: case MARKUP_NAME_Q: case MARKUP_NAME_S: case MARKUP_NAME_SAMP:
+    case MARKUP_NAME_VAR: case MARKUP_NAME_TIME: case MARKUP_NAME_U: case MARKUP_NAME_CITE:
+    case MARKUP_NAME_BDI: case MARKUP_NAME_BDO: case MARKUP_NAME_BR:
         return true;
     default:
         return false;
@@ -705,8 +705,8 @@ static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* l
 }
 
 static float flex_measure_length_decl(LayoutContext* lycon, DomElement* elem,
-                                      CssPropertyId property,
-                                      CssPropertyId resolve_property) {
+                                      CssPropertyCode property,
+                                      CssPropertyCode resolve_property) {
     if (!elem || !elem->specified_style) return 0.0f;
 
     CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property);
@@ -715,14 +715,14 @@ static float flex_measure_length_decl(LayoutContext* lycon, DomElement* elem,
 }
 
 static float flex_measure_length_decl_pair(LayoutContext* lycon, DomElement* elem,
-                                           CssPropertyId first_property,
-                                           CssPropertyId second_property) {
+                                           CssPropertyCode first_property,
+                                           CssPropertyCode second_property) {
     return flex_measure_length_decl(lycon, elem, first_property, first_property) +
            flex_measure_length_decl(lycon, elem, second_property, second_property);
 }
 
 static float flex_measure_shorthand_side_pair(LayoutContext* lycon, CssValue* value,
-                                              CssPropertyId resolve_property,
+                                              CssPropertyCode resolve_property,
                                               int first_side, int second_side) {
     if (!value) return 0.0f;
 
@@ -840,7 +840,7 @@ static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
     float max_text_width = 0.0f;
     for (DomNode* child = elem ? elem->first_child : nullptr; child; child = child->next_sibling) {
         DomElement* group = child->as_element();
-        if (group && group->tag() == HTM_TAG_OPTGROUP) {
+        if (group && group->tag() == MARKUP_NAME_OPTGROUP) {
             const char* lbl = group->get_attribute("label");
             if (lbl) {
                 size_t ll = strlen(lbl);
@@ -856,7 +856,7 @@ static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
         float option_width = measure_direct_text_children_intrinsic_width(
             lycon, option, false, CSS_VALUE_NONE);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
-        if (parent && parent->tag() == HTM_TAG_OPTGROUP) {
+        if (parent && parent->tag() == MARKUP_NAME_OPTGROUP) {
             option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
             if (option_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) {
                 option_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
@@ -1014,14 +1014,14 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
     FlexMeasuredElementHeight result = {0.0f, false};
     if (!sub_child) return result;
 
-    uintptr_t tag = sub_child->tag();
-    if (tag == HTM_TAG_H1) result.height = 32.0f;
-    else if (tag == HTM_TAG_H2) result.height = 28.0f;
-    else if (tag == HTM_TAG_H3) result.height = 24.0f;
-    else if (tag == HTM_TAG_H4) result.height = 20.0f;
-    else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) result.height = 18.0f;
-    else if (tag == HTM_TAG_P) result.height = 36.0f;  // typically 2-3 lines
-    else if (tag == HTM_TAG_SVG) {
+    NameId tag = sub_child->tag();
+    if (tag == MARKUP_NAME_H1) result.height = 32.0f;
+    else if (tag == MARKUP_NAME_H2) result.height = 28.0f;
+    else if (tag == MARKUP_NAME_H3) result.height = 24.0f;
+    else if (tag == MARKUP_NAME_H4) result.height = 20.0f;
+    else if (tag == MARKUP_NAME_H5 || tag == MARKUP_NAME_H6) result.height = 18.0f;
+    else if (tag == MARKUP_NAME_P) result.height = 36.0f;  // typically 2-3 lines
+    else if (tag == MARKUP_NAME_SVG) {
         const char* attr_h = elem ? elem->get_attribute("height") : nullptr;
         if (attr_h) {
             float attr_height = (float)atoi(attr_h);
@@ -1043,8 +1043,8 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
             result.height = 150.0f;  // HTML default SVG height
         }
     }
-    else if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_IMG ||
-             tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
+    else if (tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_IMG ||
+             tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS) {
         float css_height = get_explicit_dom_css_height(lycon, elem);
         if (css_height > 0.0f) {
             result.height = css_height;
@@ -1053,12 +1053,12 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
                       sub_child->node_name(), result.height);
         }
         if (!result.has_explicit_height_css) {
-            if (tag == HTM_TAG_IFRAME) result.height = 150.0f;  // CSS default iframe height
-            else if (tag == HTM_TAG_VIDEO) result.height = 150.0f;
+            if (tag == MARKUP_NAME_IFRAME) result.height = 150.0f;  // CSS default iframe height
+            else if (tag == MARKUP_NAME_VIDEO) result.height = 150.0f;
             else result.height = 0.0f;  // other replaced elements need explicit size
         }
     }
-    else if (tag == HTM_TAG_UL || tag == HTM_TAG_OL) {
+    else if (tag == MARKUP_NAME_UL || tag == MARKUP_NAME_OL) {
         FlexDirectContentSummary list_summary = flex_measure_direct_content_summary(elem);
         bool is_list_flex_row = false;
         if (elem) {
@@ -1073,10 +1073,10 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
             result.height = list_summary.element_count * 18.0f;  // column/block: sum of children
         }
     }
-    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION ||
-             tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||
-             tag == HTM_TAG_HEADER || tag == HTM_TAG_FOOTER ||
-             tag == HTM_TAG_ASIDE || tag == HTM_TAG_MAIN) {
+    else if (tag == MARKUP_NAME_DIV || tag == MARKUP_NAME_SECTION ||
+             tag == MARKUP_NAME_ARTICLE || tag == MARKUP_NAME_NAV ||
+             tag == MARKUP_NAME_HEADER || tag == MARKUP_NAME_FOOTER ||
+             tag == MARKUP_NAME_ASIDE || tag == MARKUP_NAME_MAIN) {
         ViewElement* nested_view = lam::view_require_element(elem);
         bool is_nested_flex = flex_measurement_is_flex_container(nested_view);
         if (is_nested_flex && nested_view &&
@@ -1152,7 +1152,7 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
     return result;
 }
 
-static void flex_accumulate_direct_element_height(uintptr_t tag,
+static void flex_accumulate_direct_element_height(NameId tag,
                                                   FlexMeasuredElementHeight measured,
                                                   float text_line_height,
                                                   bool is_row_flex,
@@ -1160,7 +1160,7 @@ static void flex_accumulate_direct_element_height(uintptr_t tag,
                                                   float* measured_height) {
     if (measured.height <= 0.0f) return;
 
-    bool is_inline_child = flex_measurement_tag_is_inline(tag) && tag != HTM_TAG_BR;
+    bool is_inline_child = flex_measurement_tag_is_inline(tag) && tag != MARKUP_NAME_BR;
     bool use_max_height = is_row_flex || is_inline_child;
     float margin =
         (use_max_height && (measured.height == text_line_height ||
@@ -1202,7 +1202,7 @@ static void flex_measure_direct_child_heights(LayoutContext* lycon, DomElement* 
                                                max_child_height, measured_height);
         } else if (sub_child->is_element()) {
             DomElement* elem = sub_child->as_element();
-            uintptr_t tag = sub_child->tag();
+            NameId tag = sub_child->tag();
             FlexMeasuredElementHeight measured_elem =
                 flex_measure_direct_element_height(lycon, sub_child, elem, text_line_height);
             flex_accumulate_direct_element_height(tag, measured_elem, text_line_height,
@@ -1712,11 +1712,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
 
     // Check if this is a replaced element (img, video) - needs special handling
-    uintptr_t elmt_name = item->tag();
-    bool is_replaced = (elmt_name == HTM_TAG_IMG || elmt_name == HTM_TAG_VIDEO ||
-                        elmt_name == HTM_TAG_IFRAME || elmt_name == HTM_TAG_CANVAS);
+    NameId elmt_name = item->tag();
+    bool is_replaced = (elmt_name == MARKUP_NAME_IMG || elmt_name == MARKUP_NAME_VIDEO ||
+                        elmt_name == MARKUP_NAME_IFRAME || elmt_name == MARKUP_NAME_CANVAS);
 
-    if (is_replaced && lycon && elmt_name == HTM_TAG_IMG) {
+    if (is_replaced && lycon && elmt_name == MARKUP_NAME_IMG) {
         // Load image to get intrinsic dimensions
         log_debug("calculate_item_intrinsic_sizes: loading image for flex item %s", item->node_name());
         const char* src_value = item->get_attribute("src");

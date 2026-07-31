@@ -45,7 +45,7 @@ typedef bool (*SelectorPseudoStateResolver)(void* context, DomElement* element, 
 typedef struct SelectorEntry {
     CssSimpleSelector* selector;  // Original selector
     void* cached_tag_ptr;         // Cached tag name pointer (from name_pool)
-    uintptr_t cached_tag_id;      // Numeric ID for fastest comparison
+    NameId cached_tag_id;         // Generated markup identity for direct comparison
     uint32_t use_count;           // Usage statistics
     bool cache_valid;             // Whether cached data is valid
 } SelectorEntry;

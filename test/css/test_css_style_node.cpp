@@ -24,7 +24,7 @@ protected:
     }
 
     // Helper function to create a test declaration
-    CssDeclaration* create_test_declaration(CssPropertyId property_id,
+    CssDeclaration* create_test_declaration(CssPropertyCode property_code,
                                           const char* value,
                                           CssSpecificity specificity,
                                           CssOrigin origin = CSS_ORIGIN_AUTHOR) {
@@ -33,7 +33,7 @@ protected:
         char* test_value = (char*)pool_alloc(pool, strlen(value) + 1);
         strcpy(test_value, value);
 
-        return css_declaration_create(property_id, test_value, specificity, origin, pool);
+        return css_declaration_create(property_code, test_value, specificity, origin, pool);
     }
 
     // Helper to create test specificity
@@ -389,7 +389,7 @@ TEST_F(CssStyleNodeTest, ComplexCascadeScenario) {
 
 TEST_F(CssStyleNodeTest, ManyDeclarationsPerformance) {
     const int num_declarations = 1000;
-    const CssPropertyId test_property = CSS_PROPERTY_COLOR;
+    const CssPropertyCode test_property = CSS_PROPERTY_COLOR;
 
     // Add many declarations with different specificities
     // Note: We use i for both classes and elements to ensure truly unique specificities
@@ -433,20 +433,20 @@ TEST_F(CssStyleNodeTest, ManyPropertiesPerformance) {
 
     // Add declarations for many different properties
     for (int i = 1; i <= num_properties; i++) {
-        CssPropertyId property_id = (CssPropertyId)i;
+        CssPropertyCode property_code = (CssPropertyCode)i;
         CssSpecificity spec = create_specificity(0, 0, 1, 0);
 
         char value[32];
         snprintf(value, sizeof(value), "value%d", i);
 
-        CssDeclaration* decl = create_test_declaration(property_id, value, spec);
+        CssDeclaration* decl = create_test_declaration(property_code, value, spec);
         style_tree_apply_declaration(style_tree, decl);
     }
 
     // Verify all properties can be retrieved efficiently
     for (int i = 1; i <= num_properties; i++) {
-        CssPropertyId property_id = (CssPropertyId)i;
-        CssDeclaration* decl = style_tree_get_declaration(style_tree, property_id);
+        CssPropertyCode property_code = (CssPropertyCode)i;
+        CssDeclaration* decl = style_tree_get_declaration(style_tree, property_code);
         EXPECT_NE(decl, nullptr);
 
         char expected[32];
@@ -807,22 +807,22 @@ TEST_F(CssStyleNodeTest, LargeScaleCascadeStressTest) {
 
     // Add many declarations for many properties
     for (int prop = 1; prop <= num_properties; prop++) {
-        CssPropertyId property_id = (CssPropertyId)prop;
+        CssPropertyCode property_code = (CssPropertyCode)prop;
 
         for (int decl = 0; decl < declarations_per_property; decl++) {
             CssSpecificity spec = create_specificity(0, decl / 5, decl % 5, decl % 3);
             char value[64];
             snprintf(value, sizeof(value), "prop%d_value%d", prop, decl);
 
-            CssDeclaration* declaration = create_test_declaration(property_id, value, spec);
+            CssDeclaration* declaration = create_test_declaration(property_code, value, spec);
             style_tree_apply_declaration(style_tree, declaration);
         }
     }
 
     // Verify each property has a winner and can be retrieved efficiently
     for (int prop = 1; prop <= num_properties; prop++) {
-        CssPropertyId property_id = (CssPropertyId)prop;
-        CssDeclaration* winning = style_tree_get_declaration(style_tree, property_id);
+        CssPropertyCode property_code = (CssPropertyCode)prop;
+        CssDeclaration* winning = style_tree_get_declaration(style_tree, property_code);
         EXPECT_NE(winning, nullptr);
 
         // Verify the value format is correct

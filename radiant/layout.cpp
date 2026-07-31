@@ -126,41 +126,41 @@ static DomElement* layout_positioned_containing_block(DomElement* elem) {
     return nullptr;
 }
 
-static bool layout_ua_block_margin_em(uintptr_t tag, float* top_em, float* bottom_em) {
+static bool layout_ua_block_margin_em(NameId tag, float* top_em, float* bottom_em) {
     if (!top_em || !bottom_em) return false;
     switch (tag) {
-    case HTM_TAG_P:
-    case HTM_TAG_UL:
-    case HTM_TAG_OL:
-    case HTM_TAG_MENU:
-    case HTM_TAG_PRE:
-    case HTM_TAG_BLOCKQUOTE:
-    case HTM_TAG_DL:
-    case HTM_TAG_FIGURE:
+    case MARKUP_NAME_P:
+    case MARKUP_NAME_UL:
+    case MARKUP_NAME_OL:
+    case MARKUP_NAME_MENU:
+    case MARKUP_NAME_PRE:
+    case MARKUP_NAME_BLOCKQUOTE:
+    case MARKUP_NAME_DL:
+    case MARKUP_NAME_FIGURE:
         *top_em = 1.0f;
         *bottom_em = 1.0f;
         return true;
-    case HTM_TAG_H1:
+    case MARKUP_NAME_H1:
         *top_em = 0.67f;
         *bottom_em = 0.67f;
         return true;
-    case HTM_TAG_H2:
+    case MARKUP_NAME_H2:
         *top_em = 0.83f;
         *bottom_em = 0.83f;
         return true;
-    case HTM_TAG_H3:
+    case MARKUP_NAME_H3:
         *top_em = 1.0f;
         *bottom_em = 1.0f;
         return true;
-    case HTM_TAG_H4:
+    case MARKUP_NAME_H4:
         *top_em = 1.33f;
         *bottom_em = 1.33f;
         return true;
-    case HTM_TAG_H5:
+    case MARKUP_NAME_H5:
         *top_em = 1.67f;
         *bottom_em = 1.67f;
         return true;
-    case HTM_TAG_H6:
+    case MARKUP_NAME_H6:
         *top_em = 2.33f;
         *bottom_em = 2.33f;
         return true;
@@ -768,7 +768,7 @@ float calc_normal_line_height(FontHandle* handle) {
     return font_calc_normal_line_height(handle);
 }
 
-CssEnum layout_specified_keyword(DomElement* element, CssPropertyId property,
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback) {
     if (!element || !element->specified_style) return fallback;
     CssDeclaration* declaration =
@@ -1290,12 +1290,12 @@ static bool layout_style_has_horizontal_border_decl(StyleTree* style) {
 
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
     if (!cell || cell->bound) return 0.0f;
-    uintptr_t tag = cell->tag();
-    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return 0.0f;
+    NameId tag = cell->tag();
+    if (tag != MARKUP_NAME_TD && tag != MARKUP_NAME_TH) return 0.0f;
 
     DomElement* table = nullptr;
     for (DomNode* node = cell->parent; node; node = node->parent) {
-        if (node->is_element() && node->as_element()->tag() == HTM_TAG_TABLE) {
+        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_TABLE) {
             table = node->as_element();
             break;
         }
@@ -1706,10 +1706,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             item_baseline = item_height; // default: bottom margin edge
         }
         if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
-            bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
-                block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-                (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
-                block->tag() == HTM_TAG_TEXTAREA);
+            bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
+                block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+                (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
+                block->tag() == MARKUP_NAME_TEXTAREA);
             bool overflow_visible = !block->scroller ||
                 (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
                  block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
@@ -1752,8 +1752,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     else if (view->view_type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-        if (span->tag() == HTM_TAG_RT && span->parent && span->parent->is_element() &&
-            span->parent->tag() == HTM_TAG_RUBY) {
+        if (span->tag() == MARKUP_NAME_RT && span->parent && span->parent->is_element() &&
+            span->parent->tag() == MARKUP_NAME_RUBY) {
             // Ruby annotations are positioned against their base level; the
             // parent line's baseline alignment applies only to that base level.
             return;
@@ -2440,9 +2440,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // programmatically rather than via the UA stylesheet.
     if (node->parent && node->parent->is_element()) {
         DomElement* parent_elem = node->parent->as_element();
-        if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->has_attribute("open")) {
+        if (parent_elem->tag() == MARKUP_NAME_DETAILS && !parent_elem->has_attribute(MARKUP_NAME_OPEN)) {
             // Only allow the first <summary> child through
-            bool is_summary = node->is_element() && node->tag() == HTM_TAG_SUMMARY;
+            bool is_summary = node->is_element() && node->tag() == MARKUP_NAME_SUMMARY;
             if (!is_summary) {
                 if (node->is_element()) {
                     DomElement* elem = node->as_element();
@@ -2459,7 +2459,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
     // Log for IMG elements
     uintptr_t node_tag = node->tag();
-    if (node_tag == HTM_TAG_IMG) {
+    if (node_tag == MARKUP_NAME_IMG) {
         log_debug("%s [FLOW_NODE IMG] Processing IMG element: %s", node->source_loc(), node->node_name());
     }
 
@@ -3063,7 +3063,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         while (child) {
             if (child->is_block()) {
                 ViewBlock* vb = lam::view_require_block(static_cast<View*>(child));
-                if (vb->tag() == HTM_TAG_BODY) {
+                if (vb->tag() == MARKUP_NAME_BODY) {
                     body_view = vb;
                     break;
                 }
@@ -3179,7 +3179,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         while (vc) {
             if (vc->is_block()) {
                 ViewBlock* vb = lam::view_require_block(vc);
-                if (vb->tag() == HTM_TAG_BODY) {
+                if (vb->tag() == MARKUP_NAME_BODY) {
                     float body_margin_bottom = (vb->bound && vb->boundary_mut()->margin.bottom > 0)
                         ? vb->boundary()->margin.bottom : 0;
                     float body_available = physical_height - vb->y - body_margin_bottom;

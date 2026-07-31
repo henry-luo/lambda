@@ -104,10 +104,16 @@ static inline JsAccessorPair* js_item_to_accessor_pair(Item it) {
 // property that was just written or defined.
 ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 
+// Canonical JS property lookup.  STRING keys may retain the legacy byte
+// fallback at an API boundary; SYMBOL and PRIVATE keys are pointer-only.
+ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key);
+
 // Convenience: set flags bits on the ShapeEntry for `name` (no-op if not found).
 // `set_mask` bits are OR'd in; `clear_mask` bits are cleared. Apply set first then clear.
 void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
                                  uint8_t set_mask, uint8_t clear_mask);
+void js_shape_entry_update_flags_key(Item obj, PropertyKeyRef key,
+                                     uint8_t set_mask, uint8_t clear_mask);
 
 // A2-T3: set or clear the JSPD_IS_ACCESSOR bit on the ShapeEntry for `name`.
 // Goes through the same Map-local clone primitive as

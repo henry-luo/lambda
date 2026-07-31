@@ -2608,7 +2608,8 @@ static Item fs_get_filehandle_prototype(void) {
     js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
     js_fs_set_method(fs_filehandle_proto, "readFile", (void*)js_fs_filehandle_readFile, 1);
     js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
-    js_fs_set_method(fs_filehandle_proto, "__sym_14", (void*)js_fs_filehandle_close, 0);
+    js_property_set(fs_filehandle_proto, js_well_known_symbol_key(14),
+        js_new_function((void*)js_fs_filehandle_close, 0));
     return fs_filehandle_proto;
 }
 

@@ -95,10 +95,10 @@ ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
 // Get section type from tag/display for visual ordering (CSS 2.1 Section 17.2)
 TableSectionType ViewTableRowGroup::get_section_type() const {
     // Check HTML tag first
-    uintptr_t tag = tag_id;
-    if (tag == HTM_TAG_THEAD) return TABLE_SECTION_THEAD;
-    if (tag == HTM_TAG_TFOOT) return TABLE_SECTION_TFOOT;
-    if (tag == HTM_TAG_TBODY) return TABLE_SECTION_TBODY;
+    NameId tag = tag_id;
+    if (tag == MARKUP_NAME_THEAD) return TABLE_SECTION_THEAD;
+    if (tag == MARKUP_NAME_TFOOT) return TABLE_SECTION_TFOOT;
+    if (tag == MARKUP_NAME_TBODY) return TABLE_SECTION_TBODY;
 
     // For CSS table elements (div with display: table-footer-group), resolve display
     // Note: The element's display field may not be set, so we resolve it fresh
@@ -2446,7 +2446,7 @@ static void table_clamp_column_max_width(TableMetadata* meta, float* col_widths,
 }
 
 static float table_resolve_column_length_constraint(LayoutContext* lycon, ViewBlock* col_elem,
-                                                    CssPropertyId property, float box_value,
+                                                    CssPropertyCode property, float box_value,
                                                     bool has_box_value, float unset_value) {
     if (has_box_value) return box_value;
     if (!col_elem || !col_elem->specified_style) return unset_value;
@@ -3255,8 +3255,8 @@ static bool is_out_of_flow_table_cell_slot(View* view) {
     ViewElement* elem = lam::view_as_element(view);
     if (!elem || elem->view_type == RDT_VIEW_TABLE_CELL) return false;
 
-    uintptr_t tag = elem->tag();
-    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return false;
+    NameId tag = elem->tag();
+    if (tag != MARKUP_NAME_TD && tag != MARKUP_NAME_TH) return false;
 
     return layout_view_is_out_of_flow_positioned(view);
 }
@@ -3824,7 +3824,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
     // This is only applied if the element is an actual HTML <table> tag
     if (element->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = element->as_element();
-        if (dom_elem->tag() == HTM_TAG_TABLE) {
+        if (dom_elem->tag() == MARKUP_NAME_TABLE) {
             // Set HTML UA default (can be overridden by CSS or cellspacing attribute below)
             table->tb->border_spacing_h = 2.0f;
             table->tb->border_spacing_v = 2.0f;
@@ -3915,7 +3915,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                 // When no border-spacing is declared on this element, inherit from
                 // ancestors. For real <table> elements, the UA default (2px) is already
                 // set above and should not be overridden by implicit inheritance.
-                bool is_html_table = (dom_elem->tag() == HTM_TAG_TABLE);
+                bool is_html_table = (dom_elem->tag() == MARKUP_NAME_TABLE);
                 if (!is_html_table) {
                     if (table_inherit_border_spacing(lycon, element, &table->tb->border_spacing_h,
                             &table->tb->border_spacing_v)) {
@@ -3987,7 +3987,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                           table->tb->border_collapse ? "collapse" : "separate");
             }
 
-            bool is_html_table = (dom_elem->tag() == HTM_TAG_TABLE);
+            bool is_html_table = (dom_elem->tag() == MARKUP_NAME_TABLE);
             if (!is_html_table && table_inherit_border_spacing(lycon, element,
                     &table->tb->border_spacing_h, &table->tb->border_spacing_v)) {
                 log_debug("Table border-spacing: anonymous inherit -> h=%.2fpx v=%.2fpx (from ancestor)",
@@ -4074,8 +4074,8 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     // css table cells default to baseline, but real HTML td/th elements have
     // ua middle alignment; table structure can be parsed before the UA inline
     // property is attached, so keep that HTML fallback here too.
-    uintptr_t tag = cellNode->tag();
-    cell->td->vertical_align = (tag == HTM_TAG_TD || tag == HTM_TAG_TH)
+    NameId tag = cellNode->tag();
+    cell->td->vertical_align = (tag == MARKUP_NAME_TD || tag == MARKUP_NAME_TH)
         ? TableCellProp::CELL_VALIGN_MIDDLE
         : TableCellProp::CELL_VALIGN_BASELINE;
     if (!cellNode->is_element()) return;
@@ -4182,7 +4182,7 @@ static inline bool is_caption_display(CssEnum display) {
 static bool table_view_is_caption(ViewBlock* child) {
     if (!child) return false;
     DisplayValue child_display = resolve_display_value((void*)child);
-    return child->tag() == HTM_TAG_CAPTION ||
+    return child->tag() == MARKUP_NAME_CAPTION ||
         is_caption_display(child_display.inner);
 }
 
@@ -4667,15 +4667,15 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         }
 
         DisplayValue display = resolve_display_value(child);
-        uintptr_t tag = child->tag();
+        NameId tag = child->tag();
 
         // Check if this is a proper table child
         bool is_row_group = is_row_group_display(display.inner);
         bool is_row = is_row_display(display.inner);
         bool is_cell = is_cell_display(display.inner);
         bool is_column = is_column_display(display.inner) ||
-                        tag == HTM_TAG_COL || tag == HTM_TAG_COLGROUP;
-        bool is_caption = is_caption_display(display.inner) || tag == HTM_TAG_CAPTION;
+                        tag == MARKUP_NAME_COL || tag == MARKUP_NAME_COLGROUP;
+        bool is_caption = is_caption_display(display.inner) || tag == MARKUP_NAME_CAPTION;
 
         if (is_row_group || is_column || is_caption) {
             // Proper table child - flush any accumulated runs first
@@ -5021,7 +5021,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     if (!node || !node->is_element()) return;
 
     DisplayValue display = resolve_display_value(node);
-    uintptr_t tag = node->tag();
+    NameId tag = node->tag();
 
     // CSS 2.1 §9.7: Elements with float become block-level elements
     // Check if this element has float set - if so, it's not a table internal element
@@ -5082,7 +5082,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     lycon->elmt = node;
 
     // Mark node based on display type or HTML tag
-    if (tag == HTM_TAG_CAPTION || display.inner == CSS_VALUE_TABLE_CAPTION) {
+    if (tag == MARKUP_NAME_CAPTION || display.inner == CSS_VALUE_TABLE_CAPTION) {
         // Caption - mark as block and layout content immediately
         ViewBlock* caption = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, node));
         if (caption) {
@@ -5312,7 +5312,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon->font = saved_font;
         }
     }
-    else if (tag == HTM_TAG_COLGROUP || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
+    else if (tag == MARKUP_NAME_COLGROUP || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
         // Column group - mark with view type and recurse to handle child columns
         // CSS 2.1 §17.2.1: Column groups don't generate cells, only provide metadata
         ViewBlock* colgroup = lam::view_require_block(set_view(lycon, RDT_VIEW_TABLE_COLUMN_GROUP, node));
@@ -5333,7 +5333,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon->font = saved_font;
         }
     }
-    else if (tag == HTM_TAG_COL || display.inner == CSS_VALUE_TABLE_COLUMN) {
+    else if (tag == MARKUP_NAME_COL || display.inner == CSS_VALUE_TABLE_COLUMN) {
         // Column - mark with view type
         // CSS 2.1 §17.2.1: Columns don't generate cells, only provide metadata
         ViewBlock* col = lam::view_require_block(set_view(lycon, RDT_VIEW_TABLE_COLUMN, node));
@@ -6672,8 +6672,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
 
         DomNode* cc = lam::dom_require_element(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
-            uintptr_t child_tag = cc->tag();
-            if (child_tag == HTM_TAG_IMG) {
+            NameId child_tag = cc->tag();
+            if (child_tag == MARKUP_NAME_IMG) {
                 log_debug("%s [TABLE CELL IMG] Found IMG child in table cell, calling layout_flow_node: %s", cell->source_loc(), cc->node_name());
             }
             layout_flow_node(lycon, cc);
@@ -7147,8 +7147,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
             bool child_is_float = table_element_is_floated(child_elem);
 
             // Special handling for <br> - it breaks the inline run even though it's inline
-            uintptr_t child_tag = child->tag();
-            bool is_line_break = (child_tag == HTM_TAG_BR);
+            NameId child_tag = child->tag();
+            bool is_line_break = (child_tag == MARKUP_NAME_BR);
 
             if (is_line_break) {
                 // <br> forces a line break - finalize current inline run
@@ -7178,8 +7178,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                     // No resolved styles yet (measurement pass before layout).
                     // Apply UA default margins for known form controls to get accurate sizing.
                     // These mirror the values set in resolve_htm_style.cpp for checkbox/radio.
-                    uintptr_t ctag = child_elem->tag();
-                    if (ctag == HTM_TAG_INPUT) {
+                    NameId ctag = child_elem->tag();
+                    if (ctag == MARKUP_NAME_INPUT) {
                         const char* inp_type = child_elem->get_attribute("type");
                         if (inp_type && strcmp(inp_type, "radio") == 0) {
                             inline_margin_h = FormDefaults::RADIO_MARGIN_LEFT + FormDefaults::RADIO_MARGIN_RIGHT;

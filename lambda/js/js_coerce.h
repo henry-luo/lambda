@@ -30,7 +30,7 @@ typedef enum {
 //
 // For non-object inputs (the wide majority of calls), returns `value`
 // unchanged. For object inputs, looks up @@toPrimitive (Symbol.toPrimitive,
-// stored as the internal __sym_2 key); if present and callable, invokes it
+// represented by its realm-local Symbol.toPrimitive property key); if present and callable, invokes it
 // with the hint string and validates the result is primitive. Otherwise
 // runs OrdinaryToPrimitive — calling valueOf then toString (or reverse for
 // JS_HINT_STRING), returning the first primitive result. If both methods

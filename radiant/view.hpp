@@ -10,6 +10,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/core/well_known_markup_names.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
@@ -57,7 +58,7 @@ typedef CssPropSerializeFn CssPropDeriveFn;
 // The row shape is intentionally plain and pointer-free apart from callbacks so
 // Jube's record dispatch can index the same immutable descriptors.
 struct CssPropAccessor {
-    CssPropertyId id;
+    CssPropertyCode id;
     PropGroupKind group_kind;
     uint16_t offset;
     CssPropValueKind value_kind;
@@ -66,9 +67,9 @@ struct CssPropAccessor {
     CssPropDeriveFn derive;
 };
 
-const CssPropAccessor* css_prop_accessor(CssPropertyId id);
+const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
-bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,
+bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
 
 // Return a committed view's visual CSS-pixel bounds, including transforms on
@@ -334,206 +335,6 @@ inline T lerp(T a, T b, float t) {
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
-
-// Define lexbor tag and CSS value constants first, before including headers that need them
-enum {
-    HTM_TAG__UNDEF,
-    HTM_TAG__TEXT,          // text node
-    HTM_TAG__EM_COMMENT,    // for HTML comments
-    HTM_TAG__EM_DOCTYPE,    // for DOCTYPE declaration
-    HTM_TAG_A,
-    HTM_TAG_ABBR,
-    HTM_TAG_ACRONYM,
-    HTM_TAG_ADDRESS,
-    HTM_TAG_ALTGLYPH,
-    HTM_TAG_ALTGLYPHDEF,
-    HTM_TAG_ALTGLYPHITEM,
-    HTM_TAG_ANIMATECOLOR,
-    HTM_TAG_ANIMATEMOTION,
-    HTM_TAG_ANIMATETRANSFORM,
-    HTM_TAG_ANNOTATION_XML,
-    HTM_TAG_APPLET,
-    HTM_TAG_AREA,
-    HTM_TAG_ARTICLE,
-    HTM_TAG_ASIDE,
-    HTM_TAG_AUDIO,
-    HTM_TAG_B,
-    HTM_TAG_BASE,
-    HTM_TAG_BASEFONT,
-    HTM_TAG_BDI,
-    HTM_TAG_BDO,
-    HTM_TAG_BGSOUND,
-    HTM_TAG_BIG,
-    HTM_TAG_BLINK,
-    HTM_TAG_BLOCKQUOTE,
-    HTM_TAG_BODY,
-    HTM_TAG_BR,
-    HTM_TAG_BUTTON,
-    HTM_TAG_CANVAS,
-    HTM_TAG_CAPTION,
-    HTM_TAG_CENTER,
-    HTM_TAG_CITE,
-    HTM_TAG_CLIPPATH,
-    HTM_TAG_CODE,
-    HTM_TAG_COL,
-    HTM_TAG_COLGROUP,
-    HTM_TAG_DATA,
-    HTM_TAG_DATALIST,
-    HTM_TAG_DD,
-    HTM_TAG_DEL,
-    HTM_TAG_DESC,
-    HTM_TAG_DETAILS,
-    HTM_TAG_DFN,
-    HTM_TAG_DIALOG,
-    HTM_TAG_DIR,
-    HTM_TAG_DIV,
-    HTM_TAG_DL,
-    HTM_TAG_DT,
-    HTM_TAG_EM,
-    HTM_TAG_EMBED,
-    HTM_TAG_FEBLEND,
-    HTM_TAG_FECOLORMATRIX,
-    HTM_TAG_FECOMPONENTTRANSFER,
-    HTM_TAG_FECOMPOSITE,
-    HTM_TAG_FECONVOLVEMATRIX,
-    HTM_TAG_FEDIFFUSELIGHTING,
-    HTM_TAG_FEDISPLACEMENTMAP,
-    HTM_TAG_FEDISTANTLIGHT,
-    HTM_TAG_FEDROPSHADOW,
-    HTM_TAG_FEFLOOD,
-    HTM_TAG_FEFUNCA,
-    HTM_TAG_FEFUNCB,
-    HTM_TAG_FEFUNCG,
-    HTM_TAG_FEFUNCR,
-    HTM_TAG_FEGAUSSIANBLUR,
-    HTM_TAG_FEIMAGE,
-    HTM_TAG_FEMERGE,
-    HTM_TAG_FEMERGENODE,
-    HTM_TAG_FEMORPHOLOGY,
-    HTM_TAG_FEOFFSET,
-    HTM_TAG_FEPOINTLIGHT,
-    HTM_TAG_FESPECULARLIGHTING,
-    HTM_TAG_FESPOTLIGHT,
-    HTM_TAG_FETILE,
-    HTM_TAG_FETURBULENCE,
-    HTM_TAG_FIELDSET,
-    HTM_TAG_FIGCAPTION,
-    HTM_TAG_FIGURE,
-    HTM_TAG_FONT,
-    HTM_TAG_FOOTER,
-    HTM_TAG_FOREIGNOBJECT,
-    HTM_TAG_FORM,
-    HTM_TAG_FRAME,
-    HTM_TAG_FRAMESET,
-    HTM_TAG_GLYPHREF,
-    HTM_TAG_H1,
-    HTM_TAG_H2,
-    HTM_TAG_H3,
-    HTM_TAG_H4,
-    HTM_TAG_H5,
-    HTM_TAG_H6,
-    HTM_TAG_HEAD,
-    HTM_TAG_HEADER,
-    HTM_TAG_HGROUP,
-    HTM_TAG_HR,
-    HTM_TAG_HTML,
-    HTM_TAG_I,
-    HTM_TAG_IFRAME,
-    HTM_TAG_IMAGE,
-    HTM_TAG_IMG,
-    HTM_TAG_INPUT,
-    HTM_TAG_INS,
-    HTM_TAG_ISINDEX,
-    HTM_TAG_KBD,
-    HTM_TAG_KEYGEN,
-    HTM_TAG_LABEL,
-    HTM_TAG_LEGEND,
-    HTM_TAG_LI,
-    HTM_TAG_LINEARGRADIENT,
-    HTM_TAG_LINK,
-    HTM_TAG_LISTING,
-    HTM_TAG_MAIN,
-    HTM_TAG_MALIGNMARK,
-    HTM_TAG_MAP,
-    HTM_TAG_MARK,
-    HTM_TAG_MARQUEE,
-    HTM_TAG_MATH,
-    HTM_TAG_MENU,
-    HTM_TAG_META,
-    HTM_TAG_METER,
-    HTM_TAG_MFENCED,
-    HTM_TAG_MGLYPH,
-    HTM_TAG_MI,
-    HTM_TAG_MN,
-    HTM_TAG_MO,
-    HTM_TAG_MS,
-    HTM_TAG_MTEXT,
-    HTM_TAG_MULTICOL,
-    HTM_TAG_NAV,
-    HTM_TAG_NEXTID,
-    HTM_TAG_NOBR,
-    HTM_TAG_NOEMBED,
-    HTM_TAG_NOFRAMES,
-    HTM_TAG_NOSCRIPT,
-    HTM_TAG_OBJECT,
-    HTM_TAG_OL,
-    HTM_TAG_OPTGROUP,
-    HTM_TAG_OPTION,
-    HTM_TAG_OUTPUT,
-    HTM_TAG_P,
-    HTM_TAG_PARAM,
-    HTM_TAG_PATH,
-    HTM_TAG_PICTURE,
-    HTM_TAG_PLAINTEXT,
-    HTM_TAG_PRE,
-    HTM_TAG_PROGRESS,
-    HTM_TAG_Q,
-    HTM_TAG_RADIALGRADIENT,
-    HTM_TAG_RB,
-    HTM_TAG_RP,
-    HTM_TAG_RT,
-    HTM_TAG_RTC,
-    HTM_TAG_RUBY,
-    HTM_TAG_S,
-    HTM_TAG_SAMP,
-    HTM_TAG_SCRIPT,
-    HTM_TAG_SECTION,
-    HTM_TAG_SELECT,
-    HTM_TAG_SLOT,
-    HTM_TAG_SMALL,
-    HTM_TAG_SOURCE,
-    HTM_TAG_SPACER,
-    HTM_TAG_SPAN,
-    HTM_TAG_STRIKE,
-    HTM_TAG_STRONG,
-    HTM_TAG_STYLE,
-    HTM_TAG_SUB,
-    HTM_TAG_SUMMARY,
-    HTM_TAG_SUP,
-    HTM_TAG_SVG,
-    HTM_TAG_TABLE,
-    HTM_TAG_TBODY,
-    HTM_TAG_TD,
-    HTM_TAG_TEMPLATE,
-    HTM_TAG_TEXTAREA,
-    HTM_TAG_TEXTPATH,
-    HTM_TAG_TFOOT,
-    HTM_TAG_TH,
-    HTM_TAG_THEAD,
-    HTM_TAG_TIME,
-    HTM_TAG_TITLE,
-    HTM_TAG_TR,
-    HTM_TAG_TRACK,
-    HTM_TAG_TT,
-    HTM_TAG_U,
-    HTM_TAG_UL,
-    HTM_TAG_VAR,
-    HTM_TAG_VIDEO,
-    HTM_TAG_WBR,
-    HTM_TAG_WEBVIEW,
-    HTM_TAG_XMP,
-    HTM_TAG__LAST_ENTRY         = 0x00c5
-};
 
 // radiant specific CSS display values
 #define RDT_DISPLAY_TEXT                CSS_VALUE_TEXT
@@ -2464,7 +2265,7 @@ struct TransformFunction;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimatedProp {
-    CssPropertyId property_id;
+    CssPropertyCode property_code;
     CssAnimValueType value_type;
     union {
         float f;                // ANIM_VAL_FLOAT
@@ -2538,7 +2339,7 @@ typedef struct CssAnimProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionProp {
-    CssPropertyId* properties;  // transitioned property IDs (NULL = all)
+    CssPropertyCode* properties;  // transitioned property IDs (NULL = all)
     int property_count;         // -1 = "all"
     float duration;             // transition-duration in seconds
     float delay;                // transition-delay in seconds
@@ -2547,7 +2348,7 @@ typedef struct CssTransitionProp {
 
 bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
                                    CssTransitionProp* transition,
-                                   CssPropertyId* property_buffer,
+                                   CssPropertyCode* property_buffer,
                                    int property_capacity);
 bool css_transition_resolve_values(const CssValue* shorthand_value,
                                    const CssValue* duration_value,
@@ -2555,7 +2356,7 @@ bool css_transition_resolve_values(const CssValue* shorthand_value,
                                    const CssValue* property_value,
                                    const CssValue* timing_value,
                                    CssTransitionProp* transition,
-                                   CssPropertyId* property_buffer,
+                                   CssPropertyCode* property_buffer,
                                    int property_capacity);
 
 // ============================================================================
@@ -2584,7 +2385,7 @@ typedef struct CssAnimState {
 // snapshot) plus the currently running transition instance (if any).
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionTrack {
-    CssPropertyId property_id;
+    CssPropertyCode property_code;
     CssAnimValueType value_type;
     bool has_snapshot;              // false until the first used value is observed
     union {
@@ -2605,7 +2406,7 @@ typedef struct CssTransitionElemState {
 typedef struct CssTransitionState {
     DomElement* element;
     UiContext* ui_context;
-    CssPropertyId property_id;
+    CssPropertyCode property_code;
     CssAnimValueType value_type;
     union {
         float f;
@@ -2677,7 +2478,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon);
 // CSS shorthand resolve-only declaration helpers.
 //
 // Background: shorthand expansion in resolve_css_style.cpp copies a parsed
-// CssDeclaration, rewrites property_id, and points value at a longhand
+// CssDeclaration, rewrites property_code, and points value at a longhand
 // CSS value before calling resolve_css_property(). When the value is a small
 // synthetic list built on the stack, the list must stay alive for the whole
 // resolve call. Manually assigning decl.value = &local_list is fragile: a
@@ -2693,7 +2494,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon);
 // during the call but must not retain a pointer from a resolve-only
 // declaration. Persistent CSS values use the PersistentField path instead.
 
-// CssDeclaration, CssValue, CssPropertyId, CSS_VALUE_TYPE_LIST
+// CssDeclaration, CssValue, CssPropertyCode, CSS_VALUE_TYPE_LIST
 
 // LayoutContext lives in radiant/layout.hpp. Forward declare it here so view
 // helpers can expose style-resolution entry points without dragging in layout.
@@ -2702,7 +2503,7 @@ struct LayoutContext;
 // ===== style resolution =====
 
 float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
-                                   CssPropertyId prop_id);
+                                   CssPropertyCode prop_id);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
@@ -2721,7 +2522,7 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              size_t family_start_index,
                                              bool require_loadable_face_source);
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
-void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child);
 DisplayValue blockify_display(DisplayValue display);
 
@@ -2733,9 +2534,9 @@ class CssTempDecl {
     CssDeclaration decl_;
 
 public:
-    CssTempDecl(const CssDeclaration* base, CssPropertyId prop, const CssValue* value)
+    CssTempDecl(const CssDeclaration* base, CssPropertyCode prop, const CssValue* value)
         : decl_(*base) {
-        decl_.property_id = prop;
+        decl_.property_code = prop;
         // resolve-only contract: value is read during the call, never retained
         decl_.value = const_cast<CssValue*>(value);
     }
@@ -2744,7 +2545,7 @@ public:
     CssTempDecl& operator=(const CssTempDecl&) = delete;
 
     void resolve(LayoutContext* lycon) {
-        resolve_css_property(decl_.property_id, &decl_, lycon);
+        resolve_css_property(decl_.property_code, &decl_, lycon);
     }
 };
 
@@ -2760,9 +2561,9 @@ class CssTempListDecl {
     int count_;
 
 public:
-    CssTempListDecl(const CssDeclaration* base, CssPropertyId prop)
+    CssTempListDecl(const CssDeclaration* base, CssPropertyCode prop)
         : decl_(*base), list_(), count_(0) {
-        decl_.property_id = prop;
+        decl_.property_code = prop;
         for (int i = 0; i < N; i++) values_[i] = nullptr;
     }
 
@@ -2793,7 +2594,7 @@ public:
             list_.data.list.count = count_;
             decl_.value = &list_;  // CSS_TEMP_DECL_OK: list_ outlives this resolve call.
         }
-        resolve_css_property(decl_.property_id, &decl_, lycon);
+        resolve_css_property(decl_.property_code, &decl_, lycon);
     }
 };
 

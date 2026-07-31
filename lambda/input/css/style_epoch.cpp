@@ -289,7 +289,7 @@ static bool style_rule_is_shareable(CssRule* rule, CssSpecificity specificity) {
             declaration->property_name[1] == '-') ||
             // canonical recipes bypass dom_element_apply_declaration(), so validate
             // here or an invalid later declaration can displace the last valid one.
-            !css_property_validate_value(declaration->property_id,
+            !css_property_validate_value(declaration->property_code,
                                          declaration->value) ||
             !css_declaration_can_clone_owned(declaration)) return false;
     }

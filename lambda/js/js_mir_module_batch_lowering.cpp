@@ -7329,18 +7329,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                             // Also store as own property on class for hasOwnProperty/in/getOwnPropertyDescriptor
                             if (sf->name) {
-                                char display_buf[256];
-                                const char* display_name = sf->name->chars;
-                                if (strncmp(display_name, "__private_", 10) == 0) {
-                                    int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                                    display_name = display_buf;
-                                    (void)len;
-                                }
-                                MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                                MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                                 jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                                 MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                                if (jm_is_private_name(sf->name)) {
+                                    key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                                }
                                 jm_call_void_1(mt, "js_check_class_static_field_key",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                                 jm_call_3(mt, "js_create_data_property", MIR_T_I64,
@@ -7391,18 +7389,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     MIR_new_reg_op(mt->ctx, val),
                                     MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                             }
-                            char display_buf[256];
-                            const char* display_name = sf->name->chars;
-                            if (strncmp(display_name, "__private_", 10) == 0) {
-                                int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                                display_name = display_buf;
-                                (void)len;
-                            }
-                            MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                            MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                             MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                            if (jm_is_private_name(sf->name)) {
+                                key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                            }
                             jm_call_void_1(mt, "js_check_class_static_field_key",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                             jm_call_3(mt, "js_create_data_property", MIR_T_I64,

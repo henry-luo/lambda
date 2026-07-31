@@ -287,7 +287,7 @@ static inline uint32_t js_dom_mutation_bit(DomJsMutationKind kind) {
     return 1u << slot;
 }
 
-static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyId prop_id) {
+static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyCode prop_id) {
     switch (prop_id) {
         case CSS_PROPERTY_BACKGROUND_COLOR:
         case CSS_PROPERTY_COLOR:
@@ -3769,8 +3769,7 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
             make_js_undefined(), iterator_args, 1);
         // DOMTokenList is iterable; delegated UI event routers commonly spread
         // classList while resolving their target before invoking callbacks.
-        js_property_set(wrapper,
-            (Item){.item = s2it(heap_create_name("__sym_1"))}, iterator);
+        js_property_set(wrapper, js_well_known_symbol_key(1), iterator);
         if (exp_map.item != ITEM_NULL) js_property_set(exp_map, cache_key, wrapper);
     }
     js_property_set(wrapper, (Item){.item = s2it(heap_create_name("length"))},
@@ -4313,10 +4312,10 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     }
 
     // look up the CSS property ID
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     if (prop_id == CSS_PROPERTY_UNKNOWN || prop_id == 0) {
         // check for CSS custom properties (--foo)
-        // note: css_property_get_id_by_name returns 0 for not-found, CSS_PROPERTY_UNKNOWN is -1
+        // note: css_property_code_from_name returns 0 for not-found, CSS_PROPERTY_UNKNOWN is -1
         if (css_prop[0] == '-' && css_prop[1] == '-') {
             // on-demand matching for custom property
             CssDeclaration* decl = js_match_custom_property(elem, css_prop);
@@ -5204,7 +5203,7 @@ static float js_dom_inline_css_dimension(DomElement* elem,
 static float js_dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0.0f;
     char value[64];
-    CssPropertyId property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
+    CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     if (!css_prop_serialize_computed(elem, property, 0, value, sizeof(value))) {
         return 0.0f;
     }
@@ -8316,8 +8315,7 @@ static Item _build_validity_state(DomElement* elem) {
     Item vs = js_new_object();
     // Set Symbol.toStringTag = "ValidityState" so
     // Object.prototype.toString.call(validity) === "[object ValidityState]"
-    js_property_set(vs,
-        (Item){.item = s2it(heap_create_name("__sym_4"))},
+    js_property_set(vs, js_well_known_symbol_key(4),
         (Item){.item = s2it(heap_create_name("ValidityState"))});
     bool value_missing   = false;
     bool type_mismatch   = false;
@@ -11033,7 +11031,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 
     // CSSOM §6.7.3: setting a property to empty string removes it
     if (!val_str[0]) {
-        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        CssPropertyCode prop_id = css_property_code_from_name(css_prop);
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
             js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
             elem->set_styles_resolved(false);
@@ -11063,7 +11061,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     // apply as inline style (highest cascade priority)
     js_dom_update_inline_style_attribute(elem, css_prop, val_str, nullptr);
     elem->set_styles_resolved(false);  // mark for re-cascading
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                            (DomNode*)elem, elem->parent);
 
@@ -11120,7 +11118,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     }
 
     // look up the CSS property ID
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     if (prop_id == CSS_PROPERTY_UNKNOWN) {
         log_debug("js_dom_get_style_property: unknown CSS property '%s'", css_prop);
         return (Item){.item = s2it(heap_create_name(""))};
@@ -11134,7 +11132,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         if (css_property_is_shorthand(prop_id)) {
             char longhand[128];
             snprintf(longhand, sizeof(longhand), "%s-top", css_prop);
-            CssPropertyId lh_id = css_property_id_from_name(longhand);
+            CssPropertyCode lh_id = css_property_code_from_name(longhand);
             if (lh_id != CSS_PROPERTY_UNKNOWN) {
                 decl = dom_element_get_specified_value(elem, lh_id);
             }
@@ -11169,7 +11167,7 @@ extern "C" Item js_style_css_has(Item style_item, Item prop_name) {
     if (!js_inline_style_cssom_property_exposed(css_prop)) {
         return (Item){.item = b2it(false)};
     }
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     return (Item){.item = b2it(prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0)};
 }
 
@@ -11822,8 +11820,8 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     if (!js_dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
     ((DomNode*)elem)->append_child(child_node);
     dom_post_insert((DomNode*)elem, child_node);
-    if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
-        elem->tag() == HTM_TAG_SELECT) {
+    if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
+        elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
@@ -11847,8 +11845,8 @@ extern "C" Item js_dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
     }
     dom_pre_remove(child_node);
     ((DomNode*)elem)->remove_child(child_node);
-    if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
-        elem->tag() == HTM_TAG_SELECT) {
+    if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
+        elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
     }
     js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
@@ -11907,7 +11905,7 @@ extern "C" Item js_dom_remove_bridge(void* node_ptr) {
     if (node->parent) {
         DomNode* old_parent = node->parent;
         DomElement* owner_select = nullptr;
-        if (node->is_element() && node->as_element()->tag() == HTM_TAG_OPTION) {
+        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_OPTION) {
             owner_select = _option_owner_select(node->as_element());
         }
         // removal must notify live ranges before native sibling links change.
@@ -12321,8 +12319,8 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
             }
             ((DomNode*)elem)->insert_before(child_node, ref);
             dom_post_insert((DomNode*)elem, child_node);
-            if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
-                child_node->as_element()->tag() == HTM_TAG_OPTION) {
+            if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
+                child_node->as_element()->tag() == MARKUP_NAME_OPTION) {
                 DomElement* child_elem = child_node->as_element();
                 if (_get_selectedness(child_elem) && !elem->has_attribute("multiple")) {
                     _select_select_only_option(elem, child_elem);
@@ -12424,7 +12422,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     if (strcmp(method, "remove") == 0) {
         if (node->parent) {
             DomElement* owner_select = nullptr;
-            if (node->is_element() && node->as_element()->tag() == HTM_TAG_OPTION) {
+            if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_OPTION) {
                 owner_select = _option_owner_select(node->as_element());
             }
             // Phase 8A: live-range cascade must run before the structural change.
@@ -12739,8 +12737,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         // use DomNode::append_child which handles all node types
         ((DomNode*)elem)->append_child(child_node);
         dom_post_insert((DomNode*)elem, child_node);
-        if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
-            elem->tag() == HTM_TAG_SELECT) {
+        if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
+            elem->tag() == MARKUP_NAME_SELECT) {
             _select_ask_for_reset(elem);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
@@ -12765,8 +12763,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         }
         dom_pre_remove(child_node);
         ((DomNode*)elem)->remove_child(child_node);
-        if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
-            elem->tag() == HTM_TAG_SELECT) {
+        if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
+            elem->tag() == MARKUP_NAME_SELECT) {
             _select_ask_for_reset(elem);
         }
         js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
@@ -13242,8 +13240,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             if (child_node) {
                 if (child_node->parent) child_node->parent->remove_child(child_node);
                 ((DomNode*)elem)->insert_before(child_node, ref);
-                if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
-                    child_node->as_element()->tag() == HTM_TAG_OPTION) {
+                if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
+                    child_node->as_element()->tag() == MARKUP_NAME_OPTION) {
                     DomElement* child_elem = child_node->as_element();
                     if (_get_selectedness(child_elem) && !elem->has_attribute("multiple")) {
                         _select_select_only_option(elem, child_elem);
@@ -13907,7 +13905,7 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
         elem, css_prop, val_str, priority) ? 1 : 0;
     elem->set_styles_resolved(false);
     if (applied) {
-        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        CssPropertyCode prop_id = css_property_code_from_name(css_prop);
         js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                                (DomNode*)elem, elem->parent);
     }
@@ -13930,7 +13928,7 @@ static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_ar
     if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
 
     // get old value before removing
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     Item old_val = (Item){.item = s2it(heap_create_name(""))};
     if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
         CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
@@ -13982,7 +13980,7 @@ static void _set_iface_to_string_tag(Item proto, const char* name) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
     // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
     // libraries use this brand to distinguish a DOM Element from plain data.
-    js_property_set(proto, js_string_key("__sym_4"),
+    js_property_set(proto, js_well_known_symbol_key(4),
                     (Item){.item = s2it(heap_create_name(name))});
 }
 

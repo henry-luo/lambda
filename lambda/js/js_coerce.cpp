@@ -17,10 +17,10 @@
 String* heap_create_name(const char* name, size_t len);
 Map* js_resolve_object_prototype();
 
-// Cached interned symbol/method-name keys. heap_create_name interns into
-// the name pool, so these are stable for the lifetime of the heap.
+// Cached interned method-name keys. Well-known Symbols use the generated
+// runtime records below because their diagnostic spelling is not identity.
 static inline Item k_sym_to_primitive(void) {
-    return (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+    return js_well_known_symbol_key(2);
 }
 static inline Item k_value_of(void) {
     return (Item){.item = s2it(heap_create_name("valueOf", 7))};
@@ -92,7 +92,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             bool has_vo = false, has_ts = false, has_tp = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
-            js_map_get_fast_ext(value.map, "__sym_2", 7, &has_tp);
+            has_tp = it2b(js_has_own_property(value, k_sym_to_primitive()));
             if (!has_vo && !has_ts && !has_tp) return pv;
         }
     }

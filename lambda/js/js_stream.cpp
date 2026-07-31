@@ -3607,8 +3607,8 @@ static Item js_stream_async_iterator(Item self) {
     js_array_push(iterators, iterator);
 
     Item identity_fn = js_new_function((void*)js_stream_iterator_identity, 0);
-    Item async_key = make_string_item("__sym_5");
-    Item iter_key = make_string_item("__sym_1");
+    Item async_key = js_well_known_symbol_key(5);
+    Item iter_key = js_well_known_symbol_key(1);
     js_property_set(iterator, async_key, identity_fn);
     js_property_set(iterator, iter_key, identity_fn);
     js_mark_non_enumerable(iterator, async_key);
@@ -4580,11 +4580,11 @@ static Item js_stream_iter_identity(void) {
     return js_get_this();
 }
 
-static bool js_stream_iter_has_method(Item value, const char* name, int len) {
+static bool js_stream_iter_has_method(Item value, Item key) {
     TypeId tid = get_type_id(value);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT && tid != LMD_TYPE_ARRAY)
         return false;
-    Item method = js_property_get(value, make_string_item(name, len));
+    Item method = js_property_get(value, key);
     return get_type_id(method) == LMD_TYPE_FUNC;
 }
 
@@ -4696,9 +4696,9 @@ static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable,
 
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("next"), js_new_closure((void*)js_stream_iter_batch_next, 0, env, 5));
-    js_property_set(obj, make_string_item("__sym_1"), js_new_function((void*)js_stream_iter_identity, 0));
+    js_property_set(obj, js_well_known_symbol_key(1), js_new_function((void*)js_stream_iter_identity, 0));
     if (async_iterable)
-        js_property_set(obj, make_string_item("__sym_5"), js_new_function((void*)js_stream_iter_identity, 0));
+        js_property_set(obj, js_well_known_symbol_key(5), js_new_function((void*)js_stream_iter_identity, 0));
     return obj;
 }
 
@@ -4710,14 +4710,15 @@ static bool js_stream_iter_value_can_sync(Item source) {
     if (js_stream_iter_source_is_single_chunk(source)) return true;
     if (tid == LMD_TYPE_ARRAY) return true;
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT)
-        return js_stream_iter_has_method(source, "__sym_1", 7);
+        return js_stream_iter_has_method(source, js_well_known_symbol_key(1));
     return false;
 }
 
 static Item js_stream_iter_from(Item source) {
     if (!js_stream_iter_apply_protocol(&source, "Stream.toAsyncStreamable"))
         return ItemNull;
-    if (js_stream_iter_has_method(source, "__sym_5", 7) && !js_stream_iter_has_method(source, "__sym_1", 7))
+    if (js_stream_iter_has_method(source, js_well_known_symbol_key(5)) &&
+        !js_stream_iter_has_method(source, js_well_known_symbol_key(1)))
         return js_stream_iter_to_readable(source);
     if (!js_stream_iter_apply_protocol(&source, "Stream.toStreamable"))
         return ItemNull;
@@ -5768,9 +5769,9 @@ static Item js_stream_iter_push(Item options_or_transform) {
     js_property_set(writer, make_string_item("end"), js_new_function((void*)js_stream_iter_writer_end, 0));
     js_property_set(writer, make_string_item("endSync"), js_new_function((void*)js_stream_iter_writer_endSync, 0));
     js_property_set(writer, make_string_item("fail"), js_new_function((void*)js_stream_iter_writer_fail, 1));
-    js_property_set(writer, make_string_item("__sym_14"),
+    js_property_set(writer, js_well_known_symbol_key(14),
                     js_new_function((void*)js_stream_iter_writer_async_dispose, 0));
-    js_property_set(writer, make_string_item("__sym_15"),
+    js_property_set(writer, js_well_known_symbol_key(15),
                     js_new_function((void*)js_stream_iter_writer_sync_dispose, 0));
     js_install_native_accessor(writer, make_string_item("desiredSize"),
                                js_new_function((void*)js_stream_iter_writer_desired_size, 0),
@@ -6612,8 +6613,8 @@ static void js_stream_install_async_iterator(Item obj) {
     RootFrame roots(4);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> iterator_root(roots, js_new_function((void*)js_stream_inst_asyncIterator, 0));
-    Rooted<Item> async_key_root(roots, make_string_item("__sym_5"));
-    Rooted<Item> iter_key_root(roots, make_string_item("__sym_1"));
+    Rooted<Item> async_key_root(roots, js_well_known_symbol_key(5));
+    Rooted<Item> iter_key_root(roots, js_well_known_symbol_key(1));
     js_property_set(object_root.get(), async_key_root.get(), iterator_root.get());
     js_property_set(object_root.get(), iter_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(object_root.get(), async_key_root.get());
@@ -8394,9 +8395,9 @@ static bool js_readable_from_is_iterable(Item value) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY) {
         return false;
     }
-    Item async_iter = js_property_get(value, make_string_item("__sym_5"));
+    Item async_iter = js_property_get(value, js_well_known_symbol_key(5));
     if (get_type_id(async_iter) == LMD_TYPE_FUNC) return true;
-    Item iter = js_property_get(value, make_string_item("__sym_1"));
+    Item iter = js_property_get(value, js_well_known_symbol_key(1));
     return get_type_id(iter) == LMD_TYPE_FUNC;
 }
 
@@ -9415,7 +9416,7 @@ static void js_stream_mark_constructor_prototype(Item ctor, Item proto, JsClass 
 }
 
 static void js_stream_install_has_instance(Item ctor, void* has_instance) {
-    Item key = make_string_item("__sym_3");
+    Item key = js_well_known_symbol_key(3);
     Item fn = js_new_function(has_instance, 1);
     js_create_data_property(ctor, key, fn);
     js_mark_non_enumerable(ctor, key);

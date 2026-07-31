@@ -21,7 +21,6 @@
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
-#include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
 void element_dom_map_remove(HashMap* map, Element* elem);
 
@@ -740,6 +739,13 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     return false;
 }
 
+bool DomElement::set_attribute(NameId name_id, const char* value) {
+    StrView name = well_known_name_view(name_id);
+    // DOM storage still accepts bytes, but generated callers must preserve the
+    // NameId until this single backing-map boundary.
+    return name.str ? set_attribute(name.str, value) : false;
+}
+
 const char* DomElement::get_attribute(const char* name) {
     DomElement* element = this;
     if (!name || name[0] == '\0') {
@@ -771,6 +777,11 @@ const char* DomElement::get_attribute(const char* name) {
     }
 
     return nullptr;
+}
+
+const char* DomElement::get_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str ? get_attribute(name.str) : nullptr;
 }
 
 bool DomElement::remove_attribute(const char* name) {
@@ -819,6 +830,11 @@ bool DomElement::remove_attribute(const char* name) {
     return false;
 }
 
+bool DomElement::remove_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str ? remove_attribute(name.str) : false;
+}
+
 bool DomElement::has_attribute(const char* name) {
     DomElement* element = this;
     if (!name) {
@@ -835,6 +851,11 @@ bool DomElement::has_attribute(const char* name) {
     }
 
     return false;
+}
+
+bool DomElement::has_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str && has_attribute(name.str);
 }
 
 const char** DomElement::attribute_names(int* count) {
@@ -1243,7 +1264,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // Validate the property value before applying
-    if (!css_property_validate_value(declaration->property_id, declaration->value)) {
+    if (!css_property_validate_value(declaration->property_code, declaration->value)) {
         return false;
     }
 
@@ -1288,21 +1309,21 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
     return applied_count;
 }
 
-CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id) {
+CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyCode property_code) {
     if (!element || !element->specified_style) {
         return NULL;
     }
 
-    return style_tree_get_declaration(element->specified_style, property_id);
+    return style_tree_get_declaration(element->specified_style, property_code);
 }
 
-bool dom_element_remove_property(DomElement* element, CssPropertyId property_id) {
+bool dom_element_remove_property(DomElement* element, CssPropertyCode property_code) {
     if (!element || !element->specified_style) {
         return false;
     }
 
     if (!style_epoch_ensure_owned(element)) return false;
-    bool removed = style_tree_remove_property(element->specified_style, property_id);
+    bool removed = style_tree_remove_property(element->specified_style, property_code);
 
     if (removed) {
         element->style_version++;
@@ -1390,7 +1411,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                 if (style_tree_apply_declaration(*target_style, element_decl)) {
                     applied_count++;
                     log_debug("[CSS] Applied %s property %d to <%s>",
-                              pseudo_name, element_decl->property_id, element->tag_name);
+                              pseudo_name, element_decl->property_code, element->tag_name);
                 }
             }
         }
@@ -1405,7 +1426,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 }
 
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
-                                                     CssPropertyId property_id, int pseudo_element) {
+                                                     CssPropertyCode property_code, int pseudo_element) {
     if (!element) {
         return NULL;
     }
@@ -1426,7 +1447,7 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         return NULL;
     }
 
-    return style_tree_get_declaration(style, property_id);
+    return style_tree_get_declaration(style, property_code);
 }
 
 bool dom_element_has_before_content(DomElement* element) {

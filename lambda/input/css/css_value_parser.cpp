@@ -1220,11 +1220,11 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit) {
     return css_value;
 }
 
-CssValue* css_get_initial_value(CssPropertyId property_id, Pool* pool) {
+CssValue* css_get_initial_value(CssPropertyCode property_code, Pool* pool) {
     if (!pool) return NULL;
 
     // Create initial values for common properties
-    switch (property_id) {
+    switch (property_code) {
         case CSS_PROPERTY_COLOR:
             return css_value_create_length(pool, 0.0, CSS_UNIT_PX); // Should be a color, but using length as fallback
         case CSS_PROPERTY_FONT_SIZE:

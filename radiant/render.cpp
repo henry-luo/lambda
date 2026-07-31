@@ -114,7 +114,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 // iframe content box, otherwise the body only paints its own
                 // intrinsic-sized box (often smaller than the iframe viewport,
                 // leaving white gaps below the body content).
-                if (root_block->tag_id != HTM_TAG_SVG &&
+                if (root_block->tag_id != MARKUP_NAME_SVG &&
                     !(root_block->embed && root_block->embedp()->img)) {
                     Color canvas_bg;
                     canvas_bg.c = 0;
@@ -151,7 +151,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 }
 
                 // Check if root element is SVG - if so, render directly without background
-                if (root_block->tag_id == HTM_TAG_SVG) {
+                if (root_block->tag_id == MARKUP_NAME_SVG) {
                     log_debug("render embedded SVG document (no background)");
                     render_inline_svg(rdcon, root_block);
                 } else if (root_block->embed && root_block->embedp()->img) {
