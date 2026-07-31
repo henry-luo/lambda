@@ -818,6 +818,7 @@ struct JsGeneratorStateRecord {
     bool started = false;
     bool executing = false;
     bool is_async = false;
+    Item private_home_class = {};
     Item delegate = {};
     int64_t delegate_resume = -1;
     int delegate_idx = 0;

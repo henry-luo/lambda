@@ -704,13 +704,13 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
 extern "C" Item js_get_prototype(Item object);
 extern "C" Item js_get_prototype_of(Item object);
 
-extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
-                                                              const char* name,
-                                                              int name_len) {
+extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
+                                                                   PropertyKeyRef key) {
+    if (!key) return nullptr;
     Item cur = obj;
     int depth = 0;
     while (depth < 16) {
-        ShapeEntry* se = js_find_shape_entry(cur, name, name_len);
+        ShapeEntry* se = js_find_shape_entry_key(cur, key);
         Map* m = se ? js_obj_underlying_map(cur) : NULL;
         if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) {
             // Preallocated constructor storage is absent until initialized, so
@@ -719,12 +719,10 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
         }
         if (se) {
             if (jspd_is_accessor(se)) {
-                if (m) {
-                    bool found = false;
-                    Item slot_val = js_map_get_fast_ext(m, name, name_len, &found);
-                    if (found && slot_val.item != ItemNull.item) {
-                        return js_item_to_accessor_pair(slot_val);
-                    }
+                Item slot_val = ItemNull;
+                if (js_own_shape_slot_status_key(cur, key, &slot_val, NULL) ==
+                    JS_SHAPE_SLOT_ACCESSOR && slot_val.item != ItemNull.item) {
+                    return js_item_to_accessor_pair(slot_val);
                 }
             }
             // ES OrdinarySet: an own property (data or accessor) terminates
@@ -742,4 +740,12 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
         depth++;
     }
     return nullptr;
+}
+
+extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
+                                                              const char* name,
+                                                              int name_len) {
+    if (!name || name_len < 0) return nullptr;
+    return js_find_accessor_pair_inheritable_key(obj,
+        heap_create_name(name, (size_t)name_len));
 }

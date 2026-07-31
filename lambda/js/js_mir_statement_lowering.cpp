@@ -2141,29 +2141,16 @@ static void jm_emit_private_brand_add(JsMirTranspiler* mt, MIR_reg_t obj, MIR_re
     jm_emit_exc_propagate_check(mt);
 }
 
-static bool jm_private_instance_method_brand_seen(JsClassEntry* ce, int method_index) {
-    if (!ce || method_index < 0 || method_index >= ce->method_count) return false;
-    JsClassMethodEntry* me = &ce->methods[method_index];
-    if (!me->name) return false;
-    for (int pi = 0; pi < method_index; pi++) {
-        JsClassMethodEntry* prev = &ce->methods[pi];
-        if (prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
-        if (prev->name->len == me->name->len &&
-            memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 void jm_emit_private_instance_method_brands(JsMirTranspiler* mt, MIR_reg_t obj, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce || !cls_obj) return;
     for (int mi = 0; mi < ce->method_count; mi++) {
         JsClassMethodEntry* me = &ce->methods[mi];
         if (me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) continue;
-        if (jm_private_instance_method_brand_seen(ce, mi)) continue;
         String* method_name = jm_class_private_name(mt, ce, me->name);
         jm_emit_private_brand_add(mt, obj, cls_obj, method_name);
+        // Private methods share a single class brand; a second add would
+        // otherwise mask repeated construction of the same receiver.
+        return;
     }
 }
 

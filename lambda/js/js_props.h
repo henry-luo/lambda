@@ -154,6 +154,13 @@ JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
                                                      Item value,
                                                      Item Receiver);
 
+// Identity-bearing keys (Symbols and private names) must not pass through a
+// spelling-only accessor walk, because same-text records are distinct keys.
+JsSetterDispatchStatus js_ordinary_set_via_accessor_key(Item object,
+                                                         PropertyKeyRef key,
+                                                         Item value,
+                                                         Item Receiver);
+
 // Outcome of `js_ordinary_get_own_descriptor` (Stage A1.5) — read-only
 // inspector for own slots. Does NOT dispatch the getter; reports the
 // descriptor kind so callers can branch on accessor-vs-data without
@@ -387,6 +394,12 @@ bool js_get_own_property_descriptor(Item object,
                                      int name_len,
                                      JsPropertyDescriptor* out);
 
+// Identity-bearing keys cannot be reconstructed from their diagnostic text.
+// This variant is required for Symbol and private descriptors.
+bool js_get_own_property_descriptor_key(Item object,
+                                         PropertyKeyRef key,
+                                         JsPropertyDescriptor* out);
+
 // ---------------------------------------------------------------------------
 // PropertyDescriptor (Stage A2.3 — write-side kernel)
 // ---------------------------------------------------------------------------
@@ -446,6 +459,12 @@ void js_define_own_property_from_descriptor(Item object,
                                              const JsPropertyDescriptor* pd,
                                              bool is_new_property,
                                              bool existing_accessor);
+
+void js_define_own_property_from_descriptor_key(Item object,
+                                                 PropertyKeyRef key,
+                                                 const JsPropertyDescriptor* pd,
+                                                 bool is_new_property,
+                                                 bool existing_accessor);
 
 // Stage A1 kernel surface: complete.
 //   js_to_property_key                  (A1)

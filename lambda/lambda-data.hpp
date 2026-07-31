@@ -434,6 +434,17 @@ static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
     return field ? type_field_storage_type_id(field->type) : LMD_TYPE_NULL;
 }
 
+static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
+        int64_t data_cap) {
+    if (!field || field->byte_offset < 0 || data_cap < 0) return false;
+    TypeId storage_type = shape_entry_storage_type_id(field);
+    int storage_size = type_info[storage_type].byte_size;
+    // Packed maps may end in a one-byte undefined/bool field; requiring a
+    // pointer-width tail made that valid final field appear absent after a
+    // sibling type change rebuilt the shape.
+    return storage_size > 0 && field->byte_offset <= data_cap - storage_size;
+}
+
 Item map_field_to_item(void* field_ptr, TypeId type_id);
 Item scalar_storage_read(Item item, bool immortal);
 

@@ -856,7 +856,9 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
     // Sparse array accessor hole-fill is also owned by the descriptor write
     // kernel, so this helper is now validation-to-descriptor glue only.
 
-    Item nm = js_to_string(name);
+    // ToPropertyKey already returned a canonical Symbol record; ToString
+    // would rebuild its diagnostic spelling and define a different property.
+    Item nm = get_type_id(name) == LMD_TYPE_STRING ? name : js_to_string(name);
     if (get_type_id(nm) != LMD_TYPE_STRING) return;
     String* nm_s = it2s(nm);
     if (!nm_s || nm_s->len >= 200) return;
@@ -879,8 +881,13 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
     if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
         define_target = (Item){.map = js_array_props(obj.array)};
     }
-    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd,
-        is_new_property, existing_accessor);
+    if (property_key_requires_identity(nm_s)) {
+        js_define_own_property_from_descriptor_key(define_target, nm_s, &pd,
+            is_new_property, existing_accessor);
+    } else {
+        js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd,
+            is_new_property, existing_accessor);
+    }
 }
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
@@ -948,6 +955,9 @@ static bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* i
     }
     if (key_type != LMD_TYPE_STRING) return false;
     String* str = it2s(key);
+    // Symbols retain their private NamePool identity even when their display
+    // text looks numeric; TypedArray indexed operations must not consume them.
+    if (str && property_key_requires_identity(str)) return false;
     if (!str || str->len == 0 || str->len >= 128) return false;
     const char* chars = str->chars;
     int len = (int)str->len;
@@ -1207,6 +1217,12 @@ static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
         TypeMap* tm = (TypeMap*)m->type;
         ShapeEntry* e = tm ? tm->shape : NULL;
         while (e) {
+            // getOwnPropertyNames excludes Symbols; byte reconstruction would
+            // otherwise turn an identity key into an unrelated string key.
+            if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+                e = e->next;
+                continue;
+            }
             const char* s = e->name->str;
             int slen = (int)e->name->length;
             if (js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
@@ -6397,6 +6413,24 @@ extern "C" Item js_in(Item key, Item object) {
         && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_VMAP) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
+    if (get_type_id(key) == LMD_TYPE_STRING &&
+        property_key_requires_identity(it2s(key)) &&
+        property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
+        // Private `in` checks the exact brand-key association and never invokes
+        // a Proxy [[HasProperty]] trap or follows an unbranded prototype chain.
+        return js_private_in(object, key);
+    }
+    if (js_is_proxy(object)) {
+        // Proxy traps expose a public Symbol value, while ordinary storage
+        // needs the canonical NamePool record; do not canonicalize this key
+        // before the proxy bridge has delivered it to user code.
+        return js_proxy_trap_has(object, key);
+    }
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    // Symbol values arrive as compact runtime ids, while property storage uses
+    // their canonical NamePool records.  Convert before ordinary lookup so
+    // `symbol in object` cannot fall back to diagnostic spelling.
     Item exotic_result = ItemNull;
     if (js_try_exotic_has_property(object, key, type, &exotic_result)) return exotic_result;
     if (type == LMD_TYPE_MAP) {
@@ -8171,6 +8205,32 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // whose toString returns the actual key — see test
     // built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-2-42).
     name = name_str_item;
+
+    if (property_key_requires_identity(name_str)) {
+        JsPropertyDescriptor pd = {};
+        if (js_get_own_property_descriptor_key(obj, name_str, &pd)) {
+            // Symbol keys carry identity in their NameRecord; rebuilding a
+            // descriptor from diagnostic text loses the installed slot.
+            descriptor_root.set(js_new_object());
+            Item desc = descriptor_root.get();
+            if (js_pd_is_accessor(&pd)) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                                (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                                (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
+            } else {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
+                                (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
+                                (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+            }
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                            (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
+                            (Item){.item = b2it(js_pd_is_configurable(&pd))});
+            return desc;
+        }
+    }
 
     Item exotic_result = ItemNull;
     if (!js_is_proxy(obj) &&
@@ -12080,6 +12140,37 @@ extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key) {
 // Object.freeze(obj) — set __frozen__ flag, Object.isFrozen(obj)
 // =============================================================================
 
+static bool js_object_apply_integrity_descriptor(Item obj, Item key, bool frozen) {
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> descriptor_root(roots, ItemNull);
+
+    Item current_desc = js_object_get_own_property_descriptor(
+        object_root.get(), key_root.get());
+    if (js_check_exception()) return false;
+    TypeId desc_type = get_type_id(current_desc);
+    if (current_desc.item == ItemNull.item || desc_type == LMD_TYPE_UNDEFINED) return true;
+    if (desc_type != LMD_TYPE_MAP) return true;
+
+    descriptor_root.set(js_new_object());
+    Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+    js_property_set(descriptor_root.get(), configurable_key, (Item){.item = b2it(false)});
+    if (frozen) {
+        Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+        Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+        bool is_accessor = it2b(js_in(get_key, current_desc)) || it2b(js_in(set_key, current_desc));
+        if (!is_accessor) {
+            Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+            js_property_set(descriptor_root.get(), writable_key, (Item){.item = b2it(false)});
+        }
+    }
+    // SetIntegrityLevel must pass the original key through DefineProperty;
+    // reconstructing a Symbol from its text mutates an unrelated property.
+    js_object_define_property(object_root.get(), key_root.get(), descriptor_root.get());
+    return !js_check_exception();
+}
+
 extern "C" Item js_object_freeze(Item obj) {
     // ES6: non-objects return the argument
     TypeId ot = get_type_id(obj);
@@ -12106,69 +12197,18 @@ extern "C" Item js_object_freeze(Item obj) {
         js_throw_type_error("Object.freeze: preventExtensions returned false");
         return obj;
     }
-    if (js_is_proxy(obj)) {
-        Item keys = js_reflect_own_keys(obj);
-        if (get_type_id(keys) == LMD_TYPE_ARRAY) {
-            for (int i = 0; i < keys.array->length; i++) {
-                Item key = keys.array->items[i];
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* key_str = it2s(key);
-                    if (key_str && key_str->len > 6 && strncmp(key_str->chars, "__sym_", 6) == 0) {
-                        long long symbol_id = atoll(key_str->chars + 6);
-                        key = (Item){.item = i2it(-(symbol_id + (long long)JS_SYMBOL_BASE))};
-                    }
-                }
-                extern Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key);
-                Item current_desc = js_proxy_trap_get_own_property_descriptor(obj, key);
-                if (js_check_exception()) return obj;
-                if (get_type_id(current_desc) == LMD_TYPE_UNDEFINED || current_desc.item == ItemNull.item) continue;
-                Item partial_desc = js_new_object();
-                Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                js_property_set(partial_desc, configurable_key, (Item){.item = b2it(false)});
-                Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-                Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
-                bool is_accessor = it2b(js_in(get_key, current_desc)) || it2b(js_in(set_key, current_desc));
-                if (!is_accessor) {
-                    Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
-                    js_property_set(partial_desc, writable_key, (Item){.item = b2it(false)});
-                }
-                Item define_result = js_object_define_property(obj, key, partial_desc);
-                if (js_check_exception()) return obj;
-                if (get_type_id(define_result) == LMD_TYPE_BOOL && !it2b(define_result)) {
-                    js_throw_type_error("Object.freeze: defineProperty returned false");
-                    return obj;
-                }
-            }
-        }
-        return obj;
-    }
     // ES §7.3.16 SetIntegrityLevel("frozen"): for each own key, define with
     // {writable:false, configurable:false} (skip writable for accessors).
-    // Routed through js_define_own_property_from_descriptor (Stage A2.5).
     Item keys = js_reflect_own_keys(obj);
     if (get_type_id(keys) == LMD_TYPE_ARRAY) {
         for (int i = 0; i < keys.array->length; i++) {
             Item key = keys.array->items[i];
-            Item prop_key = js_to_property_key(key);
-            if (get_type_id(prop_key) != LMD_TYPE_STRING) continue;
-            String* str_key = it2s(prop_key);
-            if (!str_key || str_key->len == 0 || str_key->len >= 200) continue;
-            // Determine if this property is an accessor (skip writable bit).
-            JsPropertyDescriptor existing;
-            memset(&existing, 0, sizeof(existing));
-            bool has_existing = js_get_own_property_descriptor(obj,
-                str_key->chars, (int)str_key->len, &existing);
-            JsPropertyDescriptor pd;
-            memset(&pd, 0, sizeof(pd));
-            pd.flags |= JS_PD_HAS_CONFIGURABLE;  // configurable=false (bit cleared)
-            if (!has_existing || !js_pd_is_accessor(&existing)) {
-                pd.flags |= JS_PD_HAS_WRITABLE;  // writable=false (bit cleared)
-            }
-            js_define_own_property_from_descriptor(obj,
-                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false,
-                has_existing && js_pd_is_accessor(&existing));
+            if (!js_object_apply_integrity_descriptor(obj, key, /*frozen=*/true)) return obj;
         }
     }
+    // Proxies need the integrity descriptor updates above, but the internal
+    // marker belongs only to ordinary storage and would leak through ownKeys.
+    if (js_is_proxy(obj)) return obj;
     Item key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
     js_defprop_set_internal_state(obj, key, (Item){.item = b2it(true)});
     return obj;
@@ -12272,49 +12312,18 @@ extern "C" Item js_object_seal(Item obj) {
         js_throw_type_error("Object.seal: preventExtensions returned false");
         return obj;
     }
-    if (js_is_proxy(obj)) {
-        Item keys = js_reflect_own_keys(obj);
-        if (get_type_id(keys) == LMD_TYPE_ARRAY) {
-            for (int i = 0; i < keys.array->length; i++) {
-                Item key = keys.array->items[i];
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* key_str = it2s(key);
-                    if (key_str && key_str->len > 6 && strncmp(key_str->chars, "__sym_", 6) == 0) {
-                        long long symbol_id = atoll(key_str->chars + 6);
-                        key = (Item){.item = i2it(-(symbol_id + (long long)JS_SYMBOL_BASE))};
-                    }
-                }
-                Item partial_desc = js_new_object();
-                Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                js_property_set(partial_desc, configurable_key, (Item){.item = b2it(false)});
-                Item define_result = js_object_define_property(obj, key, partial_desc);
-                if (js_check_exception()) return obj;
-                if (get_type_id(define_result) == LMD_TYPE_BOOL && !it2b(define_result)) {
-                    js_throw_type_error("Object.seal: defineProperty returned false");
-                    return obj;
-                }
-            }
-        }
-        return obj;
-    }
     // ES §7.3.16 SetIntegrityLevel("sealed"): for each own key, define with
-    // {configurable:false}. Routed through the kernel (Stage A2.5).
+    // {configurable:false}.
     Item keys = js_reflect_own_keys(obj);
     if (get_type_id(keys) == LMD_TYPE_ARRAY) {
         for (int i = 0; i < keys.array->length; i++) {
             Item key = keys.array->items[i];
-            Item prop_key = js_to_property_key(key);
-            if (get_type_id(prop_key) != LMD_TYPE_STRING) continue;
-            String* str_key = it2s(prop_key);
-            if (!str_key || str_key->len == 0 || str_key->len >= 200) continue;
-            JsPropertyDescriptor pd;
-            memset(&pd, 0, sizeof(pd));
-            pd.flags |= JS_PD_HAS_CONFIGURABLE;  // configurable=false (bit cleared)
-            js_define_own_property_from_descriptor(obj,
-                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false,
-                /*existing_accessor*/false);
+            if (!js_object_apply_integrity_descriptor(obj, key, /*frozen=*/false)) return obj;
         }
     }
+    // Unlike ordinary objects, proxy integrity is determined from its traps;
+    // publishing an implementation marker changes the observable own-key list.
+    if (js_is_proxy(obj)) return obj;
     Item sealed_k = (Item){.item = s2it(heap_create_name("__sealed__", 10))};
     js_defprop_set_internal_state(obj, sealed_k, (Item){.item = b2it(true)});
     return obj;
@@ -13789,6 +13798,18 @@ static Item js_delete_map_property(Item obj, Item key) {
     // v16: Non-configurable properties cannot be deleted
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
+        if (str_key && property_key_requires_identity(str_key)) {
+            ShapeEntry* entry = js_find_shape_entry_key(obj, str_key);
+            if (!entry) return (Item){.item = b2it(true)};
+            // A Symbol's diagnostic text cannot identify its descriptor; use
+            // the installed record for both the configurability check and tombstone.
+            if (!jspd_is_configurable(entry)) {
+                if (js_strict_mode) js_throw_type_error("Cannot delete non-configurable property");
+                return (Item){.item = b2it(false)};
+            }
+            js_shape_entry_update_flags_key(obj, str_key, JSPD_DELETED, 0);
+            return (Item){.item = b2it(true)};
+        }
         if (str_key && str_key->len > 0 && str_key->len < 200) {
             // Phase 2c fast path: consult ShapeEntry::flags first.
             int fp = js_prop_attrs_fast_path(obj, str_key->chars, (int)str_key->len, JSPD_NON_CONFIGURABLE);
@@ -13896,6 +13917,17 @@ static Item js_delete_function_property(Item obj, Item key) {
         fn->properties_map = js_new_object();
         js_function_root_item_if_needed(fn, &fn->properties_map);
     }
+    Item prop_key = js_to_property_key(key);
+    if (get_type_id(prop_key) == LMD_TYPE_STRING) {
+        String* identity_key = it2s(prop_key);
+        if (identity_key && property_key_requires_identity(identity_key)) {
+            ShapeEntry* entry = js_find_shape_entry_key(fn->properties_map, identity_key);
+            if (!entry) return (Item){.item = b2it(true)};
+            if (!jspd_is_configurable(entry)) return (Item){.item = b2it(false)};
+            js_shape_entry_update_flags_key(fn->properties_map, identity_key, JSPD_DELETED, 0);
+            return (Item){.item = b2it(true)};
+        }
+    }
     // Check non-configurable: prototype is non-configurable by default for constructors
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
@@ -13922,7 +13954,6 @@ static Item js_delete_function_property(Item obj, Item key) {
     // deleting one may need to materialize a safe backing slot first; the
     // JSPD_DELETED bit then shadows the virtual value without storing the
     // dense-array hole sentinel in typed map storage.
-    Item prop_key = js_to_property_key(key);
     if (get_type_id(prop_key) == LMD_TYPE_STRING) {
         String* sk = it2s(prop_key);
         if (sk && sk->len > 0) {
@@ -13940,6 +13971,22 @@ static Item js_delete_function_property(Item obj, Item key) {
 
 static Item js_delete_array_property(Item obj, Item key) {
     Array* arr = obj.array;
+    Item property_key = js_to_property_key(key);
+    if (get_type_id(property_key) == LMD_TYPE_STRING) {
+        String* identity_key = it2s(property_key);
+        if (identity_key && property_key_requires_identity(identity_key)) {
+            if (!js_array_has_props(arr)) return (Item){.item = b2it(true)};
+            Item props_item = (Item){.map = js_array_props(arr)};
+            ShapeEntry* entry = js_find_shape_entry_key(props_item, identity_key);
+            if (!entry) return (Item){.item = b2it(true)};
+            if (!jspd_is_configurable(entry)) {
+                if (js_strict_mode) js_throw_type_error("Cannot delete non-configurable property");
+                return (Item){.item = b2it(false)};
+            }
+            js_shape_entry_update_flags_key(props_item, identity_key, JSPD_DELETED, 0);
+            return (Item){.item = b2it(true)};
+        }
+    }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
         if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {

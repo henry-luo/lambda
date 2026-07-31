@@ -876,6 +876,7 @@ void js_set_class_instance_field_metadata_bulk(Item class_item,
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 Item js_private_key_for_class(Item class_item, Item source_name);
 Item js_private_key_for_current_class(Item source_name);
+Item js_private_in(Item object, Item private_key);
 Item js_private_home_class_enter(Item class_item);
 void js_private_home_class_leave(Item previous_class);
 void js_private_brand_add(Item object, Item private_key, Item callee);

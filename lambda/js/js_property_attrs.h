@@ -108,6 +108,10 @@ ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 // fallback at an API boundary; SYMBOL and PRIVATE keys are pointer-only.
 ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key);
 
+// Identity-preserving accessor lookup used by private and Symbol property
+// writes. Raw spelling lookups remain available for ordinary STRING keys.
+JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj, PropertyKeyRef key);
+
 // Convenience: set flags bits on the ShapeEntry for `name` (no-op if not found).
 // `set_mask` bits are OR'd in; `clear_mask` bits are cleared. Apply set first then clear.
 void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
@@ -192,6 +196,13 @@ void js_attr_set_configurable(Item obj, const char* name, int name_len, bool con
 static inline int js_prop_attrs_fast_path(Item obj, const char* name, int name_len,
                                           uint8_t attr_flag) {
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    if (!se) return -1;
+    return (se->flags & attr_flag) ? 0 : 1;
+}
+
+static inline int js_prop_attrs_fast_path_key(Item obj, PropertyKeyRef key,
+                                              uint8_t attr_flag) {
+    ShapeEntry* se = js_find_shape_entry_key(obj, key);
     if (!se) return -1;
     return (se->flags & attr_flag) ? 0 : 1;
 }
