@@ -550,6 +550,12 @@ static Item js_private_display_name_item(Item name_item) {
 static int js_function_name_from_symbol_key(PropertyKeyRef key, char* out, int out_size) {
     if (!key || !property_key_requires_identity(key) ||
             property_key_kind(key) != NAME_KEY_SYMBOL) return -1;
+    // SetFunctionName uses an empty name for Symbol(), not the diagnostic
+    // bracket form that is required only when the Symbol has a description.
+    if (key->len == 0) {
+        if (out_size > 0) out[0] = '\0';
+        return 0;
+    }
     int len = snprintf(out, out_size, "[%.*s]", (int)key->len, key->chars);
     if (len < 0) return -1;
     if (len >= out_size) len = out_size - 1;

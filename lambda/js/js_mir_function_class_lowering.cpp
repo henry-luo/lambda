@@ -44,7 +44,7 @@ static JsMirVarEntry* jm_scope_env_entry_binding_at_function_entry(JsMirTranspil
 }
 
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
-    if (!mt || !ce || !ce->name) return 0;
+    if (!mt || !ce) return 0;
     if (ce->inner_module_var_index >= 0) {
         // Nested class bindings are not globals; dynamic constructor paths
         // must recover their class identity from the definition-time slot.
@@ -52,10 +52,15 @@ MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) 
             MIR_T_I64,
             MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index));
     }
+    // Anonymous class expressions have no inner name. Their outer alias is
+    // the only runtime binding, and omitting it loses the private home class
+    // when a static method is directly dispatched.
+    String* binding_name = ce->alias_name ? ce->alias_name : ce->name;
+    if (!binding_name) return 0;
     JsIdentifierNode identifier;
     memset(&identifier, 0, sizeof(identifier));
     identifier.node_type = JS_AST_NODE_IDENTIFIER;
-    identifier.name = ce->name;
+    identifier.name = binding_name;
     return jm_transpile_box_item(mt, (JsAstNode*)&identifier);
 }
 

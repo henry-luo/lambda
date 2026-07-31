@@ -888,6 +888,9 @@ bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negat
     }
     if (key_type != LMD_TYPE_STRING) return false;
     String* str = it2s(key);
+    // A Symbol can have numeric diagnostic bytes (for example Symbol("1")),
+    // but integer-indexed exotic dispatch applies only to String property keys.
+    if (str && property_key_requires_identity(str)) return false;
     if (!str || str->len == 0 || str->len >= 128) return false;
     const char* chars = str->chars;
     int len = (int)str->len;

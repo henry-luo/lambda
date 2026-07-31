@@ -107,8 +107,7 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
     ShapeEntry* se = js_find_shape_entry(object, name, name_len);
     if (out_se) *out_se = se;
 
-    if (se && m->data && se->byte_offset >= 0 &&
-        se->byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+    if (se && m->data && shape_entry_storage_fits_data(se, m->data_cap)) {
         if (get_type_id(object) == LMD_TYPE_MAP &&
                 map_ctor_offset_is_reserved(m, se->byte_offset)) {
             // Preallocated constructor storage is not an own property before
@@ -147,8 +146,7 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object,
 
     ShapeEntry* se = js_find_shape_entry_key(object, key);
     if (out_se) *out_se = se;
-    if (se && m->data && se->byte_offset >= 0 &&
-            se->byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+    if (se && m->data && shape_entry_storage_fits_data(se, m->data_cap)) {
         if (get_type_id(object) == LMD_TYPE_MAP &&
                 map_ctor_offset_is_reserved(m, se->byte_offset)) {
             return JS_SHAPE_SLOT_ABSENT;
@@ -236,13 +234,13 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
                                                               const char* name,
                                                               int name_len);
+extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
+                                                                   PropertyKeyRef key);
 
-extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
-                                                                const char* name,
-                                                                int name_len,
-                                                                Item value,
-                                                                Item Receiver) {
-    JsAccessorPair* ap = js_find_accessor_pair_inheritable(object, name, name_len);
+static JsSetterDispatchStatus js_dispatch_accessor_setter(Item object,
+                                                          JsAccessorPair* ap,
+                                                          Item value,
+                                                          Item Receiver) {
     if (!ap) return JS_SET_NOT_FOUND;
 
     if (ap->setter.item != ItemNull.item &&
@@ -253,6 +251,23 @@ extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
         return JS_SET_DISPATCHED;
     }
     return JS_SET_NO_SETTER;
+}
+
+extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
+                                                                const char* name,
+                                                                int name_len,
+                                                                Item value,
+                                                                Item Receiver) {
+    return js_dispatch_accessor_setter(object,
+        js_find_accessor_pair_inheritable(object, name, name_len), value, Receiver);
+}
+
+extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor_key(Item object,
+                                                                    PropertyKeyRef key,
+                                                                    Item value,
+                                                                    Item Receiver) {
+    return js_dispatch_accessor_setter(object,
+        js_find_accessor_pair_inheritable_key(object, key), value, Receiver);
 }
 
 extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
@@ -424,13 +439,9 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
 // lookup (which delegates to obj.function for FUNC objects); `m` is the
 // underlying Map* used for slot reads. For LMD_TYPE_MAP these are the same;
 // for LMD_TYPE_FUNC, `m` is fn->properties_map.map.
-static bool js_props_desc_from_storage(Item obj, Map* m,
-                                        const char* name, int name_len,
-                                        JsPropertyDescriptor* out) {
-    if (!m) return false;
-    Item slot = ItemNull;
-    ShapeEntry* se = NULL;
-    JsShapeSlotStatus status = js_own_shape_slot_status(obj, name, name_len, &slot, &se);
+static bool js_props_desc_from_shape_slot(JsShapeSlotStatus status, Item slot,
+                                          ShapeEntry* se,
+                                          JsPropertyDescriptor* out) {
     if (status == JS_SHAPE_SLOT_ABSENT || status == JS_SHAPE_SLOT_DELETED) return false;
 
     if (status == JS_SHAPE_SLOT_ACCESSOR) {
@@ -467,6 +478,26 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
     return true;
 }
 
+static bool js_props_desc_from_storage(Item obj, Map* m,
+                                        const char* name, int name_len,
+                                        JsPropertyDescriptor* out) {
+    if (!m) return false;
+    Item slot = ItemNull;
+    ShapeEntry* se = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(obj, name, name_len, &slot, &se);
+    return js_props_desc_from_shape_slot(status, slot, se, out);
+}
+
+static bool js_props_desc_from_storage_key(Item obj, Map* m,
+                                            PropertyKeyRef key,
+                                            JsPropertyDescriptor* out) {
+    if (!m || !key) return false;
+    Item slot = ItemNull;
+    ShapeEntry* se = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status_key(obj, key, &slot, &se);
+    return js_props_desc_from_shape_slot(status, slot, se, out);
+}
+
 extern "C" bool js_get_own_property_descriptor(Item object,
                                                 const char* name,
                                                 int name_len,
@@ -500,6 +531,31 @@ extern "C" bool js_get_own_property_descriptor(Item object,
             }
         }
         return false;
+    }
+    return false;
+}
+
+extern "C" bool js_get_own_property_descriptor_key(Item object,
+                                                      PropertyKeyRef key,
+                                                      JsPropertyDescriptor* out) {
+    if (!out || !key) return false;
+    *out = (JsPropertyDescriptor){};
+
+    TypeId t = get_type_id(object);
+    if (t == LMD_TYPE_MAP) {
+        return js_props_desc_from_storage_key(object, object.map, key, out);
+    }
+    if (t == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)object.function;
+        if (!fn || fn->properties_map.item == 0) return false;
+        return js_props_desc_from_storage_key(object, fn->properties_map.map, key, out);
+    }
+    if (t == LMD_TYPE_ARRAY) {
+        Array* arr = object.array;
+        if (!js_array_has_props(arr)) return false;
+        Item props_item = (Item){.map = js_array_props(arr)};
+        return js_props_desc_from_storage_key(props_item, arr ? js_array_props(arr) : NULL,
+                                              key, out);
     }
     return false;
 }
@@ -763,16 +819,62 @@ extern "C" bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     return true;
 }
 
-extern "C" void js_define_own_property_from_descriptor(Item object,
-                                                        const char* name,
-                                                        int name_len,
-                                                        const JsPropertyDescriptor* pd,
-                                                        bool is_new_property,
-                                                        bool existing_accessor) {
+static ShapeEntry* js_props_find_descriptor_shape(Item object, Item name_item,
+                                                   const char* name, int name_len) {
+    String* key = it2s(name_item);
+    return key && property_key_requires_identity(key)
+        ? js_find_shape_entry_key(object, key)
+        : js_find_shape_entry(object, name, name_len);
+}
+
+static int js_props_descriptor_attr_fast_path(Item object, Item name_item,
+                                              const char* name, int name_len,
+                                              uint8_t attr_flag) {
+    String* key = it2s(name_item);
+    return key && property_key_requires_identity(key)
+        ? js_prop_attrs_fast_path_key(object, key, attr_flag)
+        : js_prop_attrs_fast_path(object, name, name_len, attr_flag);
+}
+
+static void js_props_set_descriptor_attribute(Item object, Item name_item,
+                                              const char* name, int name_len,
+                                              uint8_t attr_flag, bool enabled) {
+    String* key = it2s(name_item);
+    if (key && property_key_requires_identity(key)) {
+        js_shape_entry_update_flags_key(object, key,
+            enabled ? 0 : attr_flag, enabled ? attr_flag : 0);
+        return;
+    }
+    if (attr_flag == JSPD_NON_WRITABLE) {
+        js_attr_set_writable(object, name, name_len, enabled);
+    } else if (attr_flag == JSPD_NON_ENUMERABLE) {
+        js_attr_set_enumerable(object, name, name_len, enabled);
+    } else if (attr_flag == JSPD_NON_CONFIGURABLE) {
+        js_attr_set_configurable(object, name, name_len, enabled);
+    }
+}
+
+static void js_props_clear_descriptor_accessor(Item object, Item name_item,
+                                               const char* name, int name_len) {
+    String* key = it2s(name_item);
+    if (key && property_key_requires_identity(key)) {
+        js_shape_entry_update_flags_key(object, key, 0, JSPD_IS_ACCESSOR);
+    } else {
+        js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
+    }
+}
+
+static void js_define_own_property_from_descriptor_impl(Item object,
+                                                         Item name_item,
+                                                         const char* name,
+                                                         int name_len,
+                                                         const JsPropertyDescriptor* pd,
+                                                         bool is_new_property,
+                                                         bool existing_accessor) {
     if (!pd) return;
     if (name_len < 0 || name_len >= 240) return;
-
-    Item name_item = js_props_str(name, name_len);
+    String* name_key = it2s(name_item);
+    bool identity_key = name_key && property_key_requires_identity(name_key);
 
     // [[DefineOwnProperty]] — must NOT trigger inherited accessor logic.
     // Stage D: RAII guard restores js_skip_accessor_dispatch on every exit.
@@ -883,7 +985,8 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
                 js_props_array_numeric_storage_target(object, name, name_len);
             value_storage_target =
                 (accessor_target.item != ItemNull.item) ? accessor_target : object;
-            ShapeEntry* se = js_find_shape_entry(value_storage_target, name, name_len);
+            ShapeEntry* se = js_props_find_descriptor_shape(
+                value_storage_target, name_item, name, name_len);
             if ((se && jspd_is_accessor(se)) || existing_accessor) {
                 was_accessor = true;
                 accessor_data_target = value_storage_target;
@@ -895,14 +998,15 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         // performed by caller). Probe + clear via the flag helper; restore
         // after the value write only if it was originally set.
         bool had_nw = false;
-        if (!is_new_property &&
-                js_prop_attrs_fast_path(object, name, name_len, JSPD_NON_WRITABLE) == 0) {
+        if (!is_new_property && js_props_descriptor_attr_fast_path(
+                object, name_item, name, name_len, JSPD_NON_WRITABLE) == 0) {
             // [[DefineOwnProperty]] may legally replace the value of an existing
             // configurable/non-writable property while also making it writable.
             // The writable guard in js_property_set is shape-flag aware, so this
             // descriptor kernel must clear the shape bit before writing the value.
             had_nw = true;
-            js_attr_set_writable(object, name, name_len, /*writable=*/true);
+            js_props_set_descriptor_attribute(object, name_item, name, name_len,
+                JSPD_NON_WRITABLE, /*enabled=*/true);
         }
 
         if (!is_new_property && value_storage_target.item == ItemNull.item) {
@@ -912,24 +1016,25 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             value_storage_target =
                 (accessor_target.item != ItemNull.item) ? accessor_target : object;
         }
-        ShapeEntry* value_se = !is_new_property ?
-            js_find_shape_entry(
-                (value_storage_target.item != ItemNull.item) ? value_storage_target : object,
-                name, name_len) : NULL;
+        ShapeEntry* value_se = !is_new_property ? js_props_find_descriptor_shape(
+            (value_storage_target.item != ItemNull.item) ? value_storage_target : object,
+            name_item, name, name_len) : NULL;
         if (!was_accessor && value_se && jspd_is_accessor(value_se)) {
             accessor_data_target =
                 (value_storage_target.item != ItemNull.item) ? value_storage_target : object;
             was_accessor = true;
         }
         if (was_accessor && get_type_id(accessor_data_target) == LMD_TYPE_MAP) {
-            ShapeEntry* accessor_value_se = js_find_shape_entry(accessor_data_target, name, name_len);
+            ShapeEntry* accessor_value_se = js_props_find_descriptor_shape(
+                accessor_data_target, name_item, name, name_len);
             if (!js_props_store_raw_data_slot(accessor_data_target, accessor_value_se, pd->value)) {
                 js_property_set(accessor_data_target, name_item, pd->value);
             }
             // Clear IS_ACCESSOR only after replacing the JsAccessorPair slot.
             // Attribute probes between the two operations must continue to see
             // the slot as an accessor, not as a real Function data property.
-            js_shape_entry_set_accessor(accessor_data_target, name, name_len, /*is_accessor=*/false);
+            js_props_clear_descriptor_accessor(accessor_data_target, name_item,
+                name, name_len);
         } else if (!is_new_property && get_type_id(object) == LMD_TYPE_MAP &&
                 value_se && !jspd_is_accessor(value_se)) {
             // [[DefineOwnProperty]] performs an internal slot replacement after
@@ -938,13 +1043,21 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             // Guard on a real shape entry so virtual/special properties stay on
             // their established setter path.
             if (jspd_is_deleted(value_se)) {
-                js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+                if (identity_key) {
+                    js_shape_entry_update_flags_key(object, name_key, 0, JSPD_DELETED);
+                } else {
+                    js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+                }
             }
             fn_map_set(object, name_item, pd->value);
         } else if (get_type_id(object) == LMD_TYPE_FUNC) {
-            ShapeEntry* fn_se = js_find_shape_entry(object, name, name_len);
+            ShapeEntry* fn_se = js_props_find_descriptor_shape(object, name_item, name, name_len);
             if (fn_se && jspd_is_deleted(fn_se)) {
-                js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+                if (identity_key) {
+                    js_shape_entry_update_flags_key(object, name_key, 0, JSPD_DELETED);
+                } else {
+                    js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+                }
             }
             js_func_init_property(object, name_item, pd->value);
         } else {
@@ -955,7 +1068,8 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         // are stored under the property name with IS_ACCESSOR shape flag; the
         // accessor→data conversion above already cleared the flag.
 
-        if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/false);
+        if (had_nw) js_props_set_descriptor_attribute(object, name_item, name, name_len,
+            JSPD_NON_WRITABLE, /*enabled=*/false);
     }
 
     // ----- Attribute flags: inverse "non-*" bits on ShapeEntry.
@@ -966,28 +1080,58 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
     if (!is_accessor_desc) {
         if (pd->flags & JS_PD_HAS_WRITABLE) {
             bool w = (pd->flags & JS_PD_WRITABLE) != 0;
-            js_attr_set_writable(object, name, name_len, w);
+            js_props_set_descriptor_attribute(object, name_item, name, name_len,
+                JSPD_NON_WRITABLE, w);
         } else if (is_new_property || was_accessor) {
             // ES §6.2.5.5: default for new data property is writable=false.
             // accessor→data conversion without explicit writable also defaults
             // to non-writable (matches original ValidateAndApplyPropertyDescriptor).
-            js_attr_set_writable(object, name, name_len, /*writable=*/false);
+            js_props_set_descriptor_attribute(object, name_item, name, name_len,
+                JSPD_NON_WRITABLE, /*enabled=*/false);
         }
     }
 
     if (pd->flags & JS_PD_HAS_ENUMERABLE) {
         bool e = (pd->flags & JS_PD_ENUMERABLE) != 0;
-        js_attr_set_enumerable(object, name, name_len, e);
+        js_props_set_descriptor_attribute(object, name_item, name, name_len,
+            JSPD_NON_ENUMERABLE, e);
     } else if (is_new_property) {
-        js_attr_set_enumerable(object, name, name_len, /*enumerable=*/false);
+        js_props_set_descriptor_attribute(object, name_item, name, name_len,
+            JSPD_NON_ENUMERABLE, /*enabled=*/false);
     }
 
     if (pd->flags & JS_PD_HAS_CONFIGURABLE) {
         bool c = (pd->flags2 & 0x01u) != 0;
-        js_attr_set_configurable(object, name, name_len, c);
+        js_props_set_descriptor_attribute(object, name_item, name, name_len,
+            JSPD_NON_CONFIGURABLE, c);
     } else if (is_new_property) {
-        js_attr_set_configurable(object, name, name_len, /*configurable=*/false);
+        js_props_set_descriptor_attribute(object, name_item, name, name_len,
+            JSPD_NON_CONFIGURABLE, /*enabled=*/false);
     }
 
     js_props_fill_sparse_accessor_index(object, name, name_len, is_accessor_desc);
+}
+
+extern "C" void js_define_own_property_from_descriptor(Item object,
+                                                        const char* name,
+                                                        int name_len,
+                                                        const JsPropertyDescriptor* pd,
+                                                        bool is_new_property,
+                                                        bool existing_accessor) {
+    js_define_own_property_from_descriptor_impl(object,
+        js_props_str(name, name_len), name, name_len, pd,
+        is_new_property, existing_accessor);
+}
+
+extern "C" void js_define_own_property_from_descriptor_key(Item object,
+                                                            PropertyKeyRef key,
+                                                            const JsPropertyDescriptor* pd,
+                                                            bool is_new_property,
+                                                            bool existing_accessor) {
+    if (!key) return;
+    // DefineProperty must retain the caller's key record; creating a string
+    // from its diagnostic bytes would publish a different Symbol slot.
+    Item key_item = (Item){.item = s2it(key)};
+    js_define_own_property_from_descriptor_impl(object, key_item,
+        key->chars, (int)key->len, pd, is_new_property, existing_accessor);
 }
