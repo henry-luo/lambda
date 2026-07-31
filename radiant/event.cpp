@@ -934,11 +934,11 @@ static bool target_inside_click_control(View* target) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
             switch (elem->tag()) {
-                case HTM_TAG_A:
-                case HTM_TAG_BUTTON:
-                case HTM_TAG_INPUT:
-                case HTM_TAG_SELECT:
-                case HTM_TAG_TEXTAREA:
+                case MARKUP_NAME_A:
+                case MARKUP_NAME_BUTTON:
+                case MARKUP_NAME_INPUT:
+                case MARKUP_NAME_SELECT:
+                case MARKUP_NAME_TEXTAREA:
                     return true;
                 default:
                     break;
@@ -1244,10 +1244,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // assumed to be all text) and the click snaps to the nearest text via the
     // margin-text-hit above, so the image can never be clicked/selected.
     uintptr_t self_tag = block->tag();
-    bool is_replaced_block = self_tag == HTM_TAG_IMG || self_tag == HTM_TAG_VIDEO ||
-        self_tag == HTM_TAG_CANVAS || self_tag == HTM_TAG_IFRAME ||
-        self_tag == HTM_TAG_EMBED || self_tag == HTM_TAG_OBJECT ||
-        self_tag == HTM_TAG_HR;
+    bool is_replaced_block = self_tag == MARKUP_NAME_IMG || self_tag == MARKUP_NAME_VIDEO ||
+        self_tag == MARKUP_NAME_CANVAS || self_tag == MARKUP_NAME_IFRAME ||
+        self_tag == MARKUP_NAME_EMBED || self_tag == MARKUP_NAME_OBJECT ||
+        self_tag == MARKUP_NAME_HR;
     if (!pointer_events_none && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
@@ -1314,7 +1314,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     }
     uintptr_t name = span->tag();
     log_debug("fired at view %s", span->node_name());
-    if (name == HTM_TAG_A) {
+    if (name == MARKUP_NAME_A) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
@@ -5695,7 +5695,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
 static bool is_input_type(View* view, const char* expected_type) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
-    if (elem->tag() != HTM_TAG_INPUT) return false;
+    if (elem->tag() != MARKUP_NAME_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && strcmp(type, expected_type) == 0;
 }
@@ -5775,7 +5775,7 @@ static View* find_checkbox_radio_input(View* target) {
         if (current->is_element()) {
             ViewElement* elem = lam::view_require_element(current);
             log_debug("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
-            if (elem->tag() == HTM_TAG_LABEL) {
+            if (elem->tag() == MARKUP_NAME_LABEL) {
                 label_element = current;
                 log_debug("find_checkbox_radio_input: found label element");
                 break;
@@ -5960,7 +5960,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
 static bool is_select(View* view) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
-    return elem->tag() == HTM_TAG_SELECT;
+    return elem->tag() == MARKUP_NAME_SELECT;
 }
 
 /**
@@ -6269,14 +6269,14 @@ bool is_view_focusable(View* view) {
         }
 
         switch (tag) {
-        case HTM_TAG_A:
+        case MARKUP_NAME_A:
             // <a> is focusable if it has href
             return elem->get_attribute("href") != NULL;
-        case HTM_TAG_BUTTON:
-        case HTM_TAG_SELECT:
-        case HTM_TAG_TEXTAREA:
+        case MARKUP_NAME_BUTTON:
+        case MARKUP_NAME_SELECT:
+        case MARKUP_NAME_TEXTAREA:
             return true;
-        case HTM_TAG_INPUT: {
+        case MARKUP_NAME_INPUT: {
             // Input is focusable unless type="hidden"
             const char* type = elem->get_attribute("type");
             return !type || strcmp(type, "hidden") != 0;
@@ -8864,7 +8864,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             ViewElement* fe = lam::view_require_element(focused);
             uint32_t tag = fe->tag();
             bool handled = false;
-            if (tag == HTM_TAG_INPUT && key_event->key == RDT_KEY_SPACE) {
+            if (tag == MARKUP_NAME_INPUT && key_event->key == RDT_KEY_SPACE) {
                 if (is_checkbox(focused) || is_radio(focused)) {
                     bool js_click_dispatched = false;
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
@@ -8875,7 +8875,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     handled = true;
                 }
-            } else if (tag == HTM_TAG_BUTTON) {
+            } else if (tag == MARKUP_NAME_BUTTON) {
                 // Disabled buttons are inert.
                 DomElement* delem = lam::dom_require_element(focused);
                 bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
@@ -8884,7 +8884,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         0, 0, 0, 0, false, false, false, false, 1);
                     handled = true;
                 }
-            } else if (tag == HTM_TAG_SELECT) {
+            } else if (tag == MARKUP_NAME_SELECT) {
                 // Space / Enter on a focused <select> opens (or toggles)
                 // the dropdown popup, matching native browser behavior.
                 DomElement* delem = lam::dom_require_element(focused);

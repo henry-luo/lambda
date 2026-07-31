@@ -1304,9 +1304,9 @@ CssEnum get_white_space_value(DomNode* node) {
         }
         // HTML UA stylesheet default: preformatted elements preserve whitespace.
         // Intrinsic sizing may ask before full style resolution has populated blk.
-        uintptr_t tag = elem->tag();
+        NameId tag = elem->tag();
         if (!has_specified_white_space &&
-            (tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP)) {
+            (tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP)) {
             return CSS_VALUE_PRE;
         }
         current = current->parent;
@@ -1477,9 +1477,9 @@ static float ruby_simple_segment_inline_size(LayoutContext* lycon, DomNode* ruby
     for (DomNode* child = ruby && ruby->is_element()
              ? ruby->as_element()->first_child : nullptr;
          child; child = child->next_sibling) {
-        if (child->is_element() && child->tag() == HTM_TAG_RP) continue;
+        if (child->is_element() && child->tag() == MARKUP_NAME_RP) continue;
         float child_size = calculate_max_content_width(lycon, child);
-        if (child->is_element() && child->tag() == HTM_TAG_RT) {
+        if (child->is_element() && child->tag() == MARKUP_NAME_RT) {
             annotation_size += child_size;
         } else {
             base_size += child_size;
@@ -2607,7 +2607,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             // CSS §9.3.1: <br> creates a forced line break — content after it
             // starts on a new line, so it cannot contribute to filling the current line.
             // Stop lookahead here to avoid false-positive wraps before <br>.
-            if (node->tag() == HTM_TAG_BR) {
+            if (node->tag() == MARKUP_NAME_BR) {
                 lycon->line.advance_x = saved_advance_x;
                 return RDT_LINE_NOT_FILLED;
             }
@@ -2654,7 +2654,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
         // through <rt> here would make a base text run wrap before an
         // annotation that is positioned over it rather than after it.
         while (node && node->is_element() &&
-               (node->tag() == HTM_TAG_RT || node->tag() == HTM_TAG_RP)) {
+               (node->tag() == MARKUP_NAME_RT || node->tag() == MARKUP_NAME_RP)) {
             node = node->next_sibling;
         }
     }

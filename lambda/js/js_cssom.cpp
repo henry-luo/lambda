@@ -613,7 +613,7 @@ static const char* copy_cssom_value_text(const char* value, Pool* pool) {
 static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, Pool* pool) {
     if (!buf || !decl || !pool) return;
 
-    const char* name = decl->property_name ? decl->property_name : css_property_get_name(decl->property_id);
+    const char* name = decl->property_name ? decl->property_name : css_property_spelling_from_code(decl->property_code);
     if (!name) return;
 
     stringbuf_append_str(buf, name);
@@ -1017,7 +1017,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
     cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
 
     // search declarations for this property — last matching wins (CSS cascade)
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
 
     CssDeclaration* last_match = nullptr;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
@@ -1026,7 +1026,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
 
         // match by property ID or by name (for custom properties)
         bool match = false;
-        if (prop_id != CSS_PROPERTY_UNKNOWN && decl->property_id == prop_id) {
+        if (prop_id != CSS_PROPERTY_UNKNOWN && decl->property_code == prop_id) {
             match = true;
         } else if (decl->property_name && strcmp(decl->property_name, css_prop) == 0) {
             match = true;
@@ -1087,7 +1087,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         new_decl->value_text = canonical;
         new_decl->value_text_len = strlen(canonical);
         new_decl->valid = true;
-        new_decl->property_id = css_property_id_from_name(css_prop);
+        new_decl->property_code = css_property_code_from_name(css_prop);
 
         // find and replace or append
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
@@ -1136,12 +1136,12 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
     new_decl->value_text_len = strlen(new_decl->value_text);
 
     // find and replace existing declaration with same property
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* d = rule->data.style_rule.declarations[i];
         if (!d) continue;
         bool match = false;
-        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
+        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_code == prop_id) match = true;
         else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
 
         if (match) {
@@ -1191,14 +1191,14 @@ extern "C" Item js_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg
     // convert camelCase if needed
     char css_prop[128];
     cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
 
     // find and remove
     for (size_t i = 0; i < rm_rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* d = rm_rule->data.style_rule.declarations[i];
         if (!d) continue;
         bool match = false;
-        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
+        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_code == prop_id) match = true;
         else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
         if (match) {
             const char* old_val = css_serialize_declaration_value(
@@ -1223,7 +1223,7 @@ extern "C" Item js_cssom_decl_css_has(Item decl_item, Item prop_name) {
     if (!prop || !prop[0]) return (Item){.item = b2it(false)};
     char css_prop[128];
     cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
-    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     return (Item){.item = b2it(prop_id != CSS_PROPERTY_UNKNOWN && prop_id != 0)};
 }
 
@@ -1426,7 +1426,7 @@ static Item js_css_supports(Item* args, int argc) {
 
         bool is_custom = (prop_len >= 2 && prop_buf[0] == '-' && prop_buf[1] == '-');
         if (!is_custom) {
-            CssPropertyId pid = css_property_id_from_name(prop_buf);
+            CssPropertyCode pid = css_property_code_from_name(prop_buf);
             if (pid == CSS_PROPERTY_UNKNOWN || pid == 0) {
                 if (free_pool) mem_pool_destroy(pool);
                 return (Item){.item = b2it(false)};

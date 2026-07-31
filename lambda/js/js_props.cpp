@@ -134,19 +134,64 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
     return JS_SHAPE_SLOT_DATA;
 }
 
+extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object,
+                                                            PropertyKeyRef key,
+                                                            Item* out_slot,
+                                                            ShapeEntry** out_se) {
+    if (out_slot) *out_slot = ItemNull;
+    if (out_se) *out_se = NULL;
+    if (!key) return JS_SHAPE_SLOT_ABSENT;
+
+    Map* m = js_props_storage_map(object);
+    if (!m) return JS_SHAPE_SLOT_ABSENT;
+
+    ShapeEntry* se = js_find_shape_entry_key(object, key);
+    if (out_se) *out_se = se;
+    if (se && m->data && se->byte_offset >= 0 &&
+            se->byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+        if (get_type_id(object) == LMD_TYPE_MAP &&
+                map_ctor_offset_is_reserved(m, se->byte_offset)) {
+            return JS_SHAPE_SLOT_ABSENT;
+        }
+        Item slot = _map_read_field(se, m->data);
+        if (out_slot) *out_slot = slot;
+        if (jspd_is_deleted(se) || js_props_is_deleted_sentinel(slot)) {
+            return JS_SHAPE_SLOT_DELETED;
+        }
+        return jspd_is_accessor(se) ? JS_SHAPE_SLOT_ACCESSOR : JS_SHAPE_SLOT_DATA;
+    }
+
+    // Extension-map storage is keyed by spelling, so it is valid only for
+    // ordinary STRING records.  Unique keys must never fall through here.
+    if (property_key_requires_identity(key)) return JS_SHAPE_SLOT_ABSENT;
+    return js_own_shape_slot_status(object, key->chars, (int)key->len, out_slot, out_se);
+}
+
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
-    // Caller is responsible for ensuring `key` has been canonicalized. String
-    // and symbol keys use the central shape/slot status helper so MAP storage,
-    // FUNC properties_map storage, and ARRAY companion-map storage share the
-    // same deleted/accessor rules.
+    // This is the shared property-key boundary for direct and generic gets.
+    // Parser/Input STRING records are pooled but not runtime-canonical, so
+    // canonicalize by bytes before a shape performs pointer-key comparison.
     TypeId kt = key._type_id;
+    if (kt == LMD_TYPE_STRING) {
+        String* string_key = it2s(key);
+        if (string_key && !property_key_requires_identity(string_key)) {
+            PropertyKeyRef canonical_key = heap_create_name(string_key->chars, string_key->len);
+            if (!canonical_key) return JS_OWN_NOT_FOUND;
+            key = (Item){.item = s2it(canonical_key)};
+        }
+    }
+    // String and symbol keys use the central shape/slot status helper so MAP
+    // storage, FUNC properties_map storage, and ARRAY companion-map storage
+    // share the same deleted/accessor rules.
     if (kt == LMD_TYPE_STRING || kt == LMD_TYPE_SYMBOL) {
         const char* kc = key.get_chars();
         int kl = (int)key.get_len();
         Item slot = ItemNull;
         ShapeEntry* se = NULL;
-        JsShapeSlotStatus status = js_own_shape_slot_status(object, kc, kl, &slot, &se);
+        JsShapeSlotStatus status = string_is_pooled(it2s(key))
+            ? js_own_shape_slot_status_key(object, it2s(key), &slot, &se)
+            : js_own_shape_slot_status(object, kc, kl, &slot, &se);
         if (status == JS_SHAPE_SLOT_ABSENT) return JS_OWN_NOT_FOUND;
         if (status == JS_SHAPE_SLOT_DELETED) return JS_OWN_DELETED;
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
@@ -159,11 +204,13 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             // Setter-only accessor:
             //  - private field (#x): TypeError per ES §PrivateFieldGet.
             //  - public         : returns undefined per ES §9.1.8.1.
-            if (kl > 10 && memcmp(kc, "__private_", 10) == 0) {
+            String* property_key = it2s(key);
+            if (property_key && property_key_requires_identity(property_key) &&
+                property_key_kind(property_key) == NAME_KEY_PRIVATE) {
                 char msg[256];
                 snprintf(msg, sizeof(msg),
-                         "'#%.*s' was defined without a getter",
-                         kl - 10, kc + 10);
+                         "'%.*s' was defined without a getter",
+                         kl, kc);
                 *out_value = js_throw_type_error(msg);
                 return JS_OWN_READY;
             }

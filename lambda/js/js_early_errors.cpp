@@ -112,15 +112,15 @@ static bool is_reserved_word(const char* name, bool strict) {
 }
 
 static bool is_private_name_string(String* name) {
-    return name && name->len > 10 && strncmp(name->chars, "__private_", 10) == 0;
+    return name && name->len > 1 && name->chars[0] == '#';
 }
 
 static bool private_names_same_suffix(String* name, const char* declared, int declared_len) {
-    if (!is_private_name_string(name) || !declared || declared_len <= 10) return false;
-    int name_suffix_len = name->len - 10;
-    int declared_suffix_len = declared_len - 10;
+    if (!is_private_name_string(name) || !declared || declared_len <= 1 || declared[0] != '#') return false;
+    int name_suffix_len = name->len - 1;
+    int declared_suffix_len = declared_len - 1;
     if (name_suffix_len != declared_suffix_len) return false;
-    return strncmp(name->chars + 10, declared + 10, name_suffix_len) == 0;
+    return strncmp(name->chars + 1, declared + 1, name_suffix_len) == 0;
 }
 
 static bool ctx_private_name_is_declared(EarlyErrorCtx* ctx, String* name) {
@@ -167,8 +167,8 @@ static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
 static void check_private_identifier_valid(EarlyErrorCtx* ctx, JsAstNode* node, String* name) {
     if (!is_private_name_string(name)) return;
     if (!ctx_private_name_is_declared(ctx, name)) {
-        ee_error(ctx, node, "Private identifier '#%.*s' must be declared in an enclosing class",
-            name->len - 10, name->chars + 10);
+        ee_error(ctx, node, "Private identifier '%.*s' must be declared in an enclosing class",
+            (int)name->len, name->chars);
     }
 }
 

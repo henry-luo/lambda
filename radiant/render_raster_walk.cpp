@@ -66,7 +66,7 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
     }
-    else if (block->tag_id == HTM_TAG_SVG) {
+    else if (block->tag_id == MARKUP_NAME_SVG) {
         if (block->bound) { render_bound(rdcon, block); }
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
         render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);

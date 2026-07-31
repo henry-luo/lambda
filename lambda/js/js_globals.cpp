@@ -29,6 +29,7 @@
 #include "../lambda-data.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../lambda.hpp"
+#include "../core/name_pool.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/transpiler.hpp"
 #include "../jube/jube_registry.h"
@@ -1178,6 +1179,9 @@ static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
         (name_len >= 5 && memcmp(name, "__nc_", 5) == 0)) {
         return false;
     }
+    // A source-level string such as "__sym_103" is an ordinary public key.
+    // Symbol identity lives only in ShapeEntry::key_ref.
+    if (name_len >= 6 && memcmp(name, "__sym_", 6) == 0) return false;
     return true;
 }
 
@@ -6164,8 +6168,8 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
     if (!skip_symbol) {
         if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_FUNC) {
-            // look for __sym_3 (Symbol.hasInstance = ID 3) via property_get (handles both MAP and FUNC)
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
+            // @@hasInstance is a generated Symbol identity, not a byte key.
+            Item sym_key = js_well_known_symbol_key(3);
             Item has_instance_fn = js_property_get(right, sym_key);
             // ES §12.10.4 step 3: ReturnIfAbrupt — propagate getter errors
             if (js_check_exception()) return ItemNull;
@@ -6449,7 +6453,11 @@ extern "C" Item js_in(Item key, Item object) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
             // 1. check own data property
-            JsShapeSlotStatus own_status = js_own_shape_slot_status(object, key_str, key_len, NULL, NULL);
+            String* key_ref = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+            bool identity_key = key_ref && property_key_requires_identity(key_ref);
+            JsShapeSlotStatus own_status = identity_key
+                ? js_own_shape_slot_status_key(object, key_ref, NULL, NULL)
+                : js_own_shape_slot_status(object, key_str, key_len, NULL, NULL);
             if (own_status == JS_SHAPE_SLOT_DATA || own_status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
             // 2. Phase-5D: legacy __get_/__set_ probes removed. Bare-name shape
             //    entry with IS_ACCESSOR flag is detected by step 1 (own data probe
@@ -6464,7 +6472,9 @@ extern "C" Item js_in(Item key, Item object) {
                 if (js_is_proxy(proto)) {
                     return js_proxy_trap_has(proto, key);
                 }
-                JsShapeSlotStatus proto_status = js_own_shape_slot_status(proto, key_str, key_len, NULL, NULL);
+                JsShapeSlotStatus proto_status = identity_key
+                    ? js_own_shape_slot_status_key(proto, key_ref, NULL, NULL)
+                    : js_own_shape_slot_status(proto, key_str, key_len, NULL, NULL);
                 if (proto_status == JS_SHAPE_SLOT_DATA || proto_status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
                 // Phase-5D: legacy __get_/__set_ proto-chain probes removed.
                 // IS_ACCESSOR shape entries on protos are found by the data probe above.
@@ -6672,9 +6682,8 @@ static bool js_is_arguments_exotic_array_for_proto(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    bool found = false;
-    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
-    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* str = it2s(tag);
     return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
 }
@@ -6751,7 +6760,7 @@ static Item js_get_generator_function_prototype(bool is_async) {
     js_mark_non_enumerable(proto, ctor_key);
 
     {
-        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_key = js_well_known_symbol_key(4);
         Item tag_val = (Item){.item = s2it(heap_create_name(ctor_name, strlen(ctor_name)))};
         js_property_set(proto, tag_key, tag_val);
         js_mark_non_writable(proto, tag_key);
@@ -6814,7 +6823,7 @@ static Item js_get_async_function_prototype() {
     js_mark_non_writable(proto, ctor_key);
     js_mark_non_enumerable(proto, ctor_key);
     {
-        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_key = js_well_known_symbol_key(4);
         Item tag_val = (Item){.item = s2it(heap_create_name("AsyncFunction", 13))};
         js_property_set(proto, tag_key, tag_val);
         js_mark_non_writable(proto, tag_key);
@@ -8150,17 +8159,9 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         }
     }
 
-    // Convert name to string for comparison
-    // v41: Symbol keys must be converted to __sym_N internal format, not human-readable string
-    Item name_str_item;
-    if (get_type_id(name) == LMD_TYPE_INT && it2i(name) <= -(int64_t)JS_SYMBOL_BASE) {
-        int64_t id = -(it2i(name) + (int64_t)JS_SYMBOL_BASE);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-        name_str_item = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    } else {
-        name_str_item = js_to_string(name);
-    }
+    // Property reflection preserves Symbol identity; ToString would turn it
+    // into a user-visible spelling and merge it with an ordinary string key.
+    Item name_str_item = js_to_property_key(name);
     name_root.set(name_str_item);
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
@@ -8544,9 +8545,9 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                         (int)cls, lookup_type, name_str->chars, (int)name_str->len);
                     if (get_type_id(registry_desc) != LMD_TYPE_UNDEFINED) return registry_desc;
 
-                    // Symbol.iterator (__sym_1) — virtual property on Array/String prototypes
+                    // Symbol.iterator is a virtual property on Array/String prototypes.
                     Item builtin = ItemNull;
-                    if (name_str->len == 7 && strncmp(name_str->chars, "__sym_1", 7) == 0) {
+                    if (name.item == js_well_known_symbol_key(1).item) {
                         if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) {
                             builtin = js_property_get(obj, name);
                         }
@@ -8711,11 +8712,28 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
     //    proxies, typed arrays, String/Array/Date/etc. exotics with special
     //    [[DefineOwnProperty]] behaviour;
     //  - string key not "__"-prefixed: excludes __proto__ (own-proto marking),
-    //    symbol keys (__sym_*), private fields (__private_*) and attribute markers;
+    //    identity symbol/private keys and attribute markers;
     //  - key has no existing shape entry (js_map_get_fast_ext reports found even
     //    for deleted-sentinel entries, so map_put never creates a duplicate, and
     //    redefinition of an existing own property keeps its spec-correct path);
     //  - target is extensible.
+    if (get_type_id(name_root.get()) == LMD_TYPE_STRING) {
+        String* identity_name = it2s(name_root.get());
+        if (identity_name && property_key_requires_identity(identity_name)) {
+            // Descriptor helpers historically accepted (chars,len) and would
+            // recreate Symbol.iterator as an ordinary spelling.  A unique key
+            // is already canonical here; install its own default data slot
+            // through the identity-aware property writer.
+            if (property_key_kind(identity_name) == NAME_KEY_PRIVATE) {
+                // Class evaluation defines a private slot before its brand is
+                // observable, so this must use PrivateFieldAdd rather than Set.
+                js_private_field_define(obj_root.get(), name_root.get(), value_root.get());
+            } else {
+                js_property_set(obj_root.get(), name_root.get(), value_root.get());
+            }
+            return obj_root.get();
+        }
+    }
     if (js_input && get_type_id(obj_root.get()) == LMD_TYPE_MAP &&
             get_type_id(name_root.get()) == LMD_TYPE_STRING) {
         Map* m = obj_root.get().map;
@@ -9097,9 +9115,8 @@ static bool js_array_is_arguments_exotic(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    bool found = false;
-    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
-    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* str = it2s(tag);
     return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
 }
@@ -9194,6 +9211,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             TypeMap* pmt = (TypeMap*)pm->type;
             ShapeEntry* e = pmt->shape;
             while (e) {
+                if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+                    e = e->next;
+                    continue;
+                }
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
                 int64_t idx = js_parse_array_index(s, slen);
@@ -9215,6 +9236,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             TypeMap* pmt = (TypeMap*)pm->type;
             ShapeEntry* e = pmt->shape;
             while (e) {
+                if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+                    e = e->next;
+                    continue;
+                }
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
                 if (slen == 6 && memcmp(s, "length", 6) == 0) { e = e->next; continue; }
@@ -9259,6 +9284,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                 TypeMap* pmt = (TypeMap*)pm->type;
                 ShapeEntry* e = pmt->shape;
                 while (e) {
+                    if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+                        e = e->next;
+                        continue;
+                    }
                     const char* s = e->name->str;
                     int slen = (int)e->name->length;
                     if ((slen == 6 && strncmp(s, "length", 6) == 0) ||
@@ -9412,6 +9441,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     int idx_count = 0;
     ShapeEntry* e = tm->shape;
     while (e) {
+        if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+            e = e->next;
+            continue;
+        }
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = js_hide_legacy_dunder_own_name(s, len);
@@ -9456,6 +9489,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
     e = tm->shape;
     while (e) {
+        if (e->key_ref && property_key_requires_identity(e->key_ref)) {
+            e = e->next;
+            continue;
+        }
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = js_hide_legacy_dunder_own_name(s, len);
@@ -9558,11 +9595,10 @@ static bool js_name_starts_with(const char* name, int name_len, const char* pref
 static bool js_is_engine_internal_enumeration_key(const char* name, int name_len) {
     if (!name || name_len < 2 || name[0] != '_' || name[1] != '_') return false;
     // User code may declare globals such as `__declared__var`; only suppress
-    // keys that the runtime itself synthesizes for attributes, symbols, slots,
-    // and class/private metadata. A blanket `__*` skip hides real JS properties.
-    if (js_name_starts_with(name, name_len, "__sym_", 6) ||
-        js_name_starts_with(name, name_len, "__private_", 10) ||
-        js_name_starts_with(name, name_len, "__brand_", 8) ||
+    // keys that the runtime itself synthesizes for attributes, slots, and
+    // class metadata. Symbol and private identity keys never reach this
+    // byte-based filter, so spelling lookalikes remain public properties.
+    if (js_name_starts_with(name, name_len, "__brand_", 8) ||
         js_name_starts_with(name, name_len, "__if_", 5)) {
         return true;
     }
@@ -9584,16 +9620,7 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
     return false;
 }
 
-static bool js_internal_symbol_name_to_symbol(const char* name, int name_len, Item* out_symbol) {
-    if (!name || name_len <= 6 || strncmp(name, "__sym_", 6) != 0) return false;
-    int64_t id = 0;
-    for (int i = 6; i < name_len; i++) {
-        if (name[i] < '0' || name[i] > '9') return false;
-        id = id * 10 + (int64_t)(name[i] - '0');
-    }
-    *out_symbol = (Item){.item = i2it(-(id + (int64_t)JS_SYMBOL_BASE))};
-    return true;
-}
+static bool js_property_key_ref_to_symbol(PropertyKeyRef key, Item* out_symbol);
 
 static bool js_property_key_to_public_symbol(Item key, Item* out_symbol) {
     if (js_key_is_symbol_c(key)) {
@@ -9603,7 +9630,7 @@ static bool js_property_key_to_public_symbol(Item key, Item* out_symbol) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* key_str = it2s(key);
     if (!key_str) return false;
-    return js_internal_symbol_name_to_symbol(key_str->chars, (int)key_str->len, out_symbol);
+    return js_property_key_ref_to_symbol(key_str, out_symbol);
 }
 
 static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
@@ -9615,9 +9642,12 @@ static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
             Item symbol = ItemNull;
             const char* name = e->name->str;
             int name_len = (int)e->name->length;
-            if (js_internal_symbol_name_to_symbol(name, name_len, &symbol)) {
+            bool semantic_symbol = e->key_ref &&
+                js_property_key_ref_to_symbol(e->key_ref, &symbol);
+            if (semantic_symbol) {
                 Item map_item = (Item){.map = m};
-                JsShapeSlotStatus status = js_own_shape_slot_status(map_item, name, name_len, NULL, NULL);
+                JsShapeSlotStatus status = js_own_shape_slot_status_key(
+                    map_item, e->key_ref, NULL, NULL);
                 if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                     js_array_push(result, symbol);
                 }
@@ -11821,16 +11851,8 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
         js_lookup_builtin_method(LMD_TYPE_MAP, name, len).item != ItemNull.item) {
         return true;
     }
-    // Symbol.iterator (__sym_1) is a virtual property on Array and String prototypes
-    if (len == 7 && strncmp(name, "__sym_1", 7) == 0) {
-        if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) return true;
-    }
     if (js_builtin_registry_has_prototype_method((int)cls, lookup_type, name, len)) {
         return true;
-    }
-    if (cls == JS_CLASS_REGEXP) {
-        // symbol methods
-        if (len >= 7 && strncmp(name, "__sym_", 6) == 0) return true;
     }
     return false;
 }
@@ -11855,6 +11877,17 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
+        if (string_is_pooled(ks) && property_key_requires_identity(ks)) {
+            Array* arr = obj.array;
+            if (!js_array_has_props(arr)) return (Item){.item = b2it(false)};
+            // Array dense indices are STRING-only; a unique key lives solely
+            // in the companion-map shape and must bypass byte-key probes.
+            Item props_item = (Item){.map = js_array_props(arr)};
+            JsShapeSlotStatus status = js_own_shape_slot_status_key(
+                props_item, ks, NULL, NULL);
+            return (Item){.item = b2it(status == JS_SHAPE_SLOT_DATA ||
+                status == JS_SHAPE_SLOT_ACCESSOR)};
+        }
         // "length" is always an own property of arrays
         if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) {
             return (Item){.item = b2it(true)};
@@ -11925,23 +11958,17 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v18: handle function objects — prototype, name, length, and custom properties
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        Item k;
-        // v41: Symbol keys → __sym_N format
-        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
-            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
-            char buf[32];
-            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-        } else {
-            k = js_to_string(key);
-        }
+        Item k = js_to_property_key(key);
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
+        bool identity_key = string_is_pooled(ks) && property_key_requires_identity(ks);
         // v23: Check properties_map FIRST for deleted/overridden properties
         JsFuncProps* fn = (JsFuncProps*)obj.function;
         if (fn->properties_map.item != 0) {
-            JsShapeSlotStatus status = js_own_shape_slot_status(fn->properties_map, ks->chars, (int)ks->len, NULL, NULL);
+            JsShapeSlotStatus status = identity_key
+                ? js_own_shape_slot_status_key(fn->properties_map, ks, NULL, NULL)
+                : js_own_shape_slot_status(fn->properties_map, ks->chars, (int)ks->len, NULL, NULL);
             if (status != JS_SHAPE_SLOT_ABSENT) {
                 // If sentinel, property was deleted — except for "prototype" where the
                 // sentinel is used by js_property_set as a "cleared previous non-MAP entry"
@@ -11960,33 +11987,25 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             // non-sentinel value for IS_ACCESSOR slots.
         }
         // built-in own properties (not overridden/deleted)
-        if ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
-            (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)) {
+        if (!identity_key && ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
+            (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0))) {
             return (Item){.item = b2it(true)};
         }
         // prototype is own only for constructor functions
-        if (ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) {
+        if (!identity_key && ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) {
             return (Item){.item = b2it(js_func_has_own_prototype(obj))};
         }
         return (Item){.item = b2it(false)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    // Convert symbol keys to their internal string representation
-    Item k;
-    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
-        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-        k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    } else {
-        k = js_to_string(key);
-    }
+    Item k = js_to_property_key(key);
     if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
     String* ks = it2s(k);
     if (!ks) return (Item){.item = b2it(false)};
+    bool identity_key = string_is_pooled(ks) && property_key_requires_identity(ks);
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
-    if (ks->len == 9 && strncmp(ks->chars, "__proto__", 9) == 0) {
+    if (!identity_key && ks->len == 9 && strncmp(ks->chars, "__proto__", 9) == 0) {
         bool own_proto_marker = false;
         Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
         if (own_proto_marker && !js_is_truthy(own_proto_val)) return (Item){.item = b2it(false)};
@@ -11998,7 +12017,12 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     //             String-wrapper probe (would resurrect deleted builtin).
     //   ABSENT  — no own slot at all; fall through to builtin / String-wrapper.
     {
-        JsOwnSlotStatus st = js_ordinary_own_status(obj, ks->chars, (int)ks->len);
+        JsShapeSlotStatus status = identity_key
+            ? js_own_shape_slot_status_key(obj, ks, NULL, NULL)
+            : js_own_shape_slot_status(obj, ks->chars, (int)ks->len, NULL, NULL);
+        JsOwnSlotStatus st = status == JS_SHAPE_SLOT_DELETED ? JS_HAS_DELETED :
+            ((status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR)
+                ? JS_HAS_PRESENT : JS_HAS_ABSENT);
         if (st == JS_HAS_PRESENT) return (Item){.item = b2it(true)};
         if (st == JS_HAS_DELETED) return (Item){.item = b2it(false)};
         // JS_HAS_ABSENT — fall through.
@@ -12006,7 +12030,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     // Slot truly absent: fall back to builtin methods / String-wrapper indexed access.
     {
         // v26: check if this is a prototype Map with builtin methods
-        if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
+        if (!identity_key && js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
         // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
         if (ks->len > 0 && ks->chars[0] >= '0' && ks->chars[0] <= '9') {
             if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
@@ -12534,7 +12558,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
     return result_root.get();
 }
 
-// Returns true if `iterable` exposes a callable Symbol.iterator (`__sym_1`).
+// Returns true if `iterable` exposes a callable Symbol.iterator.
 static bool js_has_sym_iterator(Item iterable) {
     RootFrame roots(3);
     Rooted<Item> iterable_root(roots, iterable);
@@ -12542,7 +12566,7 @@ static bool js_has_sym_iterator(Item iterable) {
     Rooted<Item> factory_root(roots, ItemNull);
     TypeId tid = get_type_id(iterable_root.get());
     if (tid == LMD_TYPE_NULL || iterable_root.get().item == ITEM_JS_UNDEFINED) return false;
-    key_root.set((Item){.item = s2it(heap_create_name("__sym_1", 7))});
+    key_root.set(js_well_known_symbol_key(1));
     factory_root.set(js_property_get(iterable_root.get(), key_root.get()));
     if (js_check_exception()) return false;
     TypeId ft = get_type_id(factory_root.get());
@@ -17457,7 +17481,7 @@ static Item js_ctor_regexp_fn(Item pattern, Item flags) {
             bool has_rd = false;
             js_map_get_fast_ext(pattern.map, "__rd", 4, &has_rd);
             bool pattern_is_regexp = has_rd;
-            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+            Item sym_match_key = js_well_known_symbol_key(7);
             Item sym_match = js_property_get(pattern, sym_match_key);
             if (js_exception_pending) return ItemNull;
             TypeId match_tid = get_type_id(sym_match);
@@ -18289,7 +18313,7 @@ static void js_intrinsic_invalidate_class(int class_id, Item key) {
     if (js_intrinsic_key_equals(key, "push", 4)) {
         g_array_proto_push_ever_set = 1;
     }
-    if (js_intrinsic_key_equals(key, "__sym_1", 7)) {
+    if (key.item == js_well_known_symbol_key(1).item) {
         g_array_sym_iter_ever_set = 1;
     }
 }
@@ -18357,6 +18381,7 @@ extern "C" int js_intrinsic_array_methods_pristine() {
 struct JsSymbolEntry {
     char key[128];
     uint64_t symbol_id;
+    PropertyKeyRef property_key;
 };
 
 #define js_symbol_next_id (js_runtime_state.operations.next_symbol_id)
@@ -18367,6 +18392,7 @@ struct JsSymbolDesc {
     uint64_t symbol_id;
     char desc[128];
     int desc_len;    // -1 means no description (Symbol() with no arg)
+    PropertyKeyRef property_key;
 };
 
 #define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
@@ -18422,6 +18448,21 @@ static void js_symbol_init_registry() {
     }
 }
 
+extern "C" void js_symbol_registry_batch_reset(void) {
+    if (!js_active_runtime_state) return;
+    // Dynamic Symbol records own unique NamePool keys, so a realm reset must
+    // discard both registries before their backing pool is released.
+    if (js_symbol_registry) {
+        hashmap_free(js_symbol_registry);
+        js_symbol_registry = NULL;
+    }
+    if (js_symbol_desc_registry) {
+        hashmap_free(js_symbol_desc_registry);
+        js_symbol_desc_registry = NULL;
+    }
+    js_symbol_next_id = 100;
+}
+
 // create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
 // symbol items are encoded as negative ints that won't collide with normal ints
 static Item js_make_symbol_item(uint64_t id) {
@@ -18437,6 +18478,86 @@ static bool js_is_symbol_item(Item item) {
 
 static uint64_t js_symbol_item_id(Item item) {
     return (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE));
+}
+
+static PropertyKeyRef js_well_known_symbol_property_key(uint64_t id) {
+    if (!context || !context->js_state) return NULL;
+    JsWellKnownRefs* refs = &context->js_state->well_known;
+    switch (id) {
+    case JS_SYMBOL_ID_ITERATOR: return refs->symbol_iterator;
+    case JS_SYMBOL_ID_TO_PRIMITIVE: return refs->symbol_to_primitive;
+    case JS_SYMBOL_ID_HAS_INSTANCE: return refs->symbol_has_instance;
+    case JS_SYMBOL_ID_TO_STRING_TAG: return refs->symbol_to_string_tag;
+    case JS_SYMBOL_ID_ASYNC_ITERATOR: return refs->symbol_async_iterator;
+    case JS_SYMBOL_ID_SPECIES: return refs->symbol_species;
+    case JS_SYMBOL_ID_MATCH: return refs->symbol_match;
+    case JS_SYMBOL_ID_REPLACE: return refs->symbol_replace;
+    case JS_SYMBOL_ID_SEARCH: return refs->symbol_search;
+    case JS_SYMBOL_ID_SPLIT: return refs->symbol_split;
+    case JS_SYMBOL_ID_UNSCOPABLES: return refs->symbol_unscopables;
+    case JS_SYMBOL_ID_IS_CONCAT_SPREADABLE: return refs->symbol_is_concat_spreadable;
+    case JS_SYMBOL_ID_MATCH_ALL: return refs->symbol_match_all;
+    case JS_SYMBOL_ID_ASYNC_DISPOSE: return refs->symbol_async_dispose;
+    case JS_SYMBOL_ID_DISPOSE: return refs->symbol_dispose;
+    default: return NULL;
+    }
+}
+
+extern "C" PropertyKeyRef js_symbol_property_key(Item sym) {
+    if (!js_is_symbol_item(sym)) return NULL;
+    uint64_t id = js_symbol_item_id(sym);
+    PropertyKeyRef well_known = js_well_known_symbol_property_key(id);
+    if (well_known) return well_known;
+    if (js_symbol_desc_registry) {
+        JsSymbolDesc lookup = {};
+        lookup.symbol_id = id;
+        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        if (found) return found->property_key;
+    }
+    if (js_symbol_registry) {
+        size_t iter = 0;
+        void* entry = NULL;
+        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
+            JsSymbolEntry* found = (JsSymbolEntry*)entry;
+            if (found->symbol_id == id) return found->property_key;
+        }
+    }
+    return NULL;
+}
+
+static bool js_property_key_ref_to_symbol(PropertyKeyRef key, Item* out_symbol) {
+    if (!key || !out_symbol || !property_key_requires_identity(key) ||
+            property_key_kind(key) != NAME_KEY_SYMBOL) return false;
+    for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
+        Item symbol = js_make_symbol_item(id);
+        if (js_symbol_property_key(symbol) == key) {
+            *out_symbol = symbol;
+            return true;
+        }
+    }
+    if (js_symbol_desc_registry) {
+        size_t iter = 0;
+        void* raw = NULL;
+        while (hashmap_iter(js_symbol_desc_registry, &iter, &raw)) {
+            JsSymbolDesc* entry = (JsSymbolDesc*)raw;
+            if (entry->property_key == key) {
+                *out_symbol = js_make_symbol_item(entry->symbol_id);
+                return true;
+            }
+        }
+    }
+    if (js_symbol_registry) {
+        size_t iter = 0;
+        void* raw = NULL;
+        while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
+            JsSymbolEntry* entry = (JsSymbolEntry*)raw;
+            if (entry->property_key == key) {
+                *out_symbol = js_make_symbol_item(entry->symbol_id);
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // Populate Symbol constructor with well-known symbol properties
@@ -18493,6 +18614,13 @@ extern "C" Item js_symbol_create(Item description) {
             entry.desc_len = -1;
         }
     }
+    entry.property_key = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {entry.desc,
+            entry.desc_len >= 0 ? (size_t)entry.desc_len : 0})
+        : NULL;
+    if (!entry.property_key) {
+        return js_throw_type_error("failed to allocate symbol property key");
+    }
     hashmap_set(js_symbol_desc_registry, &entry);
 
     return sym;
@@ -18513,6 +18641,12 @@ extern "C" Item js_symbol_for(Item key) {
 
     // create new entry
     lookup.symbol_id = js_symbol_next_id++;
+    lookup.property_key = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {lookup.key, (size_t)klen})
+        : NULL;
+    if (!lookup.property_key) {
+        return js_throw_type_error("failed to allocate registry symbol property key");
+    }
     hashmap_set(js_symbol_registry, &lookup);
     return js_make_symbol_item(lookup.symbol_id);
 }

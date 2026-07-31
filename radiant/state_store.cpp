@@ -3147,7 +3147,7 @@ static bool view_element_has_attr(View* view, const char* attr_name) {
 static int form_default_selected_index_from_tree(View* view) {
     if (!view || !view->is_element()) return -1;
     DomElement* element = lam::dom_require_element(view);
-    if (element->tag() != HTM_TAG_SELECT) return -1;
+    if (element->tag() != MARKUP_NAME_SELECT) return -1;
 
     int option_count = 0;
     int selected_index = -1;

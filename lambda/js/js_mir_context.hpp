@@ -292,7 +292,7 @@ struct JsStaticFieldEntry {
 
 // Instance field entry for class (non-static field initializers)
 struct JsInstanceFieldEntry {
-    String* name;                   // field name (already __private_ prefixed if private, NULL if computed)
+    String* name;                   // source field name (#name if private, NULL if computed)
     JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression (NULL if no initializer)
     int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)

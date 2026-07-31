@@ -691,22 +691,22 @@ static bool release_should_walk_dom_children(DomElement* elem) {
         return false;
     }
 
-    uintptr_t tag = elem->tag_id;
+    NameId tag = elem->tag_id;
     switch (tag) {
-        case HTM_TAG_AREA:
-        case HTM_TAG_BASE:
-        case HTM_TAG_BR:
-        case HTM_TAG_COL:
-        case HTM_TAG_EMBED:
-        case HTM_TAG_HR:
-        case HTM_TAG_IMG:
-        case HTM_TAG_INPUT:
-        case HTM_TAG_LINK:
-        case HTM_TAG_META:
-        case HTM_TAG_PARAM:
-        case HTM_TAG_SOURCE:
-        case HTM_TAG_TRACK:
-        case HTM_TAG_WBR:
+        case MARKUP_NAME_AREA:
+        case MARKUP_NAME_BASE:
+        case MARKUP_NAME_BR:
+        case MARKUP_NAME_COL:
+        case MARKUP_NAME_EMBED:
+        case MARKUP_NAME_HR:
+        case MARKUP_NAME_IMG:
+        case MARKUP_NAME_INPUT:
+        case MARKUP_NAME_LINK:
+        case MARKUP_NAME_META:
+        case MARKUP_NAME_PARAM:
+        case MARKUP_NAME_SOURCE:
+        case MARKUP_NAME_TRACK:
+        case MARKUP_NAME_WBR:
             return false;
         default:
             break;
@@ -715,7 +715,7 @@ static bool release_should_walk_dom_children(DomElement* elem) {
     if (elem->display.inner == RDT_DISPLAY_REPLACED) {
         // Select, textarea, and button keep real DOM children/state that can own
         // layout handles; skipping them leaks fallback font handles on removal.
-        return tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_BUTTON;
+        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_BUTTON;
     }
 
     return true;
@@ -1334,10 +1334,10 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
         // In listbox mode, options have non-zero dimensions and are reported via normal path.
         // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
-        bool is_unrendered_option = (elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP)
+        bool is_unrendered_option = (elem->tag() == MARKUP_NAME_OPTION || elem->tag() == MARKUP_NAME_OPTGROUP)
                                     && elem->width == 0 && elem->height == 0;
         if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
-            || elem->tag() == HTM_TAG_WBR) {
+            || elem->tag() == MARKUP_NAME_WBR) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -2624,7 +2624,7 @@ void print_br_json(View* br, StrBuf* buf, int indent) {
 static View* single_inline_child_for_rect(ViewSpan* span) {
     if (!span) return nullptr;
     DomNode* parent = span->parent;
-    if (!parent || !parent->is_element() || parent->as_element()->tag() != HTM_TAG_BUTTON) {
+    if (!parent || !parent->is_element() || parent->as_element()->tag() != MARKUP_NAME_BUTTON) {
         return nullptr;
     }
     View* first = static_cast<View*>(span->first_child);

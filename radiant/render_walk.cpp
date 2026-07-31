@@ -157,7 +157,7 @@ static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phas
         state->color = block->inl()->color;
     }
 
-    if (block->tag_id == HTM_TAG_SVG) {
+    if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
             backend->render_inline_svg(backend->ctx, block, state->x, state->y,
                                        &state->font, state->color);

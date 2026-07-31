@@ -11,6 +11,7 @@
  */
 
 #include "layout.hpp"
+#include "../lambda/core/well_known_markup_names.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
@@ -177,9 +178,9 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    bool is_viewport_body = block->tag_id == HTM_TAG_BODY &&
+    bool is_viewport_body = block->tag_name_id() == MARKUP_NAME_BODY &&
         block->parent && block->parent->is_element() &&
-        block->parent->tag() == HTM_TAG_HTML;
+        block->parent->as_element()->tag_name_id() == MARKUP_NAME_HTML;
     ViewBlock* html_block = is_viewport_body ? lam::view_require_block(block->parent) : nullptr;
     bool html_overflow_visible = !html_block || !html_block->scroller ||
         (html_block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&

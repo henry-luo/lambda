@@ -2554,7 +2554,7 @@ static Item js_buffer_iterator_new(Item target, int kind) {
     js_property_set(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
     js_property_set(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
     js_property_set(iter, make_string_item("next"), js_new_function((void*)js_buffer_iterator_next, 0));
-    js_property_set(iter, buffer_iterator_key("__sym_1", 7), js_new_function((void*)js_buffer_iterator_identity, 0));
+    js_property_set(iter, js_well_known_symbol_key(1), js_new_function((void*)js_buffer_iterator_identity, 0));
     return iter;
 }
 
@@ -2941,7 +2941,7 @@ extern "C" Item js_get_buffer_prototype(void) {
     buf_set_method(buffer_prototype, "keys",       (void*)js_buf_inst_keys, 0);
     Item values_fn = js_new_function((void*)js_buf_inst_values, 0);
     js_property_set(buffer_prototype, make_string_item("values"), values_fn);
-    js_property_set(buffer_prototype, buffer_iterator_key("__sym_1", 7), values_fn);
+    js_property_set(buffer_prototype, js_well_known_symbol_key(1), values_fn);
     buf_set_method(buffer_prototype, "entries",    (void*)js_buf_inst_entries, 0);
 
     // endian-aware reads (1 arg: offset)
@@ -3103,7 +3103,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     // set up prototype (lazy, cached)
     js_property_set(buffer_namespace, make_string_item("prototype"), js_get_buffer_prototype());
     {
-        Item has_instance_key = make_string_item("__sym_3");
+        Item has_instance_key = js_well_known_symbol_key(3);
         js_create_data_property(buffer_namespace, has_instance_key,
                                 js_new_function((void*)js_buffer_has_instance, 1));
         js_mark_non_enumerable(buffer_namespace, has_instance_key);

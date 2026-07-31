@@ -177,6 +177,7 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
 MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref);
 bool jm_is_private_name(String* name);
 String* jm_class_private_name(JsMirTranspiler* mt, JsClassEntry* ce, String* name);
+bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce);
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
 MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable);
@@ -306,6 +307,8 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
 void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
+void jm_emit_private_instance_method_brands(JsMirTranspiler* mt, MIR_reg_t obj,
+    MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item, MIR_reg_t cls_obj);
 bool jm_emit_class_method_install(JsMirTranspiler* mt,
     const JsMirClassMethodInstallPolicy* policy);

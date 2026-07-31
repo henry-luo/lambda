@@ -499,7 +499,7 @@ CssSimpleSelector* css_parse_simple_selector(CssTokenStream* stream, Pool* pool)
 CssSpecificity css_calculate_specificity(const CssSelector* selector);
 
 // Value parsing
-CssValue* css_parse_value(CssTokenStream* stream, CssPropertyId property_id, Pool* pool);
+CssValue* css_parse_value(CssTokenStream* stream, CssPropertyCode property_code, Pool* pool);
 CssValue* css_parse_number(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_percentage(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_string(CssTokenStream* stream, Pool* pool);

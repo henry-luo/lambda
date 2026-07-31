@@ -829,7 +829,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             sf->name ? (int)sf->name->len : 0, sf->name ? sf->name->chars : "");
                     } else if (!fd->is_static && fd->key &&
                         ce->instance_field_count < ce->instance_field_capacity) {
-                        // Instance field (public or private — private already renamed to __private_)
+                        // Instance field source names retain # until class evaluation allocates identity.
                         JsInstanceFieldEntry* inf = &ce->instance_fields[ce->instance_field_count];
                         inf->computed = fd->computed;
                         inf->key_expr = fd->key;

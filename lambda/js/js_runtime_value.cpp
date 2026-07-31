@@ -297,7 +297,7 @@ extern "C" Item js_to_number(Item value) {
                     bool has_vo = false, has_ts = false, has_tp = false;
                     js_map_get_fast(value.map, "valueOf", 7, &has_vo);
                     js_map_get_fast(value.map, "toString", 8, &has_ts);
-                    js_map_get_fast(value.map, "__sym_2", 7, &has_tp);
+                    has_tp = it2b(js_has_own_property(value, js_well_known_symbol_key(2)));
                     if (!has_vo && !has_ts && !has_tp) {
                         js_throw_type_error("Cannot convert object to primitive value");
                         return ItemNull;
@@ -496,7 +496,7 @@ extern "C" Item js_to_string(Item value) {
     case LMD_TYPE_MAP: {
         // v16: Check for Symbol.toPrimitive first (prototype chain lookup)
         {
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+            Item sym_key = js_well_known_symbol_key(2);
             Item to_prim = js_property_get(value, sym_key);
             if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
             TypeId tp_type = get_type_id(to_prim);
@@ -537,7 +537,7 @@ extern "C" Item js_to_string(Item value) {
                 bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
                 js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
                 js_map_get_fast(value.map, "toString", 8, &has_own_ts);
-                js_map_get_fast(value.map, "__sym_2", 7, &has_own_tp);
+                has_own_tp = it2b(js_has_own_property(value, js_well_known_symbol_key(2)));
                 if (!has_own_vo && !has_own_ts && !has_own_tp) {
                     return js_to_string(pv);
                 }

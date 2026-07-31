@@ -318,7 +318,7 @@ static float resolve_margin_side(ViewBlock* item, int side, float track_width) {
     // Percentage margin: re-resolve against the actual track width.
     // CSS §11.4: for grid items, percentage margins resolve against the inline size of the grid area.
     // Try individual property first.
-    static const CssPropertyId side_props[] = {
+    static const CssPropertyCode side_props[] = {
         CSS_PROPERTY_MARGIN_LEFT, CSS_PROPERTY_MARGIN_RIGHT,
         CSS_PROPERTY_MARGIN_TOP,  CSS_PROPERTY_MARGIN_BOTTOM
     };

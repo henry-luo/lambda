@@ -358,11 +358,11 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
-        uintptr_t ctag = child_elem->tag();
+        NameId ctag = child_elem->tag();
 
-        if (ctag == HTM_TAG_OPTION) {
+        if (ctag == MARKUP_NAME_OPTION) {
             // direct options were measured above together with nested optgroup options
-        } else if (ctag == HTM_TAG_OPTGROUP) {
+        } else if (ctag == MARKUP_NAME_OPTGROUP) {
             // Measure optgroup label — shown as a header row in the dropdown (no indent)
             const char* label_attr = child_elem->get_attribute("label");
             if (label_attr) {
@@ -375,7 +375,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             }
             // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
             for (DomNode* gc = child_elem->first_child; gc; gc = gc->next_sibling) {
-                if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
+                if (gc->is_element() && gc->as_element()->tag() == MARKUP_NAME_OPTION) {
                     float opt_text_width = measure_direct_text_children_intrinsic_width(
                         lycon, gc->as_element(), use_min_content, CSS_VALUE_NONE);
                     // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
@@ -658,9 +658,9 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         for (DomNode* child = block->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
             DomElement* celem = child->as_element();
-            uintptr_t ctag = celem->tag();
+            NameId ctag = celem->tag();
 
-            if (ctag == HTM_TAG_OPTION) {
+            if (ctag == MARKUP_NAME_OPTION) {
                 celem->view_type = RDT_VIEW_BLOCK;
                 if (is_listbox) {
                     celem->x = border_left;
@@ -673,7 +673,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 } else {
                     zero_form_child_box(celem);
                 }
-            } else if (ctag == HTM_TAG_HR) {
+            } else if (ctag == MARKUP_NAME_HR) {
                 celem->view_type = RDT_VIEW_BLOCK;
                 if (is_listbox) {
                     // hr inside listbox: zero height, margin-top = 0.5em (UA stylesheet)
@@ -687,7 +687,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 } else {
                     zero_form_child_box(celem);
                 }
-            } else if (ctag == HTM_TAG_OPTGROUP) {
+            } else if (ctag == MARKUP_NAME_OPTGROUP) {
                 celem->view_type = RDT_VIEW_BLOCK;
                 zero_form_child_box(celem);
                 // Recurse into optgroup children
@@ -695,7 +695,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     if (!gc->is_element()) continue;
                     DomElement* gcelem = gc->as_element();
                     uintptr_t gctag = gcelem->tag();
-                    if (gctag == HTM_TAG_OPTION) {
+                    if (gctag == MARKUP_NAME_OPTION) {
                         gcelem->view_type = RDT_VIEW_BLOCK;
                         if (is_listbox) {
                             gcelem->x = border_left;
@@ -708,7 +708,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                         } else {
                             zero_form_child_box(gcelem);
                         }
-                    } else if (gctag == HTM_TAG_OPTGROUP) {
+                    } else if (gctag == MARKUP_NAME_OPTGROUP) {
                         gcelem->view_type = RDT_VIEW_BLOCK;
                         zero_form_child_box(gcelem);
                     }
@@ -719,8 +719,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // Non-select form controls: mark any stray children as 0×0
         for (DomNode* child = block->first_child; child; child = child->next_sibling) {
             if (child->is_element()) {
-                uintptr_t ctag = child->as_element()->tag();
-                if (ctag == HTM_TAG_OPTION || ctag == HTM_TAG_OPTGROUP) {
+                NameId ctag = child->as_element()->tag();
+                if (ctag == MARKUP_NAME_OPTION || ctag == MARKUP_NAME_OPTGROUP) {
                     DomElement* celem = child->as_element();
                     celem->view_type = RDT_VIEW_BLOCK;
                     zero_form_child_box(celem);
@@ -737,10 +737,10 @@ bool is_form_control(DomElement* elem) {
     if (!elem) return false;
 
     switch (elem->tag_id) {
-    case HTM_TAG_INPUT:
-    case HTM_TAG_BUTTON:
-    case HTM_TAG_SELECT:
-    case HTM_TAG_TEXTAREA:
+    case MARKUP_NAME_INPUT:
+    case MARKUP_NAME_BUTTON:
+    case MARKUP_NAME_SELECT:
+    case MARKUP_NAME_TEXTAREA:
         return true;
     default:
         return false;

@@ -984,7 +984,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     } else if (item->form_control()) {
                         // Form control (including <button>): use form intrinsic width
                         item_width = item->form->intrinsic_width;
-                        if (item_width <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
+                        if (item_width <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
                             IntrinsicSizes sizes = layout_measure_intrinsic_widths(
                                 flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
                                 "flex button intrinsic", true);
@@ -2290,8 +2290,8 @@ static void flex_ensure_explicit_image_loaded(ViewElement* item,
                                               FlexContainerLayout* flex_layout,
                                               float main_size, float cross_size,
                                               const char* axis_name) {
-    if (item->tag() != HTM_TAG_IMG || !flex_layout || !flex_layout->lycon) return;
-    const char* src = item->get_attribute("src");
+    if (item->tag() != MARKUP_NAME_IMG || !flex_layout || !flex_layout->lycon) return;
+    const char* src = item->get_attribute(MARKUP_NAME_SRC);
     if (!src || (item->embed && item->embedp()->img)) return;
 
     if (!item->embed) item->ensure_embed(flex_layout->lycon);
@@ -2354,7 +2354,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
 
         // <button> elements have flow children — measure content if intrinsic size is 0
-        if (basis <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
+        if (basis <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
             IntrinsicSizes sizes = layout_measure_intrinsic_widths(
                 flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
                 "flex form basis", true);

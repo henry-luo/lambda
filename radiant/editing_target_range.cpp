@@ -133,26 +133,26 @@ static uint32_t compute_rich_composition_target_ranges(
     return 1;
 }
 
-static bool target_range_is_join_block_tag(uintptr_t tag_id) {
+static bool target_range_is_join_block_tag(NameId tag_id) {
     switch (tag_id) {
-        case HTM_TAG_DIV:
-        case HTM_TAG_LI:
-        case HTM_TAG_P:
-        case HTM_TAG_PRE:
-        case HTM_TAG_TD:
-        case HTM_TAG_TH:
+        case MARKUP_NAME_DIV:
+        case MARKUP_NAME_LI:
+        case MARKUP_NAME_P:
+        case MARKUP_NAME_PRE:
+        case MARKUP_NAME_TD:
+        case MARKUP_NAME_TH:
             return true;
         default:
             return false;
     }
 }
 
-static bool target_range_is_table_cell_tag(uintptr_t tag_id) {
-    return tag_id == HTM_TAG_TD || tag_id == HTM_TAG_TH;
+static bool target_range_is_table_cell_tag(NameId tag_id) {
+    return tag_id == MARKUP_NAME_TD || tag_id == MARKUP_NAME_TH;
 }
 
-static bool target_range_is_list_tag(uintptr_t tag_id) {
-    return tag_id == HTM_TAG_OL || tag_id == HTM_TAG_UL;
+static bool target_range_is_list_tag(NameId tag_id) {
+    return tag_id == MARKUP_NAME_OL || tag_id == MARKUP_NAME_UL;
 }
 
 static bool target_range_join_block_pair_allowed(DomElement* prev_block,
@@ -183,37 +183,37 @@ static DomElement* target_range_text_block_parent(DomText* text) {
     return elem;
 }
 
-static bool target_range_is_simple_inline_tag(uintptr_t tag_id) {
+static bool target_range_is_simple_inline_tag(NameId tag_id) {
     switch (tag_id) {
-        case HTM_TAG_A:
-        case HTM_TAG_ABBR:
-        case HTM_TAG_B:
-        case HTM_TAG_BDI:
-        case HTM_TAG_BDO:
-        case HTM_TAG_BIG:
-        case HTM_TAG_CITE:
-        case HTM_TAG_CODE:
-        case HTM_TAG_DEL:
-        case HTM_TAG_DFN:
-        case HTM_TAG_EM:
-        case HTM_TAG_FONT:
-        case HTM_TAG_I:
-        case HTM_TAG_INS:
-        case HTM_TAG_KBD:
-        case HTM_TAG_MARK:
-        case HTM_TAG_Q:
-        case HTM_TAG_S:
-        case HTM_TAG_SAMP:
-        case HTM_TAG_SMALL:
-        case HTM_TAG_SPAN:
-        case HTM_TAG_STRIKE:
-        case HTM_TAG_STRONG:
-        case HTM_TAG_SUB:
-        case HTM_TAG_SUP:
-        case HTM_TAG_TIME:
-        case HTM_TAG_TT:
-        case HTM_TAG_U:
-        case HTM_TAG_VAR:
+        case MARKUP_NAME_A:
+        case MARKUP_NAME_ABBR:
+        case MARKUP_NAME_B:
+        case MARKUP_NAME_BDI:
+        case MARKUP_NAME_BDO:
+        case MARKUP_NAME_BIG:
+        case MARKUP_NAME_CITE:
+        case MARKUP_NAME_CODE:
+        case MARKUP_NAME_DEL:
+        case MARKUP_NAME_DFN:
+        case MARKUP_NAME_EM:
+        case MARKUP_NAME_FONT:
+        case MARKUP_NAME_I:
+        case MARKUP_NAME_INS:
+        case MARKUP_NAME_KBD:
+        case MARKUP_NAME_MARK:
+        case MARKUP_NAME_Q:
+        case MARKUP_NAME_S:
+        case MARKUP_NAME_SAMP:
+        case MARKUP_NAME_SMALL:
+        case MARKUP_NAME_SPAN:
+        case MARKUP_NAME_STRIKE:
+        case MARKUP_NAME_STRONG:
+        case MARKUP_NAME_SUB:
+        case MARKUP_NAME_SUP:
+        case MARKUP_NAME_TIME:
+        case MARKUP_NAME_TT:
+        case MARKUP_NAME_U:
+        case MARKUP_NAME_VAR:
             return true;
         default:
             return false;
@@ -347,8 +347,8 @@ static DomText* target_range_previous_cleanup_inline_text(DomText* text,
     return elem->first_child->as_text();
 }
 
-static bool target_range_is_atomic_delete_tag(uintptr_t tag_id) {
-    return tag_id == HTM_TAG_BR || tag_id == HTM_TAG_HR || tag_id == HTM_TAG_IMG;
+static bool target_range_is_atomic_delete_tag(NameId tag_id) {
+    return tag_id == MARKUP_NAME_BR || tag_id == MARKUP_NAME_HR || tag_id == MARKUP_NAME_IMG;
 }
 
 static DomNode* target_range_child_at(DomElement* parent, uint32_t index) {
@@ -421,7 +421,7 @@ static bool target_range_filler_br_block(DomElement* block) {
     if (!block || !block->first_child) return false;
     uint32_t br_count = 0;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && child->as_element()->tag() == HTM_TAG_BR) {
+        if (child->is_element() && child->as_element()->tag() == MARKUP_NAME_BR) {
             br_count++;
             continue;
         }
@@ -464,8 +464,8 @@ static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
     if (!atomic || !target_range_node_is_inside(atomic_node, surface->owner)) {
         return false;
     }
-    uintptr_t tag = atomic->tag();
-    if (tag != HTM_TAG_BR && tag != HTM_TAG_HR) return false;
+    NameId tag = atomic->tag();
+    if (tag != MARKUP_NAME_BR && tag != MARKUP_NAME_HR) return false;
 
     uint32_t atomic_idx = dom_node_child_index(atomic_node);
     if (atomic_idx == (uint32_t)-1) return false;
@@ -479,7 +479,7 @@ static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
         return true;
     }
 
-    if (tag != HTM_TAG_HR || caret.offset != 0) return false;
+    if (tag != MARKUP_NAME_HR || caret.offset != 0) return false;
     DomNode* before_atomic = atomic_node->prev_sibling;
     if (!before_atomic) return false;
     if (before_atomic->is_text()) {
@@ -493,7 +493,7 @@ static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
         return true;
     }
     if (before_atomic->is_element() &&
-        before_atomic->as_element()->tag() == HTM_TAG_BR) {
+        before_atomic->as_element()->tag() == MARKUP_NAME_BR) {
         out[0].start = { static_cast<DomNode*>(parent), atomic_idx - 1 };
         out[0].end = { static_cast<DomNode*>(parent), atomic_idx + 1 };
         return true;
@@ -624,7 +624,7 @@ static bool target_range_backspace_block_join(DomBoundary caret,
     bool direct_text_join =
         prev_content.direct_text && current_content.direct_text;
     if (direct_text_join &&
-        prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+        prev_block->tag() != MARKUP_NAME_PRE && current_block->tag() != MARKUP_NAME_PRE) {
         const char* prev_data = prev_text->text ? prev_text->text : "";
         const char* current_data = text->text ? text->text : "";
         uint32_t prev_len = prev_text->length > 0
@@ -729,12 +729,12 @@ static bool target_range_backspace_trailing_br_block_join(
 
     DomNode* last = prev_block->last_child;
     if (!last || !last->is_element() ||
-        last->as_element()->tag() != HTM_TAG_BR) {
+        last->as_element()->tag() != MARKUP_NAME_BR) {
         return false;
     }
     for (DomNode* child = prev_block->first_child->next_sibling;
          child; child = child->next_sibling) {
-        if (!child->is_element() || child->as_element()->tag() != HTM_TAG_BR) {
+        if (!child->is_element() || child->as_element()->tag() != MARKUP_NAME_BR) {
             return false;
         }
     }
@@ -799,7 +799,7 @@ static bool target_range_backspace_child_block_parent_join(
     uint32_t current_len = target_range_text_byte_len(text);
     uint32_t start_offset = prev_len;
     uint32_t end_offset = 0;
-    if (prev_block->tag() != HTM_TAG_PRE && parent->tag() != HTM_TAG_PRE) {
+    if (prev_block->tag() != MARKUP_NAME_PRE && parent->tag() != MARKUP_NAME_PRE) {
         start_offset = target_range_trim_trailing_space(prev_data, prev_len);
         end_offset = target_range_leading_space_len(current_data, current_len);
     }
@@ -834,7 +834,7 @@ static bool target_range_backspace_parent_text_child_block_join(
     uint32_t current_len = target_range_text_byte_len(text);
     uint32_t start_offset = prev_len;
     uint32_t end_offset = 0;
-    if (parent->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+    if (parent->tag() != MARKUP_NAME_PRE && current_block->tag() != MARKUP_NAME_PRE) {
         start_offset = target_range_trim_trailing_space(prev_data, prev_len);
         end_offset = target_range_leading_space_len(current_data, current_len);
     }
@@ -853,7 +853,7 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
 
     DomText* text = caret.node->as_text();
     DomElement* current_li = target_range_text_block_parent(text);
-    if (!current_li || current_li->tag() != HTM_TAG_LI) return false;
+    if (!current_li || current_li->tag() != MARKUP_NAME_LI) return false;
     DomNode* current_li_node = static_cast<DomNode*>(current_li);
     if (editing_find_text_descendant(current_li_node, false) != text) {
         return false;
@@ -873,7 +873,7 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
             nested_list_node->parent->is_element()
         ? nested_list_node->parent->as_element()
         : nullptr;
-    if (!parent_li || parent_li->tag() != HTM_TAG_LI ||
+    if (!parent_li || parent_li->tag() != MARKUP_NAME_LI ||
         !target_range_only_whitespace_after(nested_list_node) ||
         parent_li->first_child == nested_list_node) {
         return false;
@@ -919,7 +919,7 @@ static bool target_range_backspace_table_cross_row_join(DomBoundary caret,
             current_cell_node->parent->is_element()
         ? current_cell_node->parent->as_element()
         : nullptr;
-    if (!current_row || current_row->tag() != HTM_TAG_TR ||
+    if (!current_row || current_row->tag() != MARKUP_NAME_TR ||
         current_row->first_child != current_cell_node) {
         return false;
     }
@@ -927,7 +927,7 @@ static bool target_range_backspace_table_cross_row_join(DomBoundary caret,
     DomNode* prev_row_node = static_cast<DomNode*>(current_row)->prev_sibling;
     if (!prev_row_node || !prev_row_node->is_element()) return false;
     DomElement* prev_row = prev_row_node->as_element();
-    if (!prev_row || prev_row->tag() != HTM_TAG_TR || !prev_row->last_child ||
+    if (!prev_row || prev_row->tag() != MARKUP_NAME_TR || !prev_row->last_child ||
         !prev_row->last_child->is_element()) {
         return false;
     }

@@ -95,7 +95,7 @@ const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* p
 /**
  * Format a declaration (property: value) to string
  */
-const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value);
+const char* css_format_declaration(CssFormatter* formatter, CssPropertyCode property_code, CssValue* value);
 
 // ============================================================================
 // Convenience functions

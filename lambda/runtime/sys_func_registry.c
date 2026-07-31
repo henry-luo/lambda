@@ -1143,11 +1143,16 @@ extern void js_init_module_vars_undefined_bulk(const int* indices, const Item* k
     int count, int define_global_var_properties);
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
+extern void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 extern void js_init_class_instance_fields(Item callee, Item object);
 extern void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
 extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
+extern Item js_private_key_for_class(Item class_item, Item source_name);
+extern Item js_private_key_for_current_class(Item source_name);
+extern Item js_private_home_class_enter(Item class_item);
+extern void js_private_home_class_leave(Item previous_class);
 extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
@@ -2172,6 +2177,7 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target)},
+    {"js_refresh_prototype_method_homes", FPTR(js_refresh_prototype_method_homes)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -2328,6 +2334,10 @@ JitImport jit_runtime_imports[] = {
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
     {"js_set_class_instance_field_metadata_bulk", FPTR(js_set_class_instance_field_metadata_bulk)},
     {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value)},
+    {"js_private_key_for_class", FPTR(js_private_key_for_class)},
+    {"js_private_key_for_current_class", FPTR(js_private_key_for_current_class)},
+    {"js_private_home_class_enter", FPTR(js_private_home_class_enter)},
+    {"js_private_home_class_leave", FPTR(js_private_home_class_leave)},
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},

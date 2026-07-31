@@ -114,6 +114,11 @@ typedef struct AsyncRegSpill {
     int slot;
 } AsyncRegSpill;
 
+typedef struct MirPropertyKeyEntry {
+    NameRef name;
+    NameId predefined_id;
+} MirPropertyKeyEntry;
+
 struct MirTranspiler {
     // Input
     AstScript* script;
@@ -182,6 +187,7 @@ struct MirTranspiler {
     MIR_reg_t member_ic_base_reg;
     uint32_t global_var_slot_count;
     uint32_t member_ic_count;
+    ArrayList* property_keys;
 
     // Type-list pointer register: holds this module's type_list ArrayList* so that
     // cross-module function calls use the right type_list for map/elmt/object allocation.
@@ -2669,6 +2675,46 @@ static MIR_reg_t emit_member_ic_base(MirTranspiler* mt) {
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, member_ics),
             state, 0, 1)));
     return base;
+}
+
+static uint32_t module_property_key_index(MirTranspiler* mt, NameRef name) {
+    if (!mt || !name) return UINT32_MAX;
+    if (!mt->property_keys) mt->property_keys = arraylist_new(8);
+    if (!mt->property_keys) return UINT32_MAX;
+    for (int index = 0; index < mt->property_keys->length; index++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+            mt->property_keys, index);
+        if (entry && entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return (uint32_t)index;
+        }
+    }
+    MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)pool_calloc(mt->script_pool,
+        sizeof(MirPropertyKeyEntry));
+    if (!entry) return UINT32_MAX;
+    entry->name = name;
+    // AST identifiers can still be plain compiler-owned Strings. Preserve their
+    // spelling into the sealed image; only recover NameMeta after its pooled
+    // provenance is explicit.
+    entry->predefined_id = string_is_pooled(name) ? name_ref_id(name)
+        : well_known_name_id({name->chars, name->len});
+    if (!arraylist_append(mt->property_keys, entry)) return UINT32_MAX;
+    return (uint32_t)(mt->property_keys->length - 1);
+}
+
+static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index) {
+    MIR_reg_t state = emit_module_state_load(mt);
+    MIR_reg_t keys = new_reg(mt, "module_property_keys", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, keys),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, property_keys),
+            state, 0, 1)));
+    MIR_reg_t key = new_reg(mt, "module_property_key", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, key),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)index * (MIR_disp_t)sizeof(PropertyKeyRef), keys, 0, 1)));
+    return emit_box_string(mt, key);
 }
 
 // Load a global variable from its context-owned slab into a register.
@@ -8787,13 +8833,20 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     AstNode* field = field_node->field;
     MIR_reg_t boxed_field;
     if (field->node_type == AST_NODE_IDENT) {
-        // IDENT node has no type info for member fields — use name pool String* directly
+        // Static member names are linked per EvalContext; generated MIR must not
+        // retain a pointer into the compiler-owned AST NamePool.
         AstIdentNode* ident = (AstIdentNode*)field;
-        String* str = ident->name; // persistent name pool pointer
-        uint64_t str_item = ((uint64_t)LMD_TYPE_STRING << 56) | (uint64_t)(uintptr_t)str;
-        boxed_field = new_reg(mt, "fld", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, boxed_field),
-            MIR_new_int_op(mt->ctx, (int64_t)str_item)));
+        uint32_t property_key_index = module_property_key_index(mt, ident->name);
+        if (property_key_index == UINT32_MAX) {
+            log_error("module-key-link: unable to register member key '%.*s'",
+                (int)ident->name->len, ident->name->chars);
+            MIR_reg_t error_item = new_reg(mt, "member_key_error", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, error_item),
+                MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
+            return error_item;
+        }
+        boxed_field = emit_module_property_key_load(mt, property_key_index);
     } else {
         // Non-ident field (computed member): transpile as expression
         boxed_field = transpile_box_item(mt, field);
@@ -17457,7 +17510,8 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 
 uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                            ArrayList* type_list, ArrayList* const_list,
-                           Pool* script_pool, NamePool* name_pool) {
+                           Pool* script_pool, NamePool* name_pool,
+                           ArrayList** out_property_keys) {
     log_notice("transpile AST to MIR (direct)");
 
     MirTranspiler mt;
@@ -17485,6 +17539,7 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
     mt.global_vars  = global_var_new(32);
     mt.infer_cache  = infer_cache_new(32);
     mt.callsite_info = callsite_info_new(32);
+    if (out_property_keys) *out_property_keys = NULL;
 
     // Create module
     mt.module = MIR_new_module(ctx, "lambda_script");
@@ -17685,6 +17740,21 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
     }
 #endif
 
+    if (mt.property_keys && mt.property_keys->length > 0) {
+        size_t bytes_size = (size_t)mt.property_keys->length * sizeof(PropertyKeySpec);
+        for (int index = 0; index < mt.property_keys->length; index++) {
+            MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(mt.property_keys, index);
+            if (!entry || entry->predefined_id != NAME_ID_NONE ||
+                    entry->name->len > SIZE_MAX - bytes_size - 1) continue;
+            bytes_size += entry->name->len + 1;
+        }
+        if (bytes_size > UINT32_MAX) {
+            log_error("module-key-link: property key image is too large");
+        } else {
+            MIR_new_bss(ctx, "_mod_property_specs", bytes_size);
+        }
+    }
+
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
 
@@ -17707,6 +17777,8 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
     hashmap_free(mt.global_vars);
     hashmap_free(mt.infer_cache);
     hashmap_free(mt.callsite_info);
+    if (out_property_keys) *out_property_keys = mt.property_keys;
+    else if (mt.property_keys) arraylist_free(mt.property_keys);
     return mt.member_ic_count;
 }
 
@@ -17872,8 +17944,43 @@ static void register_cross_lang_pub_fns(AstImportNode* imp) {
 // Called from transpile_script() when runtime->use_mir_direct is true, for both
 // imported modules and the main script.  Depth-first import loading guarantees that
 // all of this module's sub-imports are already compiled before we are called.
+static bool finalize_module_property_key_specs(MIR_context_t ctx,
+        LambdaModuleLayout* layout, ArrayList* property_keys) {
+    if (!layout) return false;
+    layout->property_key_count = property_keys ? (uint32_t)property_keys->length : 0;
+    layout->property_key_bytes_size = 0;
+    layout->property_key_specs = NULL;
+    if (!property_keys || property_keys->length == 0) return true;
+    MIR_item_t bss_item = find_import(ctx, "_mod_property_specs");
+    if (!bss_item || !bss_item->addr) {
+        log_error("module-key-link: property spec BSS missing after link");
+        return false;
+    }
+    uint8_t* bytes = (uint8_t*)bss_item->addr;
+    PropertyKeySpec* specs = (PropertyKeySpec*)bytes;
+    uint32_t bytes_size = (uint32_t)((size_t)property_keys->length * sizeof(PropertyKeySpec));
+    for (int index = 0; index < property_keys->length; index++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(property_keys, index);
+        if (!entry || !entry->name) return false;
+        PropertyKeySpec* spec = &specs[index];
+        memset(spec, 0, sizeof(*spec));
+        spec->predefined_id = entry->predefined_id;
+        if (spec->predefined_id == NAME_ID_NONE) {
+            if (entry->name->len > UINT32_MAX - bytes_size - 1) return false;
+            spec->name_offset = bytes_size;
+            spec->name_length = entry->name->len;
+            memcpy(bytes + bytes_size, entry->name->chars, entry->name->len);
+            bytes_size += entry->name->len;
+            bytes[bytes_size++] = '\0';
+        }
+    }
+    layout->property_key_bytes_size = bytes_size;
+    layout->property_key_specs = specs;
+    return true;
+}
+
 static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
-        uint32_t member_ic_count) {
+        uint32_t member_ic_count, ArrayList* property_keys) {
     if (!ctx || !script) return;
     uint32_t slot = 0;
     LambdaModuleLayout* layout = NULL;
@@ -17900,6 +18007,10 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     layout->var_count = slot;
     layout->member_ic_count = member_ic_count;
     layout->reserved = 0;
+    if (!finalize_module_property_key_specs(ctx, layout, property_keys)) {
+        log_error("module-key-link: failed to seal property keys for '%s'",
+            script->reference ? script->reference : "<unknown>");
+    }
 }
 
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
@@ -17977,8 +18088,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (timing) clock_gettime(CLOCK_MONOTONIC, &pt1);
 #endif
 
+    ArrayList* property_keys = NULL;
     uint32_t member_ic_count = transpile_mir_ast(ctx, ast_root, tp->source,
-        tp->type_list, tp->const_list, tp->pool, tp->name_pool);
+        tp->type_list, tp->const_list, tp->pool, tp->name_pool, &property_keys);
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
 #ifdef _WIN32
@@ -18018,7 +18130,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                   script_path ? script_path : "<unknown>");
     }
 
-    finalize_context_module_layout(ctx, script, member_ic_count);
+    finalize_context_module_layout(ctx, script, member_ic_count, property_keys);
+    if (property_keys) arraylist_free(property_keys);
 
     // Register view/edit templates: walk AST, look up compiled body functions,
     // and add them to the global template registry.

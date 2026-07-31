@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "../../../lib/mempool.h"
 #include "../../../lib/strbuf.h"
+#include "../../core/name_identity.h"
 
 // Color type for text color (same as in css_style.hpp)
 #ifndef COLOR_TYPE_DEFINED
@@ -140,8 +141,8 @@ struct DomNode {
     }
 
     // static helper for tag name to ID conversion
-    static uintptr_t tag_name_to_id(const char* tag_name);
-    uintptr_t tag() const;
+    static NameId tag_name_to_id(const char* tag_name);
+    NameId tag() const;
     unsigned char* text_data() const;
     // Get attribute for element nodes
     const char* get_attribute(const char* attr_name) const;

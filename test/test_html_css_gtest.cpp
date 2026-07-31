@@ -540,7 +540,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
 
     // Create CSS declaration for .box { color: blue; }
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    decl->property_id = CSS_PROPERTY_COLOR;
+    decl->property_code = CSS_PROPERTY_COLOR;
     decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     decl->value->data.keyword = css_enum_by_name("blue");
@@ -575,7 +575,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
 
     // Apply stylesheet rule: .box { color: blue; }
     CssDeclaration* stylesheet_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    stylesheet_decl->property_id = CSS_PROPERTY_COLOR;
+    stylesheet_decl->property_code = CSS_PROPERTY_COLOR;
     stylesheet_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     stylesheet_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     stylesheet_decl->value->data.keyword = css_enum_by_name("blue");
@@ -603,7 +603,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
 
     // Apply class rule: .box { color: blue; }
     CssDeclaration* class_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    class_decl->property_id = CSS_PROPERTY_COLOR;
+    class_decl->property_code = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     class_decl->value->data.keyword = css_enum_by_name("blue");
@@ -614,7 +614,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
 
     // Apply ID rule: #main { color: green; }
     CssDeclaration* id_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    id_decl->property_id = CSS_PROPERTY_COLOR;
+    id_decl->property_code = CSS_PROPERTY_COLOR;
     id_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     id_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     id_decl->value->data.keyword = css_enum_by_name("green");
@@ -658,7 +658,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     ASSERT_NE(decl, nullptr);
 
-    decl->property_id = CSS_PROPERTY_COLOR;
+    decl->property_code = CSS_PROPERTY_COLOR;
     decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     ASSERT_NE(decl->value, nullptr);
 
@@ -1585,7 +1585,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
 
     // Apply many properties to test AVL tree performance
     const int num_properties = 50;
-    CssPropertyId properties[] = {
+    CssPropertyCode properties[] = {
         CSS_PROPERTY_COLOR,
         CSS_PROPERTY_BACKGROUND_COLOR,
         CSS_PROPERTY_WIDTH,
@@ -1600,10 +1600,10 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
 
     // Apply declarations
     for (int i = 0; i < num_properties; i++) {
-        CssPropertyId prop_id = properties[i % 10];
+        CssPropertyCode prop_id = properties[i % 10];
 
         CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-        decl->property_id = prop_id;
+        decl->property_code = prop_id;
         decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         decl->value->type = CSS_VALUE_TYPE_KEYWORD;
         decl->value->data.keyword = css_enum_by_name("value");
@@ -1631,7 +1631,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     // Apply color with different specificities
     // 1. Element selector (0,0,0,1)
     CssDeclaration* elem_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    elem_decl->property_id = CSS_PROPERTY_COLOR;
+    elem_decl->property_code = CSS_PROPERTY_COLOR;
     elem_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     elem_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     elem_decl->value->data.keyword = css_enum_by_name("black");
@@ -1642,7 +1642,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
 
     // 2. Class selector (0,0,1,0) - should override
     CssDeclaration* class_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-    class_decl->property_id = CSS_PROPERTY_COLOR;
+    class_decl->property_code = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     class_decl->value->data.keyword = css_enum_by_name("blue");

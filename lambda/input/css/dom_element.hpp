@@ -13,6 +13,7 @@
 #include "dom_lifecycle.hpp"
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
+#include "../../core/name_identity.h"
 
 /**
  * DOM Element Extension for CSS Styling
@@ -411,6 +412,7 @@ struct FragmentUnion {
 
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
+    NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
     uint8_t fragment_presence_mask;
     StyleTree* pseudo_styles[PSEUDO_STYLE_COUNT];
@@ -462,7 +464,7 @@ struct DomElement : DomNode {
     DomNode* last_child;         // Last child node
 
     // HTML/CSS style related
-    uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
+    NameId tag_id;               // Generated markup identity; custom tags use NAME_ID_NONE.
     const char* id;              // Element ID attribute (cached)
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes
@@ -681,9 +683,13 @@ struct DomElement : DomNode {
     MultiColumnProp* ensure_multicol(LayoutContext* lycon);
 
     bool set_attribute(const char* name, const char* value);
+    bool set_attribute(NameId name_id, const char* value);
     const char* get_attribute(const char* name);
+    const char* get_attribute(NameId name_id);
     bool remove_attribute(const char* name);
+    bool remove_attribute(NameId name_id);
     bool has_attribute(const char* name);
+    bool has_attribute(NameId name_id);
     const char** attribute_names(int* count);
     bool add_class(const char* class_name);
     bool remove_class(const char* class_name);
@@ -763,6 +769,11 @@ struct DomElement : DomNode {
     void set_pending_scroll_x(float value) { ensure_ext()->pending_element_scroll_x = value; }
     float pending_scroll_y() const { return ext ? ext->pending_element_scroll_y : 0.0f; }
     void set_pending_scroll_y(float value) { ensure_ext()->pending_element_scroll_y = value; }
+    NameId tag_name_id() const {
+        if (ext && ext->name_id != NAME_ID_NONE) return ext->name_id;
+        return tag_name ? well_known_name_id({tag_name, strlen(tag_name)}) : NAME_ID_NONE;
+    }
+    void set_tag_name_id(NameId value) { ensure_ext()->name_id = value; }
     void reset_view_ext() {
         if (!ext) return;
         // Doc-pooled storage outlives view results, so every relayout must drop
@@ -1009,20 +1020,20 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 /**
  * Get the specified value for a CSS property
  * @param element Target element
- * @param property_id Property to look up
+ * @param property_code Property to look up
  * @return Specified CSS declaration or NULL if not set
  */
-CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id);
+CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyCode property_code);
 
 /**
  * Get the specified value for a CSS property on a pseudo-element
  * @param element Target element (the originating element)
- * @param property_id Property to look up
+ * @param property_code Property to look up
  * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
  * @return Specified CSS declaration or NULL if not set
  */
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
-                                                     CssPropertyId property_id, int pseudo_element);
+                                                     CssPropertyCode property_code, int pseudo_element);
 
 /**
  * Check if element has ::before pseudo-element content
@@ -1058,10 +1069,10 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 /**
  * Remove a CSS property from an element
  * @param element Target element
- * @param property_id Property to remove
+ * @param property_code Property to remove
  * @return true if property was removed, false if not found
  */
-bool dom_element_remove_property(DomElement* element, CssPropertyId property_id);
+bool dom_element_remove_property(DomElement* element, CssPropertyCode property_code);
 
 /**
  * Clear every stylesheet-derived pseudo-element style tree before recascade.

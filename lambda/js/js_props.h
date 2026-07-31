@@ -98,6 +98,11 @@ JsShapeSlotStatus js_own_shape_slot_status(Item object,
                                             Item* out_slot,
                                             ShapeEntry** out_se);
 
+JsShapeSlotStatus js_own_shape_slot_status_key(Item object,
+                                                PropertyKeyRef key,
+                                                Item* out_slot,
+                                                ShapeEntry** out_se);
+
 // Mark an existing ordinary shape entry deleted using JSPD_DELETED. When
 // `create_if_missing` is true, materialize a safe undefined data slot first so
 // FUNC virtual properties can be shadow-deleted without storing the raw array

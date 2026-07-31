@@ -1835,7 +1835,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(proto, make_str("constructor"), ctor);
         js_property_set(proto, make_str("item"),
             js_new_function((void*)js_dt_files_item, 1));
-        js_property_set(proto, make_str("__sym_4"), make_str("FileList"));
+        js_property_set(proto, js_well_known_symbol_key(4), make_str("FileList"));
         Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
         if (get_type_id(array_proto) == LMD_TYPE_MAP) js_set_prototype(proto, array_proto);
         js_property_set(ctor, make_str("prototype"), proto);

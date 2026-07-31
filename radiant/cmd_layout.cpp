@@ -4981,7 +4981,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         log_error("[Lambda XML] Failed to create html wrapper element");
         return nullptr;
     }
-    html_elem->tag_id = HTM_TAG_HTML;
+    html_elem->tag_id = MARKUP_NAME_HTML;
 
     // Create <body> wrapper element
     DomElement* body_elem = DomElement::create(dom_doc, "body", nullptr);
@@ -4989,7 +4989,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         log_error("[Lambda XML] Failed to create body wrapper element");
         return nullptr;
     }
-    body_elem->tag_id = HTM_TAG_BODY;
+    body_elem->tag_id = MARKUP_NAME_BODY;
 
     // Build DOM tree from XML content and add as child of body
     DomElement* xml_dom = build_dom_tree_from_element(xml_root, dom_doc, body_elem);

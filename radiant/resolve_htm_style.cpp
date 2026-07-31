@@ -406,7 +406,7 @@ static float get_parent_table_border(DomNode* elmt) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_id == HTM_TAG_TABLE) {
+            if (elem->tag_id == MARKUP_NAME_TABLE) {
                 const char* border_attr = elem->get_attribute("border");
                 if (border_attr) {
                     StrView b_view = strview_init(border_attr, strlen(border_attr));
@@ -432,7 +432,7 @@ static float get_parent_table_cellpadding(DomNode* elmt) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_id == HTM_TAG_TABLE) {
+            if (elem->tag_id == MARKUP_NAME_TABLE) {
                 const char* cellpadding_attr = elem->get_attribute("cellpadding");
                 if (cellpadding_attr) {
                     StrView cp_view = strview_init(cellpadding_attr, strlen(cellpadding_attr));
@@ -534,7 +534,7 @@ static const char* get_parent_table_rules(DomNode* elmt) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_id == HTM_TAG_TABLE) {
+            if (elem->tag_id == MARKUP_NAME_TABLE) {
                 return elem->get_attribute("rules");
             }
         }
@@ -580,7 +580,7 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
     DomNode* node = elmt->parent;
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
-        if (elem->tag_id == HTM_TAG_TR) {
+        if (elem->tag_id == MARKUP_NAME_TR) {
             return elem->get_attribute("valign");
         }
     }
@@ -685,8 +685,8 @@ static int find_first_strong_in_node(DomNode* node) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
         // Skip <script>, <style> — they don't contribute to dir="auto" detection
-        uintptr_t tag = elem->tag_id;
-        if (tag == HTM_TAG_SCRIPT || tag == HTM_TAG_STYLE) return 0;
+        NameId tag = elem->tag_id;
+        if (tag == MARKUP_NAME_SCRIPT || tag == MARKUP_NAME_STYLE) return 0;
         // Skip elements that have their own dir attribute — per HTML spec,
         // they establish their own directionality and don't contribute to parent's auto
         const char* child_dir = elem->get_attribute("dir");
@@ -718,9 +718,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // Use the shared element storage view so inline elements can still receive
     // boundary/font defaults without asserting on their current view tag.
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
-    float em_size = 0;  uintptr_t elmt_name = elmt->tag();
+    float em_size = 0;  NameId elmt_name = elmt->tag();
     switch (elmt_name) {
-    case HTM_TAG_BODY: {
+    case MARKUP_NAME_BODY: {
         ensure_html_boundary_prop(lycon, block);
         // margin: 8px (CSS logical pixels)
         block->boundary_mut()->margin.top = block->boundary_mut()->margin.right =
@@ -779,22 +779,22 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // overflow: visible (CSS default - no special overflow handling for body)
         break;
     }
-    case HTM_TAG_H1:
+    case MARKUP_NAME_H1:
         em_size = 2;  // 2em font-size
         goto HEADING_PROP;
-    case HTM_TAG_H2:
+    case MARKUP_NAME_H2:
         em_size = 1.5;  // 1.5em font-size
         goto HEADING_PROP;
-    case HTM_TAG_H3:
+    case MARKUP_NAME_H3:
         em_size = 1.17;  // 1.17em font-size
         goto HEADING_PROP;
-    case HTM_TAG_H4:
+    case MARKUP_NAME_H4:
         em_size = 1;  // 1em font-size
         goto HEADING_PROP;
-    case HTM_TAG_H5:
+    case MARKUP_NAME_H5:
         em_size = 0.83;  // 0.83em font-size
         goto HEADING_PROP;
-    case HTM_TAG_H6:
+    case MARKUP_NAME_H6:
         em_size = 0.67;  // 0.67em font-size
         HEADING_PROP: {
         // Font styles
@@ -808,12 +808,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         ensure_html_boundary_prop(lycon, block);
         float margin_em;
         switch (elmt_name) {
-            case HTM_TAG_H1: margin_em = 0.67; break;
-            case HTM_TAG_H2: margin_em = 0.83; break;
-            case HTM_TAG_H3: margin_em = 1.00; break;
-            case HTM_TAG_H4: margin_em = 1.33; break;
-            case HTM_TAG_H5: margin_em = 1.67; break;
-            case HTM_TAG_H6: margin_em = 2.33; break;
+            case MARKUP_NAME_H1: margin_em = 0.67; break;
+            case MARKUP_NAME_H2: margin_em = 0.83; break;
+            case MARKUP_NAME_H3: margin_em = 1.00; break;
+            case MARKUP_NAME_H4: margin_em = 1.33; break;
+            case MARKUP_NAME_H5: margin_em = 1.67; break;
+            case MARKUP_NAME_H6: margin_em = 2.33; break;
             default: margin_em = 0.67; break;
         }
         block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = heading_font_size * margin_em;
@@ -821,7 +821,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
-    case HTM_TAG_P: {
+    case MARKUP_NAME_P: {
         ensure_html_boundary_prop(lycon, block);
         // margin: 1em 0;
         block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
@@ -829,7 +829,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
-    case HTM_TAG_UL:  case HTM_TAG_OL:  case HTM_TAG_MENU:
+    case MARKUP_NAME_UL:  case MARKUP_NAME_OL:  case MARKUP_NAME_MENU:
         block->ensure_block(lycon);
         ensure_html_boundary_prop(lycon, block);
         // margin: 1em 0; padding: 0 0 0 40px;
@@ -843,18 +843,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             while (ancestor) {
                 if (ancestor->is_element()) {
                     uintptr_t atag = ancestor->tag();
-                    if (atag == HTM_TAG_UL || atag == HTM_TAG_OL ||
-                        atag == HTM_TAG_MENU || atag == HTM_TAG_DIR ||
-                        atag == HTM_TAG_DL) {
+                    if (atag == MARKUP_NAME_UL || atag == MARKUP_NAME_OL ||
+                        atag == MARKUP_NAME_MENU || atag == MARKUP_NAME_DIR ||
+                        atag == MARKUP_NAME_DL) {
                         is_nested = true;
                     }
-                    if (atag == HTM_TAG_UL) {
+                    if (atag == MARKUP_NAME_UL) {
                         ul_ancestor_count++;
                     }
                 }
                 ancestor = ancestor->parent;
             }
-            if (elmt_name == HTM_TAG_UL) {
+            if (elmt_name == MARKUP_NAME_UL) {
                 // Browser UA: ul=disc, ul ul=circle, ul ul ul (and deeper)=square
                 block->blk->list_style_type =
                     (ul_ancestor_count == 0) ? CSS_VALUE_DISC :
@@ -871,11 +871,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->boundary_mut()->padding.left = 40;  // CSS logical pixels
         block->boundary_mut()->padding.left_specificity = -1;
         break;
-    case HTM_TAG_CENTER:
+    case MARKUP_NAME_CENTER:
         block->ensure_block(lycon);
         block->blk->text_align = CSS_VALUE_CENTER;
         break;
-    case HTM_TAG_DIV: {
+    case MARKUP_NAME_DIV: {
         // HTML spec §14.3.3: <div align> maps to text-align
         const char* align_attr = elmt->get_attribute("align");
         if (align_attr) {
@@ -897,7 +897,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_IMG:  { // get html width and height (before the css styles)
+    case MARKUP_NAME_IMG:  { // get html width and height (before the css styles)
         const char *value;
         value = elmt->get_attribute("width");
         if (value) {
@@ -947,7 +947,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_IFRAME: {
+    case MARKUP_NAME_IFRAME: {
         // HTML spec §15.5.14: iframe { border: 2px inset; }
         BorderProp* iframe_border = apply_html_uniform_border_base(
             lycon, block, 2.0f, CSS_VALUE_INSET, true);
@@ -1010,7 +1010,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_EMBED:
+    case MARKUP_NAME_EMBED:
         // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
         apply_html_context_default_size(lycon, 300.0f, 150.0f);
@@ -1028,7 +1028,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             }
         }
         break;
-    case HTM_TAG_WEBVIEW: {
+    case MARKUP_NAME_WEBVIEW: {
         // webview: replaced element with default 300x150, supports width/height attributes
         block->ensure_block(lycon);
         const char *value;
@@ -1052,7 +1052,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_AUDIO: {
+    case MARKUP_NAME_AUDIO: {
         // HTML §4.8.9: <audio> without controls is not rendered
         // <audio controls> is a replaced inline-block element with intrinsic size 300×54
         // (Chrome default audio player dimensions)
@@ -1068,7 +1068,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         initialize_html_media(lycon, elmt, block, false);
         break;
     }
-    case HTM_TAG_VIDEO: {
+    case MARKUP_NAME_VIDEO: {
         // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
         apply_html_replaced_pixel_size(
@@ -1077,14 +1077,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         initialize_html_media(lycon, elmt, block, true);
         break;
     }
-    case HTM_TAG_CANVAS:
+    case MARKUP_NAME_CANVAS:
         // HTML §4.12.5: canvas is a replaced element with default
         // coordinate-space dimensions 300x150 when attributes are absent.
         block->display.inner = RDT_DISPLAY_REPLACED;
         apply_html_replaced_pixel_size(
             lycon, elmt, block, 300.0f, 150.0f, true, false);
         break;
-    case HTM_TAG_OBJECT:
+    case MARKUP_NAME_OBJECT:
         // HTML §4.8.7: <object> is replaced only when it has a data attribute.
         // Without data, it renders its fallback content (children) as normal flow.
         if (elmt->get_attribute("data")) {
@@ -1093,7 +1093,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 lycon, elmt, block, 300.0f, 150.0f, true, true);
         }
         break;
-    case HTM_TAG_HR: {
+    case MARKUP_NAME_HR: {
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
         BorderProp* hr_border = apply_html_uniform_border_base(
@@ -1142,19 +1142,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_B:
+    case MARKUP_NAME_B:
         apply_html_span_bold(lycon, span);
         break;
-    case HTM_TAG_I:
+    case MARKUP_NAME_I:
         apply_html_span_font_style(lycon, span, CSS_VALUE_ITALIC);
         break;
-    case HTM_TAG_U:
+    case MARKUP_NAME_U:
         apply_html_span_text_deco(lycon, span, CSS_VALUE_UNDERLINE);
         break;
-    case HTM_TAG_S:
+    case MARKUP_NAME_S:
         apply_html_span_text_deco(lycon, span, CSS_VALUE_LINE_THROUGH);
         break;
-    case HTM_TAG_FONT: {
+    case MARKUP_NAME_FONT: {
         // parse font style
         // Get color attribute using DomNode interface
         const char* color_attr = span->get_attribute("color");
@@ -1162,7 +1162,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             span->ensure_inline(lycon);
             span->in_line->color = parse_html_color(color_attr);
             span->in_line->has_color = true;
-            log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
+            log_debug("MARKUP_NAME_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
                       span->inl()->color.r, span->inl()->color.g, span->inl()->color.b);
         }
         // Handle font size attribute (deprecated HTML but still supported)
@@ -1175,18 +1175,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML relative font sizes are offsets from legacy level 3, not inherited CSS size
                 float font_size = html_font_size_for_level(level);
                 apply_html_span_font_size(lycon, span, font_size, false);  // CSS logical pixels
-                log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->fontp()->font_size);
+                log_debug("MARKUP_NAME_FONT size='%s' -> %.1fpx", size_attr, span->fontp()->font_size);
             }
         }
         // Handle font face attribute
         const char* face_attr = span->get_attribute("face");
         if (face_attr) {
             radiant_retain_font_family(ensure_html_span_font(lycon, span), lam::PoolPtr<char>((char*)face_attr));  // store font family name
-            log_debug("HTM_TAG_FONT face: %s", face_attr);
+            log_debug("MARKUP_NAME_FONT face: %s", face_attr);
         }
         break;
     }
-    case HTM_TAG_A: {
+    case MARKUP_NAME_A: {
         // anchor style
         span->ensure_inline(lycon);
         span->in_line->cursor = CSS_VALUE_POINTER;
@@ -1196,13 +1196,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     // ========== Additional text formatting elements ==========
-    case HTM_TAG_STRONG:
+    case MARKUP_NAME_STRONG:
         apply_html_span_bold(lycon, span);
         break;
-    case HTM_TAG_EM:  case HTM_TAG_CITE:  case HTM_TAG_DFN:  case HTM_TAG_VAR:
+    case MARKUP_NAME_EM:  case MARKUP_NAME_CITE:  case MARKUP_NAME_DFN:  case MARKUP_NAME_VAR:
         apply_html_span_font_style(lycon, span, CSS_VALUE_ITALIC);
         break;
-    case HTM_TAG_CODE:  case HTM_TAG_KBD:  case HTM_TAG_SAMP:  case HTM_TAG_TT: {
+    case MARKUP_NAME_CODE:  case MARKUP_NAME_KBD:  case MARKUP_NAME_SAMP:  case MARKUP_NAME_TT: {
         // monospace font family
         apply_html_span_monospace_font(lycon, span);
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
@@ -1217,59 +1217,59 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_MARK:
+    case MARKUP_NAME_MARK:
         // yellow background highlight - handled via background property on block
         // Note: InlineProp doesn't have bg_color; would need BackgroundProp
         break;
-    case HTM_TAG_SMALL:
+    case MARKUP_NAME_SMALL:
         // font-size: smaller (0.83em)
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.83f, false);
         break;
-    case HTM_TAG_BIG:
+    case MARKUP_NAME_BIG:
         // font-size: larger (1.17em) - deprecated but still supported
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 1.17f, false);
         break;
-    case HTM_TAG_RUBY:
+    case MARKUP_NAME_RUBY:
         // Keep the UA display role on the resolved element so speculative
         // inline measurement sees the same ruby formatting context as layout.
         span->display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
         break;
-    case HTM_TAG_RT:
+    case MARKUP_NAME_RT:
         // The HTML ruby UA rule scales annotations from their ruby base; author
         // declarations still resolve afterward and override this default.
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.5f, false);
         break;
-    case HTM_TAG_SUB:
+    case MARKUP_NAME_SUB:
         // subscript: smaller font, lowered baseline
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.83f, false);
         span->ensure_inline(lycon);
         span->in_line->vertical_align = CSS_VALUE_SUB;
         break;
-    case HTM_TAG_SUP:
+    case MARKUP_NAME_SUP:
         // superscript: smaller font, raised baseline
         apply_html_span_font_size(lycon, span, lycon->font.style->font_size * 0.83f, false);
         span->ensure_inline(lycon);
         span->in_line->vertical_align = CSS_VALUE_SUPER;
         break;
-    case HTM_TAG_DEL:  case HTM_TAG_STRIKE:
+    case MARKUP_NAME_DEL:  case MARKUP_NAME_STRIKE:
         // strikethrough
         apply_html_span_text_deco(lycon, span, CSS_VALUE_LINE_THROUGH);
         break;
-    case HTM_TAG_INS:
+    case MARKUP_NAME_INS:
         // underline for inserted text
         apply_html_span_text_deco(lycon, span, CSS_VALUE_UNDERLINE);
         break;
-    case HTM_TAG_Q:
+    case MARKUP_NAME_Q:
         // inline quotation - browser adds quotes via CSS content, we just style italic
         apply_html_span_font_style(lycon, span, CSS_VALUE_ITALIC);
         break;
-    case HTM_TAG_ABBR:  case HTM_TAG_ACRONYM:
+    case MARKUP_NAME_ABBR:  case MARKUP_NAME_ACRONYM:
         // abbreviation/acronym - dotted underline in some browsers
         // we'll use standard underline for simplicity
         apply_html_span_text_deco(lycon, span, CSS_VALUE_UNDERLINE);
         break;
     // ========== Block elements ==========
-    case HTM_TAG_PRE:  case HTM_TAG_LISTING:  case HTM_TAG_XMP: {
+    case MARKUP_NAME_PRE:  case MARKUP_NAME_LISTING:  case MARKUP_NAME_XMP: {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         apply_html_block_monospace_font(lycon, block);
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
@@ -1294,8 +1294,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
         break;
     }
-    case HTM_TAG_BLOCKQUOTE:
-    case HTM_TAG_FIGURE:
+    case MARKUP_NAME_BLOCKQUOTE:
+    case MARKUP_NAME_FIGURE:
         // margin: 1em 40px
         ensure_html_boundary_prop(lycon, block);
         block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
@@ -1303,32 +1303,32 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity =
             block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
         break;
-    case HTM_TAG_ADDRESS:
+    case MARKUP_NAME_ADDRESS:
         // italic, block display
         ensure_html_block_font(lycon, block)->font_style = CSS_VALUE_ITALIC;
         break;
-    case HTM_TAG_FIGCAPTION:
+    case MARKUP_NAME_FIGCAPTION:
         // Chrome UA: figcaption is a plain block element, no special text-align
         break;
-    case HTM_TAG_DL:
+    case MARKUP_NAME_DL:
         // definition list: margin 1em 0
         ensure_html_boundary_prop(lycon, block);
         block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
         block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
         break;
-    case HTM_TAG_DD:
+    case MARKUP_NAME_DD:
         // definition description: margin-left 40px
         ensure_html_boundary_prop(lycon, block);
         block->boundary_mut()->margin.left = 40;  // CSS logical pixels
         block->boundary_mut()->margin.left_specificity = -1;
         break;
-    case HTM_TAG_DT:
+    case MARKUP_NAME_DT:
         // definition term: browser UA default is normal-weight block text.
         break;
-    case HTM_TAG_LI:
+    case MARKUP_NAME_LI:
         // list item: display list-item handled elsewhere
         break;
-    case HTM_TAG_SUMMARY:
+    case MARKUP_NAME_SUMMARY:
         // UA default: list-style: inside disclosure-closed
         // summary elements use inside marker position (disclosure triangle before text)
         block->ensure_block(lycon);
@@ -1336,7 +1336,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->list_style_type = CSS_VALUE_DISCLOSURE_CLOSED;
         break;
     // ========== Table elements ==========
-    case HTM_TAG_TABLE: {
+    case MARKUP_NAME_TABLE: {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
         // This is applied at the TableProp level in layout_table.cpp, not here in block props
 
@@ -1436,7 +1436,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_TR: {
+    case MARKUP_NAME_TR: {
         // Browser UA stylesheet: tbody/thead/tfoot default to vertical-align:
         // middle, and table rows inherit it. Preserve that computed value even
         // when author CSS changes a <tr> to an inline box.
@@ -1452,21 +1452,21 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_TH: {
+    case MARKUP_NAME_TH: {
         apply_html_table_cell_defaults(lycon, elmt, block, true);
         break;
     }
-    case HTM_TAG_TD: {
+    case MARKUP_NAME_TD: {
         apply_html_table_cell_defaults(lycon, elmt, block, false);
         break;
     }
-    case HTM_TAG_CAPTION:
+    case MARKUP_NAME_CAPTION:
         // table caption: text-align center
         block->ensure_block(lycon);
         block->blk->text_align = CSS_VALUE_CENTER;
         break;
     // ========== Form elements ==========
-    case HTM_TAG_FIELDSET:
+    case MARKUP_NAME_FIELDSET:
         // fieldset: border and padding (CSS logical pixels)
         ensure_html_boundary_prop(lycon, block);
         // Chrome uses groove style with gray color for fieldset borders
@@ -1481,13 +1481,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity =
             block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
         break;
-    case HTM_TAG_LEGEND:
+    case MARKUP_NAME_LEGEND:
         // legend: padding (CSS logical pixels)
         ensure_html_boundary_prop(lycon, block);
         block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 2;
         block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
         break;
-    case HTM_TAG_BUTTON: {
+    case MARKUP_NAME_BUTTON: {
         // button: centered text, some padding, inline-block display with flow inner
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
@@ -1512,7 +1512,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_button_box_defaults(lycon, block);
         break;
     }
-    case HTM_TAG_INPUT: {
+    case MARKUP_NAME_INPUT: {
         // Allocate form control prop - all values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
         bool form_created = false;
@@ -1701,7 +1701,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_SELECT: {
+    case MARKUP_NAME_SELECT: {
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
         bool form_created = false;
@@ -1792,7 +1792,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_background_color(lycon, block, bg_color);
         break;
     }
-    case HTM_TAG_TEXTAREA: {
+    case MARKUP_NAME_TEXTAREA: {
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
         bool form_created = false;
@@ -1830,7 +1830,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::TEXTAREA_PADDING;
         break;
     }
-    case HTM_TAG_METER: {
+    case MARKUP_NAME_METER: {
         // Meter: inline-block replaced element, Chrome default 80x16
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = RDT_DISPLAY_REPLACED;
@@ -1842,7 +1842,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_height = FormDefaults::METER_HEIGHT;
         break;
     }
-    case HTM_TAG_PROGRESS: {
+    case MARKUP_NAME_PROGRESS: {
         // Progress: inline-block replaced element, Chrome default 160x16
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = RDT_DISPLAY_REPLACED;
@@ -1854,16 +1854,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_height = FormDefaults::PROGRESS_HEIGHT;
         break;
     }
-    case HTM_TAG_LABEL:
+    case MARKUP_NAME_LABEL:
         // label is inline by default, no special styling
         break;
-    case HTM_TAG_OPTION:
-    case HTM_TAG_OPTGROUP: {
+    case MARKUP_NAME_OPTION:
+    case MARKUP_NAME_OPTGROUP: {
         // HTML spec: option/optgroup inside select/datalist are 0×0 (UA rendered).
         // Outside select/datalist, they render as normal block flow content.
         uintptr_t parent_tag = elmt->parent ? elmt->parent->tag() : 0;
-        if (parent_tag == HTM_TAG_SELECT || parent_tag == HTM_TAG_DATALIST ||
-            parent_tag == HTM_TAG_OPTGROUP) {
+        if (parent_tag == MARKUP_NAME_SELECT || parent_tag == MARKUP_NAME_DATALIST ||
+            parent_tag == MARKUP_NAME_OPTGROUP) {
             block->display.outer = CSS_VALUE_BLOCK;
             block->display.inner = CSS_VALUE_FLOW;
             block->ensure_block(lycon);
@@ -1872,12 +1872,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_DATALIST:
+    case MARKUP_NAME_DATALIST:
         // Datalist should be completely hidden (display:none)
         block->display.outer = CSS_VALUE_NONE;
         block->display.inner = CSS_VALUE_NONE;
         break;
-    case HTM_TAG_DIALOG:
+    case MARKUP_NAME_DIALOG:
         // HTML §4.12.4: <dialog> without the 'open' attribute is not rendered.
         // Chrome UA: dialog:not([open]) { display: none; }
         if (!elmt->has_attribute("open")) {
@@ -1886,9 +1886,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     // ========== Semantic/sectioning elements with no visual default ==========
-    case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:
-    case HTM_TAG_ASIDE:  case HTM_TAG_HEADER:  case HTM_TAG_FOOTER:
-    case HTM_TAG_MAIN:  case HTM_TAG_HGROUP:  case HTM_TAG_DETAILS:
+    case MARKUP_NAME_ARTICLE:  case MARKUP_NAME_SECTION:  case MARKUP_NAME_NAV:
+    case MARKUP_NAME_ASIDE:  case MARKUP_NAME_HEADER:  case MARKUP_NAME_FOOTER:
+    case MARKUP_NAME_MAIN:  case MARKUP_NAME_HGROUP:  case MARKUP_NAME_DETAILS:
         // these are block-level but have no special default styling
         break;
     }
