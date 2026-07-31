@@ -180,6 +180,11 @@ cache design should converge on; `Lambda_Design_MIR_Cache_L3.md` remains the
 authority on invalidation/keying, this section only fixes the *layout*
 direction. No implementation in this proposal.
 
+**Refined 2026-07-31:** the data/const story and the final three-section layout
+(names / data / code, serving both script caches and binary document caches)
+are elaborated in `vibe/Lambda_Design_Const_Pool.md` (MarkPack) — its §5
+supersedes the section sketch above.
+
 ## 8. Routing cleanups that ride on this (workstreams + phasing)
 
 - **W1 — builtin method dispatch by id end-to-end.** Convert the
