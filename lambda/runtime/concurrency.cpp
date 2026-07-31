@@ -3,6 +3,7 @@
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
 #include "lambda-error.h"
+#include "recovery_frame.h"
 #include "transpiler.hpp"
 #include "gc/gc_heap.h"
 #include "../../lib/log.h"
@@ -120,6 +121,10 @@ struct LambdaTask {
     int frame_root_count;
     Item handle;
     Item result;
+    // A task owns the static fault view published after one of its polls
+    // lands. The TLS fallback is only a handoff buffer, so a later task fault
+    // must not rewrite an already-completed task's observable result.
+    LambdaFaultRecord fault;
     uint64_t result_scalar;
     Item resume_value;
     uint64_t resume_value_scalar;
@@ -705,6 +710,7 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
     task->destroy_frame = destroy_frame;
     task->handle = (Item){.vmap = handle};
     task->result = ItemNull;
+    lambda_fault_record_init(&task->fault);
     task->resume_value = ItemNull;
     task->mailbox.capacity = scheduler->mailbox_capacity;
     task->next_all = scheduler->all_tasks;
@@ -746,12 +752,41 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
         lambda_task_complete(task, ItemNull);
     } else {
         task->started = true;
-        Item result = ItemNull;
-        LambdaTaskPoll poll = task->resume(task, task->frame, &result);
-        if (task->state != LAMBDA_TASK_DONE) {
-            if (poll == LAMBDA_TASK_POLL_DONE) lambda_task_complete(task, result);
-            else if (poll == LAMBDA_TASK_POLL_READY) scheduler_enqueue(task);
-            else task->state = LAMBDA_TASK_PARKED;
+        LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+            (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+        if (!recovery_frame) {
+            log_error("concurrency recovery: failed to allocate task poll frame");
+            lambda_task_complete(task, lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK));
+        } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+            Item recovered = ItemError;
+            if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+                log_error("concurrency recovery: task poll landing invariant failed");
+                recovered = lambda_recovery_publish_fault_item((Context*)context,
+                    LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+            } else {
+                // Publish first while the frame owns its embedded record, then
+                // retain a task-local static copy before releasing that frame.
+                (void)lambda_recovery_frame_fault_item((Context*)context, recovery_frame);
+                task->fault = recovery_frame->fault;
+                recovered = err2it(&task->fault.error);
+            }
+            lambda_recovery_frame_end(recovery_frame);
+            lambda_task_complete(task, recovered);
+        } else if (!lambda_recovery_frame_arm(recovery_frame)) {
+            log_error("concurrency recovery: failed to arm task poll frame");
+            lambda_recovery_frame_end(recovery_frame);
+            lambda_task_complete(task, lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK));
+        } else {
+            Item result = ItemNull;
+            LambdaTaskPoll poll = task->resume(task, task->frame, &result);
+            lambda_recovery_frame_end(recovery_frame);
+            if (task->state != LAMBDA_TASK_DONE) {
+                if (poll == LAMBDA_TASK_POLL_DONE) lambda_task_complete(task, result);
+                else if (poll == LAMBDA_TASK_POLL_READY) scheduler_enqueue(task);
+                else task->state = LAMBDA_TASK_PARKED;
+            }
         }
     }
     scheduler->current = NULL;

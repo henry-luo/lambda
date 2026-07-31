@@ -565,6 +565,24 @@ correctness accidentally.
    sanitizers, and write-through-vs-write-back differential testing pass
    without conservative discovery.
 
+### 2.1a Recovery-frame reconciliation — 2026-07-31
+
+Recovery no longer uses a shared process/thread jump target. Each execution,
+task-poll, local procedural `^err`, module transaction, or hosted guest boundary
+uses a TLS-LIFO `LambdaRecoveryFrame` with an exact side-root/number-stack
+checkpoint. A landing restores that checkpoint before inspecting its static
+fault record or exposing a result; therefore skipped C++ destructors never leave
+RootFrame slots above the restored watermark. Task completions copy the static
+record into task-owned storage before their short-lived frame is released.
+An enclosing module/guest transaction barrier takes priority over an inner local
+`^err` frame and retires that abandoned inner chain before code can resume.
+
+The POSIX stack handler selects only a registered armed frame and never logs or
+allocates. The production JS event loop no longer installs a competing SIGSEGV
+handler or continues after arbitrary memory corruption. `SideStackRootFrameTest`
+covers nested and native-RootFrame recovery, while the Windows SEH branch shares
+the frame ABI but still requires its own Windows integration run.
+
 ### 2.2 Additional foundational contracts
 
 8. **Performance-proportional publication.** Root stores are proportional to

@@ -1,9 +1,11 @@
 # Lambda — Type Enforcement Implementation Plan, Round 2
 
-**Status:** IN PROGRESS — 2026-07-31. Phases 0–4 are implemented and verified;
-Phase 5 ER-S0 through ER-S3 are implemented and verified: fault records, nested frames,
-shared-target execution entries, and native-safe local C14 lowering now use the frame ABI.
-Non-allocating origins and transactional re-entry policy remain pending.
+**Status:** IN PROGRESS — 2026-07-31. Phases 0–4 are implemented and verified.
+Phase 5 ER-S0 through ER-S6 are implemented and verified on POSIX: fault records,
+nested frames, static resource origins, transaction/task boundaries, and production
+crash-containment removal now use the frame ABI. ER-S7's precise-root/POSIX gate is
+complete; direct Windows SEH integration verification remains outstanding on a Windows
+runner.
 Phase 3 (`any \ error`, honest inference, and fn firewalls) now includes the package-source
 migrations and final MIR carrier fixes needed to honor inferred contracts without changing
 the public procedural Item ABI. The former 232 package-script failures are resolved: all 643
@@ -928,7 +930,7 @@ pass.
 | Bracket map-write static check | B7b | S | 4 |
 | `input(..., {schema: Q})` convenience | TE-10 | S | 4 |
 | Diagnostics and negative-golden hardening | TE-4/TE-9 | S | 4 |
-| System/resource fault channel | C14 | XL; ER-S0–ER-S3 landed, origin/transaction/platform work pending | 5 |
+| System/resource fault channel | C14 | XL; implemented on POSIX, Windows SEH integration verification pending | 5 |
 | Per-param sys-function typing, clean/open specializations | perf stage | — | later |
 | Witness caching, direct offsets, two-entry optimization | TE-14/perf | — | later |
 | Parenthesized `is` types, general `!`, schema-`any` surface alias | pattern/validator | — | out of scope |
@@ -1256,8 +1258,9 @@ pass.
 
 - The legacy `_lambda_recovery_point` and `_lambda_recovery_armed` TLS globals are gone. The
   POSIX stack-overflow handler reads `lambda_recovery_frame_tls_top` directly, selects the nearest
-  armed execution frame, stores only the enum-sized fault reason, and jumps to that frame's owned
-  buffer. The Windows SEH branch selects the same frame shape after `_resetstkoflw`. Ineligible
+  eligible local/execution frame unless an enclosing transaction barrier takes priority, stores
+  only the enum-sized fault reason, and jumps to that frame's owned buffer. The Windows SEH branch
+  selects the same frame shape after `_resetstkoflw`. Ineligible
   signals remain fail-stop; the POSIX handler no longer logs or allocates before the jump.
 - Runner, cached Lambda MIR, direct LambdaJS MIR, and both hosted-Jube entry forms now establish
   their own direct `setjmp` checkpoint around generated execution. Frame storage is heap-backed:
@@ -1311,6 +1314,56 @@ pass.
 - After `make -B -C build/premake config=release_native lambda -j8`,
   `make test262-baseline` passed 40,261/40,261 fully passing tests with 0 non-fully-passing,
   0 failed, 0 retries, and 0 regressions (42,889 total; 2,628 skipped; 114.0s).
+
+### 2026-07-31 — Phase 5 ER-S4 through ER-S7 POSIX recovery completion
+
+- **ER-S4 — static resource origins.** MIR side-stack/TCO stack guards and native
+  `RootFrame` exhaustion now transfer a prebuilt fault record instead of formatting an
+  ordinary error after capacity is exhausted. Rich-error allocation failure raises static
+  OOM with the original error code as non-allocating prior metadata. Equality-depth
+  exhaustion uses the same static channel only when a procedural local `^err` frame is
+  active; the pre-existing functional `let ^err` value flow remains an ordinary returned
+  error. `proc_local_system_fault.ls/.txt` and `proc_local_equality_fault.ls/.txt` pin
+  the static stack (`308`) and equality (`300`) local results, and
+  `SideStackRootFrameTest.StaticFaultOriginsLandWithoutAllocating` covers the no-allocation
+  record path.
+- **ER-S5 — short-lived task and transaction boundaries.** Every scheduler poll owns an
+  execution frame and retires it before parking. Its landed result is copied into the
+  task-owned static record, so a later fault cannot overwrite an earlier completed task.
+  Imported MIR module initializers run under transaction frames; an enclosing barrier
+  takes priority over any inner local `^err` frame, retires that abandoned chain, resets
+  partial module slabs, and only then forwards to the outer execution boundary. Hosted Jube
+  entries now poison the abandoned guest runtime/scalar-home slots before returning the
+  static result. `LambdaConcurrencyRuntime.TaskPollFaultCompletesWithDurableStaticResult`,
+  `SideStackRootFrameTest.TransactionBarrierWinsOverInnerLocalFault`, and
+  `conc/task_system_fault.ls/.txt` cover the task and transaction behavior. A direct
+  import-cone equality-depth probe exits with `E300` before the importing `pn main`
+  can print, confirming the cached-MIR transaction boundary in the real import path.
+- **ER-S6 — arbitrary crash containment.** The production JS event-loop SIGSEGV guard,
+  its alternate jump buffer, and its post-corruption continuation path were removed. C14
+  faults continue through the active recovery frame; arbitrary memory faults are no
+  longer recast as language errors. Test262's independent batch containment policy is
+  unchanged.
+- **ER-S7 — precise-root and platform state.** The root/number watermark recovery suite
+  now has 8/8 passing `SideStackRootFrameTest` cases, including local-then-outer native
+  RootFrame selection and transaction-priority local-frame retirement.
+  `vibe/Lambda_Design_Stack_Rooting.md` is reconciled with the
+  TLS-LIFO recovery ABI and removed event-loop signal guard. The POSIX implementation and
+  tests are complete. The Windows SEH branch uses the same frame selection/landing ABI,
+  but its required live integration execution has not been run on this macOS host and
+  remains the sole Phase 5 verification gap.
+- Focused checks passed: `make build`; `SideStackRootFrameTest.*` (8/8);
+  `LambdaConcurrencyRuntime.*` (12/12); and
+  `NegativeScriptTest.RuntimeError_StackOverflow` (1/1). The direct procedural probes
+  produced `[null, true, 308, "Stack overflow"]`,
+  `[null, true, 300, "Structural equality recursion limit exceeded"]`, and the task
+  probe produced `[null, true, 308, "Stack overflow"]`.
+- `make test-lambda-baseline` reached 3,690/3,691: input 2,104/2,104 and Lambda runtime
+  1,586/1,587. The only failure remains the pre-existing out-of-scope
+  `JavaScriptTests/JsFileTest.Run/dom_module_props`; all 648 Lambda-script tests passed.
+  After a release rebuild, `make test262-baseline` passed 40,261/40,261 fully passing
+  tests, with 0 non-fully-passing tests, 0 failures, 0 retries, and 0 regressions
+  (42,889 total; 2,628 skipped; 119.2s).
 
 Each phase appends a dated evidence block here when implemented. Record:
 

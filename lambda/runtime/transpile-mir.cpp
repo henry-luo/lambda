@@ -6767,11 +6767,14 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
     MIR_label_t done = new_label(mt);
 
     // A failed frame allocation cannot leave the protected expression running
-    // without a target. ER-S4 replaces this fail-closed ItemError with the
-    // static OOM origin once all resource origins publish fault records.
+    // without a target. ER-S4 raises the static OOM fault to the outer frame;
+    // only an execution with no target can continue with the fail-closed Item.
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
         MIR_new_label_op(mt->ctx, have_frame),
         MIR_new_reg_op(mt->ctx, frame), MIR_new_int_op(mt->ctx, 0)));
+    (void)emit_call_2(mt, "lambda_recovery_frame_raise_fault", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, LAMBDA_FAULT_OUT_OF_MEMORY),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, ERR_OK));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, (int64_t)item_error)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -6842,7 +6845,8 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
     // Copy the embedded record before ending the frame. The source jump skips
     // the normal RHS epilogue, so the recovery helper has already restored its
     // precise side-stack checkpoint before this Item can become observable.
-    MIR_reg_t fault_item = emit_call_1(mt, "lambda_recovery_frame_fault_item", MIR_T_I64,
+    MIR_reg_t fault_item = emit_call_2(mt, "lambda_recovery_frame_fault_item", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
         MIR_T_P, MIR_new_reg_op(mt->ctx, frame));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fault_item)));
@@ -18285,46 +18289,104 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                 runner.script->const_list ? runner.script->const_list->data : nullptr,
                 runner.script->type_list)) return nullptr;
 
-        // run only the current main script's import cone, deps before dependents
-        for (int i = 0; i < import_cone->length; i++) {
-            Script* imp_script = (Script*)import_cone->data[i];
-            if (!imp_script || !imp_script->main_func) continue;
-            log_info("mir cache: running imported module main index=%d", imp_script->index);
-            runner.context->consts = imp_script->const_list ? imp_script->const_list->data : nullptr;
-            runner.context->type_list = imp_script->type_list;
-            imp_script->main_func(runner.context);
-        }
-        // Restore context for main script execution
-        runner.context->consts = runner.script->const_list ? runner.script->const_list->data : nullptr;
-        runner.context->type_list = runner.script->type_list;
-
-        // Execute main script using already-initialized context
-        log_notice("Executing JIT compiled code...");
-        runner.context->run_main = run_main;
         Item result = ItemError;
         LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
             (Context*)runner.context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
         if (!recovery_frame) {
             log_error("mir-cache: failed to allocate recovery frame");
-            // No recovery target exists yet, so ER-S4 must publish the
-            // static OOM fault instead of constructing a rich error here.
-            result = runner.context->result = ItemError;
+            result = runner.context->result = lambda_recovery_publish_fault_item(
+                (Context*)runner.context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
         } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+            Item recovered = ItemError;
             if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
                 log_error("mir-cache: recovery frame landing invariant failed");
+                recovered = lambda_recovery_publish_fault_item((Context*)runner.context,
+                    LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+            } else {
+                recovered = lambda_recovery_frame_fault_item((Context*)runner.context,
+                    recovery_frame);
             }
-            log_error("exec: recovered from stack overflow via signal handler");
             _lambda_stack_overflow_flag = false;
             lambda_recovery_frame_end(recovery_frame);
-            lambda_stack_overflow_error("<signal>");
-            result = runner.context->result = ItemError;
+            result = runner.context->result = recovered;
         } else {
             if (!lambda_recovery_frame_arm(recovery_frame)) {
                 log_error("mir-cache: failed to arm recovery frame");
                 lambda_recovery_frame_end(recovery_frame);
-                result = runner.context->result = ItemError;
+                result = runner.context->result = lambda_recovery_publish_fault_item(
+                    (Context*)runner.context, LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
             } else {
-                result = runner.context->result = runner.script->main_func(runner.context);
+                // Module initialization is transactional. A fault first lands
+                // in this barrier, resets partial module slabs, and then
+                // forwards to the still-armed outer execution boundary.
+                bool module_init_failed = false;
+                for (int i = 0; i < import_cone->length; i++) {
+                    Script* imp_script = (Script*)import_cone->data[i];
+                    if (!imp_script || !imp_script->main_func) continue;
+                    LambdaRecoveryFrame* module_frame = lambda_recovery_frame_begin_for(
+                        (Context*)runner.context,
+                        LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
+                    if (!module_frame) {
+                        log_error("mir-cache: failed to allocate module transaction frame");
+                        if (!lambda_recovery_frame_raise_fault(
+                                LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK)) {
+                            result = runner.context->result =
+                                lambda_recovery_publish_fault_item((Context*)runner.context,
+                                    LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
+                            module_init_failed = true;
+                        }
+                        break;
+                    }
+                    if (LAMBDA_RECOVERY_FRAME_SETJMP(module_frame)) {
+                        LambdaFaultReason reason = LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT;
+                        LambdaErrorCode prior_error_code = ERR_OK;
+                        if (!lambda_recovery_frame_restore_landing(module_frame)) {
+                            log_error("mir-cache: module transaction landing invariant failed");
+                        } else {
+                            reason = module_frame->fault.reason;
+                            prior_error_code = module_frame->fault.prior_error_code;
+                        }
+                        lambda_recovery_frame_end(module_frame);
+                        // An abandoned initializer may have registered roots or
+                        // IC entries, so a local handler must not resume it.
+                        lambda_module_state_reset();
+                        if (!lambda_recovery_frame_raise_fault(reason, prior_error_code)) {
+                            result = runner.context->result =
+                                lambda_recovery_publish_fault_item((Context*)runner.context,
+                                    reason, prior_error_code);
+                            module_init_failed = true;
+                        }
+                        break;
+                    }
+                    if (!lambda_recovery_frame_arm(module_frame)) {
+                        log_error("mir-cache: failed to arm module transaction frame");
+                        lambda_recovery_frame_end(module_frame);
+                        if (!lambda_recovery_frame_raise_fault(
+                                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK)) {
+                            result = runner.context->result =
+                                lambda_recovery_publish_fault_item((Context*)runner.context,
+                                    LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+                            module_init_failed = true;
+                        }
+                        break;
+                    }
+                    log_info("mir cache: running imported module main index=%d", imp_script->index);
+                    runner.context->consts = imp_script->const_list
+                        ? imp_script->const_list->data : nullptr;
+                    runner.context->type_list = imp_script->type_list;
+                    imp_script->main_func(runner.context);
+                    lambda_recovery_frame_end(module_frame);
+                }
+                // Restore the main module only after every import barrier has
+                // retired normally; otherwise the outer landing has run.
+                runner.context->consts = runner.script->const_list
+                    ? runner.script->const_list->data : nullptr;
+                runner.context->type_list = runner.script->type_list;
+                log_notice("Executing JIT compiled code...");
+                runner.context->run_main = run_main;
+                if (!module_init_failed) {
+                    result = runner.context->result = runner.script->main_func(runner.context);
+                }
                 lambda_recovery_frame_end(recovery_frame);
             }
         }

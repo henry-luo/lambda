@@ -1597,23 +1597,27 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
     if (!recovery_frame) {
         log_error("exec: failed to allocate recovery frame");
-        // No recovery target exists yet, so an OOM here cannot safely build a
-        // second rich diagnostic before ER-S4 publishes the static fault.
-        result = context->result = ItemError;
+        result = context->result = lambda_recovery_publish_fault_item(
+            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
     } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        Item recovered = ItemError;
         if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
             log_error("exec: recovery frame landing invariant failed");
+            recovered = lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+        } else {
+            recovered = lambda_recovery_frame_fault_item((Context*)context,
+                recovery_frame);
         }
-        log_error("exec: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
-        lambda_stack_overflow_error("<signal>");
-        result = context->result = ItemError;
+        result = context->result = recovered;
     } else {
         if (!lambda_recovery_frame_arm(recovery_frame)) {
             log_error("exec: failed to arm recovery frame");
             lambda_recovery_frame_end(recovery_frame);
-            result = context->result = ItemError;
+            result = context->result = lambda_recovery_publish_fault_item(
+                (Context*)context, LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         } else {
             log_debug("exec main func");
             result = context->result = runner->script->main_func(context);

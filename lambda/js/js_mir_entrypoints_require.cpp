@@ -1020,22 +1020,29 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
     if (!recovery_frame) {
         log_error("js-mir: failed to allocate recovery frame");
-        result = (Item){.item = ITEM_ERROR};
+        result = lambda_recovery_publish_fault_item(
+            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
     } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        Item recovered = ItemError;
         if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
             log_error("js-mir: recovery frame landing invariant failed");
+            recovered = lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+        } else {
+            recovered = lambda_recovery_frame_fault_item((Context*)context,
+                recovery_frame);
         }
-        log_error("js-mir: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
-        result = (Item){.item = ITEM_ERROR};
+        result = recovered;
         // Report the error so it shows up as an uncaught exception
         js_throw_range_error("Maximum call stack size exceeded");
     } else {
         if (!lambda_recovery_frame_arm(recovery_frame)) {
             log_error("js-mir: failed to arm recovery frame");
             lambda_recovery_frame_end(recovery_frame);
-            result = (Item){.item = ITEM_ERROR};
+            result = lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         } else {
             result = js_main((Context*)context);
             lambda_recovery_frame_end(recovery_frame);

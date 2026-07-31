@@ -24,8 +24,6 @@
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
-#include <setjmp.h>
-#include <signal.h>
 #include <cstdio>
 
 extern __thread EvalContext* context;
@@ -1728,36 +1726,6 @@ extern "C" void js_event_loop_shutdown(void) {
     raf_count = 0;
 }
 
-// Recovery mechanism for SIGSEGV during event loop drain.
-// Heap corruption in timer callbacks (pre-existing bug) can crash the process
-// after tests have completed. We catch the signal and abort the event loop
-// gracefully instead of terminating.
-#ifndef _WIN32
-static sigjmp_buf event_loop_jmpbuf;
-static volatile sig_atomic_t event_loop_guarded = 0;
-static volatile sig_atomic_t event_loop_fault_signal = 0;
-static struct sigaction event_loop_old_sa;
-
-static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
-    if (event_loop_guarded) {
-        // Signal handlers cannot safely log or mutate the allocator. Record the
-        // fault and restore runtime watermarks at the sigsetjmp landing point.
-        event_loop_fault_signal = sig;
-        event_loop_guarded = 0;
-        siglongjmp(event_loop_jmpbuf, 1);
-    }
-    // not guarded, call previous handler
-    if (event_loop_old_sa.sa_flags & SA_SIGINFO) {
-        event_loop_old_sa.sa_sigaction(sig, info, ctx);
-    } else if (event_loop_old_sa.sa_handler != SIG_DFL && event_loop_old_sa.sa_handler != SIG_IGN) {
-        event_loop_old_sa.sa_handler(sig);
-    } else {
-        signal(SIGSEGV, SIG_DFL);
-        raise(SIGSEGV);
-    }
-}
-#endif  // !_WIN32
-
 // Maximum time (ms) the event loop drain is allowed to run before being
 // forcefully stopped.  Prevents infinite blocking from setInterval() or
 // long-running timers in document scripts (e.g. CSS animation test pages).
@@ -2095,24 +2063,11 @@ extern "C" int js_event_loop_drain(void) {
         return 0;
     }
 
-#ifndef _WIN32
-    // install crash guard for event loop drain
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = event_loop_sigsegv_handler;
-    sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &sa, &event_loop_old_sa);
-    event_loop_guarded = 1;
-    event_loop_fault_signal = 0;
-
     int result = 0;
-    LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture();
-    if (sigsetjmp(event_loop_jmpbuf, 1) == 0) {
-#else
-    int result = 0;
+    // A parallel event-loop SIGSEGV guard used to replace the runtime's stack
+    // handler and continue after arbitrary memory corruption. C14 faults use
+    // the active execution frame; all other memory faults must fail-stop.
     {
-#endif
         // install watchdog timer to prevent infinite blocking from setInterval
         uv_timer_t watchdog;
         JsDrainWatchdogState watchdog_state;
@@ -2162,20 +2117,7 @@ extern "C" int js_event_loop_drain(void) {
 
         // final microtask flush after loop exits
         js_microtask_flush();
-        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
     }
-#ifndef _WIN32
-    else {
-        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
-        log_error("event_loop: recovered from signal %d during drain",
-                  (int)event_loop_fault_signal);
-        result = -1;
-    }
-
-    // restore previous signal handler
-    event_loop_guarded = 0;
-    sigaction(SIGSEGV, &event_loop_old_sa, NULL);
-#endif
 
     return result;
 }

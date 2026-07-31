@@ -310,6 +310,70 @@ TEST(SideStackRootFrameTest, NativeRootFaultChoosesLocalThenOuterFrame) {
     lambda_side_stack_reset_for(&runtime);
 }
 
+TEST(SideStackRootFrameTest, TransactionBarrierWinsOverInnerLocalFault) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+    uint64_t* initial_root_top = runtime.side_root_top;
+
+    LambdaRecoveryFrame* transaction = lambda_recovery_frame_begin_for(
+        &runtime, LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
+    ASSERT_NE(transaction, nullptr);
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(transaction) == 0) {
+        ASSERT_TRUE(lambda_recovery_frame_arm(transaction));
+        ASSERT_NE(lambda_side_root_alloc_n_for(&runtime, 1), nullptr);
+
+        LambdaRecoveryFrame* local = lambda_recovery_frame_begin_for(
+            &runtime, LAMBDA_RECOVERY_CAP_LOCAL_FAULT);
+        ASSERT_NE(local, nullptr);
+        if (LAMBDA_RECOVERY_FRAME_SETJMP(local) == 0) {
+            ASSERT_TRUE(lambda_recovery_frame_arm(local));
+            // A module/guest transaction must retire the inner handler before
+            // it can observe a fault from work whose epilogue was skipped.
+            lambda_recovery_frame_raise_local_fault(
+                LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_TYPE_MISMATCH);
+            ADD_FAILURE() << "transaction-owned fault returned instead of landing";
+        }
+        ADD_FAILURE() << "inner local frame landed across transaction barrier";
+    }
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(transaction));
+    EXPECT_EQ(transaction->fault.reason, LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION);
+    EXPECT_EQ(transaction->fault.prior_error_code, ERR_TYPE_MISMATCH);
+    EXPECT_EQ(runtime.side_root_top, initial_root_top);
+    EXPECT_EQ(lambda_recovery_frame_current(), transaction);
+    ASSERT_TRUE(lambda_recovery_frame_end(transaction));
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    lambda_side_stack_reset_for(&runtime);
+}
+
+TEST(SideStackRootFrameTest, StaticFaultOriginsLandWithoutAllocating) {
+    static const LambdaFaultReason reasons[] = {
+        LAMBDA_FAULT_OUT_OF_MEMORY,
+        LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION,
+        LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT,
+    };
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+
+    for (LambdaFaultReason reason : reasons) {
+        LambdaRecoveryFrame* frame = lambda_recovery_frame_begin_for(
+            &runtime, LAMBDA_RECOVERY_CAP_LOCAL_FAULT);
+        ASSERT_NE(frame, nullptr);
+        if (LAMBDA_RECOVERY_FRAME_SETJMP(frame) == 0) {
+            ASSERT_TRUE(lambda_recovery_frame_arm(frame));
+            lambda_recovery_frame_raise_fault(reason, ERR_TYPE_MISMATCH);
+            ADD_FAILURE() << "fault origin returned instead of landing";
+        }
+        ASSERT_TRUE(lambda_recovery_frame_restore_landing(frame));
+        EXPECT_EQ(frame->fault.reason, reason);
+        EXPECT_EQ(frame->fault.prior_error_code, ERR_TYPE_MISMATCH);
+        EXPECT_TRUE(frame->fault.error.is_static);
+        ASSERT_TRUE(lambda_recovery_frame_end(frame));
+        EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    }
+    lambda_side_stack_reset_for(&runtime);
+}
+
 TEST(SideStackRootFrameTest, OversizedFrameFailsWithoutAdvancingWatermark) {
     Context runtime{};
     ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));

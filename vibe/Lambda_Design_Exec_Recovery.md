@@ -1,10 +1,11 @@
 # Lambda execution recovery: current non-local-jump inventory and redesign ledger
 
-**Status:** PROPOSED V1 RECOVERY ABI — ER-S0 through ER-S3 are implemented.
-The live inventory was rechecked 2026-07-31. The shared execution target has
-been replaced by a TLS LIFO frame at every former target site; this document
-retains the remaining origin, transaction, containment, and
-platform requirements before the unchecked system-fault channel is enabled.
+**Status:** IMPLEMENTED ON POSIX — ER-S0 through ER-S6 are implemented and
+verified. ER-S7's precise-root/POSIX gate is complete; the matching Windows SEH
+integration test remains an external Windows-runner requirement. The live
+inventory was rechecked 2026-07-31. The shared execution target has been
+replaced by a TLS LIFO frame at every former target site; resource faults use
+the static channel while arbitrary event-loop memory faults fail-stop.
 
 **Date:** 2026-07-17
 
@@ -52,13 +53,13 @@ an adequate recovery contract.
 
 | Mechanism | Jump origin | Landing point(s) | Current side-stack handling |
 |---|---|---|---|
-| Stack overflow, Unix | `runtime/lambda-stack.cpp` `siglongjmp(frame->jump_buffer, 1)` | `runtime/runner.cpp`; `runtime/transpile-mir.cpp`; `js/js_mir_entrypoints_require.cpp`; Jube guest entry | nearest armed TLS frame restores the exact shared checkpoint, then is popped before reporting |
+| Stack overflow, Unix | `runtime/lambda-stack.cpp` `siglongjmp(frame->jump_buffer, 1)` | `runtime/runner.cpp`; `runtime/transpile-mir.cpp`; `js/js_mir_entrypoints_require.cpp`; Jube guest entry | selected armed TLS frame restores the exact shared checkpoint, then is popped before reporting; transaction barriers win over inner local frames |
 | Stack overflow, Windows | `runtime/lambda-stack.cpp` `longjmp(frame->jump_buffer, 1)` after `_resetstkoflw` | Windows branches of the same execution-entry families | same frame selection and checkpoint contract; Windows runtime gate remains pending |
 | Simple file-batch timeout | `main.cpp:1371` | `main.cpp:3898` | no local snapshot/restore; later runtime reset |
 | Test262 hot-batch timeout | `main.cpp:1371` | `main.cpp:4235` | common per-test snapshot/restore |
 | Test262 hot-batch crash | `main.cpp:1360` | `main.cpp:4209` | common per-test snapshot/restore; interrupted resources intentionally leak until cleanup/reset |
 | Test262 MIR error | `main.cpp:1347` | `main.cpp:4234`, `main.cpp:4263` | common per-test snapshot/restore |
-| JS event-loop SIGSEGV guard | `js_event_loop.cpp` | `js_event_loop.cpp` | now uses `sigsetjmp` and restores the side-stack checkpoint; its arbitrary-fault continuation remains unsafe for production |
+| Production JS event loop | active `LambdaRecoveryFrame` for C14 faults | owning local/task/execution frame | no event-loop SIGSEGV target remains; arbitrary memory faults fail-stop |
 | Conservative-GC register flush | retired | none | precise rooting must not restore or depend on native-stack scanning |
 | MinGW intrinsic shim | `main.cpp:278` calls `setjmp(env)` | caller owned by the Windows/MIR ABI | compatibility shim, not a Lambda recovery policy |
 | PNG/image errors | `lib/image.c`, including explicit `longjmp` at line 463 | local decode/encode `setjmp` sites | library-local; does not target Lambda recovery state |
@@ -70,8 +71,9 @@ an adequate recovery contract.
 `lambda/runtime/recovery_frame.c` now owns `lambda_recovery_frame_tls_top`. Each
 frame carries a platform buffer, `signal_armed`, an enum-sized
 `signal_fault_reason`, a precise checkpoint, and its previous frame. The POSIX
-handler reads that TLS link directly, chooses the nearest armed frame capable of
-either a local fault or an execution boundary, sets `STACK_OVERFLOW`, and
+handler reads that TLS link directly, chooses the nearest eligible armed frame
+unless an enclosing transaction barrier exists, which takes priority over every
+inner local handler. It sets `STACK_OVERFLOW`, and
 `siglongjmp`s to its buffer. It neither logs nor allocates; an unarmed or
 non-stack fault follows the fail-stop path. The Windows SEH branch uses the same
 selection after `_resetstkoflw`.
@@ -114,18 +116,18 @@ JS `RangeError`; normal nested return resumes the still-armed outer frame.
 
 ### 3.5 Hosted Jube guest landing points
 
-Both hosted-Jube entry forms push an execution frame with the guest's active
-context. A landing restores guest-side watermarks and pops the frame before
-returning `ItemError`; normal return releases the inner frame and exposes the
-outer target again. Guest activation poisoning and transaction forwarding remain
-ER-S5 work.
+Both hosted-Jube entry forms push an execution-plus-transaction frame with the
+guest's active context. A landing restores guest-side watermarks, publishes the
+static fault result, then poisons the guest's frame-runtime and scalar-home
+slots before returning to the host. Subsequent guest calls reject the poisoned
+activation; normal guest completion still restores the prior nested activation.
 
 ### 3.6 Retired shared-target defect
 
 Before ER-S2, the runner, cached MIR, direct JS, and hosted Jube entries
 overwrote one TLS jump buffer plus Boolean flag. That non-nestable target is now
-removed. Separate batch and event-loop containment buffers are not execution
-frames and remain subject to their ER-S6 policy work.
+removed. Batch containment remains separate and test-only; the production event
+loop no longer owns any SIGSEGV recovery target.
 
 ## 4. Batch timeout recovery
 
@@ -222,35 +224,14 @@ Landing points:
 Both paths converge on the common per-test side-stack restore. They still skip
 normal MIR/native cleanup between the error origin and landing point.
 
-## 7. JS event-loop SIGSEGV recovery
+## 7. Production JS event-loop crash policy
 
-`lambda/js/js_event_loop.cpp` defines a static
-`event_loop_jmpbuf` and installs `event_loop_sigsegv_handler()` during event
-loop drain. When guarded, the handler executes:
-
-```text
-siglongjmp(event_loop_jmpbuf, 1)
-```
-
-The landing point now captures/restores `LambdaRecoveryCheckpoint`, records
-`-1`, restores the previous SIGSEGV handler, and returns from the drain.
-
-Current gaps:
-
-- generated callback epilogues and native helper destructors can be skipped;
-- installs a temporary SIGSEGV handler without `SA_ONSTACK`, so a true stack
-  overflow during drain can be intercepted by this crash guard rather than the
-  dedicated alternate-stack overflow handler;
-- performs logging and handler manipulation in the signal handler, which
-  requires a separate async-signal-safety audit;
-- catches arbitrary memory faults attributed in comments to a pre-existing
-  timer-callback bug, potentially allowing corrupted process state to
-  continue.
-
-This mechanism should not be carried unchanged into the shared recovery
-design. Prefer fixing the underlying crash and isolating arbitrary-fault
-containment at the test/process boundary. If local containment remains, it
-must use the same explicit recovery checkpoint and state-restoration contract.
+ER-S6 removed the event-loop-local `event_loop_jmpbuf`, SIGSEGV handler, and
+post-signal continuation path from `lambda/js/js_event_loop.cpp`. A C14 resource
+fault raised while draining work reaches the active local, task, or execution
+`LambdaRecoveryFrame`; arbitrary memory faults remain fail-stop and are never
+recast as language `ItemError` values. Test262 keeps its independent, test-only
+batch crash/timeout containment policy.
 
 ## 8. `setjmp` uses that are not Lambda execution recovery
 
@@ -294,7 +275,7 @@ overflow, timeout, or batch-crash policy.
 | Test262 hot-batch timeout | restored by common test path | restored | separate batch flags reset | interrupted context may be recreated |
 | Test262 batch crash | restored by common test path | restored | batch crash flag re-enabled | intentional leak containment + possible context reset |
 | Test262 MIR error | restored by common test path | restored | MIR flag reset | skips intervening MIR/native cleanup |
-| JS event-loop SIGSEGV | restored | restored | separate static buffer; prior SIGSEGV handler restored | returns `-1` after skipped frames |
+| Production JS event loop | n/a — no event-loop jump target | n/a — no event-loop jump target | active C14 frame only | arbitrary SIGSEGV fails-stop; C14 lands at its owner |
 
 The matrix covers only root/number watermarks and obvious recovery flags.
 Future inventory must include any JS argument-stack mark, active module/eval
@@ -312,24 +293,22 @@ There is no common recovery record or required state snapshot.
 ### ER2 — Execution targets are now nestable; separate containment remains
 
 ER-S2 replaced the one-slot execution target with a per-thread explicit frame
-LIFO. Batch and event-loop buffers remain separate containment mechanisms, so
-their policy and cross-thread behavior remain ER-S5/ER-S6 work rather than
-evidence that arbitrary faults are language-catchable.
+LIFO. Test-only batch containment remains separate; ER-S6 removed the
+production event-loop buffer, so arbitrary faults are not language-catchable.
 
 ### ER3 — Watermark restoration is incomplete
 
-The normal Lambda runner, cached MIR, direct JS, hosted guest, Test262 common
-path, and event-loop guard now restore `LambdaRecoveryCheckpoint`. Simple
-batch timeout remains reset-based, and no existing checkpoint captures every
+The normal Lambda runner, cached MIR, direct JS, hosted guest, task poll, and
+Test262 common paths use their documented recovery restoration. Simple batch
+timeout remains reset-based, and no existing checkpoint captures every
 auxiliary watermark required by §11.9.
 
 ### ER4 — Handler ownership conflicts
 
-The stack-overflow system, Test262 batch, and event-loop drain all install
-SIGSEGV handlers. The last installed handler wins. A true stack overflow can
-therefore be classified as a generic batch/event-loop crash, while an
-arbitrary invalid access can enter a local recovery path designed for another
-failure class.
+The stack-overflow system and the Test262 worker protocol both use signal
+containment in their own scopes. ER-S6 removed the production event-loop
+handler; the remaining test-worker behavior must stay isolated from language
+recovery targets.
 
 ### ER5 — Non-local jumps skip ownership cleanup
 
@@ -346,9 +325,9 @@ safe landing point.
 ### ER7 — Recovery result semantics differ
 
 Stack overflow becomes `ItemError` or JS `RangeError`; timeout becomes `124`;
-crash becomes `128 + signal`; MIR errors become result `1`; event-loop crash
-becomes `-1`. These are reasonable at their boundaries but need one typed
-internal reason so cleanup does not infer behavior from ad-hoc integers.
+crash becomes `128 + signal`; and MIR errors become result `1`. These boundary
+conventions require typed internal reasons so cleanup does not infer behavior
+from ad-hoc integers.
 
 ### ER8 — Test containment and production recovery are mixed
 
@@ -432,6 +411,7 @@ frame; it is not itself a jump target.
 ```text
 LambdaRecoveryFrame
     previous                       // TLS LIFO link; never process-global
+    discarded_inner                // retired after a transaction-priority landing
     Context* context               // exact EvalContext owner
     RecoverySnapshot snapshot      // §11.9, captured before protected work
     FaultRecord fault              // embedded; no allocation on fault
@@ -444,11 +424,11 @@ LambdaRecoveryFrame
 `lambda_recovery_tls_top` replaces `_lambda_recovery_point` and
 `_lambda_recovery_armed`. Pushing links the old top; a normal pop proves it is
 still the top and restores `previous`. A fault selects the nearest frame that
-accepts that fault, but cannot cross a transaction barrier (§11.11). On a jump,
-the landing primitive first makes the selected frame the TLS top, restores its
-snapshot, and marks it consumed. It then unlinks the frame before executing a
-user handler or any allocating/reporting code. A second fault in a handler
-therefore targets the outer frame, never a stale or re-entered buffer.
+accepts that fault, except that an enclosing transaction barrier takes priority:
+the landing first makes that barrier the TLS top, restores its snapshot, and
+retires the abandoned inner chain. It then unlinks the selected frame before
+executing a user handler or any allocating/reporting code. A second fault in a
+handler therefore targets the outer frame, never a stale or re-entered buffer.
 
 `setjmp` is special: its dynamic extent is the function containing the call.
 Push/pop, snapshot, and fault publication may be C/C++ helpers, but no helper
@@ -593,16 +573,18 @@ are not promoted to language-catchable system faults.
 
 ## 12. Suggested future implementation sequence
 
-**Implementation status (2026-07-31):** ER-S0 through ER-S3 are complete.
+**Implementation status (2026-07-31):** ER-S0 through ER-S6 are complete on
+POSIX. ER-S7's precise-root and POSIX recovery gates are complete; the Windows
+SEH path shares the frame ABI but still requires a Windows integration run.
 `LambdaRecoveryFrame` is a separate TLS-LIFO module with an embedded
 `FaultRecord`, platform jump buffer, and exact side-stack/MIR-scalar checkpoint.
 Runner, cached MIR, direct JS MIR, and hosted-Jube entrypoints now establish
 their own checkpoint and restore the outer frame on normal nested return. The
 MIR direct-local lowering now adds a frame only when the protected `^err` RHS
 cannot suspend; ordinary asynchronous error destructuring remains a value-lane
-operation. ER-S4 still owns converting the ordinary stack/number-side-stack
-return paths into non-allocating C14 origins, while the remaining eval/import/
-task transaction semantics are ER-S5.
+operation. ER-S4 now converts stack/RootFrame/OOM failures to static origins;
+ER-S5 adds task-poll and module transaction boundaries; and ER-S6 removes the
+production event-loop crash continuation guard.
 
 1. **ER-S0: lock the fault contract.** Add tests for the pre-reserved fault
    record and make the ordinary-error allocation-failure rule testable before
@@ -617,18 +599,21 @@ task transaction semantics are ER-S5.
    non-suspending RHS; ordinary `^err` destructuring remains continuation-safe
    when the RHS may suspend, and the native root-fault test proves local-then-
    outer target selection.
-5. **ER-S4: convert C14 origins.** Stack, side-stack/RootFrame, OOM, equality
-   depth, and fail-closed compiler guards raise typed fault reasons without
-   allocating. Migrate ordinary rich-error OOM fallback at the same time.
-6. **ER-S5: add transactional re-entry policy.** Module/eval, callbacks,
-   async tasks, workers, and hosted guests restore/poison their state before
-   forwarding faults. Preserve batch timeout/MIR result protocol unchanged.
-7. **ER-S6: isolate arbitrary crash containment.** Test262 stays test-only;
-   remove or redesign the event-loop SIGSEGV guard instead of treating memory
-   corruption as a catchable C14 fault.
-8. **ER-S7: complete platform and precise-root gates.** POSIX signal and
-   Windows SEH paths pass the same nested/recovery tests and the stack/rooting
-   documents are reconciled with the already-removed shared-target state.
+5. **ER-S4: complete.** Stack and RootFrame origins now transfer static C14
+   records; rich-error allocation failure becomes static OOM. Equality-depth
+   takes the static path for a live procedural local handler while preserving
+   the established functional returned-error flow.
+6. **ER-S5: complete.** Each async task poll owns a short-lived execution
+   frame and a task-owned static result; imported-module initialization resets
+   partial module slabs before forwarding; hosted guests poison abandoned
+   runtime/scalar slots. Batch timeout/MIR protocols are unchanged.
+7. **ER-S6: complete.** The production event loop no longer replaces SIGSEGV
+   handling or continues after arbitrary memory corruption. Test262 retains
+   its separate test-only containment.
+8. **ER-S7: POSIX and precise-root gate complete.** Shared frame tests cover
+   exact recovery watermarks and native RootFrame faults, and POSIX baselines
+   pass. The Windows SEH integration execution remains required on Windows;
+   it is not inferred from these POSIX results.
 
 ## 13. Acceptance gates for the redesign
 
@@ -667,7 +652,7 @@ task transaction semantics are ER-S5.
 | Hosted Jube guest landing/restore | `lambda/jube/jube_registry.cpp` |
 | Shared side-stack checkpoint | `lambda/runtime/side_stack.h`, `lambda/runtime/side_stack.c` |
 | Batch timeout/crash/MIR buffers and handlers | `lambda/main.cpp` |
-| Event-loop SIGSEGV jump/landing | `lambda/js/js_event_loop.cpp` |
+| Production event-loop crash policy | `lambda/js/js_event_loop.cpp` (no SIGSEGV recovery target) |
 | Eval/module/task watermarks to audit | `lambda/js/js_runtime_state.cpp`, `lambda/runtime/concurrency.cpp` |
 | MinGW setjmp intrinsic shim | `lambda/main.cpp` |
 | Library-local PNG recovery | `lib/image.c:100`, `:196`, `:463`, `:492`, `:720` |

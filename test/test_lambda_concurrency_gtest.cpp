@@ -8,6 +8,7 @@
 #include "../lambda/runtime/concurrency.h"
 #include "../lambda/lambda.hpp"
 #include "../lambda/runtime/lambda-error.h"
+#include "../lambda/runtime/recovery_frame.h"
 #include "../lambda/runtime/lambda-stack.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
@@ -82,6 +83,19 @@ static LambdaTaskPoll wait_with_timeout(LambdaTask* task, void* data, Item* out)
     return LAMBDA_TASK_POLL_DONE;
 }
 
+static LambdaTaskPoll raise_task_fault(LambdaTask* task, void* data, Item* out) {
+    (void)task;
+    (void)data;
+    (void)out;
+    // The scheduler must own the native target for this poll; it cannot
+    // survive into a later resumption after the task yields.
+    if (!lambda_recovery_frame_raise_fault(
+            LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_TYPE_MISMATCH)) {
+        ADD_FAILURE() << "task fault had no scheduler recovery target";
+    }
+    return LAMBDA_TASK_POLL_DONE;
+}
+
 class LambdaConcurrencyRuntime : public ::testing::Test {
 protected:
     EvalContext eval = {};
@@ -134,6 +148,30 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(order[1], 2);
     EXPECT_EQ(order[2], 3);
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
+}
+
+TEST_F(LambdaConcurrencyRuntime, TaskPollFaultCompletesWithDurableStaticResult) {
+    LambdaTask* first = lambda_task_create(scheduler, raise_task_fault, NULL, NULL);
+    LambdaTask* second = lambda_task_create(scheduler, raise_task_fault, NULL, NULL);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    Item first_result = lambda_task_result(first);
+    ASSERT_EQ(get_type_id(first_result), LMD_TYPE_ERROR);
+    EXPECT_EQ(it2err(first_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_TRUE(it2err(first_result)->is_static);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    Item second_result = lambda_task_result(second);
+    ASSERT_EQ(get_type_id(second_result), LMD_TYPE_ERROR);
+    EXPECT_EQ(it2err(second_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_TRUE(it2err(second_result)->is_static);
+    // The second landing reuses the TLS handoff record, but it cannot alter
+    // the first completed task's own static result.
+    EXPECT_EQ(it2err(first_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
 }
 
 TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCells) {
