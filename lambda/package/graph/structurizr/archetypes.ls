@@ -42,7 +42,10 @@ fn builtin(base, target_kind) {
 }
 
 fn problem(code, message, definition) => diagnostic.for_value(code, "error", message,
-  "archetype:" ++ definition.name, definition.source)
+  "archetype:" ++ definition.name, definition.source) or {
+    code: "structurizr.archetype-diagnostic", severity: "error",
+    message: "Structurizr archetype diagnostic", path: null, source: null
+  }
 
 fn resolve_one(definitions, definition, stack) {
   if (contains(stack, definition.name)) {

@@ -74,7 +74,7 @@ pn test_gcd() {
     var temp: int = 0
     while (y > 0) {
         temp = y
-        y = x % y
+        y = int(x % y)
         x = temp
     }
     x  // gcd(48, 18) = 6
@@ -86,7 +86,7 @@ pn test_collatz() {
     var steps: int = 0
     while (val > 1) {
         if (val % 2 == 0) {
-            val = val div 2
+            val = int(val div 2)
         } else {
             val = val * 3 + 1
         }

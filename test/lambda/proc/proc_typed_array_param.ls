@@ -103,8 +103,8 @@ pn inner_sum(arr: int[], lo: int, hi: int) {
 }
 
 pn test_nested_int_array(arr: int[], n: int) {
-    var left = inner_sum(arr, 0, n div 2)
-    var right = inner_sum(arr, n div 2, n)
+    var left = inner_sum(arr, 0, int(n div 2))
+    var right = inner_sum(arr, int(n div 2), n)
     print(left + right)
     print("\n")
 }
@@ -154,6 +154,9 @@ pn main() {
     var c = fill(3, 0)
     c[0] = 1; c[1] = 2; c[2] = 3
     test_int_array_write(c, 3)
+    // A typed procedure parameter preserves the legacy caller-visible write ABI.
+    print(c)
+    print("\n")
 
     // Test 4: int[] only annotation (no second native param)
     test_int_array_only(a)

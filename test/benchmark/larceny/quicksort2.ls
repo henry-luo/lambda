@@ -6,7 +6,7 @@
 
 // Simple pseudo-random number generator that stays in safe int range
 pn lcg_next(seed: int) int {
-    return (seed * 1664525 + 1013904223) % 1000000
+    return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
 pn partition(var arr: int[], lo: int, hi: int) int {

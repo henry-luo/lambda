@@ -27,7 +27,7 @@ pn json_obj_4(k1: string, v1: string, k2: string, v2: string,
 }
 
 pn next_rand(seed: int) int {
-    return (seed * 1664525 + 1013904223) % 1000000
+    return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
 pn benchmark() int {
@@ -40,13 +40,13 @@ pn benchmark() int {
             json = json ++ ","
         }
         seed = next_rand(seed)
-        var id: int = seed % 10000
+        var id: int = int(seed % 10000)
         seed = next_rand(seed)
         var x: float = float(seed % 20000 - 10000) / 100.0
         seed = next_rand(seed)
         var y: float = float(seed % 20000 - 10000) / 100.0
         seed = next_rand(seed)
-        var score: int = seed % 100
+        var score: int = int(seed % 100)
 
         var coord: string = json_obj_2("x", json_num(int(floor(x))), "y", json_num(int(floor(y))))
         var obj: string = json_obj_4("id", json_num(id), "score", json_num(score), "coord", coord, "active", "true")

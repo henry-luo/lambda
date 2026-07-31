@@ -79,16 +79,18 @@ fn heading_node(schema, level, kids) =>
 fn image_node(schema, n) =>
   node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])
 
-fn link_node(schema, n) =>
+// HTML input is dynamically shaped, so node construction reports malformed
+// attributes as ordinary data rather than pretending that paste succeeded.
+fn link_node(schema, n) map | error =>
   node_attrs(link_tag(schema), [{name: 'href', value: attr_value(n, 'href')}, {name: 'title', value: attr_value(n, 'title')}],
     convert_inline_schema(schema, n))
 
-fn blockquote_node(schema, n) => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
+fn blockquote_node(schema, n) map | error => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
 fn code_block_node(schema, n) => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
-fn table_node(schema, n) => node('table', normalize_table_children(schema, convert_children_schema(schema, n)))
-fn table_section_node(schema, tag, n) => node(tag, convert_children_schema(schema, n))
-fn table_row_node(schema, n) => node('tr', convert_children_schema(schema, n))
-fn table_cell_node(schema, tag, n) => node(tag, convert_inline_schema(schema, n))
+fn table_node(schema, n) map | error => node('table', normalize_table_children(schema, convert_children_schema(schema, n)))
+fn table_section_node(schema, tag, n) map | error => node(tag, convert_children_schema(schema, n))
+fn table_row_node(schema, n) map | error => node('tr', convert_children_schema(schema, n))
+fn table_cell_node(schema, tag, n) map | error => node(tag, convert_inline_schema(schema, n))
 
 fn is_list_node(schema, n) {
   if (not is_node(n)) { false }

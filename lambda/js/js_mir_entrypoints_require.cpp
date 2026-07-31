@@ -2,6 +2,7 @@
 #include "js_runtime_state.hpp"
 #undef js_input
 #include "../runtime/lambda-error.h"
+#include "../runtime/recovery_frame.h"
 #include "../runtime/mir_dump.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
@@ -1015,28 +1016,30 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     phase_start = js_mir_phase_now_us();
     Item result = ItemNull;
     if (!g_jm_preamble_compile_only) {
-    LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture();
-#if defined(__APPLE__) || defined(__linux__)
-    if (sigsetjmp(_lambda_recovery_point, 1)) {
-#elif defined(_WIN32)
-    if (setjmp(_lambda_recovery_point)) {
-#else
-    if (0) {
-#endif
-        // Stack overflow was caught — signal handler siglongjmp'd here
-        _lambda_recovery_armed = 0;   // recovery consumed; disarm
+    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+        (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!recovery_frame) {
+        log_error("js-mir: failed to allocate recovery frame");
+        result = (Item){.item = ITEM_ERROR};
+    } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+            log_error("js-mir: recovery frame landing invariant failed");
+        }
         log_error("js-mir: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
-        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
+        lambda_recovery_frame_end(recovery_frame);
         result = (Item){.item = ITEM_ERROR};
         // Report the error so it shows up as an uncaught exception
         js_throw_range_error("Maximum call stack size exceeded");
     } else {
-        _lambda_recovery_armed = 1;    // arm only for the duration of user code
-        result = js_main((Context*)context);
-        _lambda_recovery_armed = 0;
-        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
+        if (!lambda_recovery_frame_arm(recovery_frame)) {
+            log_error("js-mir: failed to arm recovery frame");
+            lambda_recovery_frame_end(recovery_frame);
+            result = (Item){.item = ITEM_ERROR};
+        } else {
+            result = js_main((Context*)context);
+            lambda_recovery_frame_end(recovery_frame);
+        }
     }
     }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;

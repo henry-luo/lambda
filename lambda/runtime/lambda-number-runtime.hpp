@@ -180,6 +180,11 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
     uint8_t right_simple = lambda_numeric_runtime_part(right, &right_part);
     result.valid = 1;
 
+    if (decimal_item_is_nan(left) || decimal_item_is_nan(right)) {
+        result.unordered = 1;
+        return result;
+    }
+
     if (left_simple && left_part.kind == LAMBDA_NUM_PART_FLOAT &&
         isnan(left_part.float_value)) {
         result.unordered = 1;

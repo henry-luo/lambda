@@ -390,7 +390,7 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
   let parsed_style = resolved_edge_style(edge, style_declarations);
   let marker_end = marker_text(source_attr(edge, "arrow-head", source_attr(edge, "marker-end", null)),
     if (explicit_end != null) explicit_end else directed == "true");
-  <edge class: edge_class(assigned_classes), 'data-edge-id': id,
+  <edge class: edge_class(assigned_classes), 'data-graph-role': "edge", 'data-edge-id': id,
       'data-from': string(source_attr(edge, "from", source_attr(edge, "from_id", ""))),
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-from-port': source_attr(edge, "from-port", source_attr(edge, "from_port", null)),

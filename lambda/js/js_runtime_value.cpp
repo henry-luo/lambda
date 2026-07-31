@@ -429,6 +429,8 @@ extern "C" Item js_to_string(Item value) {
             return result;
         }
         // regular decimal
+        const char* special = decimal_special_literal(value.get_decimal());
+        if (special) return (Item){.item = s2it(heap_create_name(special))};
         char* s = decimal_to_string(value);
         Item result = (Item){.item = s2it(heap_create_name(s))};
         decimal_free_string(s);

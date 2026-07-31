@@ -14,14 +14,21 @@ fn attr_or(child, key, fallback) {
   let attrs = child.attrs;
   let nested = if (attrs == null or attrs is error) null else attrs[key];
   let direct = child[key];
-  // missing Velmt attributes may be errors; optional metadata must use its fallback.
-  if (nested != null and not (nested is error)) nested
-  else if (direct != null and not (direct is error)) direct
+  // DOM VMaps serialize an absent attribute as "", while source Elements retain
+  // null; both represent missing optional graph metadata at this boundary.
+  if (nested != null and nested != "" and not (nested is error)) nested
+  else if (direct != null and direct != "" and not (direct is error)) direct
   else fallback
 }
 
 fn child_tag(child) {
-  if (child.tag != null) lower(string(child.tag)) else ""
+  let graph_role = attr_or(child, "data-graph-role", null);
+  // Radiant VMap projections replace element tags with visual-node tags, so
+  // graph identity must come from the transform's semantic role metadata.
+  if (graph_role != null and not (graph_role is error)) lower(string(graph_role))
+  else if (child is element) lower(string(name(child)))
+  else if (child.tag != null and not (child.tag is error)) lower(string(child.tag))
+  else ""
 }
 
 fn child_id(child, fallback_index) {
@@ -31,19 +38,19 @@ fn child_id(child, fallback_index) {
 }
 
 fn child_width(child) {
-  if (child.width != null) float(child.width)
-  else if (child.wd != null) float(child.wd)
+  if (child.width != null and not (child.width is error)) float(child.width)
+  else if (child.wd != null and not (child.wd is error)) float(child.wd)
   else 80.0
 }
 
 fn child_height(child) {
-  if (child.height != null) float(child.height)
-  else if (child.hg != null) float(child.hg)
+  if (child.height != null and not (child.height is error)) float(child.height)
+  else if (child.hg != null and not (child.hg is error)) float(child.hg)
   else 40.0
 }
 
 fn child_index(child, fallback_index) {
-  if (child.index != null) int(child.index) else fallback_index
+  if (child.index != null and not (child.index is error)) int(child.index) else fallback_index
 }
 
 fn child_z(child, fallback) {
@@ -137,9 +144,11 @@ fn measured_ports_at(stack, node_width, node_height, result) {
   }
 }
 
-fn measured_ports(node) => measured_ports_at([
-  for (child in child_children(node)) {child: child, x: 0.0, y: 0.0}
-], child_width(node), child_height(node), [])
+fn measured_ports(node) =>
+  // A malformed DOM subtree has no usable ports; it must not abort graph layout.
+  measured_ports_at([
+    for (child in child_children(node)) {child: child, x: 0.0, y: 0.0}
+  ], child_width(node), child_height(node), []) or []
 
 fn measured_port(nodes, node_id, port_id) {
   let matches = [for (entry in nodes,

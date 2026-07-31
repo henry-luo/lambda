@@ -121,15 +121,21 @@ Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
         TsFunctionTypeNode* fn = (TsFunctionTypeNode*)node;
         TypeFunc* tf = (TypeFunc*)alloc_type(pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
         tf->returned = fn->return_type ? ts_resolve_type(tp, fn->return_type) : make_base_type(pool, LMD_TYPE_ANY);
+        tf->inferred_return = tf->returned;
+        tf->return_contract = tf->returned;
+        tf->has_explicit_return_contract = fn->return_type != NULL;
         tf->param_count = fn->param_count;
         tf->required_param_count = fn->param_count;
         TypeParam* prev_p = NULL;
         for (int i = 0; i < fn->param_count; i++) {
             TypeParam* tp_param = (TypeParam*)pool_calloc(pool, sizeof(TypeParam));
             tp_param->type_id = LMD_TYPE_TYPE;
+            tp_param->kind = TYPE_KIND_PARAM;
             // note: TypeParam has no name field — parameter names are in the AST, not the type
             Type* pt = ts_resolve_type(tp, fn->param_types[i]);
             tp_param->full_type = pt;
+            tp_param->contract_type = pt;
+            tp_param->has_explicit_contract = true;
             if (prev_p) prev_p->next = tp_param;
             else tf->param = tp_param;
             prev_p = tp_param;

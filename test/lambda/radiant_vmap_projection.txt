@@ -1,0 +1,7 @@
+{
+  installed: true,
+  tag: true,
+  role: true,
+  id: true,
+  float_string: 60
+}

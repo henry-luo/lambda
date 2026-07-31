@@ -27,6 +27,8 @@ extern "C" {
 #include "../../lambda/runtime/gc/gc_data_zone.h"
 #include "../../lib/mempool.h"
 #include "../../lambda/runtime/side_stack.h"
+#include "../../lambda/runtime/recovery_frame.h"
+#include "../../lambda/runtime/lambda-stack.h"
 }
 
 // Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.
@@ -163,6 +165,148 @@ TEST(SideStackRootFrameTest, RecoveryCheckpointRestoresBothStacks) {
     EXPECT_EQ(runtime.side_root_top, checkpoint.side_stack.root_top);
     EXPECT_EQ(runtime.side_number_top, checkpoint.side_stack.number_top);
     EXPECT_FALSE(checkpoint.active);
+    lambda_side_stack_reset_for(&runtime);
+}
+
+TEST(SideStackRootFrameTest, RecoveryFramesRestoreNestedWatermarksAndRemainLifo) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+    uint64_t* initial_root_top = runtime.side_root_top;
+    uint64_t* initial_number_top = runtime.side_number_top;
+    runtime.mir_return_lane = UINT64_C(0x1111);
+    runtime.mir_bitcast_scratch = UINT64_C(0x2222);
+
+    LambdaRecoveryFrame outer{};
+    ASSERT_TRUE(lambda_recovery_frame_push_for(&runtime, &outer,
+        LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY));
+    ASSERT_EQ(lambda_recovery_frame_current(), &outer);
+    ASSERT_TRUE(lambda_recovery_frame_arm(&outer));
+
+    ASSERT_NE(lambda_side_root_alloc_n_for(&runtime, 1), nullptr);
+    ASSERT_NE(lambda_side_number_alloc_for(&runtime), nullptr);
+    runtime.mir_return_lane = UINT64_C(0x3333);
+    runtime.mir_bitcast_scratch = UINT64_C(0x4444);
+
+    LambdaRecoveryFrame inner{};
+    ASSERT_TRUE(lambda_recovery_frame_push_for(&runtime, &inner,
+        LAMBDA_RECOVERY_CAP_LOCAL_FAULT));
+    ASSERT_EQ(lambda_recovery_frame_current(), &inner);
+    ASSERT_TRUE(lambda_recovery_frame_arm(&inner));
+    ASSERT_TRUE(lambda_recovery_frame_prepare_fault(&inner,
+        LAMBDA_FAULT_OUT_OF_MEMORY, ERR_TYPE_MISMATCH));
+
+    ASSERT_NE(lambda_side_root_alloc_n_for(&runtime, 2), nullptr);
+    ASSERT_NE(lambda_side_number_alloc_for(&runtime), nullptr);
+    runtime.mir_return_lane = UINT64_C(0x5555);
+    runtime.mir_bitcast_scratch = UINT64_C(0x6666);
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(&inner));
+    EXPECT_EQ(runtime.side_root_top, initial_root_top + 1);
+    EXPECT_EQ(runtime.side_number_top, initial_number_top + 1);
+    EXPECT_EQ(runtime.mir_return_lane, UINT64_C(0x3333));
+    EXPECT_EQ(runtime.mir_bitcast_scratch, UINT64_C(0x4444));
+    EXPECT_EQ(inner.state, LAMBDA_RECOVERY_FRAME_LANDED);
+    ASSERT_NE(lambda_fault_record_error(&inner.fault), nullptr);
+    EXPECT_EQ(inner.fault.reason, LAMBDA_FAULT_OUT_OF_MEMORY);
+
+    EXPECT_FALSE(lambda_recovery_frame_pop(&outer));
+    EXPECT_EQ(lambda_recovery_frame_current(), &inner);
+    ASSERT_TRUE(lambda_recovery_frame_pop(&inner));
+    EXPECT_EQ(lambda_recovery_frame_current(), &outer);
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(&outer));
+    EXPECT_EQ(runtime.side_root_top, initial_root_top);
+    EXPECT_EQ(runtime.side_number_top, initial_number_top);
+    EXPECT_EQ(runtime.mir_return_lane, UINT64_C(0x1111));
+    EXPECT_EQ(runtime.mir_bitcast_scratch, UINT64_C(0x2222));
+    ASSERT_TRUE(lambda_recovery_frame_pop(&outer));
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    lambda_side_stack_reset_for(&runtime);
+}
+
+TEST(SideStackRootFrameTest, HeapFramesSurviveNestedNonLocalLanding) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+    uint64_t* initial_root_top = runtime.side_root_top;
+    uint64_t* initial_number_top = runtime.side_number_top;
+
+    LambdaRecoveryFrame* outer = lambda_recovery_frame_begin_for(
+        &runtime, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    ASSERT_NE(outer, nullptr);
+    ASSERT_EQ(LAMBDA_RECOVERY_FRAME_SETJMP(outer), 0);
+    ASSERT_TRUE(lambda_recovery_frame_arm(outer));
+
+    ASSERT_NE(lambda_side_root_alloc_n_for(&runtime, 1), nullptr);
+    ASSERT_NE(lambda_side_number_alloc_for(&runtime), nullptr);
+
+    LambdaRecoveryFrame* inner = lambda_recovery_frame_begin_for(
+        &runtime, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    ASSERT_NE(inner, nullptr);
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(inner) == 0) {
+        ASSERT_TRUE(lambda_recovery_frame_arm(inner));
+        ASSERT_NE(lambda_side_root_alloc_n_for(&runtime, 2), nullptr);
+        ASSERT_NE(lambda_side_number_alloc_for(&runtime), nullptr);
+        inner->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
+        inner->signal_armed = 0;
+        LAMBDA_RECOVERY_FRAME_LONGJMP(inner);
+    }
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(inner));
+    EXPECT_EQ(inner->fault.reason, LAMBDA_FAULT_STACK_OVERFLOW);
+    EXPECT_EQ(runtime.side_root_top, initial_root_top + 1);
+    EXPECT_EQ(runtime.side_number_top, initial_number_top + 1);
+    ASSERT_TRUE(lambda_recovery_frame_end(inner));
+    EXPECT_EQ(lambda_recovery_frame_current(), outer);
+    EXPECT_TRUE(outer->signal_armed);
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(outer));
+    ASSERT_TRUE(lambda_recovery_frame_end(outer));
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+    EXPECT_EQ(runtime.side_root_top, initial_root_top);
+    EXPECT_EQ(runtime.side_number_top, initial_number_top);
+    lambda_side_stack_reset_for(&runtime);
+}
+
+TEST(SideStackRootFrameTest, NativeRootFaultChoosesLocalThenOuterFrame) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind_for(&runtime));
+    LambdaRecoveryFrame* outer = lambda_recovery_frame_begin_for(
+        &runtime, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    ASSERT_NE(outer, nullptr);
+
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(outer) == 0) {
+        ASSERT_TRUE(lambda_recovery_frame_arm(outer));
+        LambdaRecoveryFrame* inner = lambda_recovery_frame_begin_for(
+            &runtime, LAMBDA_RECOVERY_CAP_LOCAL_FAULT);
+        ASSERT_NE(inner, nullptr);
+        if (LAMBDA_RECOVERY_FRAME_SETJMP(inner) == 0) {
+            ASSERT_TRUE(lambda_recovery_frame_arm(inner));
+            lambda_root_frame_overflow_error();
+            ADD_FAILURE() << "root-frame fault returned instead of landing";
+        }
+
+        ASSERT_TRUE(lambda_recovery_frame_restore_landing(inner));
+        uint64_t caught = lambda_recovery_frame_static_fault_item(inner);
+        ASSERT_EQ(caught >> 56, LMD_TYPE_ERROR);
+        LambdaError* caught_error = (LambdaError*)(uintptr_t)(caught &
+            UINT64_C(0x00FFFFFFFFFFFFFF));
+        ASSERT_NE(caught_error, nullptr);
+        EXPECT_EQ(caught_error->code, ERR_STACK_OVERFLOW);
+        EXPECT_EQ(inner->fault.reason, LAMBDA_FAULT_SIDE_STACK_EXHAUSTION);
+        ASSERT_TRUE(lambda_recovery_frame_end(inner));
+        EXPECT_EQ(lambda_recovery_frame_current(), outer);
+        EXPECT_TRUE(outer->signal_armed);
+
+        // The inner frame was popped before handling its fault. A new origin
+        // therefore reaches the still-armed outer target exactly once.
+        lambda_root_frame_overflow_error();
+        ADD_FAILURE() << "outer root-frame fault returned instead of landing";
+    }
+
+    ASSERT_TRUE(lambda_recovery_frame_restore_landing(outer));
+    EXPECT_EQ(outer->fault.reason, LAMBDA_FAULT_SIDE_STACK_EXHAUSTION);
+    ASSERT_TRUE(lambda_recovery_frame_end(outer));
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
     lambda_side_stack_reset_for(&runtime);
 }
 

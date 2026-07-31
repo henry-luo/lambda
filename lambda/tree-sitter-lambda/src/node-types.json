@@ -76,6 +76,10 @@
         {
           "type": "unary_type",
           "named": true
+        },
+        {
+          "type": "value_error_type",
+          "named": true
         }
       ]
     }
@@ -199,6 +203,10 @@
           {
             "type": "unary_type",
             "named": true
+          },
+          {
+            "type": "value_error_type",
+            "named": true
           }
         ]
       }
@@ -304,6 +312,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -982,6 +994,10 @@
         {
           "type": "unary_type",
           "named": true
+        },
+        {
+          "type": "value_error_type",
+          "named": true
         }
       ]
     }
@@ -1338,6 +1354,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -2332,6 +2352,10 @@
         {
           "type": "unary_type",
           "named": true
+        },
+        {
+          "type": "value_error_type",
+          "named": true
         }
       ]
     }
@@ -2594,6 +2618,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -3166,6 +3194,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "value_error_type",
             "named": true
           }
         ]
@@ -4082,6 +4114,40 @@
     }
   },
   {
+    "type": "value_error_type",
+    "named": true,
+    "fields": {
+      "error": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "return_type_pattern",
+            "named": true
+          }
+        ]
+      },
+      "ok": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "fn_type",
+            "named": true
+          },
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "var_stam",
     "named": true,
     "fields": {
@@ -4622,11 +4688,11 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",

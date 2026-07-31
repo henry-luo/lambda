@@ -65,6 +65,11 @@ typedef struct SysFuncInfo {
     bool native_returns_float;  // True if native function returns double
     int native_arg_count;       // Number of args for native function (1 or 2), 0 if not applicable
     bool is_async;              // call is a suspension seed for Lambda pn analysis
+    // Value-lane effects are independent of `can_raise`/T^.
+    // `success_type` describes a successful result; `may_return_error` marks
+    // ordinary ItemError values that callers may contain with `or`.
+    Type* success_type;
+    bool may_return_error;
 } SysFuncInfo;
 
 // GC effect and representation metadata consumed by MIR emitters. Unknown

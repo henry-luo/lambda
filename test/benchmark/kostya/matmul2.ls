@@ -7,7 +7,7 @@
 let N = 200
 
 pn next_rand(seed: int) int {
-    return (seed * 1664525 + 1013904223) % 1000000
+    return int((seed * 1664525 + 1013904223) % 1000000)
 }
 
 pn matmul(a: float[], b: float[], var c: float[], n: int) {

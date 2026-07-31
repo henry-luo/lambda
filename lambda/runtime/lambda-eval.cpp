@@ -5,6 +5,8 @@
 #include "gc/gc_heap.h"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
+#include "recovery_frame.h"
+#include "type_contract.hpp"
 #include "concurrency.h"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -39,6 +41,21 @@
 
 extern __thread EvalContext* context;
 extern "C" void cow_profile_note_mutable_value(void);
+
+extern "C" Item lambda_recovery_frame_fault_item(
+        Context* runtime_context, LambdaRecoveryFrame* frame) {
+    if (!runtime_context || !frame || !frame->fault.active) return ItemError;
+    Item fault_item{.item = lambda_recovery_frame_static_fault_item(frame)};
+    LambdaError* fallback = it2err(fault_item);
+    if (!fallback) return ItemError;
+    if (context && (Context*)context == runtime_context) {
+        if (context->last_error && context->last_error != fallback) {
+            err_free(context->last_error);
+        }
+        context->last_error = fallback;
+    }
+    return fault_item;
+}
 
 Item vmap_get_by_item(VMap* vm, Item key);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -742,6 +759,26 @@ static Item function_argument_count_check(Function* fn, int actual, const char* 
     return ItemError;
 }
 
+static Item unsupported_dynamic_abi_error(Function* fn, int required_abi_args,
+        int supported_abi_args, const char* caller) {
+    char message[256];
+    snprintf(message, sizeof(message),
+        "%s: dynamic call to function '%s' requires %d ABI arguments, but this dispatch ABI supports at most %d",
+        caller, fn && fn->name ? fn->name : "<anonymous>", required_abi_args,
+        supported_abi_args);
+    set_runtime_error(ERR_UNSUPPORTED_DYNAMIC_ABI, "%s", message);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) loc.file = context->current_file;
+        LambdaError* error = err_create_heap(ERR_UNSUPPORTED_DYNAMIC_ABI, message, &loc);
+        if (error) {
+            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            return err2it(error);
+        }
+    }
+    return ItemError;
+}
+
 // Dynamic function dispatch for first-class functions
 // For closures, env is passed as the first argument
 // Stack traces are captured via native stack walking (no push/pop needed)
@@ -777,8 +814,7 @@ Item fn_call(Function* fn, List* args) {
             case 6: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5]);
             case 7: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]);
             default:
-                set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH, "fn_call: unsupported argument count %d for closure (max 7)", arg_count);
-                return ItemError;
+                return unsupported_dynamic_abi_error(fn, arg_count, 7, "fn_call");
         }
     }
 
@@ -796,8 +832,7 @@ Item fn_call(Function* fn, List* args) {
             case 7: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]); break;
             case 8: ri = ((RetItem(*)(Item,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7]); break;
             default:
-                log_error("fn_call: unsupported argument count %d (max 8)", arg_count);
-                return ItemError;
+                return unsupported_dynamic_abi_error(fn, arg_count, 8, "fn_call");
         }
         return ri_to_item(ri);
     }
@@ -814,8 +849,7 @@ Item fn_call(Function* fn, List* args) {
         case 7: return ((Item(*)(Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]);
         case 8: return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7]);
         default:
-            log_error("fn_call: unsupported argument count %d (max 8)", arg_count);
-            return ItemError;
+            return unsupported_dynamic_abi_error(fn, arg_count, 8, "fn_call");
     }
 }
 
@@ -876,10 +910,7 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
         int fixed_count = signature->param_count;
         dispatch_count = fixed_count + (signature->is_variadic ? 1 : 0);
         if (dispatch_count > 8) {
-            set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
-                "fn_call_into: function '%s' needs %d ABI arguments; dynamic dispatch supports 8",
-                fn->name ? fn->name : "<anonymous>", dispatch_count);
-            return ItemError;
+            return unsupported_dynamic_abi_error(fn, dispatch_count, 8, "fn_call_into");
         }
         for (int i = 0; i < fixed_count; i++) {
             physical_args[i] = i < arg_count ? rooted_args[i]->get() :
@@ -944,9 +975,8 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
             default: break;
             }
         }
-        set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
-            "fn_call_into: unsupported generated argument count %d", dispatch_count);
-        return ItemError;
+        return unsupported_dynamic_abi_error(dispatch_fn, dispatch_count,
+            env ? 7 : 8, "fn_call_into");
     }
     void* env = dispatch_fn->closure_env;
     // The exact caller home must cross this forwarding boundary unchanged.
@@ -976,9 +1006,8 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
         default: break;
         }
     }
-    set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
-        "fn_call_into: unsupported argument count %d", arg_count);
-    return ItemError;
+    return unsupported_dynamic_abi_error(dispatch_fn, arg_count,
+        env ? 7 : 8, "fn_call_into");
 }
 
 Item fn_call0_into(Function* fn, uint64_t* result_home) {
@@ -1223,13 +1252,11 @@ static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
-static bool runtime_type_is_global_meta_type(Type* type) {
-    return type == &TYPE_TYPE || type == &TYPE_INTEGER || type == &TYPE_NUMBER;
-}
-
 static Type* runtime_boundary_unwrap_type(Type* type) {
     while (type && type->type_id == LMD_TYPE_TYPE &&
-            type->kind == TYPE_KIND_SIMPLE && !runtime_type_is_global_meta_type(type)) {
+            !type_is_global_meta_type(type) && type->kind == TYPE_KIND_SIMPLE) {
+        // Global meta-types have only the compact prefix; no TypeType payload
+        // exists to unwrap until that invariant has been established.
         Type* inner = ((TypeType*)type)->type;
         if (!inner) break;
         type = inner;
@@ -1242,20 +1269,6 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
     return type;
 }
 
-static bool runtime_type_accepts_error(Type* expected) {
-    expected = runtime_boundary_unwrap_type(expected);
-    if (!expected) return false;
-    if (expected->type_id == LMD_TYPE_ANY || expected->type_id == LMD_TYPE_ERROR) return true;
-    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_BINARY) {
-        TypeBinary* binary = (TypeBinary*)expected;
-        if (binary->op == OPERATOR_UNION) {
-            return runtime_type_accepts_error(binary->left) ||
-                runtime_type_accepts_error(binary->right);
-        }
-    }
-    return false;
-}
-
 static bool runtime_validate_value_against_type(Item item, Type* expected,
         ValidationResult** validation) {
     if (!context || !context->validator) return false;
@@ -1265,12 +1278,19 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
     return result && result->valid;
 }
 
+static bool runtime_type_admit_value(Item value, Type* expected, Item* converted);
+
 bool lambda_type_matches(Item item, Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
     TypeId actual_id = get_type_id(item);
-    if (actual_id == LMD_TYPE_ERROR) return runtime_type_accepts_error(expected);
+    if (actual_id == LMD_TYPE_ERROR) return lambda_type_accepts_error(expected);
     if (expected->type_id == LMD_TYPE_ANY) return true;
+    if (expected == &TYPE_MAP && actual_id == LMD_TYPE_VMAP) {
+        // Host-backed VMaps implement Lambda's map interface but retain a distinct
+        // physical tag; the global map contract must not reject them at a native call.
+        return true;
+    }
 
     if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_PATTERN) {
         if (!is_text_type_id(actual_id)) return false;
@@ -1331,49 +1351,6 @@ bool lambda_type_matches(Item item, Type* expected) {
     }
 }
 
-static void runtime_type_name(Type* type, char* buffer, size_t capacity) {
-    Type* unwrapped = runtime_boundary_unwrap_type(type);
-    if (!unwrapped) {
-        snprintf(buffer, capacity, "unknown");
-        return;
-    }
-    if (unwrapped->type_id == LMD_TYPE_MAP) {
-        TypeMap* map_type = (TypeMap*)unwrapped;
-        if (map_type->struct_name) {
-            snprintf(buffer, capacity, "%s", map_type->struct_name);
-            return;
-        }
-    }
-    if (unwrapped == &TYPE_NUMBER) {
-        snprintf(buffer, capacity, "number");
-        return;
-    }
-    if (unwrapped == &TYPE_INTEGER) {
-        snprintf(buffer, capacity, "integer");
-        return;
-    }
-    if (unwrapped->type_id == LMD_TYPE_TYPE && unwrapped->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)unwrapped)->op == OPERATOR_REPEAT) {
-        char element_name[96];
-        runtime_type_name(((TypeUnary*)unwrapped)->operand, element_name,
-            sizeof(element_name));
-        snprintf(buffer, capacity, "%s[]", element_name);
-        return;
-    }
-    if (unwrapped->type_id == LMD_TYPE_TYPE && unwrapped->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)unwrapped)->op == OPERATOR_UNION) {
-        char left_name[64];
-        char right_name[64];
-        runtime_type_name(((TypeBinary*)unwrapped)->left, left_name,
-            sizeof(left_name));
-        runtime_type_name(((TypeBinary*)unwrapped)->right, right_name,
-            sizeof(right_name));
-        snprintf(buffer, capacity, "%s | %s", left_name, right_name);
-        return;
-    }
-    snprintf(buffer, capacity, "%s", get_type_name(unwrapped->type_id));
-}
-
 static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
@@ -1415,7 +1392,7 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
     char actual_summary[192];
     char message[512];
     char validation_detail[320] = {};
-    runtime_type_name(expected, expected_name, sizeof(expected_name));
+    lambda_type_format_name(expected, expected_name, sizeof(expected_name));
     runtime_value_summary(actual, actual_summary, sizeof(actual_summary));
     runtime_validation_detail(validation, validation_detail, sizeof(validation_detail));
     snprintf(message, sizeof(message),
@@ -1445,7 +1422,9 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
     // retain the original diagnostic instead of receiving a misleading second
     // type mismatch.
     if (get_type_id(value) == LMD_TYPE_ERROR) return value;
-    if (lambda_type_matches(value, expected)) return value;
+
+    Item converted = ItemError;
+    if (runtime_type_admit_value(value, expected, &converted)) return converted;
 
     // Shape/union/occurrence matching is delegated to the validator. Reuse its
     // first concrete failure here so a rejected dynamic binding identifies the
@@ -1585,6 +1564,7 @@ Bool fn_is_nan(Item a) {
         double val = a.get_double();
         return __builtin_isnan(val) ? BOOL_TRUE : BOOL_FALSE;
     }
+    if (tid == LMD_TYPE_DECIMAL) return decimal_item_is_nan(a) ? BOOL_TRUE : BOOL_FALSE;
     return BOOL_FALSE;  // non-float values are never NaN
 }
 
@@ -2073,6 +2053,7 @@ Bool fn_ne(Item a_item, Item b_item) {
 static int total_type_rank(Item item) {
     TypeId tid = get_type_id(item);
     if (is_float_type_id(tid) && isnan(item.get_double())) return 14;
+    if (tid == LMD_TYPE_DECIMAL && decimal_item_is_nan(item)) return 14;
     switch (tid) {
     case LMD_TYPE_NULL: return 0;
     case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
@@ -3226,6 +3207,7 @@ RetItem fn_input2(Item target_item, Item type) {
         return ri_ok({.item = s2it(result_str)});
     }
     String *type_str = NULL, *flavor_str = NULL;
+    Type* schema_type = NULL;
 
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
@@ -3290,6 +3272,16 @@ RetItem fn_input2(Item target_item, Item type) {
                 flavor_str = NULL;  // input flavor ignored
             }
         }
+
+        Item input_schema = _map_get((TypeMap*)options_map->type, options_map->data,
+            "schema", &is_found);
+        if (is_found && input_schema.item && input_schema._type_id != LMD_TYPE_NULL) {
+            if (get_type_id(input_schema) != LMD_TYPE_TYPE) {
+                return item_to_ri(lambda_type_error(input_schema, &TYPE_TYPE,
+                    "input schema option"));
+            }
+            schema_type = input_schema.type;
+        }
     }
     else {
         log_debug("input type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
@@ -3311,7 +3303,13 @@ RetItem fn_input2(Item target_item, Item type) {
     target_free(target);
 
     // todo: input should be cached in context
-    return ri_ok((input && input->root.item) ? input->root : ItemNull);
+    Item result = (input && input->root.item) ? input->root : ItemNull;
+    if (schema_type && result.item) {
+        // Keep input schema admission on the shared TE-10 boundary so its
+        // conversion and validator-path diagnostics cannot diverge from bindings.
+        return item_to_ri(lambda_type_check(result, schema_type, "input schema"));
+    }
+    return ri_ok(result);
 }
 
 // declared extern "C" to allow calling from C code (path.c)
@@ -3635,7 +3633,9 @@ Item fn_index(Item item, Item index_item) {
     if (item_type == LMD_TYPE_VMAP) {
         // VMap integer-looking keys are still map keys, not sequence offsets.
         VMap* vm = item.vmap;
-        if (vm && vm->vtable) return vmap_get_by_item(vm, index_item);
+        // Host-backed VMaps resolve through their host hook without a storage
+        // vtable; rejecting them here made callback metadata appear absent.
+        if (vm && (vm->host_type || vm->vtable)) return vmap_get_by_item(vm, index_item);
         return ItemNull;
     }
 
@@ -3937,7 +3937,9 @@ Item fn_member(Item item, Item key) {
     }
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;
-        if (!vm || !vm->vtable) return ItemNull;
+        // A host projection is a map even when it has no local vtable; its
+        // properties are supplied by vmap_get_by_item's host dispatch.
+        if (!vm || (!vm->host_type && !vm->vtable)) return ItemNull;
         return vmap_get_by_item(vm, key);
     }
     case LMD_TYPE_ELEMENT: {
@@ -6393,11 +6395,15 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
         } else {
             Item field_value = _map_read_field(entry, src_data);
             Item field_clone = clone_mutable_item(field_value, clone_ctx);
-            // Cloned maps must keep the original slot layout; writing an `any`
-            // field as a raw pointer makes later reads interpret pointer bytes as
-            // a TypedItem tag.
+            // Cloned maps must keep the original physical slot layout. Extended
+            // contracts such as `string | error` use the raw Item lane even
+            // though their semantic TypeId is LMD_TYPE_TYPE.
             void* dst_field = (char*)mutable_clone_owner_data(dst_owner) + entry->byte_offset;
-            map_field_store(dst_field, field_clone, entry->type->type_id);
+            if (shape_entry_uses_raw_item_storage(entry)) {
+                *(Item*)dst_field = field_clone;
+            } else {
+                map_field_store(dst_field, field_clone, shape_entry_storage_type_id(entry));
+            }
         }
         entry = entry->next;
     }
@@ -6949,7 +6955,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     int64_t new_size = 0;
     for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
         old_count++;
-        new_size += type_info[entry->type->type_id].byte_size;
+        new_size += type_info[shape_entry_storage_type_id(entry)].byte_size;
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
@@ -6973,7 +6979,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         *entry = *old;
         entry->byte_offset = offset;
         entry->next = NULL;
-        int size = type_info[old->type->type_id].byte_size;
+        int size = type_info[shape_entry_storage_type_id(old)].byte_size;
         memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset, (size_t)size);
         offset += size;
         if (last) last->next = entry;
@@ -7096,12 +7102,9 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
     Item write_result = cow_path_set(rooted_candidate.get(), rooted_path.get(),
         rooted_value.get());
     if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
-    if (!lambda_type_matches(rooted_candidate.get(), contract)) {
-        ValidationResult* validation = NULL;
-        (void)runtime_validate_value_against_type(rooted_candidate.get(), contract, &validation);
-        return lambda_type_error_with_validation(rooted_candidate.get(), contract, boundary, validation);
-    }
-    return rooted_candidate.get();
+    Item converted_root = lambda_type_check(rooted_candidate.get(), contract, boundary);
+    if (get_type_id(converted_root) == LMD_TYPE_ERROR) return converted_root;
+    return converted_root;
 }
 
 static Type* runtime_array_contract_element(Type* expected) {
@@ -7141,7 +7144,11 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     if (!lambda_type_matches(rooted_candidate.get(), expected)) {
         ValidationResult* validation = NULL;
         (void)runtime_validate_value_against_type(rooted_candidate.get(), expected, &validation);
-        return lambda_type_error_with_validation(rooted_value.get(), expected, boundary, validation);
+        // The validator inspected the rebuilt array. Reporting only the leaf
+        // value hid that candidate context even though its path identifies the
+        // failed index.
+        return lambda_type_error_with_validation(rooted_candidate.get(), expected, boundary,
+            validation);
     }
     return rooted_candidate.get();
 }
@@ -7396,7 +7403,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         } else {
             // unchanged field — copy bytes (ref count unchanged, same pointers)
             int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
-                type_info[old_e->type->type_id].byte_size;
+                type_info[shape_entry_storage_type_id(old_e)].byte_size;
             memcpy(new_field, old_field, sz);
         }
         field_index++;
@@ -7519,6 +7526,155 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
         entry = entry->next;
     }
     return NULL;
+}
+
+static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) {
+    if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected ||
+            expected->type_id != LMD_TYPE_MAP) {
+        return false;
+    }
+
+    // The source may be an input-owned or shared dynamic map. Clone the entire
+    // reachable candidate before its first converted field so a failed nested
+    // admission cannot alter the source value or any COW snapshot.
+    RootFrame roots(3);
+    Rooted<Item> rooted_candidate(roots, fn_mutable_value(value));
+    Rooted<Item> rooted_field(roots, ItemNull);
+    Rooted<Item> rooted_converted(roots, ItemNull);
+    if (get_type_id(rooted_candidate.get()) != LMD_TYPE_MAP ||
+            rooted_candidate.get().item == value.item) {
+        return false;
+    }
+
+    TypeMap* expected_map = (TypeMap*)expected;
+    for (ShapeEntry* expected_field = expected_map->shape; expected_field;
+            expected_field = expected_field->next) {
+        if (!expected_field->name || !expected_field->name->str || !expected_field->type) {
+            continue;
+        }
+        Map* candidate_map = rooted_candidate.get().map;
+        TypeMap* candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
+        ShapeEntry* candidate_field = map_find_shape_entry(candidate_type,
+            expected_field->name->str, expected_field->name->length);
+        if (!candidate_field) return false;
+
+        rooted_field.set(_map_read_field(candidate_field, candidate_map->data));
+        Item field_converted = ItemNull;
+        if (!runtime_type_admit_value(rooted_field.get(), expected_field->type,
+                &field_converted)) {
+            return false;
+        }
+        rooted_converted.set(field_converted);
+        if (rooted_converted.get().item == rooted_field.get().item) continue;
+
+        candidate_map = rooted_candidate.get().map;
+        candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
+        candidate_field = map_find_shape_entry(candidate_type,
+            expected_field->name->str, expected_field->name->length);
+        if (!candidate_field || !candidate_field->type) return false;
+        TypeId converted_type = get_type_id(rooted_converted.get());
+        if (candidate_field->type->type_id != converted_type) {
+            // `fn_map_set` deliberately widens an int back into a float slot.
+            // Boundary admission instead changes the detached candidate shape so
+            // the stored field's observable tag satisfies the named contract.
+            map_rebuild_for_type_change((void**)&candidate_map->type,
+                &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
+                (Container*)candidate_map, candidate_field, converted_type,
+                rooted_converted.get());
+        } else {
+            String* field_name = heap_create_name(expected_field->name->str,
+                expected_field->name->length);
+            if (!field_name) return false;
+            rooted_field.set({.item = s2it(field_name)});
+            fn_map_set(rooted_candidate.get(), rooted_field.get(), rooted_converted.get());
+        }
+    }
+
+    if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    *converted = rooted_candidate.get();
+    return true;
+}
+
+static bool runtime_type_admit_array(Item value, Type* expected, Item* converted) {
+    Type* element_type = runtime_array_contract_element(expected);
+    TypeId source_type = get_type_id(value);
+    if (!element_type || (source_type != LMD_TYPE_ARRAY &&
+            source_type != LMD_TYPE_ARRAY_NUM && source_type != LMD_TYPE_ELEMENT)) {
+        return false;
+    }
+
+    RootFrame roots(3);
+    Rooted<Item> rooted_candidate(roots, fn_mutable_value(value));
+    Rooted<Item> rooted_element(roots, ItemNull);
+    Rooted<Item> rooted_converted(roots, ItemNull);
+    TypeId candidate_type = get_type_id(rooted_candidate.get());
+    if ((candidate_type != LMD_TYPE_ARRAY && candidate_type != LMD_TYPE_ARRAY_NUM &&
+            candidate_type != LMD_TYPE_ELEMENT) || rooted_candidate.get().item == value.item) {
+        return false;
+    }
+
+    int64_t length = rooted_candidate.get().array->length;
+    for (int64_t index = 0; index < length; index++) {
+        rooted_element.set(item_at(rooted_candidate.get(), index));
+        Item element_converted = ItemNull;
+        if (!runtime_type_admit_value(rooted_element.get(), element_type,
+                &element_converted)) {
+            return false;
+        }
+        rooted_converted.set(element_converted);
+        if (rooted_converted.get().item == rooted_element.get().item) continue;
+
+        if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ARRAY_NUM) {
+            // A Float ArrayNum has no per-item tags. Reify it before publishing
+            // converted elements so `3.0 -> int` cannot remain physically float.
+            convert_specialized_to_generic(rooted_candidate.get().array);
+        }
+        if (get_type_id(fn_array_set(rooted_candidate.get().array, index,
+                rooted_converted.get())) == LMD_TYPE_ERROR) {
+            return false;
+        }
+    }
+
+    if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    *converted = rooted_candidate.get();
+    return true;
+}
+
+static bool runtime_type_admit_value(Item value, Type* expected, Item* converted) {
+    if (!converted) return false;
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected) return false;
+
+    // Preserve an already conforming union member rather than arbitrarily
+    // re-representing it through an earlier union arm.
+    if (lambda_type_matches(value, expected)) {
+        *converted = value;
+        return true;
+    }
+
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)expected)->op == OPERATOR_UNION) {
+        TypeBinary* union_type = (TypeBinary*)expected;
+        return runtime_type_admit_value(value, union_type->left, converted) ||
+            runtime_type_admit_value(value, union_type->right, converted);
+    }
+
+    if (lambda_numeric_kind_from_item(value) != LAMBDA_NUM_INVALID &&
+            lambda_numeric_kind_from_type(expected) != LAMBDA_NUM_INVALID) {
+        // A numeric pair reached this DEFERRED boundary but cannot be represented
+        // exactly in the target contract. Do not let type-directional membership
+        // turn that failed conversion into a truncating native unbox.
+        return lambda_numeric_boundary_admit(value, expected, converted);
+    }
+
+    if (expected->type_id == LMD_TYPE_MAP) {
+        return runtime_type_admit_map(value, expected, converted);
+    }
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)expected)->op == OPERATOR_REPEAT) {
+        return runtime_type_admit_array(value, expected, converted);
+    }
+    return false;
 }
 
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,

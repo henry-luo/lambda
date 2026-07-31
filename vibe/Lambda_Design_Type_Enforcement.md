@@ -1280,10 +1280,14 @@ targeted tests (every new `*.ls` with its `*.txt` golden, per repo rule; negativ
 cases assert the diagnostic text). Performance measurements use `make release`, never a debug
 binary.
 
-### 8.1 Delivered enforcement inventory (2026-07-30)
+### 8.1 Round-1 enforcement inventory (2026-07-30)
 
-The correctness work in P0–P4 is implemented. The old survey remains above as the before-state;
-this ledger is the authoritative current-state summary.
+Round 1 implemented the boundaries summarized in this ledger. The retained P0–P4 narrative
+below is historical implementation context, not a claim that every later semantic expansion is
+complete. The revised implementation plan in
+[`Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md) is the current completion
+authority for C14c, value-aware numeric admission, internal exclusion types, implicit clean
+firewalls, and the remaining gaps.
 
 | Boundary / invariant | Delivered implementation |
 |---|---|
@@ -1321,8 +1325,9 @@ optional/default/variadic calls; and map COW snapshot isolation. The complete
 `make test-lambda-baseline` gate is green: **2,104/2,104** input tests and
 **1,542/1,542** Lambda-runtime tests. `make test262-baseline` is also green:
 **40,261/40,261** baseline tests fully pass, with **0** non-fully-passing tests,
-**0** failures, **0** retries, and **0** regressions. The enforcement correctness scope is
-therefore closed; §9's performance work remains explicitly deferred.
+**0** failures, **0** retries, and **0** regressions. This is a Round-1 verification snapshot;
+the revised enforcement scope remains active, while §9's performance work stays explicitly
+deferred.
 
 **P0 — Semantic foundation and static completion.** Establish TE-6's canonical
 `subtype`/`matches` primitives and truth tables first, then TE-7 items 1–4: declaration reorder

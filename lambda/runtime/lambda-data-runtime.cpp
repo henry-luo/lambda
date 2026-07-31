@@ -2151,7 +2151,7 @@ Map* map_fill(Map* map, ...) {
 
 // extract field value from a named shape entry's storage
 Item _map_read_field(ShapeEntry* field, void* map_data) {
-    TypeId type_id = field->type->type_id;
+    TypeId type_id = shape_entry_storage_type_id(field);
     void* field_ptr = (char*)map_data + field->byte_offset;
     void* ptr_val = nullptr;
     switch (type_id) {
@@ -2223,7 +2223,7 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
                                      void* map_data) {
     if (!owner || !owner->is_immortal) return _map_read_field(field, map_data);
     void* field_ptr = (char*)map_data + field->byte_offset;
-    switch (field->type->type_id) {
+    switch (shape_entry_storage_type_id(field)) {
     case LMD_TYPE_INT64: {
         return Item{.item = l2it(field_ptr)};
     }

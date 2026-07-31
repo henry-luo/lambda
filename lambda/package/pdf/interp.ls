@@ -823,31 +823,33 @@ fn _ctx(st, stack, texts, paths, pending_clip_d, pending_clip_rule, has_pending_
     }
 }
 
-fn _ctx_with_st(ctx, st) {
+// The interpreter context contains dynamically decoded PDF values; preserve a
+// failed record rebuild so an invalid stream cannot become a plausible context.
+fn _ctx_with_st(ctx, st) map | error {
     _ctx(st, ctx.stack, ctx.texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
          ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
          ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
 }
 
-fn _ctx_with_texts(ctx, st, texts) {
+fn _ctx_with_texts(ctx, st, texts) map | error {
     _ctx(st, ctx.stack, texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
          ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
          ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
 }
 
-fn _ctx_with_paths(ctx, paths) {
+fn _ctx_with_paths(ctx, paths) map | error {
     _ctx(ctx.st, ctx.stack, ctx.texts, paths, ctx.pending_clip_d, ctx.pending_clip_rule,
          ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
          ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
 }
 
-fn _ctx_with_stack(ctx, stack) {
+fn _ctx_with_stack(ctx, stack) map | error {
     _ctx(ctx.st, stack, ctx.texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
          ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
          ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
 }
 
-fn _push_graphics_state(ctx) {
+fn _push_graphics_state(ctx) map | error {
     _ctx_with_stack(ctx, ctx.stack ++ [{
           st: ctx.st,
           pending_clip_d: ctx.pending_clip_d,

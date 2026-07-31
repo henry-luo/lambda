@@ -364,6 +364,11 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             fn_type->is_proc = false;
             fn_type->param = NULL;  // no typed params — all Item
             fn_type->returned = &TYPE_ANY;
+            fn_type->inferred_return = &TYPE_ANY;
+            // Hosted exports are dynamically typed interfaces, so their
+            // signature explicitly admits the full value top.
+            fn_type->return_contract = &TYPE_ANY;
+            fn_type->has_explicit_return_contract = true;
             fn_node->type = (Type*)fn_type;
 
             // Link into AST child list

@@ -1,6 +1,7 @@
 type Person = {name: string, age: int}
 
 let wrong_scalar: int = "not an integer"
+let wrong_float: int = 3.0
 let wrong_field: Person = {name: "Ana", age: "not an integer"}
 let wrong_null: int = null
 

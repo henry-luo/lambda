@@ -50,7 +50,9 @@ fn filter_class_at(items, cls, i, n, acc) {
   } else { filter_class_at(items, cls, i + 1, n, acc) }
 }
 
-pub fn deco_remove_class(set, cls) =>
+// Overlay data is derived from dynamic document state; preserve malformed
+// decorations as values instead of manufacturing a partial replacement set.
+pub fn deco_remove_class(set, cls) map | error =>
   deco_set(filter_class_at(set.items, cls, 0, len(set.items), []))
 
 pub fn deco_concat(a, b) =>
@@ -93,7 +95,7 @@ fn map_items_at(items, map_pos_fn, i, n, acc) {
   else { map_items_at(items, map_pos_fn, i + 1, n, [*acc, map_one_deco(items[i], map_pos_fn)]) }
 }
 
-pub fn deco_map(set, map_pos_fn) =>
+pub fn deco_map(set, map_pos_fn) map | error =>
   deco_set(map_items_at(set.items, map_pos_fn, 0, len(set.items), []))
 
 fn map_pos_through_steps(steps, p, i, n) {
@@ -129,7 +131,7 @@ fn map_items_tx_at(items, tx, i, n, acc) {
   }
 }
 
-pub fn deco_map_tx(set, tx) =>
+pub fn deco_map_tx(set, tx) map | error =>
   deco_set(map_items_tx_at(set.items, tx, 0, len(set.items), []))
 
 // ---------------------------------------------------------------------------

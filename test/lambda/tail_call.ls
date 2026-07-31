@@ -31,7 +31,7 @@ fn fib(n: int) int => fib_tail(n, 0, 1)
 // Tail recursion in both branches of if-expression
 fn gcd(a: int, b: int) int =>
     if (b == 0) a
-    else gcd(b, a % b)
+    else gcd(b, int(a % b))
 
 // ==============================================================================
 // PART 2: Non-Tail-Recursive Functions (UNSAFE - need stack check)

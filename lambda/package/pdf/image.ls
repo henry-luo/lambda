@@ -358,11 +358,13 @@ fn _inline_ncomp(cs) {
     else { 3 }
 }
 
-fn _div_int(a, b) {
+// Malformed image metadata must stay observable instead of being coerced into
+// a synthetic row size that could desynchronize subsequent byte reads.
+fn _div_int(a, b) int | error {
     int(float(a) / float(b))
 }
 
-fn _row_bytes(w, ncomp, bpc) {
+fn _row_bytes(w, ncomp, bpc) int | error {
     _div_int((w * ncomp * bpc) + 7, 8)
 }
 

@@ -67,6 +67,11 @@ Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 Type TYPE_ANY = {.type_id = LMD_TYPE_ANY};
 Type TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
+// Contract-only tops distinguish an implicit clean boundary from explicit
+// `any` without changing the value-level Item representation.
+Type TYPE_ANY_NO_ERROR = {.type_id = LMD_TYPE_ANY};
+Type TYPE_ANY_NO_NULL = {.type_id = LMD_TYPE_ANY};
+Type TYPE_ANY_NO_ERROR_OR_NULL = {.type_id = LMD_TYPE_ANY};
 
 Type CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
 Type CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};
@@ -683,7 +688,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(Map**)field_ptr = nullptr;
             }
         } else {
-            switch (field->type->type_id) {
+            TypeId storage_type_id = shape_entry_storage_type_id(field);
+            switch (storage_type_id) {
             case LMD_TYPE_NULL: {
                 // For dynamically-typed fields (e.g. state-bound element attributes),
                 // store non-null values as raw tagged Items. The compiler sets shape type
@@ -867,7 +873,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             default:
-                log_error("unknown type %s", get_type_name(field->type->type_id));
+                log_error("unknown map storage type %s", get_type_name(storage_type_id));
             }
         }
         field = field->next;
@@ -1066,10 +1072,11 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             strlen(key) == field->name->length &&
             target_equal(field->ns, key_ns)) {
             *is_found = true;
-            TypeId type_id = field->type->type_id;
+            TypeId type_id = shape_entry_storage_type_id(field);
             void* field_ptr = map_field_ptr(map_data, field);
-            log_debug("_map_get_const: key='%s' type_id=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
-                key, type_id, field->byte_offset, field_ptr, *(uint64_t*)field_ptr, map_type, map_data);
+            log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
+                key, field->type->type_id, type_id, field->byte_offset, field_ptr,
+                *(uint64_t*)field_ptr, map_type, map_data);
             Item result = map_field_to_item(field_ptr, type_id);
             return *(ConstItem*)&result;
         }

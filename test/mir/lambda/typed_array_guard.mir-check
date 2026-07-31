@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Typed numeric-array loads retain their guarded fast path; typed writes go through the checked replacement helper so a widened alias cannot mutate the bound array into an invalid representation.",
+  "description": "Typed numeric-array loads retain their guarded fast path. A proven float procedure parameter validates the physical array guard before writing in place, preserving the caller-visible procedure ABI without a per-store whole-array scan.",
   "checks": [
     {
       "in_func": "_guarded_load_#",
@@ -19,16 +19,16 @@
     },
     {
       "in_func": "_guarded_store_#",
+      "forbid": [
+        "call\tlambda_array_set_checked_p, lambda_array_set_checked"
+      ],
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
-        { "pattern": "call\tlambda_array_set_checked_p, lambda_array_set_checked" },
-        { "pattern": "call\titem_type_id_p, item_type_id" },
-        { "pattern": "eq\tstmt_err_" },
-        { "pattern": "call\tfn_index_p, fn_index" }
-      ],
-      "count": {
-        "call\tlambda_array_set_checked_p, lambda_array_set_checked": 1
-      }
+        { "pattern": "mov\tgtid_" },
+        { "pattern": "eq\tgtidok_" },
+        { "pattern": "call\tfn_array_set_p, fn_array_set" },
+        { "pattern": "mov\tfitms_" }
+      ]
     }
   ]
 }

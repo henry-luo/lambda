@@ -7,7 +7,7 @@ import style_rules: lambda.package.graph.structurizr.styles
 fn children(value, wanted = null) => [
   for (child in graph_model.element_children(value)
     where wanted == null or graph_model.tag(child) == wanted) child
-]
+] or []
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
@@ -15,8 +15,8 @@ fn workspace_model(workspace) => first(children(workspace, "c4-model"))
 fn workspace_views(workspace) => first(children(workspace, "c4-views"))
 fn workspace_styles(workspace) => first(children(workspace, "c4-styles"))
 
-fn elements(workspace) => children(workspace_model(workspace), "c4-element")
-fn relationships(workspace) => children(workspace_model(workspace), "c4-relationship")
+fn elements(workspace) => children(workspace_model(workspace), "c4-element") or []
+fn relationships(workspace) => children(workspace_model(workspace), "c4-relationship") or []
 
 pub fn view_keys(workspace) => [
   for (diagram in children(workspace_views(workspace), "c4-view")) string(diagram.key)

@@ -127,6 +127,8 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_BREAK_OUTSIDE_LOOP, "BREAK_OUTSIDE_LOOP", "Break outside loop"},
     {ERR_CONTINUE_OUTSIDE_LOOP, "CONTINUE_OUTSIDE_LOOP", "Continue outside loop"},
     {ERR_RETURN_OUTSIDE_FUNCTION, "RETURN_OUTSIDE_FUNCTION", "Return outside function"},
+    {ERR_UNHANDLED_ERROR, "UNHANDLED_ERROR", "Unhandled error-returning call"},
+    {ERR_UNSUPPORTED_DYNAMIC_ABI, "UNSUPPORTED_DYNAMIC_ABI", "Unsupported dynamic call ABI"},
     
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},
@@ -273,6 +275,7 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
 
     error->code = code;
     error->is_heap = is_heap;
+    error->is_static = false;
     error->message = message ? err_strdup(message) : err_strdup(err_code_message(code));
 
     if (location) {
@@ -305,6 +308,83 @@ LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const c
 
 LambdaError* err_create_simple(LambdaErrorCode code, const char* message) {
     return err_create(code, message, NULL);
+}
+
+const char* lambda_fault_reason_name(LambdaFaultReason reason) {
+    switch (reason) {
+    case LAMBDA_FAULT_STACK_OVERFLOW: return "stack_overflow";
+    case LAMBDA_FAULT_SIDE_STACK_EXHAUSTION: return "side_stack_exhaustion";
+    case LAMBDA_FAULT_OUT_OF_MEMORY: return "out_of_memory";
+    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION: return "equality_depth_exhaustion";
+    case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT: return "runtime_boundary_defect";
+    case LAMBDA_FAULT_NONE: return "none";
+    }
+    return "unknown";
+}
+
+static LambdaErrorCode lambda_fault_error_code(LambdaFaultReason reason) {
+    switch (reason) {
+    case LAMBDA_FAULT_STACK_OVERFLOW:
+    case LAMBDA_FAULT_SIDE_STACK_EXHAUSTION:
+        return ERR_STACK_OVERFLOW;
+    case LAMBDA_FAULT_OUT_OF_MEMORY:
+        return ERR_OUT_OF_MEMORY;
+    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION:
+        return ERR_RUNTIME_ERROR;
+    case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
+        return ERR_INVALID_STATE;
+    case LAMBDA_FAULT_NONE:
+        return ERR_OK;
+    }
+    return ERR_INTERNAL_ERROR;
+}
+
+static const char* lambda_fault_error_message(LambdaFaultReason reason) {
+    switch (reason) {
+    case LAMBDA_FAULT_STACK_OVERFLOW:
+        return "Stack overflow";
+    case LAMBDA_FAULT_SIDE_STACK_EXHAUSTION:
+        return "Side-stack capacity exhausted";
+    case LAMBDA_FAULT_OUT_OF_MEMORY:
+        return "Out of memory";
+    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION:
+        return "Structural equality recursion limit exceeded";
+    case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
+        return "Runtime boundary invariant failed";
+    case LAMBDA_FAULT_NONE:
+        return "No fault";
+    }
+    return "Unknown system fault";
+}
+
+void lambda_fault_record_init(LambdaFaultRecord* record) {
+    if (!record) return;
+    memset(record, 0, sizeof(*record));
+}
+
+void lambda_fault_record_prepare(LambdaFaultRecord* record,
+                                 LambdaFaultReason reason,
+                                 LambdaErrorCode prior_error_code) {
+    if (!record) return;
+    lambda_fault_record_init(record);
+    record->reason = reason;
+    record->prior_error_code = prior_error_code;
+    record->active = reason != LAMBDA_FAULT_NONE;
+    record->error.code = lambda_fault_error_code(reason);
+    // A recovery landing exposes this embedded error through Context::last_error.
+    // It must never be released as an ordinary heap/system error after OOM.
+    record->error.is_static = true;
+    record->error.message = (char*)lambda_fault_error_message(reason);
+}
+
+void lambda_fault_record_from_error_allocation_failure(
+        LambdaFaultRecord* record, LambdaErrorCode prior_error_code) {
+    lambda_fault_record_prepare(record, LAMBDA_FAULT_OUT_OF_MEMORY,
+                                prior_error_code);
+}
+
+LambdaError* lambda_fault_record_error(LambdaFaultRecord* record) {
+    return record && record->active ? &record->error : NULL;
 }
 
 // ============================================================================
@@ -961,6 +1041,7 @@ void err_free_stack_trace(StackFrame* trace) {
 
 void err_release_payload(LambdaError* error) {
     if (!error) return;
+    if (error->is_static) return;
 
     if (error->message) mem_free(error->message);
     if (error->help) mem_free(error->help);
@@ -976,7 +1057,7 @@ void err_release_payload(LambdaError* error) {
 void err_free(LambdaError* error) {
     if (!error) return;
 
-    if (error->is_heap) return;
+    if (error->is_heap || error->is_static) return;
     err_release_payload(error);
     mem_free(error);
 }

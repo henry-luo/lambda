@@ -134,5 +134,7 @@ pub fn edit_set_decorations(editor, decorations) =>
    events: [*editor.events, {kind: 'decorations', decorations: decorations}],
    mounted: editor.mounted, preset: editor.preset}
 
-pub fn edit_find(editor, needle, attrs) =>
+// A search decoration can fail to build from malformed editor state; exposing
+// that value preserves the session instead of publishing a partial editor.
+pub fn edit_find(editor, needle, attrs) map | error =>
   edit_set_decorations(editor, find_decorations_in_doc(editor.doc, needle, attrs))

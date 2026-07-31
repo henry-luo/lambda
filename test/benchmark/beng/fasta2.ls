@@ -90,8 +90,9 @@ pn random_fasta(id: string, desc: string, chars, probs: float[],
         var line: string = ""
         var j: int = 0
         while (j < line_len) {
-            // LCG random
-            seed_arr[0] = (seed_arr[0] * IA + IC) % IM
+            // `%` has a flexible numeric result; convert it at the int[]
+            // boundary so the PRNG state keeps its declared element contract.
+            seed_arr[0] = int((seed_arr[0] * IA + IC) % IM)
             var r: float = float(seed_arr[0]) / float(IM)
 
             // lookup character by cumulative probability

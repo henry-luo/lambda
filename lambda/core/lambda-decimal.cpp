@@ -35,12 +35,16 @@ void decimal_init() {
     // Initialize fixed-precision context (decimal128 precision)
     mpd_defaultcontext(&g_fixed_ctx);
     g_fixed_ctx.prec = DECIMAL_FIXED_PRECISION;
+    // Lambda keeps numeric poison in the value domain; mpdecimal traps would
+    // abort before operations such as 0m * decimal.inf can produce decimal.nan.
+    g_fixed_ctx.traps = 0;
     
     // Initialize unlimited-precision context (high but practical precision)
     // mpd_maxcontext has absurdly high precision (10^18) which crashes mpd_pow.
     // Use 200 digits which is far more than needed for any practical computation.
     mpd_maxcontext(&g_unlimited_ctx);
     g_unlimited_ctx.prec = 200;
+    g_unlimited_ctx.traps = 0;
     
     g_initialized = true;
     log_debug("decimal_init: fixed_prec=%d, unlimited_prec=%d",
@@ -169,12 +173,28 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {
 
     if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
-        if (isnan(val) || isinf(val)) return false;
+        if (isnan(val)) return false;
+        if (isinf(val)) {
+            snprintf(out, out_size, "%sinf", val < 0 ? "-" : "");
+            return true;
+        }
     } else if (type == LMD_TYPE_NUM_SIZED) {
         double val = item.get_num_sized_as_double();
         if ((item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32) &&
-            (isnan(val) || isinf(val))) {
+            isnan(val)) {
             return false;
+        }
+        if ((item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32) &&
+            isinf(val)) {
+            snprintf(out, out_size, "%sinf", val < 0 ? "-" : "");
+            return true;
+        }
+    } else if (type == LMD_TYPE_DECIMAL) {
+        Decimal* decimal = item.get_decimal();
+        if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val)) return false;
+        if (mpd_isinfinite(decimal->dec_val)) {
+            snprintf(out, out_size, "%sinf", mpd_isnegative(decimal->dec_val) ? "-" : "");
+            return true;
         }
     }
 
@@ -303,7 +323,7 @@ Item decimal_from_string(const char* str) {
     uint32_t status = 0;
     mpd_qset_string(dec_val, str, dec_ctx, &status);
     
-    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+    if (status != 0) {
         mpd_del(dec_val);
         return ItemError;
     }
@@ -535,7 +555,13 @@ void decimal_print(StrBuf* strbuf, Decimal* decimal) {
         return;
     }
     
-    // Use libmpdec to format - no truncation per design decision
+    const char* special = decimal_special_literal(decimal);
+    if (special) {
+        strbuf_append_str(strbuf, special);
+        return;
+    }
+
+    // Use libmpdec to format finite values with no truncation.
     char* decimal_str = mpd_to_sci(decimal->dec_val, 1);  // scientific notation
     if (!decimal_str) {
         strbuf_append_str(strbuf, "error");
@@ -795,12 +821,6 @@ Item decimal_add(Item a, Item b) {
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
     
-    if (mpd_isnan(result) || mpd_isinfinite(result)) {
-        mpd_del(result);
-        log_error("decimal_add: result is NaN or infinite");
-        return ItemError;
-    }
-    
     // integer + integer stays integer; mixed numeric ops leave the integer lane.
     if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
@@ -834,12 +854,6 @@ Item decimal_sub(Item a, Item b) {
     
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
-    
-    if (mpd_isnan(result) || mpd_isinfinite(result)) {
-        mpd_del(result);
-        log_error("decimal_sub: result is NaN or infinite");
-        return ItemError;
-    }
     
     // integer - integer stays integer; mixed numeric ops leave the integer lane.
     if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
@@ -875,12 +889,6 @@ Item decimal_mul(Item a, Item b) {
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
     
-    if (mpd_isnan(result) || mpd_isinfinite(result)) {
-        mpd_del(result);
-        log_error("decimal_mul: result is NaN or infinite");
-        return ItemError;
-    }
-    
     // integer * integer stays integer; mixed numeric ops leave the integer lane.
     if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
@@ -891,6 +899,20 @@ typedef enum DecimalDivisionOp {
     DECIMAL_INTEGER_DIVIDE,
     DECIMAL_REMAINDER,
 } DecimalDivisionOp;
+
+static Item decimal_zero_division_result(mpd_t* numerator, mpd_t* divisor,
+        mpd_context_t* ctx, bool is_unlimited) {
+    if (!numerator || !divisor || !ctx) return ItemError;
+
+    const char* spelling = "NaN";
+    if (!mpd_iszero(numerator)) {
+        bool negative = mpd_isnegative(numerator) != mpd_isnegative(divisor);
+        spelling = negative ? "-Infinity" : "Infinity";
+    }
+    mpd_t* result = decimal_parse_str(spelling, ctx);
+    if (!result) return ItemError;
+    return decimal_push_result(result, is_unlimited);
+}
 
 static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
     bool is_unlimited = should_be_unlimited(a, b);
@@ -909,12 +931,14 @@ static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
         return ItemError;
     }
     
-    // Check for division by zero
+    // C14c keeps computed zero divisors in the decimal domain. mpdecimal's
+    // remainder operation would otherwise produce NaN for every nonzero lane,
+    // while Lambda requires the same signed inf/nan result as true division.
     if (mpd_iszero(b_dec)) {
+        Item result = decimal_zero_division_result(a_dec, b_dec, dec_ctx, is_unlimited);
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal division: division by zero");
-        return ItemError;
+        return result;
     }
     
     mpd_t* result = mpd_new(dec_ctx);
@@ -939,18 +963,9 @@ static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
     
-    if (mpd_isnan(result) || mpd_isinfinite(result)) {
-        mpd_del(result);
-        log_error("decimal_div: result is NaN or infinite");
-        return ItemError;
-    }
-    
-    if ((op == DECIMAL_INTEGER_DIVIDE || op == DECIMAL_REMAINDER) &&
-        decimal_binary_result_is_bigint(a, b)) {
-        return decimal_push_bigint_result(result);
-    }
-    // True division exits the integer domain; integral division and remainder
-    // preserve it when both inputs are integer carriers.
+    // C14c makes `div` and `%` number-domain operations. Even when both inputs
+    // are bigint carriers, their truncating/remainder result must remain a
+    // decimal Item so the observable result agrees with `/` domain selection.
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -994,12 +1009,6 @@ Item decimal_pow(Item a, Item b) {
     
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
-    
-    if (mpd_isnan(result) || mpd_isinfinite(result)) {
-        mpd_del(result);
-        log_error("decimal_pow: result is NaN or infinite");
-        return ItemError;
-    }
     
     return decimal_push_result(result, is_unlimited);
 }
@@ -1105,6 +1114,25 @@ bool decimal_item_is_zero(Item item) {
     Decimal* dec_ptr = item.get_decimal();
     if (!dec_ptr || !dec_ptr->dec_val) return false;
     return mpd_iszero(dec_ptr->dec_val);
+}
+
+bool decimal_item_is_nan(Item item) {
+    if (!decimal_is_any(item)) return false;
+    Decimal* decimal = item.get_decimal();
+    return decimal && decimal->dec_val && mpd_isnan(decimal->dec_val);
+}
+
+bool decimal_item_is_infinite(Item item) {
+    if (!decimal_is_any(item)) return false;
+    Decimal* decimal = item.get_decimal();
+    return decimal && decimal->dec_val && mpd_isinfinite(decimal->dec_val);
+}
+
+const char* decimal_special_literal(Decimal* decimal) {
+    if (!decimal || !decimal->dec_val) return NULL;
+    if (mpd_isnan(decimal->dec_val)) return "decimal.nan";
+    if (!mpd_isinfinite(decimal->dec_val)) return NULL;
+    return mpd_isnegative(decimal->dec_val) ? "-decimal.inf" : "decimal.inf";
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1237,7 +1265,8 @@ int64_t decimal_to_int64(Item item) {
 bool decimal_to_int64_exact(Item item, int64_t* out) {
     if (!out || !decimal_is_any(item)) return false;
     Decimal* decimal = item.get_decimal();
-    if (!decimal || !decimal->dec_val || !mpd_isinteger(decimal->dec_val)) return false;
+    if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val) ||
+            mpd_isinfinite(decimal->dec_val) || !mpd_isinteger(decimal->dec_val)) return false;
 
     // Semantic `integer` now reaches ordinary integral consumers after mixed
     // full-width arithmetic; reject out-of-range values instead of inheriting
@@ -1246,6 +1275,22 @@ bool decimal_to_int64_exact(Item item, int64_t* out) {
     mpd_ssize_t value = mpd_qget_ssize(decimal->dec_val, &status);
     if (status & MPD_Invalid_operation) return false;
     *out = (int64_t)value;
+    return true;
+}
+
+bool decimal_to_uint64_exact(Item item, uint64_t* out) {
+    if (!out || !decimal_is_any(item)) return false;
+    Decimal* decimal = item.get_decimal();
+    if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val) ||
+            mpd_isinfinite(decimal->dec_val) || !mpd_isinteger(decimal->dec_val) ||
+            mpd_isnegative(decimal->dec_val)) return false;
+
+    // The boundary admission path must reject an out-of-range decimal before a
+    // native unsigned cast; mpdecimal reports that case instead of wrapping it.
+    uint32_t status = 0;
+    uint64_t value = mpd_qget_u64(decimal->dec_val, &status);
+    if (status != 0) return false;
+    *out = value;
     return true;
 }
 #endif

@@ -167,15 +167,18 @@ static inline LambdaNumericDecision lambda_numeric_classify(
             (left == LAMBDA_NUM_FLOAT || right == LAMBDA_NUM_FLOAT) ?
             LAMBDA_NUM_FLOAT : LAMBDA_NUM_INT;
         if (joined == LAMBDA_NUM_FLOAT &&
-            (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD ||
-             op == LAMBDA_NUM_OP_BITWISE || op == LAMBDA_NUM_OP_SHIFT)) {
+            (op == LAMBDA_NUM_OP_BITWISE || op == LAMBDA_NUM_OP_SHIFT)) {
             return decision;
         }
         decision.valid = 1;
         decision.left_domain = left;
         decision.right_domain = right;
-        decision.result = op == LAMBDA_NUM_OP_TRUE_DIV && joined == LAMBDA_NUM_INT ?
-            LAMBDA_NUM_FLOAT : joined;
+        // C14c keeps `div` and `%` as truncation/remainder operations, but
+        // selects their result domain exactly like `/`. A known int pair must
+        // therefore leave the compact integer lane before MIR/native lowering.
+        decision.result = (op == LAMBDA_NUM_OP_TRUE_DIV ||
+            op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) &&
+            joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT : joined;
         decision.overflow = decision.result == LAMBDA_NUM_INT ?
             LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT : LAMBDA_NUM_OVERFLOW_IEEE;
         return decision;
@@ -206,7 +209,8 @@ static inline LambdaNumericDecision lambda_numeric_classify(
 
     uint8_t both_sized_integers = lambda_numeric_is_sized_integer(left) &&
                                   lambda_numeric_is_sized_integer(right);
-    if (both_sized_integers && op != LAMBDA_NUM_OP_TRUE_DIV) {
+    if (both_sized_integers && op != LAMBDA_NUM_OP_TRUE_DIV &&
+            op != LAMBDA_NUM_OP_IDIV && op != LAMBDA_NUM_OP_MOD) {
         decision.valid = 1;
         decision.left_domain = left;
         decision.right_domain = right;
@@ -259,8 +263,12 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         if (joined != LAMBDA_NUM_INT && joined != LAMBDA_NUM_INTEGER) return decision;
         decision.result = joined;
     } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
-        if (joined == LAMBDA_NUM_FLOAT) return decision;
-        decision.result = joined;
+        // C14c gives integral division and remainder the same result-domain
+        // selection as `/`: flex/small integers become float and full-width or
+        // unbounded integer domains become decimal. The operation itself still
+        // supplies truncation-toward-zero or dividend-signed remainder.
+        decision.result = joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT :
+                          joined == LAMBDA_NUM_INTEGER ? LAMBDA_NUM_DECIMAL : joined;
     } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
         decision.result = joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT :
                           joined == LAMBDA_NUM_INTEGER ? LAMBDA_NUM_DECIMAL : joined;

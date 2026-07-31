@@ -1,0 +1,1 @@
+[[decimal, decimal.inf, decimal.inf, -decimal.inf, decimal.nan, decimal.nan], [decimal.inf, decimal.nan, -decimal.inf], [true, true, false, true], [false, true, false, false], [decimal.inf, decimal.nan], ["decimal.inf", "decimal.nan"], [1, "float", "float"], [-decimal.inf, 2, decimal.inf, decimal.nan]]

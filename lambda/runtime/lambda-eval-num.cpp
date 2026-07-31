@@ -481,6 +481,18 @@ static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
     }
 }
 
+static double runtime_number_division_result(double left, double right,
+        LambdaNumericOpFamily op) {
+    if (op == LAMBDA_NUM_OP_TRUE_DIV) return left / right;
+    if (op == LAMBDA_NUM_OP_IDIV) return trunc(left / right);
+    if (op == LAMBDA_NUM_OP_MOD) {
+        // C14c deliberately gives a computed zero remainder the same poison as
+        // division, instead of C fmod's always-NaN result for a nonzero dividend.
+        return right == 0.0 ? left / right : fmod(left, right);
+    }
+    return NAN;
+}
+
 static bool apply_classified_numeric(Item item_a, TypeId type_a,
         Item item_b, TypeId type_b, LambdaNumericOpFamily op, Item* result) {
     bool int_a = type_a == LMD_TYPE_INT;
@@ -507,7 +519,10 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
             if (op == LAMBDA_NUM_OP_ADD) value = left + right;
             else if (op == LAMBDA_NUM_OP_SUB) value = left - right;
             else if (op == LAMBDA_NUM_OP_MUL) value = left * right;
-            else if (op == LAMBDA_NUM_OP_TRUE_DIV) value = left / right;
+            else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
+                    op == LAMBDA_NUM_OP_MOD) {
+                value = runtime_number_division_result(left, right, op);
+            }
             else return false;
             *result = push_d(value);
             return true;
@@ -522,16 +537,10 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
             *result = pack_compact_int_or_float((__int128)left - (__int128)right);
         } else if (op == LAMBDA_NUM_OP_MUL) {
             *result = pack_compact_int_or_float((__int128)left * (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
-            *result = push_d((double)left / (double)right);
-        } else if (right == 0 &&
-                (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD)) {
-            log_error("integer arithmetic zero divisor");
-            *result = ItemError;
-        } else if (op == LAMBDA_NUM_OP_IDIV) {
-            *result = (Item){.item = i2it(left / right)};
-        } else if (op == LAMBDA_NUM_OP_MOD) {
-            *result = (Item){.item = i2it(left % right)};
+        } else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
+                op == LAMBDA_NUM_OP_MOD) {
+            *result = push_d(runtime_number_division_result((double)left,
+                (double)right, op));
         } else {
             return false;
         }
@@ -574,17 +583,12 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
             *result = pack_compact_int_or_float((__int128)left - (__int128)right);
         } else if (op == LAMBDA_NUM_OP_MUL) {
             *result = pack_compact_int_or_float((__int128)left * (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
+                op == LAMBDA_NUM_OP_MOD) {
+            *result = push_d(runtime_number_division_result((double)left,
+                (double)right, op));
         } else {
-            if (right == 0) {
-                log_error("integer arithmetic zero divisor");
-                *result = ItemError;
-            } else if (op == LAMBDA_NUM_OP_IDIV) {
-                *result = (Item){.item = i2it(left / right)};
-            } else if (op == LAMBDA_NUM_OP_MOD) {
-                *result = (Item){.item = i2it(left % right)};
-            } else {
-                return false;
-            }
+            return false;
         }
         return true;
     }
@@ -596,7 +600,10 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         if (op == LAMBDA_NUM_OP_ADD) value = left + right;
         else if (op == LAMBDA_NUM_OP_SUB) value = left - right;
         else if (op == LAMBDA_NUM_OP_MUL) value = left * right;
-        else if (op == LAMBDA_NUM_OP_TRUE_DIV) value = left / right;
+        else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
+                op == LAMBDA_NUM_OP_MOD) {
+            value = runtime_number_division_result(left, right, op);
+        }
         else return false;
         *result = push_d(value);
         return true;

@@ -25,6 +25,8 @@ typedef struct LambdaSideStackSnapshot {
 typedef struct LambdaRecoveryCheckpoint {
     Context* context;
     LambdaSideStackSnapshot side_stack;
+    uint64_t mir_return_lane;
+    uint64_t mir_bitcast_scratch;
     bool active;
 } LambdaRecoveryCheckpoint;
 

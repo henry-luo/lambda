@@ -84,12 +84,17 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
         }
     } else if (type == LMD_TYPE_DECIMAL) {
         // Parsers use Decimal as the exact carrier for oversized integer tokens.
-        char* decimal = decimal_to_string(item);
-        if (decimal) {
-            stringbuf_append_str(sb, decimal);
-            decimal_free_string(decimal);
+        const char* special = decimal_special_literal(item.get_decimal());
+        if (special) {
+            stringbuf_append_str(sb, special);
         } else {
-            stringbuf_append_str(sb, "null");
+            char* decimal = decimal_to_string(item);
+            if (decimal) {
+                stringbuf_append_str(sb, decimal);
+                decimal_free_string(decimal);
+            } else {
+                stringbuf_append_str(sb, "null");
+            }
         }
     } else if (type == LMD_TYPE_NUM_SIZED) {
         // inline sized numerics (i8..u32 packed as int; f16/f32 as float)

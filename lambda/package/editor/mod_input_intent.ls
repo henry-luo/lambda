@@ -17,7 +17,9 @@ fn composition_base_doc(state) =>
 fn composition_state(state) =>
   {doc: state.doc, selection: composition_selection(state)}
 
-fn composition_range(sel_before, tx) =>
+// Composition updates are derived from host-editor selection data; retain an
+// invalid selection as an error rather than mapping it to a different range.
+fn composition_range(sel_before, tx) map | error =>
   text_selection(pos_min(sel_before.anchor, sel_before.head), tx.sel_after.anchor)
 
 fn mark_composition_tx(tx, comp, add_history) =>

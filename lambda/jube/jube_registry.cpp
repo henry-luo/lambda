@@ -20,6 +20,7 @@
 #include "../module/node_core/node_url.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../runtime/lambda-stack.h"
+#include "../runtime/recovery_frame.h"
 #include "../runtime/side_stack.h"
 #include "../../lib/file.h"
 #include "../../lib/digest.h"
@@ -2835,27 +2836,33 @@ static int jube_host_execution_run_main(void* execution_context, void* entry_fun
     JubeGuestMainFn entry = (JubeGuestMainFn)entry_function;
     if (!execution || !execution->activation_active || !entry || !out_result) return -1;
 
-    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture();
-#if defined(__APPLE__) || defined(__linux__)
-    if (sigsetjmp(_lambda_recovery_point, 1)) {
-#elif defined(_WIN32)
-    if (setjmp(_lambda_recovery_point)) {
-#else
-    if (0) {
-#endif
-        _lambda_recovery_armed = 0;
+    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+        (Context*)execution->active_context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!recovery_frame) {
+        log_error("jube-guest: failed to allocate recovery frame");
+        *out_result = ItemError;
+        return -1;
+    }
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+            log_error("jube-guest: recovery frame landing invariant failed");
+        }
         _lambda_stack_overflow_flag = false;
-        lambda_recovery_checkpoint_restore(&checkpoint);
+        lambda_recovery_frame_end(recovery_frame);
         // The recovery boundary, not the language module, owns converting a
         // JIT stack escape into the runtime's standard error result.
         lambda_stack_overflow_error("hosted-guest");
         *out_result = ItemError;
         return -1;
     }
-    _lambda_recovery_armed = 1;
+    if (!lambda_recovery_frame_arm(recovery_frame)) {
+        log_error("jube-guest: failed to arm recovery frame");
+        lambda_recovery_frame_end(recovery_frame);
+        *out_result = ItemError;
+        return -1;
+    }
     *out_result = entry((Context*)context);
-    _lambda_recovery_armed = 0;
-    lambda_recovery_checkpoint_disarm(&checkpoint);
+    lambda_recovery_frame_end(recovery_frame);
     return 0;
 }
 
@@ -2865,27 +2872,33 @@ static int jube_host_execution_run_main_into(void* execution_context,
     JubeGuestMainIntoFn entry = (JubeGuestMainIntoFn)entry_function;
     if (!execution || !execution->activation_active || !entry || !out_result) return -1;
 
-    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture();
-#if defined(__APPLE__) || defined(__linux__)
-    if (sigsetjmp(_lambda_recovery_point, 1)) {
-#elif defined(_WIN32)
-    if (setjmp(_lambda_recovery_point)) {
-#else
-    if (0) {
-#endif
-        _lambda_recovery_armed = 0;
+    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+        (Context*)execution->active_context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!recovery_frame) {
+        log_error("jube-guest: failed to allocate result-home recovery frame");
+        *out_result = ItemError;
+        return -1;
+    }
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+            log_error("jube-guest: result-home recovery frame landing invariant failed");
+        }
         _lambda_stack_overflow_flag = false;
-        lambda_recovery_checkpoint_restore(&checkpoint);
+        lambda_recovery_frame_end(recovery_frame);
         lambda_stack_overflow_error("hosted-guest");
         *out_result = ItemError;
         return -1;
     }
-    _lambda_recovery_armed = 1;
+    if (!lambda_recovery_frame_arm(recovery_frame)) {
+        log_error("jube-guest: failed to arm result-home recovery frame");
+        lambda_recovery_frame_end(recovery_frame);
+        *out_result = ItemError;
+        return -1;
+    }
     // The execution owns this slot until its caller has consumed the result.
     execution->result_scalar_home = 0;
     *out_result = entry((Context*)context, &execution->result_scalar_home);
-    _lambda_recovery_armed = 0;
-    lambda_recovery_checkpoint_disarm(&checkpoint);
+    lambda_recovery_frame_end(recovery_frame);
     return 0;
 }
 

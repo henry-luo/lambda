@@ -11,14 +11,10 @@ let TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M",
              "n","o","p","q","r","s","t","u","v","w","x","y","z",
              "0","1","2","3","4","5","6","7","8","9","+","/"]
 
-// NOTE: no `string` return-type annotation on the string-building procedures —
-// it currently segfaults the MIR JIT once the returned string is large enough to
-// span a GC (repro: temp/repro_string_return_segv.ls). Param/local annotations
-// and `int` return types are unaffected.
-// TABLE stays unannotated: only int/float/int64/uint64 have packed ArrayNum
-// layouts, so a string[] annotation would fail to coerce
+// TABLE stays unannotated because it is a generic Item array rather than a
+// packed numeric ArrayNum.
 // Encode using integer array of byte values
-pn b64_encode(bytes: int[], num_bytes: int) {
+pn b64_encode(bytes: int[], num_bytes: int) string {
     var result: string = ""
     var i: int = 0
     while (i + 2 < num_bytes) {
@@ -61,9 +57,8 @@ pn main() {
     var __t0 = clock()
     // Create input: 10000 bytes all = 97 ('a')
     let num_bytes: int = 10000
-    // fill(n, int) already infers a packed ArrayNum; an int[] annotation on the
-    // local would re-tag the var as ANY and lose the direct-index path
-    var bytes = fill(num_bytes, 97)
+    // This buffer crosses b64_encode's checked int[] parameter boundary.
+    var bytes: int[] = fill(num_bytes, 97)
 
     var encoded: string = ""
     var decoded_len: int = 0

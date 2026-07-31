@@ -171,7 +171,7 @@ fn node_declaration_groups(graph) {
   let grouped = [for (entry in entries group by entry.id into declarations) {
     id: declarations.id,
     // group keys are attributes on the grouped value and are not declarations.
-    values: [for (declaration in declarations
+    values: [for (declaration_index:int, declaration in declarations
       where declaration.value != null) declaration.value]
   }];
   map([for (declarations in grouped,

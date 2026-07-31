@@ -1,0 +1,6 @@
+{
+  html: [["e0", "Animal", "Duck", "empty", "none"], ["e1", "Animal", "Habitat", "odiamond", "none"], ["e2", "Duck", "Habitat", "none", "normal"]],
+  nodes: ["Animal", "Duck", "Habitat"],
+  layout: [["Animal", "Duck"], ["Animal", "Habitat"], ["Duck", "Habitat"]],
+  placements: [[0, 0, 76], [1, 120, 76], [2, 240, 76], [6, 0, 0], [7, 0, 0], [8, 0, 0], [3, 60, 122], [4, 120, 0], [5, 180, 122]]
+}

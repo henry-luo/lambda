@@ -39,11 +39,11 @@ fn first_or(items, fallback) {
 
 fn normalize_node(node, index) {
   let id = if (node.id != null and node.id != "") string(node.id) else "n" ++ string(index);
-  let wd = if (node.width != null) float(node.width)
-    else if (node.wd != null) float(node.wd)
+  let wd = if (node.width != null and not (node.width is error)) float(node.width)
+    else if (node.wd != null and not (node.wd is error)) float(node.wd)
     else 80.0;
-  let hg = if (node.height != null) float(node.height)
-    else if (node.hg != null) float(node.hg)
+  let hg = if (node.height != null and not (node.height is error)) float(node.height)
+    else if (node.hg != null and not (node.hg is error)) float(node.hg)
     else 40.0;
   let regular = edge_bool(node.regular, false);
   {
@@ -241,7 +241,8 @@ fn same_rank_in_scopes(to, constraints, scopes) =>
     contains(scopes, constraint.scope)) constraint]) > 0
 
 fn same_rank(from, to, constraints) =>
-  same_rank_in_scopes(to, constraints, same_scopes(from, constraints))
+  // Invalid external constraints establish no rank relation, never a layout-wide error.
+  same_rank_in_scopes(to, constraints, same_scopes(from, constraints)) or false
 
 fn has_rank_value(id, constraints, values) =>
   len([for (constraint in constraints where constraint.kind == "rank" and
@@ -369,11 +370,22 @@ fn score_group_key(entry, depth) =>
   if (depth < len(entry.group_keys)) entry.group_keys[depth]
   else "node:" ++ entry.node.id
 
+fn grouped_children(group) => [for (child_index:int, child in group) child]
+
+fn scored_group(members) {
+  let children = grouped_children(members);
+  {
+    score: min([for (member in children) member.score]),
+    members: children
+  }
+}
+
 fn grouped_entries_by_score(scored, depth) {
-  let grouped = [for (entry in scored group by score_group_key(entry, depth) into members) {
-    score: min([for (member in members) member.score]),
-    members: members
-  }];
+  // Grouped values expose a computed key only when it has an explicit alias.
+  // A group is an element: its key is an attribute, so preserve only its
+  // indexed children before the recursive ordering pass consumes it.
+  let grouped = [for (entry in scored group by score_group_key(entry, depth) as score_key into members)
+    scored_group(members)];
   [for (group in sort(grouped, (entry) => entry.score),
     member in if (len(group.members) > 1)
       grouped_entries_by_score(group.members, depth + 1)
@@ -613,7 +625,9 @@ fn reverse_items_at(items, i) {
   if (i < 0) { [] } else [items[i], *reverse_items_at(items, i - 1)]
 }
 
-fn reverse_items(items) => reverse_items_at(items, len(items) - 1)
+fn reverse_items(items) =>
+  // Route normalization can discard an unusable dynamic item list without aborting layout.
+  reverse_items_at(items, len(items) - 1) or []
 
 fn clip_rect(cx, cy, tx, ty, half_w, half_h) {
   let dx = tx - cx;
@@ -888,7 +902,9 @@ fn simplify_route_at(points, i, result) {
   else simplify_route_at(points, i + 1, append_route_point(result, points[i]))
 }
 
-fn simplify_route(points) => simplify_route_at(points, 0, [])
+fn simplify_route(points) =>
+  // Keep the original route when a dynamic point cannot be normalized.
+  simplify_route_at(points, 0, []) or points
 
 fn orthogonal_points(points, vertical_first) {
   if (len(points) < 2) points

@@ -1,0 +1,1 @@
+error[E208]: function 'leaks_error' may return error from call to 'may_fail'

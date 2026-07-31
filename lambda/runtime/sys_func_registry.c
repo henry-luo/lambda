@@ -21,11 +21,13 @@
 #include "concurrency.h"
 #include "runtime-state.h"
 #include "side_stack.h"
+#include "recovery_frame.h"
 #include "../js/js_test262_fast_paths.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
 extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
+extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
 
 // ============================================================================
 // Runtime-only declarations (not needed for dylib / AST metadata builds)
@@ -250,7 +252,8 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 //          is_method_eligible, first_param_type, can_raise,
 //          c_ret_type, c_arg_conv,
 //          c_func_name, func_ptr,
-//          native_c_name, native_func_ptr, native_returns_float, native_arg_count}
+//          native_c_name, native_func_ptr, native_returns_float, native_arg_count,
+//          is_async, success_type, may_return_error}
 //
 // func_ptr: FPTR(fn_name) — resolves to real pointer or dummy stub
 // native_func_ptr: NPTR(native_fn) — resolves to real pointer or dummy stub
@@ -280,13 +283,16 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_SYMBOL, C_ARG_ITEM, "fn_name", FPTR(fn_name), NULL, NULL, false, 0},
 
     {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_int", FPTR(fn_int), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_int", FPTR(fn_int), NULL, NULL, false, 0,
+     false, &TYPE_NUMBER, true},
 
     {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0},
+     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0,
+     false, &TYPE_FLOAT, true},
 
     {SYSFUNC_COMPLEX, "complex", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_complex1", FPTR(fn_complex1), NULL, NULL, false, 0},
@@ -304,10 +310,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "fn_conj", FPTR(fn_conj), NULL, NULL, false, 0},
 
     {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_decimal", FPTR(fn_decimal), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_decimal", FPTR(fn_decimal), NULL, NULL, false, 0,
+     false, &TYPE_DECIMAL, true},
 
     {SYSFUNC_BINARY, "binary", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
+     false, &TYPE_BINARY, true},
 
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_number", NULL, NULL, NULL, false, 0},  // unimplemented
@@ -1275,6 +1283,23 @@ JitImport jit_runtime_imports[] = {
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
+    {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
+    {"lambda_recovery_frame_arm", FPTR(lambda_recovery_frame_arm)},
+    {"lambda_recovery_frame_restore_landing", FPTR(lambda_recovery_frame_restore_landing)},
+    {"lambda_recovery_frame_end", FPTR(lambda_recovery_frame_end)},
+    {"lambda_recovery_frame_fault_item", FPTR(lambda_recovery_frame_fault_item)},
+#if defined(__APPLE__) || defined(__linux__)
+    // This is the platform primitive itself. The generated MIR activation
+    // owns the setjmp call; a C wrapper would make a later longjmp undefined.
+    {"sigsetjmp", FPTR(sigsetjmp),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
+#else
+    {"setjmp", FPTR(setjmp),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
+#endif
 
     // ========================================================================
     // Array constructors and operations
@@ -3180,7 +3205,13 @@ bool jit_import_validate_no_gc_allowlist(void) {
     return true;
 #else
     static const char* audited[] = {
-        "memset", "memcpy", "fmod", "is_truthy",
+        "memset", "memcpy", "fmod",
+#if defined(__APPLE__) || defined(__linux__)
+        "sigsetjmp",
+#else
+        "setjmp",
+#endif
+        "is_truthy",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store",

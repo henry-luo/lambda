@@ -31,12 +31,11 @@ pn sphere_intersect(ox: float, oy: float, oz: float, dx: float, dy: float, dz: f
 }
 
 pn benchmark() int {
-    // 4 spheres — float literal arrays already infer a packed ArrayNum, so no
-    // float[] annotation on the locals (that would re-tag the var as ANY)
-    var sx = [0.0, -2.0, 2.0, 0.0]
-    var sy = [0.0, 0.0, 0.0, 2.0]
-    var sz = [5.0, 5.0, 5.0, 5.0]
-    var sr = [1.0, 1.0, 1.0, 1.0]
+    // 4 spheres — preserve the float element contract through indexed calls.
+    var sx: float[] = [0.0, -2.0, 2.0, 0.0]
+    var sy: float[] = [0.0, 0.0, 0.0, 2.0]
+    var sz: float[] = [5.0, 5.0, 5.0, 5.0]
+    var sr: float[] = [1.0, 1.0, 1.0, 1.0]
     let num_spheres: int = 4
 
     // Camera at origin, looking along +z

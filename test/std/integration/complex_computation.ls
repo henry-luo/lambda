@@ -21,7 +21,7 @@ is_pythagorean(1, 2, 3)
 
 // GCD via recursion
 fn gcd(a: int, b: int) int {
-    if (b == 0) a else gcd(b, a % b)
+    if (b == 0) a else gcd(b, int(a % b))
 }
 gcd(48, 18)
 gcd(100, 75)

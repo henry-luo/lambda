@@ -391,11 +391,13 @@ pub fn has_segments(st) {
 //   - state is the path state with `segments` cleared
 //   - emit  is a list of <path> SVG elements (length 0 or 1)
 
-fn _clear(st) {
+// Preserve a malformed dynamic path state as an ordinary error; clearing it to
+// a fresh state would hide a decode failure and change the page's paint stream.
+fn _clear(st) map | error {
     _set(st, [], st.current_x, st.current_y, st.start_x, st.start_y)
 }
 
-pub fn clear_current_path(st) {
+pub fn clear_current_path(st) map | error {
     _set(st, [], st.current_x, st.current_y, st.start_x, st.start_y)
 }
 

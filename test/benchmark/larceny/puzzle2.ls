@@ -5,9 +5,9 @@
 
 let BOARD_SIZE = 10
 
-// cols/diag1/diag2 stay unannotated: only int/float/int64/uint64 have packed
-// ArrayNum layouts, so a bool[] annotation would fail to coerce
-pn solve(row: int, cols, diag1, diag2, n: int) int {
+// The generic boolean buffers intentionally use explicit any: solve stores and
+// reads Item values without imposing a numeric ArrayNum representation.
+pn solve(row: int, cols: any, diag1: any, diag2: any, n: int) int {
     if (row == n) {
         return 1
     }

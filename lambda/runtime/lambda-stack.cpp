@@ -13,6 +13,7 @@
 
 #include "lambda-stack.h"
 #include "lambda-error.h"
+#include "recovery_frame.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include <cstdio>
@@ -42,15 +43,7 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
 __thread uintptr_t _lambda_stack_limit = 0;
 __thread uintptr_t _lambda_stack_base = 0;
 
-// Signal-based recovery state
-#if defined(__APPLE__) || defined(__linux__)
-__thread sigjmp_buf _lambda_recovery_point;
-#elif defined(_WIN32)
-__thread jmp_buf _lambda_recovery_point;
-#endif
-
 __thread volatile bool _lambda_stack_overflow_flag = false;
-__thread volatile sig_atomic_t _lambda_recovery_armed = 0;
 
 // Track whether signal handler has been installed (process-wide, only once)
 static volatile bool _signal_handler_installed = false;
@@ -166,29 +159,35 @@ static void stack_overflow_signal_handler(int sig, siginfo_t *info, void *ctx) {
 
     // Check if this is actually a stack overflow (vs null-pointer deref, etc.)
     if (!is_stack_overflow_fault(fault_addr)) {
-        // Not a stack overflow — restore default handler and re-raise
-        log_error("signal handler: SIGSEGV at %p is not stack overflow, re-raising",
-                  (void*)fault_addr);
+        // Not a stack overflow — restore default handler and re-raise. A
+        // signal handler cannot safely log or allocate before fail-stop.
         signal(sig, SIG_DFL);
         raise(sig);
         return;  // unreachable
     }
 
-    // It's a stack overflow. Only jump if a recovery point is currently armed — jumping
-    // into a zero-initialized jmp_buf (e.g. overflow during AST build, before any code
-    // execution armed it) is undefined behavior. Unarmed → clean default crash.
-    if (!_lambda_recovery_armed) {
-        log_error("signal handler: stack overflow with no armed recovery point "
-                  "(fault_addr=%p) — aborting", (void*)fault_addr);
+    // It is a stack overflow. Select the nearest local-fault or execution
+    // boundary. The
+    // handler reads the TLS LIFO directly because logging or helper calls are
+    // not safe on the alternate signal stack.
+    LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
+    while (frame &&
+           (!frame->signal_armed ||
+            !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
+                                     LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
+        frame = frame->previous;
+    }
+    if (!frame) {
+        // An unarmed target has no valid native activation to receive a jump.
         signal(sig, SIG_DFL);
         raise(sig);
         return;  // unreachable
     }
 
     _lambda_stack_overflow_flag = true;
-    log_error("signal handler: stack overflow detected (fault_addr=%p, stack_limit=%p)",
-              (void*)fault_addr, (void*)_lambda_stack_limit);
-    siglongjmp(_lambda_recovery_point, 1);
+    frame->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
+    frame->signal_armed = 0;
+    siglongjmp(frame->jump_buffer, 1);
 }
 
 static void install_signal_handler(void) {
@@ -252,11 +251,20 @@ static void install_signal_handler(void) {
 
 static LONG WINAPI stack_overflow_seh_handler(EXCEPTION_POINTERS *ep) {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
+        LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
+        while (frame &&
+               (!frame->signal_armed ||
+                !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
+                                         LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
+            frame = frame->previous;
+        }
+        if (!frame) return EXCEPTION_CONTINUE_SEARCH;
         _lambda_stack_overflow_flag = true;
-        log_error("stack init: SEH stack overflow detected");
+        frame->signal_fault_reason = LAMBDA_FAULT_STACK_OVERFLOW;
+        frame->signal_armed = 0;
         // Reset the stack overflow state so the thread can continue
         _resetstkoflw();
-        longjmp(_lambda_recovery_point, 1);
+        longjmp(frame->jump_buffer, 1);
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -346,16 +354,20 @@ extern "C" void lambda_stack_overflow_error(const char* func_name) {
 }
 
 extern "C" void lambda_root_frame_overflow_error(void) {
-    lambda_stack_overflow_error("native-root-frame");
     _lambda_stack_overflow_flag = true;
     // Continuing after a failed reservation would turn every Rooted home in
     // the frame into a null slot and make precise collection unsound.
-    if (_lambda_recovery_armed) {
-#if defined(__APPLE__) || defined(__linux__)
-        siglongjmp(_lambda_recovery_point, 1);
-#elif defined(_WIN32)
-        longjmp(_lambda_recovery_point, 1);
-#endif
+    LambdaRecoveryFrame* frame = lambda_recovery_frame_tls_top;
+    while (frame &&
+           (!frame->signal_armed ||
+            !(frame->capabilities & (LAMBDA_RECOVERY_CAP_LOCAL_FAULT |
+                                     LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY)))) {
+        frame = frame->previous;
+    }
+    if (frame) {
+        frame->signal_fault_reason = LAMBDA_FAULT_SIDE_STACK_EXHAUSTION;
+        frame->signal_armed = 0;
+        LAMBDA_RECOVERY_FRAME_LONGJMP(frame);
     }
     log_error("native-root-frame: reservation failed without an armed recovery point");
     abort();
