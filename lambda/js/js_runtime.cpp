@@ -6206,11 +6206,17 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
     }
 }
 
-static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, int name_len) {
+static bool js_proto_chain_has_nonwritable_data_impl(Item object, PropertyKeyRef identity_key,
+                                                     const char* name, int name_len) {
+    if (!name || name_len < 0) return false;
     Item proto = js_get_prototype_of(object);
     int depth = 0;
     while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
-        ShapeEntry* se = js_find_shape_entry(proto, name, name_len);
+        // Symbol/private spelling is not its property identity; use the exact
+        // record so inherited non-writable slots cannot be shadowed by writes.
+        ShapeEntry* se = identity_key
+            ? js_find_shape_entry_key(proto, identity_key)
+            : js_find_shape_entry(proto, name, name_len);
         if (se) {
             if (jspd_is_accessor(se)) return false;
             return !js_props_query_writable(proto.map, se, name, name_len);
@@ -6219,6 +6225,16 @@ static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, i
         depth++;
     }
     return false;
+}
+
+static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, int name_len) {
+    return js_proto_chain_has_nonwritable_data_impl(object, NULL, name, name_len);
+}
+
+static bool js_proto_chain_has_nonwritable_data(Item object, PropertyKeyRef key) {
+    return key && js_proto_chain_has_nonwritable_data_impl(
+        object, property_key_requires_identity(key) ? key : NULL,
+        key->chars, (int)key->len);
 }
 
 static bool js_is_class_constructor_map(Item object) {
@@ -6918,7 +6934,7 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                 ((str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) ||
                  (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
             if (!has_own_before_set && !class_intrinsic_define &&
-                js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                js_proto_chain_has_nonwritable_data(object, str_key)) {
                 if (property_key_requires_identity(str_key) &&
                     property_key_kind(str_key) == NAME_KEY_PRIVATE) {
                     char msg[256];
