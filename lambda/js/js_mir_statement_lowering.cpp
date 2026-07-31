@@ -2427,6 +2427,23 @@ static JsClassEntry* jm_find_class_entry_by_node(JsMirTranspiler* mt, JsClassNod
     return NULL;
 }
 
+static JsClassEntry* jm_find_class_for_binding_declarator(JsMirTranspiler* mt,
+        JsVariableDeclaratorNode* declarator) {
+    if (!mt || !declarator || !declarator->init) return NULL;
+    JsAstNode* init = declarator->init;
+    if (init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_class_entry_by_node(mt, (JsClassNode*)init);
+    }
+    if (init->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* init_id = (JsIdentifierNode*)init;
+        if (init_id->name) {
+            return jm_find_class(mt, init_id->name->chars, (int)init_id->name->len);
+        }
+    }
+    return NULL;
+}
+
 static bool jm_node_contains_node(JsAstNode* node, JsAstNode* target) {
     if (!node || !target || ts_node_is_null(node->node) || ts_node_is_null(target->node)) return false;
     uint32_t ns = ts_node_start_byte(node->node);
@@ -2533,9 +2550,24 @@ static JsClassEntry* jm_find_class_for_identifier_binding(JsMirTranspiler* mt, J
         class_node = (JsClassNode*)binding_node;
     } else if (binding_node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
         JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)binding_node;
-        if (vd->init && (vd->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                         vd->init->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
-            class_node = (JsClassNode*)vd->init;
+        JsClassEntry* resolved = jm_find_class_for_binding_declarator(mt, vd);
+        if (resolved) return resolved;
+    } else if (binding_node->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)binding_node;
+        for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+            if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)item;
+            if (!declarator->id || declarator->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+            JsIdentifierNode* binding_id = (JsIdentifierNode*)declarator->id;
+            if (!id->name || !binding_id->name || id->name->len != binding_id->name->len ||
+                    strncmp(id->name->chars, binding_id->name->chars, id->name->len) != 0) {
+                continue;
+            }
+            // The scope builder stores a `var` binding on its declaration rather
+            // than its declarator. Resolve its initializer here so `var Alias =
+            // Class` retains the source class prototype during `new Alias()`.
+            JsClassEntry* resolved = jm_find_class_for_binding_declarator(mt, declarator);
+            if (resolved) return resolved;
         }
     }
     if (!class_node && binding_node->node_type == JS_AST_NODE_IDENTIFIER &&

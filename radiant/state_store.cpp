@@ -48,6 +48,8 @@ static void view_state_release_payload(ViewState* view_state);
 static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewStateKind kind);
 static FormControlProp* form_prop_for_view(View* view);
 static bool view_element_has_attr(View* view, const char* attr_name);
+static bool form_element_supports_disabled_state(DomElement* element);
+static bool form_control_is_disabled_by_fieldset(DomElement* element);
 static int form_default_selected_index_from_tree(View* view);
 static float form_default_range_value(View* view, FormControlProp* form);
 static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
@@ -2232,9 +2234,11 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
         case PSEUDO_STATE_CHECKED:
             return form_control_get_checked(state, view);
         case PSEUDO_STATE_DISABLED:
-            return form_control_is_disabled(state, view);
+            return form_control_supports_disabled_state(view) &&
+                form_control_is_disabled(state, view);
         case PSEUDO_STATE_ENABLED:
-            return !form_control_is_disabled(state, view);
+            return form_control_supports_disabled_state(view) &&
+                !form_control_is_disabled(state, view);
         case PSEUDO_STATE_REQUIRED:
             return form_control_is_required(state, view);
         case PSEUDO_STATE_OPTIONAL:
@@ -2286,12 +2290,18 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
 
 bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uint32_t pseudo_state) {
     if (!element) return false;
-    if (!element->doc || !element->doc->view_tree) {
-        return dom_element_default_pseudo_state(element, pseudo_state);
-    }
     DocState* state = (DocState*)context;
     if (!state && element->doc) {
         state = (DocState*)element->doc->state;
+    }
+    if (pseudo_state == PSEUDO_STATE_DISABLED || pseudo_state == PSEUDO_STATE_ENABLED) {
+        // Dynamic elements can be queried before the next layout attaches a
+        // view tree, but HTML disabledness still follows the same fieldset
+        // rule as rendered controls.
+        return state_get_pseudo_state(state, static_cast<View*>(element), pseudo_state);
+    }
+    if (!element->doc || !element->doc->view_tree) {
+        return dom_element_default_pseudo_state(element, pseudo_state);
     }
     if (pseudo_state == PSEUDO_STATE_LINK) {
         return dom_element_default_pseudo_state(element, pseudo_state);
@@ -3142,6 +3152,64 @@ static bool view_element_has_attr(View* view, const char* attr_name) {
     if (!view || !view->is_element() || !attr_name) return false;
     ViewElement* elem = lam::view_require_element(view);
     return elem->get_attribute(attr_name) != NULL;
+}
+
+static bool form_element_supports_disabled_state(DomElement* element) {
+    if (!element || !element->tag_name) return false;
+    const char* tag = element->tag_name;
+    return strcasecmp(tag, "button") == 0 ||
+        strcasecmp(tag, "fieldset") == 0 ||
+        strcasecmp(tag, "input") == 0 ||
+        strcasecmp(tag, "optgroup") == 0 ||
+        strcasecmp(tag, "option") == 0 ||
+        strcasecmp(tag, "select") == 0 ||
+        strcasecmp(tag, "textarea") == 0;
+}
+
+bool form_control_supports_disabled_state(View* view) {
+    if (!view || !view->is_element()) return false;
+    return form_element_supports_disabled_state(lam::dom_require_element(view));
+}
+
+static bool form_control_is_disabled_by_fieldset(DomElement* element) {
+    if (!element || !element->tag_name) return false;
+    const char* tag = element->tag_name;
+    if (strcasecmp(tag, "button") != 0 &&
+        strcasecmp(tag, "fieldset") != 0 &&
+        strcasecmp(tag, "input") != 0 &&
+        strcasecmp(tag, "select") != 0 &&
+        strcasecmp(tag, "textarea") != 0) {
+        return false;
+    }
+
+    DomNode* child_on_path = (DomNode*)element;
+    for (DomNode* parent = element->parent; parent;
+         child_on_path = parent, parent = parent->parent) {
+        if (!parent->is_element()) continue;
+        DomElement* fieldset = parent->as_element();
+        if (!fieldset || !fieldset->tag_name ||
+            strcasecmp(fieldset->tag_name, "fieldset") != 0 ||
+            !fieldset->has_attribute("disabled")) {
+            continue;
+        }
+
+        DomNode* first_element = fieldset->first_child;
+        while (first_element && !first_element->is_element()) {
+            first_element = first_element->next_sibling;
+        }
+        if (first_element && first_element->is_element()) {
+            DomElement* first_legend = first_element->as_element();
+            if (first_legend && first_legend->tag_name &&
+                strcasecmp(first_legend->tag_name, "legend") == 0 &&
+                child_on_path == first_element) {
+                continue;
+            }
+        }
+        // A disabled fieldset disables descendant controls except those in its
+        // first legend; selector matching and focusability must share this rule.
+        return true;
+    }
+    return false;
 }
 
 static int form_default_selected_index_from_tree(View* view) {
@@ -4347,11 +4415,16 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
 // ============================================================================
 
 bool form_control_is_disabled(DocState* state, View* view) {
-    ViewState* view_state = form_view_state_get(state, view);
-    if (view_state) return view_state->data.form.disabled != 0;
+    if (!view || !view->is_element()) return false;
+    DomElement* element = lam::dom_require_element(view);
+    if (!form_element_supports_disabled_state(element)) return false;
 
-    if (!view) return false;
-    return view_element_has_attr(view, "disabled");
+    ViewState* view_state = form_view_state_get(state, view);
+    bool directly_disabled = view_state
+        ? view_state->data.form.disabled != 0
+        : view_element_has_attr(view, "disabled");
+    if (directly_disabled) return true;
+    return form_control_is_disabled_by_fieldset(element);
 }
 
 typedef enum FormConstraintKind {

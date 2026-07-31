@@ -2010,6 +2010,16 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             // demand a nonexistent binding from the enclosing expression scope.
             continue;
         }
+        // Runtime globals belong to the realm environment, not to an esbuild
+        // wrapper closure. Capturing `document` here stored an uninitialised
+        // closure slot, so ordinary SVG feature detection later observed
+        // `undefined` instead of the active document. A real ancestor local
+        // still shadows the realm binding and must remain a capture.
+        if (strncmp(ref->name, "_js_", 4) == 0 &&
+            js_builtin_global_find(ref->name + 4, (int)strlen(ref->name + 4)) &&
+            !(ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name))) {
+            continue;
+        }
         if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
         // Skip module-level bindings; identifier lowering resolves them via
         // module_consts (and MCONST_MODVAR uses live js_get_module_var reads).

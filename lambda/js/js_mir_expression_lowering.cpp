@@ -10075,7 +10075,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t evaluated_callee = jm_transpile_box_item(mt, call->callee);
+    // ECMAScript evaluates the callee before its arguments.  Keep that value
+    // in its own rooted register because an argument such as `fn(fn = 0)` may
+    // overwrite the identifier register used to resolve the callee.
+    MIR_reg_t callee = jm_new_reg(mt, "callee", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, evaluated_callee)));
+    jm_create_gc_root_slot(mt, callee);
 
     // Generator spill: if any argument contains a yield, the callee register will be lost
     // after the yield suspend/resume cycle. Save it to an env slot and restore after args.

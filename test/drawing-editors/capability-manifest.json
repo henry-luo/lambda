@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "contract": "Radiant editable drawing SVG DOM compatibility",
+  "packages": {
+    "raphael": "2.3.0",
+    "@maxgraph/core": "0.16.0",
+    "jointjs": "3.7.7"
+  },
+  "exclusions": ["canvas", "react", "foreignObject", "drawing-library polyfills"],
+  "capabilities": [
+    {"capability":"harness.lifecycle","library":"shared","status":"implemented","fixture":"test/html/editable-raphael.html","notes":"All probes create, destroy, and recreate one library-owned SVG host."},
+    {"capability":"svg.identity","library":"shared","status":"pending","notes":"Requires real SVG interfaces and typed wrapper identity."},
+    {"capability":"svg.namespaced-attributes","library":"raphael","status":"pending","notes":"Required for XLink image and pattern compatibility."},
+    {"capability":"svg.bounds-and-transforms","library":"raphael","status":"pending","notes":"Requires getBBox, getScreenCTM, and affine matrix values."},
+    {"capability":"graph.gestures","library":"maxgraph","status":"pending","notes":"Requires SVG hit testing and document gesture routing."},
+    {"capability":"svg.ctm-and-text-metrics","library":"jointjs","status":"pending","notes":"Requires native affine conversion and font-backed SVG text geometry."}
+  ]
+}

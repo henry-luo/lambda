@@ -9595,6 +9595,45 @@ static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_co
 #endif
 }
 
+// Compiled JS wrappers use a fixed MIR signature, so the dynamic dispatcher
+// must materialize each supported arity as an exact C++ function-pointer type.
+// Library constructors routinely exceed the native-specialization limit of 16
+// formals; keep this broader boxed-call ABI separate from that optimization.
+enum { JS_MIR_CONTEXT_CALL_MAX_ARITY = 32 };
+
+template <size_t... Indices>
+struct JsMirCallArgSequence {};
+
+template <size_t Count, size_t... Indices>
+struct JsMirMakeCallArgSequence
+    : JsMirMakeCallArgSequence<Count - 1, Count - 1, Indices...> {};
+
+template <size_t... Indices>
+struct JsMirMakeCallArgSequence<0, Indices...> {
+    typedef JsMirCallArgSequence<Indices...> Type;
+};
+
+template <bool HasEnv, size_t... Indices>
+static Item js_invoke_mir_context_wrapper_impl(void* func_ptr, Context* runtime,
+        const Item* args, Item env, uint64_t* scalar_result_home,
+        JsMirCallArgSequence<Indices...>) {
+    if constexpr (HasEnv) {
+        typedef Item (*Fn)(Context*, Item,
+            decltype((void)Indices, Item{})..., uint64_t*);
+        return ((Fn)func_ptr)(runtime, env, args[Indices]..., scalar_result_home);
+    }
+    typedef Item (*Fn)(Context*, decltype((void)Indices, Item{})..., uint64_t*);
+    return ((Fn)func_ptr)(runtime, args[Indices]..., scalar_result_home);
+}
+
+template <size_t Count, bool HasEnv>
+static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
+        const Item* args, Item env, uint64_t* scalar_result_home) {
+    return js_invoke_mir_context_wrapper_impl<HasEnv>(func_ptr, runtime,
+        args, env, scalar_result_home,
+        typename JsMirMakeCallArgSequence<Count>::Type());
+}
+
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
@@ -9756,7 +9795,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     typedef Item (*P16H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
 
     // Pad missing arguments with undefined to match declared param count
-    Item padded_args[16];
+    Item padded_args[JS_MIR_CONTEXT_CALL_MAX_ARITY];
     Item undef = make_js_undefined();
     int effective_count = arg_count;
     Item* effective_args = args;
@@ -9765,12 +9804,20 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     // Collect excess args into a JS array for the rest parameter
     bool has_rest = (fn->param_count < 0);
     int real_param_count = has_rest ? -fn->param_count : fn->param_count;
+    if (real_param_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
+        // The rest array occupies one declared operand, so reject unsupported
+        // arities before its slot can overrun the fixed dispatch buffer.
+        log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI",
+            real_param_count);
+        return ItemError;
+    }
 
     if (has_rest) {
         int regular_count = real_param_count - 1;  // params before rest
         effective_count = real_param_count;
         // Copy regular args, then build rest array from remaining
-        for (int i = 0; i < regular_count && i < 16; i++) {
+        for (int i = 0; i < regular_count &&
+                i < JS_MIR_CONTEXT_CALL_MAX_ARITY; i++) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
         // Build rest array from args[regular_count..arg_count-1]
@@ -9783,7 +9830,10 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         effective_args = padded_args;
     } else if (arg_count < fn->param_count) {
         effective_count = fn->param_count;
-        if (effective_count > 16) effective_count = 16;
+        if (effective_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
+            log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI", effective_count);
+            return ItemError;
+        }
         for (int i = 0; i < effective_count; i++) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
@@ -9847,6 +9897,9 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         typedef Item (*C15H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
         typedef Item (*C16H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
         Context* runtime = fn->runtime_context;
+#define JS_MIR_CONTEXT_CALL_CASE(count, has_env, env_value) \
+        case count: return js_invoke_mir_context_wrapper<count, has_env>( \
+            fn->func_ptr, runtime, effective_args, env_value, scalar_result_home)
         if (fn->env) {
             Item env = {.item = (uint64_t)fn->env};
             switch (effective_count) {
@@ -9866,6 +9919,23 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             case 13: return ((C14H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
             case 14: return ((C15H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
             case 15: return ((C16H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+            JS_MIR_CONTEXT_CALL_CASE(16, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(17, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(18, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(19, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(20, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(21, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(22, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(23, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(24, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(25, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(26, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(27, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(28, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(29, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(30, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(31, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(32, true, env);
             default: return ItemError;
             }
         }
@@ -9886,8 +9956,26 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         case 13: return ((C13H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
         case 14: return ((C14H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
         case 15: return ((C15H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+        JS_MIR_CONTEXT_CALL_CASE(16, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(17, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(18, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(19, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(20, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(21, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(22, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(23, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(24, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(25, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(26, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(27, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(28, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(29, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(30, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(31, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(32, false, ItemNull);
         default: return ItemError;
         }
+#undef JS_MIR_CONTEXT_CALL_CASE
     }
 
     if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
@@ -10010,7 +10098,7 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d)",
+        log_error("js-debug-callee: non-function callee at site_id=%lld (type=%d)",
             (long long)site_id, get_type_id(callee));
     }
     // diagnostics must be observational; returning null changed the checked

@@ -1312,6 +1312,27 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
         setup_font(evcon->ui_context, &evcon->font, default_font);
         target_block_view(evcon, lam::view_require_block(root_view));
+        DomNode* root_node = static_cast<DomNode*>(root_view);
+        DomDocument* doc = root_node && root_node->is_element()
+            ? root_node->as_element()->doc : nullptr;
+        MousePositionEvent* mouse = &evcon->event.mouse_position;
+        DomElement* svg_hit = doc ? (DomElement*)js_dom_document_svg_element_from_point(
+            doc, (float)mouse->x, (float)mouse->y) : nullptr;
+        if (svg_hit && evcon->target) {
+            bool target_contains_svg = false;
+            for (DomNode* node = (DomNode*)svg_hit; node; node = node->parent) {
+                if (node == static_cast<DomNode*>(evcon->target)) {
+                    target_contains_svg = true;
+                    break;
+                }
+            }
+            if (target_contains_svg) {
+                // SVG paint geometry has no per-shape CSS boxes. Preserve the
+                // normal page-layer winner, then refine only inside that winner
+                // with the SVG CTM/bounds hit result used by elementFromPoint().
+                evcon->target = static_cast<View*>(svg_hit);
+            }
+        }
         evcon->font = pa_font;
     }
     else {
@@ -5463,6 +5484,11 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
         dom_element_clear_pseudo_styles(e);
         e->set_styles_resolved(false);
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
+            if ((uintptr_t)c < 4096) {
+                log_error("drawing recascade invalid child link: parent=%p tag=%s child=%p",
+                          (void*)e, e->tag_name ? e->tag_name : "?", (void*)c);
+                return;
+            }
             clear_cascaded_styles_recursive(c);
         }
     }
@@ -7630,7 +7656,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward mouse button events to layer-mode webview
-        if (evcon.target && evcon.target->is_element()) {
+        if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {
+            // SVG paint hits target leaf geometry without a CSS block box;
+            // only block views can own an embedded layer webview.
             ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embedp()->webview &&
                 tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
@@ -8654,7 +8682,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward scroll to layer-mode webview
-        if (evcon.target && evcon.target->is_element()) {
+        if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {
+            // SVG paint hits target leaf geometry without a CSS block box;
+            // only block views can own an embedded layer webview.
             ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embedp()->webview &&
                 tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&

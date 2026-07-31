@@ -276,6 +276,12 @@ struct DomDocument {
     void destroy();
 };
 
+uint32_t dom_document_alloc_node_id(DomDocument* doc);
+
+// A DOM node can be owned either by the document's dedicated node arena or by
+// the retained Input arena when UI-mode values embed their DOM storage.
+bool dom_document_owns_node_storage(DomDocument* doc, const void* storage);
+
 typedef void (*DomDocumentResourceDestroyFn)(void* data);
 
 // tier-1: doc-pool, survives relayout

@@ -513,7 +513,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
@@ -581,6 +581,8 @@ help:
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
 	@echo "  test-editable        - Run all focused editable and upstream editor checks"
+	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
+	@echo "  test-drawing         - Run all editable-drawing compatibility probes"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
 	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
@@ -2273,6 +2275,17 @@ editable-editor-e2e: build
 	@./lambda.exe view test/html/editable-editorjs.html --event-file test/ui/editable-editors-editorjs-page.json --headless --no-log
 
 test-editable: editable-unit editable-ui editable-editor-e2e
+
+# Pinned drawing packages are built locally by test/drawing-editors; this target
+# never installs packages and exercises ordinary DOM/SVG/event lifetime paths.
+drawing-editor-e2e: build
+	@cd test/drawing-editors && node tools/build.mjs
+	@./lambda.exe view test/html/svg-dom-contract.html --event-file test/ui/svg-dom-contract.json --headless --no-log
+	@./lambda.exe view test/html/editable-raphael.html --event-file test/ui/editable-drawing-raphael.json --headless --no-log
+	@./lambda.exe view test/html/editable-maxgraph.html --event-file test/ui/editable-drawing-maxgraph.json --headless --no-log
+	@./lambda.exe view test/html/editable-jointjs.html --event-file test/ui/editable-drawing-jointjs.json --headless --no-log
+
+test-drawing: drawing-editor-e2e
 
 # Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
 # The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group

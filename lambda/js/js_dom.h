@@ -57,6 +57,14 @@ bool js_dom_is_host_driven_loop(void);
  */
 bool js_dom_has_committed_geometry_snapshot(void* dom_doc);
 
+/**
+ * Return the topmost painted SVG element at viewport coordinates, or NULL.
+ * Native pointer dispatch uses this alongside regular CSS-box hit testing so
+ * SVG descendants retain their geometric event target even though they do not
+ * each own a CSS layout box.
+ */
+void* js_dom_document_svg_element_from_point(void* dom_doc, float x, float y);
+
 // Commits a pending transient-document reflow at the script/event-loop
 // checkpoint. Long-lived Radiant sessions keep ownership of their frame loop.
 bool js_dom_commit_headless_layout(void);

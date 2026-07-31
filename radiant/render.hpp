@@ -181,6 +181,23 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
 // be inspected by the active backend or when the callback aborts traversal.
 bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 
+// Shared SVG geometry parsing for rendering and DOM geometry queries. The
+// returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
+RdtPath* svg_parse_path_d(const char* d);
+bool svg_parse_transform(const char* transform_str, float matrix[6]);
+
+typedef struct SvgTextMetrics {
+    float width;
+    float ascent;
+    float descent;
+    bool used_font_metrics;
+} SvgTextMetrics;
+
+bool svg_measure_text_metrics(const char* text, float font_size_px,
+                              FontContext* font_ctx, const char* font_family,
+                              int weight, FontSlant slant,
+                              SvgTextMetrics* out_metrics);
+
 // ---------------------------------------------------------------------------
 // Fill
 // ---------------------------------------------------------------------------

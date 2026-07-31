@@ -311,19 +311,6 @@ static bool radiant_dom_is_attr_name_projection(const char* name) {
     return strncmp(name, "data-", 5) == 0 || strncmp(name, "aria-", 5) == 0;
 }
 
-static Item radiant_dom_class_name_item(DomElement* elem) {
-    if (!elem || elem->class_count == 0) return radiant_dom_string_item("");
-    StrBuf* sb = strbuf_new_cap(64);
-    if (!sb) return radiant_dom_string_item("");
-    for (int i = 0; i < elem->class_count; i++) {
-        if (i > 0) strbuf_append_char(sb, ' ');
-        strbuf_append_str(sb, elem->class_names[i]);
-    }
-    Item result = radiant_dom_string_item(sb->str ? sb->str : "");
-    strbuf_free(sb);
-    return result;
-}
-
 static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
     return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
 }
@@ -1401,13 +1388,24 @@ RADIANT_MEMBER_GET(radiant_dom_member_local_name,
 RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* ns = elem->get_attribute("__lambda_ns_uri");
-    *out = radiant_dom_string_item((ns && ns[0] != '\0') ? ns : "http://www.w3.org/1999/xhtml");
+    // Record access predates parser-created SVG nodes. Keep it on the
+    // canonical resolver so namespace inheritance matches generic DOM reads.
+    *out = js_dom_get_property_impl(receiver,
+        (Item){.item = s2it(heap_create_name("namespaceURI"))});
     return 1;
 }
 RADIANT_MEMBER_GET(radiant_dom_member_prefix, ItemNull)
 RADIANT_MEMBER_GET(radiant_dom_member_id, radiant_dom_string_item(elem->id))
-RADIANT_MEMBER_GET(radiant_dom_member_class_name, radiant_dom_class_name_item(elem))
+RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    // SVG className is SVGAnimatedString, unlike HTML's string reflection.
+    // Using one resolver prevents the record fast path from changing the
+    // WebIDL type according to how an element was created.
+    *out = js_dom_get_property_impl(receiver,
+        (Item){.item = s2it(heap_create_name("className"))});
+    return 1;
+}
 RADIANT_MEMBER_GET(radiant_dom_member_node_type,
     radiant_dom_int_item((int64_t)elem->node_type))
 RADIANT_C_API int radiant_dom_member_parent_node(Item receiver, Item* out) {

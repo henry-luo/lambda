@@ -1,0 +1,14 @@
+{
+  "name": "radiant-editable-drawing-compatibility",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs"
+  },
+  "dependencies": {
+    "@maxgraph/core": "0.16.0",
+    "esbuild": "0.25.9",
+    "jointjs": "3.7.7",
+    "raphael": "2.3.0"
+  }
+}

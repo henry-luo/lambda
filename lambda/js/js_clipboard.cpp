@@ -1929,6 +1929,10 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(navigator, make_str("platform"), make_str("MacIntel"));
         js_property_set(navigator, make_str("userAgent"),
             make_str("Lambda/Headless (Macintosh)"));
+        // Browser capability probes call appName before inspecting SVG support;
+        // leaving this legacy Navigator string absent makes ordinary method
+        // access throw before the probe can select its rendering path.
+        js_property_set(navigator, make_str("appName"), make_str("Netscape"));
         // Legacy UA-sniffing libraries still call string methods on
         // Navigator.appVersion; keep it present and consistent with this host.
         js_property_set(navigator, make_str("appVersion"),

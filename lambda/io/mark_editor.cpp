@@ -3,6 +3,7 @@
 #include "../input/css/dom_element.hpp"
 #include "../../lib/log.h"
 #include "../../lib/arena.h"
+#include "../../lib/hashmap.h"
 #include <string.h>
 #include <stdlib.h>
 #include <new>
@@ -14,6 +15,8 @@
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
 extern TypeInfo type_info[];
+DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
+void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 
 static bool mark_editor_should_preserve_ui_dom_child(Item child) {
     TypeId type_id = get_type_id(child);
@@ -30,6 +33,108 @@ static bool mark_editor_should_preserve_ui_dom_child(Item child) {
             text->native_string == s;
     }
     return false;
+}
+
+static DomElement* mark_editor_lookup_ui_element_child(DomElement* parent,
+                                                        Element* child_element) {
+    if (!parent || !parent->doc || !child_element) return nullptr;
+    DomElement* embedded = element_to_dom_element(child_element);
+    if (dom_document_owns_node_storage(parent->doc, embedded) &&
+        embedded->node_type == DOM_NODE_ELEMENT && embedded->doc == parent->doc &&
+        dom_element_to_element(embedded) == child_element) {
+        return embedded;
+    }
+    if (parent->doc->element_dom_map) {
+        return element_dom_map_lookup(parent->doc->element_dom_map, child_element);
+    }
+    return nullptr;
+}
+
+static DomNode* mark_editor_take_relinked_ui_child(DomNode* old_first,
+                                                    DomElement* parent,
+                                                    Item child) {
+    if (!parent) return nullptr;
+    TypeId type_id = get_type_id(child);
+    for (DomNode* candidate = old_first; candidate; candidate = candidate->next_sibling) {
+        if (candidate->parent != parent) continue;
+        if (type_id == LMD_TYPE_ELEMENT && child.element && candidate->is_element() &&
+            candidate == static_cast<DomNode*>(
+                mark_editor_lookup_ui_element_child(parent, child.element))) {
+            candidate->parent = nullptr;
+            return candidate;
+        }
+        if (type_id == LMD_TYPE_STRING && candidate->is_text()) {
+            DomText* text = candidate->as_text();
+            if (text && text->native_string == child.get_safe_string()) {
+                candidate->parent = nullptr;
+                return candidate;
+            }
+        }
+    }
+    return nullptr;
+}
+
+static DomNode* mark_editor_create_relinked_ui_child(DomElement* parent, Item child) {
+    if (!parent || !parent->doc) return nullptr;
+    TypeId type_id = get_type_id(child);
+    if (type_id == LMD_TYPE_ELEMENT && child.element) {
+        DomElement* element = mark_editor_lookup_ui_element_child(parent, child.element);
+        TypeElmt* type = (TypeElmt*)child.element->type;
+        const char* tag_name = type ? type->name.str : nullptr;
+        if (!element) {
+            DomElement* storage = element_to_dom_element(child.element);
+            if (dom_document_owns_node_storage(parent->doc, storage) &&
+                storage->node_type == DOM_NODE_ELEMENT && !storage->doc &&
+                !storage->tag_name && dom_element_to_element(storage) == child.element &&
+                tag_name) {
+                // UI-mode MarkBuilder reserves a DomElement prefix for every
+                // new Element. A parser-created fragment has not joined a
+                // document yet, so initialize that reserved storage here
+                // instead of deriving a wrapper from an unrelated Element.
+                element = DomElement::create_in(storage, parent->doc, tag_name,
+                                                child.element);
+            }
+        }
+        if (!element && tag_name) {
+            // Fragment parsers create plain Elements even for UI documents.
+            // Give those values a registered wrapper instead of treating the
+            // bytes before the Element as an embedded DomElement.
+            element = DomElement::create(parent->doc, tag_name, child.element);
+            if (element && parent->doc->element_dom_map) {
+                element_dom_map_insert(parent->doc->element_dom_map, child.element, element);
+            }
+        }
+        if (!element) {
+            log_error("mark_editor_dom_relink: child Element has no DOM wrapper");
+            return nullptr;
+        }
+        return static_cast<DomNode*>(element);
+    }
+    if (type_id != LMD_TYPE_STRING) return nullptr;
+
+    String* string_value = child.get_safe_string();
+    if (!string_value) return nullptr;
+    DomText* candidate = string_to_dom_text(string_value);
+    // Only a fat DomText-String allocation may be recovered from the String
+    // address; parser-owned and ordinary strings require a backed wrapper.
+    if (dom_document_owns_node_storage(parent->doc, candidate) &&
+        candidate->node_type == DOM_NODE_TEXT &&
+        candidate->native_string == string_value) {
+        // MarkBuilder creates this fat wrapper before it joins a DOM sibling
+        // chain. Register its generation here so a later textContent replace
+        // can pin the new text node through the lifecycle registry.
+        if (!candidate->id) {
+            candidate->id = dom_document_alloc_node_id(parent->doc);
+        }
+        size_t primary_size = sizeof(DomText) + sizeof(String) +
+                              string_value->len + 1;
+        if (!dom_node_registry_register(parent->doc, candidate,
+                                        primary_size, true)) {
+            return nullptr;
+        }
+        return static_cast<DomNode*>(candidate);
+    }
+    return static_cast<DomNode*>(DomText::create(string_value, parent));
 }
 
 //==============================================================================
@@ -103,52 +208,47 @@ void mark_editor_destroy(MarkEditor* editor) {
  */
 void MarkEditor::dom_relink_children(Element* parent_elem) {
     DomElement* parent = element_to_dom_element(parent_elem);
-    parent->first_child = nullptr;
-    parent->last_child = nullptr;
+    if (!parent) return;
+    DomNode* old_first = parent->first_child;
+    ArrayList* relinked_nodes = arraylist_new((int)parent_elem->length);
+    if (!relinked_nodes) {
+        log_error("mark_editor_dom_relink: failed to allocate child list");
+        return;
+    }
 
-    DomNode* prev = nullptr;
-
+    // Select every node before rewriting links: an inline Mark mutation must
+    // retain the existing DOM wrappers for unchanged backing children.  This
+    // lets the DOM removal bridge unlink the one deleted wrapper afterwards.
     for (int64_t i = 0; i < parent_elem->length; i++) {
         Item child = parent_elem->items[i];
-        TypeId tid = get_type_id(child);
-        DomNode* node = nullptr;
-
-        if (tid == LMD_TYPE_ELEMENT) {
-            DomElement* ce = element_to_dom_element(child.element);
-            node = static_cast<DomNode*>(ce);
-        } else if (tid == LMD_TYPE_STRING) {
-            String* s = child.get_safe_string();
-            if (s) {
-                DomText* dt = nullptr;
-                DomText* candidate = string_to_dom_text(s);
-                // safety: verify this is a fat DomText-String allocation
-                if (arena_owns(parent->doc->node_arena, candidate) &&
-                    candidate->node_type == DOM_NODE_TEXT &&
-                    candidate->native_string == s) {
-                    dt = candidate;
-                } else {
-                    dt = DomText::create(s, parent);
-                }
-                if (dt) {
-                    node = static_cast<DomNode*>(dt);
-                }
-            }
+        DomNode* node = mark_editor_take_relinked_ui_child(old_first, parent, child);
+        if (!node) {
+            node = mark_editor_create_relinked_ui_child(parent, child);
         }
-        // Symbols and other types: skip (no DOM node)
-
-        if (node) {
-            node->parent = parent;
-            node->prev_sibling = prev;
-            node->next_sibling = nullptr;
-            if (prev) {
-                prev->next_sibling = node;
-            } else {
-                parent->first_child = node;
-            }
-            parent->last_child = node;
-            prev = node;
+        if (node && !arraylist_append(relinked_nodes, node)) {
+            log_error("mark_editor_dom_relink: failed to record child node");
+            arraylist_free(relinked_nodes);
+            return;
         }
     }
+
+    parent->first_child = nullptr;
+    parent->last_child = nullptr;
+    DomNode* prev = nullptr;
+    for (int i = 0; i < arraylist_length(relinked_nodes); i++) {
+        DomNode* node = (DomNode*)arraylist_get(relinked_nodes, i);
+        node->parent = parent;
+        node->prev_sibling = prev;
+        node->next_sibling = nullptr;
+        if (prev) {
+            prev->next_sibling = node;
+        } else {
+            parent->first_child = node;
+        }
+        parent->last_child = node;
+        prev = node;
+    }
+    arraylist_free(relinked_nodes);
 }
 
 //==============================================================================

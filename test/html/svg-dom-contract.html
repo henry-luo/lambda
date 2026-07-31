@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Radiant SVG DOM contract</title>
+<link rel="stylesheet" href="editable-drawing.css">
+<h1>SVG DOM contract</h1>
+<p>Exercises the native SVG namespace, affine geometry, hit testing, and XML parser without a library adapter.</p>
+<button id="run-svg-direct-contract" type="button">Run SVG contract</button>
+<div id="svg-direct-host"></div>
+<pre id="svg-direct-state"></pre>
+<script>
+const state = document.getElementById("svg-direct-state");
+const svgNs = "http://www.w3.org/2000/svg";
+const xlinkNs = "http://www.w3.org/1999/xlink";
+const svg = document.createElementNS(svgNs, "svg");
+svg.setAttribute("id", "svg-direct-root");
+svg.setAttribute("width", "320");
+svg.setAttribute("height", "180");
+svg.setAttribute("viewBox", "0 0 320 180");
+const group = document.createElementNS(svgNs, "g");
+group.setAttribute("transform", "translate(20 15)");
+const rect = document.createElementNS(svgNs, "rect");
+rect.setAttribute("id", "svg-direct-rect");
+rect.setAttribute("x", "40");
+rect.setAttribute("y", "30");
+rect.setAttribute("width", "120");
+rect.setAttribute("height", "60");
+rect.setAttribute("fill", "#dbeafe");
+const image = document.createElementNS(svgNs, "image");
+image.setAttributeNS(xlinkNs, "xlink:href", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9NgAAAABJRU5ErkJggg==");
+group.appendChild(rect);
+group.appendChild(image);
+svg.appendChild(group);
+document.getElementById("svg-direct-host").appendChild(svg);
+
+document.getElementById("run-svg-direct-contract").addEventListener("click", () => {
+  try {
+    const box = rect.getBBox();
+    const point = svg.createSVGPoint();
+    point.x = box.x + box.width / 2;
+    point.y = box.y + box.height / 2;
+    const screenPoint = point.matrixTransform(rect.getScreenCTM());
+    const hit = document.elementFromPoint(screenPoint.x, screenPoint.y);
+    const parsed = new DOMParser().parseFromString(
+      "<svg xmlns='http://www.w3.org/2000/svg'><path d='M0 0 L4 4'/></svg>",
+      "image/svg+xml");
+    const pass = rect instanceof SVGGraphicsElement &&
+      svg instanceof SVGSVGElement &&
+      box.x === 40 && box.y === 30 && box.width === 120 && box.height === 60 &&
+      hit === rect &&
+      image.getAttributeNS(xlinkNs, "href") !== null &&
+      parsed.documentElement.namespaceURI === svgNs &&
+      typeof document.execCommand !== "function" &&
+      typeof document.queryCommandSupported !== "function";
+    state.textContent = JSON.stringify({
+      box, hit: hit && hit.id, matrix: rect.getScreenCTM(),
+      parsedRoot: parsed.documentElement.nodeName, pass
+    });
+    state.setAttribute("data-ready", pass ? "true" : "false");
+  } catch (error) {
+    state.textContent = String(error && error.message ? error.message : error);
+    state.setAttribute("data-ready", "false");
+  }
+});
+</script>

@@ -527,6 +527,10 @@ static bool sim_count_visitor(View* view, void* udata) {
 // Count elements matching a CSS selector in the document
 static int count_elements_by_selector(DomDocument* doc, const char* selector_text) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return 0;
+    // Script-driven DOM mutations update the DOM immediately but replace the
+    // retained ViewTree on reflow. Count against the refreshed tree so this
+    // assertion has the same post-mutation visibility as selector targets.
+    sim_flush_pending_reflow(doc);
 
     Pool* pool = doc->document_pool;
     if (!pool) return 0;
