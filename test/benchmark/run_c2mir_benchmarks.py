@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -19,6 +20,8 @@ import time
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 C2M = PROJECT_ROOT / "mac-deps/mir/c2m"
+TIMER_MAIN = PROJECT_ROOT / "test/benchmark/c2mir/bench_timer_main.c"
+TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 SUITES = {
     "r7rs": [
         ("ack", "ack: PASS"),
@@ -81,6 +84,36 @@ SUITES = {
 }
 
 
+def port_source(suite, name):
+    """Path of the native port for one benchmark row, or None when unported."""
+    source = PROJECT_ROOT / "test/benchmark" / suite / "c2mir" / f"{name}.c"
+    return source if source.is_file() else None
+
+
+def build_command(source):
+    """c2m argv for one native port.
+
+    `-Dmain=c2mir_bench_body` renames the port's entry point so
+    bench_timer_main.c can supply the real `main` and bracket the workload with
+    a wall-clock measurement. Without it the only measurable number would be
+    whole-process wall time, which for c2m includes parsing and JIT-generating
+    the C source and so is not comparable with any engine's __TIMING__ value.
+    """
+    return [str(C2M), "-Dmain=c2mir_bench_body", str(source), str(TIMER_MAIN), "-eg"]
+
+
+def parse_timing(stdout):
+    """Return the self-reported workload milliseconds, or None."""
+    match = TIMING_RE.search(stdout)
+    return float(match.group(1)) if match else None
+
+
+def strip_timing(stdout):
+    """Drop the __TIMING__ line so output can be diffed against a golden file."""
+    return "\n".join(line for line in stdout.splitlines()
+                     if not TIMING_RE.search(line)).strip()
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=sorted(SUITES), action="append",
@@ -108,20 +141,28 @@ def main():
     for suite in selected_suites:
         print(f"{suite}:")
         for name, expected in SUITES[suite]:
-            source = PROJECT_ROOT / "test/benchmark" / suite / "c2mir" / f"{name}.c"
+            source = port_source(suite, name)
             total += 1
+            if source is None:
+                failures += 1
+                print(f"  {name:<12} MISSING SOURCE")
+                continue
             started = time.perf_counter()
             try:
                 result = subprocess.run(
-                    [str(C2M), str(source), "-eg"], cwd=PROJECT_ROOT,
+                    build_command(source), cwd=PROJECT_ROOT,
                     capture_output=True, text=True, timeout=args.timeout,
                 )
             except subprocess.TimeoutExpired:
                 failures += 1
                 print(f"  {name:<12} TIMEOUT")
                 continue
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
-            output = result.stdout.strip()
+            wall_ms = (time.perf_counter() - started) * 1000.0
+            # workload-only time when the port reported it; wall time (which
+            # includes c2m's own compile) only as a fallback
+            body_ms = parse_timing(result.stdout)
+            elapsed_ms = body_ms if body_ms is not None else wall_ms
+            output = strip_timing(result.stdout)
             if expected.startswith("@file:"):
                 golden = PROJECT_ROOT / expected.removeprefix("@file:")
                 expected_output = golden.read_text().strip()

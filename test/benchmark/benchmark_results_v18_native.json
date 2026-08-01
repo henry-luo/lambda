@@ -1,0 +1,1174 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-08-01T09:30:44",
+    "command": "test/benchmark/run_benchmarks.py -e go -s r7rs -b mbrot -n 3 --results-output test/benchmark/benchmark_results_v18_native.json",
+    "engines": [
+      "go"
+    ],
+    "runs": 3,
+    "timeout_s": 120,
+    "suite_cooldown_seconds": 10,
+    "results_output": "test/benchmark/benchmark_results_v18_native.json",
+    "fresh": false,
+    "suite_filters": [
+      "r7rs"
+    ],
+    "bench_filters": [
+      "mbrot"
+    ],
+    "canonical_duplicate_suites": {
+      "mandelbrot": "awfy",
+      "nbody": "awfy",
+      "richards": "awfy",
+      "deltablue": "awfy",
+      "primes": "kostya"
+    },
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 48969640,
+    "lambda_archive": null,
+    "lambda_archive_size_bytes": null,
+    "lambda_archive_sha256": null,
+    "test262_baseline": {
+      "status": "not_run"
+    },
+    "lambda_commit": "33b2cd0a5b668fd6b9f69c2f9c5d21adeed81d2f",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "not_recorded",
+    "log_dir": null,
+    "typed_variants": false,
+    "finished_at": "2026-08-01T09:30:44"
+  },
+  "r7rs": {
+    "fib": {
+      "category": "recursive",
+      "c2mir": 1.095947,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.694417
+    },
+    "fibfp": {
+      "category": "recursive",
+      "c2mir": 1.169922,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.758
+    },
+    "tak": {
+      "category": "recursive",
+      "c2mir": 0.123047,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.077
+    },
+    "cpstak": {
+      "category": "closure",
+      "c2mir": 0.2229,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.12125
+    },
+    "sum": {
+      "category": "iterative",
+      "c2mir": 0.281982,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.294875
+    },
+    "sumfp": {
+      "category": "iterative",
+      "c2mir": 0.083008,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.161584
+    },
+    "nqueens": {
+      "category": "backtrack",
+      "c2mir": 0.133057,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.214625
+    },
+    "fft": {
+      "category": "numeric",
+      "c2mir": 0.025879,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.093917
+    },
+    "mbrot": {
+      "category": "numeric",
+      "c2mir": 0.457031,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.396417
+    },
+    "ack": {
+      "category": "recursive",
+      "c2mir": 11.968018,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 8.326625
+    }
+  },
+  "awfy": {
+    "sieve": {
+      "category": "micro",
+      "c2mir": 0.01709,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.033209
+    },
+    "permute": {
+      "category": "micro",
+      "c2mir": 0.030029,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.037458
+    },
+    "queens": {
+      "category": "micro",
+      "c2mir": 0.019043,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.036334
+    },
+    "towers": {
+      "category": "micro",
+      "c2mir": 0.029053,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.032
+    },
+    "bounce": {
+      "category": "micro",
+      "c2mir": 0.026123,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.039917
+    },
+    "list": {
+      "category": "micro",
+      "c2mir": 0.022949,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.034541
+    },
+    "storage": {
+      "category": "micro",
+      "c2mir": 0.096191,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.207875
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "c2mir": 32.695068,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 36.697167
+    },
+    "nbody": {
+      "category": "compute",
+      "c2mir": 1.572021,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 1.408958
+    },
+    "richards": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 28.266,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "json": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 0.384541,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "deltablue": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 1.837,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "havlak": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 3.23225,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "cd": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 9.724459,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "c2mir": 3.563965,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 2.847334
+    },
+    "fannkuch": {
+      "category": "permutation",
+      "c2mir": 0.156982,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.252125
+    },
+    "fasta": {
+      "category": "generation",
+      "c2mir": 0.258057,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.227084
+    },
+    "knucleotide": {
+      "category": "hashing",
+      "c2mir": 0.297852,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.839459
+    },
+    "pidigits": {
+      "category": "bignum",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 0.100209,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "regexredux": {
+      "category": "regex",
+      "c2mir": 1.224854,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 2.626583
+    },
+    "revcomp": {
+      "category": "string",
+      "c2mir": 0.396973,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.251458
+    },
+    "spectralnorm": {
+      "category": "numeric",
+      "c2mir": 0.38208,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.565042
+    }
+  },
+  "kostya": {
+    "brainfuck": {
+      "category": "interpreter",
+      "c2mir": 30.143066,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 21.144542
+    },
+    "matmul": {
+      "category": "numeric",
+      "c2mir": 6.276855,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 16.205167
+    },
+    "primes": {
+      "category": "numeric",
+      "c2mir": 1.642822,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 1.727625
+    },
+    "base64": {
+      "category": "string",
+      "c2mir": 0.578857,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.666666
+    },
+    "levenshtein": {
+      "category": "string",
+      "c2mir": 0.937012,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 1.283917
+    },
+    "json_gen": {
+      "category": "data",
+      "c2mir": 2.237061,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 1.686667
+    },
+    "collatz": {
+      "category": "numeric",
+      "c2mir": 282.028076,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 158.047041
+    }
+  },
+  "larceny": {
+    "triangl": {
+      "category": "search",
+      "c2mir": 64.910889,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 52.527125
+    },
+    "array1": {
+      "category": "array",
+      "c2mir": 0.330078,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.315708
+    },
+    "deriv": {
+      "category": "symbolic",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 3.755167,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "diviter": {
+      "category": "iterative",
+      "c2mir": 282.316162,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 282.500166
+    },
+    "divrec": {
+      "category": "recursive",
+      "c2mir": 5.322998,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 6.626416
+    },
+    "gcbench": {
+      "category": "allocation",
+      "c2mir": 75.515869,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 44.217417
+    },
+    "paraffins": {
+      "category": "combinat",
+      "c2mir": 0.048828,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.061917
+    },
+    "pnpoly": {
+      "category": "numeric",
+      "c2mir": 2.009033,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 2.404458
+    },
+    "puzzle": {
+      "category": "search",
+      "c2mir": 1.344971,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 1.2505
+    },
+    "quicksort": {
+      "category": "sorting",
+      "c2mir": 0.205078,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.272416
+    },
+    "ray": {
+      "category": "numeric",
+      "c2mir": 0.181885,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 0.111709
+    }
+  },
+  "jetstream": {
+    "cube3d": {
+      "category": "3d",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 0.856,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "navier_stokes": {
+      "category": "numeric",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 51.737917,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "splay": {
+      "category": "data",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 28.868667,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "hashmap": {
+      "category": "data",
+      "c2mir": 2.966064,
+      "_status": {
+        "c2mir": "ok",
+        "go": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "go": 4.47675
+    },
+    "crypto_sha1": {
+      "category": "crypto",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 0.177875,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "raytrace3d": {
+      "category": "3d",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port",
+        "go": "ok"
+      },
+      "go": 2.153625,
+      "_status_detail": {
+        "go": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  }
+}

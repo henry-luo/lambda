@@ -7,6 +7,20 @@ benchmarks with:
 python3 test/benchmark/run_c2mir_benchmarks.py
 ```
 
+Each port is compiled together with `test/benchmark/c2mir/bench_timer_main.c`
+under `-Dmain=c2mir_bench_body`: that renames the port's own entry point so the
+timer file can supply `main` and bracket the workload with a wall-clock
+measurement, reported as `__TIMING__` milliseconds like every other engine.
+Whole-process wall time is not usable for these ports because it includes c2m
+parsing and JIT-generating the source, which dominates every sub-100ms
+benchmark. The same invocation is reused by the `c2mir` engine of
+`run_benchmarks.py`, so the correctness runner and the timing runner cannot
+drift apart.
+
+`Overall_Result18.md` carries the resulting column. Note that it is **not** the
+retired `lambda --c2mir` transpiler path (CLAUDE rule 14) — that CLI option no
+longer exists; the column measures these native C ports.
+
 ## Covered workloads
 
 | Suite | Coverage |

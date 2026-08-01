@@ -30,6 +30,7 @@ ENGINE_LABELS = {
     "mir": "MIR (untyped)",
     "mir_typed": "MIR (typed)",
     "c2mir": "C2MIR",
+    "go": "Go",
     "lambdajs": "LambdaJS",
     "quickjs": "QuickJS",
     "nodejs": "Node.js",
@@ -140,6 +141,88 @@ def collect_notables(data, engines):
     ratios.sort(reverse=True)
     wins.sort()
     return missing, ratios, wins
+
+
+STATIC_CEILING_ENGINES = ["c2mir", "go"]
+
+
+def collect_static_ceiling(data, engines):
+    """Per-row distance from typed Lambda to the statically typed native ports.
+
+    C2MIR and Go are not alternative Lambda backends: they are what the same
+    workload costs with types all the way down, so MIR/native is the headroom a
+    fully typed Lambda could still recover. C2MIR is the sharper of the two
+    because it shares MIR's backend — a gap there is Lambda's front end, not a
+    difference in code generator.
+    """
+    present = [e for e in STATIC_CEILING_ENGINES if e in engines]
+    if not present:
+        return None
+    lambda_engine = "mir_typed" if "mir_typed" in engines else "mir"
+    rows = []
+    for suite in SUITE_ORDER:
+        for bench_name, bench_data in data.get(suite, {}).items():
+            lambda_ms = value_of(bench_data.get(lambda_engine))
+            gaps = {e: ratio(bench_data.get(lambda_engine), bench_data.get(e)) for e in present}
+            if all(g is None for g in gaps.values()):
+                continue
+            rows.append({
+                "suite": suite,
+                "name": bench_name,
+                "lambda_ms": lambda_ms,
+                "native": {e: value_of(bench_data.get(e)) for e in present},
+                "gaps": gaps,
+            })
+    if not rows:
+        return None
+    return {
+        "lambda_engine": lambda_engine,
+        "engines": present,
+        "rows": rows,
+        "geo": {e: geo_mean([r["gaps"].get(e) for r in rows]) for e in present},
+        "covered": {e: sum(1 for r in rows if r["gaps"].get(e) is not None) for e in present},
+    }
+
+
+def write_static_ceiling(w, ceiling, total_rows):
+    if not ceiling:
+        return
+    lambda_label = ENGINE_LABELS.get(ceiling["lambda_engine"], ceiling["lambda_engine"])
+    engines = ceiling["engines"]
+    w("---")
+    w()
+    w("## Distance to the Static Ceiling")
+    w()
+    w(f"How far {lambda_label} is from the same workload written in a statically typed "
+      "language. These columns are a reference bound, not another Lambda execution path: "
+      "they say what is still on the table, and C2MIR is the sharper of the two because it "
+      "shares MIR's code generator, so a gap there is attributable to Lambda's front end "
+      "rather than to the backend.")
+    w()
+    for engine in engines:
+        label = ENGINE_LABELS.get(engine, engine)
+        w(f"- **{lambda_label} / {label} geomean:** "
+          f"{fmt_ratio(ceiling['geo'].get(engine))} over "
+          f"{ceiling['covered'].get(engine, 0)} of {total_rows} rows")
+    w()
+    ranked = sorted(
+        (r for r in ceiling["rows"] if r["gaps"].get(engines[0]) is not None),
+        key=lambda r: r["gaps"][engines[0]], reverse=True)
+    if not ranked:
+        return
+    w(f"**Widest gaps vs {ENGINE_LABELS.get(engines[0], engines[0])}**")
+    w()
+    header = f"| Benchmark | {lambda_label} |"
+    header += "".join(f" {ENGINE_LABELS.get(e, e)} |" for e in engines)
+    header += "".join(f" {lambda_label}/{ENGINE_LABELS.get(e, e)} |" for e in engines)
+    w(header)
+    w("|---|" + "---:|" * (1 + 2 * len(engines)))
+    for row in ranked[:12]:
+        line = f"| {row['suite']}/{row['name']} | {fmt_ms(row['lambda_ms'])} |"
+        line += "".join(f" {fmt_ms(row['native'].get(e))} |" for e in engines)
+        line += "".join(f" {fmt_ratio(row['gaps'].get(e))} |" for e in engines)
+        w(line)
+    w()
 
 
 def compute_dedup_summary(data, engines):
@@ -290,6 +373,16 @@ def write_report(args, data):
     w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     w(f"- **Results source:** `{args.input}`")
+    # Columns folded in by merge_engine_results.py were measured in a separate
+    # session; saying so is the difference between a comparison and a claim.
+    for record in metadata.get("merged_engines", []):
+        merged_labels = ", ".join(ENGINE_LABELS.get(e, e) for e in record.get("engines", []))
+        started = (record.get("source_started_at") or "")[:10]
+        when = f" on {started}" if started else ""
+        runs_text = f", {record['source_runs']} run(s)" if record.get("source_runs") else ""
+        note = f" {record['note']}" if record.get("note") else ""
+        w(f"- **Separately measured:** {merged_labels} measured{when}{runs_text} "
+          f"from `{record.get('source')}`.{note}")
     if "mir_typed" in engines:
         w("- **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists")
     w()
@@ -299,6 +392,19 @@ def write_report(args, data):
       "`.ls` port implements exactly one `runIteration()`, so every engine times the same work. "
       "A previous revision hard-coded 8 repeats for every file, which made the JS engines run "
       "8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.")
+    if any(e in engines for e in STATIC_CEILING_ENGINES):
+        w()
+        w("C2MIR and Go are native statically typed ports of the same workloads, present as a "
+          "reference bound rather than as Lambda execution paths. The C2MIR column is **not** the "
+          "retired `lambda --c2mir` transpiler: it is the C port run through MIR's own C frontend "
+          "(`mac-deps/mir/c2m`), so its emitted MIR can be read side by side with Lambda's. Both "
+          "native columns report workload-only `__TIMING__` milliseconds like every other engine — "
+          "the C ports are compiled alongside `test/benchmark/c2mir/bench_timer_main.c` under "
+          "`-Dmain=`, keeping c2m's own parse and JIT time outside the measurement, and the Go "
+          "ports time the body inside `bench.Run`, excluding Go process startup. Each port asserts "
+          "the same expected result as the `.ls` it mirrors. C2MIR coverage is partial by design "
+          "(see `C2MIR_COVERAGE.md`); rows marked `not_recorded` are duplicate benchmark names "
+          "whose canonical row lives in another suite.")
     w()
     w("---")
     w()
@@ -368,6 +474,7 @@ def write_report(args, data):
     w("> Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.")
     w()
     write_historical_comparisons(w, metadata)
+    write_static_ceiling(w, collect_static_ceiling(data, engines), total_rows)
     missing, ljs_ratios, ljs_wins = collect_notables(data, engines)
     w("---")
     w()
