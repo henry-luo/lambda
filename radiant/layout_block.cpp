@@ -305,8 +305,19 @@ static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
 static void apply_contain_intrinsic_used_size(LayoutContext* lycon, ViewBlock* block) {
     if (!lycon || !block || !block->blk || !block->block()->contain_size) return;
 
+    bool width_is_auto = block->block()->given_width < 0.0f ||
+        block->block()->given_width_type == CSS_VALUE_AUTO;
+    bool is_out_of_flow = block->position &&
+        (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+         block->positionp()->position == CSS_VALUE_FIXED);
+    bool is_normal_flow_block = block->display.outer == CSS_VALUE_BLOCK &&
+        block->display.inner == CSS_VALUE_FLOW && !is_out_of_flow &&
+        !(block->position && element_has_float(block));
+
     if (block->block()->contain_intrinsic_width >= 0.0f &&
-        (block->block()->given_width < 0.0f || block->block()->given_width_type == CSS_VALUE_AUTO)) {
+        width_is_auto && !is_normal_flow_block) {
+        // An intrinsic fallback is content for shrink-to-fit sizing, not a specified width
+        // for an in-flow block whose auto width must fill its containing block.
         lycon->block.given_width = block->block()->contain_intrinsic_width;
         block->blk->given_width = lycon->block.given_width;
         if (block->block()->given_width_type == CSS_VALUE_AUTO) {
@@ -5632,6 +5643,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // When min/max constraints change one dimension, the other must scale proportionally.
     bool image_height_auto_derived = false;
     bool image_width_auto_derived = false;
+    bool image_height_auto_derived_from_css_ratio = false;
+    bool image_width_auto_derived_from_css_ratio = false;
+    float image_auto_size_css_aspect_ratio = 0.0f;
+    bool image_auto_size_css_ratio_uses_content_box = false;
 
     CssDeclaration* content_replacement_decl = nullptr;
     CssContentImage content_replacement_image = {nullptr, 1.0f};
@@ -5728,15 +5743,62 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 lycon->block.given_width, lycon->block.given_height, width_is_zero_percent);
 
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0 || width_is_zero_percent) {
+                float intrinsic_aspect_ratio = h > 0.0f ? w / h : 0.0f;
+                float css_aspect_ratio = layout_preferred_aspect_ratio(block);
+                bool css_ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
+                bool css_ratio_overrides_intrinsic = css_aspect_ratio > 0.0f &&
+                    (!css_ratio_uses_content_box ||
+                     intrinsic_aspect_ratio <= 0.0f);
+                // A plain ratio overrides an image's natural ratio; `auto` preserves it when available.
+                float image_auto_size_aspect_ratio = css_ratio_overrides_intrinsic ?
+                    css_aspect_ratio : intrinsic_aspect_ratio;
                 if (lycon->block.given_width >= 0 && !width_is_zero_percent) {
                     // Width specified, scale unspecified height
-                    lycon->block.given_height = (w > 0.0f) ? (lycon->block.given_width * h / w) : 0.0f;
+                    float ratio_source_width = lycon->block.given_width;
+                    if (css_ratio_overrides_intrinsic) {
+                        // Constraints apply before aspect-ratio transfers the definite dimension.
+                        ratio_source_width = layout_apply_min_max_width(
+                            block, ratio_source_width, layout_uses_border_box(block));
+                        if (css_ratio_uses_content_box && layout_uses_border_box(block)) {
+                            ratio_source_width = layout_content_width_from_border_box(
+                                block, ratio_source_width);
+                        }
+                    }
+                    float ratio_height = image_auto_size_aspect_ratio > 0.0f ?
+                        ratio_source_width / image_auto_size_aspect_ratio : 0.0f;
+                    lycon->block.given_height = css_ratio_overrides_intrinsic &&
+                        css_ratio_uses_content_box && layout_uses_border_box(block)
+                        ? layout_border_height_from_content_box(block, ratio_height) : ratio_height;
                     image_height_auto_derived = true;
+                    image_height_auto_derived_from_css_ratio = css_ratio_overrides_intrinsic;
+                    if (css_ratio_overrides_intrinsic) {
+                        image_auto_size_css_aspect_ratio = css_aspect_ratio;
+                        image_auto_size_css_ratio_uses_content_box = css_ratio_uses_content_box;
+                    }
                 }
                 else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
                     // Height specified, scale unspecified width
-                    lycon->block.given_width = (h > 0.0f) ? (lycon->block.given_height * w / h) : 0.0f;
+                    float ratio_source_height = lycon->block.given_height;
+                    if (css_ratio_overrides_intrinsic) {
+                        // Constraints apply before aspect-ratio transfers the definite dimension.
+                        ratio_source_height = layout_apply_min_max_height(
+                            block, ratio_source_height, layout_uses_border_box(block));
+                        if (css_ratio_uses_content_box && layout_uses_border_box(block)) {
+                            ratio_source_height = layout_content_height_from_border_box(
+                                block, ratio_source_height);
+                        }
+                    }
+                    float ratio_width = image_auto_size_aspect_ratio > 0.0f ?
+                        ratio_source_height * image_auto_size_aspect_ratio : 0.0f;
+                    lycon->block.given_width = css_ratio_overrides_intrinsic &&
+                        css_ratio_uses_content_box && layout_uses_border_box(block)
+                        ? layout_border_width_from_content_box(block, ratio_width) : ratio_width;
                     image_width_auto_derived = true;
+                    image_width_auto_derived_from_css_ratio = css_ratio_overrides_intrinsic;
+                    if (css_ratio_overrides_intrinsic) {
+                        image_auto_size_css_aspect_ratio = css_aspect_ratio;
+                        image_auto_size_css_ratio_uses_content_box = css_ratio_uses_content_box;
+                    }
                 }
                 else {
                     // Both width and height unspecified, or width was 0% on 0-width parent
@@ -5898,6 +5960,27 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
 
+    bool width_is_auto = block->blk && lycon->block.given_width < 0.0f &&
+        (block->block()->given_width_type == CSS_VALUE_AUTO ||
+         block->block()->given_width_type == CSS_VALUE__UNDEF);
+    float preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
+    if (width_is_auto && lycon->block.given_height >= 0.0f &&
+        preferred_aspect_ratio > 0.0f && block->display.inner != RDT_DISPLAY_REPLACED) {
+        bool ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
+        bool ratio_uses_border_box = !ratio_uses_content_box && layout_uses_border_box(block);
+        float ratio_source_height = layout_apply_min_max_height(
+            block, lycon->block.given_height, layout_uses_border_box(block));
+        if (ratio_uses_content_box && layout_uses_border_box(block)) {
+            ratio_source_height = layout_content_height_from_border_box(block, ratio_source_height);
+        }
+        float ratio_width = ratio_source_height * preferred_aspect_ratio;
+        // Derive auto width before block fill; otherwise the containing width falsely becomes definite.
+        lycon->block.given_width = ratio_uses_border_box || !layout_uses_border_box(block)
+            ? ratio_width : layout_border_width_from_content_box(block, ratio_width);
+        block->blk->given_width = lycon->block.given_width;
+        block->blk->given_width_type = CSS_VALUE__UNDEF;
+    }
+
     // determine block width and height
     float content_width = -1;
     log_debug("%s Block '%s': given_width=%.2f,  given_height=%.2f, blk=%p, width_type=%d", block->source_loc(),
@@ -5917,15 +6000,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // CSS 2.2 Section 10.3.5: Floats with auto width use shrink-to-fit width
     // We'll do a post-layout adjustment after content is laid out
     // Note: width is "auto" if either explicitly set to auto (CSS_VALUE_AUTO=84) or unset (CSS_VALUE__UNDEF=0)
-    bool width_is_auto = !block->blk ||
-                         block->block()->given_width_type == CSS_VALUE_AUTO ||
-                         block->block()->given_width_type == CSS_VALUE__UNDEF;
-    bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
+    bool has_auto_width = !block->blk ||
+                          block->block()->given_width_type == CSS_VALUE_AUTO ||
+                          block->block()->given_width_type == CSS_VALUE__UNDEF;
+    bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && has_auto_width;
     // CSS 2.1 §10.3.9: Inline-blocks with auto width use shrink-to-fit.
     // Check given_width < 0 to exclude percentage widths (resolved to px during
     // CSS resolution, so given_width >= 0 even though given_width_type = _UNDEF).
     bool is_inline_block_auto_width = (block->view_type == RDT_VIEW_INLINE_BLOCK) &&
-        lycon->block.given_width < 0 && width_is_auto && !is_float_auto_width;
+        lycon->block.given_width < 0 && has_auto_width && !is_float_auto_width;
 
     // Check for width: max-content or min-content (intrinsic sizing keywords)
     // Either from CSS property OR propagated from parent's intrinsic sizing mode
@@ -5933,8 +6016,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                                 (parent_is_intrinsic_sizing && lycon->available_space.is_width_max_content());
     bool is_min_content_width = (block->blk && block->block_mut()->given_width_type == CSS_VALUE_MIN_CONTENT) ||
                                 (parent_is_intrinsic_sizing && lycon->available_space.is_width_min_content());
+    // Replaced elements resolve fit-content after object sizing so a definite
+    // opposite axis can transfer their natural aspect ratio first.
+    bool is_fit_content_width = block->blk &&
+        block->block_mut()->given_width_type == CSS_VALUE_FIT_CONTENT &&
+        block->display.inner != RDT_DISPLAY_REPLACED;
 
-    if (is_max_content_width || is_min_content_width) {
+    if (is_max_content_width || is_min_content_width || is_fit_content_width) {
         // For max-content/min-content width, use shrink-to-fit behavior
         // Initially use available width for layout, then shrink to content width post-layout
         float available_width = pa_block->content_width;
@@ -5974,11 +6062,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (image_height_auto_derived && block->embed && block->embedp()->img && width_was_clamped) {
             float iw = block->embedp()->img->width;
             float ih = block->embedp()->img->height;
-            if (iw > 0) {
+            if (image_auto_size_css_aspect_ratio > 0.0f) {
+                float ratio_source_width = image_auto_size_css_ratio_uses_content_box &&
+                    layout_uses_border_box(block)
+                    ? layout_content_width_from_border_box(block, content_width) : content_width;
+                float ratio_height = ratio_source_width / image_auto_size_css_aspect_ratio;
+                lycon->block.given_height = image_auto_size_css_ratio_uses_content_box &&
+                    layout_uses_border_box(block)
+                    ? layout_border_height_from_content_box(block, ratio_height) : ratio_height;
+            } else if (iw > 0) {
                 lycon->block.given_height = content_width * ih / iw;
-                log_debug("%s [IMG] Aspect ratio: width %.2f→%.2f, height scaled to %.2f", block->source_loc(),
-                          pre_clamp_width, content_width, lycon->block.given_height);
             }
+            log_debug("%s [IMG] Aspect ratio: width %.2f→%.2f, height scaled to %.2f", block->source_loc(),
+                      pre_clamp_width, content_width, lycon->block.given_height);
         }
 
         // CSS 2.1 §10.3.2: For replaced elements with 'width: auto', the intrinsic
@@ -5986,7 +6082,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // to explicitly set CSS widths, not to intrinsic dimensions. However, when
         // min/max-width constrains the width, the constraint IS in border-box terms.
         if (layout_uses_border_box(block)) {
-            if (!image_width_auto_derived || width_was_clamped) {
+            if (!image_width_auto_derived || width_was_clamped ||
+                image_width_auto_derived_from_css_ratio) {
                 if (block->bound) content_width = adjust_border_padding_width(block, content_width);
                 log_debug("%s After adjust_border_padding (border-box): content_width=%.2f", block->source_loc(), content_width);
             } else {
@@ -6054,18 +6151,27 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (image_width_auto_derived && block->embed && block->embedp()->img && height_was_clamped) {
             float iw = block->embedp()->img->width;
             float ih = block->embedp()->img->height;
-            if (ih > 0) {
+            if (image_auto_size_css_aspect_ratio > 0.0f) {
+                float ratio_source_height = image_auto_size_css_ratio_uses_content_box &&
+                    layout_uses_border_box(block)
+                    ? layout_content_height_from_border_box(block, content_height) : content_height;
+                float ratio_width = ratio_source_height * image_auto_size_css_aspect_ratio;
+                content_width = !image_auto_size_css_ratio_uses_content_box &&
+                    layout_uses_border_box(block)
+                    ? layout_content_width_from_border_box(block, ratio_width) : ratio_width;
+            } else if (ih > 0) {
                 content_width = content_height * iw / ih;
-                log_debug("%s [IMG] Aspect ratio: height %.2f→%.2f, width scaled to %.2f", block->source_loc(),
-                          pre_clamp_height, content_height, content_width);
             }
+            log_debug("%s [IMG] Aspect ratio: height %.2f→%.2f, width scaled to %.2f", block->source_loc(),
+                      pre_clamp_height, content_height, content_width);
         }
 
         // CSS 2.1 §10.6.2: For replaced elements with 'height: auto', the intrinsic
         // height is the used height (content-box). box-sizing: border-box only applies
         // to explicitly set CSS heights, not to intrinsic dimensions.
         if (layout_uses_border_box(block)) {
-            if (!image_height_auto_derived || height_was_clamped) {
+            if (!image_height_auto_derived || height_was_clamped ||
+                image_height_auto_derived_from_css_ratio) {
                 if (block->bound) content_height = adjust_border_padding_height(block, content_height);
             } else {
                 log_debug("%s [IMG] Skipping border-box for intrinsic height: content_height=%.2f", block->source_loc(), content_height);
@@ -6075,12 +6181,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     else { // auto height - will be determined by content
         float aspect_ratio = layout_preferred_aspect_ratio(block);
         if (aspect_ratio > 0.0f && content_width >= 0.0f) {
-            content_height = content_width / aspect_ratio;
+            bool ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
+            bool ratio_uses_border_box = !ratio_uses_content_box && layout_uses_border_box(block);
+            float ratio_source_width = ratio_uses_border_box
+                ? layout_border_width_from_content_box(block, content_width) : content_width;
+            float ratio_height = ratio_source_width / aspect_ratio;
+            // Plain ratios use box-sizing dimensions; `auto <ratio>` always uses content-box dimensions.
+            content_height = !ratio_uses_border_box && layout_uses_border_box(block)
+                ? layout_border_height_from_content_box(block, ratio_height) : ratio_height;
             lycon->block.given_height = content_height;
             block->ensure_block(lycon);
             block->blk->given_height = content_height;
             log_debug("%s [AspectRatio] auto height %.1f from width %.1f / ratio %.3f",
-                      block->source_loc(), content_height, content_width, aspect_ratio);
+                      block->source_loc(), content_height, ratio_source_width, aspect_ratio);
         }
         if (content_height < 0.0f) content_height = 0.0f;
         // Don't inherit parent's content_height for auto height blocks
@@ -6590,7 +6703,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // This ensures children are laid out with the correct shrink-to-fit width
     // CSS 2.1 §10.3.5 (floats) and §10.3.9 (inline-blocks): shrink-to-fit width =
     //   min(max-content, max(min-content, available))
-    if ((is_float_auto_width || is_inline_block_auto_width || is_max_content_width || is_min_content_width) && block->is_element()) {
+    if ((is_float_auto_width || is_inline_block_auto_width || is_max_content_width ||
+         is_min_content_width || is_fit_content_width) && block->is_element()) {
         // Font is loaded after setup_inline, so now we can calculate intrinsic width
         DomElement* dom_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
         float available = pa_block->content_width;
@@ -6613,9 +6727,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // The fit_content formula (min(max-content, max(min-content, available))) is
         // always correct, whether it expands (narrow container) or shrinks (wide container).
         if (fit_content >= 0 && fabsf(fit_content - block->width) > 0.01f) {
+            // `fit-content` is an intrinsic keyword, not an auto block width; it
+            // must clamp the element's intrinsic contribution instead of filling its CB.
             log_debug("%s Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f", block->source_loc(),
                 is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" :
-                (is_inline_block_auto_width ? "inline-block" : "float")),
+                (is_fit_content_width ? "fit-content" :
+                (is_inline_block_auto_width ? "inline-block" : "float"))),
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size.

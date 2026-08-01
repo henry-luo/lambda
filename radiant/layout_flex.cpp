@@ -2439,6 +2439,24 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         return basis;
     }
 
+    float contain_intrinsic_width = -1.0f;
+    float contain_intrinsic_height = -1.0f;
+    layout_resolve_contain_intrinsic_size(flex_layout->lycon,
+                                          lam::dom_require<DOM_NODE_ELEMENT>(item),
+                                          &contain_intrinsic_width,
+                                          &contain_intrinsic_height);
+    float contain_intrinsic_main_size = is_horizontal ? contain_intrinsic_width
+                                                      : contain_intrinsic_height;
+    if (contain_intrinsic_main_size >= 0.0f) {
+        // flex-basis:auto uses the size-containment fallback after definite CSS sizes,
+        // rather than treating the omitted descendants as zero-sized content.
+        float basis = contain_intrinsic_main_size;
+        if (item->bound) {
+            basis += layout_boundary_padding_border_axis(item->bound, is_horizontal);
+        }
+        return basis;
+    }
+
     // Case 2b: aspect-ratio with explicit cross-axis size
     // If item has aspect-ratio and explicit height (for horizontal) or width (for vertical),
     // compute main-axis size from cross-axis and aspect-ratio

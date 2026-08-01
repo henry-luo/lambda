@@ -2707,29 +2707,56 @@ bool dom_text_is_backed(DomText* text_node) {
     return text_node && text_node->native_string && text_node->parent;
 }
 
+static int64_t dom_text_find_backed_child_index(DomText* text_node) {
+    if (!text_node || !text_node->parent || !text_node->native_string) return -1;
+
+    Element* parent_elem = dom_element_backing((DomElement*)text_node->parent);
+    if (!parent_elem) return -1;
+
+    for (int64_t i = 0; i < parent_elem->length; i++) {
+        Item item = parent_elem->items[i];
+        if (get_type_id(item) == LMD_TYPE_STRING &&
+            item.get_string() == text_node->native_string) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int64_t dom_text_get_child_index(DomText* text_node) {
     if (!text_node || !text_node->parent || !text_node->native_string) {
         log_error("dom_text_get_child_index: text node not backed");
         return -1;
     }
 
-    Element* parent_elem = dom_element_backing((DomElement*)text_node->parent);
-    if (!parent_elem) {
+    if (!dom_element_backing((DomElement*)text_node->parent)) {
         log_error("dom_text_get_child_index: parent has no native_element");
         return -1;
     }
 
-    // Scan parent's children to find matching native_string
-    for (int64_t i = 0; i < parent_elem->length; i++) {
-        Item item = parent_elem->items[i];
-        if (get_type_id(item) == LMD_TYPE_STRING && item.get_string() == text_node->native_string) {
-            log_debug("dom_text_get_child_index: found at index %lld", i);
-            return i;
-        }
+    int64_t child_idx = dom_text_find_backed_child_index(text_node);
+    if (child_idx >= 0) {
+        log_debug("dom_text_get_child_index: found at index %lld", child_idx);
+        return child_idx;
     }
 
     log_error("dom_text_get_child_index: native_string not found in parent (may have been removed)");
     return -1;
+}
+
+bool dom_text_replace_backed_string(DomText* text_node, String* replacement) {
+    if (!text_node || !replacement || !dom_text_is_backed(text_node)) return false;
+    DomElement* parent = (DomElement*)text_node->parent;
+    if (!parent || !parent->doc || !parent->doc->document_pool) return false;
+
+    int64_t child_idx = dom_text_find_backed_child_index(text_node);
+    Element* parent_elem = dom_element_to_element(parent);
+    if (child_idx < 0 || !parent_elem) return false;
+
+    // retain the live wrapper while replacing its Mark item; rebuilding the
+    // sibling chain here invalidates ranges and editor selections mid-edit.
+    parent_elem->items[child_idx] = (Item){.item = s2it(replacement)};
+    return dom_text_adopt_document_string(text_node, parent->doc, replacement);
 }
 
 bool dom_text_remove(DomText* text_node) {

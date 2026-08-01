@@ -285,6 +285,7 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 float layout_preferred_aspect_ratio(ViewBlock* block);
+bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
 
 namespace radiant {
 

@@ -1433,6 +1433,82 @@ static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t pro
     return false;
 }
 
+static bool css_contain_value_has_size(const CssValue* value) {
+    if (css_value_identifier_is(value, "size") || css_value_identifier_is(value, "strict")) {
+        return true;
+    }
+    if (!value || value->type != CSS_VALUE_TYPE_LIST) return false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+        if (css_value_identifier_is(item, "size") || css_value_identifier_is(item, "strict")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool resolve_contain_intrinsic_size_value(LayoutContext* lycon, const CssValue* value,
+                                                 float* out_width, float* out_height) {
+    if (!value || !out_width || !out_height) return false;
+    *out_width = -1.0f;
+    *out_height = -1.0f;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+            float length = -1.0f;
+            if (!resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+                                                  item, &length)) {
+                continue;
+            }
+            if (*out_width < 0.0f) {
+                *out_width = length;
+            } else {
+                *out_height = length;
+                break;
+            }
+        }
+    } else {
+        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+                                         value, out_width);
+    }
+    if (*out_width >= 0.0f && *out_height < 0.0f) {
+        *out_height = *out_width;
+    }
+    return *out_width >= 0.0f || *out_height >= 0.0f;
+}
+
+bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
+                                           float* out_width, float* out_height) {
+    if (!out_width || !out_height) return false;
+    *out_width = -1.0f;
+    *out_height = -1.0f;
+    if (!lycon || !element || !element->specified_style) return false;
+
+    CssDeclaration* contain_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_CONTAIN);
+    if (!contain_decl || !css_contain_value_has_size(contain_decl->value)) return false;
+
+    CssDeclaration* size_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE);
+    if (size_decl) {
+        resolve_contain_intrinsic_size_value(lycon, size_decl->value, out_width, out_height);
+    }
+
+    CssDeclaration* width_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH);
+    if (width_decl && (!size_decl || width_decl->source_order > size_decl->source_order)) {
+        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH,
+                                         width_decl->value, out_width);
+    }
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT);
+    if (height_decl && (!size_decl || height_decl->source_order > size_decl->source_order)) {
+        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT,
+                                         height_decl->value, out_height);
+    }
+    return *out_width >= 0.0f || *out_height >= 0.0f;
+}
+
 static bool parse_object_position_component(LayoutContext* lycon, const CssValue* value,
                                             float* out_value, bool* out_is_percent,
                                             int* out_axis) {
@@ -11340,18 +11416,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_CONTAIN: {
             if (!block || !value) break;
             ensure_span_block(lycon, block);
-            bool contains_size = false;
-            if (css_value_identifier_is(value, "size") || css_value_identifier_is(value, "strict")) {
-                contains_size = true;
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-                    if (css_value_identifier_is(item, "size") || css_value_identifier_is(item, "strict")) {
-                        contains_size = true;
-                        break;
-                    }
-                }
-            }
+            bool contains_size = css_contain_value_has_size(value);
             block->blk->contain_size = contains_size;
             log_debug("[CSS] contain size containment: %d", contains_size);
             break;
@@ -11383,25 +11448,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!block || !value) break;
             float first = -1.0f;
             float second = -1.0f;
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-                    float length = -1.0f;
-                    if (!resolve_contain_intrinsic_length(lycon, prop_id, item, &length)) continue;
-                    if (first < 0.0f) {
-                        first = length;
-                    } else {
-                        second = length;
-                        break;
-                    }
-                }
-            } else {
-                resolve_contain_intrinsic_length(lycon, prop_id, value, &first);
-            }
+            resolve_contain_intrinsic_size_value(lycon, value, &first, &second);
             if (first >= 0.0f) {
                 ensure_span_block(lycon, block);
                 block->blk->contain_intrinsic_width = first;
-                block->blk->contain_intrinsic_height = second >= 0.0f ? second : first;
+                block->blk->contain_intrinsic_height = second;
                 log_debug("[CSS] contain-intrinsic-size: %.1f %.1f",
                           block->block()->contain_intrinsic_width,
                           block->block()->contain_intrinsic_height);

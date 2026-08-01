@@ -1294,10 +1294,13 @@ bool dom_text_replace_data_contents(DocState* st, DomText* t,
     String* s = dom_document_create_string(doc, buf, new_len);
     mem_free(buf);
     if (!s) return false;
-
-    // Range edits can replace the same detached text repeatedly; transfer
-    // payload ownership so the prior generated String is freed at replacement.
-    dom_text_adopt_document_string(t, doc, s);
+    if (!dom_text_replace_backed_string(t, s)) {
+        // js-created text can be attached beneath a backed element without
+        // occupying a Mark child slot, so only mutate Mark when it owns this node.
+        // Range edits can replace the same detached text repeatedly; transfer
+        // payload ownership so the prior generated String is freed at replacement.
+        dom_text_adopt_document_string(t, doc, s);
+    }
 
     if (st) dom_mutation_text_replace_data(st, t, u16_offset, u16_count, repl_u16_len);
     return true;

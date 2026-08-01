@@ -613,7 +613,7 @@ static bool js_dom_node_is_connected(DomNode* node) {
     return false;
 }
 
-static inline void dom_pre_remove(DomNode* child) {
+static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
     DocState* st = js_dom_state_for_nodes(child, child ? child->parent : nullptr);
     if (st && child) {
         dom_mutation_pre_remove(st, child);
@@ -660,13 +660,18 @@ static inline void dom_pre_remove(DomNode* child) {
         js_document_active_element = nullptr;
     }
     view_pool_release_detached_subtree(child);
-    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
-                                  child ? child->parent : nullptr, 0);
+    if (record_mutation) {
+        js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
+                                      child ? child->parent : nullptr, 0);
+    }
 }
-static inline void dom_post_insert(DomNode* parent, DomNode* node) {
+static inline void dom_post_insert(DomNode* parent, DomNode* node,
+                                   bool record_mutation = true) {
     DocState* st = js_dom_state_for_nodes(node, parent);
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
-    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
+    if (record_mutation) {
+        js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
+    }
 }
 
 static bool js_dom_is_generated_pseudo_node(DomNode* node) {
@@ -5623,7 +5628,7 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
 
     while (elem->first_child) {
         DomNode* child = elem->first_child;
-        dom_pre_remove(child);
+        dom_pre_remove(child, notify_mutation);
         // Observers pin their removedNodes while the wrapper is still live.
         // MarkEditor may retire it as part of the backing deletion below.
         js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE,
@@ -5654,7 +5659,8 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                 DomElement* child_dom = build_dom_tree_from_element(
                     body_elem->items[i].element, doc, nullptr);
                 if (child_dom && elem->append_child(child_dom)) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)child_dom);
+                    dom_post_insert((DomNode*)elem, (DomNode*)child_dom,
+                                    notify_mutation);
                     js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                                                      child_dom, elem,
                                                      nullptr, nullptr);
@@ -5664,7 +5670,8 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                 if (!s) continue;
                 DomText* text_dom = elem->append_text(s->chars);
                 if (text_dom) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
+                    dom_post_insert((DomNode*)elem, (DomNode*)text_dom,
+                                    notify_mutation);
                     js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                                                      text_dom, elem,
                                                      nullptr, nullptr);
@@ -10888,13 +10895,16 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             if (!js_dom_replace_inner_html(elem, "", false)) return ItemNull;
             // DOM string-replace-all uses no replacement node for empty strings.
             if (text_str[0] != '\0') {
-                if (!elem->append_text(text_str)) return ItemNull;
+                DomText* text_node = elem->append_text(text_str);
+                if (!text_node) return ItemNull;
+                dom_post_insert((DomNode*)elem, (DomNode*)text_node, false);
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            // textContent replaces children under the same parent; the existing
-            // remove/insert records are precise enough for retained reconcile.
-            js_dom_mutation_notify();
+            // textContent replaces an entire child list. Record it atomically
+            // so reconciliation cannot relayout only the removed old child.
+            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                                   (DomNode*)elem, (DomNode*)elem);
         }
         return value;
     }
@@ -13824,10 +13834,51 @@ static int64_t js_dom_backed_child_index(DomElement* parent, DomElement* child) 
     return -1;
 }
 
+static int64_t js_dom_backed_node_index(DomElement* parent, DomNode* child) {
+    if (!parent || !child) return -1;
+    if (child->is_element()) {
+        return js_dom_backed_child_index(parent, child->as_element());
+    }
+    if (!child->is_text()) return -1;
+
+    DomText* text = child->as_text();
+    Element* parent_backing = dom_element_to_element(parent);
+    if (!text || !text->native_string || !parent_backing) return -1;
+    for (int64_t i = 0; i < parent_backing->length; i++) {
+        Item item = parent_backing->items[i];
+        if (get_type_id(item) == LMD_TYPE_STRING &&
+            item.get_string() == text->native_string) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool js_dom_remove_backed_element_item(DomElement* parent,
+                                               DomElement* child,
+                                               int64_t child_index) {
+    if (!parent || !child || child_index < 0 || !parent->doc ||
+        !parent->doc->input) {
+        return false;
+    }
+    // drag libraries may detach a wrapper before reinsertion; remove its stale
+    // Mark slot first so a later relink cannot restore the previous order.
+    Element* parent_backing = dom_element_to_element(parent);
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    Item result = editor.elmt_delete_child({.element = parent_backing},
+                                            (int)child_index);
+    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
+        log_error("js_dom_remove_backed_element_item: inline delete changed backing identity");
+        return false;
+    }
+    return true;
+}
+
 static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
     DomElement* child_elem = child->as_element();
-    if (js_dom_backed_child_index(parent, child_elem) >= 0) {
+    int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
+    if (backed_index >= 0) {
         if (child->parent == parent) {
             if (parent->last_child == child) return true;
             // Move an existing sibling through both trees so the backing order
@@ -13836,11 +13887,11 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
         } else if (child->parent) {
             if (!child->parent->is_element() ||
                 !((DomNode*)child->parent)->remove_child(child)) return false;
+        } else if (!js_dom_remove_backed_element_item(parent, child_elem,
+                                                       backed_index)) {
+            return false;
         }
-        // A UI-mode Mark edit can relink the backing tree while a live wrapper
-        // still has no parent link.  The backing already owns this child, so
-        // restore only the DOM chain rather than inserting it a second time.
-        return ((DomNode*)parent)->append_child(child);
+        return parent->append_child(child_elem);
     }
     if (child->parent) {
         if (!child->parent->is_element()) return false;
@@ -13861,6 +13912,76 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
         // reconciliation and selector traversal.
         return ((DomNode*)parent)->append_child(child);
     }
+    return true;
+}
+
+static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
+                                         DomNode* ref_child) {
+    if (!parent || !child || !child->is_element()) return false;
+    if (ref_child && ref_child->parent != (DomNode*)parent) return false;
+    DomElement* child_elem = child->as_element();
+    if (parent->is_synthetic() || child_elem->is_synthetic()) {
+        if (child->parent && !child->parent->remove_child(child)) return false;
+        return ((DomNode*)parent)->insert_before(child, ref_child);
+    }
+    if (!parent->doc || !parent->doc->input) return false;
+    if (child == ref_child ||
+        (child->parent == (DomNode*)parent && child->next_sibling == ref_child)) {
+        return true;
+    }
+
+    if (child->parent) {
+        if (!child->parent->is_element() ||
+            !js_dom_remove_backed_child(child->parent->as_element(), child)) {
+            return false;
+        }
+    } else {
+        int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
+        if (backed_index >= 0 &&
+            !js_dom_remove_backed_element_item(parent, child_elem, backed_index)) {
+            return false;
+        }
+    }
+
+    int64_t insert_index = dom_element_to_element(parent)->length;
+    for (DomNode* candidate = ref_child; candidate;
+         candidate = candidate->next_sibling) {
+        insert_index = js_dom_backed_node_index(parent, candidate);
+        if (insert_index >= 0) break;
+    }
+    if (insert_index < 0) insert_index = dom_element_to_element(parent)->length;
+
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    Element* parent_backing = dom_element_to_element(parent);
+    Item result = editor.elmt_insert_child({.element = parent_backing},
+                                            (int)insert_index,
+                                            {.element = dom_element_to_element(child_elem)});
+    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
+        log_error("js_dom_insert_backed_element: inline insert changed backing identity");
+        return false;
+    }
+    return child->parent == (DomNode*)parent;
+}
+
+static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
+                                       DomNode* ref_child) {
+    if (!parent || !child) return false;
+    if (child == ref_child ||
+        (child->parent == (DomNode*)parent && child->next_sibling == ref_child)) {
+        return true;
+    }
+
+    // a same-parent reorder changes Element::items as well as sibling links;
+    // otherwise HTMLCollection keeps reporting the source order after insertBefore().
+    if (child->parent) dom_pre_remove(child);
+    bool inserted = child->is_element()
+        ? js_dom_insert_backed_element(parent, child, ref_child)
+        : ((child->parent ? child->parent->remove_child(child) : true) &&
+           ((DomNode*)parent)->insert_before(child, ref_child));
+    if (!inserted) return false;
+
+    dom_post_insert((DomNode*)parent, child);
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, (DomNode*)parent);
     return true;
 }
 
@@ -13901,7 +14022,6 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     }
     if (!parent->doc || !parent->doc->input) return false;
 
-    Element* parent_backing = dom_element_to_element(parent);
     int64_t child_index = js_dom_backed_child_index(parent, child_elem);
     if (child_index < 0) {
         // Positional DOM APIs can insert a DOM-only element between backed
@@ -13909,10 +14029,7 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
         return ((DomNode*)parent)->remove_child(child);
     }
 
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_delete_child({.element = parent_backing}, (int)child_index);
-    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("js_dom_remove_backed_child: inline delete changed backing identity");
+    if (!js_dom_remove_backed_element_item(parent, child_elem, child_index)) {
         return false;
     }
 
@@ -14035,11 +14152,9 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
         }
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
-    if (!parent_node->insert_before(new_child, ref_child)) {
+    if (!js_dom_insert_before_child(elem, new_child, ref_child)) {
         return ItemNull;
     }
-    dom_post_insert(parent_node, new_child);
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, new_child, parent_node);
     return new_child_arg;
 }
 
@@ -14187,9 +14302,11 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
                 String* s = dom_document_create_string(elem->doc, combined, new_len);
                 pool_free(elem->doc->document_pool, combined);
                 if (!s) break;
-                // Normalization repeatedly replaces the survivor's payload; it
-                // must transfer ownership so prior merge strings are reclaimed.
-                dom_text_adopt_document_string(text, elem->doc, s);
+                // normalize() must replace the surviving Mark string before
+                // removing its sibling; otherwise a later innerHTML rebuild
+                // relinks both stale text entries into the DOM child list.
+                if (!dom_text_replace_backed_string(text, s) &&
+                    !dom_text_adopt_document_string(text, elem->doc, s)) break;
                 DocState* st = js_dom_current_state();
                 if (st) {
                     dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
@@ -14197,7 +14314,7 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
                 }
                 DomNode* remove_node = child->next_sibling;
                 dom_pre_remove(remove_node);
-                ((DomNode*)elem)->remove_child(remove_node);
+                if (!js_dom_remove_backed_child(elem, remove_node)) break;
             }
         }
         child = child->next_sibling;
@@ -15062,16 +15179,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 return args[0];
             }
         }
-        // detach from old parent
-        if (new_child->parent) {
-            dom_pre_remove(new_child);
-            new_child->parent->remove_child(new_child);
-        }
-        if (!parent_node->insert_before(new_child, ref_child)) {
+        if (!js_dom_insert_before_child(elem, new_child, ref_child)) {
             return ItemNull;
         }
-        dom_post_insert(parent_node, new_child);
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, new_child, parent_node);
         return args[0];
     }
 
@@ -15105,9 +15215,11 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     String* s = dom_document_create_string(elem->doc, combined, new_len);
                     pool_free(elem->doc->document_pool, combined);
                     if (!s) break;
-                    // The surviving node owns its generated merge string; this
-                    // keeps repeated normalize() calls memory-neutral.
-                    dom_text_adopt_document_string(text, elem->doc, s);
+                    // normalize() must replace the surviving Mark string before
+                    // removing its sibling; otherwise a later innerHTML rebuild
+                    // relinks both stale text entries into the DOM child list.
+                    if (!dom_text_replace_backed_string(text, s) &&
+                        !dom_text_adopt_document_string(text, elem->doc, s)) break;
                     // Spec: ranges with (next_text, k) move to (text, head_u16 + k);
                     // appended-data shift handled separately.
                     {
@@ -15122,7 +15234,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     // remove the next text node
                     DomNode* remove_node = child->next_sibling;
                     dom_pre_remove(remove_node);
-                    ((DomNode*)elem)->remove_child(remove_node);
+                    if (!js_dom_remove_backed_child(elem, remove_node)) break;
                 }
             }
             child = child->next_sibling;

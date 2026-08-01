@@ -88,6 +88,22 @@ float layout_aspect_ratio_value(const CssValue* value) {
     return 0.0f;
 }
 
+static bool layout_aspect_ratio_value_has_auto(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        return value->data.keyword == CSS_VALUE_AUTO;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) return false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        if (item && item->type == CSS_VALUE_TYPE_KEYWORD &&
+            item->data.keyword == CSS_VALUE_AUTO) {
+            return true;
+        }
+    }
+    return false;
+}
+
 float layout_preferred_aspect_ratio(ViewBlock* block) {
     if (!block) return 0.0f;
     if (block->flex_item() && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
@@ -95,6 +111,14 @@ float layout_preferred_aspect_ratio(ViewBlock* block) {
     if (!element) return 0.0f;
     CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
     return decl ? layout_aspect_ratio_value(decl->value) : 0.0f;
+}
+
+bool layout_aspect_ratio_uses_content_box(ViewBlock* block) {
+    if (!block) return false;
+    DomElement* element = block->as_element();
+    if (!element) return false;
+    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
+    return decl && layout_aspect_ratio_value_has_auto(decl->value);
 }
 
 enum IntrinsicZeroWidthChar {
@@ -2337,7 +2361,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         dom_node_resolve_style(element, lycon);
     }
-
     // First check if element has resolved font
     if (view_block_font->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
@@ -2628,10 +2651,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    // Resolve CSS display for this element if not already resolved.
+    // Resolve CSS display for this element.
     // Intrinsic sizing needs the same outer/inner display mapping as normal
-    // layout, especially for CSS table values on non-table HTML elements.
-    if (!element->styles_resolved() && element->specified_style) {
+    // layout, especially for CSS table values on non-table HTML elements. A
+    // style-only measurement can mark styles resolved before it materializes
+    // the default display value, so do not use that flag as a display cache.
+    if (element->specified_style) {
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         (lam::unsafe_view_block_element_storage(element))->display = resolve_display_value((void*)element);
     }
@@ -2676,6 +2701,22 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     ViewBlock* resolved_width_view = lam::unsafe_view_block_element_storage(element);
+    bool has_definite_width = resolved_width_view->blk &&
+        resolved_width_view->block()->given_width >= 0.0f &&
+        resolved_width_view->block()->given_width_type != CSS_VALUE_AUTO &&
+        resolved_width_view->block()->given_width_type != CSS_VALUE__UNDEF;
+    float contain_intrinsic_width = -1.0f;
+    float contain_intrinsic_height = -1.0f;
+    layout_resolve_contain_intrinsic_size(lycon, element, &contain_intrinsic_width,
+                                          &contain_intrinsic_height);
+    if (contain_intrinsic_width >= 0.0f && !has_definite_width) {
+        float padding_border = intrinsic_horizontal_padding_border_width(
+            lycon, element, lycon->block.content_width);
+        float intrinsic_width = contain_intrinsic_width + padding_border;
+        // Size containment replaces descendant contributions with this synthetic box
+        // in every intrinsic-width query, including flex and grid measurements.
+        return {intrinsic_width, intrinsic_width};
+    }
     if (!content_only && !is_table_display && !is_inline_non_replaced &&
         resolved_width_view->blk && resolved_width_view->block_mut()->given_width >= 0.0f) {
         float resolved_width = resolved_width_view->block()->given_width;
@@ -4278,7 +4319,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §9.2.4: Skip display:none children — they generate no boxes
             ViewBlock* child_vb = lam::unsafe_view_block_element_storage(child_elem);
-            if (layout_block_is_display_none(child_vb)) {
+            // A style-only measurement can leave the cached display empty; query the
+            // computed display instead of mistaking that placeholder for `none`.
+            if (layout_display_is_none(resolve_display_value(child_elem))) {
                 continue;
             }
 
@@ -5030,6 +5073,27 @@ float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float wi
     return calculate_max_content_height(lycon, node, width);
 }
 
+static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* element,
+                                              ViewBlock* view) {
+    if (!lycon || !element || !view) return false;
+    if (view->blk && view->block()->given_height >= 0.0f &&
+        view->block()->given_height_type != CSS_VALUE_AUTO &&
+        view->block()->given_height_type != CSS_VALUE__UNDEF) {
+        return true;
+    }
+    if (!element->specified_style) return false;
+
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_HEIGHT);
+    if (!height_decl || !height_decl->value) return false;
+    const CssValue* value = height_decl->value;
+    if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_FUNCTION &&
+        !(value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0)) {
+        return false;
+    }
+    return resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value) >= 0.0f;
+}
+
 static bool intrinsic_height_should_collapse_whitespace(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
            white_space == CSS_VALUE_PRE_LINE || white_space == 0;
@@ -5242,8 +5306,17 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         return explicit_height;
     }
 
+    float contain_intrinsic_width = -1.0f;
+    float contain_intrinsic_height = -1.0f;
+    layout_resolve_contain_intrinsic_size(lycon, element, &contain_intrinsic_width,
+                                          &contain_intrinsic_height);
+    bool has_contain_intrinsic_height = contain_intrinsic_height >= 0.0f &&
+        !intrinsic_has_definite_css_height(lycon, element, view);
+
     // CSS 2.1 §10.6.2: Replaced element intrinsic height
-    if (view->display.inner == RDT_DISPLAY_REPLACED) {
+    // Size containment substitutes the fallback before a natural image ratio can
+    // reintroduce the descendant contribution that containment removed.
+    if (view->display.inner == RDT_DISPLAY_REPLACED && !has_contain_intrinsic_height) {
         NameId elem_tag = element->tag();
         if (elem_tag == MARKUP_NAME_IMG) {
             if (view->embed && view->embedp()->img) {
@@ -5546,7 +5619,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         intrinsic_is_table_row_box(element);
 
     // For multi-column grids, calculate height based on rows
-    if (is_form_control_replaced) {
+    if (has_contain_intrinsic_height) {
+        // Size containment removes descendant contributions; its fallback replaces
+        // the content-box block contribution before padding and border are added.
+        height = contain_intrinsic_height;
+    } else if (is_form_control_replaced) {
         // Replaced form control: skip children entirely; padding/border added below.
     } else if (is_empty_auto_container) {
         // Empty auto-height containers have zero content height. Padding and border
