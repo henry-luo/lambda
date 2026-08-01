@@ -707,15 +707,56 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     MIR_finish_func(mt->ctx);
 }
 
+// JS parameter inference is a physical specialization, not a runtime type
+// contract.  The boxed entry must prove the exact Item shape before passing an
+// argument to `_n`; coercing a string or boolean here changes JavaScript `+`.
+static MIR_reg_t jm_emit_exact_native_shape_test(JsMirTranspiler* mt,
+        MIR_reg_t item, TypeId type_id) {
+    if (type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t inline_bits = jm_new_reg(mt, "native_guard_float_bits", MIR_T_I64);
+        MIR_reg_t inline_float = jm_new_reg(mt, "native_guard_float_inline", MIR_T_I64);
+        MIR_reg_t tagged_float = jm_new_reg(mt, "native_guard_float_tagged", MIR_T_I64);
+        MIR_reg_t result = jm_new_reg(mt, "native_guard_float", MIR_T_I64);
+        MIR_reg_t tag = jm_new_reg(mt, "native_guard_float_tag", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, inline_bits), MIR_new_reg_op(mt->ctx, item),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NE,
+            MIR_new_reg_op(mt->ctx, inline_float), MIR_new_reg_op(mt->ctx, inline_bits),
+            MIR_new_int_op(mt->ctx, 0)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+            MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, item),
+            MIR_new_int_op(mt->ctx, 56)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, tagged_float), MIR_new_reg_op(mt->ctx, tag),
+            MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, inline_float),
+            MIR_new_reg_op(mt->ctx, tagged_float)));
+        return result;
+    }
+
+    MIR_reg_t tag = jm_new_reg(mt, "native_guard_tag", MIR_T_I64);
+    MIR_reg_t result = jm_new_reg(mt, "native_guard", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, item),
+        MIR_new_int_op(mt->ctx, 56)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, tag),
+        MIR_new_int_op(mt->ctx, type_id)));
+    return result;
+}
+
 void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int param_count = jm_count_params(fn);
     bool has_captures = (fc->capture_count > 0);
 
     // Phase 4: Check if this function qualifies for a native version.
-    // Requirements: no captures, all params inferred as INT or FLOAT,
-    //               return type is INT or FLOAT, param_count <= 16.
-    // Also respect has_native_version flag (Phase 1.76 may have revoked it).
+    // Requirements: no captures, at least one INT/FLOAT specialization, a
+    // boxed Item carrier for every remaining param, and a numeric return.
+    // The guarded entry proves only specialized formals; the Item formals keep
+    // their ordinary JavaScript dynamic behavior.
     bool generate_native = false;
     // Native MIR params cannot represent sloppy duplicate formals, and arrow
     // block bodies still rely on boxed statement-completion return handling.
@@ -727,13 +768,20 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         param_count > 0 && param_count <= 16 &&
         (fc->native_return_kind == NATIVE_RETURN_INT ||
          fc->native_return_kind == NATIVE_RETURN_FLOAT)) {
+        bool has_native_param = false;
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
-            if (fc->param_types[i] != LMD_TYPE_INT && fc->param_types[i] != LMD_TYPE_FLOAT) {
+            TypeId param_type = fc->param_types[i];
+            if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
+                has_native_param = true;
+                continue;
+            }
+            if (param_type != LMD_TYPE_ANY) {
                 generate_native = false;
                 break;
             }
         }
+        if (!has_native_param) generate_native = false;
     }
 
     // --- Generate native version if eligible ---
@@ -2466,12 +2514,17 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         hashmap_free(dstr_param_names);
     }
 
-    // If we have a native version, the boxed version becomes a thin wrapper:
-    // unbox params → call native → box result
+    // A native JS body is an inferred fast path. The existing boxed lowering
+    // remains the complete source-equivalent fallback for every other shape.
     if (generate_native) {
         MIR_reg_t* native_args = LAMBDA_ALLOCA(param_count, MIR_reg_t);
+        MIR_reg_t inferred_guard = jm_new_reg(mt, "native_entry_guard", MIR_T_I64);
+        MIR_label_t boxed_slow_label = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, inferred_guard), MIR_new_int_op(mt->ctx, 1)));
 
-        // Unbox each parameter (with default-param handling for native wrapper)
+        // Resolve all defaults and collect one exact predicate before unboxing.
+        // The guard-fail branch below deliberately skips every native coercion.
         param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
             char vname[128];
@@ -2495,14 +2548,33 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
 
+            if (fc->param_types[i] != LMD_TYPE_ANY) {
+                MIR_reg_t exact = jm_emit_exact_native_shape_test(mt, preg,
+                    fc->param_types[i]);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                    MIR_new_reg_op(mt->ctx, inferred_guard),
+                    MIR_new_reg_op(mt->ctx, inferred_guard),
+                    MIR_new_reg_op(mt->ctx, exact)));
+            }
+
+            param_node = param_node ? param_node->next : NULL;
+        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, boxed_slow_label),
+            MIR_new_reg_op(mt->ctx, inferred_guard)));
+
+        param_node = fn->params;
+        for (int i = 0; i < param_count; i++) {
+            char vname[128];
+            jm_get_param_name(param_node, i, vname, sizeof(vname));
+            MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
+
             if (fc->param_types[i] == LMD_TYPE_FLOAT) {
                 native_args[i] = jm_emit_unbox_float(mt, preg);
+            } else if (fc->param_types[i] == LMD_TYPE_INT) {
+                native_args[i] = jm_emit_unbox_int(mt, preg);
             } else {
-                // Use it2i (runtime type-checking unbox) instead of jm_emit_unbox_int
-                // because callers may pass FLOAT Items for INT-typed params (e.g. 36e5).
-                // it2i handles INT, INT64, FLOAT → int64_t conversion correctly.
-                native_args[i] = jm_call_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                native_args[i] = preg;
             }
             param_node = param_node ? param_node->next : NULL;
         }
@@ -2513,8 +2585,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Box the result and return
         MIR_reg_t boxed_result = jm_box_native(mt, native_result, fc->return_type);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed_result)));
-
-        goto finish_boxed;
+        jm_emit_label(mt, boxed_slow_label);
     }
 
     // --- v15: Generator wrapper (creates generator object instead of running body) ---

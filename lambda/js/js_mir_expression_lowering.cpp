@@ -6597,6 +6597,9 @@ bool jm_should_inline(JsFuncCollected* fc) {
     if (!fc->has_native_version || !fc->native_func_item) return false;
     if (fc->capture_count > 0) return false;
     if (fc->has_non_simple_params) return false;
+    for (int i = 0; i < fc->param_count; i++) {
+        if (fc->param_types[i] == LMD_TYPE_ANY) return false;
+    }
     if (fc->param_count > 4) return false;
     if (!fc->node || !fc->node->body) return false;
     if (!jm_inline_params_are_simple(fc->node)) return false;

@@ -7690,6 +7690,18 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
 
+    LambdaNumericKind source_kind = lambda_numeric_kind_from_item(value);
+    LambdaNumericKind target_kind = lambda_numeric_kind_from_type(expected);
+    if (source_kind != LAMBDA_NUM_INVALID && target_kind != LAMBDA_NUM_INVALID &&
+            target_kind != LAMBDA_NUM_INTEGER) {
+        // A declared concrete numeric boundary establishes the destination
+        // representation, even when membership would accept the source tag.
+        // Checking lambda_type_matches first left an int-tagged value at a
+        // float boundary, after which a native float body could unbox it as
+        // the wrong physical lane.
+        return lambda_numeric_boundary_admit(value, expected, converted);
+    }
+
     // Preserve an already conforming union member rather than arbitrarily
     // re-representing it through an earlier union arm.
     if (lambda_type_matches(value, expected)) {
@@ -7704,8 +7716,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
             runtime_type_admit_value(value, union_type->right, converted);
     }
 
-    if (lambda_numeric_kind_from_item(value) != LAMBDA_NUM_INVALID &&
-            lambda_numeric_kind_from_type(expected) != LAMBDA_NUM_INVALID) {
+    if (source_kind != LAMBDA_NUM_INVALID && target_kind != LAMBDA_NUM_INVALID) {
         // A numeric pair reached this DEFERRED boundary but cannot be represented
         // exactly in the target contract. Do not let type-directional membership
         // turn that failed conversion into a truncating native unbox.
