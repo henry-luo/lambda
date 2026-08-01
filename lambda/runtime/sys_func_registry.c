@@ -1427,6 +1427,10 @@ JitImport jit_runtime_imports[] = {
     {"box_int64_value", FPTR(box_int64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+    // C16 canonical int encoder — the flex-int promote lane's cold path.
+    {"int2it", FPTR(int2it),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_int64_result_or_error", FPTR(box_int64_result_or_error),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},

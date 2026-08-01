@@ -1810,3 +1810,282 @@ user's, not the language's.
   `inf`/`nan` support** (mpdecimal supports them natively; the Lambda wrapper
   currently filters them — unblock tracked in the enforcement impl plan,
   including distinct printing, tentatively `decimal.inf` / `decimal.nan`).
+
+### C16. Flex `int` redefined: the float64-representable integers (2026-08-01) — RESOLVED: total int arithmetic; `div`/`%` stay int via `int.inf`/`int.nan`; 53-bit literal band retained
+
+Decided by the designer 2026-08-01, out of the TE-15 soft-error-containment discussion
+(`Lambda_Design_Type_Enforcement.md` TE-15; issue evidence in `Lambda_Issue_Type_Support.md`
+TS-9 and the measured declared-boundary divergence of the same date). Supersedes the
+**promotion arm of C3 — now historical for the flex tier** (C3's machine-int rulings, literal
+strictness, and data-home philosophy stand), and revises the **`int div int → float` typing arm
+of C14c** (C14c's substance — truncation semantics, literal-zero compile error, and
+never-`error()` — stands unchanged).
+
+**Ruling.**
+1. **Domain.** Flex `int` = every integer exactly representable in IEEE binary64 — the
+   contiguous band ±(2⁵³ − 1) plus the sparse representable integers above it — extended by
+   the closure points `int.inf`, `-int.inf`, `int.nan`.
+2. **Tagged, not erased.** `int` remains a distinct runtime type. `type()`, printing, `is`,
+   the validator, and the promotion lattice keep the int/float distinction; contact with
+   float still yields float. The erasure variant ("int is a hint over number") is rejected.
+3. **Arithmetic is closed and total.** `+`, `-`, `*`, `div`, `%` on int are correctly-rounded
+   binary64 operations: exact within the contiguous band, correctly rounded above it,
+   saturating to `int.inf`/`int.nan` at the float-range extremes. **The overflow-promotes-to-
+   float rule is deleted** — int arithmetic never changes type.
+4. **`div`/`%` return int.** A computed zero divisor yields the int domain's own poison
+   (`7 div 0 → int.inf`, `0 div 0 → int.nan`), parallel to `decimal.inf`/`decimal.nan`
+   (C14c). True division `/` is untouched: `int / int → float` (fractional results are
+   genuinely float). C14c's accepted cost "div→int contexts become float↛int static errors"
+   dissolves.
+5. **Literal strictness keeps the band.** An unsuffixed integer literal outside ±(2⁵³ − 1) is
+   a **compile error even where sparsely representable** (`18014398509481984` = 2⁵⁴ errors):
+   a literal of that magnitude expresses i64/`integer` intent, and admitting only the
+   contiguous band keeps the rule teachable. Suffixes (`i64`, `n`, `m`, float form) express
+   the intent explicitly.
+6. **Data homes unchanged.** Parser placement stays band-based: `int` home iff within
+   ±(2⁵³ − 1), else `int64`, else `decimal`. Sparse representability is not a home test —
+   ingestion stays deterministic and big IDs stay exact.
+7. **Poison behavior.** Int poison participates in int arithmetic as int poison
+   (`1 div 0 + 1 → int.inf`); `int.nan is int → true` (poison is unequal, not untypeable);
+   nan-family values keep the §5 equality carve-out; infinities compare equal across numeric
+   representations of the same sign under cross-representation ties.
+
+**Arguments (assistant's case, adopted by designer):**
+1. **Totality/annotation monotonicity.** Under the 53-bit band + TE-15, every int-annotated
+   arithmetic binding was a potential runtime defect edge — `: int` on working code could
+   only add failure modes ("int is everywhere"). Under C16, an all-int-ops expression is
+   *statically* int: checks discharge at compile time, loops carry no containment edges.
+2. **Inference honesty.** `int ⊕ int : int` becomes a true statement instead of an
+   approximation with a runtime escape (closes TS-9's "static type said int, value is
+   float" complaint by construction).
+3. **Performance.** The flexint dual-lane lowering (53-bit branch + dual boxing per op) dies;
+   int compiles to plain double arithmetic; i64/Smi lanes survive as invisible proven-range
+   optimizations (the V8 shape) — the O1-class divergence becomes unrepresentable. Aligns
+   Lambda's and LambdaJS's numeric models over the shared emitter.
+4. **The tagged variant has empty blast radius** where the erasure variant bled: type(),
+   int-vs-float formatting, TE-6 (`3.0 is int` stays false), validator, §4.2 ingestion — all
+   unchanged.
+5. **C14c's own symmetry argument now points here:** C14c justified div→float partly by "flex
+   arithmetic already leaves int on overflow" — C16 removes that escape, so giving div a
+   float result would *reintroduce* the only type leak; int's own poison completes closure.
+   Loop inference stays int for the canonical `(lo + hi) div 2`.
+
+**Accepted costs (designer-acknowledged):**
+- **Computed exactness above 2⁵³ is gone** — results round silently (off-by-one at ~9·10¹⁵),
+  typed int. Guideline: values that must be exact *and* may exceed the band belong in `i64`,
+  `integer`, or `decimal`; parsed data is already protected by ruling 6. At-risk computed
+  cases to document: epoch-nanosecond arithmetic, 64-bit-ID arithmetic, micro-unit money
+  aggregates, fib(79)+.
+- `int.inf`/`int.nan` are novel (no mainstream "integer infinity" precedent); the internal
+  precedent is `decimal.inf`/`decimal.nan`, whose literal/round-trip story they share.
+- Output/golden churn: yesterday's escapes printed float-formatted (`1.80144e+16`); C16
+  prints int-formatted (`18014398509481982`).
+
+**Follow-up rulings (designer, 2026-08-01, same day):**
+8. **`div` stays int — confirmed** (closing the "arguable" flag on ruling 4).
+9. **Unsuffixed literal type is lexical, never value-selected** (the same rule as the `n`
+   suffix): a numeric literal is `int` iff it has **no decimal point and no negative
+   exponent**. `10e1` is `int` 100 despite the e-notation; `10.`, `10.0`, `10.e1`, and
+   `10e-1` are `float`. Derived consequence: an integer-form literal above the band errors
+   rather than silently becoming float — `1e16` is a compile error; spell `1.0e16` (float)
+   or `1e16n` (`integer`). Implementation note: today's lexer classes e-notation as float —
+   reclassification is a `grammar.js` + `make generate-grammar` change.
+10. **The `is` exact-embedding lattice is re-derived**: **`int ⊑ int64` dies**; the exact
+    integer chain is **`i32 ⊑ int ⊑ integer`** (and onward to `decimal`); `int ⊑ float`
+    stays definitional; `int ∥ int64` (sparse int values exceed the int64 range; odd int64
+    values above 2⁵³ are not int). Embedding is judged over finite values; poison follows
+    ruling 11.
+11. **Poison identity**: the same-signed infinities are **one value across representations**
+    — `int.inf == inf == decimal.inf` — under cross-representation numeric equality. Nans
+    are the opposite: **never shared, per IEEE** — every nan (`nan`, `int.nan`,
+    `decimal.nan`) is unequal to everything including itself; there is no cross-domain nan
+    identity.
+12. **Boundary admission = domain membership (designer, 2026-08-01, second follow-up).**
+    A numeric value passes a typed boundary iff it is a *member* of the target domain:
+    `1.0` is accepted as `1` (same value), and `inf`/`decimal.inf` pass an `int` boundary
+    as `int.inf` (one value, re-tagged). **A foreign nan is REJECTED as a casting error** —
+    "like `1.5` passing to `int`": `nan` is not `int.nan`, so it cannot be admitted as
+    `int.nan`. Derived generalizations recorded (flag if unintended): (a) a nan passes only
+    its *own* domain's boundary — so `int.nan` at a `float`-typed boundary also rejects
+    (the statically-proven `int ⊑ float` edge covers finite values and the shared `inf`;
+    it needs a poison-only deferred branch, one tag compare); the alternative
+    (widening-converts, `int.nan → nan`) was NOT adopted; (b) domains without poison
+    (`integer`, sized ints) admit no poison at all — `int.inf` at an `integer`-typed
+    boundary is the same membership failure, so the `int ⊑ integer` edge likewise carries
+    the poison-only branch. Failures take the TE-15 skip like any other boundary defect.
+13. **`integer` gains `integer.inf`/`integer.nan`; `integer div integer → integer`
+    (designer, 2026-08-01, third follow-up).** Same reasoning as int's div: truncating
+    division of integers is integral, so with its own poison the domain closes —
+    `div`/`%` on the `integer` domain stay `integer`, zero divisor → `integer.inf`/
+    `integer.nan`. This revises ruling 4's / C14c's large-integer arm **for `div`/`%`
+    only**: sized `i64`/`u64` operands still enter the `integer` domain first (§4.3), so
+    `i64 div u64 → integer` (was decimal). True division `/` is untouched everywhere:
+    `integer / integer → decimal` (§4.4). Poison-bearing domains are now FOUR — float,
+    int, integer, decimal; only the sized machine ints remain poison-free. Inf identity
+    extends: `int.inf == inf == integer.inf == decimal.inf` (same sign, one value);
+    `integer.nan` is unique like every nan. Implementation note: `integer` is
+    mpdec-backed (N2) and mpdecimal supports inf/nan specials natively — same unblock
+    path as `decimal.inf`/`decimal.nan`.
+14. **Subtyping classifies poison upward (designer, 2026-08-01, third follow-up;
+    supersedes ruling 12's derived arm (a), which is WITHDRAWN).** For `int ⊑ float` to
+    be a true subtype, int's poison is *a float* in the classification relation:
+    `int.nan is float` → true, just as `nan is float` → true — even though
+    `int.nan ≠ nan` as values (nans never shared). The reverse does not hold: `nan` is
+    **not** an int (`nan is int` → false). General form (derived, flag if unintended):
+    every value of a domain — poison included — is a member of every superdomain on the
+    `⊑` chain (`int.nan is integer`/`is decimal` → true via `int ⊑ integer ⊑ decimal`),
+    while remaining its own value under `==`. Consequences: **upward/widening edges are
+    statically closed again — no poison branch anywhere** (the int→float and int→integer
+    deferred nan-checks from ruling 12's derived arms are gone); membership checks exist
+    only at *narrowing* boundaries, where a foreign nan rejects ("nan is not int", like
+    `1.5`), a shared inf passes by identity, and sized-int boundaries admit no poison at
+    all. The `⊑` lattice is total over full domains — the ruling-10 phrase "judged over
+    finite values" is superseded by this cleaner rule.
+
+**Design symmetry (designer-stated closing summary, 2026-08-01; distilled at the head of
+spec §4):** *every unbounded numeric domain is closed and total with its own poison;
+infinities are one value wherever poison exists; nans are always private; classification
+flows up, checks only guard the way down.* The sized machine ints stand outside the
+symmetry: bounded, wrapping, poison-free.
+
+**Open sub-rulings (implementation not yet designed, per designer):**
+- Bitwise/shift domain over the sparse band (recommendation: defined for finite values within
+  ±(2⁵³ − 1); outside → `error()` as a conversion-class failure, since bit reinterpretation
+  is not number math).
+- ~~Nan admission at typed cross-domain boundaries~~ — RULED by rulings 12 + 14 (narrowing
+  rejects foreign nan; widening classifies poison upward, no checks). Ruling 12's derived
+  arm (a) withdrawn by 14; arm (b) narrowed to sized ints only by 13.
+- ~~Boxed encoding for int-tagged values outside the compact-tag band and tag-space audit
+  vs. the self-tagged inline-double lane~~ — **AUDITED 2026-08-01, resolved**: an inline
+  double *is its own Item* (all 64 bits, `lambda.h:1293-1301` returns raw bits under
+  `ITEM_DBL_MASK`), while tagged values keep only a 56-bit payload — so **an int-tagged
+  Item can never carry an inline double**, and "int as float64" is available in native
+  lanes only. Boxed int therefore stays compact for `|v| ≤ 2⁵³` (not widened to the
+  payload's 2⁵⁵: above 2⁵³ not every integer is representable, so a wider payload could
+  encode a non-member) with a **tagged pointer to a double cell** above it, following the
+  existing out-of-band-float precedent (`d2it`, `lambda.h:1286`). The 53-bit band survives
+  as *carrier capacity*, never again as a semantic bound. Full plan, including the
+  `i2it`-overflow-arm fix that closes the O1 divergence, the range-proven-`i64`-lane rule, and
+  the convergence with the 2026-08-01 tuning work: `vibe/Lambda_Impl_Int_Total.md`.
+- `int.inf`/`int.nan` payload encoding (reserved compact payloads vs. cells) — open, see
+  that plan's Phase A.
+- Value-aware admission under §11.4 now passes any finite integral float into int (e.g.
+  1e300) — confirm validator/`lambda_type_check` arms use the integrality test, not the band.
+- Golden/W-series enumeration for the lattice change (`int ⊑ int64` removal, ruling 10).
+
+### C17. Numeric converters returning poison (`int("abc") → int.nan`) — considered and REJECTED (2026-08-01)
+
+Raised by the designer immediately after C16 and withdrawn the same session. Recorded
+because the *reasoning* is the durable artifact: this is the natural next question after
+C16, it will be re-proposed by anyone who reads C16 alone, and the arguments that killed it
+also produced two design invariants (truthiness-by-tag; interior-vs-ingress) that outlive
+the proposal.
+
+**The proposal.** `int("str")` returns `int.nan` instead of `error(...)`; likewise
+`float(...)`, `decimal(...)`, and (by C16 ruling 13) `integer(...)`. Motivation: with C16
+having removed the arithmetic escape, converters are the *last* error originators in
+otherwise-pure numeric code, so poison-returning converters would close the numeric world
+completely — and would likely simplify the implementation.
+
+**What made it genuinely attractive** (all confirmed, none of these were the reason it
+failed):
+1. *Closure.* C14c's teachable line — "number math is closed over numbers ∪ {inf, nan};
+   only conversions/parsing produce `error()`" — would shorten to "the numeric world is
+   closed; nothing numeric returns `error()`."
+2. *Codegen.* Converter results would stay unboxed in native lanes (a nan is just a bit
+   pattern), converter call sites would stop being TE-15 origination sites, and the
+   post-call error branch would disappear.
+3. *A decided wart dissolves.* `let n: int = int(s)` is a compile error today (TE binding
+   rule: an explicitly-declared `| error` source cannot bind to plain `T`); with poison
+   returns it becomes legal and clean, and all E228/engagement ceremony around converters
+   evaporates.
+4. *Precedent.* JavaScript's `Number("abc") → NaN` is the same design, battle-tested at
+   scale.
+
+**Why it was rejected.**
+
+- **It trades a loud failure for a silent one — in the exact dimension this design arc
+  exists to fix.** `int(s) or 0` is the blessed default idiom (decided 2026-07-29,
+  live-probed, documented in the error-handling guide). Nan is **truthy** (C14c, verified),
+  so `int("abc") or 0` would evaluate to `int.nan`, not `0`: the most common
+  parse-with-default pattern in the language would silently stop defaulting and let poison
+  travel into the result. TE-15 and C16 were both motivated by *eliminating* silent wrong
+  values; introducing one here to win closure elsewhere is a net loss of exactly the
+  quantity being optimized.
+- **Diagnosability regresses at the worst possible boundary.** §10.4 (designer, reversing
+  the assistant's two-form proposal) requires every enforcement failure to carry a rich
+  diagnosis — code, message, expected/actual, location. Poison carries nothing: a batch
+  yields `[1, int.nan, 3]` where it used to yield `[1, error("...row 7..."), 3]`. For a
+  *data-processing* language, "this input field would not parse, here is which one and
+  why" is the bread-and-butter diagnostic; anonymous poison is precisely the class of
+  silent, unexplained result the spec's error-containment invariant (§13.7) forbids.
+- **The remaining win was small, because C16 already took the large one.** Converters felt
+  like "the last error originator" only because C16 had removed the others — but the two
+  populations differ in kind. Arithmetic defects were *hot and ubiquitous* (every
+  int-annotated binding, every loop counter, unavoidable in correct code); converter
+  failures are *cold and rare* (bad input data, already on a diagnostic path). Removing
+  the hot ones was the important fix. Removing the cold ones buys little and pays for it
+  in diagnosis — the right stopping point was already reached.
+- **Rejecting it *unifies* rather than splits.** Designer's framing: "`int("abc")`
+  returning error is less of an issue — this is just like all type casting errors." A
+  string is not a number; asking whether it can become one is a casting question and is
+  answered like every other casting question (`let x: int = 3.5`, a failed validator
+  field, an inadmissible narrowing under ruling 12 — all `error()`). The proposal would
+  have *diverged* these: converters reporting failure as poison while the annotation
+  boundary one line later reports the same failure as an error. The assistant had framed
+  that divergence as a teachable feature (`int(x)` = attempt, `: int` = assertion; C#'s
+  TryParse-vs-cast); the designer's unification is the stronger position, and it needs no
+  new vocabulary.
+
+**Companion options weighed for saving the `or` idiom, and why none was taken:**
+
+1. **Infix rescue `e1 ^ e2`** ("if `e1` is falsy or nan → `e2`"), with `let a^b` extended
+   to route nan into `b`. Set aside: `^` is already three-way overloaded (postfix
+   propagate `f()^`, channel spelling `T^E`, destructure `let a^err`), and an infix
+   meaning collides with the postfix one under whitespace (`a ^ -b` vs `a^ - b` —
+   rescue-with-negated-default or propagate-then-subtract?). Extending `^err` to absorb
+   nan would also merge two unrelated predicates (error-ness, nan-ness) into one form and
+   put *numeric* constituents in the error-side binding — re-muddying the poison/error
+   taxonomy C16 had just separated. Assessed as spending core-grammar complexity to
+   preserve a footgun.
+2. **Nan-falsy** (assistant's recommendation; JS precedent — NaN-falsy is exactly *why*
+   `Number(s) || 0` works there; would also retroactively heal C14c's accepted cost that
+   `a div b or 0` no longer defaults). **Declined by the designer**, restating the original
+   grounds for truthy-nan: (i) *runtime cost* — falsy is a tag test today, so admitting
+   nan forces value inspection on numeric tags; (ii) *static inference* — truthiness
+   decidable from the type alone lets the compiler fold conditions without value analysis.
+   The assistant's counter-arguments, recorded as not persuasive enough to overturn it:
+   truthy-0 already makes every numeric condition statically constant, so the folding
+   being protected mostly folds degenerate code; the flagship site (`int(s) or 0`) would
+   get *cheaper* under nan-falsy once C17 unboxed it (one `f == f` compare in a double
+   lane, versus today's boxed tag dispatch); and value-aware boundary admission (C16
+   ruling 12) had already accepted value-dependence where it bought the right semantics.
+   The designer's call stands: **falsy stays {null, false, error, `""`} — tag-decidable.**
+3. **Do nothing** (accept losing the idiom) — rejected as unacceptable.
+4. **Converter default argument** `int(s, 0)` — noted as the cheap pragmatic fallback if
+   the truthiness change were ever wanted without nan-falsy (type-static, zero runtime
+   cost, no grammar change); **not adopted**, since reverting C17 keeps `or 0` working and
+   makes the fallback unnecessary.
+
+**Ruling: status quo, nothing changes.** Numeric converters keep returning **error values**
+(`T | error`); **nan stays truthy**, consistent with truthy-0; the `^` grammar is untouched.
+Everything already recorded stands: C14c's teachable line, §7.3's canonical `int("abc")`
+example and its "present but invalid → `error()`" principle, the TE binding rule (`let n:
+int = int(s)` stays a compile error; idioms are `int(s) or 0`, `^err`, or a union binding),
+and §10.4's rich payloads.
+
+**Two invariants extracted (the durable output of this deliberation):**
+
+- **Truthiness is decidable from the type tag alone.** Now an explicit design constraint,
+  not an accident of the current falsy set: any future proposal that wants a value-dependent
+  falsy value (a nan, an empty container, a zero) must clear both the runtime-fast-path and
+  the static-folding bars stated above. Recorded in spec §3.
+- **Interior versus ingress — where poison comes from.** *Poison originates only inside
+  number math* (computed zero divisors, saturation at the float-range extremes): both
+  operands are already numbers, the operation is number math, so the result stays in
+  number. *`error()` marks the numeric world's ingress and egress boundaries*: parsing,
+  casting, narrowing admission, validation — where a non-number is asked to become a
+  number, or a number is asked to fit a domain it does not belong to. This is a derived
+  line (it follows from where the value came from), not a carve-out list, and it is the
+  reason C14c and C17 point in opposite directions without conflicting. Recorded in
+  spec §4.

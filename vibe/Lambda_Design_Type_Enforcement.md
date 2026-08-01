@@ -4,8 +4,10 @@
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
 firewall, E228 acknowledgment forms, `or`-narrowing, fault channel), tracked in
 [`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
-work explicitly deferred by §1/§9 remains a separate follow-on.
-**Date:** 2026-07-29; revised 2026-07-30
+work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
+skip to the closest safe boundary) and TE-16 (the `^ { }` handler; `let a^err` and `if (^err)`
+retired) decided 2026-08-01, neither yet implemented.
+**Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -1271,6 +1273,301 @@ Whether every function receives both versions, whether usage creates additional
 specializations, and how open returns use boxed or side-channel ABIs are deferred. They are
 performance decisions, not part of the language contract.
 
+### TE-15 — Soft-error containment: skip to the closest safe boundary (decided 2026-08-01, user)
+
+**Decision.** A soft error does not *propagate* through the expressions around it — it **skips**:
+at the moment of origination, control transfers to the end of the closest statically-enclosing
+*safe boundary*, and that boundary's position receives the error value. Everything between the
+origination site and the boundary is never evaluated. This is the containment policy for the
+whole family of soft/evaluation errors — failed deferred type checks, failed conversions and
+casts, validation failures, and error values produced by `| error` computations — not a rule
+for any one numeric case.
+
+#### The problem it closes
+
+§10.8 (revised 2026-07-30) already decided that a failed annotated binding "yields the boundary
+error *before the binding exists* — `x` never holds an error." That promises control leaves the
+straight-line path on failure but names no landing site, and the code after the binding was
+compiled assuming `x: T`, so execution cannot simply continue. The gap is measurable today
+(repro `temp/overflow_fn_test3.ls`, 2026-08-01): with `fn f(a: int) int { a + a*a }` and an
+argument whose body result leaves the flex-int band, the *same call* yields a bare `ITEM_ERROR`
+under boxed consumption (`let d = f(x)`, `f(x) or -1`) but a silently resurrected `float`
+under native-arithmetic consumption (`f(x) + 1`). Mechanism: the native entry flattens its
+boxed int-or-float result through `it2i` (truncated raw i64, no boundary check — the
+`transpile-mir.cpp:12034` checked return never fires because the body's AST type is `INT`), and
+the outcome then depends on whether the *caller* re-boxes (53-bit guard → bare error singleton)
+or keeps computing in the native lane (next flex-int op promotes the out-of-band i64 back to
+float). Same call, two results by consumption context — the fourth outcome §1 forbids, twice.
+
+#### Options considered (2026-08-01)
+
+1. **Status quo** — rejected: incoherent per the evidence above; the "error" produced is also
+   the bare singleton, violating the rich-payload decision (§10 Q4).
+2. **Require the user to spell `T | error`** — rejected: viral. If overflow (or any deferred
+   check) counted as inferred error-possibility, every arithmetic-bearing plain-`T` fn would
+   fail the §10.7 firewall and `| error` would spread through every signature — the `Result`
+   pandemic, and not user-friendly.
+3. **Redefine flex `int` as the float-representable integers** — **DECIDED 2026-08-01 as C16**
+   (`Lambda_Semantics_Formal2.md` C16; spec §4.1/§4.2/§4.6/§4.7 updated), in the *tagged*
+   variant: `int` remains a distinct runtime type (never a hint erased into float); arithmetic
+   incl. `div`/`%` is closed and total via `int.inf`/`int.nan`; the overflow-promotes-to-float
+   rule is deleted; unsuffixed literals stay restricted to ±(2⁵³−1). Consequence for TE-15:
+   int *arithmetic* no longer originates defects at all — the mechanism below still governs
+   casts, parsing, validation, and fractional→int admission.
+4. **Handle it for the user — automatic containment.** Two granularities:
+   - *Skip to end of function* — rejected. Every annotated `let` becomes an invisible early
+     return (`T^` behavior without the spelling), and one bad item inside a `for` kills the
+     whole batch because the jump target is past the loop.
+   - *Skip to end of the closest block/element body* — **adopted**, generalized into the
+     three-zone rule below. The containment region is not a policy choice but derived: it
+     equals the variable's scope, which is exactly the static extent of the violated
+     assumption. Code later in the block assumed `a: T`; code outside the block cannot name
+     `a` at all, so scope itself proves it needs no protection.
+
+#### The rule: three zones, one mechanism
+
+Every expression position has a statically-known **error destination** — the nearest enclosing
+construct that can *accept* an error value. Origination skips straight to it:
+
+- **Zone 1 — binding boundary.** `let a: T = e` where the deferred check fails (or an error
+  value arrives): the annotated binding is *not* an acceptor; the error skips to the end of the
+  smallest enclosing block, and **the block evaluates to the error**. Subsequent statements in
+  the block never run; outer blocks are safe by scoping.
+- **Zone 2 — composition points.** List/map/element child positions *are* acceptors: the error
+  lands as an ordinary data item and construction continues (§10 Q6's batch idiom, unchanged).
+  `[1, int("x"), 3]` still composes to `[1, error, 3]` — the element position is the nearest
+  acceptor, so the skip never reaches the block.
+- **Zone 3 — expression interior.** Operators and calls between origination and destination
+  have no acceptor positions of their own and are simply **skipped, never evaluated**. The
+  error does not travel through them as a value.
+
+The acceptor set is the closed list already enumerated by TE-8's short-circuit targets plus the
+engagement forms: container element positions; `or`-left operands (skip lands at the rescue —
+the right operand evaluates); `^err` destructuring and postfix `^` (capture/propagate);
+`match`/`is` scrutinee positions with error classification; positions typed `any`, `error`,
+`T | error`, `T^`; and unannotated bindings (which infer the union and hold the value, boxed).
+The smallest enclosing block is the destination of last resort. The fn body is the outermost
+block, so an uncontained error becomes the function's result — for *disclosed* soft errors this
+is exactly §10.7 (an open body must disclose `| error` or contain); for **defect-channel**
+errors (failed deferred boundary checks) it crosses a plain-`T` return on the unenumerated
+system channel per `Lambda_Formal_Semantics.md` §7.3 — inference must **never** widen a
+signature because of defect possibility, or option 2's pandemic returns through the back door.
+
+#### Semantic consequences
+
+- **Origination is a sequence point.** Evaluation of the containing expression stops
+  immediately; operands and effects to its right never run (Rust/Swift argument behavior).
+  Vacuous inside `fn` (no effects to observe); meaningful inside `pn`. Corollary: strict
+  left-to-right evaluation order becomes *normative*, not incidental.
+- **Rescue moves to the initializer.** Since failure exits the block, `a or 0` *after* the
+  binding is unreachable by construction; the idioms are `let a: T = e or 0` and
+  `let a^err = e` (engagement suppresses the skip and captures instead).
+- **Batch friendliness is a theorem, not a hope.** A `for` body is a block, so a bad item
+  yields one error item in the collected result and the loop continues:
+  `for (x in xs) { let n: int = int(x.count); n * 2 }` → error elements for bad items, results
+  for good ones.
+- **Elements.** Child-expression errors remain child items (zone 2); only a failed *binding*
+  declared inside the body collapses the element body to the error.
+- **Payload.** The skip delivers the §10 Q4 rich error (code, message, expected/actual,
+  boundary location) — the bare `ITEM_ERROR` singleton observed at today's re-box guard does
+  not satisfy the contract. Exception: a defect rescued *by an `or` on the same edge* may skip
+  materializing the error object (log-line breadcrumb only) as an optimization.
+
+#### Implementation model: errors are control, not values
+
+**Invariant.** An error exists only (a) boxed in an Item-typed lane or slot, or (b) transiently
+on a resolved control edge from origination site to destination. Native/unboxed lanes are
+error-free *by construction*; no operator in unboxed code ever receives an error operand — the
+emitter, not the runtime, guarantees this.
+
+Value-propagation through unboxed lanes was considered and rejected: it requires an in-band
+sentinel (today's accidental out-of-band i64 *is* one, and its consumer-dependent meaning is
+the measured divergence), or re-boxing every lane an error might cross (re-creates the flexint
+ANY-poisoning this design exists to remove), or a polled side-flag (cost on every operation).
+
+- **Destination stack.** The emitter maintains the acceptor context lexically while lowering
+  (same shape as the online-exception emission-time tracker). Destinations are static; there is
+  no dynamic unwinding — skips are intra-function branches, and fn boundaries use the ordinary
+  return path.
+- **Origination sites are a closed set**, each already computing its failure condition:
+  `lambda_type_check` boundaries, fallible conversions/sys-funcs, and calls to open/`^`
+  callees. (The flex-int promote edge was a fourth class; C16 deleted it — int arithmetic
+  never leaves int.) Routing retargets existing branches — happy-path cost is zero. `any`-lane
+  data cannot smuggle errors into native lanes because every `any`→native transition is already
+  a checked boundary (TE-5 R3).
+- **Cross-function ABI.** Interior routing reaches the fn's outermost region → error return;
+  the *call site* is an origination site in the caller. Boxed-returning calls carry the error
+  in the result Item; native-returning calls check the context error lane
+  (`FN_ERROR_LANE_CONTEXT_ITEM`) — one load-and-branch after the call, the Swift-`throws`
+  shape. A callee whose compiled body provably contains **zero** origination sites needs no
+  caller-side branch; carry this as the emission-time effect bit
+  (`FnEffectSummary.may_return_error`) — transitive in the implementation, invisible in types.
+  **Polarity fix required:** today's `closed_item_result` gate (`transpile-mir.cpp:11355`)
+  treats a *missing* variant analysis as "trusted clean, skip the error branch" — that is one
+  half of the measured divergence. Unknown must mean defect-capable; branch-free only on proof.
+- **Boxed lanes keep value contagion** (the helpers' existing "error in, error out") as an
+  equivalent implementation wherever it is unobservable — i.e. pure `fn` code. `pn` bodies emit
+  control-routing on both boxed and unboxed paths so the two agree on which effects ran.
+  **Equivalence invariant (test target, DF9-style): contagion ≡ routing wherever observable.**
+- **Landing pads.** One per region that contains origination sites: receive/box the error, root
+  it, restore the side-number-stack watermark (`lambda_restore_number_frame_top` — the existing
+  single-funnel machinery generalized per block).
+
+#### Open sub-questions
+
+- **Statement-position defects in `pn` (the hardest).** A failed reassignment whose block value
+  is discarded — `acc = acc + x` inside a loop — must not evaporate with `acc` silently stale.
+  Recommendation: escalate (raise channel / abort the loop); **undecided**.
+- **Flex-int overflow policy — RESOLVED 2026-08-01 by C16** (option 3 above, tagged variant):
+  int arithmetic is total, so it no longer produces defects; TE-15's zones stand unchanged
+  for casts, parsing, validation, and fractional→int.
+- **Skip is containment, not acknowledgement — RESOLVED by TE-16.** A raised (`T^E`) error
+  is compile-time gated at the immediate expression and therefore never reaches the skip
+  machinery; TE-15 governs defects and boundary-rejected soft errors only.
+
+### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, user)
+
+**Decision.** Local error handling becomes a single expression form:
+
+```lambda
+let a = e ^ { … ~ … }      // ~ is the error; `a` is statically clean T
+```
+
+`let a^err = e` and the prefix error test `if (^err)` are **retired**. This closes the last
+"static type lies" hole in the language and reduces `^` from four roles to three.
+
+#### Why the destructure had to go
+
+`let a^err = e` is Go's `(v, err)` shape: a *product*, so both bindings live in one scope and
+nothing prevents reading `a` when `err` is set. Its documented and implemented behavior is
+that `a` is `null` on failure (verified 2026-08-01: failure → `[null, type.null, "boom"]`,
+success → `[42, int, null]`), while its *static* type is `T` with error constituents stripped.
+But TE-11 says plain `T` excludes null — so `a : T` was a claim the runtime did not honor,
+the same defect class as TS-9's "static type said int, value is float" that C16 eliminated.
+The doc already conceded it ("effectively `T?` until `err` is checked. Flow narrowing stays
+KIV; the discipline is documented, not enforced"). Measured consequence: with `a` null,
+`a + 1` yields `null` — an unchecked use produces a silently null-contaminated result rather
+than failing loudly. Probing the representation-risk case (`string`-typed binding into
+`len`) showed no crash — `a` stays boxed — so this was a typing hole, not a memory-safety
+one; but the boxing is itself the cost, since a `T` that may hold null can never take the
+native lane TE-3 wants to give it.
+
+*Rejected repair:* flow-narrowing `a : T?` → `T` in the `else` branch of `if (^err)`. It
+preserves the ergonomics but buys soundness with a dataflow analysis that must not have
+holes. TE-16 is sound **by construction** — the failure path provably does not reach the
+binding — which is the same reasoning that chose TE-15's block scoping over function scoping.
+
+#### Why the plain skip is not sufficient either
+
+TE-15's skip is *safe* but *blind*: `{ let a: T = e; … }` cannot tell whether an error
+occurred and cannot access it. Skip is a fail-stop mechanism; `^ { }` is the handling
+mechanism. Together they are the intended pair — **skip is the default (fail-safe, the error
+becomes the block's value), and `^ { }` is the engagement form that suppresses the skip and
+puts the error in hand.**
+
+#### Prior art (the shape being adopted)
+
+Rust never lets a failed outcome and its success binding coexist in one scope: `Result<T, E>`
+is a *sum*, and either the binding is scoped to a proven-success branch (`match`, `if let`)
+or the failure path is required to leave the scope entirely (`let … else { }` whose block
+must diverge; `?`). Lambda already had two of the three: `match` arms genuinely narrow the
+scrutinee (verified 2026-08-01 — `case error:` binds `~` as the error, `case int:` binds it
+as an int, so no scope holds "an int that might be null"), and postfix `^` is `?`. TE-16
+supplies the third: `e ^ { }` is `let … else { }` in expression form.
+
+#### The form
+
+- **Typing** mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. So `let a: T = e ^ h`
+  requires `h : T` or a diverging `h`; unannotated bindings infer the union.
+- **Handler contract:** produce a value of the expected type, *or* diverge — `raise`,
+  `return`, or letting the enclosing block skip. Value-form is `or`-with-access; diverge-form
+  is let-else. `raise`/`return` inside the handler are legal and act on the enclosing frame.
+- **`~` binds the error**, consistent with `match` arms and pipes. Nested `^` inside a `match`
+  arm shadows innermost-wins.
+- **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
+  (`T | error`) errors.
+
+#### Syntax: brace-delimited, and why
+
+The handler **must** be braced. `^` followed by `{` is the handler; `^` followed by anything
+else (or nothing) is postfix propagate. This is a purely lexical discriminator.
+
+The rejected alternative was the terser `e ^ expr` with "any expression after `^` is the
+handler, EOL means propagate." Two measured problems: (1) `f(5)^ - 1` **parses today and
+evaluates to 41** (propagate, then subtract; verified against the current build), and that
+rule silently reinterprets it as rescue-with-`-1`, yielding 42 on the success path — a
+semantic change to already-valid code with no diagnostic; (2) it requires newline sensitivity
+in the expression grammar (the JavaScript-ASI hazard class), since otherwise
+`let a = f()^` followed by a statement would swallow that statement as a handler. The brace
+form needs neither. If a bare-expression form is ever wanted, the minimum safety measure is
+to make `^` followed by a unary-capable token (`-`, `+`) a **compile error demanding
+parentheses** rather than silently choosing the infix reading.
+
+The verbosity cost is illusory because **`or` already owns the terse-default case**. The
+division of labor:
+
+| Form | Catches | Error accessible |
+|---|---|---|
+| `e or default` | falsy: error, null, false, `""` | no |
+| `e ^ { … ~ … }` | error only | yes, as `~` |
+| `e^` | error only | no — propagates |
+
+Note this corrects a tempting mis-framing: `or` and `^` are **not** a soft/hard split. Both
+work on both channels (TE-13's unified discharge; verified: `error("boom") or 5` → `5`). The
+real distinction is coalescing-without-access versus error-specific-with-access — and since
+`or` also swallows null and `""`, `^ { }` is the more precise instrument even for soft errors.
+
+#### Retiring `if (^err)`
+
+With the destructure gone there is no `err` binding convention to test, and the general
+spelling already works: **`err is error`** (verified 2026-08-01). This removes the
+prefix-unary `^` (`grammar.js:542`), leaving `^` with three roles — postfix propagate
+(`:466`), infix handler (new), and the type-level channel (`:1080`, `:1139`) — all meaning
+"the error channel".
+
+#### Acknowledgement taxonomy for the enforcing channel
+
+A raised `T^E` must be acknowledged at the immediate expression (TE-13 tightness) by exactly
+one of:
+
+1. `match` with a `case error:` arm;
+2. `e ^ { … }` — handle here;
+3. `e^` — propagate;
+4. a receiving position that textually admits error — `let x: T^ = e`, `let x: T | error = e`,
+   or a declared parameter/return of that shape.
+
+`let x = e` alone never acknowledges (stricter than Zig/Rust/Go, per TE-13), and — the ruling
+this section adds — **TE-15's skip does not acknowledge either.** Skip is automatic
+containment for *defects*; it is not user engagement, so it cannot discharge an obligation
+the user is required to make visible. Consequently a raised error is compile-time gated and
+never reaches the skip machinery.
+
+**The three regimes, stated once** (they are routinely conflated):
+
+| Class | Mechanism | Compile-time obligation |
+|---|---|---|
+| soft error values (`T \| error`) | flow as data — the batch idiom | none |
+| defects (failed boundary checks) | TE-15 skip to closest safe boundary | none (automatic) |
+| raised errors (`T^E`) | must be acknowledged at the immediate expression | E228 |
+
+#### Migration
+
+- Rewrite `let a^err = e; if (^err) { H } else { B }` as `let a = e ^ { H }` followed by `B`,
+  or as a `match` when both outcomes need full arms.
+- Rewrite `if (^err)` as `if (err is error)`.
+- Grammar: remove `:542`'s prefix `^` and `:702`'s destructure; add the braced infix form;
+  `make generate-grammar` (never hand-edit `parser.c`).
+- **E228 diagnostics advertise the retired form verbatim** — "use `d(...)^` to propagate,
+  `let result^err = d(...)` to capture, or `d(...) or default` to recover"
+  (`build_ast.cpp:5199`, `:9017`). They must be updated in the same change or they will
+  instruct users toward syntax that no longer exists.
+- Doc sweep: `doc/Lambda_Error_Handling.md` (~28 hits, including its "Error Destructuring"
+  section), `doc/Lambda_Formal_Semantics.md` §7.3/§11.4/§13, `doc/Lambda_Reference.md`,
+  `doc/Lambda_Cheatsheet.md`. Note `pub x^err = …` also disappears.
+- **Lazy/streaming `for` bodies** — where containment materializes for deferred evaluation; KIV.
+- **Engagement-set finalization** — the exact list of skip-suppressing forms, kept aligned with
+  the E228 acknowledgment forms as those settle.
+
 ---
 
 ## 8. Phasing
@@ -1398,7 +1695,9 @@ semantics.
 - **`x is (int[])` — parenthesized types on the `is` RHS**: noted with full grammar analysis in
   TE-13's side-finding; belongs to the **pattern-grammar and validator design**, not this
   proposal (user, 2026-07-29).
-- **TS-9** int→float overflow policy — owned by `Lambda_Formal_Semantics.md`.
+- **TS-9** int→float overflow policy — **CLOSED 2026-08-01 by C16** (`int` = the
+  float64-representable integers, tagged; no overflow promotion exists to be silent about).
+  See `Lambda_Semantics_Formal2.md` C16 and spec §4.1.
 - Side-findings filed for separate handling: TOML datetime unsupported (§4.2); `it2l` missing
   ERROR arm and the `0`-vs-`INT64_MAX` asymmetry (§5.2) — both subsumed by TE-8 at boundaries
   but the raw converters may deserve their own cleanup. (The index-OOB → `ItemNull` behavior

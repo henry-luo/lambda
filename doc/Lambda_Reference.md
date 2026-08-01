@@ -61,7 +61,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
 | **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — Mutable variables, assignment, while loops, I/O module, `pn` functions, and `main()` entry point |
-| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, `let a^err` destructuring, compile-time enforcement |
+| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, the `^ { }` handler, compile-time enforcement |
 
 ### Reference Documentation
 
@@ -308,8 +308,8 @@ pub type Vec2 {
     fn scale(f) => <Vec2 x: x*f, y: y*f>
 }
 
-// Public with error destructuring
-pub config^err = input("config.json", 'json')
+// Public, with the error handled at the binding
+pub config = input("config.json", 'json') ^ { {} }
 
 // Private (not exported)
 let v = 123
@@ -331,9 +331,6 @@ let angle: Angle = 1.57
 let v = <Vec2 x: 3.0, y: 4.0>
 v.len()          // 5.0
 v is Vec2        // true
-
-// Error variables are also imported
-if (err != null) print("config failed")
 ```
 
 ### Export Visibility
@@ -344,7 +341,6 @@ if (err != null) print("config failed")
 | `pub fn f()` / `pub pn p()` | Public function/procedure |
 | `pub type T = ...` | Public type alias |
 | `pub type T { ... }` | Public object type |
-| `pub x^err = ...` | Public value + error variable |
 | `let x = ...` | Private (module-local) |
 | `fn f()` / `pn p()` | Private function/procedure |
 | `type T = ...` / `type T { ... }` | Private type |
@@ -382,7 +378,7 @@ m.sin(0)              // 0
 
 ## Error Handling
 
-Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors using the `^` propagation operator or `let a^err` destructuring. Ignoring an error is a **compile-time error**.
+Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors with the `^` propagation operator or the `^ { … }` handler. Ignoring an error is a **compile-time error**.
 
 ```lambda
 // Function that may fail
@@ -394,14 +390,14 @@ fn divide(a, b) int^ {
 // Propagate error with ^
 let result = divide(10, x)^
 
-// Or destructure to handle locally
-let result^err = divide(10, x)
-if (err != null) {
-    print("error: " ++ err.message)
+// Or handle it locally — `~` is the error
+let result = divide(10, x) ^ {
+    print("error: " ++ ~.message)
+    0
 }
 ```
 
-> **Full documentation**: See **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** for the complete guide — error types, `raise`, `^` operator, destructuring, enforcement rules, error codes, and examples.
+> **Full documentation**: See **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** for the complete guide — error types, `raise`, `^` operator, the `^ { }` handler, enforcement rules, error codes, and examples.
 
 ---
 

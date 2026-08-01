@@ -393,7 +393,8 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
     em_finalize_frame_prologue(&mt->em, mt->em.frame.plan.entry_mode,
         offsetof(Context, side_root_top), offsetof(Context, side_root_limit),
         offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
-        offsetof(Context, side_root_commit_limit));
+        offsetof(Context, side_root_commit_limit),
+        offsetof(Context, side_number_commit_limit));
     jm_call_void_1(mt, "lambda_stack_overflow_error", MIR_T_P,
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"js-side-stack"));
     MIR_op_t failure = mt->em.frame.return_type == MIR_T_D

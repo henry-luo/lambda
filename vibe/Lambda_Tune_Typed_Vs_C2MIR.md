@@ -267,34 +267,72 @@ purely by deleting statically-redundant checks) is this exact shape.
   every declared-return proc, so it wants its own change with the
   entry-equivalence corpus as the gate — not a tail-end edit.
 
-### T-B. Loop lowering (kills M4, M5, M6) — **largest single lever**
+### T-B. Loop lowering (kills M4, M5, M6)
 
-- **B1 — Native counted `for`.** `for i in a to b` with int-typed endpoints →
-  i64 induction variable, native compare/branch, no Range object, no iterator
-  calls. This alone de-poisons the body: with `i` unboxed, existing inference
-  keeps `i-1`, `flags[i-1]`, `k+i` in native lanes and M5 evaporates for free.
-  The whole AWFY micro cluster (sieve/permute/queens/towers/bounce, 26–31x) is
-  this one pattern.
-- **B2 — No dead comprehensions.** In statement position, emit no
-  `array_spreadable`/`array_push_spread`/`array_end`. (The prior for-stam fix
-  addressed void-body boxing; the spreadable-list scaffolding is still
-  emitted.)
+- **B1 — Native counted `for`. LANDED 2026-08-01.** `for i in a to b` with
+  int-typed endpoints → i64 induction variable, no Range object, no iterator
+  calls. Implemented as a branch *inside* the existing loop emission rather
+  than a parallel fast path: the range case computes `len = end - start + 1`
+  (clamped at 0, mirroring `fn_to`) and derives the element as
+  `start + idx`, while comprehension output, `where`/`order`/`limit`, nested
+  sources and break/continue all stay on the shared path. Removes per
+  iteration: one `iter_val_at` call and the unbox of its result; and per loop:
+  the Range allocation, `item_keys`, `iter_len`, `symbol_key_list_free`.
+
+  With `i` native, existing inference keeps `i-1`, `flags[i-1]`, `k+i` in
+  native lanes, so M5 evaporates without further work.
+
+  **Measured (MIR-typed):** awfy/sieve 0.401 → **0.252** (-37%, now faster
+  than v18's 0.518); awfy/queens 0.728 → **0.531** (-27%, ≈ v18); storage
+  1.71 → 1.60; nqueens 5.49 → 5.40. Rows that iterate by `while` or recursion
+  (permute, towers, bounce) are unaffected — the win is exactly where the
+  `to`-range pattern is used.
+
+- **B2 — No dead comprehensions. NOT SAFE AS SPECIFIED; do not retry on node
+  type.** The plan said "in statement position, emit no
+  `array_spreadable`/`array_push_spread`/`array_end`". `AST_NODE_FOR_STAM`
+  does **not** mean the value is discarded: at script top level a statement's
+  value is the printed result, so `for i in 1 to 3 { i * 10 }` must still
+  yield `[10, 20, 30]` (test/lambda/nested_shadowing.ls pins exactly this, and
+  caught the mistake). Eliding the comprehension needs a real
+  *result-unused* analysis at the point of consumption, not a syntactic
+  position test. Left in place; B1 above already removes the per-iteration
+  call that dominated.
 
 ### T-C. Typed-array direct addressing (kills M7)
 
-- **C1 — Inline element ops on proven ArrayNum.** After `ensure_typed_array`
-  (or when the static type says `float[]`/`int[]`), lower `a[i]` to bounds
-  check + `d:(base, idx, 8)` load into a d-register, and `a[i] = x` to the
-  store. Read: 2 calls → ~3 instrs. Write: 1 call → ~3 instrs. Floats stay in
-  registers, which also removes the `push_d`/adopt/restore stack detours (41
-  calls in `advance`).
-- **C2 — Remove `has_typed_array_param` from the native-gate disqualifiers**
-  once C1 exists (the exclusion is currently rational: the native body
-  couldn't do anything useful with the array anyway).
+- **C1 — Inline element ops on proven ArrayNum. ALREADY PRESENT; the nbody gap
+  was A1, not C1.** The machinery the proposal asked for already existed:
+  `emit_checked_index_load` emits bounds check + `d:(base, idx, 8)` into a
+  d-register for `float[]`/`int[]`/`uint64[]`, the indexed-store path emits an
+  inline store with `fn_array_set` only as the OOB fallback, and
+  `has_elem_type_invalidation` is properly type-aware (a float store into a
+  `float[]` does not invalidate the narrowing).
+
+  The `item_at`/`it2d` calls counted in §1.3 came from the *declaration*
+  boundary instead: `declared_array_contract` fired on every array annotation,
+  so a declared `float[]` was re-checked and downgraded to ANY before the fast
+  paths could see it. **A1 fixed that, and nbody went 82.1 → 20.5 ms (4x).**
+  The lesson is the one the mechanism catalog already implies — M7's cost was
+  M1 wearing a different hat.
+- **C2 — Remove `has_typed_array_param` from the native-gate disqualifiers.
+  LANDED 2026-08-01.** With C1's fast paths reading the array raw, the
+  exclusion only denied a function's *other* parameters their native carriers:
+  `advance(bx: float[], ..., dt: float)` passed `dt` boxed purely because it
+  shared a signature with an array. Removed from both the primary gate and the
+  forward-declaration gate, along with the now-dead scan.
 - Together these target the top of the gap table: nbody 52x, spectralnorm
   48.5x, fft 39.4x, plus TS-3's measured "annotations make it slower".
 
-### T-D. Call-ceremony diet (shrinks M8)
+### T-D. Call-ceremony diet (shrinks M8) — **D1a LANDED 2026-08-01**
+
+D1a turned out to be the single largest lever of the session: fib -20%,
+ack -18%, cpstak -16%, fibfp -18%. Removing one FFI call per *invocation*
+matters more than any per-operation saving on call-heavy code. Static emission
+grows +5 insns per function (the cold block minus the removed call), which the
+ratchet correctly flagged; budgets were re-baselined on that justification.
+The commit-limit comparison also closed a latent gap: the number region was
+never committed on Windows once the unconditional call was gone.
 
 - **D1a — Inline the side-stack ensure.** The prologue already contains the
   fast path; the call is redundant with it. Today every function emits
@@ -318,15 +356,31 @@ purely by deleting statically-redundant checks) is this exact shape.
      first call through the slow path naturally.
   Fast path grows by zero instructions and loses one FFI call per function
   invocation (~10–20 cycles + branch/I-cache pressure).
-- **D1b** — Skip the root-frame `memset` when every slot is provably stored
-  before the first GC point (fib stores all live slots before any call), or
-  zero only the live-across-call subset. For an 80-byte frame the `memset`
-  *call* costs more than the 10 inline zero-stores it performs.
-- **D2** — Conditional epilogue: skip `adopt_scalar_home`/`restore_number_frame_top`
-  when the returned Item is self-contained (tagged int/bool/inline double) and
-  the number frame provably didn't grow.
-- **D3** — Drop dead prologue loads (`type_list`, `heap_ptr`, `gc_ptr` when
-  unused) and duplicate root stores. Cheap; also shrinks MIR budgets.
+- **D1b — PARTIALLY LANDED 2026-08-01.** The safe half shipped: the
+  inline-vs-`memset` threshold moved 8 → 16 slots, so fib's 10-slot (80-byte)
+  frame clears with ten pipelined stores instead of an FFI call. Zeroing still
+  happens either way, so this carries none of the GC risk of *eliding* it.
+  The elision half (prove every slot is stored before the first GC point, or
+  zero only the live-across-call subset) is **not done** and still wants the
+  forced-GC sweep as its gate.
+- **D2 — NOT DONE; blocked on the same analysis as A3.** The mechanism already
+  exists: `em_adopt_scalar_item_value` skips the call when the mode is
+  `MIR_SCALAR_RETURN_NONE`, and `em_scalar_return_mode_for_type` already returns
+  NONE for int/bool. The blocker is `infer_boxed_return_mode`'s blanket
+  `if (is_proc) return DYNAMIC` — the *same* conservative shape A3 hit. Its
+  comment names the hazard precisely: a wide scalar returned as untagged bits
+  after the number frame has been restored. Proving a proc's returns are
+  self-contained is the identical "what does every return statement produce"
+  analysis A3's second half needs, so **the two should be implemented
+  together**.
+- **D3 — LANDED 2026-08-01.** A dead-definition sweep
+  (`em_drop_unused_definition`) runs after body emission and drops the eager
+  prologue chain — `mod_tl_bss` → `type_list`, `heap_ptr` → `gc_ptr` — in any
+  body that reads none of it. Removing them post-hoc rather than emitting
+  lazily keeps emission order independent of where the first use lands; a lazy
+  load inside a loop or a branch would be worse. Measured **-4 insns per
+  function** (-64 on the closure corpus), exactly the four dead loads.
+  Duplicate root stores were not pursued.
 
 ### Expected recovery (order-of-magnitude, per class)
 
@@ -387,3 +441,60 @@ mixed suites (cf. mypyc, Static Hermes typed paths).
 Dumps studied for this analysis: `temp/{fib,sieve,nbody,mandelbrot}_lambda.mir`
 against `temp/{fib,sieve}_c2mir.mir` (nbody/mandelbrot C ports read from
 source, `test/benchmark/awfy/c2mir/*.c`).
+
+---
+
+## 12. Two pre-existing regressions (diagnosed 2026-08-01)
+
+Both predate the tuning work; verified against `lambda-v18-e406aa9b87` and the
+pre-session build.
+
+### 12.1 kostya/brainfuck — hang. **FIXED (script).**
+
+`tape[dp] = (tape[dp] + 1) % 256` on `tape = fill(30000, 0)`. Under **C14c**,
+`int % int` is a **float**, so every store re-represented the packed int array,
+element by element. It did not fail to compile — the array is untyped, so the
+degradation was silent: >300 s versus 323 ms on v18.
+
+`brainfuck2.ls` (the typed variant) **already had** `int(...)` around both
+modulo expressions; only the untyped variant was missed when C14c landed. Same
+fix applied: hang → **566 ms**, output matches the golden.
+
+This is the fourth script hit by the same C14c change (after `fft2`, `cd2`,
+`json2`). The others failed to compile and were obvious; this one only got
+slower, which is the more dangerous failure mode. Worth a sweep for
+`div`/`%` on values that flow into packed arrays.
+
+### 12.2 beng/binarytrees2 — 7x. **DIAGNOSED, NOT FIXED.**
+
+A declared **named map shape** as a return or parameter contract runs
+`runtime_validate_value_against_type` — the full schema validator, including a
+per-call `ValidationResult` allocation — **once per instance**. binarytrees
+allocates ~500k nodes through `pn make_tree(depth: int) Node`, so it pays a
+structural walk per node. Isolated by removing one annotation at a time:
+
+| variant | ms |
+|---|---:|
+| as written | 45.7 |
+| without the `Node` **return** type | 24.4 |
+| without the `Node` **parameter** type | 25.0 |
+| v18 (pre-enforcement) | 6.3 |
+
+Each named-shape annotation roughly doubles the runtime, which is TS-3 at map
+granularity: **the annotation is a pessimization**.
+
+**Why the obvious fixes do not work** (both tried and reverted as inert):
+- *Runtime identity* (`map->type == contract` ⇒ conforms): the literal builds
+  its own anonymous `TypeMap`, never the named one, so the pointers differ.
+- *Compile-time shape equality* (T-A1 elision for field-for-field agreement):
+  the literal's fields are typed `Node` while `Node`'s fields are `Node?`, so
+  the shapes are related by **subtyping, not equality**.
+
+**The fix** is therefore one of: (a) recursive map subtyping in
+`static_boundary_relation` with a cycle guard, so `{left: Node, right: Node}`
+proves against `{left: Node?, right: Node?}` and T-A1 elides; or (b) shape
+unification at construction — build a literal with the declared `TypeMap` when
+a contract is in scope, which also makes `has_named_shape` mean something (it
+is currently only ever copied, never set). (b) additionally restores the
+`map_with_region_tl` region-producer path the benchmark's own header comment
+depends on.

@@ -2371,7 +2371,8 @@ static int jube_host_mir_function_frame_finalize(void* compiler_cursor,
     em_finalize_frame_prologue(emitter, frame->plan.entry_mode,
         offsetof(Context, side_root_top), offsetof(Context, side_root_limit),
         offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
-        offsetof(Context, side_root_commit_limit));
+        offsetof(Context, side_root_commit_limit),
+        offsetof(Context, side_number_commit_limit));
     frame->active = false;
     // Overflow handling follows frame teardown so the callee cannot observe
     // transient root or scalar-home state from a completed guest frame.

@@ -192,6 +192,10 @@ struct MirTranspiler {
     // Type-list pointer register: holds this module's type_list ArrayList* so that
     // cross-module function calls use the right type_list for map/elmt/object allocation.
     MIR_reg_t type_list_reg;
+    // D3: intermediates of the eager prologue loads, kept so the dead-definition
+    // sweep can drop the whole chain when a body reads none of it.
+    MIR_reg_t type_list_bss_reg;
+    MIR_reg_t heap_ptr_reg;
 
     // Per-module BSS item that holds this module's type_list pointer.
     MIR_item_t type_list_bss;
@@ -1101,7 +1105,8 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
     em_finalize_frame_prologue(&mt->em, mt->em.frame.plan.entry_mode,
         offsetof(Context, side_root_top), offsetof(Context, side_root_limit),
         offsetof(Context, side_number_top), offsetof(Context, side_number_limit),
-        offsetof(Context, side_root_commit_limit));
+        offsetof(Context, side_root_commit_limit),
+        offsetof(Context, side_number_commit_limit));
     emit_call_void_1(mt, "lambda_stack_overflow_error", MIR_T_P,
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"side-stack"));
     if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
@@ -4796,6 +4801,10 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
                 MIR_new_reg_op(mt->ctx, fast_mul)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
             emit_label(mt, l_promote);
+            // C16 TODO(A4): this promote lane becomes `int2it(prod)` — an
+            // out-of-band product is still an `int`. Blocked on the get_int56
+            // read-site audit; producing the carrier before readers understand
+            // it prints the cell pointer as the value.
             MIR_reg_t boxed_float = emit_box(mt, prod, LMD_TYPE_FLOAT);
             MIR_reg_t slow_mul = native_int_out
                 ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
@@ -4831,6 +4840,7 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         MIR_reg_t dsum = new_reg(mt, "fi_d", MIR_T_D);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dsum),
             MIR_new_reg_op(mt->ctx, sum)));
+        // C16 TODO(A4): becomes `int2it(dsum)` once readers are audited.
         MIR_reg_t boxed_float = emit_box(mt, dsum, LMD_TYPE_FLOAT);
         MIR_reg_t slow_sum = native_int_out
             ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
@@ -6423,22 +6433,66 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     int key_filter = (int)loop->key_filter;  // 0=ALL, 1=INT, 2=SYMBOL
     bool key_only = loop->key_only;
 
-    // Evaluate collection
-    MIR_reg_t collection = transpile_expr(mt, loop->as);
-    TypeId coll_tid = get_effective_type(mt, loop->as);
+    // T-B1: `for i in a to b` over int endpoints needs no Range object and no
+    // iterator protocol — the induction variable is `start + idx`. The generic
+    // path allocates a Range, then calls item_keys + iter_len once and
+    // iter_val_at *per iteration*, handing the body a boxed `i` that degrades
+    // every operation touching it to dynamic dispatch (M4 -> M5 in
+    // vibe/Lambda_Tune_Typed_Vs_C2MIR.md). Everything else about the loop —
+    // comprehension output, where/order/limit, nested sources, break/continue —
+    // is deliberately left on the shared path below.
+    AstNode* range_src = mir_unwrap_primary(loop->as);
+    bool counted_range = !key_only && key_filter == 0 &&
+        range_src && range_src->node_type == AST_NODE_BINARY &&
+        ((AstBinaryNode*)range_src)->op == OPERATOR_TO &&
+        get_effective_type(mt, ((AstBinaryNode*)range_src)->left) == LMD_TYPE_INT &&
+        get_effective_type(mt, ((AstBinaryNode*)range_src)->right) == LMD_TYPE_INT;
 
-    // Box the collection
-    MIR_reg_t boxed_coll = emit_box(mt, collection, coll_tid);
+    MIR_reg_t range_start = 0;
+    MIR_reg_t boxed_coll = 0;
+    MIR_reg_t keys_al = 0;
+    MIR_reg_t len;
+    if (counted_range) {
+        AstBinaryNode* range = (AstBinaryNode*)range_src;
+        MIR_reg_t start_val = transpile_expr(mt, range->left);
+        MIR_reg_t end_val = transpile_expr(mt, range->right);
+        range_start = new_reg(mt, "range_start", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, range_start), MIR_new_reg_op(mt->ctx, start_val)));
+        // Mirrors fn_to: length is end - start + 1, and an inverted range is
+        // empty rather than negative (lambda-eval.cpp fn_to).
+        len = new_reg(mt, "range_len", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB, MIR_new_reg_op(mt->ctx, len),
+            MIR_new_reg_op(mt->ctx, end_val), MIR_new_reg_op(mt->ctx, range_start)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, len),
+            MIR_new_reg_op(mt->ctx, len), MIR_new_int_op(mt->ctx, 1)));
+        MIR_reg_t empty = new_reg(mt, "range_empty", MIR_T_I64);
+        MIR_label_t l_len_ok = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LT, MIR_new_reg_op(mt->ctx, empty),
+            MIR_new_reg_op(mt->ctx, len), MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_len_ok), MIR_new_reg_op(mt->ctx, empty)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_label(mt, l_len_ok);
+    } else {
+        // Evaluate collection
+        MIR_reg_t collection = transpile_expr(mt, loop->as);
+        TypeId coll_tid = get_effective_type(mt, loop->as);
 
-    // Get keys (for maps/elements/objects - returns ArrayList* or NULL for arrays)
-    MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+        // Box the collection
+        boxed_coll = emit_box(mt, collection, coll_tid);
 
-    // Get unified iteration length via iter_len(data, keys, key_filter)
-    MIR_reg_t len = emit_call_3(mt, "iter_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        // Get keys (for maps/elements/objects - returns ArrayList* or NULL for arrays)
+        keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
+
+        // Get unified iteration length via iter_len(data, keys, key_filter)
+        len = emit_call_3(mt, "iter_len", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+    }
 
     // Create spreadable output array
     MIR_reg_t output = emit_call_0(mt, "array_spreadable", MIR_T_P);
@@ -6478,17 +6532,27 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cmp)));
 
+    // T-B1: the counted range's element is arithmetic, not a fetch. Producing it
+    // natively is what keeps `i` out of the boxed lane for the whole body.
+    MIR_reg_t current_item = 0;
+    TypeId val_tid = LMD_TYPE_INT;
+    MIR_type_t val_mtype = MIR_T_I64;
+    MIR_reg_t val_reg = 0;
+    if (counted_range) {
+        val_reg = new_reg(mt, "range_i", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, val_reg),
+            MIR_new_reg_op(mt->ctx, range_start), MIR_new_reg_op(mt->ctx, idx)));
+    } else {
     // Get current loop item; `for k at item` binds keys, while `in` binds values.
-    MIR_reg_t current_item = emit_call_4(mt, key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
+    current_item = emit_call_4(mt, key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
         MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
         MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
 
     // Determine the proper type for the loop variable from AST
-    TypeId val_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
-    MIR_type_t val_mtype = MIR_T_I64;
-    MIR_reg_t val_reg = current_item;
+    val_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
+    val_reg = current_item;
 
     // For known element types, unbox to the proper MIR type
     if (val_tid == LMD_TYPE_FLOAT) {
@@ -6507,6 +6571,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         val_reg = emit_unbox(mt, current_item, LMD_TYPE_STRING);
         val_mtype = MIR_T_P;
     }
+    }
 
     // Bind loop value variable
     char var_name[128];
@@ -6518,13 +6583,18 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         char idx_name[128];
         snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
 
-        // Get key via iter_key_at(data, keys, idx, key_filter)
-        MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
-        set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
+        if (counted_range) {
+            // A range's key is its ordinal, which the counter already holds.
+            set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
+        } else {
+            // Get key via iter_key_at(data, keys, idx, key_filter)
+            MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
+                MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+            set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
+        }
     }
 
     // Handle nested loops (multi-variable for: for (a in X, b in Y, ...))
@@ -6668,8 +6738,10 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
-    emit_call_void_1(mt, "symbol_key_list_free",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+    if (keys_al) {
+        emit_call_void_1(mt, "symbol_key_list_free",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+    }
 
     // Post-processing: ORDER BY, then OFFSET, then LIMIT
     MIR_reg_t final_reg;
@@ -15044,10 +15116,63 @@ static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
         while (last && last->next) last = last->next;
         body = mir_unwrap_primary(last);
     }
+    // A3: a braced proc ends in a `return` *statement*, whose own node carries
+    // no type — which made every such body defer and denied procs the native
+    // return lane. The statement's value is what the ABI actually returns, and
+    // each return site already converts to the declared carrier
+    // (transpile_return_stam) while `emit_return_if_item_error` diverts a raised
+    // diagnostic, so inspect the value instead of the wrapper.
+    if (body && body->node_type == AST_NODE_RETURN_STAM) {
+        body = mir_unwrap_primary(((AstReturnNode*)body)->value);
+    }
     return body;
 }
 
+// A checked declaration boundary emits `emit_return_if_item_error`, so a body
+// containing one can return an Item even when the signature is clean. That is
+// only representable on a boxed return: a native lane either fails MIR
+// validation (an Item into a `double`) or silently hands the caller error bits
+// as a number, and granting the callee an error lane does not help because a
+// non-`can_raise` caller never reads it (see the `call_error_lane` gate) —
+// the diagnostic would be replaced by a silent 0. So the boundary must deny
+// the native return, exactly as a deferring tail expression does.
+//
+// The test mirrors the emitter's own condition (`declaration_boundary_applies`
+// plus `mir_boundary_is_redundant`): a check is emitted unless the annotation
+// is redundant against the initializer's static type. Anything this misses
+// would be a silent miscompile, so unknown shapes must answer "may defer".
+static bool declaration_may_check_boundary(AstNode* stam) {
+    AstNode* declare = stam->node_type == AST_NODE_LET_STAM ||
+        stam->node_type == AST_NODE_VAR_STAM || stam->node_type == AST_NODE_PUB_STAM
+        ? ((AstLetNode*)stam)->declare : NULL;
+    for (AstNode* d = declare; d; d = d->next) {
+        if (d->node_type != AST_NODE_ASSIGN) continue;
+        AstNamedNode* asn = (AstNamedNode*)d;
+        if (!asn->declared_type || asn->is_type_definition) continue;
+        Type* declared = mir_unwrap_decl_type(asn->declared_type);
+        if (!declared) return true;
+        if (!asn->as || !asn->as->type) return true;
+        if (!lambda_boundary_is_redundant(asn->as->type, declared)) return true;
+    }
+    return false;
+}
+
+static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
+    AstNode* body = fn_node ? mir_unwrap_primary(fn_node->body) : NULL;
+    if (!body) return false;
+    if (body->node_type != AST_NODE_LIST && body->node_type != AST_NODE_CONTENT) {
+        return declaration_may_check_boundary(body);
+    }
+    for (AstNode* stam = ((AstListNode*)body)->item; stam; stam = stam->next) {
+        if (declaration_may_check_boundary(stam)) return true;
+    }
+    return false;
+}
+
 static bool function_return_may_defer(AstFuncNode* fn_node) {
+    // An interior checked boundary can produce a return the native ABI cannot
+    // carry, independently of what the tail expression proves.
+    if (function_body_may_check_boundary(fn_node)) return true;
     AstNode* body = function_body_result_expr(fn_node);
     if (!body) return true;
     if (body->node_type == AST_NODE_CALL_EXPR) {
@@ -15707,16 +15832,15 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // param with a native type (INT, FLOAT, BOOL, STRING, INT64, UINT64), OR has a
     // declared native return type (P4-3.4: return-type-only optimization).
     bool generate_native = false;
-    bool has_typed_array_param = false;
-    for (int i = 0; i < user_param_count; i++) {
-        if (resolved_param_types[i] == LMD_TYPE_ARRAY_NUM) {
-            has_typed_array_param = true;
-            break;
-        }
-    }
+    // T-C1/C2: a typed-array parameter no longer disqualifies the native body.
+    // The exclusion was rational while `float[]` reads went through item_at:
+    // the native body could do nothing useful with the array. Now that the
+    // indexed fast paths read it raw (emit_checked_index_load), the exclusion
+    // only denies the function's *other* params their native carriers — an
+    // `advance(bx: float[], ..., dt: float)` was passing `dt` boxed purely
+    // because it shared a signature with an array.
     if (!needs_task_context && !is_async_proc && !has_borrowed_params &&
-            !is_closure && !is_method && !is_variadic &&
-            !has_typed_array_param) {
+            !is_closure && !is_method && !is_variadic) {
         for (int i = 0; i < user_param_count; i++) {
             if (mir_is_native_param_type(resolved_param_types[i])) {
                 generate_native = true;
@@ -15912,6 +16036,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Load this module's type_list from per-module BSS _mod_type_list_ptr. Used by
     // map_with_tl/elmt_with_tl/etc. to pass the module's own type_list to those calls.
     MIR_reg_t mod_tl_bss_addr_fn = new_reg(mt, "mod_tl_bss", MIR_T_I64);
+    mt->type_list_bss_reg = mod_tl_bss_addr_fn;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr_fn),
         MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
     mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
@@ -15920,6 +16045,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
     MIR_reg_t heap_reg_fn = new_reg(mt, "heap_ptr", MIR_T_I64);
+    mt->heap_ptr_reg = heap_reg_fn;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg_fn),
@@ -16505,6 +16631,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Publish the Item ABI only when dynamic/host reachability needs it.  A
     // closed direct graph keeps a single body; when inference is open this is
     // instead the guarded fast/slow companion selected above.
+    // D3: the eager prologue chain is dead in any body that never allocates.
+    // Sweep leaf-first so dropping gc_ptr exposes heap_ptr, and so on.
+    em_drop_unused_definition(&mt->em, mt->gc_reg);
+    em_drop_unused_definition(&mt->em, mt->heap_ptr_reg);
+    em_drop_unused_definition(&mt->em, mt->type_list_reg);
+    em_drop_unused_definition(&mt->em, mt->type_list_bss_reg);
+
     NativeFuncInfo* wrapper_nfi = generate_native
         ? find_native_func_info(mt, name_buf->str) : NULL;
     if (mir_function_needs_boxed_entry(mt, fn_node)) {
@@ -16966,7 +17099,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                             name_buf->str, fwd_ret_tid);
                     }
                     // P4-3.4: Also enable native version when return type alone is native
-                    if (!has_native && !has_typed_array_param) {
+                    if (!has_native) {
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
                         if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
                             NativeFuncInfo nfi;

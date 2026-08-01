@@ -18,10 +18,12 @@ pn four1(data: float[], n: int) {
             data[i + 1] = data[j + 1]
             data[j + 1] = temp
         }
-        var m: int = n div 2
+        // C14c: `div` keeps truncation semantics but takes its result domain
+        // from `/`, so int div int is a float. An int binding needs int().
+        var m: int = int(n div 2)
         while (m >= 2 and j >= m) {
             j = j - m
-            m = m div 2
+            m = int(m div 2)
         }
         j = j + m
         i = i + 2

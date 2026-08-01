@@ -24,10 +24,10 @@
 [float, 2]
 [float, 9007199254740991]
 "=== M2: idiv and mod share the float result domain ==="
-[float, 3]
-[float, -3]
-[float, 1]
-[float, -1]
+[int, 3]
+[int, -3]
+[int, 1]
+[int, -1]
 "=== M1: float vs float, static ==="
 [bool, true]
 [bool, false]

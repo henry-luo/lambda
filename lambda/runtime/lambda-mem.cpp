@@ -840,6 +840,35 @@ static Item box_float_number_stack(double dval) {
     return {.item = d2it(dptr)};
 }
 
+// C16: an `int` outside the compact ±(2^53-1) band still belongs to the int
+// domain (the float64-representable integers), but a tagged Item has no room
+// for an inline double — the tag byte and the double's own bits occupy the
+// same word. So it takes a cell, exactly like a tiny out-of-band float, while
+// keeping an int tag so `type()` still answers `int`.
+static Item box_int_number_stack(double dval) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
+        log_error("number-stack int boxing called with invalid context");
+        return ItemError;
+    }
+    double *dptr = (double*)lambda_side_number_alloc();
+    if (!dptr) {
+        lambda_stack_overflow_error("number-side-stack");
+        return ItemError;
+    }
+    *dptr = dval;
+    return {.item = ITEM_INT_BIG | (uint64_t)(uintptr_t)dptr};
+}
+
+// Canonical C16 int encoder. `value` must already be integral (or an int
+// poison sentinel); it selects the carrier by magnitude and never changes type,
+// which is what makes int arithmetic total.
+Item int2it(double value) {
+    if (value >= (double)INT53_MIN && value <= (double)INT53_MAX) {
+        return {.item = i2it((int64_t)value)};
+    }
+    return box_int_number_stack(value);
+}
+
 Item flt2it(double dval) {
     uint64_t bits;
     memcpy(&bits, &dval, sizeof(bits));
@@ -878,6 +907,13 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     if (!home) {
         // A missing ABI home would return a dead activation pointer.
         abort();
+    }
+    // Tested before the switch: `get_type_id` normalizes the C16 int carrier to
+    // LMD_TYPE_INT, so a `case LMD_TYPE_INT_BIG` below could never match.
+    if (!(item.item & ITEM_DBL_MASK) && item._type_id == LMD_TYPE_INT_BIG) {
+        double value = lambda_int_item_value(item);
+        memcpy(home, &value, sizeof(value));
+        return {.item = ITEM_INT_BIG | (uint64_t)(uintptr_t)home};
     }
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64:

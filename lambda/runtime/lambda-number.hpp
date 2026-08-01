@@ -173,11 +173,12 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         decision.valid = 1;
         decision.left_domain = left;
         decision.right_domain = right;
-        // C14c keeps `div` and `%` as truncation/remainder operations, but
-        // selects their result domain exactly like `/`. A known int pair must
-        // therefore leave the compact integer lane before MIR/native lowering.
-        decision.result = (op == LAMBDA_NUM_OP_TRUE_DIV ||
-            op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) &&
+        // C16 revises C14c's result-typing arm: `div`/`%` stay in their operand
+        // domain, closing over int's own poison (`7 div 0` is `int.inf`). Only
+        // true division leaves int, because a fractional result genuinely is a
+        // float. C14c's substance — truncation semantics, literal-zero compile
+        // error, never `error()` — is unchanged.
+        decision.result = op == LAMBDA_NUM_OP_TRUE_DIV &&
             joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT : joined;
         decision.overflow = decision.result == LAMBDA_NUM_INT ?
             LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT : LAMBDA_NUM_OVERFLOW_IEEE;
@@ -263,12 +264,12 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         if (joined != LAMBDA_NUM_INT && joined != LAMBDA_NUM_INTEGER) return decision;
         decision.result = joined;
     } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
-        // C14c gives integral division and remainder the same result-domain
-        // selection as `/`: flex/small integers become float and full-width or
-        // unbounded integer domains become decimal. The operation itself still
-        // supplies truncation-toward-zero or dividend-signed remainder.
-        decision.result = joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT :
-                          joined == LAMBDA_NUM_INTEGER ? LAMBDA_NUM_DECIMAL : joined;
+        // C16: integral division and remainder stay in the joined domain, which
+        // closes over that domain's own poison. Truncation-toward-zero and
+        // dividend-signed remainder are unchanged; only the result *type*
+        // differs from C14c. `integer div integer` stays `integer` (ruling 13),
+        // so sized i64/u64 pairs land in `integer` rather than `decimal`.
+        decision.result = joined;
     } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
         decision.result = joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT :
                           joined == LAMBDA_NUM_INTEGER ? LAMBDA_NUM_DECIMAL : joined;

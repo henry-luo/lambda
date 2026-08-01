@@ -43,7 +43,7 @@ pn hit_add(ht, name, index) {
     var conv = { v: 0 }
     conv.v = n
     var ni: int = (conv.v)
-    var slot: int = int(ni % 32)
+    var slot: int = ni % 32
     var tbl = (ht.tbl)
     if (index < 255) {
         var val: int = (index + 1) % 256
@@ -61,7 +61,7 @@ pn hit_get(ht, name) {
     var conv = { v: 0 }
     conv.v = n
     var ni: int = (conv.v)
-    var slot: int = int(ni % 32)
+    var slot: int = ni % 32
     var tbl = (ht.tbl)
     var v = tbl[slot]
     var r: int = v - 1
