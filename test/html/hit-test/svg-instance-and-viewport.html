@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Adapted from WPT SVG <use> and cssom-view elementFromPoint coverage. -->
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+</style>
+<svg id="hit-surface" width="720" height="300" viewBox="0 0 720 300">
+  <defs>
+    <path id="source-diamond" d="M40 0 L80 40 L40 80 L0 40 Z" fill="#369"/>
+    <g id="source-group" transform="translate(5 0)">
+      <rect x="0" y="0" width="70" height="60" fill="#693"/>
+    </g>
+  </defs>
+  <use id="diamond-instance" href="#source-diamond" x="20" y="20"/>
+  <use id="group-instance" href="#source-group" x="610" y="20"/>
+  <image id="image-box" x="160" y="20" width="110" height="70"
+         href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLkPgAAAABJRU5ErkJggg=="/>
+  <text id="svg-text" x="320" y="65" font-size="32">Hit</text>
+  <foreignObject id="foreign-box" x="440" y="20" width="110" height="70">
+    <div xmlns="http://www.w3.org/1999/xhtml">foreign</div>
+  </foreignObject>
+  <svg id="clipped-nested" x="20" y="140" width="100" height="80" viewBox="0 0 100 80" overflow="hidden">
+    <rect id="nested-visible" x="10" y="20" width="50" height="40" fill="#693"/>
+    <rect id="nested-outside" x="80" y="20" width="70" height="40" fill="#936"/>
+  </svg>
+  <svg id="none-inherited" x="180" y="140" width="100" height="80" pointer-events="none">
+    <rect id="blocked-child" x="0" y="0" width="45" height="80" fill="#936"/>
+    <rect id="re-enabled-child" x="55" y="0" width="45" height="80" fill="#369" pointer-events="all"/>
+  </svg>
+</svg>

@@ -260,10 +260,11 @@ static inline void svg_fill_path(SvgInlineRenderContext* ctx, RdtPath* path, Col
 
 static inline void svg_stroke_path(SvgInlineRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
-                                   const float* dash, int dash_count, const RdtMatrix* xform) {
+                                   const float* dash, int dash_count, float dash_phase,
+                                   const RdtMatrix* xform) {
     PaintRecordTarget target = svg_record_target(ctx);
     paint_record_stroke_path(&target, "svg_stroke_path", path, color, width,
-                             cap, join, dash, dash_count, 0, xform);
+                             cap, join, dash, dash_count, dash_phase, xform);
 }
 static inline void svg_fill_linear_gradient(SvgInlineRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
@@ -484,33 +485,36 @@ static bool svg_style_name_matches(const char* style, const char* name, size_t n
     return *p == ':';
 }
 
+const char* svg_get_inline_style_property(const char* style, const char* name,
+                                          char* buffer, size_t buffer_size) {
+    if (!style || !name || !buffer || buffer_size == 0) return nullptr;
+    size_t name_len = strlen(name);
+    const char* p = style;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
+        if (!*p) break;
+        if (svg_style_name_matches(p, name, name_len)) {
+            p += name_len;
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+            if (*p == ':') p++;
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+            const char* value_start = p;
+            while (*p && *p != ';') p++;
+            svg_copy_trim(buffer, buffer_size, value_start, p);
+            return buffer;
+        }
+        while (*p && *p != ';') p++;
+        if (*p == ';') p++;
+    }
+    return nullptr;
+}
+
 static const char* get_svg_attr_or_style(SvgInlineRenderContext* ctx, Element* elem, const char* name, char* buffer, size_t buffer_size) {
     if (!buffer || buffer_size == 0) return nullptr;
 
-    const char* style = get_svg_attr(elem, "style");
-    if (style) {
-        size_t name_len = strlen(name);
-        const char* p = style;
-        while (*p) {
-            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
-            if (!*p) break;
-
-            if (svg_style_name_matches(p, name, name_len)) {
-                p += name_len;
-                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-                if (*p == ':') p++;
-                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-
-                const char* value_start = p;
-                while (*p && *p != ';') p++;
-                svg_copy_trim(buffer, buffer_size, value_start, p);
-                return buffer;
-            }
-
-            while (*p && *p != ';') p++;
-            if (*p == ';') p++;
-        }
-    }
+    const char* inline_value = svg_get_inline_style_property(get_svg_attr(elem, "style"),
+        name, buffer, buffer_size);
+    if (inline_value) return inline_value;
 
     const char* rule_value = get_svg_style_rule_value(ctx, elem, name, buffer, buffer_size);
     if (rule_value) return rule_value;
@@ -1554,6 +1558,8 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
     char stroke_opacity_buf[64];
     char linecap_buf[64];
     char linejoin_buf[64];
+    char dasharray_buf[256];
+    char dashoffset_buf[64];
     const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
     const char* fill_opacity_attr = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
     const char* opacity_attr = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
@@ -1663,20 +1669,33 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
         }
 
         // dash array
-        float dashes[16];
+        float dashes[32];
         int dash_count = 0;
-        const char* dasharray = get_svg_attr(elem, "stroke-dasharray");
+        const char* dasharray = get_svg_attr_or_style(ctx, elem, "stroke-dasharray",
+            dasharray_buf, sizeof(dasharray_buf));
         if (dasharray && strcmp(dasharray, "none") != 0) {
             const char* p = dasharray;
             while (*p && dash_count < 16) {
                 while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                 if (!*p) break;
-                dashes[dash_count++] = strtof(p, (char**)&p);
+                float dash = strtof(p, (char**)&p);
+                if (dash > 0.0f) dashes[dash_count++] = dash;
             }
         }
+        if (dash_count & 1) {
+            // SVG repeats an odd-length list; keeping the renderer's period
+            // aligned with hit testing prevents every second dash from moving.
+            int original_count = dash_count;
+            for (int index = 0; index < original_count; index++) {
+                dashes[dash_count++] = dashes[index];
+            }
+        }
+        const char* dashoffset = get_svg_attr_or_style(ctx, elem, "stroke-dashoffset",
+            dashoffset_buf, sizeof(dashoffset_buf));
+        float dash_phase = dashoffset ? parse_svg_length(dashoffset, 0.0f) : 0.0f;
 
         svg_stroke_path(ctx, path, sc, stroke_width, cap, join,
-                        dash_count > 0 ? dashes : nullptr, dash_count, transform);
+                        dash_count > 0 ? dashes : nullptr, dash_count, dash_phase, transform);
     }
 
     if (use_filter) {
@@ -1757,7 +1776,7 @@ static void render_svg_line(SvgInlineRenderContext* ctx, Element* elem) {
         // no inherited stroke and no explicit stroke: draw with default black
         Color black = {}; black.a = 255;
         svg_stroke_path(ctx, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
-                        nullptr, 0, &m);
+                        nullptr, 0, 0.0f, &m);
     }
     draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
     rdt_path_free(path);

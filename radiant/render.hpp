@@ -185,6 +185,9 @@ bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 // returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
 RdtPath* svg_parse_path_d(const char* d);
 bool svg_parse_transform(const char* transform_str, float matrix[6]);
+// Returns the matching inline SVG style value in caller-owned storage, or null.
+const char* svg_get_inline_style_property(const char* style, const char* name,
+                                          char* buffer, size_t buffer_size);
 
 typedef struct SvgTextMetrics {
     float width;

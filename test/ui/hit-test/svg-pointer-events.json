@@ -1,0 +1,24 @@
+{
+  "name": "SVG hit-test: pointer-events geometry modes",
+  "html": "test/html/hit-test/svg-pointer-events.html",
+  "default_timeout": 0,
+  "viewport": {"width": 860, "height": 430},
+  "events": [
+    {"type": "assert_hit_test", "x": 70, "y": 55, "expected_selector": "#bbox-hidden"},
+    {"type": "assert_hit_test", "x": 200, "y": 55, "expected_selector": "#all-unpainted"},
+    {"type": "assert_hit_test", "x": 330, "y": 55, "expected_selector": "#visible-fill-unpainted"},
+    {"type": "assert_hit_test", "x": 410, "y": 55, "expected_selector": "#visible-stroke-unpainted"},
+    {"type": "assert_hit_test", "x": 590, "y": 55, "expected_selector": "#css-all-unpainted"},
+    {"type": "assert_hit_test", "x": 715, "y": 55, "expected_selector": "#css-overrides-none"},
+    {"type": "assert_hit_test", "x": 70, "y": 175, "expected_selector": "#hidden-painted"},
+    {"type": "assert_hit_test", "x": 200, "y": 175, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 330, "y": 175, "expected_selector": "#opacity-zero-painted"},
+    {"type": "assert_hit_test", "x": 460, "y": 175, "expected_selector": "#behind-pointer-none"},
+    {"type": "assert_hit_test", "x": 590, "y": 175, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 715, "y": 175, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 70, "y": 285, "expected_selector": "#visible-unpainted"},
+    {"type": "assert_hit_test", "x": 200, "y": 285, "expected_selector": "#fill-hidden-unpainted"},
+    {"type": "assert_hit_test", "x": 280, "y": 285, "expected_selector": "#stroke-hidden-unpainted"},
+    {"type": "assert_hit_test", "x": 410, "y": 285, "expected_selector": "#hit-surface"}
+  ]
+}

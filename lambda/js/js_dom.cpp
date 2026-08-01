@@ -145,6 +145,7 @@ static Item js_dom_svg_get_animated_class_name(DomElement* elem);
 static Item js_dom_svg_create_transform(void);
 static Item js_dom_svg_create_transform_from_matrix(Item matrix);
 static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem);
+static DomElement* dom_find_by_id(DomElement* root, const char* id);
 
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
@@ -4490,9 +4491,8 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
 // ============================================================================
 
 /**
- * On-demand matching for CSS custom properties (--variable-name).
- * Matches element against all stylesheets and returns the best-matching
- * declaration for the given custom property name.
+ * On-demand stylesheet matching for a custom or regular property. Inline
+ * regular styles are resolved by their caller before this stylesheet pass.
  */
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name) {
     if (!elem || !elem->doc || !prop_name) return nullptr;
@@ -12113,20 +12113,42 @@ static bool js_dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
     return true;
 }
 
-static const float JS_DOM_SVG_PATH_HIT_AIM_SLOP_PX = 3.0f;
+static const float JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX = 3.0f;
 static const int JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH = 10;
 
 typedef struct JsDomSvgPathHitContext {
     float point_x;
     float point_y;
     float curve_flatness;
-    float nearest_stroke_distance_sq;
+    float stroke_radius;
+    float stroke_dash[32];
+    float stroke_dash_total;
+    float stroke_dash_offset;
+    float subpath_stroke_length;
+    float first_stroke_start_x;
+    float first_stroke_start_y;
+    float first_stroke_end_x;
+    float first_stroke_end_y;
+    float last_stroke_start_x;
+    float last_stroke_start_y;
+    float last_stroke_end_x;
+    float last_stroke_end_y;
+    int stroke_dash_count;
+    RdtStrokeCap stroke_cap;
+    RdtStrokeJoin stroke_join;
+    float stroke_miter_limit;
     int fill_winding;
     int fill_crossings;
     bool fill_on_edge;
+    bool subpath_fill_on_edge;
     bool has_current;
     bool subpath_has_draw;
     bool subpath_closed;
+    bool has_first_stroke_segment;
+    bool has_last_stroke_segment;
+    bool stroke_enabled;
+    bool stroke_hit;
+    float subpath_area_twice;
     float current_x;
     float current_y;
     float subpath_start_x;
@@ -12155,6 +12177,203 @@ static float js_dom_svg_point_segment_distance_sq(float point_x, float point_y,
     return px * px + py * py;
 }
 
+static bool js_dom_svg_point_in_triangle(float point_x, float point_y,
+                                         float ax, float ay, float bx, float by,
+                                         float cx, float cy) {
+    float ab = (point_x - ax) * (by - ay) - (point_y - ay) * (bx - ax);
+    float bc = (point_x - bx) * (cy - by) - (point_y - by) * (cx - bx);
+    float ca = (point_x - cx) * (ay - cy) - (point_y - cy) * (ax - cx);
+    return (ab >= 0.0f && bc >= 0.0f && ca >= 0.0f) ||
+        (ab <= 0.0f && bc <= 0.0f && ca <= 0.0f);
+}
+
+static bool js_dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
+                                                float start_x, float start_y,
+                                                float end_x, float end_y,
+                                                bool start_cap, bool end_cap) {
+    if (!context) return false;
+    float dx = end_x - start_x;
+    float dy = end_y - start_y;
+    float length = hypotf(dx, dy);
+    if (length <= 0.000001f) {
+        float px = context->point_x - start_x;
+        float py = context->point_y - start_y;
+        return px * px + py * py <= context->stroke_radius * context->stroke_radius;
+    }
+    float ux = dx / length;
+    float uy = dy / length;
+    float point_dx = context->point_x - start_x;
+    float point_dy = context->point_y - start_y;
+    float along = point_dx * ux + point_dy * uy;
+    float across = point_dx * -uy + point_dy * ux;
+    if (fabsf(across) > context->stroke_radius) return false;
+    float min_along = 0.0f;
+    float max_along = length;
+    if (context->stroke_cap == RDT_CAP_SQUARE) {
+        if (start_cap) min_along -= context->stroke_radius;
+        if (end_cap) max_along += context->stroke_radius;
+    }
+    if (along >= min_along && along <= max_along) return true;
+    if (context->stroke_cap != RDT_CAP_ROUND) return false;
+    if (start_cap && along < 0.0f) {
+        return point_dx * point_dx + point_dy * point_dy <=
+            context->stroke_radius * context->stroke_radius;
+    }
+    if (end_cap && along > length) {
+        float end_dx = context->point_x - end_x;
+        float end_dy = context->point_y - end_y;
+        return end_dx * end_dx + end_dy * end_dy <=
+            context->stroke_radius * context->stroke_radius;
+    }
+    return false;
+}
+
+static bool js_dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
+                                     float distance, float* out_remaining) {
+    if (!context || context->stroke_dash_count <= 0 || context->stroke_dash_total <= 0.0f) {
+        if (out_remaining) *out_remaining = 1.0e30f;
+        return true;
+    }
+    float position = fmodf(distance + context->stroke_dash_offset,
+        context->stroke_dash_total);
+    if (position < 0.0f) position += context->stroke_dash_total;
+    for (int index = 0; index < context->stroke_dash_count; index++) {
+        float length = context->stroke_dash[index];
+        if (position < length || index == context->stroke_dash_count - 1) {
+            if (out_remaining) *out_remaining = LMB_MAX(length - position, 0.0f);
+            return (index & 1) == 0;
+        }
+        position -= length;
+    }
+    if (out_remaining) *out_remaining = 0.0f;
+    return false;
+}
+
+static void js_dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
+                                         float prev_start_x, float prev_start_y,
+                                         float vertex_x, float vertex_y,
+                                         float next_end_x, float next_end_y) {
+    if (!context || context->stroke_hit) return;
+    float prev_dx = vertex_x - prev_start_x;
+    float prev_dy = vertex_y - prev_start_y;
+    float next_dx = next_end_x - vertex_x;
+    float next_dy = next_end_y - vertex_y;
+    float prev_length = hypotf(prev_dx, prev_dy);
+    float next_length = hypotf(next_dx, next_dy);
+    if (prev_length <= 0.000001f || next_length <= 0.000001f) return;
+    float vertex_dx = context->point_x - vertex_x;
+    float vertex_dy = context->point_y - vertex_y;
+    // Flattened closed curves share this vertex between two butt strips. Keep
+    // the shared centerline covered so an epsilon at move/close cannot create
+    // a false gap in an otherwise continuous stroke.
+    if (vertex_dx * vertex_dx + vertex_dy * vertex_dy <=
+        context->stroke_radius * context->stroke_radius) {
+        context->stroke_hit = true;
+        return;
+    }
+    float prev_x = prev_dx / prev_length;
+    float prev_y = prev_dy / prev_length;
+    float next_x = next_dx / next_length;
+    float next_y = next_dy / next_length;
+    float cross = prev_x * next_y - prev_y * next_x;
+    if (fabsf(cross) <= 0.000001f) return;
+    float outward_sign = cross > 0.0f ? -1.0f : 1.0f;
+    float prev_normal_x = -prev_y * outward_sign;
+    float prev_normal_y = prev_x * outward_sign;
+    float next_normal_x = -next_y * outward_sign;
+    float next_normal_y = next_x * outward_sign;
+    float outer_prev_x = vertex_x + prev_normal_x * context->stroke_radius;
+    float outer_prev_y = vertex_y + prev_normal_y * context->stroke_radius;
+    float outer_next_x = vertex_x + next_normal_x * context->stroke_radius;
+    float outer_next_y = vertex_y + next_normal_y * context->stroke_radius;
+    if (context->stroke_join == RDT_JOIN_ROUND) {
+        float point_dx = context->point_x - vertex_x;
+        float point_dy = context->point_y - vertex_y;
+        context->stroke_hit = point_dx * point_dx + point_dy * point_dy <=
+            context->stroke_radius * context->stroke_radius;
+        return;
+    }
+    if (context->stroke_join == RDT_JOIN_BEVEL) {
+        context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+            vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
+        return;
+    }
+    float determinant = prev_x * -next_y - prev_y * -next_x;
+    if (fabsf(determinant) <= 0.000001f) return;
+    float delta_x = outer_next_x - outer_prev_x;
+    float delta_y = outer_next_y - outer_prev_y;
+    float prev_distance = (delta_x * -next_y - delta_y * -next_x) / determinant;
+    float miter_x = outer_prev_x + prev_x * prev_distance;
+    float miter_y = outer_prev_y + prev_y * prev_distance;
+    float miter_length = hypotf(miter_x - vertex_x, miter_y - vertex_y);
+    if (miter_length > context->stroke_miter_limit * context->stroke_radius) {
+        context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+            vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
+        return;
+    }
+    context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+        outer_prev_x, outer_prev_y, outer_next_x, outer_next_y, miter_x, miter_y);
+}
+
+static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
+                                                    float start_x, float start_y,
+                                                    float end_x, float end_y) {
+    if (!context || !context->stroke_enabled) return;
+    if (context->stroke_dash_count == 0 && context->has_last_stroke_segment) {
+        js_dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
+            context->last_stroke_start_y, start_x, start_y, end_x, end_y);
+    }
+    float dx = end_x - start_x;
+    float dy = end_y - start_y;
+    float length = hypotf(dx, dy);
+    if (length <= 0.000001f) return;
+    if (!context->has_first_stroke_segment) {
+        context->first_stroke_start_x = start_x;
+        context->first_stroke_start_y = start_y;
+        context->first_stroke_end_x = end_x;
+        context->first_stroke_end_y = end_y;
+        context->has_first_stroke_segment = true;
+    }
+    if (context->stroke_dash_count <= 0) {
+        if (js_dom_svg_stroke_segment_contains(context, start_x, start_y,
+                end_x, end_y, false, false)) {
+            context->stroke_hit = true;
+        }
+    } else {
+        float segment_offset = 0.0f;
+        while (segment_offset < length) {
+            float remaining = 0.0f;
+            float path_offset = context->subpath_stroke_length + segment_offset;
+            bool dash_on = js_dom_svg_dash_is_on_at(context, path_offset, &remaining);
+            if (remaining <= 0.000001f) remaining = length - segment_offset;
+            float fragment_length = LMB_MIN(remaining, length - segment_offset);
+            if (dash_on) {
+                float start_fraction = segment_offset / length;
+                float end_fraction = (segment_offset + fragment_length) / length;
+                float fragment_start_x = start_x + dx * start_fraction;
+                float fragment_start_y = start_y + dy * start_fraction;
+                float fragment_end_x = start_x + dx * end_fraction;
+                float fragment_end_y = start_y + dy * end_fraction;
+                bool start_cap = path_offset <= 0.000001f ||
+                    !js_dom_svg_dash_is_on_at(context, path_offset - 0.0001f, nullptr);
+                bool end_cap = !js_dom_svg_dash_is_on_at(context,
+                    path_offset + fragment_length + 0.0001f, nullptr);
+                if (js_dom_svg_stroke_segment_contains(context, fragment_start_x, fragment_start_y,
+                        fragment_end_x, fragment_end_y, start_cap, end_cap)) {
+                    context->stroke_hit = true;
+                }
+            }
+            segment_offset += fragment_length;
+        }
+    }
+    context->subpath_stroke_length += length;
+    context->last_stroke_start_x = start_x;
+    context->last_stroke_start_y = start_y;
+    context->last_stroke_end_x = end_x;
+    context->last_stroke_end_y = end_y;
+    context->has_last_stroke_segment = true;
+}
+
 static void js_dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
                                               float start_x, float start_y,
                                               float end_x, float end_y) {
@@ -12165,7 +12384,7 @@ static void js_dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
     float side = (end_x - start_x) * (context->point_y - start_y) -
         (context->point_x - start_x) * (end_y - start_y);
     if (fabsf(side) <= 0.000001f) {
-        context->fill_on_edge = true;
+        context->subpath_fill_on_edge = true;
         return;
     }
     if (upward && side > 0.0f) {
@@ -12182,25 +12401,42 @@ static void js_dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
                                             float end_x, float end_y,
                                             bool include_stroke) {
     if (!context) return;
+    context->subpath_area_twice += start_x * end_y - end_x * start_y;
     if (include_stroke) {
-        float distance_sq = js_dom_svg_point_segment_distance_sq(
-            context->point_x, context->point_y, start_x, start_y, end_x, end_y);
-        if (distance_sq < context->nearest_stroke_distance_sq) {
-            context->nearest_stroke_distance_sq = distance_sq;
-        }
+        js_dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
     }
     js_dom_svg_path_hit_add_fill_edge(context, start_x, start_y, end_x, end_y);
 }
 
-static void js_dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
-    if (!context || !context->has_current || !context->subpath_has_draw ||
-        context->subpath_closed) {
-        return;
+static void js_dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
+    if (!context) return;
+    if (fabsf(context->subpath_area_twice) > 0.000001f &&
+        context->subpath_fill_on_edge) {
+        context->fill_on_edge = true;
     }
-    // SVG fill implicitly closes an open subpath, while its stroke does not.
-    js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
-                                    context->subpath_start_x, context->subpath_start_y,
-                                    false);
+}
+
+static void js_dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
+    if (!context || !context->has_current || !context->subpath_has_draw) return;
+    if (!context->subpath_closed) {
+        // SVG fill implicitly closes an open subpath, while its stroke does not.
+        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+                                        context->subpath_start_x, context->subpath_start_y,
+                                        false);
+        // A zero-area contour, such as <line>, has no fill boundary to pick.
+        js_dom_svg_path_hit_commit_subpath_fill_edge(context);
+    }
+    if (!context->subpath_closed && context->has_first_stroke_segment &&
+        context->stroke_dash_count == 0) {
+        if (js_dom_svg_stroke_segment_contains(context, context->first_stroke_start_x,
+                context->first_stroke_start_y, context->first_stroke_end_x,
+                context->first_stroke_end_y, true, false) ||
+            js_dom_svg_stroke_segment_contains(context, context->last_stroke_start_x,
+                context->last_stroke_start_y, context->last_stroke_end_x,
+                context->last_stroke_end_y, false, true)) {
+            context->stroke_hit = true;
+        }
+    }
 }
 
 static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
@@ -12240,6 +12476,145 @@ static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
         end_x, end_y, depth + 1);
 }
 
+static void js_dom_svg_path_add_ellipse(RdtPath* path, float cx, float cy,
+                                        float rx, float ry) {
+    if (!path || rx <= 0.0f || ry <= 0.0f) return;
+    const float kappa = 0.5522847498307936f;
+    rdt_path_move_to(path, cx + rx, cy);
+    rdt_path_cubic_to(path, cx + rx, cy + kappa * ry,
+        cx + kappa * rx, cy + ry, cx, cy + ry);
+    rdt_path_cubic_to(path, cx - kappa * rx, cy + ry,
+        cx - rx, cy + kappa * ry, cx - rx, cy);
+    rdt_path_cubic_to(path, cx - rx, cy - kappa * ry,
+        cx - kappa * rx, cy - ry, cx, cy - ry);
+    rdt_path_cubic_to(path, cx + kappa * rx, cy - ry,
+        cx + rx, cy - kappa * ry, cx + rx, cy);
+    rdt_path_close(path);
+}
+
+static void js_dom_svg_path_add_rect(RdtPath* path, float x, float y,
+                                     float width, float height,
+                                     float rx, float ry) {
+    if (!path || width <= 0.0f || height <= 0.0f) return;
+    rx = LMB_MIN(fabsf(rx), width * 0.5f);
+    ry = LMB_MIN(fabsf(ry), height * 0.5f);
+    if (rx <= 0.0f || ry <= 0.0f) {
+        rdt_path_move_to(path, x, y);
+        rdt_path_line_to(path, x + width, y);
+        rdt_path_line_to(path, x + width, y + height);
+        rdt_path_line_to(path, x, y + height);
+        rdt_path_close(path);
+        return;
+    }
+    const float kappa = 0.5522847498307936f;
+    float right = x + width;
+    float bottom = y + height;
+    rdt_path_move_to(path, x + rx, y);
+    rdt_path_line_to(path, right - rx, y);
+    rdt_path_cubic_to(path, right - rx + kappa * rx, y,
+        right, y + ry - kappa * ry, right, y + ry);
+    rdt_path_line_to(path, right, bottom - ry);
+    rdt_path_cubic_to(path, right, bottom - ry + kappa * ry,
+        right - rx + kappa * rx, bottom, right - rx, bottom);
+    rdt_path_line_to(path, x + rx, bottom);
+    rdt_path_cubic_to(path, x + rx - kappa * rx, bottom,
+        x, bottom - ry + kappa * ry, x, bottom - ry);
+    rdt_path_line_to(path, x, y + ry);
+    rdt_path_cubic_to(path, x, y + ry - kappa * ry,
+        x + rx - kappa * rx, y, x + rx, y);
+    rdt_path_close(path);
+}
+
+static bool js_dom_svg_path_add_points(RdtPath* path, const char* points,
+                                       bool close_path) {
+    if (!path || !points) return false;
+    bool has_point = false;
+    const char* cursor = points;
+    while (cursor && *cursor) {
+        cursor = js_dom_svg_skip_number_separators(cursor);
+        if (!*cursor) break;
+        char* end = nullptr;
+        float x = strtof(cursor, &end);
+        if (end == cursor) break;
+        cursor = js_dom_svg_skip_number_separators(end);
+        float y = strtof(cursor, &end);
+        if (end == cursor) break;
+        if (has_point) rdt_path_line_to(path, x, y);
+        else rdt_path_move_to(path, x, y);
+        has_point = true;
+        cursor = end;
+    }
+    if (has_point && close_path) rdt_path_close(path);
+    return has_point;
+}
+
+static bool js_dom_svg_is_basic_shape(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    const char* tag = elem->tag_name;
+    return strcasecmp(tag, "rect") == 0 || strcasecmp(tag, "circle") == 0 ||
+        strcasecmp(tag, "ellipse") == 0 || strcasecmp(tag, "line") == 0 ||
+        strcasecmp(tag, "polyline") == 0 || strcasecmp(tag, "polygon") == 0 ||
+        strcasecmp(tag, "path") == 0;
+}
+
+static RdtPath* js_dom_svg_basic_shape_path(DomElement* elem) {
+    if (!js_dom_svg_is_basic_shape(elem)) return nullptr;
+    const char* tag = elem->tag_name;
+    if (strcasecmp(tag, "path") == 0) {
+        const char* d = elem->get_attribute("d");
+        return d && *d ? svg_parse_path_d(d) : nullptr;
+    }
+    RdtPath* path = rdt_path_new();
+    if (!path) return nullptr;
+    bool valid = false;
+    if (strcasecmp(tag, "rect") == 0) {
+        float width = js_dom_svg_attribute_number(elem, "width", 0.0f);
+        float height = js_dom_svg_attribute_number(elem, "height", 0.0f);
+        const char* rx_attr = elem->get_attribute("rx");
+        const char* ry_attr = elem->get_attribute("ry");
+        float rx = rx_attr ? js_dom_svg_attribute_number(elem, "rx", 0.0f)
+            : (ry_attr ? js_dom_svg_attribute_number(elem, "ry", 0.0f) : 0.0f);
+        float ry = ry_attr ? js_dom_svg_attribute_number(elem, "ry", 0.0f) : rx;
+        if (width > 0.0f && height > 0.0f) {
+            js_dom_svg_path_add_rect(path,
+                js_dom_svg_attribute_number(elem, "x", 0.0f),
+                js_dom_svg_attribute_number(elem, "y", 0.0f), width, height, rx, ry);
+            valid = true;
+        }
+    } else if (strcasecmp(tag, "circle") == 0) {
+        float radius = js_dom_svg_attribute_number(elem, "r", 0.0f);
+        if (radius > 0.0f) {
+            js_dom_svg_path_add_ellipse(path,
+                js_dom_svg_attribute_number(elem, "cx", 0.0f),
+                js_dom_svg_attribute_number(elem, "cy", 0.0f), radius, radius);
+            valid = true;
+        }
+    } else if (strcasecmp(tag, "ellipse") == 0) {
+        float rx = js_dom_svg_attribute_number(elem, "rx", 0.0f);
+        float ry = js_dom_svg_attribute_number(elem, "ry", 0.0f);
+        if (rx > 0.0f && ry > 0.0f) {
+            js_dom_svg_path_add_ellipse(path,
+                js_dom_svg_attribute_number(elem, "cx", 0.0f),
+                js_dom_svg_attribute_number(elem, "cy", 0.0f), rx, ry);
+            valid = true;
+        }
+    } else if (strcasecmp(tag, "line") == 0) {
+        rdt_path_move_to(path, js_dom_svg_attribute_number(elem, "x1", 0.0f),
+                         js_dom_svg_attribute_number(elem, "y1", 0.0f));
+        rdt_path_line_to(path, js_dom_svg_attribute_number(elem, "x2", 0.0f),
+                         js_dom_svg_attribute_number(elem, "y2", 0.0f));
+        valid = true;
+    } else {
+        valid = js_dom_svg_path_add_points(path, elem->get_attribute("points"),
+            strcasecmp(tag, "polygon") == 0);
+    }
+    if (!valid) {
+        rdt_path_free(path);
+        return nullptr;
+    }
+    return path;
+}
+
 static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
                                       const float* args, int arg_count) {
     JsDomSvgPathHitContext* context = (JsDomSvgPathHitContext*)userdata;
@@ -12255,6 +12630,11 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         context->has_current = true;
         context->subpath_has_draw = false;
         context->subpath_closed = false;
+        context->subpath_stroke_length = 0.0f;
+        context->has_first_stroke_segment = false;
+        context->has_last_stroke_segment = false;
+        context->subpath_area_twice = 0.0f;
+        context->subpath_fill_on_edge = false;
         return true;
     case RDT_PATH_LINE:
         if (arg_count < 2 || !context->has_current) return false;
@@ -12292,9 +12672,17 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
                                         context->subpath_start_x, context->subpath_start_y,
                                         true);
+        if (context->stroke_dash_count == 0 && context->has_first_stroke_segment &&
+            context->has_last_stroke_segment) {
+            js_dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
+                context->last_stroke_start_y, context->subpath_start_x,
+                context->subpath_start_y, context->first_stroke_end_x,
+                context->first_stroke_end_y);
+        }
         context->current_x = context->subpath_start_x;
         context->current_y = context->subpath_start_y;
         context->subpath_closed = true;
+        js_dom_svg_path_hit_commit_subpath_fill_edge(context);
         return true;
     case RDT_PATH_RECT:
     case RDT_PATH_CIRCLE:
@@ -12305,62 +12693,393 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
     return false;
 }
 
-static bool js_dom_svg_paint_is_visible(DomElement* elem, const char* paint_name,
-                                        const char* opacity_name,
-                                        bool paint_is_visible_by_default) {
-    if (!elem || !paint_name || !opacity_name) return false;
-    const char* paint = elem->get_attribute(paint_name);
-    if (paint && (!*paint || strcasecmp(paint, "none") == 0)) return false;
-    if (!paint && !paint_is_visible_by_default) return false;
-    float paint_opacity = js_dom_svg_attribute_number(elem, opacity_name, 1.0f);
-    float opacity = js_dom_svg_attribute_number(elem, "opacity", 1.0f);
-    return paint_opacity > 0.0f && opacity > 0.0f;
+static const char* js_dom_svg_cascaded_property_value(DomElement* elem,
+                                                       const char* name,
+                                                       char* buffer,
+                                                       size_t buffer_size) {
+    if (!elem || !name || !buffer || buffer_size == 0 || !elem->doc) return nullptr;
+    // This selector matcher returns only real stylesheet declarations.  The
+    // resolved style tree also contains SVG initial values (notably
+    // stroke:none), which must not mask a presentation attribute.
+    CssDeclaration* declaration = js_match_custom_property(elem, name);
+    if (!declaration || (!declaration->value &&
+            (!declaration->value_text || declaration->value_text_len == 0))) return nullptr;
+    const char* serialized = css_serialize_declaration_value(declaration,
+        elem->doc->document_pool);
+    if (!serialized || !*serialized) return nullptr;
+    size_t length = strlen(serialized);
+    if (length >= buffer_size) length = buffer_size - 1;
+    memcpy(buffer, serialized, length);
+    buffer[length] = '\0';
+    return buffer;
 }
 
-static bool js_dom_svg_path_contains_viewport_point(DomElement* elem,
-                                                    float viewport_x,
-                                                    float viewport_y) {
-    if (!elem) return false;
-    const char* d = elem->get_attribute("d");
-    if (!d || !*d) return false;
-    bool has_fill = js_dom_svg_paint_is_visible(elem, "fill", "fill-opacity", true);
-    bool has_stroke = js_dom_svg_paint_is_visible(elem, "stroke", "stroke-opacity", false);
-    if (!has_fill && !has_stroke) return false;
+static const char* js_dom_svg_presentation_value(DomElement* elem, const char* name,
+                                                  bool inherits, char* buffer,
+                                                  size_t buffer_size) {
+    if (!elem || !name || !buffer || buffer_size == 0) return nullptr;
+    for (DomNode* node = (DomNode*)elem; node && node->is_element();
+         node = node->parent) {
+        DomElement* current = node->as_element();
+        const char* inline_value = svg_get_inline_style_property(
+            current->get_attribute("style"), name, buffer, buffer_size);
+        if (inline_value) return inline_value;
+        const char* cascaded_value = js_dom_svg_cascaded_property_value(current, name,
+            buffer, buffer_size);
+        if (cascaded_value) return cascaded_value;
+        const char* attribute = current->get_attribute(name);
+        if (attribute) return attribute;
+        if (!inherits) break;
+    }
+    return nullptr;
+}
+
+static float js_dom_svg_presentation_number(DomElement* elem, const char* name,
+                                            float fallback, bool inherits) {
+    char value_buffer[64] = {};
+    const char* value = js_dom_svg_presentation_value(elem, name, inherits,
+        value_buffer, sizeof(value_buffer));
+    if (!value) return fallback;
+    char* end = nullptr;
+    float parsed = strtof(value, &end);
+    return end != value ? parsed : fallback;
+}
+
+static bool js_dom_svg_paint_is_present(DomElement* elem, const char* paint_name,
+                                        bool paint_is_present_by_default) {
+    if (!elem || !paint_name) return false;
+    char paint_buffer[256] = {};
+    const char* paint = js_dom_svg_presentation_value(elem, paint_name, true,
+        paint_buffer, sizeof(paint_buffer));
+    if (paint && (!*paint || strcasecmp(paint, "none") == 0)) return false;
+    return paint || paint_is_present_by_default;
+}
+
+typedef struct JsDomSvgShapeHit {
+    bool fill;
+    bool stroke;
+    bool bounding_box;
+} JsDomSvgShapeHit;
+
+static void js_dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
+                                            JsDomSvgPathHitContext* context) {
+    if (!context) return;
+    float stroke_width = js_dom_svg_presentation_number(elem, "stroke-width", 1.0f, true);
+    context->stroke_enabled = stroke_width > 0.0f;
+    if (!context->stroke_enabled) return;
+    context->stroke_radius = stroke_width * 0.5f + JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX / min_scale;
+    context->stroke_cap = RDT_CAP_BUTT;
+    context->stroke_join = RDT_JOIN_MITER;
+    context->stroke_miter_limit = 4.0f;
+    char cap_buffer[64] = {};
+    char join_buffer[64] = {};
+    char dash_buffer[256] = {};
+    const char* cap = js_dom_svg_presentation_value(elem, "stroke-linecap", true,
+        cap_buffer, sizeof(cap_buffer));
+    const char* join = js_dom_svg_presentation_value(elem, "stroke-linejoin", true,
+        join_buffer, sizeof(join_buffer));
+    if (cap && strcasecmp(cap, "round") == 0) context->stroke_cap = RDT_CAP_ROUND;
+    else if (cap && strcasecmp(cap, "square") == 0) context->stroke_cap = RDT_CAP_SQUARE;
+    if (join && strcasecmp(join, "round") == 0) context->stroke_join = RDT_JOIN_ROUND;
+    else if (join && strcasecmp(join, "bevel") == 0) context->stroke_join = RDT_JOIN_BEVEL;
+    context->stroke_miter_limit = js_dom_svg_presentation_number(elem,
+        "stroke-miterlimit", 4.0f, true);
+    if (context->stroke_miter_limit < 1.0f) context->stroke_miter_limit = 1.0f;
+    context->stroke_dash_offset = js_dom_svg_presentation_number(elem,
+        "stroke-dashoffset", 0.0f, true);
+    const char* dasharray = js_dom_svg_presentation_value(elem, "stroke-dasharray", true,
+        dash_buffer, sizeof(dash_buffer));
+    if (!dasharray || !*dasharray || strcasecmp(dasharray, "none") == 0) return;
+    const char* cursor = dasharray;
+    while (*cursor && context->stroke_dash_count < 16) {
+        cursor = js_dom_svg_skip_number_separators(cursor);
+        if (!*cursor) break;
+        char* end = nullptr;
+        float dash = strtof(cursor, &end);
+        if (end == cursor) break;
+        if (dash > 0.0f) {
+            context->stroke_dash[context->stroke_dash_count++] = dash;
+        }
+        cursor = end;
+    }
+    if (context->stroke_dash_count & 1) {
+        int original_count = context->stroke_dash_count;
+        for (int index = 0; index < original_count && context->stroke_dash_count < 32; index++) {
+            context->stroke_dash[context->stroke_dash_count++] = context->stroke_dash[index];
+        }
+    }
+    for (int index = 0; index < context->stroke_dash_count; index++) {
+        context->stroke_dash_total += context->stroke_dash[index];
+    }
+    if (context->stroke_dash_total <= 0.0f) context->stroke_dash_count = 0;
+}
+
+static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_local_point(DomElement* elem,
+                                                               float local_x,
+                                                               float local_y,
+                                                               float min_scale) {
+    JsDomSvgShapeHit result = {};
+    if (!elem) return result;
+    // Every basic SVG primitive is lowered to the same contour visitor.  Its
+    // bounding box contains non-painted gaps, so it cannot decide a hit.
+    RdtPath* path = js_dom_svg_basic_shape_path(elem);
+    if (!path) return result;
+    JsDomSvgPathHitContext context = {};
+    context.point_x = local_x;
+    context.point_y = local_y;
+    context.curve_flatness = 0.5f / min_scale;
+    js_dom_svg_configure_stroke_hit(elem, min_scale, &context);
+    bool visited = rdt_path_visit(path, js_dom_svg_path_hit_visit, &context);
+    if (visited) js_dom_svg_path_hit_finish_subpath(&context);
+    float left = 0.0f;
+    float top = 0.0f;
+    float right = 0.0f;
+    float bottom = 0.0f;
+    result.bounding_box = rdt_path_get_bounds(path, &left, &top, &right, &bottom) &&
+        local_x >= left && local_x <= right && local_y >= top && local_y <= bottom;
+    rdt_path_free(path);
+    if (!visited) return result;
+    {
+        char fill_rule_buffer[64] = {};
+        const char* fill_rule = js_dom_svg_presentation_value(elem, "fill-rule", true,
+            fill_rule_buffer, sizeof(fill_rule_buffer));
+        bool even_odd = fill_rule && strcasecmp(fill_rule, "evenodd") == 0;
+        if (context.fill_on_edge || (even_odd
+                ? (context.fill_crossings & 1) != 0
+                : context.fill_winding != 0)) {
+            result.fill = true;
+        }
+    }
+    result.stroke = context.stroke_enabled && context.stroke_hit;
+    return result;
+}
+
+static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
+                                                                  float viewport_x,
+                                                                  float viewport_y) {
+    JsDomSvgShapeHit result = {};
+    if (!elem) return result;
     RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
     float local_x = 0.0f;
     float local_y = 0.0f;
     if (!js_dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
                                             &local_x, &local_y)) {
-        return false;
+        return result;
     }
     float scale_x = hypotf(screen_ctm.e11, screen_ctm.e21);
     float scale_y = hypotf(screen_ctm.e12, screen_ctm.e22);
     float min_scale = LMB_MIN(scale_x, scale_y);
     if (min_scale < 0.0001f) min_scale = 0.0001f;
-    RdtPath* path = svg_parse_path_d(d);
-    if (!path) return false;
-    JsDomSvgPathHitContext context = {};
-    context.point_x = local_x;
-    context.point_y = local_y;
-    context.curve_flatness = 0.5f / min_scale;
-    context.nearest_stroke_distance_sq = 1.0e30f;
-    bool visited = rdt_path_visit(path, js_dom_svg_path_hit_visit, &context);
-    if (visited) js_dom_svg_path_hit_finish_subpath(&context);
-    rdt_path_free(path);
-    if (!visited) return false;
-    if (has_fill) {
-        const char* fill_rule = elem->get_attribute("fill-rule");
-        bool even_odd = fill_rule && strcasecmp(fill_rule, "evenodd") == 0;
-        if (context.fill_on_edge || (even_odd
-                ? (context.fill_crossings & 1) != 0
-                : context.fill_winding != 0)) {
-            return true;
-        }
+    return js_dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
+}
+
+static bool js_dom_svg_tag_is(DomElement* elem, const char* tag) {
+    return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
+}
+
+static bool js_dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* top,
+                                             float* right, float* bottom) {
+    if (!js_dom_svg_tag_is(elem, "svg") || !left || !top || !right || !bottom) return false;
+    float min_x = 0.0f;
+    float min_y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    const char* viewbox = elem->get_attribute("viewBox");
+    if (!viewbox) viewbox = elem->get_attribute("viewbox");
+    if (js_dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &width, &height)) {
+        *left = min_x;
+        *top = min_y;
+        *right = min_x + width;
+        *bottom = min_y + height;
+        return true;
     }
-    if (!has_stroke) return false;
-    float stroke_width = js_dom_svg_attribute_number(elem, "stroke-width", 1.0f);
-    float hit_radius = stroke_width * 0.5f + JS_DOM_SVG_PATH_HIT_AIM_SLOP_PX / min_scale;
-    return context.nearest_stroke_distance_sq <= hit_radius * hit_radius;
+    width = js_dom_svg_attribute_number(elem, "width", elem->width);
+    height = js_dom_svg_attribute_number(elem, "height", elem->height);
+    if (width <= 0.0f || height <= 0.0f) return false;
+    *left = 0.0f;
+    *top = 0.0f;
+    *right = width;
+    *bottom = height;
+    return true;
+}
+
+static JsDomSvgShapeHit js_dom_svg_bounds_hit_viewport_point(DomElement* elem,
+                                                              float viewport_x,
+                                                              float viewport_y) {
+    JsDomSvgShapeHit result = {};
+    if (!elem) return result;
+    RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
+    float local_x = 0.0f;
+    float local_y = 0.0f;
+    if (!js_dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
+                                            &local_x, &local_y)) {
+        return result;
+    }
+    float left = 0.0f;
+    float top = 0.0f;
+    float right = 0.0f;
+    float bottom = 0.0f;
+    if (js_dom_svg_tag_is(elem, "svg")) {
+        if (!js_dom_svg_viewport_local_bounds(elem, &left, &top, &right, &bottom)) {
+            return result;
+        }
+    } else {
+        JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(elem);
+        if (!bounds.valid) return result;
+        left = bounds.left;
+        top = bounds.top;
+        right = bounds.right;
+        bottom = bounds.bottom;
+    }
+    result.bounding_box = local_x >= left && local_x <= right &&
+        local_y >= top && local_y <= bottom;
+    // Image/text/foreignObject content is painted by its own renderer. Its
+    // exposed SVG geometry is its viewport box, not a union of child boxes.
+    result.fill = result.bounding_box;
+    return result;
+}
+
+static DomElement* js_dom_svg_use_reference(DomElement* elem) {
+    if (!elem || !elem->doc || !js_dom_svg_tag_is(elem, "use")) return nullptr;
+    const char* href = elem->get_attribute("href");
+    if (!href) href = elem->get_attribute("xlink:href");
+    if (!href || href[0] != '#' || !href[1]) return nullptr;
+    return dom_find_by_id(elem->doc->root, href + 1);
+}
+
+static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* reference,
+                                                                 const RdtMatrix* reference_ctm,
+                                                                 float viewport_x,
+                                                                 float viewport_y) {
+    JsDomSvgShapeHit result = {};
+    if (!reference || !reference_ctm) return result;
+    if (js_dom_svg_is_basic_shape(reference)) {
+        float local_x = 0.0f;
+        float local_y = 0.0f;
+        if (!js_dom_svg_matrix_unproject_point(reference_ctm, viewport_x, viewport_y,
+                                                &local_x, &local_y)) {
+            return result;
+        }
+        float scale_x = hypotf(reference_ctm->e11, reference_ctm->e21);
+        float scale_y = hypotf(reference_ctm->e12, reference_ctm->e22);
+        float min_scale = LMB_MIN(scale_x, scale_y);
+        if (min_scale < 0.0001f) min_scale = 0.0001f;
+        return js_dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale);
+    }
+    if (!js_dom_svg_tag_is(reference, "g") && !js_dom_svg_tag_is(reference, "a") &&
+        !js_dom_svg_tag_is(reference, "symbol")) {
+        return result;
+    }
+    for (DomNode* child = reference->last_child; child; child = child->prev_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        RdtMatrix child_transform = js_dom_svg_transform_from_element(child_elem);
+        RdtMatrix child_ctm = rdt_matrix_multiply(reference_ctm, &child_transform);
+        JsDomSvgShapeHit child_hit = js_dom_svg_reference_hit_viewport_point(child_elem,
+            &child_ctm, viewport_x, viewport_y);
+        result.fill = result.fill || child_hit.fill;
+        result.stroke = result.stroke || child_hit.stroke;
+        result.bounding_box = result.bounding_box || child_hit.bounding_box;
+    }
+    return result;
+}
+
+static JsDomSvgShapeHit js_dom_svg_use_hit_viewport_point(DomElement* elem,
+                                                           float viewport_x,
+                                                           float viewport_y) {
+    JsDomSvgShapeHit result = {};
+    DomElement* reference = js_dom_svg_use_reference(elem);
+    if (!reference) return result;
+    RdtMatrix instance_ctm = js_dom_svg_ctm(elem, true);
+    RdtMatrix offset = rdt_matrix_translate(
+        js_dom_svg_attribute_number(elem, "x", 0.0f),
+        js_dom_svg_attribute_number(elem, "y", 0.0f));
+    instance_ctm = rdt_matrix_multiply(&instance_ctm, &offset);
+    RdtMatrix reference_transform = js_dom_svg_transform_from_element(reference);
+    RdtMatrix reference_ctm = rdt_matrix_multiply(&instance_ctm, &reference_transform);
+    result = js_dom_svg_reference_hit_viewport_point(reference, &reference_ctm,
+        viewport_x, viewport_y);
+    JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(reference);
+    float local_x = 0.0f;
+    float local_y = 0.0f;
+    if (bounds.valid && js_dom_svg_matrix_unproject_point(&reference_ctm, viewport_x,
+            viewport_y, &local_x, &local_y)) {
+        result.bounding_box = local_x >= bounds.left && local_x <= bounds.right &&
+            local_y >= bounds.top && local_y <= bounds.bottom;
+    }
+    return result;
+}
+
+typedef enum JsDomSvgPointerEventsMode {
+    JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED,
+    JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL,
+    JS_DOM_SVG_POINTER_EVENTS_VISIBLE_STROKE,
+    JS_DOM_SVG_POINTER_EVENTS_VISIBLE,
+    JS_DOM_SVG_POINTER_EVENTS_PAINTED,
+    JS_DOM_SVG_POINTER_EVENTS_FILL,
+    JS_DOM_SVG_POINTER_EVENTS_STROKE,
+    JS_DOM_SVG_POINTER_EVENTS_ALL,
+    JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX,
+    JS_DOM_SVG_POINTER_EVENTS_NONE,
+} JsDomSvgPointerEventsMode;
+
+static JsDomSvgPointerEventsMode js_dom_svg_pointer_events_mode(DomElement* elem) {
+    char pointer_events_buffer[64] = {};
+    const char* value = js_dom_svg_presentation_value(elem, "pointer-events", true,
+        pointer_events_buffer, sizeof(pointer_events_buffer));
+    if (!value || !*value || strcasecmp(value, "auto") == 0 ||
+        strcasecmp(value, "visiblePainted") == 0) {
+        return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED;
+    }
+    if (strcasecmp(value, "visibleFill") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL;
+    if (strcasecmp(value, "visibleStroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_STROKE;
+    if (strcasecmp(value, "visible") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE;
+    if (strcasecmp(value, "painted") == 0) return JS_DOM_SVG_POINTER_EVENTS_PAINTED;
+    if (strcasecmp(value, "fill") == 0) return JS_DOM_SVG_POINTER_EVENTS_FILL;
+    if (strcasecmp(value, "stroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_STROKE;
+    if (strcasecmp(value, "all") == 0) return JS_DOM_SVG_POINTER_EVENTS_ALL;
+    if (strcasecmp(value, "bounding-box") == 0) return JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX;
+    if (strcasecmp(value, "none") == 0) return JS_DOM_SVG_POINTER_EVENTS_NONE;
+    return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED;
+}
+
+static bool js_dom_svg_element_is_visible_for_pointer_events(DomElement* elem) {
+    char visibility_buffer[64] = {};
+    const char* visibility = js_dom_svg_presentation_value(elem, "visibility", true,
+        visibility_buffer, sizeof(visibility_buffer));
+    return !visibility || (strcasecmp(visibility, "hidden") != 0 &&
+        strcasecmp(visibility, "collapse") != 0);
+}
+
+static bool js_dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mode,
+                                                        bool visible,
+                                                        bool fill_painted,
+                                                        bool stroke_painted,
+                                                        const JsDomSvgShapeHit* hit) {
+    if (!hit || mode == JS_DOM_SVG_POINTER_EVENTS_NONE) return false;
+    switch (mode) {
+    case JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED:
+        return visible && ((fill_painted && hit->fill) || (stroke_painted && hit->stroke));
+    case JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL:
+        return visible && hit->fill;
+    case JS_DOM_SVG_POINTER_EVENTS_VISIBLE_STROKE:
+        return visible && hit->stroke;
+    case JS_DOM_SVG_POINTER_EVENTS_VISIBLE:
+        return visible && (hit->fill || hit->stroke);
+    case JS_DOM_SVG_POINTER_EVENTS_PAINTED:
+        return (fill_painted && hit->fill) || (stroke_painted && hit->stroke);
+    case JS_DOM_SVG_POINTER_EVENTS_FILL:
+        return hit->fill;
+    case JS_DOM_SVG_POINTER_EVENTS_STROKE:
+        return hit->stroke;
+    case JS_DOM_SVG_POINTER_EVENTS_ALL:
+        return hit->fill || hit->stroke;
+    case JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX:
+        return hit->bounding_box;
+    case JS_DOM_SVG_POINTER_EVENTS_NONE:
+        return false;
+    }
+    return false;
 }
 
 static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
@@ -12373,43 +13092,82 @@ static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
         strcasecmp(tag, "desc") == 0 || strcasecmp(tag, "metadata") == 0) {
         return true;
     }
-    const char* display = elem->get_attribute("display");
-    const char* visibility = elem->get_attribute("visibility");
-    const char* pointer_events = elem->get_attribute("pointer-events");
-    return (display && strcasecmp(display, "none") == 0) ||
-        (visibility && strcasecmp(visibility, "hidden") == 0) ||
-        (pointer_events && strcasecmp(pointer_events, "none") == 0);
+    char display_buffer[64] = {};
+    const char* display = js_dom_svg_presentation_value(elem, "display", false,
+        display_buffer, sizeof(display_buffer));
+    // visibility and pointer-events are inherited, but descendants may
+    // override either one. Only display:none removes the entire subtree.
+    return display && strcasecmp(display, "none") == 0;
+}
+
+static bool js_dom_svg_point_is_within_viewports(DomElement* elem, float x, float y) {
+    for (DomNode* node = (DomNode*)elem; node && node->is_element(); node = node->parent) {
+        DomElement* current = node->as_element();
+        if (!js_dom_svg_tag_is(current, "svg")) continue;
+        char overflow_buffer[64] = {};
+        const char* overflow = js_dom_svg_presentation_value(current, "overflow", false,
+            overflow_buffer, sizeof(overflow_buffer));
+        if (overflow && strcasecmp(overflow, "visible") == 0) continue;
+        float local_x = 0.0f;
+        float local_y = 0.0f;
+        RdtMatrix ctm = js_dom_svg_ctm(current, true);
+        if (!js_dom_svg_matrix_unproject_point(&ctm, x, y, &local_x, &local_y)) {
+            return false;
+        }
+        float left = 0.0f;
+        float top = 0.0f;
+        float right = 0.0f;
+        float bottom = 0.0f;
+        if (!js_dom_svg_viewport_local_bounds(current, &left, &top, &right, &bottom) ||
+            local_x < left || local_x > right || local_y < top || local_y > bottom) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool js_dom_svg_element_contains_viewport_point(DomElement* elem,
                                                        float x, float y) {
-    if (!elem || js_dom_svg_element_skips_hit_test(elem)) return false;
-    if (elem->tag_name && strcasecmp(elem->tag_name, "path") == 0) {
-        return js_dom_svg_path_contains_viewport_point(elem, x, y);
-    }
-    JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(elem);
-    if (!bounds.valid) return false;
-    RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
-    float local_x = 0.0f;
-    float local_y = 0.0f;
-    if (!js_dom_svg_matrix_unproject_point(&screen_ctm, x, y,
-                                            &local_x, &local_y)) {
+    if (!elem || js_dom_svg_element_skips_hit_test(elem) ||
+        !js_dom_svg_point_is_within_viewports(elem, x, y)) return false;
+    JsDomSvgPointerEventsMode pointer_events = js_dom_svg_pointer_events_mode(elem);
+    if (pointer_events == JS_DOM_SVG_POINTER_EVENTS_NONE) return false;
+    JsDomSvgShapeHit hit = {};
+    bool fill_painted = false;
+    bool stroke_painted = false;
+    if (js_dom_svg_is_basic_shape(elem)) {
+        hit = js_dom_svg_basic_shape_hit_viewport_point(elem, x, y);
+        fill_painted = js_dom_svg_paint_is_present(elem, "fill", true);
+        stroke_painted = js_dom_svg_paint_is_present(elem, "stroke", false);
+    } else if (js_dom_svg_tag_is(elem, "use")) {
+        DomElement* reference = js_dom_svg_use_reference(elem);
+        hit = js_dom_svg_use_hit_viewport_point(elem, x, y);
+        fill_painted = js_dom_svg_paint_is_present(reference ? reference : elem, "fill", true);
+        stroke_painted = js_dom_svg_paint_is_present(reference ? reference : elem, "stroke", false);
+    } else if (js_dom_svg_tag_is(elem, "g") || js_dom_svg_tag_is(elem, "a") ||
+               js_dom_svg_tag_is(elem, "switch")) {
+        // Container bounds are only a union for getBBox(); blank union gaps
+        // belong to no painted child and must not become a drag target.
         return false;
+    } else {
+        hit = js_dom_svg_bounds_hit_viewport_point(elem, x, y);
+        if (js_dom_svg_tag_is(elem, "image") ||
+            js_dom_svg_tag_is(elem, "foreignObject") || js_dom_svg_tag_is(elem, "svg")) {
+            fill_painted = true;
+        } else {
+            fill_painted = js_dom_svg_paint_is_present(elem, "fill", true);
+            stroke_painted = js_dom_svg_paint_is_present(elem, "stroke", false);
+        }
     }
-    // SVG strokes remain targetable even when their geometric bounds collapse
-    // to a line; keep the tolerance in local space after applying the same CTM
-    // used by getScreenCTM() so zoomed editors do not gain a separate hit path.
-    float stroke = js_dom_svg_attribute_number(elem, "stroke-width", 1.0f);
-    float tolerance = LMB_MAX(stroke * 0.5f, 0.5f);
-    return local_x >= bounds.left - tolerance &&
-        local_x <= bounds.right + tolerance &&
-        local_y >= bounds.top - tolerance &&
-        local_y <= bounds.bottom + tolerance;
+    return js_dom_svg_pointer_events_selects_geometry(pointer_events,
+        js_dom_svg_element_is_visible_for_pointer_events(elem), fill_painted,
+        stroke_painted, &hit);
 }
 
 static DomElement* js_dom_svg_element_from_point_walk(DomElement* elem,
                                                        float x, float y) {
-    if (!elem || js_dom_svg_element_skips_hit_test(elem)) return nullptr;
+    if (!elem || js_dom_svg_element_skips_hit_test(elem) ||
+        !js_dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
@@ -12658,8 +13416,9 @@ static DomElement* js_dom_element_from_point_walk(DomNode* node,
     DomElement* elem = node->as_element();
     if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "svg") == 0) {
-        DomElement* svg_hit = js_dom_svg_element_from_point_walk(elem, px, py);
-        if (svg_hit) return svg_hit;
+        // SVG's geometry walker is authoritative: falling through to the DOM
+        // layout box would resurrect elements rejected by pointer-events.
+        return js_dom_svg_element_from_point_walk(elem, px, py);
     }
     if (elem->shadow_root_element()) {
         DomElement* shadow_hit = js_dom_shadow_element_from_point_walk(
@@ -12826,24 +13585,30 @@ static Item js_dom_boundary_from_point(DomElement* elem,
     return js_dom_make_boundary_object(boundary);
 }
 
+extern "C" void* js_dom_document_element_from_point_native(void* doc_ptr,
+                                                            float x, float y) {
+    DomDocument* doc = (DomDocument*)doc_ptr;
+    if (!doc || !js_dom_has_committed_geometry_snapshot(doc) ||
+        !doc->view_tree || !doc->view_tree->root) {
+        return nullptr;
+    }
+
+    DomElement* shadow_hit = js_dom_shadow_element_from_document_point_walk(
+        static_cast<DomNode*>(doc->root), x, y);
+    if (shadow_hit) return shadow_hit;
+
+    return js_dom_element_from_point_walk(
+        static_cast<DomNode*>(doc->view_tree->root),
+        0.0f, 0.0f, x, y);
+}
+
 static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg) {
-    if (!doc || !_js_current_ui_context ||
-        !js_dom_has_committed_geometry_snapshot(doc) ||
-        !doc->view_tree || !doc->view_tree->root) {
-        return ItemNull;
-    }
-
+    if (!doc || !_js_current_ui_context) return ItemNull;
     float x = js_dom_item_to_float(x_arg);
     float y = js_dom_item_to_float(y_arg);
-    DomElement* shadow_hit = js_dom_shadow_element_from_document_point_walk(
-        static_cast<DomNode*>(doc->root), x, y);
-    if (shadow_hit) return js_dom_wrap_element(shadow_hit);
-
-    DomElement* hit = js_dom_element_from_point_walk(
-        static_cast<DomNode*>(doc->view_tree->root),
-        0.0f, 0.0f, x, y);
+    DomElement* hit = (DomElement*)js_dom_document_element_from_point_native(doc, x, y);
     return hit ? js_dom_wrap_element(hit) : ItemNull;
 }
 

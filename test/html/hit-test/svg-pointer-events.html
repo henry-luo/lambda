@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Adapted from WPT svg/interact/scripted/svg-pointer-events-bbox.html. -->
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+#css-all-unpainted, #css-overrides-none { pointer-events: all; }
+#css-none-overrides-all { pointer-events: none; }
+#css-fill-none { fill: none; }
+#css-stroke-none { stroke: none; }
+</style>
+<svg id="hit-surface" width="780" height="360" viewBox="0 0 780 360">
+  <rect id="bbox-hidden" x="20" y="20" width="100" height="70" fill="none" stroke="none"
+        visibility="hidden" pointer-events="bounding-box"/>
+  <rect id="all-unpainted" x="150" y="20" width="100" height="70" fill="none" stroke="none"
+        pointer-events="all"/>
+  <rect id="visible-fill-unpainted" x="280" y="20" width="100" height="70" fill="none" stroke="none"
+        pointer-events="visibleFill"/>
+  <rect id="visible-stroke-unpainted" x="410" y="20" width="100" height="70" fill="none" stroke="none"
+        pointer-events="visibleStroke" stroke-width="10"/>
+  <rect id="css-all-unpainted" x="540" y="20" width="100" height="70" fill="none" stroke="none"/>
+  <rect id="css-overrides-none" x="670" y="20" width="90" height="70" fill="none" stroke="none"
+        pointer-events="none"/>
+  <rect id="hidden-painted" x="20" y="140" width="100" height="70" fill="#369"
+        visibility="hidden" pointer-events="painted"/>
+  <rect id="hidden-visible-painted" x="150" y="140" width="100" height="70" fill="#369"
+        visibility="hidden" pointer-events="visiblePainted"/>
+  <rect id="opacity-zero-painted" x="280" y="140" width="100" height="70" fill="#369" opacity="0"/>
+  <rect id="behind-pointer-none" x="410" y="140" width="100" height="70" fill="#396"/>
+  <rect id="pointer-none" x="410" y="140" width="100" height="70" fill="#c63" pointer-events="none"/>
+  <rect id="css-none-overrides-all" x="540" y="140" width="100" height="70" fill="#c63"
+        pointer-events="all"/>
+  <rect id="css-fill-none" x="670" y="140" width="90" height="70" fill="#369"/>
+  <rect id="visible-unpainted" x="20" y="250" width="100" height="70" fill="none" stroke="none"
+        pointer-events="visible"/>
+  <rect id="fill-hidden-unpainted" x="150" y="250" width="100" height="70" fill="none" stroke="none"
+        visibility="hidden" pointer-events="fill"/>
+  <rect id="stroke-hidden-unpainted" x="280" y="250" width="100" height="70" fill="none" stroke="none"
+        visibility="hidden" pointer-events="stroke" stroke-width="10"/>
+  <rect id="css-stroke-none" x="410" y="250" width="100" height="70" fill="none" stroke="#369"
+        stroke-width="10"/>
+</svg>

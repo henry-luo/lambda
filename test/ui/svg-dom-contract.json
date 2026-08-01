@@ -1,7 +1,7 @@
 {
   "name": "native SVG DOM geometry and hit-test contract",
   "html": "test/html/svg-dom-contract.html",
-  "viewport": {"width": 720, "height": 520},
+  "viewport": {"width": 720, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": "#run-svg-direct-contract"}},
     {"type": "assert_attribute", "target": {"selector": "#svg-direct-state"}, "attribute": "data-ready", "equals": "true", "assert_timeout": 1000},
@@ -10,6 +10,7 @@
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"hit\":\"svg-direct-rect\""},
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"overlapCircleHit\":\"svg-overlap-circle\""},
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"pathAimHit\":\"svg-overlap-path\""},
+    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"shapeGeometryPass\":true"},
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"parsedRoot\":\"SVG\""},
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"serialized\":\"<svg"}
   ]
