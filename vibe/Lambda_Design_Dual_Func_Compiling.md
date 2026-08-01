@@ -4,7 +4,10 @@
 > [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
 > frozen per CLAUDE rule 14). The type-checking-trampoline half remains valid and
 > is retained here as the *declared-parameter* lane.
-> Related: [`Lambda_Design_Type_Enforcement.md`](Lambda_Design_Type_Enforcement.md) (TE-9 error-value returns),
+> Related: [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) (LC1: no
+> inline caches in Lambda script — §10 multi-version dispatches via guard
+> chain, never caches),
+> [`Lambda_Design_Type_Enforcement.md`](Lambda_Design_Type_Enforcement.md) (TE-9 error-value returns),
 > [`Lambda_Issue_Type_Support.md`](Lambda_Issue_Type_Support.md) (TS-1..TS-9),
 > [`Lambda_Design_Item_Boxing.md`](Lambda_Design_Item_Boxing.md).
 
