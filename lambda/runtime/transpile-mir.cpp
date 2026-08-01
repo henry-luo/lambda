@@ -2449,6 +2449,19 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         MIR_T_P, MIR_new_reg_op(mt->ctx, site_reg));
 }
 
+// T-A1: a boundary that can neither reject nor convert is pure cost — the box +
+// `lambda_type_check` + error test + unbox round trip around it computes a known
+// answer. Eliding it is what makes an annotation pin a representation instead of
+// installing a check (see vibe/Lambda_Tune_Typed_Vs_C2MIR.md M1).
+//
+// The redundancy rule itself lives with the other type reasoning in
+// build_ast.cpp; asking it here rather than re-deriving it is what keeps
+// emission and diagnosis from drifting apart.
+static bool mir_boundary_is_redundant(AstNode* source_node, Type* target) {
+    if (!source_node || !source_node->type || !target) return false;
+    return lambda_boundary_is_redundant(source_node->type, target);
+}
+
 // A declared `T | error` parameter receives an incoming ItemError as a body
 // value. `lambda_type_check` returns that same Item unchanged, so check the
 // input first; otherwise its ordinary post-check branch would mistake valid
@@ -7143,12 +7156,26 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 bool checked_declaration_boundary = false;
                 bool declared_array_contract = declared_value_type &&
                     mir_array_occurrence_element(declared_value_type) != NULL;
-                if (has_type_annotation && declared_value_type &&
-                        (expr_tid == LMD_TYPE_ANY ||
-                         (declared_value_type->type_id == LMD_TYPE_MAP &&
-                          expr_tid == LMD_TYPE_MAP &&
-                          asn->as && asn->as->type != declared_value_type) ||
-                         declared_array_contract)) {
+                bool declaration_boundary_applies = has_type_annotation &&
+                    declared_value_type &&
+                    (expr_tid == LMD_TYPE_ANY ||
+                     (declared_value_type->type_id == LMD_TYPE_MAP &&
+                      expr_tid == LMD_TYPE_MAP &&
+                      asn->as && asn->as->type != declared_value_type) ||
+                     declared_array_contract);
+                // T-A1: the check itself can be dropped when the relation is
+                // redundant, but the boundary is also where a boxed initializer
+                // acquires this binding's declared carrier. Dropping both wrote
+                // an Item into a native lane — the same defect the `9 - len(s)`
+                // comment below describes, and it made mbrot/permute/towers
+                // return ITEM_ERROR or spin. Keep the unbox, drop the call.
+                bool declaration_boundary_redundant = declaration_boundary_applies &&
+                    mir_boundary_is_redundant(asn->as, declared_value_type);
+                if (declaration_boundary_applies && declaration_boundary_redundant &&
+                        expr_tid == LMD_TYPE_ANY) {
+                    checked_declaration_boundary = true;
+                }
+                if (declaration_boundary_applies && !declaration_boundary_redundant) {
                     char boundary[192];
                     snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
                         (int)asn->name->len, asn->name->chars);
@@ -11243,7 +11270,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                                 parameter_error_label);
                             has_parameter_error_guard = true;
                         }
+                        // T-A1: `val_tid` is a representation label, not the
+                        // argument's semantic type — a flexint result is ANY
+                        // here while its AST type is `int`. Ask the boundary
+                        // relation before paying for a check the AST checker
+                        // already proved, or every typed call re-boxes.
                         if (parameter_contract && parameter_contract != &TYPE_ANY &&
+                                !mir_boundary_is_redundant(resolved_args[i],
+                                    parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
                                  (parameter_contract->type_id == LMD_TYPE_MAP &&
                                   val_tid == LMD_TYPE_MAP &&
@@ -11315,7 +11349,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                                 : transpile_box_item(mt, resolved_args[i]);
                         }
                         TypeId val_tid = get_effective_type(mt, resolved_args[i]);
+                        // T-A1, boxed-ABI mirror of the native-param site above.
                         if (parameter_contract && parameter_contract != &TYPE_ANY &&
+                                !mir_boundary_is_redundant(resolved_args[i],
+                                    parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
                                  (parameter_contract->type_id == LMD_TYPE_MAP &&
                                   val_tid == LMD_TYPE_MAP &&
@@ -12321,7 +12358,13 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         // values before ownership/COW work or native unboxing so a rejected
         // assignment leaves both the old binding and its snapshots intact.
         Type* contract = var->full_type ? mir_unwrap_decl_type(var->full_type) : NULL;
+        // T-A1: `s = s + n` on a declared `int` re-checked a relation the AST
+        // checker had proven, once per loop iteration. Unlike the declaration
+        // site, eliding needs no carrier repair: the checked path also left
+        // val_tid as ANY, so the widening below sees the same representation
+        // either way.
         if (contract && contract->type_id != LMD_TYPE_ANY &&
+                !mir_boundary_is_redundant(assign->value, contract) &&
                 (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
                  (contract->type_id == LMD_TYPE_MAP && val_tid == LMD_TYPE_MAP &&
                   assign->value->type != contract))) {

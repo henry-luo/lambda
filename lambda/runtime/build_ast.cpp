@@ -1226,12 +1226,6 @@ bool should_continue_transpiling(Transpiler* tp) {
     return tp->error_count < tp->max_errors;
 }
 
-typedef enum StaticBoundaryResult {
-    STATIC_BOUNDARY_PROVEN,
-    STATIC_BOUNDARY_REJECTED,
-    STATIC_BOUNDARY_DEFERRED,
-} StaticBoundaryResult;
-
 static Type* boundary_unwrap_type(Type* type) {
     type = unwrap_simple_type_type(type);
     if (type && !is_global_simple_type(type) && type->kind == TYPE_KIND_CONSTRAINED) {
@@ -1328,6 +1322,20 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     }
     return types_compatible_with_full(source, target, target) ?
         STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
+}
+
+// See type_contract.hpp. A proven relation is necessary but not sufficient:
+// admission also converts. Requiring both sides to be unadorned global scalar
+// carriers of the same TypeId is what makes admission provably the identity —
+// constraints, unions, occurrences and named map shapes all reach runtime
+// admission and may convert or re-pack. An earlier revision elided on PROVEN
+// alone and silently skipped the int->float widening in a `var x: float = <int>`
+// declaration, which made mbrot/permute/nqueens compute wrong answers.
+bool lambda_boundary_is_redundant(Type* source, Type* target) {
+    if (!source || !target) return false;
+    if (static_boundary_relation(source, target) != STATIC_BOUNDARY_PROVEN) return false;
+    if (!is_global_simple_type(source) || !is_global_simple_type(target)) return false;
+    return source->type_id == target->type_id;
 }
 
 // Calls with an error-capable argument have one extra control-flow edge: a

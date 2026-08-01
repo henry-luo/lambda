@@ -165,13 +165,50 @@ purely by deleting statically-redundant checks) is this exact shape.
 
 ### T-A. Annotations pin representation (kills M1, M2, M3)
 
-- **A1 — Elide statically-true boundaries.** At a direct call site or typed
-  assignment, when the RHS static type ⊑ the declared type, emit nothing: no
-  box, no `lambda_type_check`, no `it2i`. This is the static complement of
-  DF8 (which handles the *dynamic*-entry case in the callee); DF2 already
-  states the principle ("after that check the representation is known… not
-  emitted") — apply it to the transpiler's existing declared lane now, without
-  waiting for the full dual-func machinery.
+- **A1 — Elide statically-true boundaries. LANDED 2026-08-01.** At a typed
+  declaration, assignment, or call argument, when the boundary can neither
+  reject nor convert, emit no `lambda_type_check` and no error branch.
+  This is the static complement of DF8 (which handles the *dynamic*-entry case
+  in the callee); DF2 already states the principle ("after that check the
+  representation is known… not emitted").
+
+  **Two things the implementation had to get right, both found by the gate:**
+
+  1. **Proven ≠ redundant.** `lambda_type_check` returns the Item that
+     `runtime_type_admit_value` produced — it *widens* `int` to `float` and
+     re-packs map shapes. Eliding on `STATIC_BOUNDARY_PROVEN` alone skipped
+     the widening in `var x: float = <int>` and made mbrot/permute/nqueens
+     compute wrong answers. Redundancy therefore also requires that admission
+     be the identity: both sides unadorned global scalar carriers of the same
+     TypeId (`lambda_boundary_is_redundant`, build_ast.cpp — kept next to the
+     relation it refines rather than re-derived in the transpiler).
+  2. **The boundary was also the unboxing point.** At a *declaration* it is
+     where a boxed initializer acquires the binding's declared carrier
+     (`checked_declaration_boundary` gates the `emit_unbox`). Dropping check
+     and unbox together wrote an Item into a native lane — precisely the
+     failure the `9 - len(s)` comment in that function already describes.
+     The elided path keeps the unbox and drops only the call. At *assignment*
+     and *call-argument* sites no repair is needed: the checked path also left
+     `val_tid` as ANY, so downstream sees the same representation either way.
+
+  **Measured (MIR-typed, median of 3, release):**
+
+  | row | v18 | master pre-A1 | post-A1 |
+  |---|---:|---:|---:|
+  | r7rs/sum | 4.39 | 21.5 | **4.13** |
+  | r7rs/mbrot | 0.961 | 2.52 | **0.883** |
+  | r7rs/fib | 7.79 | 17.3 | 9.03 |
+  | r7rs/ack | 24.5 | 45.5 | 30.2 |
+  | r7rs/cpstak | 1.24 | 3.87 | 2.69 |
+  | r7rs/nqueens | 1.60 | 6.13 | 5.53 |
+  | awfy/nbody | 82.1 | 30.0 | 21.0 |
+
+  R7RS typed geomean **0.60x of pre-A1** (40% faster). The distance to the v18
+  snapshot closes from 2.36x to 1.42x — about 60% of the
+  `274625d56` regression recovered. `sum` and `mbrot` are fully back.
+  Gate: `make test-lambda-baseline` 3709 passed / 1 failed, the single failure
+  being `MirRatchetTest/js_tune6_exact_collection`, proven pre-existing by
+  re-running it with these changes stashed.
 - **A2 — Checked-unboxed int arithmetic.** Keep the biased INT53 overflow
   check (2 instrs, well-predicted — this is *not* the cost); on the fast path
   keep the result as raw i64 in the existing unboxed local. Box only in the
