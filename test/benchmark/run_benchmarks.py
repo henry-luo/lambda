@@ -33,10 +33,10 @@ import math
 import os
 import platform
 import re
+import shlex
 import signal
 import subprocess
 import sys
-import time
 import time
 
 # ============================================================
@@ -44,7 +44,14 @@ import time
 # ============================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 os.chdir(PROJECT_ROOT)
+
+# Port coverage and invocation live with their own standalone runners so the
+# correctness scripts and this timing runner cannot drift apart.
+import run_c2mir_benchmarks as c2mir_ports  # noqa: E402
+import run_go_benchmarks as go_ports  # noqa: E402
 
 # ============================================================
 # Configuration
@@ -66,7 +73,15 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 
 IS_MACOS = platform.system() == "Darwin"
 
-ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
+ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "quickjs", "nodejs", "python"]
+
+# Native statically-typed reference ports. They are not alternative Lambda
+# execution paths — they bound what a fully typed Lambda program could reach on
+# the same workload, and C2MIR shares MIR's backend so its emitted MIR can be
+# read next to Lambda's. Coverage is partial by design; see C2MIR_COVERAGE.md.
+# The build dir must stay absolute: `go -C <dir> build` resolves a relative -o
+# against the package directory, not against the project root.
+GO_BUILD_DIR = go_ports.DEFAULT_BUILD_DIR
 
 # Rows that RUN and exit 0 but compute the wrong answer on a given engine. They are
 # excluded per-engine, not per-row. Verify with test/benchmark goldens before adding
@@ -78,8 +93,8 @@ ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
 # it measures ~0.79 ms against Node's ~0.50 ms, so the row is not spuriously fast.
 WRONG_OUTPUT_ROWS = {}
 ENGINE_LABELS = {
-    "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
-    "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
+    "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "go": "Go",
+    "lambdajs": "LambdaJS", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
 }
 
 # ============================================================
@@ -738,6 +753,50 @@ def time_run_awfy_python(bench_name, num_runs, timeout_s):
             detail)
 
 
+def c2mir_command(suite, name):
+    """Shell command for a native C2MIR port, or (None, status) when unavailable."""
+    source = c2mir_ports.port_source(suite, name)
+    if source is None:
+        return None, "missing_port"
+    if not c2mir_ports.C2M.is_file():
+        return None, "toolchain_missing"
+    return " ".join(shlex.quote(a) for a in c2mir_ports.build_command(source)), "ok"
+
+
+def go_command(suite, name):
+    """Build a Go port and return its command, or (None, status) when unavailable.
+
+    The build runs here rather than inside the timed region: `go build` is far
+    slower than any benchmark body and must not land in the measurement.
+    """
+    if not go_ports.has_port(suite, name):
+        return None, "missing_port"
+    go = go_ports.go_executable()
+    if not go:
+        return None, "toolchain_missing"
+    GO_BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    executable, error = go_ports.build_binary(go, suite, name, GO_BUILD_DIR)
+    if error is not None:
+        return None, "build_failed"
+    return shlex.quote(str(executable)), "ok"
+
+
+def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
+    """Time one native reference port (c2mir or go) for a benchmark row."""
+    label = ENGINE_LABELS.get(engine, engine)
+    print(f"  {label:<8} ", end="", flush=True)
+    cmd, status = (c2mir_command if engine == "c2mir" else go_command)(suite, name)
+    if cmd is None:
+        results[suite][name][engine] = None
+        row[engine] = None
+        record_status(results, suite, name, engine, status)
+        print(f" --- ({status})")
+        return
+    w, e, ok, status, detail = time_run_benchmark(cmd, num_runs, timeout_s)
+    record_time_result(results, row, suite, name, engine, w, e, ok, status, detail)
+    print(f" {fmt_ms(e if e is not None else w)}")
+
+
 def mir_script_variants(b):
     """Return (untyped, typed-or-None) Lambda scripts for a benchmark."""
     ls_path = b["ls_path"]
@@ -814,12 +873,12 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                                        w, e, ok, status, detail)
                     print(f" {fmt_ms(e if e is not None else w)}")
 
-    # --- C2MIR ---
-    if "c2mir" in engines:
-        print(f"  C2MIR    ", end="", flush=True)
-        w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run --c2mir {ls_path}", num_runs, timeout_s)
-        record_time_result(results, row, suite, name, "c2mir", w, e, ok, status, detail)
-        print(f" {fmt_ms(e if e is not None else w)}")
+    # --- Native reference ports (statically typed ceiling) ---
+    # `lambda.exe run --c2mir` was removed from the CLI, so the C2MIR column now
+    # measures the native C ports through MIR's own C frontend (mac-deps/mir/c2m).
+    for native_engine in ("c2mir", "go"):
+        if native_engine in engines:
+            run_native_engine(native_engine, suite, name, num_runs, timeout_s, results, row)
 
     if not is_js:
         bundle_path = js_path.replace("2.js", "2_bundle.js") if js_path else None
@@ -1116,12 +1175,24 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
         row["mir"] = peak
         print(f" peak={fmt_mem(peak)}" if ok else " failed")
 
-    # --- C2MIR ---
-    if "c2mir" in engines:
-        print(f"  C2MIR    ", end="", flush=True)
-        peak, ok = mem_measure_n(f"{LAMBDA_EXE} run --c2mir {ls_path}", num_runs, timeout_s)
-        results[suite][name]["c2mir"] = peak
-        row["c2mir"] = peak
+    # --- Native reference ports ---
+    # These peaks include the toolchain's own footprint (c2m holds the C
+    # frontend and MIR generator in-process; a Go binary carries its runtime and
+    # GC heap), so they bound Lambda's RSS only loosely.
+    for native_engine in ("c2mir", "go"):
+        if native_engine not in engines:
+            continue
+        label = ENGINE_LABELS.get(native_engine, native_engine)
+        print(f"  {label:<8} ", end="", flush=True)
+        cmd, status = (c2mir_command if native_engine == "c2mir" else go_command)(suite, name)
+        if cmd is None:
+            results[suite][name][native_engine] = None
+            row[native_engine] = None
+            print(f" --- ({status})")
+            continue
+        peak, ok = mem_measure_n(cmd, num_runs, timeout_s)
+        results[suite][name][native_engine] = peak
+        row[native_engine] = peak
         print(f" peak={fmt_mem(peak)}" if ok else " failed")
 
     if not is_js:
