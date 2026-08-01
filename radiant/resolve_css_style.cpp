@@ -4569,6 +4569,73 @@ static void apply_grid_template_track_value(const CssValue* value,
               (*track_list_ptr)->track_count);
 }
 
+static bool grid_template_track_slice_is_supported(CssValue** values, int count) {
+    if (!values || count <= 0) return false;
+
+    bool has_track_size = false;
+    for (int i = 0; i < count; i++) {
+        CssValue* value = values[i];
+        if (!value) return false;
+        if (css_value_can_be_grid_track_size(value)) {
+            has_track_size = true;
+            continue;
+        }
+        // parse_grid_track_list owns the existing line-name token handling.
+        if (value->type != CSS_VALUE_TYPE_CUSTOM) return false;
+    }
+    return has_track_size;
+}
+
+static void clear_grid_template_track_list(GridTrackList** track_list_ptr) {
+    if (!track_list_ptr || !*track_list_ptr) return;
+    destroy_grid_track_list(*track_list_ptr);
+    *track_list_ptr = nullptr;
+}
+
+static bool apply_grid_template_shorthand(const CssValue* value, GridProp* grid) {
+    if (!value || !grid) return false;
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+        clear_grid_template_track_list(&grid->grid_template_rows);
+        clear_grid_template_track_list(&grid->grid_template_columns);
+        clear_grid_template_areas(grid);
+        return true;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.comma_separated) return false;
+
+    CssValue** values = value->data.list.values;
+    int value_count = value->data.list.count;
+    int separator_index = -1;
+    for (int i = 0; i < value_count; i++) {
+        if (!css_grid_is_separator(values[i])) continue;
+        if (separator_index >= 0) return false;
+        separator_index = i;
+    }
+    if (separator_index <= 0 || separator_index >= value_count - 1 ||
+        !grid_template_track_slice_is_supported(values, separator_index) ||
+        !grid_template_track_slice_is_supported(values + separator_index + 1,
+                                                value_count - separator_index - 1)) {
+        return false;
+    }
+
+    CssValue rows = {};
+    rows.type = CSS_VALUE_TYPE_LIST;
+    rows.data.list.values = values;
+    rows.data.list.count = separator_index;
+
+    CssValue columns = {};
+    columns.type = CSS_VALUE_TYPE_LIST;
+    columns.data.list.values = values + separator_index + 1;
+    columns.data.list.count = value_count - separator_index - 1;
+
+    // CSS Grid §7.2: the slash form assigns row then column tracks and resets
+    // grid-template-areas; leaving this shorthand unresolved left explicit tracks absent.
+    apply_grid_template_track_value(&rows, &grid->grid_template_rows, "grid-template rows");
+    apply_grid_template_track_value(&columns, &grid->grid_template_columns, "grid-template columns");
+    clear_grid_template_areas(grid);
+    return true;
+}
+
 // ============================================================================
 // Main Style Resolution
 // ============================================================================
@@ -9742,6 +9809,18 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
 
+        case CSS_PROPERTY_GRID_TEMPLATE: {
+            if (!block) {
+                log_debug("[CSS] grid-template: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            if (!apply_grid_template_shorthand(value, block->embedp()->grid)) {
+                log_debug("[CSS] grid-template: unsupported grammar");
+            }
+            break;
+        }
+
         case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
             if (!block) {
                 log_debug("[CSS] grid-template-areas: Cannot apply to non-block element");
@@ -9754,13 +9833,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             // Handle "none" keyword
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 log_debug("[CSS] grid-template-areas: none");
-                // Clear existing areas
-                for (int i = 0; i < grid->area_count; i++) {
-                    if (grid->grid_areas && grid->grid_areas[i].name) {
-                        mem_free(grid->grid_areas[i].name);
-                    }
-                }
-                grid->area_count = 0;
+                clear_grid_template_areas(grid);
                 break;
             }
 
