@@ -29,7 +29,7 @@ guard: do the incoming Items match the unboxed version's parameter representatio
 
 Exactly **one** unboxed version per function in this design. Multi-version
 specialization (one unboxed version per observed argument shape) is explicitly
-future work — see §11.
+future work — see §10.
 
 ### 1.1 The two cases from the request
 
@@ -128,7 +128,7 @@ call to `<name>` or a full boxed lowering of the body.
 
 Rejected alternative: per-param guards with partial coercion (unbox the params
 that match, box the rest). That needs 2^N entry shapes or a coercion that
-reintroduces the current unsoundness. Revisit only under §11.
+reintroduces the current unsoundness. Revisit only under §10.
 
 ### DF2 — The guard tests *inferred* params only
 
@@ -281,7 +281,7 @@ the wrong default. It is retained as a scoped optimization in DF16.
 > `boxed_body(args)`.
 
 This is the one property the whole design rests on, and it is directly testable
-(§10). Everything in O1–O4 is a threat to it.
+(§8). Everything in O1–O4 is a threat to it.
 
 ### DF10 — Recursion
 
@@ -314,7 +314,7 @@ that motivated it now fails the guard and runs boxed instead of being truncated.
 
 Proposed post-DF4 rule: weak arithmetic evidence with no contradicting call-site
 evidence → speculate `INT`. Land this **as a separate, separately-measured
-change** after the guard is green (§9, Phase 3) — never in the same commit.
+change** after the guard is green (§7, P4) — never in the same commit.
 
 ### DF13 — LambdaJS adopts the same shape
 
@@ -810,3 +810,153 @@ design: a representation-exact guard (DF5), a correct fallback (DF4), and an
 equivalence invariant to test each new version against (DF9). Union-typed params
 become the first candidate: `int | string` would get one `int` version and one
 `string` version instead of staying boxed.
+
+---
+
+## 11. Prior art
+
+None of the individual mechanisms in this document is new. Every one of them —
+dual entry points, a representation guard, a boxed fallback body, annotations
+that pin representation, speculation backed by a slow path — is settled practice
+somewhere. What follows maps the precedents onto the decisions in §3, so that
+each decision can be argued from someone else's measured experience rather than
+from first principles, and so the known failure modes are named before we hit
+them.
+
+*(Version/status details below are from memory and worth re-checking before being
+cited outside this document; the design points they illustrate are not in doubt.)*
+
+### 11.1 Two entry points per function — DF1, DF7, DF8, DF15
+
+| System | Fast entry | Public entry | How the version is chosen |
+|---|---|---|---|
+| **SBCL** (Common Lisp) | internal entry, "local call" convention | external entry point (XEP): arg-count + declared-type checks, then the same body | callee-side check; known call sites use the local convention and skip the XEP entirely |
+| **Cython** | `cdef` C function | `cpdef` also emits a Python-callable wrapper that converts and forwards | caller's language decides statically |
+| **Numba** | `nopython` compiled specialization | dispatcher object | runtime dispatch on observed argument types, with `object` mode as a real fallback |
+| **Julia** | specialized method instance | generic entry / `invoke` | runtime dispatch on concrete argument types |
+| **Static Python** (Meta Cinder) | typed bytecode with unboxed primitives | normal Python entry | boundary checks at the typed/untyped edge |
+| **Static Hermes** (Meta, announced 2023) | native AOT from typed JS | untyped JS path | static where types are known |
+| **Sorbet Compiler** (Stripe, experimental; not actively developed publicly) | LLVM-compiled `sig`-typed method | CRuby VM method | per-method fallback into the interpreter |
+| **This design** | `<name>` | `<name>_b` | callee-side guard (DF8), fallback is a real body (DF1) |
+
+Three things to take from the table.
+
+1. **The callee-side check is the majority position.** SBCL's XEP and Numba's
+   dispatcher both put the decision in one place per function rather than at each
+   call site. DF8 lands where the field already is; DF16's caller-side work is
+   correctly scoped down to *hoisting* an existing predicate rather than
+   duplicating the decision.
+2. **SBCL already does DF15.** A function whose calls are all local and visible
+   gets no external entry point at all. That is the same analysis as P0.5, and
+   it is the oldest and least controversial part of this proposal.
+3. **Numba is the closest match to DF1's specific shape** — two-tier with a
+   genuine second body (`object` mode), not a coercion. It is also a standing
+   warning: users routinely hit silent `object`-mode fallback and lose all the
+   speed with no diagnostic. That is exactly what O6 (deopt signal) is for.
+
+LambdaJS's current state (§2.2) — two bodies, no guard, static call-site choice —
+matches the *Cython* column, not the Numba one. DF13 moves it to the Numba shape.
+
+### 11.2 Annotations as representation, not merely as checks — O3, TS-3
+
+**Cython** (`cdef int x`), **mypyc**, **Julia**, and **Static Python** all treat an
+annotation as a commitment about machine representation: the annotated value is
+stored unboxed and operations on it compile to native instructions; unannotated
+values remain the boxed universal representation. mypyc compiles mypy itself with
+this model for a roughly 4× speedup.
+
+This is the answer O3 is looking for, and these systems get it by *construction*:
+the annotation is enforced at the untyped boundary, so inside the typed region the
+representation is guaranteed and needs no further test. That is precisely the DF2
+argument — a declared param needs no guard because the boundary already ran.
+
+It is also the direction the measured TS-3 penalty points: today an `int[]` or
+named-map annotation on a *local* installs a boundary without pinning a
+representation, so it costs (4.24×) and buys nothing.
+
+### 11.3 Speculation with a fallback — DF12, DF4, O6
+
+- **Tracing JITs (PyPy, V8, LuaJIT)** are the canonical guard-and-deoptimize
+  systems. Lambda's DF4 fall-through is deoptimization *without OSR*: the guard is
+  at function entry and the fallback is a complete alternative body, so there is
+  no mid-function state mapping to reconstruct. This is a real simplification, not
+  a shortcut, and it is worth stating as such — the hard part of deopt is
+  transferring live state at an arbitrary point, and DF1's entry-only guard
+  structurally avoids it. The price is granularity: one bad argument runs the whole
+  call boxed.
+- **Julia's "type instability"** is the same phenomenon recorded in the flexint
+  poisoning finding: one value the inferencer cannot pin degrades every
+  downstream arithmetic operation to the boxed path. Julia's tooling answer
+  (`@code_warntype`) is a diagnostic that shows where inference gave up — the same
+  need as O6, approached from the tooling side rather than the runtime side.
+- **Crystal** is the counterfactual: union types plus whole-program inference and
+  *no* dynamic escape hatch, compiled to LLVM. It shows what DF1.2's union params
+  could become under §10 (tagged-union representation with a dispatch, rather than
+  staying boxed) — at the cost of the dynamic lane Lambda intends to keep.
+- **Strongtalk** (Bracha & Griswold, OOPSLA 1993) originated the "optional types
+  that do not affect runtime semantics" position. DF4 deliberately does *not* take
+  that position for declared types (they raise), which is worth noting as a
+  conscious divergence: Lambda's declared lane is enforced, its inferred lane is
+  advisory.
+
+### 11.4 What gradual typing costs — the boundary literature
+
+The relevant results, all of which measure systems structurally similar to this
+one:
+
+- **Takikawa et al., *Is Sound Gradual Typing Dead?* (POPL 2016)** — measured every
+  typed/untyped configuration of each benchmark rather than only the fully-typed
+  and fully-untyped endpoints, and found order-of-magnitude slowdowns in
+  *partially* typed configurations of Typed Racket. The cost tracks the number of
+  typed/untyped **boundaries**, not the number of annotations.
+- **Greenman & Felleisen, *A Spectrum of Type Soundness and Performance*
+  (ICFP 2018)** — separates *deep* (guarded, contract-at-boundary) from *shallow*
+  (transient, check-at-use) from *erased*, with the cost profile of each.
+- **Vitousek et al., *Big Types in Little Runtime* (POPL 2017)** — Reticulated
+  Python's transient semantics: cheap, shallow, pervasive checks instead of
+  expensive boundary wrappers.
+- **Kuhlenschmidt, Almahallawi & Siek, Grift (PLDI 2019)** — an ahead-of-time
+  compiler for a gradually typed language emitting C/LLVM, built specifically to
+  measure the cost of gradual typing at native-code speed, with space-efficient
+  coercions. This is the closest academic analogue of this entire document.
+- **Wrigstad et al., Thorn "like types" (POPL 2010)** — a third mode between
+  `dyn` and concrete: checked at the boundary, usable by the compiler for
+  representation, not deeply enforced.
+
+**Where this design sits in that spectrum, stated explicitly:** DF2 + DF5 are a
+*shallow/transient* discipline (a representation test at entry, no wrappers, no
+blame tracking), and DF4 splits the two lanes — the declared lane is *deep-ish*
+(the boundary raises, per TE-9), the inferred lane is transient-with-fallback.
+Naming this matters because it selects which cost model applies: the Takikawa
+wrapper-cost results are about the deep lane and largely do not apply to the
+inferred lane, whereas the transient results (steady per-use overhead, no
+catastrophic boundary blowup) do. It also predicts where a blowup *could* appear
+here — at declared boundaries crossed in a loop, which is exactly what DF16's
+hoisting is for.
+
+### 11.5 Benchmark method worth borrowing — §8
+
+The Takikawa configuration-lattice method is directly applicable to the `*2.ls`
+typed corpus. Today those rows are graded as a per-row geomean of fully-typed vs
+fully-untyped, which cannot distinguish "annotations helped" from "annotations
+added a boundary that happened to be cheap here". Measuring a lattice of partial
+typings for a handful of representative benchmarks would attribute cost to
+boundaries directly, and would give P4 (DF12 inference lifting) a baseline that
+is not confounded by annotation placement. Recorded as a suggested addition to
+§8, not a gate.
+
+### 11.6 What is not precedented
+
+The combination, not the parts: union types plus optional annotations plus a
+tagged 64-bit `Item` plus a self-hosted MIR JIT plus a document/data-processing
+runtime, in one small toolchain. Crystal has the union inference; Julia has the
+specialization and the instability problem; Cython and mypyc have the
+representation pinning; none of them has all three.
+
+One structural advantage is genuinely ours: **DF15 is unavailable to most of this
+list.** Python, JavaScript, Ruby, and Lisp all have `eval` or open-world dispatch,
+so a public entry can essentially never be proven dead — SBCL's local-call
+elision applies only to lexically local functions, not to global `defun`s. Lambda
+has no `eval` (DF17), which is why P0.5 can elide `_b` for module-private
+functions outright. That is the cheapest win in this document and it is available
+precisely because of a language decision made elsewhere.
