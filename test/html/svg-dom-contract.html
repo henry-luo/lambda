@@ -14,8 +14,8 @@ const xlinkNs = "http://www.w3.org/1999/xlink";
 const svg = document.createElementNS(svgNs, "svg");
 svg.setAttribute("id", "svg-direct-root");
 svg.setAttribute("width", "320");
-svg.setAttribute("height", "180");
-svg.setAttribute("viewBox", "0 0 320 180");
+svg.setAttribute("height", "220");
+svg.setAttribute("viewBox", "0 0 320 220");
 const group = document.createElementNS(svgNs, "g");
 group.setAttribute("transform", "translate(20 15)");
 const rect = document.createElementNS(svgNs, "rect");
@@ -30,6 +30,18 @@ image.setAttributeNS(xlinkNs, "xlink:href", "data:image/png;base64,iVBORw0KGgoAA
 const path = document.createElementNS(svgNs, "path");
 path.setAttribute("d", "M10 110 L70 145");
 path.setAttribute("stroke", "#0f766e");
+const overlapCircle = document.createElementNS(svgNs, "circle");
+overlapCircle.setAttribute("id", "svg-overlap-circle");
+overlapCircle.setAttribute("cx", "245");
+overlapCircle.setAttribute("cy", "80");
+overlapCircle.setAttribute("r", "24");
+overlapCircle.setAttribute("fill", "#fef3c7");
+const overlapPath = document.createElementNS(svgNs, "path");
+overlapPath.setAttribute("id", "svg-overlap-path");
+overlapPath.setAttribute("d", "M185 140 L245 40 L305 140");
+overlapPath.setAttribute("fill", "none");
+overlapPath.setAttribute("stroke", "#0f766e");
+overlapPath.setAttribute("stroke-width", "4");
 const text = document.createElementNS(svgNs, "text");
 text.setAttribute("x", "200");
 text.setAttribute("y", "120");
@@ -37,6 +49,8 @@ text.textContent = "SVG label";
 group.appendChild(rect);
 group.appendChild(image);
 group.appendChild(path);
+group.appendChild(overlapCircle);
+group.appendChild(overlapPath);
 svg.appendChild(group);
 svg.appendChild(text);
 document.getElementById("svg-direct-host").appendChild(svg);
@@ -52,6 +66,14 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
     point.y = box.y + box.height / 2;
     const screenPoint = point.matrixTransform(rect.getScreenCTM());
     const hit = document.elementFromPoint(screenPoint.x, screenPoint.y);
+    point.x = 245;
+    point.y = 80;
+    const overlapCirclePoint = point.matrixTransform(overlapCircle.getScreenCTM());
+    const overlapCircleHit = document.elementFromPoint(overlapCirclePoint.x, overlapCirclePoint.y);
+    point.x = 210;
+    point.y = 90;
+    const pathAimPoint = point.matrixTransform(overlapPath.getScreenCTM());
+    const pathAimHit = document.elementFromPoint(pathAimPoint.x, pathAimPoint.y);
     const parsed = new DOMParser().parseFromString(
       "<svg xmlns='http://www.w3.org/2000/svg'><path d='M0 0 L4 4'/></svg>",
       "image/svg+xml");
@@ -61,10 +83,12 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
       path instanceof SVGPathElement &&
       text instanceof SVGTextContentElement &&
       box.x === 40 && box.y === 30 && box.width === 120 && box.height === 60 &&
-      groupBox.x === 0 && groupBox.y === 0 && groupBox.width === 160 && groupBox.height === 145 &&
+      groupBox.x === 0 && groupBox.y === 0 && groupBox.width === 305 && groupBox.height === 145 &&
       pathBox.x === 10 && pathBox.y === 110 && pathBox.width === 60 && pathBox.height === 35 &&
       textBox.width > 0 && textBox.height > 0 &&
       hit === rect &&
+      overlapCircleHit === overlapCircle &&
+      pathAimHit === overlapPath &&
       image.getAttributeNS(xlinkNs, "href") !== null &&
       parsed.documentElement.namespaceURI === svgNs &&
       serialized.includes("<rect id=\"svg-direct-rect\"") &&
@@ -72,7 +96,9 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
       typeof document.execCommand !== "function" &&
       typeof document.queryCommandSupported !== "function";
     state.textContent = JSON.stringify({
-      box, groupBox, pathBox, textBox, hit: hit && hit.id, matrix: rect.getScreenCTM(),
+      box, groupBox, pathBox, textBox, hit: hit && hit.id,
+      overlapCircleHit: overlapCircleHit && overlapCircleHit.id,
+      pathAimHit: pathAimHit && pathAimHit.id, matrix: rect.getScreenCTM(),
       parsedRoot: parsed.documentElement.nodeName, serialized, pass
     });
     state.setAttribute("data-ready", pass ? "true" : "false");

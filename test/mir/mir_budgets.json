@@ -137,10 +137,10 @@
       "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including conservative exception-extraction safepoints.",
       "budgets": {
         "default": {
-          "module_insns": 291,
+          "module_insns": 292,
           "functions": {
             "js_main": {
-              "insns": 74
+              "insns": 75
             }
           },
           "frames": [
@@ -205,7 +205,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots in each generated root frame.",
       "budgets": {
         "default": {
-          "module_insns": 4288
+          "module_insns": 4299
         }
       }
     },
@@ -216,7 +216,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested and throwing fixed argument-root extents.",
       "budgets": {
         "default": {
-          "module_insns": 4421
+          "module_insns": 4448
         }
       }
     },

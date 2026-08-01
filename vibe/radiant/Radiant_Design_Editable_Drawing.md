@@ -86,7 +86,7 @@ It is intentionally narrow but real.
 | Affine objects | native `SVGMatrix`/`DOMMatrix` and `SVGPoint`/`DOMPoint` coefficients plus multiply, inverse, translate, scale, rotate, flip, and point transformation | direct fixture; Raphaël and JointJS startup |
 | Coordinate transforms | `createSVGMatrix`, `createSVGPoint`, `getCTM`, and `getScreenCTM` compose SVG transforms with committed layout coordinates | direct hit-test contract; JointJS and Raphaël operations |
 | Geometry | `getBBox` for rect, circle, ellipse, line, polyline, polygon, path, text, image, and group; group bounds union descendants in group coordinates; text uses Radiant font measurement | direct rect/group/path/text assertions and JointJS text assertion |
-| Hit testing | `document.elementFromPoint` returns SVG elements through the normal Radiant event/hit-test path | direct fixture and drag assertions |
+| Hit testing | `document.elementFromPoint` returns SVG elements through the normal Radiant event/hit-test path; SVG paths use their actual fill and flattened stroke geometry rather than their bounding boxes, with a 3 CSS-pixel stroke aiming allowance | direct fixture and drag assertions |
 | XML | `DOMParser` parses SVG XML and `XMLSerializer` serializes the native SVG subtree, reconstructing XLink-qualified attributes | direct fixture |
 
 Geometry follows Radiant's committed-layout checkpoint. It does not introduce a
@@ -203,6 +203,11 @@ tolerance. The committed UI fixtures remain the deterministic event replay.
   `this.constructor`, protecting Bootstrap-style static lookup. The focused
   gate covers all three real libraries plus the direct SVG contract and bundled
   listener closure path.
+- The direct SVG contract also places a stroked path above a circle inside the
+  path's bounding box. The circle remains pickable away from the actual path,
+  while a point 3 CSS pixels from the thin stroke picks the path. This prevents
+  a broad path box from stealing circle drags without making thin paths hard to
+  aim at.
 - The external Chrome 150 oracle completed real pointer drag, focused keyboard,
   control, and destroy/recreate sequences for all three pages, as well as
   maxGraph's native wheel path. JointJS's page-owned host wheel listener passed
