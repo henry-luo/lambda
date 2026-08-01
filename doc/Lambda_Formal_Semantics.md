@@ -1,7 +1,7 @@
 # Lambda Formal Semantics — Specification
 
 **Status:** normative — an Architecture Decision Record for the Lambda language
-**Basis:** decision records C1–C13 (with findings A1–A10 and the probe evidence) in
+**Basis:** decision records C1–C17 (with findings A1–A10 and the probe evidence) in
 [`vibe/Lambda_Semantics_Formal.md`](../vibe/Lambda_Semantics_Formal.md) and
 [`vibe/Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md); type-enforcement
 decisions TE-1–TE-14 (with the boundary inventory and measured evidence) in
@@ -10,7 +10,9 @@ summarized in §11.4.
 **Scope:** this document specifies what Lambda's semantics **is by decision** — not
 what any given build implements. Where the implementation disagrees, the
 implementation is wrong; the conformance work is tracked in
-[`vibe/Lambda_Semantics_Impl_Plan.md`](../vibe/Lambda_Semantics_Impl_Plan.md), and
+[`vibe/Lambda_Semantics_Impl_Plan.md`](../vibe/Lambda_Semantics_Impl_Plan.md)
+(C16's flex-`int` conformance has its own plan,
+[`vibe/Lambda_Impl_Int_C16.md`](../vibe/Lambda_Impl_Int_C16.md)), and
 the executable formal model is specified in
 [`vibe/Lambda_Semantics_DSL_Proposal.md`](../vibe/Lambda_Semantics_DSL_Proposal.md).
 **Style:** each section states the rule in the declarative present, followed by a
@@ -32,9 +34,12 @@ string; an empty box is a box). Absence is expressed by `null` alone. [C1, C2]
 containers are *things* that hold content. The distinction drives truthiness (an
 empty container is still something) and equality shape. [C2]
 
-**P3 — Exact until you ask for float.** Integer and decimal arithmetic is exact;
-inexactness enters only through the float type, explicitly. Numbers get bigger,
-and only float makes them blurrier. [C3, C13]
+**P3 — Exactness lives in the exact tier.** `integer` and `decimal` arithmetic
+is exact, and parsed data always lands in an exact home (§4.2) — inexactness
+can enter *computed* values, never ingested ones. Flex `int` shares binary64
+precision by definition (C16): exact within ±(2⁵³ − 1), correctly rounded
+beyond. `float` remains the explicitly inexact type. *(Historical form: "exact
+until you ask for float" — retired with C3's promotion arm.)* [C3, C13, C16]
 
 **P4 — Mutation is visible or it does not exist.** Values never alias. Mutability
 is a property of bindings, marked by `var` — never a property of values.
@@ -118,57 +123,134 @@ symbols, binaries, functions, and types.
 Formally: `truthy(v) = false  iff  v = null ∨ v = false ∨ v is error ∨
 (v is string ∧ len(v) = 0)`.
 
+**Truthiness is decidable from the type tag alone** — a deliberate invariant, not
+an accident of the current set (C17). It keeps the runtime test a tag compare and
+lets inference fold conditions statically. A proposal to make some *value* of an
+otherwise-truthy type falsy — a `nan`, an empty container, a zero — must clear
+both bars before it can be entertained. This is why `nan` is truthy despite
+marking failure: `error` carries its falsiness in its tag, poison does not.
+
 *Rationale.* Falsy-0 is C's boolless legacy; languages with real booleans chose
 truthy-0 (Ruby, Lua, Lisp). Truthy-0 also keeps `or` a safe coalescing operator —
 `config.port or 8080` never clobbers a legitimate 0 — so Lambda never needs a
 separate `??`. Containers are truthy because an empty box is empty but is not
 nothing (P2); the resulting system is JavaScript's object rule with the C-legacy
 number mistakes removed. Consequence to teach: `if (results)` does **not** ask
-"any results?" — write `len(results) > 0`. [C2]
+"any results?" — write `len(results) > 0`; and since poison is truthy,
+`a div b or 0` does not rescue a zero divisor (guard it, or test `is nan`).
+[C2, C17]
 
 ---
 
 ## 4. Numerics
 
+**The poison symmetry (C16).** The organizing principle of this section:
+**every unbounded numeric domain is closed and total with its own poison;
+infinities are one value wherever poison exists; nans are always private;
+classification flows up, checks only guard the way down.** Concretely: `float`,
+`int`, `integer`, and `decimal` each close their arithmetic with their own
+`inf`/`nan` pair (`int.inf`/`int.nan`, `integer.inf`/`integer.nan`,
+`decimal.inf`/`decimal.nan`, and float's bare `inf`/`nan`); same-signed
+infinities are a single value across all four; every nan is unequal to
+everything, itself included, and belongs to its origin domain alone; a value —
+poison included — is a member of every superdomain on the `⊑` chain, so
+widening never checks, while narrowing boundaries verify domain membership
+(§11.4). Only the sized machine ints stand outside the symmetry: bounded,
+wrapping, poison-free.
+
+**Where poison comes from — interior versus ingress (C17).** Poison arises
+*only inside number math*: a computed zero divisor, saturation at the
+float-range extremes. Both operands are already numbers and the operation is
+number math, so the result stays in number rather than leaving for the error
+channel. Failure at the numeric world's *boundaries* is the opposite —
+parsing, casting, narrowing admission, and validation report `error()`, because
+there a non-number is being asked to become a number, or a number is being
+asked to fit a domain it does not belong to. So `1 div 0` is `int.inf` while
+`int("abc")` is an `error` — the same distinction that makes `int(s) or 0` the
+working default idiom and `a div b or 0` not one. The line is derived from
+where a value came from, not from a list of exceptions. [C14c, C17]
+
 ### 4.1 The two-tier integer model
 
-- **Flex `int`**: 53-bit symmetric range **±(2⁵³ − 1)** — exactly the integer
-  subset of `float64` (JavaScript's safe-integer bound). On overflow, arithmetic
-  **promotes to float** (correctly rounded); types are sticky (no demotion).
-  The symmetric range means the flex tier has no `MinInt`: negation and `abs`
-  are total.
+- **Flex `int`** — **C16 (2026-08-01), superseding this tier's promotion arm of
+  C3**: the integers exactly representable in IEEE binary64 — every integer in
+  the contiguous band **±(2⁵³ − 1)** (JavaScript's safe-integer bound) plus the
+  sparse representable integers beyond it — extended by the closure points
+  `int.inf`, `-int.inf`, and `int.nan` (the int domain's own poison, parallel
+  to `decimal.inf`/`decimal.nan`). `int` is a **distinct runtime type, not a
+  hint erased into float**: `type()`, printing, `is`, and the validator keep
+  the int/float distinction, and float contact still yields float (§4.3).
+  Arithmetic (`+`, `-`, `*`, `div`, `%`) is correctly-rounded binary64
+  arithmetic, **closed and total over the domain**: exact within the contiguous
+  band, correctly rounded above it, saturating to `int.inf`/`int.nan` at the
+  float-range extremes. **There is no overflow promotion — int arithmetic never
+  changes type.** Negation and `abs` are total (the domain is symmetric).
+  Poison behaves as elsewhere: `int.nan is int` → true (§5.1's "unequal, not
+  untypeable"); the same-signed infinities are **one value across the four
+  poison-bearing domains** (`int.inf == inf == integer.inf == decimal.inf`),
+  while nans are **never shared, per IEEE** — every nan (`nan`, `int.nan`,
+  `integer.nan`, `decimal.nan`) is unequal to everything including itself.
+  Classification runs *up* the `⊑` chain — `int.nan is float` → true, just as
+  `nan is float` — but never down: `nan is int` → false, and a foreign nan
+  rejects at narrowing boundaries (§11.4). The `is` lattice is total over full
+  domains, poison included: **`i32 ⊑ int ⊑ integer`** (and onward to
+  `decimal`), `int ⊑ float` definitionally; **`int ∥ int64`** — sparse int
+  values exceed the int64 range, and odd int64 values above 2⁵³ are not int.
 - **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
   **wraps** (two's complement); constant/literal overflow is a **compile
-  error**; division by zero yields float `inf`/`nan` per C14c (a deliberate
-  divergence from Go's panic — number math stays in number). Ordinary machine
+  error**; division by zero yields the entered domain's poison per C14c/C16
+  (`i8 div 0` → `int.inf`, `i64 div 0` → `integer.inf` — a deliberate
+  divergence from Go's panic; number math stays in number). Ordinary machine
   arithmetic wraps; `div` and `%` leave the machine lane under §4.7 rather
   than applying a machine `MinInt div -1` rule.
 
-*Rationale.* `int ⊂ float64` makes each int↔float operand conversion
-lossless and lets the JIT hold ints in double registers with zero observable
-difference (P6). An overflowing integer result can still round after promotion:
-odd or otherwise unrepresentable results above 2⁵³ may lose precision. Keeping
-that boundary behavior is the deliberate practical/performance tradeoff; the
-rejected alternative is automatic overflow into `integer`. [C3]
+*Rationale.* `int ⊂ float64` is definitional, not an embedding theorem: an int
+*is* a binary64 value that happens to be integral, so the JIT holds ints in
+double registers with zero observable difference (P6) and LambdaJS's numeric
+model coincides with Lambda's. Totality is the point: `int ⊕ int : int` is a
+*true* statement of inference rather than an approximation with a runtime
+escape; an `int` annotation can never introduce a runtime failure into all-int
+arithmetic (annotations stay monotone); and TE-15's containment edges retreat
+to genuine casts and parses. The deliberate cost is precision, not domain:
+computed results above 2⁵³ may round silently. The guideline that pays for it:
+values that must be exact *and* may exceed the band belong in `i64`, `integer`,
+or `decimal` — and §4.2 routes parsed data there already, so inexactness can
+enter computed values only, never ingested ones. Rejected alternatives: the
+historical 53-bit band with float promotion (made every declared-int boundary
+a deferred runtime check and int arithmetic untypable as int); automatic
+overflow into `integer` (C3's original rejection stands); erasing int into
+float entirely (loses the type/format/validator distinctions data processing
+needs). [C3 (historical), C16]
 
 ### 4.2 Literals are strict; data always fits
 
-- An unsuffixed integer literal that exceeds the `int` range is a **compile
-  error** — never a silent conversion. Suffixes (`i64`, `u64`, sized numeric
-  suffixes, `n`, `m`, float form) express intent explicitly. The suffix alone
-  names the type: `n` is `integer` always (`1n`, `1e3n`), `m` is `decimal`
-  always (`100m`, `1.5m`, `1.5e-2m`). A fractional or negative-exponent
-  spelling with `n` (`1.0n`, `1e-3n`) is a **compile error** naming `m` —
-  `n` requires an integer-valued spelling.
+- **Which unsuffixed spellings are `int` is lexical, never value-selected**
+  (the same rule as the `n` suffix): a numeric literal is `int` iff it has
+  **no decimal point and no negative exponent**. `10e1` is `int` 100 despite
+  the e-notation; `10.`, `10.0`, `10.e1`, and `10e-1` are `float`. (C16)
+- An unsuffixed `int`-form literal outside the contiguous band **±(2⁵³ − 1)**
+  is a **compile error** — never a silent conversion, and **even where the
+  value is sparsely representable** (`18014398509481984` = 2⁵⁴ errors although
+  it is a valid `int` value): a literal of that magnitude expresses
+  `i64`/`integer` intent, and admitting only the contiguous band keeps the
+  rule teachable (C16). The two rules compose: `1e16` is a compile error —
+  spell `1.0e16` (float) or `1e16n` (`integer`). Suffixes (`i64`, `u64`, sized
+  numeric suffixes, `n`, `m`, float form) express intent explicitly. The suffix alone names the type: `n` is `integer`
+  always (`1n`, `1e3n`), `m` is `decimal` always (`100m`, `1.5m`, `1.5e-2m`).
+  A fractional or negative-exponent spelling with `n` (`1.0n`, `1e-3n`) is a
+  **compile error** naming `m` — `n` requires an integer-valued spelling.
 - **Data cannot be rejected**: input parsers place integer tokens in the
-  smallest exact home — `int`, else `int64`, else `decimal` — never silently in
-  float. [C3, C13]
+  smallest exact home — `int` iff within ±(2⁵³ − 1), else `int64`, else
+  `decimal` — never silently in float. The `int` home is the contiguous band,
+  not the sparse representability test: ingestion stays deterministic, and
+  large exact values (64-bit IDs, epoch nanoseconds) keep exact carriers.
+  [C3, C13, C16]
 
 ### 4.3 Mixed-operation promotion lattice
 
 > numeric operations use the exact-embedding lattice: `int` can enter both
-> `float` and `integer`; the *unbounded* `integer` and `float` meet at
-> `decimal`. Fixed-width integers (`i8`…`u32`, `int`, `i64`, `u64`) meet
+> `float` and `integer`; the *exact unbounded* `integer` and `float` meet at
+> `decimal`. Binary-domain integers (`i8`…`u32`, `int`, `i64`, `u64`) meet
 > `float` in `float` — see §4.3.
 
 The exact meeting type is contagious. **A float entering the decimal world is
@@ -192,9 +274,10 @@ magnitudes. Sized-integer arithmetic has two cases:
   non-sized operands meet through `int → float` or
   `int → integer → decimal`. Consequently `u8 + int → int` and
   `i64 + int → integer`. Small and large `u64` values take the same path.
-- **fixed-width integer × float → `float`.** Every bounded integer type —
-  `i8`…`u32`, `int`, `i64`, `u64` — meets a binary float in `float`. Only the
-  unbounded `integer` domain meets `float` in `decimal`. So `i64 * float → float`
+- **binary-domain integer × float → `float`.** Every binary-precision integer
+  type — `i8`…`u32`, `int` (C16: binary64-domain, no longer bounded), `i64`,
+  `u64` — meets a binary float in `float`. Only the exact unbounded
+  `integer` domain meets `float` in `decimal`. So `i64 * float → float`
   and `u64 * float → float`, while `integer * float → decimal`. This is the one
   place a fixed-width type does **not** follow its semantic domain to the meet:
   `i64`/`u64` enter `integer` for exactness joins against a bigint, but not
@@ -232,7 +315,8 @@ uppercase `N` suffix is not part of the grammar.
 
 Decimal `+`, `-`, and `*` are exact and may grow storage; division and other
 inexact operations round at the documented decimal context. `integer ÷ integer`
-exits to `decimal`, not floor division.
+exits to `decimal`, not floor division (truncating `div`/`%` stay in `integer`
+— §4.7, C16).
 
 *Rationale.* The third instance of the two-tier philosophy. Precision carried in
 the type is the value-semantics-compatible design; Python's context — mutable
@@ -275,6 +359,15 @@ parseable Lambda spellings `decimal.inf`, `-decimal.inf`, and `decimal.nan`; bar
 `inf`/`nan` remain float. Decimal poison participates in arithmetic as decimal poison,
 so `0m * decimal.inf` is `decimal.nan`, never an error or process fault. [C8.5a, C14c]
 
+Finite `int` values print as integers at every magnitude — no decimal point, no
+exponent form (`18014398509481982`, not `1.80144e+16`) — keeping int and float
+output visibly distinct, which data emission relies on. Int poison follows the
+decimal pattern: the parseable spellings `int.inf`, `-int.inf`, and `int.nan`,
+distinct from float's bare `inf`/`nan`, participating in int arithmetic as int
+poison (`1 div 0 + 1` is `int.inf`). `integer` poison prints likewise:
+`integer.inf`, `-integer.inf`, `integer.nan` (`1n div 0n + 1n` is
+`integer.inf`). [C14c, C16]
+
 ### 4.7 Division and modulo
 
 Division by zero never raises, at any width or tier:
@@ -289,25 +382,34 @@ Division by zero never raises, at any width or tier:
   Sized integer operands first enter the non-sized domains from §4.3, so
   `i8 / u8 → float` while `i64 / u64 → decimal`. Float-domain division
   follows IEEE: `1/0` → `inf`, `0.0/0.0` → `nan`.
-- `div` and `%` are integer *operations* but number *math* — **C14c
-  (2026-07-30), superseding C14b's `error()` arm**: their results follow the
-  same domain-selection table as `/` (`int div int → float`; large-integer
-  domains → decimal), and a computed zero divisor yields the domain's
-  `inf`/`nan` exactly as `/` does. Integer math stays in number and never
-  returns `error()`. Staying in the int lane is the user's explicit choice —
-  `if (b != 0) a div b else 0` — and note the `or`-rescue does not apply
-  (inf/nan are truthy): guard the divisor or test `is nan`.
-- Vectorized integer division follows the scalar rule: the result is a float
-  array with per-lane `inf`/`nan` at offending lanes — representable and
-  type-stable, so C14b's whole-op single-`error` is retired. The pre-mask
-  idiom (`b eq 0`) remains available for salvage but is no longer required.
-  Decimal-domain division by zero likewise yields decimal `decimal.inf`,
-  `-decimal.inf`, or `decimal.nan`; these spellings round-trip through the Lambda
-  grammar and remain visibly distinct from float poison.
+- `div` and `%` are integer *operations* and **stay in their operand domain —
+  C16 (2026-08-01), revising C14c's result-typing arm while keeping its
+  substance**: `int div int → int` and `int % int → int`; a computed zero
+  divisor yields the int domain's own poison — `7 div 0 → int.inf`,
+  `0 div 0 → int.nan` — exactly as float division yields `inf`/`nan` and
+  decimal division yields `decimal.inf`/`decimal.nan`. The `integer` domain
+  closes the same way: `integer div integer → integer` with
+  `integer.inf`/`integer.nan` on a computed zero divisor, and sized
+  `i64`/`u64` operands enter `integer` first (§4.3), so `i64 div u64 →
+  integer`. Integer math stays in number and never returns `error()` (C14c,
+  unchanged). True division `/` is untouched: `int / int → float` and
+  `integer / integer → decimal` — fractional results take the fractional
+  domains.
+  Staying finite is the user's explicit choice — `if (b != 0) a div b else 0`
+  — and the `or`-rescue does not apply (poison is truthy): guard the divisor
+  or test `is nan`.
+- Vectorized integer division follows the scalar rule: the result stays an
+  int-family array with per-lane `int.inf`/`int.nan` at offending lanes —
+  representable and type-stable, so C14b's whole-op single-`error` remains
+  retired. The pre-mask idiom (`b eq 0`) remains available for salvage but is
+  no longer required. Decimal-domain division by zero likewise yields
+  `decimal.inf`, `-decimal.inf`, or `decimal.nan`; all poison spellings
+  round-trip through the Lambda grammar and remain visibly distinct from
+  float poison.
 
 `div` truncates toward zero; `%` takes the dividend's sign (C convention;
 contrast Python's flooring — relevant when modeling guest languages).
-[A2, C3, C14b (historical), C14c]
+[A2, C3, C14b (historical), C14c, C16]
 
 ---
 
@@ -323,7 +425,10 @@ contrast Python's flooring — relevant when modeling guest languages).
   (§5.3).
 - **Two designed poison carve-outs**: `nan` and `error` values never equal
   anything, including themselves. These are the only exceptions to
-  reflexivity. **Poison is unequal, not untypeable**: classification is a
+  reflexivity. `nan` means the whole family — float `nan`, `int.nan`,
+  `integer.nan`, `decimal.nan` — nans are never shared across or within
+  representations (IEEE); same-signed infinities, by contrast, are one value
+  across `float`, `int`, `integer`, and `decimal` (C16). **Poison is unequal, not untypeable**: classification is a
   different relation — `err is error` → true, `nan is float` → true, and
   `match` type arms (which dispatch via `is`) catch them:
   `match int(s) { case error: fallback  case int: ~ * 2 }`. Errors reach
@@ -1055,11 +1160,19 @@ section distills its semantic decisions; several are captured nowhere else.
   `match`, annotated bindings, firewalls).
   `type(a or b) = (type(a) \ {error, null}) | type(b)`, so `int(s) or 0 : int`.
   [enforcement §10.8, TE-13]
-- **Deferred numeric checks are value-aware.** An exactly-embedding value
-  passes and is re-represented (`float 3.0` → `int 3`); an inexact one fails
-  with the error. Static positions reject the whole class (`let x: int = 3.5`
-  *and* `3.0` are compile errors); `is`/`match` stay type-directional
-  (`3.0 is int` is false). [TE-5, TE-6]
+- **Deferred numeric checks are value-aware: admission is domain membership.**
+  An exactly-embedding value passes and is re-represented (`float 3.0` →
+  `int 3`); an inexact one fails with the error. Poison follows the same
+  membership rule (C16): same-signed infinities are one value across
+  float/int/integer/decimal, so `inf` passes an `int` boundary re-tagged as
+  `int.inf`; classification runs up the `⊑` chain, so *widening* admits
+  poison without any check (`int.nan` flows into a `float` or `integer`
+  position and remains `int.nan`); at *narrowing* boundaries a foreign nan is
+  rejected exactly like `3.5` (`nan` is not `int.nan` — nans are never
+  shared); sized-int boundaries admit no poison at all. Static positions
+  reject the whole class (`let x: int = 3.5` *and* `3.0` are compile errors);
+  `is`/`match` stay type-directional (`3.0 is int` is false). [TE-5, TE-6,
+  C16]
 
 *Rationale.* Error is as dangerous as null, or more — a stray null yields
 absence, while a mishandled error is a poisoned computation carrying a
@@ -1147,10 +1260,12 @@ a semantics change:
 | Section | Decisions | Where argued |
 |---|---|---|
 | §2 value domain, `""`, solid types | C1, C1.6a, C2 | `Lambda_Semantics_Formal.md` |
-| §3 truthiness | C2 | ibid. |
-| §4.1–4.3 integers, literals, lattice | C3 | ibid. |
+| §3 truthiness | C2, C17 (tag-decidability invariant) | ibid. |
+| §4 poison symmetry, interior-vs-ingress | C16, C17 | `Lambda_Semantics_Formal2.md` |
+| §4.1–4.3 integers, literals, lattice | C3 (flex arm historical), C16 | `Lambda_Semantics_Formal.md`; C16 in `Lambda_Semantics_Formal2.md` |
 | §4.4 decimal tiers | C13 | `Lambda_Semantics_Formal2.md` |
-| §4.5–4.6 float↔decimal, printing | C8.5a | ibid. |
+| §4.5–4.6 float↔decimal, printing | C8.5a, C16 (int printing/poison) | ibid. |
+| §4.7 division and modulo | A2, C14b (historical), C14c, C16 | ibid. |
 | §5 equality | C8, C8.5, C8.6, C8.6-R, C8.7 | ibid. |
 | §6 total order | C11 | ibid. |
 | §7 absence, errors, indexing, aggregation | C5, C5.3, C14, C15 | ibid. |

@@ -1090,7 +1090,12 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
 static inline void em_insert_zero_frame_slots(MirEmitter* em,
         MIR_insn_t before, MIR_reg_t frame_base, int slot_count) {
     if (!em || !before || !frame_base || slot_count <= 0) return;
-    const int inline_slot_limit = 8;
+    // D1b: the crossover is well past 8. Each cleared slot is one independent
+    // store that pipelines, whereas the memset leaf costs an FFI call before it
+    // writes anything — fib's 10-slot (80-byte) frame paid a call to do what ten
+    // stores do. Zeroing still happens either way; only the mechanism changes,
+    // so this carries none of the GC risk that *eliding* the clear would.
+    const int inline_slot_limit = 16;
     if (slot_count <= inline_slot_limit) {
         for (int slot = 0; slot < slot_count; slot++) {
             MIR_insn_t clear = MIR_new_insn(em->ctx, MIR_MOV,
@@ -1126,14 +1131,72 @@ static inline void em_insert_zero_frame_slots(MirEmitter* em,
     MIR_insert_insn_before(em->ctx, em->func_item, before, clear);
 }
 
+// D3: does any instruction other than `def` read `reg`? Covers register
+// operands and the base/index of memory operands, so a value that is only ever
+// addressed through memory still counts as live.
+static inline bool em_reg_is_read(MirEmitter* em, MIR_reg_t reg, MIR_insn_t def) {
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        if (insn == def) continue;
+        for (size_t i = 0; i < insn->nops; i++) {
+            MIR_op_t* op = &insn->ops[i];
+            if (op->mode == MIR_OP_REG && op->u.reg == reg) return true;
+            if (op->mode == MIR_OP_MEM &&
+                    (op->u.mem.base == reg || op->u.mem.index == reg)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// D3: drop a prologue load nothing consumes. The type-list, heap and gc-heap
+// pointers are established eagerly at every function entry because *some*
+// bodies need them for allocation; a leaf like fib reads none of them and paid
+// four instructions per call for the privilege. Removing them here rather than
+// emitting lazily keeps emission order independent of where the first use
+// happens to land (a lazy load inside a loop or a branch would be worse).
+//
+// Only a MOV whose destination is the register is a candidate: anything with
+// side effects stays regardless of whether its result is read.
+static inline void em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
+    if (!reg || !em->func) return;
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        if (insn->code != MIR_MOV || insn->nops != 2 ||
+                insn->ops[0].mode != MIR_OP_REG || insn->ops[0].u.reg != reg) {
+            continue;
+        }
+        if (!em_reg_is_read(em, reg, insn)) {
+            MIR_remove_insn(em->ctx, em->func_item, insn);
+        }
+        return;
+    }
+}
+
 // Finalize reservation sizes; bound bodies skip binding, not frame reservation.
+// T-D1a: the prologue no longer *calls* lambda_side_stack_ensure_for on every
+// entry. Its fast path was already inline here — the call re-did the same top vs
+// limit comparisons and, on POSIX, nothing else (the region is mmap'd
+// demand-paged at reserve, so committed == limit from first bind). It stays
+// load-bearing only for first-call binding and for advancing the Windows commit
+// watermark, so it becomes a cold grow-and-retry slow path instead.
+//
+// The inline checks therefore compare against the *commit* limit rather than the
+// reservation limit: that is what makes reserved-but-uncommitted space route to
+// the slow path before any store touches it, and it closes a latent gap where
+// the number region was never committed on Windows.
 static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         MirEntryMode entry_mode, size_t root_top_offset,
         size_t root_limit_offset, size_t number_top_offset,
-        size_t number_limit_offset, size_t root_commit_limit_offset) {
+        size_t number_limit_offset, size_t root_commit_limit_offset,
+        size_t number_commit_limit_offset) {
     MirFrameState* frame = &em->frame;
     MIR_label_t overflow_label = em_new_label(em);
-    MirImportEntry* ensure_import = NULL;
+    MIR_label_t grow_label = em_new_label(em);
+    MIR_label_t retry_label = em_new_label(em);
+    bool needs_reserve = frame->root_slot_count > 0 || frame->fixed_number_slots > 0;
+    (void)root_limit_offset; (void)number_limit_offset;
     if (frame->root_slot_count == 0) {
         MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns);
         while (insn) {
@@ -1150,27 +1213,17 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
             insn = next;
         }
     }
+    // Retry target: a grow must re-read both tops, because first-call binding
+    // moves them from NULL to the region base.
+    MIR_reg_t grown = 0;
+    if (needs_reserve) {
+        grown = em_new_reg(em, "frame_grown", MIR_T_I64);
+        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+            MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, grown),
+                MIR_new_int_op(em->ctx, 0)));
+        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor, retry_label);
+    }
     if (entry_mode == MIR_ENTRY_CHECKED) {
-        MIR_var_t ensure_args[3] = {
-            {MIR_T_P, "runtime", 0},
-            {MIR_T_I64, "root_slots", 0},
-            {MIR_T_I64, "number_slots", 0},
-        };
-        ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_for",
-            MIR_T_I64, 3, ensure_args, 1, false);
-        MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_call_insn(em->ctx, 6,
-                MIR_new_ref_op(em->ctx, ensure_import->proto),
-                MIR_new_ref_op(em->ctx, ensure_import->import),
-                MIR_new_reg_op(em->ctx, ensured),
-                MIR_new_reg_op(em->ctx, frame->runtime),
-                MIR_new_int_op(em->ctx, frame->root_slot_count),
-                MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_BF,
-                MIR_new_label_op(em->ctx, overflow_label),
-                MIR_new_reg_op(em->ctx, ensured)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_MOV,
                 MIR_new_reg_op(em->ctx, frame->root_base),
@@ -1181,28 +1234,6 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         // roots and return scratch still need capacity. Skipping this reserve
         // made a checked map write overflow at function entry and quietly
         // bypass the write/error path before it executed.
-        if (frame->root_slot_count > 0 || frame->fixed_number_slots > 0) {
-            MIR_var_t ensure_args[3] = {
-                {MIR_T_P, "runtime", 0},
-                {MIR_T_I64, "root_slots", 0},
-                {MIR_T_I64, "number_slots", 0},
-            };
-            ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_for",
-                MIR_T_I64, 3, ensure_args, 1, false);
-            MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
-            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-                MIR_new_call_insn(em->ctx, 6,
-                    MIR_new_ref_op(em->ctx, ensure_import->proto),
-                    MIR_new_ref_op(em->ctx, ensure_import->import),
-                    MIR_new_reg_op(em->ctx, ensured),
-                    MIR_new_reg_op(em->ctx, frame->runtime),
-                    MIR_new_int_op(em->ctx, frame->root_slot_count),
-                    MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
-            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-                MIR_new_insn(em->ctx, MIR_BF,
-                    MIR_new_label_op(em->ctx, overflow_label),
-                    MIR_new_reg_op(em->ctx, ensured)));
-        }
         if (frame->root_slot_count > 0) {
             MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
                 MIR_new_insn(em->ctx, MIR_MOV,
@@ -1225,6 +1256,7 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
             frame->plan.debug_name ? frame->plan.debug_name : "<unnamed>");
         abort();
     }
+    MIR_reg_t number_top_reg = 0;
     if (frame->fixed_number_slots > 0) {
         MIR_reg_t top = em_new_reg(em, "number_top", MIR_T_I64);
         MIR_reg_t limit = em_new_reg(em, "number_limit", MIR_T_I64);
@@ -1237,19 +1269,17 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, limit),
                 MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)number_limit_offset, frame->runtime, 0, 1)));
+                    (MIR_disp_t)number_commit_limit_offset, frame->runtime, 0, 1)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_UGT, MIR_new_reg_op(em->ctx, overflow),
                 MIR_new_reg_op(em->ctx, top), MIR_new_reg_op(em->ctx, limit)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_BT,
-                MIR_new_label_op(em->ctx, overflow_label),
+                MIR_new_label_op(em->ctx, grow_label),
                 MIR_new_reg_op(em->ctx, overflow)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)number_top_offset, frame->runtime, 0, 1),
-                MIR_new_reg_op(em->ctx, top)));
+        // Store deferred until the root check has also passed: a retry must not
+        // observe a half-bumped pair of tops.
+        number_top_reg = top;
     }
 
     if (frame->root_slot_count > 0) {
@@ -1264,56 +1294,22 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, limit),
                 MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)root_limit_offset, frame->runtime, 0, 1)));
+                    (MIR_disp_t)root_commit_limit_offset, frame->runtime, 0, 1)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_UGT, MIR_new_reg_op(em->ctx, overflow),
                 MIR_new_reg_op(em->ctx, top), MIR_new_reg_op(em->ctx, limit)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_BT,
-                MIR_new_label_op(em->ctx, overflow_label),
+                MIR_new_label_op(em->ctx, grow_label),
                 MIR_new_reg_op(em->ctx, overflow)));
-#if defined(_WIN32)
-        if (!ensure_import) {
-            MIR_var_t ensure_args[2] = {
-                {MIR_T_I64, "root_slots", 0},
-                {MIR_T_I64, "number_slots", 0},
-            };
-            ensure_import = em_ensure_import(em, "lambda_side_stack_ensure_tls",
-                MIR_T_I64, 2, ensure_args, 1, false);
+        if (number_top_reg) {
+            MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+                MIR_new_insn(em->ctx, MIR_MOV,
+                    MIR_new_mem_op(em->ctx, MIR_T_I64,
+                        (MIR_disp_t)number_top_offset, frame->runtime, 0, 1),
+                    MIR_new_reg_op(em->ctx, number_top_reg)));
+            number_top_reg = 0;
         }
-        MIR_reg_t commit_limit = em_new_reg(em, "root_commit_limit", MIR_T_I64);
-        MIR_reg_t needs_commit = em_new_reg(em, "root_needs_commit", MIR_T_I64);
-        MIR_reg_t committed = em_new_reg(em, "root_committed", MIR_T_I64);
-        MIR_label_t ready = em_new_label(em);
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_reg_op(em->ctx, commit_limit),
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)root_commit_limit_offset,
-                    frame->runtime, 0, 1)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_UGT,
-                MIR_new_reg_op(em->ctx, needs_commit),
-                MIR_new_reg_op(em->ctx, top),
-                MIR_new_reg_op(em->ctx, commit_limit)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_BF, MIR_new_label_op(em->ctx, ready),
-                MIR_new_reg_op(em->ctx, needs_commit)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_call_insn(em->ctx, 5,
-                MIR_new_ref_op(em->ctx, ensure_import->proto),
-                MIR_new_ref_op(em->ctx, ensure_import->import),
-                MIR_new_reg_op(em->ctx, committed),
-                MIR_new_int_op(em->ctx, frame->root_slot_count),
-                MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_BF,
-                MIR_new_label_op(em->ctx, overflow_label),
-                MIR_new_reg_op(em->ctx, committed)));
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor, ready);
-#else
-        (void)root_commit_limit_offset;
-#endif
         em_insert_zero_frame_slots(em, frame->anchor, frame->root_base,
             frame->root_slot_count);
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
@@ -1322,6 +1318,53 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                     (MIR_disp_t)root_top_offset, frame->runtime, 0, 1),
                 MIR_new_reg_op(em->ctx, top)));
     }
+    // A frame with only number slots still has to publish its bumped top.
+    if (number_top_reg) {
+        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
+            MIR_new_insn(em->ctx, MIR_MOV,
+                MIR_new_mem_op(em->ctx, MIR_T_I64,
+                    (MIR_disp_t)number_top_offset, frame->runtime, 0, 1),
+                MIR_new_reg_op(em->ctx, number_top_reg)));
+    }
+
+    // Cold slow path. lambda_side_stack_ensure_for binds on first use and
+    // advances the Windows commit watermark; on success we re-run the inline
+    // checks, which is why both tops are re-read at retry_label. `grown` makes
+    // this one-shot: if a successful grow still fails the check, fall through to
+    // the overflow error rather than spin.
+    if (needs_reserve) {
+        em_emit_label(em, grow_label);
+        MIR_var_t ensure_args[3] = {
+            {MIR_T_P, "runtime", 0},
+            {MIR_T_I64, "root_slots", 0},
+            {MIR_T_I64, "number_slots", 0},
+        };
+        MirImportEntry* ensure_import = em_ensure_import(em,
+            "lambda_side_stack_ensure_for", MIR_T_I64, 3, ensure_args, 1, false);
+        MIR_reg_t already = em_new_reg(em, "frame_grow_once", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_NE,
+            MIR_new_reg_op(em->ctx, already), MIR_new_reg_op(em->ctx, grown),
+            MIR_new_int_op(em->ctx, 0)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, overflow_label),
+            MIR_new_reg_op(em->ctx, already)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, grown), MIR_new_int_op(em->ctx, 1)));
+        MIR_reg_t ensured = em_new_reg(em, "frame_ensured", MIR_T_I64);
+        em_emit_insn(em, MIR_new_call_insn(em->ctx, 6,
+            MIR_new_ref_op(em->ctx, ensure_import->proto),
+            MIR_new_ref_op(em->ctx, ensure_import->import),
+            MIR_new_reg_op(em->ctx, ensured),
+            MIR_new_reg_op(em->ctx, frame->runtime),
+            MIR_new_int_op(em->ctx, frame->root_slot_count),
+            MIR_new_int_op(em->ctx, frame->fixed_number_slots)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+            MIR_new_label_op(em->ctx, overflow_label),
+            MIR_new_reg_op(em->ctx, ensured)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, retry_label)));
+    }
+
     em_emit_label(em, overflow_label);
     return overflow_label;
 }

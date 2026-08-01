@@ -198,6 +198,12 @@ because it is a *silent* representation change of the same family as everything 
 whose static type said `int` is now a `float`, and nothing in the source says so. Worth confirming
 this stays the intended behaviour as the numeric tower settles.
 
+**RESOLVED 2026-08-01 by C16** (`vibe/Lambda_Semantics_Formal2.md`; spec §4.1/§4.2/§4.6/§4.7
+rewritten): flex `int` is redefined as the float64-representable integers — a distinct runtime
+type, closed and total under `+ - * div %` with `int.inf`/`int.nan`, no overflow promotion.
+The silent int→float flip ceases to exist semantically; `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` and
+the flexint dual-lane lowering become implementation back-work (not yet started).
+
 ---
 
 ## Priority
