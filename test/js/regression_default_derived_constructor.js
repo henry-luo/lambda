@@ -38,3 +38,17 @@ var ExportedCellCodec = class extends BaseCodecDefault {
 };
 
 console.log(new ExportedCellCodec().value);
+
+class ConstructorIdentityBase {
+  constructor() {
+    console.log(this.constructor.NAME);
+  }
+}
+
+class ConstructorIdentityDerived extends ConstructorIdentityBase {
+  static get NAME() {
+    return "derived";
+  }
+}
+
+new ConstructorIdentityDerived();

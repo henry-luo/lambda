@@ -2898,7 +2898,12 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         }
         // v18c: Set constructor property (instance.constructor === Class)
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        js_property_set(object_root.get(), ctor_key, callee_root.get());
+        Item instance_constructor = new_target_root.get().item != ItemNull.item
+            ? new_target_root.get() : callee_root.get();
+        // A default derived constructor forwards into its parent before that
+        // parent body reads `this.constructor`; retain the original new.target
+        // here instead of correcting it only after the parent returns.
+        js_property_set(object_root.get(), ctor_key, instance_constructor);
         // Mark constructor as non-enumerable (per ES spec)
         js_mark_non_enumerable(object_root.get(), ctor_key);
         // Set __proto__ so instance methods are accessible via prototype chain

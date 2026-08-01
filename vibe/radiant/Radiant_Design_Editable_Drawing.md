@@ -1,7 +1,7 @@
 # Radiant Editable Drawing Compatibility — Implemented SVG DOM Contract
 
 **Date:** 2026-08-01
-**Status:** Implemented and regression-tested
+**Status:** Implemented; focused gate and MIR ratchet verified
 **Scope:** real SVG-only Raphaël, maxGraph, and JointJS core drawing probes in
 one Radiant `DomDocument`.
 
@@ -195,6 +195,37 @@ render the local built pages in a supported browser and compare their actual
 upstream SVG projection before changing a capability entry or geometry
 tolerance. The committed UI fixtures remain the deterministic event replay.
 
+### Verification snapshot — 2026-08-01
+
+- `make build`, `make test-drawing`, the four new direct LambdaJS regressions,
+  and `test_mir_ratchet_gtest` pass. The default-derived-constructor
+  regression also asserts that a base constructor observes the derived
+  `this.constructor`, protecting Bootstrap-style static lookup. The focused
+  gate covers all three real libraries plus the direct SVG contract and bundled
+  listener closure path.
+- The external Chrome 150 oracle completed real pointer drag, focused keyboard,
+  control, and destroy/recreate sequences for all three pages, as well as
+  maxGraph's native wheel path. JointJS's page-owned host wheel listener passed
+  its standard browser `WheelEvent` path; Chrome's DevTools input injection did
+  not acknowledge a hardware-wheel command for that Paper. The deterministic
+  Radiant fixture remains the hardware-event acceptance gate.
+- `make test-radiant-baseline` passes the 4,378-case core layout suite, 23
+  view-command tests, 105 page-load tests, and all 211 expected visual cases.
+  The target still returns nonzero for existing form, DOM/UI, and WPT-input
+  baseline failures. A serial current-vs-parent audit found no new failures:
+  DOM/UI improves from 48/63 to 52/63, the four WPT input failures are identical
+  (16 passed / 4 failed), and the `form` corpus improves from three recorded
+  baseline regressions to one. This record does not rebaseline or mask them.
+- `make test-lambda-baseline` passes the input baseline and all drawing-related
+  LambdaJS checks, but its existing `test_js_gtest` Node/system slice cannot
+  resolve `node:assert` and consequently reports 204 module cases. It is not a
+  drawing-runtime semantic failure.
+- `make test262-baseline` builds its runner and release executable, then stops
+  before executing tests because `ref/test262` is at
+  `2b2ecead6e828dd9af13a9ec72065e645724a50f` while the checked-in baseline
+  records `673e9bacbe28590f501e2dcd817aadcc31899191`. Updating either snapshot
+  is a separate conformance-inventory decision.
+
 ---
 
 ## 6. Deliberate exclusions and upgrade policy
@@ -224,5 +255,6 @@ Radiant can now host real Raphaël, maxGraph, and JointJS SVG editors in one
 native document with accurate SVG identity, namespace handling, affine
 geometry, bounds, text measurement, hit testing, XML handling, ordinary
 events, and clean lifecycle teardown. The boundary is explicit, portable, and
-covered by a focused compatibility gate plus broader Radiant, Lambda, and
-test262 baselines.
+covered by a focused compatibility gate; the verification snapshot above keeps
+the separate workspace-baseline blockers visible rather than treating them as
+part of the drawing contract.
