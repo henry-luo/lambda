@@ -232,11 +232,40 @@ purely by deleting statically-redundant checks) is this exact shape.
   Remaining A2 consumers not yet wired: declaration/assignment initializers
   into a native int local, and `for`-range bounds (the latter subsumed by
   T-B1).
-- **A3 — Native returns for native bodies.** `NativeFuncInfo.return_mir`
-  already exists ([transpile-mir.cpp:15318](../lambda/runtime/transpile-mir.cpp:15318));
-  make the native body actually return the native representation so
-  `fib(n-1) + fib(n-2)` compiles to `adds`, not `fn_add`. This is dual-func
-  O3/DF9 territory — the entry-equivalence test (§8 of that doc) is the gate.
+- **A3 — Native returns for native bodies. PARTIALLY LANDED 2026-08-01;
+  the load-bearing half remains.** Goal: make the native body return its native
+  representation so `fib(n-1) + fib(n-2)` compiles to inline arithmetic, not
+  `fn_add`. Dual-func O3/DF9 territory; entry equivalence (§8 there) is the gate.
+
+  **What the code already had.** The whole native-return ABI exists:
+  `NativeFuncInfo.return_type/return_mir`, the MIR return type selected from it,
+  and — critically — an out-of-band error lane. When a native-returning function
+  `can_raise`, the raw body signals a raised diagnostic through
+  `Context.mir_return_lane` (`RETURN_LANE_ERROR`) and
+  `emit_boxed_abi_wrapper` reconstructs the Item. So a native carrier does
+  **not** lose the diagnostic — the original reason for keeping proc returns
+  boxed does not actually apply.
+
+  **Landed:**
+  1. `infer_return_type` no longer excludes procs wholesale (`is_proc ||` gone
+     from the declared-return bail); `function_return_may_defer` is now the only
+     guard.
+  2. T-A1 extended to the **return firewall** — a declared `int` return was
+     re-checking every `return` of an already-`int` expression. Declaring a
+     return type cost **27%** before this (probe: `pn fib(n: int) int` 11.96ms
+     vs untyped 9.08ms); it is now free (8.80 vs 8.76). **An annotation that
+     used to be a pessimization is now neutral** — the same TS-3 shape, at the
+     return boundary.
+
+  **Not landed — and this is what the recursion class needs.**
+  `function_return_may_defer` inspects only the body's *tail expression*. For a
+  braced proc the tail is a `return` **statement**, so it always defers and the
+  native return never engages. Closing this needs an analysis that walks every
+  `return` in the proc body and proves each one produces the declared carrier;
+  the single return funnel (`return_value` + one `L2` epilogue) means the
+  conversion itself has exactly one insertion point. That is an ABI change for
+  every declared-return proc, so it wants its own change with the
+  entry-equivalence corpus as the gate — not a tail-end edit.
 
 ### T-B. Loop lowering (kills M4, M5, M6) — **largest single lever**
 

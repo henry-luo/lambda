@@ -12300,7 +12300,13 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // A declared return is an interface firewall. Preserve a dynamic
         // result as an Item until it has proved the full return Type*, then
         // (and only then) permit a native return lane to consume it.
+        // T-A1 at the return firewall: a declared `int` return re-checked every
+        // `return` of an already-`int` expression. As at the assignment site,
+        // eliding needs no carrier repair — the checked path also left val_tid
+        // as ANY, so the native-return conversion below sees the same input.
         if (return_contract_needs_checked_boundary(mt->current_return_type) &&
+                !mir_boundary_is_redundant(ret_node->value,
+                    mir_unwrap_decl_type(mt->current_return_type)) &&
                 (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
                  (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
                   val_tid == LMD_TYPE_MAP && ret_node->value->type !=
@@ -15069,10 +15075,16 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
         if (ft->returned) {
             TypeId ret_tid = ft->returned->type_id;
             // A declared native carrier is only valid when the body already
-            // proves that carrier. A braced proc body or `any`-typed tail can
-            // still produce a boundary error; keep its result boxed so the
-            // diagnostic never becomes raw native bits.
-            if (is_proc || function_return_may_defer(fn_node)) {
+            // proves that carrier. An `any`-typed tail can still produce a
+            // boundary error; keep its result boxed so the diagnostic never
+            // becomes raw native bits.
+            //
+            // A3: procs are no longer excluded wholesale. A raised diagnostic
+            // leaves a native-returning body through the error lane
+            // (RETURN_LANE_ERROR / Context.mir_return_lane, wired in
+            // emit_boxed_abi_wrapper), so a native carrier does not lose it.
+            // `function_return_may_defer` stays the real guard.
+            if (function_return_may_defer(fn_node)) {
                 return LMD_TYPE_ANY;
             }
             // Only accept simple native types for now
