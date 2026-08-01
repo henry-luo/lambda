@@ -4633,7 +4633,47 @@ static bool mir_matches_compact_loop_add(MirTranspiler* mt, AstBinaryNode* binar
             left_ident->name->len) == 0 && mir_is_one_int_literal(mt, binary->right);
 }
 
+// A2: does this node lower through the inline flex-int decision below? Those
+// are the sites whose in-range lane already holds a raw i64 but hands the
+// consumer a boxed Item. Both compact-loop forms and the exact-u32 form have
+// their own raw lowerings and must keep them.
+static bool mir_is_flexint_int_arith(MirTranspiler* mt, AstNode* node) {
+    if (!node || node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* bi = (AstBinaryNode*)node;
+    if (bi->op != OPERATOR_ADD && bi->op != OPERATOR_SUB &&
+            bi->op != OPERATOR_MUL) {
+        return false;
+    }
+    if (get_effective_type(mt, bi->left) != LMD_TYPE_INT ||
+            get_effective_type(mt, bi->right) != LMD_TYPE_INT) {
+        return false;
+    }
+    if (mir_binary_is_exact_u32_result(bi)) return false;
+    return !mir_matches_compact_loop_sub(mt, bi) &&
+        !mir_matches_compact_loop_add(mt, bi);
+}
+
+// A2: emit a flex-int ADD/SUB/MUL straight into a native i64 for a consumer that
+// wants one. Otherwise the value is boxed by the flex-int lowering and unboxed
+// again immediately by the consumer's `it2i` — a call plus a second range check
+// and a tag/mask per operation, on the hottest arithmetic in the language.
+//
+// The promote lane keeps box-float-then-`it2i`: that is exactly what the
+// consumer would have applied to the Item it used to receive, so out-of-INT53
+// behaviour is unchanged and O1 stays untouched.
+static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
+        bool native_int_out);
+
+static MIR_reg_t mir_emit_flexint_native_int(MirTranspiler* mt, AstBinaryNode* bi) {
+    return transpile_binary_out(mt, bi, true);
+}
+
 static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
+    return transpile_binary_out(mt, bi, false);
+}
+
+static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
+        bool native_int_out) {
     // TCO: binary expression operands are NEVER in tail position.
     // e.g., `1 + f(n-1)` — the call is NOT tail because addition follows.
     mt->in_tail_position = false;
@@ -4747,14 +4787,20 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             MIR_reg_t ival = new_reg(mt, "fi_i", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, ival),
                 MIR_new_reg_op(mt->ctx, prod)));
-            MIR_reg_t boxed_int = emit_box(mt, ival, LMD_TYPE_INT);
+            // A2: a native-int consumer takes the in-range product raw; only
+            // the promote lane pays for an Item, and it pays exactly what the
+            // consumer's own it2i would have cost on the value it used to get.
+            MIR_reg_t fast_mul = native_int_out ? ival
+                : emit_box(mt, ival, LMD_TYPE_INT);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-                MIR_new_reg_op(mt->ctx, boxed_int)));
+                MIR_new_reg_op(mt->ctx, fast_mul)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
             emit_label(mt, l_promote);
             MIR_reg_t boxed_float = emit_box(mt, prod, LMD_TYPE_FLOAT);
+            MIR_reg_t slow_mul = native_int_out
+                ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-                MIR_new_reg_op(mt->ctx, boxed_float)));
+                MIR_new_reg_op(mt->ctx, slow_mul)));
             emit_label(mt, l_done);
             return out;
         }
@@ -4775,17 +4821,21 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)INT53_MAX * 2))));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, l_promote), MIR_new_reg_op(mt->ctx, in_range)));
-        MIR_reg_t boxed_int = emit_box(mt, sum, LMD_TYPE_INT);
+        // A2: see the MUL lane above — in-range stays a raw i64 for a
+        // native-int consumer, the promote lane is unchanged behaviour.
+        MIR_reg_t fast_sum = native_int_out ? sum : emit_box(mt, sum, LMD_TYPE_INT);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-            MIR_new_reg_op(mt->ctx, boxed_int)));
+            MIR_new_reg_op(mt->ctx, fast_sum)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
         emit_label(mt, l_promote);
         MIR_reg_t dsum = new_reg(mt, "fi_d", MIR_T_D);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dsum),
             MIR_new_reg_op(mt->ctx, sum)));
         MIR_reg_t boxed_float = emit_box(mt, dsum, LMD_TYPE_FLOAT);
+        MIR_reg_t slow_sum = native_int_out
+            ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-            MIR_new_reg_op(mt->ctx, boxed_float)));
+            MIR_new_reg_op(mt->ctx, slow_sum)));
         emit_label(mt, l_done);
         return out;
     }
@@ -11258,11 +11308,21 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     // Phase 4: Native param — pass native value directly (skip boxing)
                     TypeId param_tid = call_nfi->param_types[i];
                     if (resolved_args[i]) {
-                        MIR_reg_t val = short_circuit_error
-                            ? transpile_box_item(mt, resolved_args[i])
-                            : transpile_expr(mt, resolved_args[i]);
-                        TypeId val_tid = short_circuit_error ? LMD_TYPE_ANY
-                            : get_effective_type(mt, resolved_args[i]);
+                        // A2: `f(n - 1)` into a native int param is the hottest
+                        // shape in the language. Ask the flex-int lowering for a
+                        // raw i64 instead of boxing it here and unboxing it three
+                        // lines down.
+                        bool flexint_native_arg = !short_circuit_error &&
+                            param_tid == LMD_TYPE_INT &&
+                            mir_is_flexint_int_arith(mt, resolved_args[i]);
+                        MIR_reg_t val = flexint_native_arg
+                            ? mir_emit_flexint_native_int(mt, (AstBinaryNode*)resolved_args[i])
+                            : (short_circuit_error
+                                ? transpile_box_item(mt, resolved_args[i])
+                                : transpile_expr(mt, resolved_args[i]));
+                        TypeId val_tid = flexint_native_arg ? LMD_TYPE_INT
+                            : (short_circuit_error ? LMD_TYPE_ANY
+                                : get_effective_type(mt, resolved_args[i]));
                         if (short_circuit_error) {
                             // A native call would unbox this Item below. Keep
                             // the original error and skip the raw invocation.

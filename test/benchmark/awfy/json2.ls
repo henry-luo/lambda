@@ -43,7 +43,7 @@ pn hit_add(ht, name, index) {
     var conv = { v: 0 }
     conv.v = n
     var ni: int = (conv.v)
-    var slot: int = ni % 32
+    var slot: int = int(ni % 32)
     var tbl = (ht.tbl)
     if (index < 255) {
         var val: int = (index + 1) % 256
@@ -61,7 +61,7 @@ pn hit_get(ht, name) {
     var conv = { v: 0 }
     conv.v = n
     var ni: int = (conv.v)
-    var slot: int = ni % 32
+    var slot: int = int(ni % 32)
     var tbl = (ht.tbl)
     var v = tbl[slot]
     var r: int = v - 1
@@ -125,7 +125,7 @@ pn jv_arr_add(arr, item) {
 
 pn jv_arr_size(arr) {
     var vals = (arr.vals)
-    var r: int = vec_size(vals)
+    var r = vec_size(vals)
     return r
 }
 
@@ -133,7 +133,7 @@ pn jv_obj_add(obj, name, value) {
     var names = (obj.names)
     var vals = (obj.vals)
     var ht = (obj.ht)
-    var idx: int = vec_size(names)
+    var idx = vec_size(names)
     hit_add(ht, name, idx)
     vec_add(names, name)
     vec_add(vals, value)
@@ -141,7 +141,7 @@ pn jv_obj_add(obj, name, value) {
 
 pn jv_obj_get(obj, name) {
     var ht = (obj.ht)
-    var idx: int = hit_get(ht, name)
+    var idx = hit_get(ht, name)
     if (idx == -1) {
         return null
     }
@@ -567,7 +567,7 @@ pn benchmark() {
         print("FAIL: no head\n")
         return 0
     }
-    var hobj: int = jv_is_object(head)
+    var hobj = jv_is_object(head)
     if (hobj != 1) {
         print("FAIL: head not object\n")
         return 0
@@ -577,12 +577,12 @@ pn benchmark() {
         print("FAIL: no operations\n")
         return 0
     }
-    var oarr: int = jv_is_array(ops)
+    var oarr = jv_is_array(ops)
     if (oarr != 1) {
         print("FAIL: operations not array\n")
         return 0
     }
-    var opsz: int = jv_arr_size(ops)
+    var opsz = jv_arr_size(ops)
     if (opsz == 156) {
         return 1
     }

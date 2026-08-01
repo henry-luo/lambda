@@ -203,18 +203,35 @@ purely by deleting statically-redundant checks) is this exact shape.
   | r7rs/nqueens | 1.60 | 6.13 | 5.53 |
   | awfy/nbody | 82.1 | 30.0 | 21.0 |
 
-  R7RS typed geomean **0.60x of pre-A1** (40% faster). The distance to the v18
-  snapshot closes from 2.36x to 1.42x — about 60% of the
-  `274625d56` regression recovered. `sum` and `mbrot` are fully back.
+  With A2 (below) the R7RS typed geomean is **0.588x of pre-fix master**
+  (41% faster); distance to the v18 snapshot closes **2.36x → 1.39x**, i.e.
+  **62% of the `274625d56` regression recovered**. `sum` (21.5 → 3.99) and
+  `mbrot` (2.52 → 0.855) are fully back, both now ahead of v18.
   Gate: `make test-lambda-baseline` 3709 passed / 1 failed, the single failure
   being `MirRatchetTest/js_tune6_exact_collection`, proven pre-existing by
   re-running it with these changes stashed.
-- **A2 — Checked-unboxed int arithmetic.** Keep the biased INT53 overflow
-  check (2 instrs, well-predicted — this is *not* the cost); on the fast path
-  keep the result as raw i64 in the existing unboxed local. Box only in the
-  cold overflow branch. Semantics unchanged — the overflow-to-double lane
-  survives, it just stops taxing the 99.99% path. Resolves the Result18
-  flexint-poisoning finding without prejudging O1.
+- **A2 — Checked-unboxed int arithmetic. PARTIALLY LANDED 2026-08-01.** Keep
+  the biased INT53 overflow check (2 instrs, well-predicted — this is *not*
+  the cost); on the fast path keep the result as raw i64. Box only in the cold
+  overflow branch.
+
+  Implemented by parameterizing the existing flex-int lowering on a
+  `native_int_out` flag (`transpile_binary_out`) rather than duplicating it,
+  and wiring one consumer: a flex-int `int` argument passed to a **native int
+  parameter** (`f(n - 1)`). The promote lane deliberately keeps
+  box-float-then-`it2i` — byte for byte what the consumer would have applied
+  to the Item it used to receive — so out-of-INT53 behaviour is unchanged and
+  **O1 stays untouched**.
+
+  Gain is real but small: ~2–3% (fib 9.03 → 8.78, sum 4.13 → 3.99,
+  nqueens 5.53 → 5.39). The reason matters: for `fib` the residual is **M3,
+  not M2** — the native body still has a *boxed return*, so
+  `fib(n-1) + fib(n-2)` is still an `fn_add` dispatch. **A3 is now the
+  binding constraint for the recursion class, not A2.**
+
+  Remaining A2 consumers not yet wired: declaration/assignment initializers
+  into a native int local, and `for`-range bounds (the latter subsumed by
+  T-B1).
 - **A3 — Native returns for native bodies.** `NativeFuncInfo.return_mir`
   already exists ([transpile-mir.cpp:15318](../lambda/runtime/transpile-mir.cpp:15318));
   make the native body actually return the native representation so

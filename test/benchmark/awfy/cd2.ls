@@ -86,9 +86,9 @@ pn arr_new() {
 }
 
 pn arr_get(a, idx: int) {
-    var i2: int = idx % 32
+    var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
-    var i1: int = mid % 16
+    var i1: int = int(mid % 16)
     var i0: int = shr(mid, 4)
     var l0 = (a.l0)
     var c1 = l0[i0]
@@ -100,9 +100,9 @@ pn arr_get(a, idx: int) {
 }
 
 pn arr_set(a, idx: int, val) {
-    var i2: int = idx % 32
+    var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
-    var i1: int = mid % 16
+    var i1: int = int(mid % 16)
     var i0: int = shr(mid, 4)
     var l0 = (a.l0)
     var c1 = l0[i0]
