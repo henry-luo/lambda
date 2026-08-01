@@ -4,15 +4,17 @@
 <link rel="stylesheet" href="editable-drawing.css">
 <h1>maxGraph SVG drawing probe</h1>
 <p>Creates an upstream graph model with two vertices and one edge.</p>
-<button id="destroy" type="button">Destroy drawing</button>
-<button id="recreate" type="button">Recreate drawing</button>
-<button id="add-vertex" type="button" data-drawing-action="addVertex">Add vertex</button>
-<button id="move-source" type="button" data-drawing-action="moveSource">Move source</button>
-<button id="resize-source" type="button" data-drawing-action="resizeSource">Resize source</button>
-<button id="reconnect-edge" type="button" data-drawing-action="reconnectEdge">Reconnect edge</button>
-<button id="pan-zoom" type="button" data-drawing-action="panZoom">Pan and zoom</button>
-<button id="undo" type="button" data-drawing-action="undo">Undo</button>
-<button id="redo" type="button" data-drawing-action="redo">Redo</button>
+<div id="drawing-controls">
+  <button id="destroy" type="button">Destroy drawing</button>
+  <button id="recreate" type="button">Recreate drawing</button>
+  <button id="add-vertex" type="button" data-drawing-action="addVertex">Add vertex</button>
+  <button id="move-source" type="button" data-drawing-action="moveSource">Move source</button>
+  <button id="resize-source" type="button" data-drawing-action="resizeSource">Resize source</button>
+  <button id="reconnect-edge" type="button" data-drawing-action="reconnectEdge">Reconnect edge</button>
+  <button id="pan-zoom" type="button" data-drawing-action="panZoom">Pan and zoom</button>
+  <button id="undo" type="button" data-drawing-action="undo">Undo</button>
+  <button id="redo" type="button" data-drawing-action="redo">Redo</button>
+</div>
 <div id="drawing-slot"><div id="drawing-host" aria-label="maxGraph drawing"></div></div>
 <h2>Library state</h2><pre id="drawing-state"></pre>
 <h2>Capability report</h2><pre id="drawing-capabilities"></pre>

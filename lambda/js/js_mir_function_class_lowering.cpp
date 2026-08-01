@@ -237,12 +237,19 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* ce, bool set_home_class) {
     if (!mt || !cls_obj || !ce) return;
     JsClassMethodEntry* constructor = ce->constructor;
-    for (JsClassEntry* parent = ce->superclass;
-         (!constructor || !constructor->fc || !constructor->fc->func_item) && parent;
-         parent = parent->superclass) {
-        if (parent->constructor && parent->constructor->fc &&
-            parent->constructor->fc->func_item) {
-            constructor = parent->constructor;
+    // An implicit derived constructor is `constructor(...args) { super(...args); }`.
+    // Reusing a parent's body changes its HomeObject, so a nested super() resolves
+    // from the child instead of the body-owning class. Leave it absent for the
+    // runtime's default-derived-constructor path rather than borrowing that body.
+    bool implicit_derived_constructor = !constructor && ce->node && ce->node->superclass;
+    if (!implicit_derived_constructor) {
+        for (JsClassEntry* parent = ce->superclass;
+             (!constructor || !constructor->fc || !constructor->fc->func_item) && parent;
+             parent = parent->superclass) {
+            if (parent->constructor && parent->constructor->fc &&
+                parent->constructor->fc->func_item) {
+                constructor = parent->constructor;
+            }
         }
     }
     if (constructor && constructor->fc && constructor->fc->func_item) {

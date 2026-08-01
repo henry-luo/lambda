@@ -12482,7 +12482,8 @@ extern "C" Item js_number_is_finite(Item value) {
 extern "C" Item js_number_is_nan(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_FLOAT) {
-        return (Item){.item = b2it(isnan(it2d(value)))};
+        double number = it2d(value);
+        return (Item){.item = b2it(isnan(number))};
     }
     return (Item){.item = b2it(false)};
 }

@@ -27,14 +27,26 @@ rect.setAttribute("height", "60");
 rect.setAttribute("fill", "#dbeafe");
 const image = document.createElementNS(svgNs, "image");
 image.setAttributeNS(xlinkNs, "xlink:href", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9NgAAAABJRU5ErkJggg==");
+const path = document.createElementNS(svgNs, "path");
+path.setAttribute("d", "M10 110 L70 145");
+path.setAttribute("stroke", "#0f766e");
+const text = document.createElementNS(svgNs, "text");
+text.setAttribute("x", "200");
+text.setAttribute("y", "120");
+text.textContent = "SVG label";
 group.appendChild(rect);
 group.appendChild(image);
+group.appendChild(path);
 svg.appendChild(group);
+svg.appendChild(text);
 document.getElementById("svg-direct-host").appendChild(svg);
 
 document.getElementById("run-svg-direct-contract").addEventListener("click", () => {
   try {
     const box = rect.getBBox();
+    const groupBox = group.getBBox();
+    const pathBox = path.getBBox();
+    const textBox = text.getBBox();
     const point = svg.createSVGPoint();
     point.x = box.x + box.width / 2;
     point.y = box.y + box.height / 2;
@@ -43,17 +55,25 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
     const parsed = new DOMParser().parseFromString(
       "<svg xmlns='http://www.w3.org/2000/svg'><path d='M0 0 L4 4'/></svg>",
       "image/svg+xml");
+    const serialized = new XMLSerializer().serializeToString(svg);
     const pass = rect instanceof SVGGraphicsElement &&
       svg instanceof SVGSVGElement &&
+      path instanceof SVGPathElement &&
+      text instanceof SVGTextContentElement &&
       box.x === 40 && box.y === 30 && box.width === 120 && box.height === 60 &&
+      groupBox.x === 0 && groupBox.y === 0 && groupBox.width === 160 && groupBox.height === 145 &&
+      pathBox.x === 10 && pathBox.y === 110 && pathBox.width === 60 && pathBox.height === 35 &&
+      textBox.width > 0 && textBox.height > 0 &&
       hit === rect &&
       image.getAttributeNS(xlinkNs, "href") !== null &&
       parsed.documentElement.namespaceURI === svgNs &&
+      serialized.includes("<rect id=\"svg-direct-rect\"") &&
+      serialized.includes("xlink:href=") &&
       typeof document.execCommand !== "function" &&
       typeof document.queryCommandSupported !== "function";
     state.textContent = JSON.stringify({
-      box, hit: hit && hit.id, matrix: rect.getScreenCTM(),
-      parsedRoot: parsed.documentElement.nodeName, pass
+      box, groupBox, pathBox, textBox, hit: hit && hit.id, matrix: rect.getScreenCTM(),
+      parsedRoot: parsed.documentElement.nodeName, serialized, pass
     });
     state.setAttribute("data-ready", pass ? "true" : "false");
   } catch (error) {

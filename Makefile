@@ -2281,6 +2281,8 @@ test-editable: editable-unit editable-ui editable-editor-e2e
 drawing-editor-e2e: build
 	@cd test/drawing-editors && node tools/build.mjs
 	@./lambda.exe view test/html/svg-dom-contract.html --event-file test/ui/svg-dom-contract.json --headless --no-log
+	@./lambda.exe view test/html/js-loop-listener-contract.html --event-file test/ui/js-loop-listener-contract.json --headless --no-log
+	@./lambda.exe view test/html/js-loop-listener-bundle-contract.html --event-file test/ui/js-loop-listener-bundle-contract.json --headless --no-log
 	@./lambda.exe view test/html/editable-raphael.html --event-file test/ui/editable-drawing-raphael.json --headless --no-log
 	@./lambda.exe view test/html/editable-maxgraph.html --event-file test/ui/editable-drawing-maxgraph.json --headless --no-log
 	@./lambda.exe view test/html/editable-jointjs.html --event-file test/ui/editable-drawing-jointjs.json --headless --no-log

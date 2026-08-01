@@ -15,8 +15,9 @@ function cell_snapshot(cell) {
 
 function graph_snapshot(drawing) {
   const view = drawing.graph.getView();
+  const modelXml = new ModelXmlSerializer(drawing.graph.getDataModel()).export({ pretty: false });
   return {
-    modelXml: drawing.modelXml || "pending",
+    modelXml,
     selectedCell: drawing.graph.getSelectionCell()
       ? drawing.graph.getSelectionCell().getId() : null,
     source: cell_snapshot(drawing.source),
@@ -49,8 +50,8 @@ install_drawing_probe({
     graph.batchUpdate(() => {
       source = graph.insertVertex(parent, "source", "Source", 40, 45, 110, 50);
       target = graph.insertVertex(parent, "target", "Target", 255, 150, 110, 50);
-      edge = graph.insertEdge(parent, "edge", "", source, target, { endArrow: "classic" });
     });
+    edge = graph.insertEdge(parent, "edge", "", source, target, { endArrow: "classic" });
     const undo = new UndoManager();
     const record_edit = (_sender, event) => undo.undoableEditHappened(event.getProperty("edit"));
     graph.getDataModel().addListener(InternalEvent.UNDO, record_edit);

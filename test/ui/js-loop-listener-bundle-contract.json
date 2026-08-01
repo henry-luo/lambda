@@ -1,0 +1,14 @@
+{
+  "name": "bundled per-iteration DOM listener closures retain their action and outer state",
+  "html": "test/html/js-loop-listener-bundle-contract.html",
+  "viewport": {"width": 520, "height": 540},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-ready", "equals": "true"},
+    {"type": "click", "target": {"selector": "#add-vertex"}},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-action-dispatched", "equals": "addVertex"},
+    {"type": "assert_text", "target": {"selector": "#drawing-state"}, "contains": "\"count\":1"},
+    {"type": "click", "target": {"selector": "#move-source"}},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-action-dispatched", "equals": "moveSource"},
+    {"type": "assert_text", "target": {"selector": "#drawing-state"}, "contains": "\"count\":11"}
+  ]
+}

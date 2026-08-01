@@ -10,8 +10,10 @@ import { Boundary } from "jointjs/src/linkTools/Boundary.mjs";
 // complete dependency graph before evaluation, so shared chunks compile once.
 
 function joint_snapshot(drawing) {
-  const label = drawing.host.querySelector(".labels text");
-  const labelBounds = label ? label.getBBox() : null;
+  // JointJS renders element labels as SVG text but keeps link-label markup private.
+  const textNodes = drawing.host.querySelectorAll("text");
+  const textNode = textNodes.length > 0 ? textNodes[0] : null;
+  const textBounds = textNode ? textNode.getBBox() : null;
   const sourcePosition = drawing.source.position();
   const target = drawing.link.target();
   const scale = drawing.paper.scale();
@@ -26,8 +28,8 @@ function joint_snapshot(drawing) {
     paper: { scaleX: scale.sx, scaleY: scale.sy, translateX: translate.tx, translateY: translate.ty },
     selectedCell: drawing.selectedCell ? drawing.selectedCell.id : null,
     toolsVisible: !!drawing.toolsVisible,
-    labelBounds: labelBounds && labelBounds.width > 0 && labelBounds.height > 0
-      ? { width: labelBounds.width, height: labelBounds.height } : null
+    textBounds: textBounds && textBounds.width > 0 && textBounds.height > 0
+      ? { width: textBounds.width, height: textBounds.height } : null
   };
 }
 
