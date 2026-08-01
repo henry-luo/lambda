@@ -1,20 +1,24 @@
 {
   "schema_version": 1,
-  "description": "Tune4 M2: the closed integer caller set emits native compare/subtract, while an escaped callee keeps generic arithmetic for unseen float callers.",
+  "description": "Tune4 M2: the closed integer caller set emits native subtraction, while an escaped callee keeps generic arithmetic for unseen float callers.",
   "checks": [
     {
       "in_func": "_closed_gap_#",
       "expect": [
-        "ge\tge_",
         "sub\tfi_sum_"
       ],
       "forbid": [
-        "call\tfn_ge_p, fn_ge",
         "call\tfn_sub_p, fn_sub"
       ]
     },
     {
       "in_func": "_open_gap_#",
+      "expect": [
+        "sub\tfi_sum_"
+      ]
+    },
+    {
+      "in_func": "_open_gap_b_#",
       "expect": [
         "call\tfn_sub_p, fn_sub"
       ]

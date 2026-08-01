@@ -170,8 +170,6 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
                             if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) ok = false;
                         } else if (expected == LMD_TYPE_FLOAT) {
                             if (actual != LMD_TYPE_FLOAT && actual != LMD_TYPE_INT) ok = false;
-                        } else {
-                            ok = false; // ANY param — cannot optimize
                         }
                         if (arg) arg = arg->next;
                     }
@@ -222,8 +220,6 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) return NULL;
         } else if (expected == LMD_TYPE_FLOAT) {
             if (actual != LMD_TYPE_FLOAT && actual != LMD_TYPE_INT) return NULL;
-        } else {
-            return NULL; // ANY param — can't optimize
         }
         if (arg) arg = arg->next;
     }
@@ -255,7 +251,12 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
         (!mt->tco_func || !mt->in_tail_position || !jm_is_recursive_call(call, mt->tco_func))) {
         return false;
     }
-    return true;
+    // A known native body is not enough: an unmatched direct call is lowered
+    // through the boxed entry, whose slow lane can return any JavaScript value.
+    // Reporting the inferred raw return here would make its caller unbox an
+    // already boxed string/object result.
+    return fc->has_native_version && fc->native_func_item &&
+        jm_resolve_native_call(mt, call) == fc;
 }
 
 // Walk JS AST to find if there's at least one tail-recursive call.

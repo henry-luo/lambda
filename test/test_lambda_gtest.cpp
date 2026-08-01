@@ -486,6 +486,10 @@ TEST(LambdaNegativeTests, test_type_enforcement_dynamic_parameter) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_parameter.ls");
 }
 
+TEST(LambdaNegativeTests, test_type_enforcement_static_float_to_int_parameter) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforce_static_float_to_int_parameter.ls");
+}
+
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_return) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_return.ls");
 }

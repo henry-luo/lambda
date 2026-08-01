@@ -1,18 +1,10 @@
-// Tune4 M2 fixture: a closed, uniformly typed caller set may narrow parameters,
-// while a function that escapes as a value must retain generic arithmetic.
+// Tune4 M2 fixture: a closed, uniformly typed pure function may narrow its
+// parameters, while a function that escapes as a value retains generic
+// arithmetic for unseen float callers.
 
-pn closed_gap(x, y) {
-    var count = 0
-    while (x >= y) {
-        x = x - y
-        count = count + 1
-    }
-    return count
-}
+fn closed_gap(x, y) { x - y }
 
-pn open_gap(x, y) {
-    return x - y
-}
+fn open_gap(x, y) { x - y }
 
 pn apply2(f, a, b) {
     return f(a, b)

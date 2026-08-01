@@ -1,6 +1,12 @@
 # Lambda / LambdaJS — Dual-Version Function Compiling
 
-> **Status: DRAFT PROPOSAL.** Supersedes the dual-version half of
+> **Status: IMPLEMENTED — Stage 1 core.** Lambda and LambdaJS now use the
+> source-authoritative dual-entry plan described here: declared boundary
+> admission, inferred fast/slow entries, and closed-world entry elision are
+> implemented. Guard hoisting, lazy slow-body generation, and multi-version
+> specialization remain deliberately future work.
+>
+> This supersedes the dual-version half of
 > [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
 > frozen per CLAUDE rule 14). The type-checking-trampoline half remains valid and
 > is retained here as the *declared-parameter* lane.
@@ -84,69 +90,59 @@ soundness one: `int|string` has no single native MIR type.
 
 ### 2.1 Lambda / MIR Direct
 
-`transpile_func_def()` ([transpile-mir.cpp:15150](../lambda/runtime/transpile-mir.cpp:15150))
-emits **one body plus one wrapper**, never two bodies:
+`transpile_func_def()` now makes a per-function native plan before lowering.
+The plan records declared versus inferred-specialized parameters, the one raw
+carrier shape, whether visible calls are closed, and whether a boxed entry and
+slow body are necessary.
 
-- Param types resolve declared-first, then inferred, into `resolved_param_types[16]`
-  ([:15176–15219](../lambda/runtime/transpile-mir.cpp:15176)).
-- `generate_native` gate ([:15221–15250](../lambda/runtime/transpile-mir.cpp:15221)):
-  `!needs_task_context && !is_closure && !is_method && !is_variadic &&
-  !has_typed_array_param`, **and** (≥1 param passes `mir_is_native_param_type`,
-  **or** the inferred return type alone is a native scalar).
-- The single body is `FN_ENTRY_NATIVE_BODY` when `generate_native`, else
-  `FN_ENTRY_BOXED_BODY` ([:15450](../lambda/runtime/transpile-mir.cpp:15450)).
-- `emit_boxed_abi_wrapper()` ([:14883](../lambda/runtime/transpile-mir.cpp:14883))
-  runs for **every** function ([:16009](../lambda/runtime/transpile-mir.cpp:16009)),
-  producing `<name>_b`. Its per-param sequence is: error short-circuit →
-  `emit_optional_argument_value` → `emit_parameter_boundary` *(declared types
-  only)* → `emit_unbox` → forward to the body.
+- A declared native function has one raw main body. Its optional `<name>_b`
+  resolves defaults, performs declared implicit boundary admission and
+  normalization, then calls the raw body. Failed admission returns the declared
+  error; it never selects a slow body.
+- An untyped function with one closed visible raw shape emits only `<name>`.
+  An open or mixed shape emits `<name>` plus `<name>_b`; the boxed entry performs
+  an exact inferred-shape predicate and lowers the complete original body on a
+  failure.
+- Direct calls use `<name>` only after every planned proof is statically known.
+  All other calls use `_b`, so inference-derived unboxing is never coercive.
+- `runtime_type_admit_value()` normalizes a successful concrete numeric
+  admission through `lambda_numeric_boundary_admit`; an admitted `int` at a
+  declared `float` boundary reaches the raw body as a float Item/carrier.
+- Escaping through `Function*`, imports, exports, or `start` keeps `_b`
+  available. `start f(...)` is escaped because task dispatch invokes a public
+  context ABI rather than the raw ABI.
 
-**The structural gap.** `emit_unbox` ([:2153](../lambda/runtime/transpile-mir.cpp:2153))
-is **coercive, not discriminating**: `it2i` / `it2d` / `it2b` / `it2s`. For a
-param whose native type came from *inference* rather than declaration, there is
-no boundary check in front of it. So a dynamic call `f("7")` against
-`fn f(a) { a + 1 }` (a inferred `int`) is silently coerced instead of running
-the source-defined dynamic semantics of `+`. There is **no complete slow body
-to fall back to.**
-
-Direct call sites have the same shape ([:11039–11051](../lambda/runtime/transpile-mir.cpp:11039)):
-a statically-`ANY` argument to a native param is `emit_unbox`-coerced; a
-statically-mismatched argument is box-then-unbox-coerced.
-
-**This is why inference is timid.** `resolve_inferred_type()`
-([:14559–14580](../lambda/runtime/transpile-mir.cpp:14559)) carries an explicit
-comment refusing to speculate `INT` on weak arithmetic evidence because that
-guess "truncated float args at the call boundary (cd.ls positions/denominators)".
-Without a complete slow body, every inference must be *provably* right, so most
-inference is abandoned. That conservatism is the measured cost recorded in
-the observed loss of useful type information around flex-`int` index arithmetic
-and TS-3. Flex `int` itself is not the defect; O1 isolates the missing
-promotion-aware inference and lowering.
+`pn`/`var` params, closures, methods, variadics, typed arrays, and async/task
+paths stay boxed-only in this stage. Inference retains a concrete candidate in
+the presence of deferred calls, so an `int` fast path can coexist with a boxed
+slow lane rather than being erased by an `any` caller.
 
 ### 2.2 LambdaJS
 
-LambdaJS already emits **two full bodies**: `<name>` (boxed) and `<name>_n`
-(native) ([js_mir_function_class_lowering.cpp:679–1035](../lambda/js/js_mir_function_class_lowering.cpp:679)).
-Eligibility ([js_mir_module_batch_lowering.cpp:5829–5844](../lambda/js/js_mir_module_batch_lowering.cpp:5829)):
-no captures, 1..16 simple params, no `arguments`, **all** params `INT|FLOAT`, and
-return `INT|FLOAT`. Phase 1.76 revokes eligibility on contradicting call sites;
-Phase 1.77 narrows still-`ANY` params from call-site evidence.
+LambdaJS keeps its boxed body and optional `<name>_n` native body. The boxed
+entry resolves defaults, combines exact predicates for specialized parameters,
+calls `_n` on a match, and falls through to the complete existing boxed lowering
+on a miss. Native eligibility accepts a mixed native/`Item` signature with at
+least one `INT` or `FLOAT` parameter; `ANY` parameters remain boxed carriers.
 
-**The gap is the mirror image of Lambda's.** JS has both bodies but **no guard**:
-the choice is made statically at the call site (`jm_call_direct_native`,
-`jm_should_inline`). Every dynamic call — `js_call_function`, any `Function`
-value, any method dispatch — lands in the boxed body and can never reach `_n`,
-even when the runtime argument types match perfectly.
+Contradicting literal calls no longer globally revoke a specialization. Matching
+direct calls still use the native path; an unmatched direct or `Function` call
+uses the boxed result path. Native inlining is disabled for mixed signatures.
+Function expressions passed as callbacks remain boxed-only: their dynamic
+receiver/context is not part of the scalar raw ABI, so an argument-only predicate
+cannot prove that call convention. JS retains a boxed entry even for closed
+cases; direct-`eval` outward escape propagation is not a prerequisite for
+correctness or entry elision in this implementation.
 
 ### 2.3 Summary of what this proposal changes
 
-| | Lambda today | JS today | Proposed (both) |
-|---|---|---|---|
-| Unboxed body | yes (when native) | yes (`_n`) | when the function has a profitable native plan |
-| Full boxed lowering | only when *not* native | always | boxed-only when there is no specialization; duplicated only for untyped open/mixed functions |
-| Guard in boxed entry | **none** (coerces) | **none** (never dispatches) | **for inferred specializations only** |
-| Dynamic call reaches fast path | no (coerces, unsound) | no | inferred: exact shape; declared: after admission/normalization |
-| Inferred specialization must cover every caller | **yes** | no (revocation) | **only when the slow body is elided** |
+| | Lambda implementation | LambdaJS implementation |
+|---|---|---|
+| Unboxed body | raw `<name>` for a profitable plan | native `<name>_n` for a profitable plan |
+| Full boxed lowering | boxed-only or inferred open/mixed | always retained |
+| Guard in boxed entry | exact inferred shape; declared params use admission | exact inferred shape |
+| Dynamic call reaches fast path | through `_b` after proof/admission | through the boxed entry after an exact match |
+| Closed inferred plan | `_b` and slow body may be omitted | boxed entry is retained |
 
 ---
 
@@ -419,21 +415,22 @@ path are green. Land the policy change as a separate, separately measured phase.
 
 ### DF13 — LambdaJS adopts the same planning matrix
 
-JS already has both bodies. For an open/mixed inferred function, give the boxed
-body an entry guard that forwards to `_n`, and relax Phase 1.76's *revocation*
-into a *guard*. Today a single contradicting call site deletes `_n` for all call
-sites
-([js_mir_module_batch_lowering.cpp:3119](../lambda/js/js_mir_module_batch_lowering.cpp:3119));
-with a guard, the contradicting site simply fails the guard.
+Implemented: for an open/mixed inferred function, the boxed body has an entry
+guard that forwards to `_n`; a miss falls through to the complete boxed body.
+Contradicting literal calls no longer revoke `_n` globally, so they retain a
+direct fast path for matching calls and use the boxed path otherwise. As in
+Lambda, inferred JS types select an implementation; they do not create a source
+contract.
 
-For a non-escaped function whose visible callers all prove one exact shape,
-DF15 may instead retain `_n` alone. If no profitable native shape exists, retain
-only the boxed body. As in Lambda, inferred JS types select implementations; they
-do not create source contracts.
+Eligibility now permits mixed native/`Item` parameter lists, provided at least
+one parameter is `INT` or `FLOAT` and the return is numeric. The `Item` formals
+are passed through unchanged and are not inlined or TCO-specialized. Callback
+function expressions remain a deliberate boxed-only exclusion because their
+dynamic receiver/context is not represented in the raw ABI.
 
-JS eligibility requires **all** params `INT|FLOAT`. That is stricter than
-Lambda's "≥1 native param" and should be relaxed to match once the guard exists
-(mixed native/Item param lists are exactly what a guard handles).
+JS currently retains the boxed entry rather than applying Lambda's closed-world
+elision. This makes `eval` and other late callers safe without a separate outward
+escape propagation pass; that pass is required before any future JS elision.
 
 ### DF14 — The unboxed version's precondition
 
@@ -555,19 +552,19 @@ The brute-force answer is the correct one here: these are already whole-unit
 operations, and no incremental win is worth making DF15's analysis defend against
 them.
 
-One invariant this relies on: **recompilation must regenerate both entries
-consistently.** A cached module compiled under one elision decision must never be
-partially reused alongside code compiled under another — that is O7's
-cache-version bump, and DF17 is now a second reason to take it.
+One invariant this relies on: **recompilation regenerates the whole module.** The
+runtime cache retains imports only within one `Runtime`, invalidates a changed
+source/dependent cone, and persists no compiled artifact across processes. There
+is therefore no cross-version compiler artifact that needs a cache-key bump.
 
 **Lambda script — not applicable.** There is no `eval` system function; the
 dynamic surface is `Function*` values, imports, and dispatched methods, all of
 which already set `escaped`. Lambda's P0.5 elision is therefore unblocked.
 
-**JS direct `eval` — an escape condition.** Direct eval sees its enclosing scope
-chain, so it is exactly "a caller the owning unit could not see". Rule: *a direct
-eval at scope S marks escaped every function binding visible from S* — walk S's
-scope chain outward and mark all of them.
+**JS direct `eval` — future escape condition for elision.** Direct eval sees its
+enclosing scope chain, so it is exactly "a caller the owning unit could not see".
+Before JS elides a boxed entry, a direct eval at scope S must mark escaped every
+function binding visible from S by walking the scope chain outward.
 
 `has_direct_eval` already exists ([js_mir_context.hpp:213](../lambda/js/js_mir_context.hpp:213))
 and already drives `observes_this` and `uses_with`
@@ -582,11 +579,10 @@ called from `eval("helper('a')")` inside some other function is the case, and
 Indirect eval (`(0,eval)(…)`, `new Function`) runs in global scope and can only
 reach global/exported bindings, which are already escaped. It needs nothing.
 
-**What eval-compiled code then does.** With `_b` guaranteed to exist, eval follows
-DF8 like any other dynamic compilation unit and calls `_b`. The callee-side guard
-is already the route from eval to the unboxed specialization; eval needs no
-bespoke caller-side predicate. A later measured hoisting optimization may use
-DF16, but it is not part of eval correctness.
+**Current behavior.** JS retains `_b`, so eval follows DF8 like any other dynamic
+compilation unit and has a correct boxed destination. The callee-side guard is
+already the route from eval to the unboxed specialization; eval needs no bespoke
+caller-side predicate.
 
 **Explicitly rejected: unboxed-only functions reachable from eval, with the eval
 site emitting a guard and no fallback.** The guard-fail edge would have no correct
@@ -668,11 +664,18 @@ signal that a gate is missing.
 
 ### O1 — Promotion-aware numeric inference and lowering
 
+**Implemented Stage 1 boundary.** Flex `int` is handled by the existing numeric
+operation promotion rules, not by a special function-boundary conversion. The
+dual-entry planner specializes only the proven `int`/`float` input shape; sized,
+decimal, union, and otherwise ambiguous numeric candidates remain boxed instead
+of forcing an unsafe raw carrier. This preserves the standard promotion result
+while keeping entry-shape inference separate from body/result inference.
+
 Flex `int` is not a function-boundary special case. Like every other numeric
 type, it participates in the numeric promotion lattice: the operation selects
 its result domain, and that domain may differ from the operands' domains. In
 particular, `int` arithmetic promotes to `float` when the result leaves INT53.
-Today `i2it` returns `ITEM_ERROR` outside that band
+The original risk was that `i2it` could return `ITEM_ERROR` outside that band
 ([lambda.h:1278](../lambda/lambda.h:1278)), while a raw native `int64_t`
 operation used as a flex-`int` carrier may wrap. Neither behavior implements the
 source rule.
@@ -688,11 +691,14 @@ inference **and lowering**:
 - emit the operation checks/conversions needed to produce the promoted value,
   never native wrap or `ITEM_ERROR` as an accidental overflow policy.
 
-Until that lowering is correct, flex-`int` inferred specializations that can
-exercise promotion remain ineligible. DF5 stays an exact input-shape test; it
-does not attempt to predict body overflow.
+The entry guard remains an exact input-shape test; it does not attempt to predict
+body overflow. Stage 1 keeps a candidate boxed when no one raw carrier is proven.
 
 ### O2 — Parameter and return specialization must be independent
+
+**Resolved.** The native plan records parameter specialization independently from
+the inferred return carrier. A return-only inference never creates a raw entry or
+a slow body, and an open inferred function routes only on its parameter shape.
 
 `infer_return_type()` currently encourages the emitter to treat "native params"
 and "native return" as one version decision. They are independent. A function
@@ -704,25 +710,20 @@ carrier is not proven, keep the unboxed body's return dynamic or omit the
 unboxed version; do not emit an unreachable slow body or replay an effectful
 body after observing its result.
 
-### O3 — Declared numeric normalization is required *(resolved design; code gap)*
+### O3 — Declared numeric normalization is required — **RESOLVED**
 
-The current runtime check does **not** guarantee exact target representation:
-`lambda_type_matches` accepts type-level exact numeric embeddings, and
-`runtime_type_admit_value` preserves an already matching Item. Thus an `int`
-admitted by a declared `float` boundary may remain int-tagged even though the
-native body expects semantic/carrier `float`.
-
-DF2/DF6 settle the rule: every successful concrete numeric boundary returns a
-target-normalized value. A thin typed wrapper then unboxes that normalized Item;
-no slow body is needed. Implementation must make the checked boundary use one
-numeric admission/normalization helper even on its early success path.
-
-The finalized Item must also replace the pre-check binding and root. The current
-wrapper calls `set_var` before `emit_parameter_boundary`; a converted map, array,
-or scalar must be rebound and rooted before a later default/check can allocate or
-before the boxed slow body reads the parameter.
+`runtime_type_admit_value()` now routes every successful concrete numeric
+boundary through `lambda_numeric_boundary_admit` before membership is accepted.
+The resulting Item is rebound and rooted before raw unboxing. Thus a dynamic or
+statically embedded `int` admitted by `float` reaches a declared raw float
+parameter as a float, while static `float → int` is rejected and dynamic values
+must be exactly representable.
 
 ### O4 — GC rooting across the two lanes
+
+**Verified.** The slow lane uses the ordinary boxed lowering and finalized
+parameters are rebound before it can allocate. The 25-case forced-GC MIR sweep,
+including the new dual-entry cases, passes.
 
 The boxed lane must publish every finalized Item parameter — after defaults and
 declared normalization — in its side-root frame. Native scalar params are not
@@ -736,6 +737,10 @@ wrong answer. Treat the forced-GC sweep
 ([`Lambda_Design_MIR_Emission_Test.md`](Lambda_Design_MIR_Emission_Test.md)) as a blocking gate, not a nice-to-have.
 
 ### O5 — Guard placement vs. optional params and defaults
+
+**Implemented.** Defaults and declared admission run before the combined inferred
+guard; guard failure branches before any raw unboxing and enters the complete
+boxed lowering.
 
 The inferred guard must sit **after** `emit_optional_argument_value`, every
 declared DF6 admission/normalization, and rebinding/rooting of the finalized
@@ -755,12 +760,16 @@ for correctness.
 
 ### O7 — MIR module cache interaction
 
-The L1 module cache ([`Lambda_Design_MIR_Cache.md`](Lambda_Design_MIR_Cache.md)) keys on module content. Two entries
-per function changes the emitted module but not the keying. Confirm no cached
-module can carry a `_b` compiled under a different guard policy across a
-transpiler change — a cache-version bump is the safe answer.
+**Resolved.** The L1 cache retains only imported `Script`s inside one `Runtime`;
+changed source invalidates its dependent cone, and no compiled artifact survives
+across processes. A compiler-version cache-key bump is therefore unnecessary.
 
 ### O8 — `_b` is currently unconditional; DF15 makes it optional
+
+**Resolved.** The audit covers direct calls, `Function*`, imports/exports, task
+launch, main resolution, and `start`. Escaped call paths retain `_b`; non-escaped
+closed plans can use the raw entry alone. The `start` syntax is explicitly marked
+escaped because its task dispatcher uses the public context ABI.
 
 `emit_boxed_abi_wrapper` runs for every function today
 ([:16009](../lambda/runtime/transpile-mir.cpp:16009)), so every `_b` lookup
@@ -783,6 +792,10 @@ a link failure at JIT time, not a compile error.
 
 ### O9 — An async proc cannot host a second body inside `_b`
 
+**Resolved for Stage 1.** Async/task procedures, `pn`, and `var` parameters are
+excluded from raw specializations and stay boxed-only. A separate async slow-body
+state machine is future work, not a hidden ABI exception.
+
 `emit_boxed_abi_wrapper` sets `mt->in_async_proc = false` deliberately, with the
 comment that "the wrapper has no suspend/resume state of its own" and that
 inheriting the raw async body's frame register would make wrapper parameter
@@ -803,6 +816,9 @@ is the more general answer and is also what O14 would want, but it is a bigger
 change than the guard itself and should not ride along with it.
 
 ### O10 — The two result paths in `_b` must agree on one protocol
+
+**Verified.** The raw and boxed slow returns both use the existing dynamic boxed
+return funnel; forced-GC and scalar-home MIR probes pass.
 
 **Scope note:** an earlier revision called this the most delicate piece of P3.
 On reading the epilogue machinery that is an overstatement — the existing single
@@ -849,7 +865,7 @@ is safe: `DYNAMIC` is the widest mode and discriminates at run time.
 Failure mode is still a wrong value rather than a crash, so it belongs in the DF9
 test regardless of its reduced scope.
 
-### O11 — `var` and proc params must be excluded from unboxing — verify
+### O11 — `var` and proc params must be excluded from unboxing — **RESOLVED**
 
 A `var` param borrows caller storage and writes back
 (`is_var_param`, `cow_children_may_be_shared`,
@@ -860,25 +876,22 @@ writes must remain visible to the caller"
 ([:15762](../lambda/runtime/transpile-mir.cpp:15762)). Passing either as a raw
 native scalar destroys the write-back.
 
-Today's native gate filters by **type** only
-([:15236](../lambda/runtime/transpile-mir.cpp:15236)) — nothing there inspects
-`is_var_param`. So `pn f(var a: int)` appears to qualify. Determine whether that
-is reachable today; if so it is a **pre-existing bug**, not one this design
-introduces, and the fix (exclude `is_var_param`/`is_proc_param` from both
-`generate_native` and the guard) belongs in P0 either way.
+The raw-native gate now rejects every `pn`/`var` parameter. This preserves
+borrow/write-back semantics and prevents a raw carrier from replacing a caller
+owned `Item` location.
 
 ### O12 — Late callers vs. `escaped` — **RESOLVED, see DF17**
 
-Closed. REPL and hot reload are out of scope (whole-script recompile); Lambda has
-no `eval`, so P0.5 is unblocked; JS direct eval becomes an escape condition.
-
-Residue, tracked into P6: implement the **outward** propagation. `has_direct_eval`
-today marks the function *containing* the eval; DF17 needs every binding *visible
-from* that scope marked instead. Getting the direction wrong looks like it works —
-the containing function is deopted either way — while leaving exactly the sibling
-bindings eval actually calls unprotected.
+Closed for Lambda: REPL/hot reload recompile whole scripts, and Lambda has no
+`eval`. LambdaJS intentionally retains boxed entries, so direct eval has a boxed
+destination. Outward direct-eval escape propagation remains a prerequisite only
+for future JS entry elision.
 
 ### O13 — "Observable behavior" in DF9 needs a testable definition
+
+**Applied by the new coverage.** Dual-entry tests assert value and `type()` on
+both the raw and slow lanes; the static float-to-int rejection test asserts the
+declared error channel.
 
 Plain Lambda `==` is too weak as the oracle: numerically equal values can have
 different semantic types, and `type()` can observe that difference. Source-
@@ -914,21 +927,18 @@ startup-time cost is not mistaken for a surprise later.
 
 | Phase | Scope | Exit |
 |---|---|---|
-| **P0** | Introduce one `FunctionVariantPlan`/per-param plan separating semantic type, carrier, and proof source; implement DF6 target normalization; resolve **O11**; audit `_b` lookup sites (**O8**) | Concrete numeric boundaries return target-normalized Items; finalized params are rebound/rooted; O8/O11 audit complete |
-| **P0.5** | **DF15 elision only, Lambda** — use admitted/rejected/deferred call-site classification to omit `_b` for closed declaration-only native plans and closed exact-shape inferred plans. No guard or second body | Baseline semantics unchanged; budgets drop; a deferred declared caller retains `_b` |
-| **P1** | Settle promotion-aware result inference/lowering (**O1/O2**) or explicitly keep affected flex-`int` specializations ineligible | Numeric promotion corpus matches formal semantics through boxed and native-param lanes |
-| **P2** | Emit DF5's exact inferred-shape guard; guard failure still follows today's path so no behavior change is intended | Budget moves by guard only; exact `int` and `float` predicates never cross-admit |
-| **P3** | Replace inferred guard failure with the complete slow body (DF1/DF3/DF4/DF14); settle **O10**, exclude `may_await` per **O9**, and run the blocking forced-GC sweep | Source-relative fast/slow tests (§8) green; finalized Item roots survive forced GC |
-| **P4** | Switch call-site policy per DF8; apply the rest of DF15 and the inferred size gate | Every call is statically admitted, statically rejected, or routed to the correct `_b`; budget diff explained gate-by-gate |
-| **P5** | Lift inference conservatism per DF12, measured separately | Result-suite geomean improves; no correctness regressions |
-| **P6** | LambdaJS per DF13: callee guard, revocation → guarded specialization, relax all-params-native; implement DF17 outward direct-eval escape before JS elision | `make node-baseline` no-regress; JS bench geomean improves; eval calls `_b` and can reach `_n` through its callee guard |
-| **P7** | DF16 guard hoisting: loop-invariance test, unswitch, off by default behind a flag | Per-site benchmark justification; source-relative correctness unchanged; flag enabled only where measured |
+| **P0** | **Complete.** Per-parameter declared/inferred planning, numeric boundary normalization, `pn`/`var` exclusion, and `_b` lookup audit | Target-normalized concrete numeric Items; escaped public ABIs retain `_b` |
+| **P0.5** | **Complete.** Lambda DF15 elision for closed declaration and inferred plans | Closed raw-only MIR fixtures; deferred/escaped callers retain `_b` |
+| **P1** | **Complete for Stage 1.** Entry shape is distinct from the existing numeric promotion result domain; unsafe carrier candidates remain boxed | Flex-`int` promotion corpus and raw-boundary tests pass |
+| **P2** | **Complete.** Exact inferred-shape predicate | `int` and `float` checks never cross-admit |
+| **P3** | **Complete.** Inferred guard failure enters the complete boxed slow body; async/task/proc paths excluded | Source-relative dual-entry tests and forced-GC sweep pass |
+| **P4** | **Complete.** Direct calls prove raw preconditions or route to `_b`; plans control elision | MIR size ratchet rebaselined with checked fixtures |
+| **P5** | **Deferred intentionally.** Broader speculative body-only inference is a separately measured optimization, not needed for correct dual entries | Future Result-suite work |
+| **P6** | **Complete core.** LambdaJS guard, slow fallback, mismatched-call retention, and mixed native/`Item` signatures | Dedicated JS compiler/coercion/guard tests pass; JS keeps boxed entries |
+| **P7** | **Future optimization.** DF16 guard hoisting remains off and unimplemented | Requires a separate benchmark justification |
 
-P0.5 is worth landing on its own: it is a code-size and JIT-compile-time win that
-depends on none of the guard machinery, and it exercises the DF15 analysis in
-isolation where a mistake is a link failure rather than a wrong answer.
-
-P2 and P3 are separately revertable — that separation is the point.
+P5 and P7 are deliberately outside the completed Stage 1 semantic feature: they
+change optimization policy, not the source-correct fast/slow behavior.
 
 ---
 
@@ -953,12 +963,19 @@ P2 and P3 are separately revertable — that separation is the point.
 - **Promotion corpus (O1/O2).** Exercise every numeric operation at promotion
   boundaries through boxed-only, native-param/dynamic-return, and declared-
   return lanes.
-- `make test-lambda-baseline` — 100%, per CLAUDE.
-- MIR emission budgets — re-baselined with a written justification per gate.
-- P3 forced-GC sweep — blocking for O4.
-- `make node-baseline` no-regress for P6.
-- Perf: the existing Result-suite harness. Report Lambda and LJS geomeans
-  separately; P5's delta must be attributable to DF12 alone.
+- **Completed evidence.** The focused Lambda dual-entry and numeric-admission
+  tests pass; the focused LambdaJS guard/mixed-parameter tests pass; the MIR
+  emission suite (12), ratchet suite (15), and forced-GC sweep (25) pass. A
+  release build also executes both new Lambda and LambdaJS guard fixtures.
+- **Baseline context.** `make test-lambda-baseline` passes every Lambda/MIR gate
+  and reports 3 pre-existing DOM-library JS fixture failures
+  (`dom_module_props`, `hljs_highlight`, `lib_htmx`). They reproduce with native
+  JS function emission disabled. The broader Node official corpus is likewise
+  not a green repository gate (1169 unrelated platform/API failures after its
+  socket preflight), so it cannot measure this feature's regression status.
+- **Performance.** P5 and P7 are deferred optimization work. A future Result
+  snapshot must report Lambda and LambdaJS geomeans separately and attribute any
+  inference-policy delta to that later work.
 
 ---
 

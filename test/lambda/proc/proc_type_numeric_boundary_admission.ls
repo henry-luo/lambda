@@ -2,6 +2,7 @@
 // membership remains type-directional after the source value is preserved.
 fn dynamic(value) any { value }
 fn accept(value: int) int { value }
+fn accept_float(value: float) float { value }
 fn return_int(value) int { dynamic(value) }
 
 type Person = {age: int}
@@ -9,6 +10,8 @@ type Person = {age: int}
 pn main() {
     let declared: int = dynamic(3.0)
     let argument = accept(dynamic(4.0))
+    let float_from_int = accept_float(dynamic(9))
+    let static_float_from_int = accept_float(10)
     let returned = return_int(5.0)
 
     var reassigned: int = 0
@@ -33,9 +36,9 @@ pn main() {
         default: false
     }
 
-    print(string([declared, argument, returned, reassigned, person.age, values[1],
+    print(string([declared, argument, float_from_int, static_float_from_int, returned, reassigned, person.age, values[1],
         decimal_value is decimal, signed_value is i8, unsigned_value is u8,
         decimal_int is int, signed64 is i64, unsigned64 is u64, half_value is f16,
         float_value is f32, dynamic(3.0) is int, dynamic_match, declared is int,
-        person.age is int, values[1] is int]) ++ "\n")
+        float_from_int is float, static_float_from_int is float, person.age is int, values[1] is int]) ++ "\n")
 }

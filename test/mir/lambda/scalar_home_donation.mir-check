@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Caller-donated scalar home: hidden trailing home argument on the callee, and adopt-before-number-watermark-restore ordering at the call site (Stack API #15/#16/#19/#21).",
+  "description": "Caller-donated scalar home: the deferred int64 argument is boxed and adopted before its number watermark is restored, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21).",
   "checks": [
     {
       "in_func": "_twice_#",
@@ -12,16 +12,17 @@
       "in_func": "main",
       "expect_seq": [
         { "pattern": "mov\tcall_number_base_" },
-        { "pattern": "call\tbox_int64_value_p" },
+        { "pattern": "call\tbox_int64_result_or_error_p" },
         { "pattern": "lambda_item_adopt_scalar_home" },
         { "pattern": ", call_number_base_" }
       ],
       "count": {
-        "call\tbox_int64_value_p": 1,
+        "call\tbox_int64_result_or_error_p": 1,
         "mov\tcall_number_base_": 1
       },
       "expect": [
-        ", scalar_home_"
+        ", scalar_home_",
+        "call\t_twice_b_"
       ]
     }
   ]

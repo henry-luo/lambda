@@ -3079,8 +3079,10 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
 
 // ============================================================================
 // Phase 3.5: Call-site type propagation
-// Scan function bodies for calls with literal arguments that contradict the
-// inferred param types. Widen those params to ANY and revoke native eligibility.
+// A contradictory argument shape no longer revokes an inferred native body: its
+// boxed entry guards the raw call and runs complete boxed lowering on a miss.
+// Callback function expressions remain an exclusion because their receiver and
+// callback context are not represented by the scalar raw ABI.
 // ============================================================================
 
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
@@ -3115,18 +3117,17 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                     else if (expected == LMD_TYPE_FLOAT)
                         ok = (arg_type == LMD_TYPE_FLOAT || arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_ANY);
                     if (!ok) {
-                        log_debug("js-mir P3.5 callsite: widening %s param %d from type %d to ANY (literal mismatch)",
-                            callee_fc->name, i, expected);
-                        callee_fc->param_types[i] = LMD_TYPE_ANY;
-                        callee_fc->has_native_version = false;
+                        log_debug("js-mir P3.5 callsite: preserving native shape for %s param %d; boxed entry handles literal mismatch",
+                            callee_fc->name, i);
                     }
                 }
                 arg = arg->next;
             }
         }
-        // v18l: Revoke native version for function expressions passed as callback
-        // arguments. The caller (e.g. reduce, map, forEach) may pass any type,
-        // so unboxing to native int/float inside the boxed wrapper is unsafe.
+        // A callback can receive a dynamic receiver/context that the scalar
+        // raw ABI does not carry. Its argument guard alone cannot prove that
+        // hidden calling convention, so leave callback bodies boxed until the
+        // native entry also models it.
         {
             JsAstNode* cb_arg = call->arguments;
             while (cb_arg) {
@@ -3134,7 +3135,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                     cb_arg->node_type == JS_AST_NODE_ARROW_FUNCTION) {
                     JsFuncCollected* cb_fc = jm_find_collected_func(mt, (JsFunctionNode*)cb_arg);
                     if (cb_fc && cb_fc->has_native_version) {
-                        log_debug("js-mir P3.5 callsite: revoking native for callback '%s' (passed as argument)",
+                        log_debug("js-mir P3.5 callsite: callback '%s' stays boxed for dynamic receiver context",
                             cb_fc->name);
                         cb_fc->has_native_version = false;
                     }
@@ -5893,14 +5894,21 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                          jm_p6_function_allows_native_specialization(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
+        bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
-                if (fc->param_types[j] != LMD_TYPE_INT && fc->param_types[j] != LMD_TYPE_FLOAT) {
+                TypeId param_type = fc->param_types[j];
+                if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
+                    has_native_param = true;
+                    continue;
+                }
+                if (param_type != LMD_TYPE_ANY) {
                     eligible = false;
                     break;
                 }
             }
         }
+        if (!has_native_param) eligible = false;
         fc->has_native_version = eligible;
         fc->native_return_kind = !eligible ? NATIVE_RETURN_NONE :
             fc->return_type == LMD_TYPE_FLOAT ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
@@ -5910,9 +5918,18 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
         }
 
-        // TCO eligibility: native-eligible function with at least one tail-recursive call
+        // Mixed native/Item entries keep the Item formal stable across every
+        // tail iteration. Retain TCO for all-native signatures only.
         fc->is_tco_eligible = false;
-        if (eligible && jm_has_tail_call(fc->node->body, fc)) {
+        if (eligible && has_native_param) {
+            for (int j = 0; j < fc->param_count; j++) {
+                if (fc->param_types[j] == LMD_TYPE_ANY) {
+                    has_native_param = false;
+                    break;
+                }
+            }
+        }
+        if (eligible && has_native_param && jm_has_tail_call(fc->node->body, fc)) {
             fc->is_tco_eligible = true;
             log_debug("js-mir TCO: %s eligible for tail-call optimization", fc->name);
         }
@@ -5986,10 +6003,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                  jm_p6_function_allows_native_specialization(fc) &&
                                  !fc->has_non_simple_params &&
                                  fc->param_count <= 16);
+                bool has_native_param = false;
                 if (eligible) {
                     for (int p = 0; p < fc->param_count; p++) {
                         TypeId pt = fc->param_types[p];
-                        if (pt != LMD_TYPE_INT && pt != LMD_TYPE_FLOAT) {
+                        if (pt == LMD_TYPE_INT || pt == LMD_TYPE_FLOAT) {
+                            has_native_param = true;
+                            continue;
+                        }
+                        if (pt != LMD_TYPE_ANY) {
                             eligible = false; break;
                         }
                     }
@@ -5999,6 +6021,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             eligible = false;
                     }
                 }
+                if (!has_native_param) eligible = false;
                 if (eligible && !fc->has_native_version) {
                     fc->has_native_version = true;
                     fc->native_return_kind = fc->return_type == LMD_TYPE_FLOAT
@@ -6011,7 +6034,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // P6 can make recursive accumulator functions native-eligible;
                 // recompute TCO after narrowing so deep tail calls stay loops.
-                fc->is_tco_eligible = eligible && jm_has_tail_call(fc->node->body, fc);
+                bool all_native_params = has_native_param;
+                for (int p = 0; p < fc->param_count; p++) {
+                    if (fc->param_types[p] == LMD_TYPE_ANY) {
+                        all_native_params = false;
+                        break;
+                    }
+                }
+                fc->is_tco_eligible = eligible && all_native_params &&
+                    jm_has_tail_call(fc->node->body, fc);
             }
         }
         mem_free(evi);
@@ -6147,7 +6178,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 native->params = fc->native_param_analysis;
                 for (int p = 0; p < fc->param_count; p++) {
                     ValueRep rep = fc->param_types[p] == LMD_TYPE_FLOAT
-                        ? VALUE_REP_F64 : VALUE_REP_I64;
+                        ? VALUE_REP_F64 : fc->param_types[p] == LMD_TYPE_ANY
+                            ? VALUE_REP_ITEM : VALUE_REP_I64;
                     native->params[p] = {fc->param_types[p], rep, 0};
                 }
             }
