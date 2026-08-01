@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled loop listener closure contract</title>
+<link rel="stylesheet" href="editable-drawing.css">
+<h1>Bundled loop listener closure contract</h1>
+<div id="drawing-controls">
+  <button id="destroy" type="button">Destroy</button>
+  <button id="recreate" type="button">Recreate</button>
+  <button id="add-vertex" type="button" data-drawing-action="addVertex">Add</button>
+  <button id="move-source" type="button" data-drawing-action="moveSource">Move</button>
+  <button id="resize-source" type="button" data-drawing-action="resizeSource">Resize</button>
+  <button id="reconnect-edge" type="button" data-drawing-action="reconnectEdge">Reconnect</button>
+  <button id="pan-zoom" type="button" data-drawing-action="panZoom">Pan</button>
+  <button id="undo" type="button" data-drawing-action="undo">Undo</button>
+  <button id="redo" type="button" data-drawing-action="redo">Redo</button>
+</div>
+<div id="drawing-slot"><div id="drawing-host"></div></div>
+<pre id="drawing-state"></pre><pre id="drawing-capabilities"></pre>
+<script src="../drawing-editors/build/loop-closure.js"></script>

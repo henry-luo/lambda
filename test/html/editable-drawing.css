@@ -9,5 +9,7 @@ body { max-width: 860px; margin: 0 auto; padding: 24px; }
 h1 { margin: 0 0 6px; font-size: 24px; }
 p { margin: 0 0 16px; color: #475569; }
 button { margin-right: 8px; padding: 6px 10px; border: 1px solid #94a3b8; border-radius: 6px; background: #fff; color: #0f172a; }
+#drawing-controls { margin: 12px 0; }
+#drawing-controls button { display: block; width: 180px; margin: 0 0 8px; }
 #drawing-host { width: 420px; height: 260px; margin: 16px 0; border: 1px solid #94a3b8; background: #fff; overflow: hidden; }
 pre { width: 100%; min-height: 28px; margin: 8px 0; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }

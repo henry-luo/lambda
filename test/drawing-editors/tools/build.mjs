@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 
-const entries = ["raphael", "maxgraph"];
+const entries = ["raphael", "maxgraph", "loop-closure"];
 const jointDependencyEntries = {
   "deps/backbone": "backbone",
   "deps/jquery": "jquery"

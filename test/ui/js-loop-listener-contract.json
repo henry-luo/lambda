@@ -1,0 +1,14 @@
+{
+  "name": "per-iteration DOM listener closures retain their action and outer state",
+  "html": "test/html/js-loop-listener-contract.html",
+  "viewport": {"width": 520, "height": 260},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#loop-state"}, "attribute": "data-ready", "equals": "true"},
+    {"type": "click", "target": {"selector": "#loop-one"}},
+    {"type": "assert_attribute", "target": {"selector": "#loop-state"}, "attribute": "data-action-dispatched", "equals": "one"},
+    {"type": "assert_text", "target": {"selector": "#loop-state"}, "contains": "one:ready"},
+    {"type": "click", "target": {"selector": "#loop-two"}},
+    {"type": "assert_attribute", "target": {"selector": "#loop-state"}, "attribute": "data-action-dispatched", "equals": "two"},
+    {"type": "assert_text", "target": {"selector": "#loop-state"}, "contains": "two:ready"}
+  ]
+}

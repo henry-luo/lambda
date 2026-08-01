@@ -1491,6 +1491,7 @@ static void js_dom_install_window_frames_global(void);
 static void js_dom_install_window_dialog_globals(void);
 static void js_dom_install_window_computed_style_global(void);
 static void js_dom_install_dom_parser_global(void);
+static void js_dom_install_xml_serializer_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -1553,6 +1554,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         extern void js_dom_install_option_constructor(void);
         js_dom_install_option_constructor();
         js_dom_install_dom_parser_global();
+        js_dom_install_xml_serializer_global();
         js_history_install_globals();
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
@@ -5445,6 +5447,142 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             strbuf_append_char(sb, '>');
         }
     }
+}
+
+static void collect_xml_attr_value(const char* value, StrBuf* sb) {
+    if (!value || !sb) return;
+    for (const char* p = value; *p; p++) {
+        if (*p == '&') strbuf_append_str(sb, "&amp;");
+        else if (*p == '<') strbuf_append_str(sb, "&lt;");
+        else if (*p == '"') strbuf_append_str(sb, "&quot;");
+        else if (*p == '\r') strbuf_append_str(sb, "&#13;");
+        else strbuf_append_char(sb, *p);
+    }
+}
+
+static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb) {
+    if (!value || !sb) return;
+    for (size_t i = 0; i < length; i++) {
+        char ch = value[i];
+        if (ch == '&') strbuf_append_str(sb, "&amp;");
+        else if (ch == '<') strbuf_append_str(sb, "&lt;");
+        else if (ch == '>') strbuf_append_str(sb, "&gt;");
+        else strbuf_append_char(sb, ch);
+    }
+}
+
+static void collect_xml_node(DomNode* node, StrBuf* sb) {
+    if (!node || !sb || js_dom_is_generated_pseudo_node(node)) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text && text->text && text->length > 0) {
+            collect_xml_text_value(text->text, text->length, sb);
+        }
+        return;
+    }
+    if (node->is_comment()) {
+        DomComment* comment = node->as_comment();
+        strbuf_append_str(sb, "<!--");
+        if (comment && comment->content && comment->length > 0) {
+            strbuf_append_str_n(sb, comment->content, (int)comment->length);
+        }
+        strbuf_append_str(sb, "-->");
+        return;
+    }
+    if (!node->is_element()) return;
+
+    DomElement* elem = node->as_element();
+    const char* tag = elem && elem->tag_name ? elem->tag_name : "";
+    if (strcmp(tag, "#document-fragment") == 0) {
+        for (DomNode* child = js_dom_first_script_visible_child(elem); child;
+             child = js_dom_next_script_visible_sibling(child)) {
+            collect_xml_node(child, sb);
+        }
+        return;
+    }
+
+    strbuf_append_char(sb, '<');
+    strbuf_append_str(sb, tag);
+    int attr_count = 0;
+    const char** attr_names = elem->attribute_names(&attr_count);
+    bool has_xlink_attr = false;
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        if (!name || js_dom_is_internal_attr(name)) continue;
+        char xlink_name[128];
+        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
+        if (elem->get_attribute(xlink_name)) {
+            has_xlink_attr = true;
+            break;
+        }
+    }
+    if (has_xlink_attr && !elem->get_attribute("xmlns:xlink")) {
+        // XLink attributes mirror an unprefixed renderer attribute internally;
+        // XMLSerializer must restore their qualified XML identity on output.
+        strbuf_append_str(sb, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+    }
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        if (!name || js_dom_is_internal_attr(name)) continue;
+        char xlink_name[128];
+        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
+        bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
+        strbuf_append_char(sb, ' ');
+        if (is_xlink_attr) strbuf_append_str(sb, "xlink:");
+        strbuf_append_str(sb, name);
+        strbuf_append_str(sb, "=\"");
+        const char* value = elem->get_attribute(name);
+        if (value) collect_xml_attr_value(value, sb);
+        strbuf_append_char(sb, '"');
+    }
+
+    DomNode* child = js_dom_first_script_visible_child(elem);
+    if (!child) {
+        strbuf_append_str(sb, "/>");
+        return;
+    }
+    strbuf_append_char(sb, '>');
+    while (child) {
+        collect_xml_node(child, sb);
+        child = js_dom_next_script_visible_sibling(child);
+    }
+    strbuf_append_str(sb, "</");
+    strbuf_append_str(sb, tag);
+    strbuf_append_char(sb, '>');
+}
+
+static Item js_dom_xml_serializer_constructor(void) {
+    return make_js_undefined();
+}
+
+static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
+    if (!node) {
+        DomDocument* doc = js_document_proxy_doc_from_item(node_item);
+        node = doc ? (DomNode*)doc->root : nullptr;
+    }
+    if (!node) return js_throw_type_error("XMLSerializer.serializeToString requires a Node");
+
+    // ModelXmlSerializer exports MaxGraph's detached XML trees through this
+    // standard DOM API; serializing the live node preserves namespaces and
+    // attributes instead of substituting a format-specific graph snapshot.
+    StrBuf* sb = strbuf_new_cap(256);
+    collect_xml_node(node, sb);
+    String* result = heap_create_name(sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+static void js_dom_install_xml_serializer_global(void) {
+    Item global = js_get_global_this();
+    Item ctor = js_new_function((void*)js_dom_xml_serializer_constructor, 0);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("XMLSerializer"))});
+    Item proto = js_new_object();
+    js_property_set(proto, js_string_key("constructor"), ctor);
+    js_property_set(proto, js_string_key("serializeToString"),
+        js_new_function((void*)js_dom_xml_serializer_serialize_to_string, 1));
+    js_property_set(ctor, js_string_key("prototype"), proto);
+    js_property_set(global, js_string_key("XMLSerializer"), ctor);
 }
 
 static void js_dom_collapse_selection_before_child_replace(DomElement* elem,

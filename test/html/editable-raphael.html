@@ -4,8 +4,10 @@
 <link rel="stylesheet" href="editable-drawing.css">
 <h1>Raphaël SVG drawing probe</h1>
 <p>Creates shapes, a gradient, an image smoke case, and an SVG drag surface.</p>
-<button id="destroy" type="button">Destroy drawing</button>
-<button id="recreate" type="button">Recreate drawing</button>
+<div id="drawing-controls">
+  <button id="destroy" type="button">Destroy drawing</button>
+  <button id="recreate" type="button">Recreate drawing</button>
+</div>
 <div id="drawing-slot"><div id="drawing-host" aria-label="Raphaël drawing"></div></div>
 <h2>Library state</h2><pre id="drawing-state"></pre>
 <h2>Capability report</h2><pre id="drawing-capabilities"></pre>

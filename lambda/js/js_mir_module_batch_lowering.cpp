@@ -229,16 +229,6 @@ static bool jm_child_can_use_parent_scope_env(JsFuncCollected* parent, JsFuncCol
     return child != NULL;
 }
 
-static bool jm_capture_is_transitive_through_parent(JsFuncCollected* parent,
-        struct hashmap* parent_locals, const char* name) {
-    if (!parent || !name) return false;
-    if (parent_locals && jm_name_set_has(parent_locals, name)) return false;
-    for (int pc = 0; pc < parent->capture_count; pc++) {
-        if (strcmp(parent->captures[pc].name, name) == 0) return true;
-    }
-    return false;
-}
-
 static void jm_collect_function_private_self_name(JsFunctionNode* fn,
         struct hashmap* locals) {
     if (!fn || !locals || fn->node_type != JS_AST_NODE_FUNCTION_EXPRESSION || !fn->name) return;
@@ -264,52 +254,108 @@ static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
     return link_slot;
 }
 
+static bool jm_scope_env_key_binding_start(const FnCapture* cap, uint32_t* out_start) {
+    if (!cap || !out_start) return false;
+    const char* at = strchr(cap->scope_env_key, '@');
+    if (!at || !at[1] || at[1] < '0' || at[1] > '9') return false;
+    uint32_t start = 0;
+    for (const char* cursor = at + 1; *cursor >= '0' && *cursor <= '9'; cursor++) {
+        start = start * 10u + (uint32_t)(*cursor - '0');
+    }
+    *out_start = start;
+    return true;
+}
+
+static bool jm_function_captures_lexical_for_head(const JsFunctionNode* fn,
+        const char* name) {
+    if (!fn || !name) return false;
+    for (int i = 0; i < fn->lexical_for_head_capture_count; i++) {
+        if (strcmp(fn->lexical_for_head_capture_names[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static bool jm_ts_node_contains_byte(TSNode node, uint32_t byte) {
+    return !ts_node_is_null(node) &&
+        byte >= ts_node_start_byte(node) && byte < ts_node_end_byte(node);
+}
+
+static bool jm_ts_loop_owns_binding(TSNode node,
+        uint32_t closure_start, uint32_t binding_start) {
+    if (ts_node_is_null(node) || !jm_ts_node_contains_byte(node, closure_start)) return false;
+    const char* type = ts_node_type(node);
+    if (strcmp(type, "for_statement") == 0 ||
+        strcmp(type, "for_in_statement") == 0 ||
+        strcmp(type, "while_statement") == 0 ||
+        strcmp(type, "do_statement") == 0) {
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        bool closure_in_body = jm_ts_node_contains_byte(body, closure_start);
+        bool binding_in_body = jm_ts_node_contains_byte(body, binding_start);
+        // Per-iteration bindings can be declared either in the loop body or
+        // in a for/for-in header immediately before that body.  A forced
+        // capture alone is not evidence of loop ownership: normal nested
+        // callbacks force their parent lexical cell too.
+        bool binding_in_header = binding_start >= ts_node_start_byte(node) &&
+            binding_start < ts_node_start_byte(body);
+        if (closure_in_body && (binding_in_body || binding_in_header)) {
+            return true;
+        }
+    }
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        if (jm_ts_loop_owns_binding(ts_node_named_child(node, i),
+                closure_start, binding_start)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_capture_is_loop_private(JsFuncCollected* child,
+        JsFuncCollected* parent, const FnCapture* cap) {
+    if (!cap || !cap->force_env_capture || !cap->is_let_const) return false;
+    uint32_t binding_start = 0;
+    if (!jm_scope_env_key_binding_start(cap, &binding_start)) {
+        // Tree-sitter's for-in/for-of lexical head uses the compiler's
+        // dedicated marker rather than a source-keyed reference. Preserve its
+        // per-iteration cell without classifying ordinary forced captures as
+        // loop-private.
+        return child && jm_function_captures_lexical_for_head(child->node, cap->name);
+    }
+    if (!child || !child->node || !parent || !parent->node) return false;
+    // A lexical declared in a loop body needs one closure cell per iteration;
+    // a function-local lexical merely carries a source key to disambiguate it
+    // from a same-named module binding and must remain in the shared parent env.
+    return jm_ts_loop_owns_binding(parent->node->node,
+        ts_node_start_byte(child->node->node), binding_start);
+}
+
 static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollected* parent) {
     if (!child || !parent || parent->scope_env_count <= 0) return;
-    struct hashmap* parent_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (parent->node) {
-        JsAstNode* param = parent->node->params;
-        while (param) {
-            jm_collect_pattern_names(param, parent_locals);
-            param = param->next;
-        }
-        if (parent->node->body) {
-            // capture propagation can add parent locals to parent->captures;
-            // collect all body locals so they are not mistaken for transitive cells.
-            jm_collect_body_locals(parent->node->body, parent_locals, false);
-        }
-        // A named function expression's self name is local to that activation;
-        // treating it as transitive resolves recursive child closures globally.
-        jm_collect_function_private_self_name(parent->node, parent_locals);
-    }
     bool has_loop_private = false;
     bool has_shared_parent = false;
     for (int k = 0; k < child->capture_count; k++) {
-        if (child->captures[k].force_env_capture) {
+        FnCapture* cap = &child->captures[k];
+        bool loop_private = jm_capture_is_loop_private(child, parent, cap);
+        if (loop_private) {
             has_loop_private = true;
-        } else if (child->captures[k].scope_env_slot >= 0 &&
-                   jm_capture_is_transitive_through_parent(parent, parent_locals, child->captures[k].name)) {
+        } else if (cap->scope_env_slot >= 0) {
             has_shared_parent = true;
         }
     }
     if (!has_loop_private || !has_shared_parent) {
-        hashmap_free(parent_locals);
         return;
     }
     child->closure_env_has_parent_link = true;
     child->closure_env_parent_link_slot =
         jm_parent_link_slot_after_captures(child, parent->scope_env_count);
     for (int k = 0; k < child->capture_count; k++) {
-        if (!child->captures[k].force_env_capture &&
-            child->captures[k].scope_env_slot >= 0 &&
-            jm_capture_is_transitive_through_parent(parent, parent_locals, child->captures[k].name)) {
-            // parent-local captures must stay in this activation's env; only
-            // true transitive captures may read through the copied parent link.
-            child->captures[k].grandparent_slot = child->captures[k].scope_env_slot;
+        FnCapture* cap = &child->captures[k];
+        bool loop_private = jm_capture_is_loop_private(child, parent, cap);
+        if (!loop_private && cap->scope_env_slot >= 0) {
+            cap->grandparent_slot = cap->scope_env_slot;
         }
     }
-    hashmap_free(parent_locals);
     log_debug("js-mir: mixed loop closure '%s' keeps shared parent captures via env slot %d",
         child->name, child->closure_env_parent_link_slot);
 }
