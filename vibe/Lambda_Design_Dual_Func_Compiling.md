@@ -10,37 +10,68 @@
 
 ---
 
-## 1. Goal
+## 1. Goal and semantic authority
 
-Compile **two versions** of every eligible user-defined function:
+The **user-defined source function is the semantic authority**. Its explicit
+contracts, or their absence, determine which calls are legal and what the body
+means. Neither generated entry is intrinsically authoritative: each is an
+implementation of some part of the source function's domain.
+
+An eligible function may have these two entries:
 
 | Version | ABI | Role |
 |---|---|---|
-| **Unboxed** (`<name>`) | native MIR types for qualifying params, native return | fast path |
-| **Boxed** (`<name>_b`) | all-`Item` params, `Item` return | the public/dynamic entry |
+| **Unboxed** (`<name>`) | native MIR carriers for qualifying params; return ABI chosen independently | declared main body or inferred specialization |
+| **Boxed** (`<name>_b`) | all-`Item` params, `Item` return | public checker/trampoline, or inferred dispatcher plus complete slow body |
 
-The boxed version is not a pure trampoline. It is:
-
-```
-guard: do the incoming Items match the unboxed version's parameter representations?
-  yes → unbox, call the unboxed version, box the result, return   (fast path)
-  no  → fall through into a full boxed lowering of the same body   (slow path)
-```
-
-Exactly **one** unboxed version per function in this design. Multi-version
-specialization (one unboxed version per observed argument shape) is explicitly
+Exactly **one** unboxed version per function is allowed in this design.
+Multi-version specialization (one version per observed argument shape) is
 future work — see §10.
 
-### 1.1 The two cases from the request
+### 1.1 Typed and untyped functions are different cases
 
-- **Case A — untyped `fn f(a, b)`.** If ≥1 param is *inferred* to a determined
-  unboxable type → emit unboxed + boxed. If none is → emit boxed only, and the
-  boxed version has no guard and no unboxed callee (it *is* the body).
-- **Case B — typed or partially typed `fn f(a: int, b)`.** Emit both by default.
-  The boxed version exists for dynamic call sites whose argument types are not
-  statically known.
+| Source definition | Caller set | Generated shape | Meaning of a failed dynamic check |
+|---|---|---|---|
+| **typed**, native-eligible | closed and statically proven | unboxed main body; `_b` may be omitted | statically rejected call |
+| **typed**, native-eligible | open/dynamic | unboxed main body + `_b` checking trampoline | declared-contract error; never a slow-body fallback |
+| **untyped** | closed, with one proven profitable argument shape | unboxed specialization only; slow body and `_b` collapse | impossible in the compiled caller set |
+| **untyped** | mixed or open, with a profitable shape | unboxed specialization + `_b` guard + complete boxed slow body | run the slow body; inference never creates a contract error |
+| **untyped** | no profitable shape | boxed body only | ordinary dynamic execution |
 
-### 1.2 Union-typed params
+A closed-world inferred shape does **not** become a user-visible contract. It
+only proves that every caller reachable in the current compilation unit belongs
+to the specialization domain. If a new caller can appear, the function is open
+and needs the complete slow body; if a later compilation adds such a caller, the
+unit is recompiled and the slow body is restored.
+
+The closed untyped case therefore has the same *implementation shape* as the
+typed case, but not the same failure semantics. An inferred function cannot
+expose a checker that rejects arguments outside its specialization: if such an
+argument can arrive, the function is open and needs the source-equivalent slow
+body.
+
+For a partially typed function, apply the rules per parameter. Declared params
+use declared-boundary semantics; unannotated params remain eligible for an
+inferred specialization and, when their caller set is open or mixed, require the
+slow body. An unannotated param that remains boxed `Item` is not a specialization
+and imposes neither a guard nor a slow body by itself.
+
+### 1.2 Semantic type, carrier, and result domain are separate
+
+Do not encode three different facts in one `TypeId`:
+
+1. the parameter's **semantic type** (declared or exact inferred call shape);
+2. the parameter's chosen **physical MIR carrier** (`I64`, `D`, raw pointer, or
+   boxed `Item`); and
+3. the body's **expression/result promotion domain**.
+
+For example, an unannotated exact `int` argument remains semantic `int` at entry,
+while an operation in the body may promote its result to `float`. Conversely, an
+`int` admitted to a declared `float` parameter is normalized to the parameter's
+`float` carrier before entry. Parameter specialization and return-ABI
+specialization are independent decisions.
+
+### 1.3 Union-typed params
 
 A param inferred (or declared) as a union — `int | string` — **does not qualify
 for unboxing**. It stays `Item` in *both* versions. It contributes no guard test
@@ -75,7 +106,8 @@ is **coercive, not discriminating**: `it2i` / `it2d` / `it2b` / `it2s`. For a
 param whose native type came from *inference* rather than declaration, there is
 no boundary check in front of it. So a dynamic call `f("7")` against
 `fn f(a) { a + 1 }` (a inferred `int`) is silently coerced instead of running
-the boxed semantics of `+`. There is **no fallback body to fall back to.**
+the source-defined dynamic semantics of `+`. There is **no complete slow body
+to fall back to.**
 
 Direct call sites have the same shape ([:11039–11051](../lambda/runtime/transpile-mir.cpp:11039)):
 a statically-`ANY` argument to a native param is `emit_unbox`-coerced; a
@@ -85,10 +117,11 @@ statically-mismatched argument is box-then-unbox-coerced.
 ([:14559–14580](../lambda/runtime/transpile-mir.cpp:14559)) carries an explicit
 comment refusing to speculate `INT` on weak arithmetic evidence because that
 guess "truncated float args at the call boundary (cd.ls positions/denominators)".
-Without a fallback body, every inference must be *provably* right, so most
+Without a complete slow body, every inference must be *provably* right, so most
 inference is abandoned. That conservatism is the measured cost recorded in
-the measured `int`-widening ("flexint") poisoning of index arithmetic,
-and TS-3.
+the observed loss of useful type information around flex-`int` index arithmetic
+and TS-3. Flex `int` itself is not the defect; O1 isolates the missing
+promotion-aware inference and lowering.
 
 ### 2.2 LambdaJS
 
@@ -109,50 +142,65 @@ even when the runtime argument types match perfectly.
 
 | | Lambda today | JS today | Proposed (both) |
 |---|---|---|---|
-| Unboxed body | yes (when native) | yes (`_n`) | yes |
-| Boxed **body** | only when *not* native | always | always, when needed by DF3 |
-| Guard in boxed entry | **none** (coerces) | **none** (never dispatches) | **yes** |
-| Dynamic call reaches fast path | no (coerces, unsound) | no | yes, when types match |
-| Inferred type must be provably right | **yes** | no (revocation) | **no** |
+| Unboxed body | yes (when native) | yes (`_n`) | when the function has a profitable native plan |
+| Full boxed lowering | only when *not* native | always | boxed-only when there is no specialization; duplicated only for untyped open/mixed functions |
+| Guard in boxed entry | **none** (coerces) | **none** (never dispatches) | **for inferred specializations only** |
+| Dynamic call reaches fast path | no (coerces, unsound) | no | inferred: exact shape; declared: after admission/normalization |
+| Inferred specialization must cover every caller | **yes** | no (revocation) | **only when the slow body is elided** |
 
 ---
 
 ## 3. Decisions
 
-### DF1 — Two entries, one guard, one fallback
+### DF1 — One source meaning, plan-dependent entries
 
-Emit `<name>` (unboxed body) and `<name>_b` (boxed entry). `<name>_b` contains,
-in order: the existing prologue (error short-circuit, optional defaults,
-declared-type boundary checks), then a **single combined guard**, then either a
-call to `<name>` or a full boxed lowering of the body.
+Version planning follows §1.1 rather than imposing the same two-entry shape on
+every function. Where both entries are needed, emit `<name>` (unboxed) and
+`<name>_b` (boxed public entry). Their roles depend on the source definition:
 
-Rejected alternative: per-param guards with partial coercion (unbox the params
-that match, box the rest). That needs 2^N entry shapes or a coercion that
-reintroduces the current unsoundness. Revisit only under §10.
+- for a typed function, `<name>` is the only main-body lowering and `_b` is a
+  checking/normalizing trampoline;
+- for an untyped open or mixed function, `_b` contains a combined inferred-shape
+  guard, a fast call to `<name>`, and a complete boxed lowering on guard failure;
+- for a closed untyped function whose callers prove one shape, `<name>` alone is
+  a complete implementation for the reachable call domain and `_b` is omitted.
 
-### DF2 — The guard tests *inferred* params only
+Rejected alternative: per-param partial fallback (unbox the params that match,
+box the rest). That needs 2^N entry shapes or a conversion that silently changes
+an untyped binding's semantic type. Revisit only under §10.
 
-A param with a declared non-`any` type already passes through
-`emit_parameter_boundary`, which raises on violation. After that check the
-representation is known, so the guard test for that param is statically true and
-is **not emitted**.
+### DF2 — Declared params use admission and normalization, not a guard
 
-Consequence: **a fully-declared function needs no guard and no boxed body.** Its
-`_b` stays exactly the thin trampoline it is today. All new machinery is paid for
-only where inference is involved.
+A declared non-`any` param crosses the declared boundary before native entry.
+The boundary applies DF6's implicit-admission rule and, on success, normalizes a
+concrete numeric target into the target semantic/carrier representation. The
+unboxed body may then rely on that representation without an inferred-shape
+guard. Failure returns the declared-contract error.
 
-### DF3 — When is a boxed body emitted?
+Consequences:
 
-Emit a boxed body in `<name>_b` **iff** at least one of:
+- a fully declared native-eligible function has no boxed slow body;
+- its `_b`, when required by visibility, is only error/default handling →
+  declared admission/normalization → unbox → call → box;
+- a declared contract that admits a differently represented numeric value does
+  not require a slow body; normalization is the contract-authorized operation.
 
-1. ≥1 param's unboxed representation came from **inference** (not declaration); or
-2. the **return** representation came from inference and the function escapes; or
-3. a declared param's contract admits values whose representations differ (see O3).
+### DF3 — A slow body is emitted only for incomplete inference coverage
 
-Otherwise `_b` remains a trampoline: guard is empty, the boundary checks already
-guarantee the call is legal, and a violation is an error, not a fallback.
+Emit a complete boxed slow body **iff** all of these are true:
 
-This rule is the whole cost-control story. Declared code pays nothing new.
+1. at least one qualifying param is specialized from inference rather than a
+   declaration;
+2. an unboxed version is profitable; and
+3. the caller set is open, deferred, or contains at least one visible call shape
+   outside that unboxed specialization.
+
+If every visible call to a non-escaped untyped function belongs to one inferred
+shape, the slow body and `_b` collapse. If no visible call belongs to a
+profitable single shape, omit the unboxed version and keep only the boxed body.
+An inferred return representation alone never causes a slow body: there is no
+entry-time predicate that could select it, and parameter and return ABIs are
+planned independently.
 
 ### DF4 — Declared violation raises; inferred mismatch falls through
 
@@ -164,10 +212,12 @@ Two different failure semantics, never conflated:
 - **Inferred** `a` (unannotated), argument is a string → perfectly legal program
   → guard fails → boxed body runs, `+` dispatches dynamically.
 
-### DF5 — Guard predicates are representation tests, not conversions
+### DF5 — Inferred guards are exact semantic-shape tests, not admissions
 
-The guard asks "is this Item already in the unboxed version's representation?",
-not "can this Item be converted?". Per-type tests:
+The guard asks "does this Item already have the semantic type specialized by the
+unboxed version?", not "can this value be admitted or converted?" Inference is
+not a user contract and must never change the semantic type of an unannotated
+binding. Per-type tests:
 
 | Unboxed type | Guard predicate | Cost |
 |---|---|---|
@@ -201,22 +251,42 @@ fail every predicate, routing to the boxed body — or, where
 `mir_param_short_circuits_item_error` applies, they are short-circuited before
 the guard is reached.
 
-### DF6 — `int` → `float` widening is allowed in the guard; nothing else is
+### DF6 — One general numeric implicit-boundary-admission rule
 
-For a `float` param, an `int` Item passes the guard and is widened with a single
-`I2D`. This is total and lossless within INT53 ([lambda.h:1256](../lambda/lambda.h:1256)),
-and it is the single most common real mismatch (`f(1)` against a float-inferred
-param).
+This rule applies to **declared concrete numeric boundaries**, not inferred
+guards. For source type/value `S` and declared destination `T`:
 
-**`int64`/`uint64` are explicitly *not* admitted to a `float` param.** They are
-number-homed full-width values with no INT53 bound, so the widening is lossy
-above 2^53 — the same divergence O1 describes, arriving by a different route.
-They fail the guard and take the boxed path.
+1. **Static source:** admit only when the entire domain of `S` exactly embeds in
+   `T`; normalize into `T`'s semantic/native carrier.
+2. **Static non-embedding source:** reject at compile time. In particular,
+   `float → int` is never implicitly admitted statically, even when a particular
+   expression might evaluate to an integral float.
+3. **Dynamic source:** inspect the runtime numeric value. Admit exactly when that
+   value is representable in `T` without information loss; normalize it to `T`.
+   Otherwise return the rich boundary error.
+4. **Explicit conversion functions** such as `int(x)` and `float(x)` retain their
+   separately defined, possibly lossy semantics.
 
-No other cross-type admission is permitted either: every remaining "conversion"
-loses information (`float`→`int`) or costs a call (`string`→`int`), and both
-belong on the boxed path where the body's own dynamic dispatch handles them
-correctly.
+This is **implicit boundary admission**, not a cast: admission is exact and
+contract-driven; an explicit conversion is a separate source operation.
+
+Examples:
+
+| Crossing | Result |
+|---|---|
+| static `int → float` | admit and normalize; every Lambda `int` is exactly representable |
+| static `float → int` | reject |
+| dynamic `3.0 → int` | admit as `int 3` |
+| dynamic `3.5 → int` | boundary error |
+| static `i64 → float` | reject; the whole `i64` domain does not embed |
+| dynamic `i64(2^52) → float` | admit |
+| dynamic `i64(2^53 + 1) → float` | boundary error |
+| static `i8 → int`, `f32 → float`, `int → i64` | admit and normalize |
+
+The implementation should use the shared numeric-kind lattice for static
+domain embedding and one value-aware runtime helper for every numeric target.
+Union and abstract numeric targets (`number`, `integer`) do not arbitrarily pick
+a concrete member carrier; they remain boxed unless separately specialized.
 
 ### DF7 — Naming and ABI stay as they are
 
@@ -224,35 +294,43 @@ correctly.
 shape of the code, of `FnEntryKind` ([value_rep.h:43](../lambda/runtime/value_rep.h:43)),
 of the `Function*` construction path ([:3547–3555](../lambda/runtime/transpile-mir.cpp:3547)),
 of imports ([:3497](../lambda/runtime/transpile-mir.cpp:3497)), and of method
-dispatch. **No renaming.** `_b` gains a body; nothing else moves.
+dispatch. **No renaming.** `_b` gains a slow body only in DF3's inferred
+open/mixed case; typed functions retain the checking-trampoline shape.
 
 The `FN_ENTRY_PUBLIC_WRAPPER` variant keeps its dynamic result contract
-(`SCALAR_RETURN_DYNAMIC`) — correct and now load-bearing, since the boxed body
-can return anything.
+(`SCALAR_RETURN_DYNAMIC`) — correct and load-bearing whenever the boxed slow body
+can return any source-defined value.
 
 ### DF8 — The check lives in the callee, not the call site
 
-**Decision: a call site that cannot statically prove the argument types calls
-`<name>_b` and lets the guard decide.** It does not emit its own check.
+**Decision: a call site that cannot statically prove the required declared
+admission or inferred specialization calls `<name>_b`.** The callee performs the
+one required boundary/guard operation; the caller does not duplicate it.
 
 | Call site knows | Today | Proposed |
 |---|---|---|
-| all arg types match unboxed params | call `<name>` direct | unchanged |
-| some arg statically `any` | coerce via `emit_unbox`, call `<name>` | **call `<name>_b`** |
-| some arg statically mismatches an *inferred* param | box→unbox coerce, call `<name>` | **call `<name>_b`** |
-| some arg statically mismatches a *declared* param | box→unbox coerce | error per DF4 / TE-9 |
-| dynamic (`Function*`, import, method) | `<name>_b` | unchanged |
+| declared params are statically admitted | call `<name>` direct, sometimes by coercion | apply DF6 normalization, call `<name>` direct |
+| a declared param is statically rejected | box→unbox coerce | compile-time contract error |
+| a declared param is deferred (`any`) | unchecked unbox | call checking trampoline `<name>_b` |
+| inferred args exactly match the specialization shape | call `<name>` direct | unchanged |
+| inferred args are outside or deferred relative to the specialization | box→unbox coerce | call `<name>_b`; its slow body preserves source semantics |
+| dynamic (`Function*`, import, method) | `<name>_b` | call `<name>_b`; it checks declared params and/or dispatches inferred ones |
+
+The rows compose across parameters. A direct unboxed call is legal only when
+every declared param is statically admitted and every inferred-specialized param
+has the exact planned semantic type. An unannotated param deliberately retained
+as `Item` needs no proof.
 
 **Why not caller-side as the default.** The alternative is that each call site
 emits its own guard, testing only the params it does not already know, and calls
 the unboxed version on success. The site-specificity is real, but as a *default*
 it loses on four counts:
 
-1. **It does not replace the callee-side work, it adds to it.** A complete boxed
-   version must exist regardless — for exports, `Function*` values, methods, and
-   imports (DF15). So the callee-side guard is incremental cost ≈ 0 on top of
-   code that is emitted anyway; the caller-side guard is pure addition,
-   replicated once per call site.
+1. **It does not replace the callee-side work for an open function, it adds to
+   it.** A boxed public entry must exist for exports, `Function*` values,
+   methods, and imports (DF15). For an inferred open function that entry also
+   needs the complete slow body. A caller-side guard is therefore pure
+   duplication, replicated once per site.
 2. **The saving is small and the cost is per-site.** A call site that proves
    *all* its argument types emits no guard under either policy — it calls the
    unboxed entry directly. Only partially-known sites differ, and the difference
@@ -264,8 +342,8 @@ it loses on four counts:
    more.
 4. **One guard site, one correctness argument.** DF5 has real subtleties — the
    two-test `float` predicate, the `string` tag-0 exclusion. Replicating that at
-   every call site is N chances to get it wrong, and N places to fix when O1
-   lands. It also gives DF9 a single object to test.
+   every call site is N chances to get it wrong and N places to maintain. It
+   also gives DF9 a single specialization predicate to test.
 
 Code size is not a neutral concern here: Lambda JITs through MIR at runtime, so
 per-site expansion is compile time and I-cache as well as bytes, and the project
@@ -274,28 +352,39 @@ already runs a 0%-slack MIR budget ratchet.
 None of these four argues that caller-side checking is *wrong* — only that it is
 the wrong default. It is retained as a scoped optimization in DF16.
 
-### DF9 — Entry equivalence is the correctness invariant
+### DF9 — Source-relative correctness is the invariant
 
-> For every argument tuple that passes the guard,
-> `unboxed(args)` must produce the same observable result as
-> `boxed_body(args)`.
+The source function and formal semantics are the oracle. Generated entries have
+three separate obligations:
 
-This is the one property the whole design rests on, and it is directly testable
-(§8). Everything in O1–O4 is a threat to it.
+1. **Declaration-driven main body:** after declared admission/normalization,
+   `<name>` has the same observable behavior as the source function under its
+   declared contracts.
+2. **Complete slow body:** for every argument tuple, including declared-contract
+   failures, the boxed lowering has the same observable behavior as the source
+   function and its declared boundaries.
+3. **Inferred specialization:** for every tuple satisfying all declared
+   admissions and DF5's exact inferred shape, `<name>` has the same observable
+   behavior as the source function.
+
+Comparing the two generated bodies over the guard-passing intersection remains
+a useful differential test, but neither body defines the other's semantics.
+Guard-failing inputs are tested only against the slow-body/source obligation;
+they must never be passed to the unboxed entry. O1–O5 and O10 threaten these
+properties.
 
 ### DF10 — Recursion
 
 A self-call inside the unboxed body calls `<name>` directly (params are already
-native, guard is statically true). A self-call inside the boxed body calls
-`<name>_b`. Mutual recursion resolves the same way through the forward
-declarations already created in `prepass_forward_declare`.
+native and satisfy its precondition). A self-call inside an untyped boxed slow
+body calls `<name>_b`. Mutual recursion resolves the same way through the
+forward declarations already created in `prepass_forward_declare`.
 
-Consequence worth knowing: a recursive function entered with *matching* types
-guards once and then recurses natively; entered with *mismatching* types it
-re-guards at every level, since each recursive call re-enters `_b`. That is
-correct but repetitive. It is not worth optimizing before measurement — a
-recursion that stays on the boxed path is dominated by the boxed body's own
-dynamic dispatch, not by the guard in front of it.
+For an inferred open function, a call entered with the specialized shape guards
+once and then recurses natively; a call on the slow path re-guards at every
+level, since each recursive call re-enters `_b`. That is correct but repetitive.
+It is not worth optimizing before measurement — a recursion that stays on the
+boxed path is dominated by the boxed body's own dynamic dispatch.
 
 ### DF11 — Scope exclusions for Stage 1
 
@@ -306,23 +395,41 @@ ABI); deferred to keep Stage 1 measurable.
 
 ### DF12 — Inference may become speculative
 
-This is the payoff. With DF4's fallback in place, `resolve_inferred_type()` no
-longer needs to be provably right — only *usually* right. Specifically, the
-refusal documented at [:14576–14579](../lambda/runtime/transpile-mir.cpp:14576)
-("we no longer SPECULATE INT here") can be lifted, because the float argument
-that motivated it now fails the guard and runs boxed instead of being truncated.
+This is the payoff for an open/mixed untyped function. With DF4's complete slow
+body, the specialization shape need only be profitable, not universally true:
+an argument of another semantic type fails the exact guard and runs the source-
+equivalent boxed lowering instead of being truncated.
 
-Proposed post-DF4 rule: weak arithmetic evidence with no contradicting call-site
-evidence → speculate `INT`. Land this **as a separate, separately-measured
-change** after the guard is green (§7, P4) — never in the same commit.
+Inference must, however, keep two products separate:
 
-### DF13 — LambdaJS adopts the same shape
+- **entry-shape inference** determines the exact semantic types accepted by the
+  specialization and is driven primarily by caller shapes;
+- **body/result inference** chooses operation and return promotion domains and
+  may use body evidence.
 
-JS already has both bodies. The change is narrower: give the boxed body an entry
-guard that forwards to `_n`, and relax Phase 1.76's *revocation* into a *guard*.
-Today a single contradicting call site deletes `_n` for all call sites
+Using a param in float arithmetic does not by itself change an unannotated
+`int` argument into semantic `float`; the param can retain semantic `int` while
+the operation result promotes. A physical `D` carrier is likewise not evidence
+that the binding's semantic type is float.
+
+The refusal documented at
+[:14576–14579](../lambda/runtime/transpile-mir.cpp:14576) ("we no longer
+SPECULATE INT here") may be revisited only after this separation and the slow
+path are green. Land the policy change as a separate, separately measured phase.
+
+### DF13 — LambdaJS adopts the same planning matrix
+
+JS already has both bodies. For an open/mixed inferred function, give the boxed
+body an entry guard that forwards to `_n`, and relax Phase 1.76's *revocation*
+into a *guard*. Today a single contradicting call site deletes `_n` for all call
+sites
 ([js_mir_module_batch_lowering.cpp:3119](../lambda/js/js_mir_module_batch_lowering.cpp:3119));
 with a guard, the contradicting site simply fails the guard.
+
+For a non-escaped function whose visible callers all prove one exact shape,
+DF15 may instead retain `_n` alone. If no profitable native shape exists, retain
+only the boxed body. As in Lambda, inferred JS types select implementations; they
+do not create source contracts.
 
 JS eligibility requires **all** params `INT|FLOAT`. That is stricter than
 Lambda's "≥1 native param" and should be relaxed to match once the guard exists
@@ -330,17 +437,19 @@ Lambda's "≥1 native param" and should be relaxed to match once the guard exist
 
 ### DF14 — The unboxed version's precondition
 
-The unboxed version **assumes** every param already matches its declared or
-inferred representation. It performs no checks of its own. It may therefore be
-entered through exactly two paths:
+The unboxed version **assumes** every param already has its planned semantic
+type and physical carrier. It performs no checks of its own. It may therefore be
+entered through exactly two proof-producing paths:
 
-1. a call site that statically proved every argument type (DF8 row 1), or
-2. the boxed entry's guard (DF5).
+1. a call site that statically proved the inferred shape and completed every
+   required declared DF6 admission/normalization; or
+2. `_b`, after declared admission/normalization for typed params and the DF5
+   exact guard for inferred params.
 
-Any third entry path is a bug, not a slow path. This makes the guard the *sole*
-enforcer of the precondition, and gives DF9 its precise statement: entry
-equivalence is required only over argument tuples that satisfy the precondition —
-which is exactly the set the guard admits.
+Any third entry path is a bug, not a slow path. DF5 is the sole dynamic proof for
+an inferred specialization; DF6 is the declared admission/normalization rule.
+DF9's specialization obligation applies only to tuples satisfying this
+precondition.
 
 ### DF15 — Visibility decides which versions exist at all
 
@@ -353,10 +462,20 @@ functions, dispatched functions, and any reference outside direct-callee
 position — i.e. it already means *"has callers this unit cannot see or cannot
 type"*.
 
-| | **not escaped** — every caller visible | **escaped** — exported / value / dynamic |
+Use TE-2's three-way call-site classification rather than collapsing it to
+"match/mismatch":
+
+- **statically admitted** — every declared boundary admission and inferred
+  shape is proven;
+- **statically rejected** — a declared contract error; compilation fails and
+  this call contributes no runtime entry requirement;
+- **deferred/outside specialization** — needs `_b`.
+
+| Function plan | **not escaped** — every caller visible | **escaped** — exported / value / dynamic |
 |---|---|---|
-| **all params declared** | every site matches → **omit `<name>_b` entirely**; a mismatching site is a DF4 error at compile time | `_b` required. Per DF2 it is today's trampoline: boundary checks, unbox, call, box. No guard, no boxed body. |
-| **any param inferred** | every site matches → the inference is **proven, not speculative** → no guard, no boxed body, `_b` omitted. No site matches → **omit the unboxed version**. Mixed → guard + boxed body. | Full DF1 shape: guard + boxed body. |
+| **native plan uses declarations only** (other params may remain `Item`) | all declared boundaries admitted → omit `_b`; any deferred boundary → keep checking trampoline | `_b` checking trampoline required; no guard or slow body |
+| **native plan includes ≥1 inferred-specialized param** | every site admitted and in exact shape → unboxed only; mixed/deferred → guard + complete slow body | guard + complete slow body required |
+| **no profitable native plan** | boxed body only | boxed body only |
 
 Two consequences worth stating separately:
 
@@ -364,14 +483,15 @@ Two consequences worth stating separately:
   an importer calls it, so `_b` is the contract. This is already true
   structurally — imports resolve to the `_b` symbol
   ([:3497](../lambda/runtime/transpile-mir.cpp:3497)).
-- **Non-exported with all-matching call sites ⇒ speculation becomes proof.** This
-  is the cell that pays for DF12: within a closed caller set, an inferred type
-  that every call site agrees with needs no fallback at all. The fallback body is
-  the price of *open* caller sets, and only of those.
+- **Non-exported with one exact visible call shape ⇒ the specialization domain
+  covers the reachable domain.** This is the cell that pays for DF12 without
+  turning inference into a contract. It needs no slow body because no reachable
+  call lies outside the shape; recompilation restores the slow body if that fact
+  changes.
 
 DF15 subsumes the escape gate previously sketched in §5, and it is what makes the
-DF8 answer cheap: the boxed version is not extra work the guard imposes, it is
-work the export surface already requires.
+DF8 answer cheap for open functions: the boxed public entry is work the export
+surface already requires, while closed functions can elide it entirely.
 
 ### DF16 — Caller-side guards as a scoped optimization: hoisting, not duplication
 
@@ -404,7 +524,7 @@ ordinary loop-invariance test, not a new analysis.
 - It is *one* guard per loop, not one per call site, so DF8's objection 1
   (replication) does not apply.
 - The guard predicate is still DF5's, emitted by the same helper. DF8's
-  objection 4 (N chances to get it wrong, N places to fix for O1) does not apply
+  objection 4 (N chances to get it wrong, N places to maintain) does not apply
   — there is still exactly one definition of the predicate.
 - The failure edge is literally the DF8 path. The optimization can be disabled
   at any point and the program still compiles and runs.
@@ -413,7 +533,7 @@ ordinary loop-invariance test, not a new analysis.
   is emitted as a plain expression rather than as an opaque intrinsic. Emit it
   that way.
 
-**Gating.** Off by default until P6; each enablement justified by benchmark, not
+**Gating.** Off by default until P7; each enablement justified by benchmark, not
 by inspection. Before reaching for it on a given site, check whether better
 inference would make the argument statically typed instead — that removes the
 guard entirely rather than relocating it, and is strictly better whenever it is
@@ -463,15 +583,10 @@ Indirect eval (`(0,eval)(…)`, `new Function`) runs in global scope and can onl
 reach global/exported bindings, which are already escaped. It needs nothing.
 
 **What eval-compiled code then does.** With `_b` guaranteed to exist, eval follows
-DF8 like any other compilation unit. But it should also emit DF5's guard and call
-the unboxed entry directly where it can — and this matters more in eval than
-anywhere else, because **eval-compiled code can never satisfy DF8 row 1**: it has
-no static type knowledge of the module bindings it names, so without
-guard-emission it would take the boxed path unconditionally, forever. The guard is
-the only route by which eval'd code reaches an unboxed entry at all.
-
-Same two constraints as DF16: the predicate must come from the shared DF5 helper,
-never be hand-rolled at the eval site; and the fail edge is `_b`.
+DF8 like any other dynamic compilation unit and calls `_b`. The callee-side guard
+is already the route from eval to the unboxed specialization; eval needs no
+bespoke caller-side predicate. A later measured hoisting optimization may use
+DF16, but it is not part of eval correctness.
 
 **Explicitly rejected: unboxed-only functions reachable from eval, with the eval
 site emitting a guard and no fallback.** The guard-fail edge would have no correct
@@ -495,8 +610,8 @@ Item dist_b(Context* rt, Item _x, Item _y, ScalarHome* _home) {
     if (is_error(_x)) return _x;                       ; existing short-circuit
     if (is_error(_y)) return _y;
     ;; --- guard (DF5) ---
-    ok  = (_x & ITEM_DBL_MASK) | ((_x >> 56) == FLOAT) | ((_x >> 56) == INT)
-    ok &= (_y & ITEM_DBL_MASK) | ((_y >> 56) == FLOAT) | ((_y >> 56) == INT)
+    ok  = (_x & ITEM_DBL_MASK) | ((_x >> 56) == FLOAT)
+    ok &= (_y & ITEM_DBL_MASK) | ((_y >> 56) == FLOAT)
     if (!ok) goto boxed_body;
     ;; --- fast path ---
     return box_float(dist(rt, unbox_float(_x), unbox_float(_y)));
@@ -506,34 +621,41 @@ boxed_body:
 }
 ```
 
-For `fn dist(x: float, y: float)` — both declared — DF2/DF3 collapse this to
-today's trampoline: boundary checks, unbox, call, box. No guard, no second body.
+For `fn dist(x: float, y: float)` — both declared — DF2/DF3 collapse this to a
+checking trampoline: resolve defaults, apply DF6 admission and normalization,
+unbox, call, box. An incoming `int` is statically or dynamically normalized to
+declared `float`; a rejected value returns the contract error. There is no guard
+and no second body.
 
 ---
 
 ## 5. Cost model
 
-**Fast path added cost:** 2–3 MIR instructions per inferred param, one branch,
-fully predictable on monomorphic call sites. Replaces (for the statically-`any`
-case) a runtime `it2i`/`it2d` **call**. Net win.
+**Dynamic inferred fast-path cost:** 2–3 MIR instructions per specialized param,
+one branch, and one extra call through `_b`. The branch should be predictable on
+monomorphic call sites and replaces unchecked `it2i`/`it2d` calls, but the net
+effect is a benchmark question, not an asserted win.
 
-**Slow path added cost:** none relative to today's *correct* behaviour — today
-there is no correct behaviour to compare against.
+**Slow-path execution cost:** one failed guard and branch before the boxed
+lowering, relative to a boxed-only function. There is no meaningful comparison
+with today's mismatched inferred-native path because that path does not preserve
+the source semantics.
 
 **Extra frame:** under DF8 a partially-typed call site now reaches the unboxed
 body through `_b` rather than directly, costing one call/return. Against that it
-saves N `it2i`/`it2s` runtime calls. Net-positive for N ≥ 1, which is every case
-where the question arises; a zero-unknown-param site never goes through `_b` at
-all.
+saves N `it2i`/`it2s` runtime calls. `_b` also owns root/number-frame prologue and
+epilogue work, so even N = 1 is not presumed positive. A zero-unknown-param site
+never goes through `_b` at all.
 
 **Code size:** the real cost. A boxed body is a second full lowering. Controls:
 
-- DF2/DF3 exempt all fully-declared functions.
+- DF2/DF3 exempt fully declared functions from body duplication.
 - **DF15 visibility elision** removes one version outright for most
   module-private helpers — and, in the all-matching case, removes the guard too.
-- **Size gate:** above a body-node-count threshold, skip the unboxed version
-  entirely rather than duplicate. Threshold to be set from measurement, not
-  guessed.
+- **Size gate:** for an inferred open/mixed function above a body-node-count
+  threshold, skip the unboxed specialization entirely rather than duplicate.
+  It does not apply to a declared unboxed body plus thin trampoline. Threshold
+  to be set from measurement, not guessed.
 
 MIR emission budgets (`test/mir/mir_budgets.json`, MT7 0%-slack ratchet, see
 [`Lambda_Design_MIR_Emission_Test.md`](Lambda_Design_MIR_Emission_Test.md)) **will** move. Re-baselining is part of the work,
@@ -544,63 +666,92 @@ signal that a gate is missing.
 
 ## 6. Open issues
 
-### O1 — `int` overflow semantics diverge between versions *(pre-existing, now observable)*
+### O1 — Promotion-aware numeric inference and lowering
 
-`i2it` returns `ITEM_ERROR` when a value leaves the INT53 band
-([lambda.h:1278](../lambda/lambda.h:1278)). A native `int64_t` add in the unboxed
-body wraps silently. So for arguments near INT53, unboxed and boxed bodies
-already disagree — today that is a latent bug; under DF9 it is a **visible
-entry-equivalence violation**, because the same call can take either entry.
+Flex `int` is not a function-boundary special case. Like every other numeric
+type, it participates in the numeric promotion lattice: the operation selects
+its result domain, and that domain may differ from the operands' domains. In
+particular, `int` arithmetic promotes to `float` when the result leaves INT53.
+Today `i2it` returns `ITEM_ERROR` outside that band
+([lambda.h:1278](../lambda/lambda.h:1278)), while a raw native `int64_t`
+operation used as a flex-`int` carrier may wrap. Neither behavior implements the
+source rule.
 
-Options: (a) emit overflow checks in the unboxed body's `int` arithmetic —
-correct, costs the win; (b) narrow the guard to a value-range test — costs 2 more
-instructions per int param, still cheap, and preserves DF9; (c) accept and
-document. **Recommend (b)**, measured. This is the same root as
-the `int`-widening ("flexint") poisoning of index arithmetic, and must be
-settled before DF12.
+This is not solved by narrowing the entry guard: an input-only range check cannot
+bound arbitrary body arithmetic. The required fix is shared promotion-aware
+inference **and lowering**:
 
-### O2 — Return-representation soundness under proven params
+- infer the possible result domain of each numeric operation, including
+  value-dependent promotion;
+- choose a native return only when that result domain has one proven carrier;
+- otherwise allow native params with a boxed/dynamic return;
+- emit the operation checks/conversions needed to produce the promoted value,
+  never native wrap or `ITEM_ERROR` as an accidental overflow policy.
 
-The unboxed version's native return type is inferred by `infer_return_type()`.
-Under DF1 that inference now runs with *proven* param types, which makes it
-strictly more sound than today. It is not automatically sound: a body whose
-`int` arithmetic can widen still needs the O1 answer. Until O1 lands, keep the
-return-type gate exactly as conservative as it is today.
+Until that lowering is correct, flex-`int` inferred specializations that can
+exercise promotion remain ineligible. DF5 stays an exact input-shape test; it
+does not attempt to predict body overflow.
 
-### O3 — Does a declared-type boundary guarantee *representation*?
+### O2 — Parameter and return specialization must be independent
 
-DF2 skips the guard for declared params on the assumption that
-`emit_checked_boundary` guarantees not just type-compatibility but the exact
-representation `emit_unbox` expects. If the validator accepts an `int64`-homed
-Item for a declared `int` param (or an integral `float`), the assumption breaks
-and DF3 clause 3 applies. **This must be verified against the validator's
-`Type*` acceptance rules before DF2 is implemented** — it is the one place where
-the design could be quietly wrong.
+`infer_return_type()` currently encourages the emitter to treat "native params"
+and "native return" as one version decision. They are independent. A function
+may profitably receive raw params while returning an `Item` because its result
+is a union, a dynamic call result, or a promoted numeric value.
+
+An inferred return alone never justifies a second body (DF3). If the result
+carrier is not proven, keep the unboxed body's return dynamic or omit the
+unboxed version; do not emit an unreachable slow body or replay an effectful
+body after observing its result.
+
+### O3 — Declared numeric normalization is required *(resolved design; code gap)*
+
+The current runtime check does **not** guarantee exact target representation:
+`lambda_type_matches` accepts type-level exact numeric embeddings, and
+`runtime_type_admit_value` preserves an already matching Item. Thus an `int`
+admitted by a declared `float` boundary may remain int-tagged even though the
+native body expects semantic/carrier `float`.
+
+DF2/DF6 settle the rule: every successful concrete numeric boundary returns a
+target-normalized value. A thin typed wrapper then unboxes that normalized Item;
+no slow body is needed. Implementation must make the checked boundary use one
+numeric admission/normalization helper even on its early success path.
+
+The finalized Item must also replace the pre-check binding and root. The current
+wrapper calls `set_var` before `emit_parameter_boundary`; a converted map, array,
+or scalar must be rebound and rooted before a later default/check can allocate or
+before the boxed slow body reads the parameter.
 
 ### O4 — GC rooting across the two lanes
 
-Unboxed params are raw MIR values and are not GC roots — **except** `string`,
-which is `VALUE_REP_RAW_GC_POINTER`. `FnParamAnalysis` already carries the
-per-param `ValueRep` ([:14866–14872](../lambda/runtime/transpile-mir.cpp:14866)),
-so the machinery exists; the new boxed body must publish its Item params as
-roots in the side-root frame while the unboxed body must not. Getting this
-backwards is a use-after-free, not a wrong answer. Treat the P3 forced-GC sweep
+The boxed lane must publish every finalized Item parameter — after defaults and
+declared normalization — in its side-root frame. Native scalar params are not
+Item roots. A native `string` param is different: it has
+`VALUE_REP_RAW_GC_POINTER` and needs an explicit lifetime proof through a live
+caller Item root or an equivalent precise callee root. `FnParamAnalysis` already
+carries the per-param `ValueRep`
+([:14866–14872](../lambda/runtime/transpile-mir.cpp:14866)), so the machinery
+exists. Getting the lane or finalized binding wrong is a use-after-free, not a
+wrong answer. Treat the forced-GC sweep
 ([`Lambda_Design_MIR_Emission_Test.md`](Lambda_Design_MIR_Emission_Test.md)) as a blocking gate, not a nice-to-have.
 
 ### O5 — Guard placement vs. optional params and defaults
 
-The guard must sit **after** `emit_optional_argument_value` and the declared
-boundary checks (a default value is itself typed and can feed the fast path) and
-**before** `emit_unbox` — i.e. exactly at
-[:15035](../lambda/runtime/transpile-mir.cpp:15035). An omitted optional param
-with no default resolves to null, which fails every guard predicate; that is the
-correct outcome (boxed body handles absence).
+The inferred guard must sit **after** `emit_optional_argument_value`, every
+declared DF6 admission/normalization, and rebinding/rooting of the finalized
+Items, but **before** native unboxing. A default value is itself a source value
+and may feed the fast path. An omitted untyped optional param with no default
+resolves to null, which fails every specialized predicate; the boxed slow body
+handles absence. A declared optional instead follows its declared nullable
+contract and never uses an inferred fallback to excuse a violation.
 
 ### O6 — Deopt signal
 
 Optional: count guard failures per entry under a debug flag. A guard that always
-fails means the unboxed version is dead weight and the inference was wrong — a
-cheap, direct feedback signal for tuning DF12. Not required for correctness.
+fails means the unboxed specialization is dead weight for the observed workload
+— a cheap, direct feedback signal for tuning DF12. It does not mean the source
+program or inference contract was "wrong"; no such contract exists. Not required
+for correctness.
 
 ### O7 — MIR module cache interaction
 
@@ -653,10 +804,10 @@ change than the guard itself and should not ride along with it.
 
 ### O10 — The two result paths in `_b` must agree on one protocol
 
-**Scope note:** an earlier revision called this the most delicate piece of P2.
+**Scope note:** an earlier revision called this the most delicate piece of P3.
 On reading the epilogue machinery that is an overstatement — the existing single
 return funnel absorbs most of it. What is left is one function to verify and one
-contract not to break. The structural item in P2 is O9, not this.
+contract not to break. The structural item in P3 is O9, not this.
 
 *The mechanism.* `_b` declares `RETURN_LANE_SCALAR` with
 `MIR_SCALAR_RETURN_DYNAMIC` and receives a caller-donated `_scalar_home`, because
@@ -721,23 +872,29 @@ introduces, and the fix (exclude `is_var_param`/`is_proc_param` from both
 Closed. REPL and hot reload are out of scope (whole-script recompile); Lambda has
 no `eval`, so P0.5 is unblocked; JS direct eval becomes an escape condition.
 
-Residue, tracked into P5: implement the **outward** propagation. `has_direct_eval`
+Residue, tracked into P6: implement the **outward** propagation. `has_direct_eval`
 today marks the function *containing* the eval; DF17 needs every binding *visible
 from* that scope marked instead. Getting the direction wrong looks like it works —
 the containing function is deopted either way — while leaving exactly the sibling
 bindings eval actually calls unprotected.
 
-### O13 — "Observable result" in DF9 needs a definition
+### O13 — "Observable behavior" in DF9 needs a testable definition
 
-DF9 says the two entries must produce "the same observable result". Pin down what
-that includes before writing the test, or the test will either fail on cosmetics
-or be quietly weakened until it passes.
+Plain Lambda `==` is too weak as the oracle: numerically equal values can have
+different semantic types, and `type()` can observe that difference. Source-
+relative equivalence requires:
 
-Proposed: equivalence **requires** equality of the returned value, and equality of
-*whether* an error was raised, and equality of writes through `var`/proc params.
-It **does not require** identical error message text (the boxed body's dynamic
-dispatch will naturally word things differently from the native path), identical
-container identity, or identical log output.
+- the same returned semantic type and value;
+- the same value-vs-raised error channel and the same observable error payload
+  (code/category, expected/actual data, and user-visible message fields; stack
+  addresses or compiler-internal locations may differ);
+- the same writes through `var`/proc params and the same other language-visible
+  proc effects.
+
+It does not require identical physical boxing, number-home address, COW sharing,
+or internal debug log output. Container identity is not an observable value
+property under Lambda's no-alias semantics; container contents and visible
+mutation effects are.
 
 ### O14 — A cold boxed body is still JIT-compiled
 
@@ -757,43 +914,58 @@ startup-time cost is not mistaken for a surprise later.
 
 | Phase | Scope | Exit |
 |---|---|---|
-| **P0** | Resolve **O3** (validator) and **O11** (`var`/proc params); audit the `_b` lookup sites (**O8**); add `is_inferred` per param alongside `resolved_param_types` | O3/O11 answered in writing; DF2 confirmed or DF3.3 activated; O8 audit complete |
-| **P0.5** | **DF15 elision only, Lambda** — omit `_b` for non-escaped functions whose visible call sites all match. No guard, no second body, no semantic change. Unblocked: Lambda has no `eval` (DF17) | Pure code-size/compile-time win; baseline unchanged; budgets drop |
-| **P1** | Emit the guard in `emit_boxed_abi_wrapper` for inferred params, slow path still today's coercion | No behaviour change intended; budgets move by the guard only; baseline green |
-| **P2** | Replace the slow path with a real boxed body (DF1/DF3/DF4/DF14); settle **O10** (one result protocol) and **O9** (exclude `may_await`); apply the rest of DF15 and the size gate (§5) | Entry-equivalence tests (§8) green; budget diff explained gate-by-gate |
-| **P3** | Settle **O1** (recommend range-narrowed guard); switch call-site policy per DF8 | No divergence in the O1 stress corpus |
-| **P4** | Lift inference conservatism per DF12, measured separately | Result-suite geomean improves; no correctness regressions |
-| **P5** | LambdaJS per DF13: guard in the boxed body, revocation → guard, relax all-params-native. Then DF17's direct-eval escape (outward propagation) before any JS-side elision, plus guard emission in the eval transpiler | `make node-baseline` no-regress; JS bench geomean improves; an eval-calls-module-private test exists and passes |
-| **P6** | DF16 guard hoisting: loop-invariance test, unswitch, off by default behind a flag | Per-site benchmark justification; entry equivalence unchanged; flag flipped on only where measured |
+| **P0** | Introduce one `FunctionVariantPlan`/per-param plan separating semantic type, carrier, and proof source; implement DF6 target normalization; resolve **O11**; audit `_b` lookup sites (**O8**) | Concrete numeric boundaries return target-normalized Items; finalized params are rebound/rooted; O8/O11 audit complete |
+| **P0.5** | **DF15 elision only, Lambda** — use admitted/rejected/deferred call-site classification to omit `_b` for closed declaration-only native plans and closed exact-shape inferred plans. No guard or second body | Baseline semantics unchanged; budgets drop; a deferred declared caller retains `_b` |
+| **P1** | Settle promotion-aware result inference/lowering (**O1/O2**) or explicitly keep affected flex-`int` specializations ineligible | Numeric promotion corpus matches formal semantics through boxed and native-param lanes |
+| **P2** | Emit DF5's exact inferred-shape guard; guard failure still follows today's path so no behavior change is intended | Budget moves by guard only; exact `int` and `float` predicates never cross-admit |
+| **P3** | Replace inferred guard failure with the complete slow body (DF1/DF3/DF4/DF14); settle **O10**, exclude `may_await` per **O9**, and run the blocking forced-GC sweep | Source-relative fast/slow tests (§8) green; finalized Item roots survive forced GC |
+| **P4** | Switch call-site policy per DF8; apply the rest of DF15 and the inferred size gate | Every call is statically admitted, statically rejected, or routed to the correct `_b`; budget diff explained gate-by-gate |
+| **P5** | Lift inference conservatism per DF12, measured separately | Result-suite geomean improves; no correctness regressions |
+| **P6** | LambdaJS per DF13: callee guard, revocation → guarded specialization, relax all-params-native; implement DF17 outward direct-eval escape before JS elision | `make node-baseline` no-regress; JS bench geomean improves; eval calls `_b` and can reach `_n` through its callee guard |
+| **P7** | DF16 guard hoisting: loop-invariance test, unswitch, off by default behind a flag | Per-site benchmark justification; source-relative correctness unchanged; flag enabled only where measured |
 
 P0.5 is worth landing on its own: it is a code-size and JIT-compile-time win that
 depends on none of the guard machinery, and it exercises the DF15 analysis in
 isolation where a mistake is a link failure rather than a wrong answer.
 
-P1 and P2 are separately revertable — that separation is the point.
+P2 and P3 are separately revertable — that separation is the point.
 
 ---
 
 ## 8. Test & gates
 
-- **Entry equivalence (DF9, scoped by O13)** — the primary new test. For each
-  dual-compiled function in the corpus, call it through both entries with the
-  same arguments and diff the results. Argument sets must include: exact-match,
-  `int`-for-`float`, deliberate mismatch, `null`, `error`, INT53 boundary values,
-  and `int64` values above 2^53 (DF6's exclusion).
+- **Declared implicit-boundary admission (DF2/DF6).** Cover every concrete
+  numeric source/target pair in both static and deferred form: whole-domain exact
+  embeddings admit statically; non-embeddings reject statically; dynamic exact
+  values normalize to the target; dynamic inexact values return the rich error.
+- **Untyped fast specialization (DF5/DF9).** For guard-passing exact semantic
+  shapes, compare the unboxed result with a forced-boxed/source reference. Check
+  semantic type as well as value, including float zero/negative-zero, INT53
+  edges, full-width homes, strings, and errors admitted by explicit contracts.
+- **Untyped slow path (DF3/DF4/DF9).** For guard-failing inputs, compare `_b`
+  only with a forced-boxed/source reference; never call the unboxed entry outside
+  its precondition. Include `int` for inferred `float`, `float` for inferred
+  `int`, strings, null, errors, and `i64`/`u64` values above 2^53.
+- **Closed-world collapse (DF15).** Verify that one exact visible call shape
+  omits `_b`, while a deferred or outside-shape caller retains it; adding a later
+  caller through whole-unit recompilation must restore the slow body, not create
+  an inferred contract error.
+- **Promotion corpus (O1/O2).** Exercise every numeric operation at promotion
+  boundaries through boxed-only, native-param/dynamic-return, and declared-
+  return lanes.
 - `make test-lambda-baseline` — 100%, per CLAUDE.
 - MIR emission budgets — re-baselined with a written justification per gate.
 - P3 forced-GC sweep — blocking for O4.
-- `make node-baseline` no-regress for P5.
+- `make node-baseline` no-regress for P6.
 - Perf: the existing Result-suite harness. Report Lambda and LJS geomeans
-  separately; P4's delta must be attributable to DF12 alone.
+  separately; P5's delta must be attributable to DF12 alone.
 
 ---
 
 ## 9. What this does not do
 
 - No multi-version specialization (one unboxed version only).
-- No bespoke per-call-site checks. DF16 guard *hoisting* is accepted but is P6,
+- No bespoke per-call-site checks. DF16 guard *hoisting* is accepted but is P7,
   flag-gated, and never emits a predicate other than DF5's.
 - No runtime type feedback / OSR / tiering.
 - No change to the frozen C2MIR path (CLAUDE rule 14).
@@ -806,56 +978,60 @@ P1 and P2 are separately revertable — that separation is the point.
 Once DF9 is enforced and O6 gives a failure signal, the natural extension is N
 unboxed versions keyed by observed argument shape, with the boxed entry
 dispatching through a small guard chain. The prerequisites are all in this
-design: a representation-exact guard (DF5), a correct fallback (DF4), and an
-equivalence invariant to test each new version against (DF9). Union-typed params
-become the first candidate: `int | string` would get one `int` version and one
-`string` version instead of staying boxed.
+design: an exact semantic-shape guard (DF5), a source-equivalent complete slow
+body (DF4), and a source-relative correctness invariant for every specialization
+(DF9). Union-typed params become the first candidate: `int | string` would get
+one `int` version and one `string` version instead of staying boxed.
 
 ---
 
 ## 11. Prior art
 
-None of the individual mechanisms in this document is new. Every one of them —
-dual entry points, a representation guard, a boxed fallback body, annotations
-that pin representation, speculation backed by a slow path — is settled practice
-somewhere. What follows maps the precedents onto the decisions in §3, so that
-each decision can be argued from someone else's measured experience rather than
-from first principles, and so the known failure modes are named before we hit
-them.
-
-*(Version/status details below are from memory and worth re-checking before being
-cited outside this document; the design points they illustrate are not in doubt.)*
+None of the individual mechanisms in this document is new. Dual entry points,
+typed wrappers, exact representation guards, and speculation backed by a
+complete slow implementation all have precedents. No one precedent is the
+semantic authority for Lambda, and the declared and inferred lanes have
+different closest analogues. This section maps those analogues without claiming
+that another system has Lambda's exact combined shape.
 
 ### 11.1 Two entry points per function — DF1, DF7, DF8, DF15
 
 | System | Fast entry | Public entry | How the version is chosen |
 |---|---|---|---|
-| **SBCL** (Common Lisp) | internal entry, "local call" convention | external entry point (XEP): arg-count + declared-type checks, then the same body | callee-side check; known call sites use the local convention and skip the XEP entirely |
+| **SBCL** (Common Lisp) | internal/local-call convention | full-call external entry point (XEP) and prologue | known local calls use the local convention; unknown/full calls use the XEP |
 | **Cython** | `cdef` C function | `cpdef` also emits a Python-callable wrapper that converts and forwards | caller's language decides statically |
-| **Numba** | `nopython` compiled specialization | dispatcher object | runtime dispatch on observed argument types, with `object` mode as a real fallback |
+| **Numba (current)** | `nopython` specializations | dispatcher object | runtime selection/compilation by observed argument types; automatic object-mode fallback was removed in 0.59 |
+| **Numba (≤0.58, historical)** | attempted `nopython` specialization | object-mode compilation | compilation failure could fall back to a complete generic implementation |
 | **Julia** | specialized method instance | generic entry / `invoke` | runtime dispatch on concrete argument types |
 | **Static Python** (Meta Cinder) | typed bytecode with unboxed primitives | normal Python entry | boundary checks at the typed/untyped edge |
 | **Static Hermes** (Meta, announced 2023) | native AOT from typed JS | untyped JS path | static where types are known |
 | **Sorbet Compiler** (Stripe, experimental; not actively developed publicly) | LLVM-compiled `sig`-typed method | CRuby VM method | per-method fallback into the interpreter |
-| **This design** | `<name>` | `<name>_b` | callee-side guard (DF8), fallback is a real body (DF1) |
+| **This design, declared** | `<name>` main body | `<name>_b` admission/normalization trampoline | static calls skip the wrapper; dynamic calls enforce the user contract |
+| **This design, inferred open/mixed** | `<name>` specialization | `<name>_b` exact-shape dispatcher + complete slow body | exact shape takes fast path; every other legal value preserves source semantics in the slow body |
 
 Three things to take from the table.
 
-1. **The callee-side check is the majority position.** SBCL's XEP and Numba's
-   dispatcher both put the decision in one place per function rather than at each
-   call site. DF8 lands where the field already is; DF16's caller-side work is
-   correctly scoped down to *hoisting* an existing predicate rather than
-   duplicating the decision.
-2. **SBCL already does DF15.** A function whose calls are all local and visible
-   gets no external entry point at all. That is the same analysis as P0.5, and
-   it is the oldest and least controversial part of this proposal.
-3. **Numba is the closest match to DF1's specific shape** — two-tier with a
-   genuine second body (`object` mode), not a coercion. It is also a standing
-   warning: users routinely hit silent `object`-mode fallback and lose all the
-   speed with no diagnostic. That is exactly what O6 (deopt signal) is for.
+1. **Callee-side dispatch is established practice, not a claimed majority.**
+   SBCL's full entry and Numba's dispatcher put an open-world decision in one
+   place per function. DF8 uses the same concentration of responsibility;
+   DF16's caller work is scoped to measured hoisting.
+2. **Local/full-call separation supports DF15's direction.** A closed caller set
+   can use an internal convention and avoid paying the public-entry path. Lambda
+   goes further for module-private functions because its lack of runtime string
+   eval makes more caller sets genuinely closed.
+3. **Historical Numba object fallback is a warning, not a current exact match.**
+   It demonstrates the cost of silently falling into a complete generic
+   implementation; current Numba removed that automatic behavior. O6 should
+   therefore report specialization usefulness without presenting a fallback as
+   an error.
+
+Primary references: [SBCL calling convention](https://www.sbcl.org/sbcl-internals/Calling-Convention.html),
+[Cython `cpdef`](https://cython.readthedocs.io/en/latest/src/quickstart/cythonize.html),
+and [Numba 0.59 fallback removal](https://numba.readthedocs.io/en/0.61.0/release/0.59.0-notes.html).
 
 LambdaJS's current state (§2.2) — two bodies, no guard, static call-site choice —
-matches the *Cython* column, not the Numba one. DF13 moves it to the Numba shape.
+is closest to the Cython-style static split. DF13 adds runtime specialization
+dispatch; it should not be described as adopting current Numba's exact shape.
 
 ### 11.2 Annotations as representation, not merely as checks — O3, TS-3
 
@@ -865,10 +1041,12 @@ stored unboxed and operations on it compile to native instructions; unannotated
 values remain the boxed universal representation. mypyc compiles mypy itself with
 this model for a roughly 4× speedup.
 
-This is the answer O3 is looking for, and these systems get it by *construction*:
-the annotation is enforced at the untyped boundary, so inside the typed region the
-representation is guaranteed and needs no further test. That is precisely the DF2
-argument — a declared param needs no guard because the boundary already ran.
+These systems get the typed-region invariant by *construction*: the annotation
+is enforced at the untyped boundary **and the admitted value is converted into
+the typed carrier**. That second half is essential. A compatibility predicate
+that leaves an int-tagged Item at a declared float boundary has not established
+the representation DF2 requires. DF6's normalization is therefore part of the
+boundary, not an optional unbox afterward.
 
 It is also the direction the measured TS-3 penalty points: today an `int[]` or
 named-map annotation on a *local* installs a boundary without pinning a
@@ -884,13 +1062,14 @@ representation, so it costs (4.24×) and buys nothing.
   transferring live state at an arbitrary point, and DF1's entry-only guard
   structurally avoids it. The price is granularity: one bad argument runs the whole
   call boxed.
-- **Julia's "type instability"** is the same phenomenon recorded in the flexint
-  poisoning finding: one value the inferencer cannot pin degrades every
-  downstream arithmetic operation to the boxed path. Julia's tooling answer
+- **Julia's "type instability"** is analogous to the representation-planning
+  problem: one result domain the inferencer cannot pin can degrade downstream
+  arithmetic to a generic path. It is not the semantic rule for Lambda flex
+  `int`; O1 remains governed by Lambda's promotion lattice. Julia's tooling answer
   (`@code_warntype`) is a diagnostic that shows where inference gave up — the same
   need as O6, approached from the tooling side rather than the runtime side.
 - **Crystal** is the counterfactual: union types plus whole-program inference and
-  *no* dynamic escape hatch, compiled to LLVM. It shows what DF1.2's union params
+  *no* dynamic escape hatch, compiled to LLVM. It shows what §1.3's union params
   could become under §10 (tagged-union representation with a dispatch, rather than
   staying boxed) — at the cost of the dynamic lane Lambda intends to keep.
 - **Strongtalk** (Bracha & Griswold, OOPSLA 1993) originated the "optional types
@@ -923,16 +1102,21 @@ one:
   `dyn` and concrete: checked at the boundary, usable by the compiler for
   representation, not deeply enforced.
 
-**Where this design sits in that spectrum, stated explicitly:** DF2 + DF5 are a
-*shallow/transient* discipline (a representation test at entry, no wrappers, no
-blame tracking), and DF4 splits the two lanes — the declared lane is *deep-ish*
-(the boundary raises, per TE-9), the inferred lane is transient-with-fallback.
-Naming this matters because it selects which cost model applies: the Takikawa
-wrapper-cost results are about the deep lane and largely do not apply to the
-inferred lane, whereas the transient results (steady per-use overhead, no
-catastrophic boundary blowup) do. It also predicts where a blowup *could* appear
-here — at declared boundaries crossed in a loop, which is exactly what DF16's
-hoisting is for.
+**Where this design sits in that spectrum:** the literature applies directly to
+the **declared** lane, where annotations impose runtime enforcement at a dynamic
+boundary. Lambda's concrete scalar checks are shallow, while structural
+map/array contracts may validate deeply at the boundary; Lambda does not install
+higher-order blame wrappers. The exact classification should follow the
+guarantee actually provided by each contract kind.
+
+DF5's inferred guard is **not gradual-type enforcement at all**. It creates no
+user-visible type promise and exists only to select an optimization. Its closest
+prior art is specialization/deoptimization, not transient soundness. Likewise,
+DF16 hoists inferred representation guards; hoisting expensive declared
+boundaries would be a separate optimization with separate legality rules.
+
+Primary reference: [Greenman & Felleisen, *A Spectrum of Type Soundness and
+Performance*](https://www2.ccs.neu.edu/racket/pubs/icfp18-gf.pdf).
 
 ### 11.5 Benchmark method worth borrowing — §8
 
@@ -941,7 +1125,7 @@ typed corpus. Today those rows are graded as a per-row geomean of fully-typed vs
 fully-untyped, which cannot distinguish "annotations helped" from "annotations
 added a boundary that happened to be cheap here". Measuring a lattice of partial
 typings for a handful of representative benchmarks would attribute cost to
-boundaries directly, and would give P4 (DF12 inference lifting) a baseline that
+boundaries directly, and would give P5 (DF12 inference lifting) a baseline that
 is not confounded by annotation placement. Recorded as a suggested addition to
 §8, not a gate.
 
@@ -953,10 +1137,11 @@ runtime, in one small toolchain. Crystal has the union inference; Julia has the
 specialization and the instability problem; Cython and mypyc have the
 representation pinning; none of them has all three.
 
-One structural advantage is genuinely ours: **DF15 is unavailable to most of this
-list.** Python, JavaScript, Ruby, and Lisp all have `eval` or open-world dispatch,
-so a public entry can essentially never be proven dead — SBCL's local-call
-elision applies only to lexically local functions, not to global `defun`s. Lambda
-has no `eval` (DF17), which is why P0.5 can elide `_b` for module-private
-functions outright. That is the cheapest win in this document and it is available
-precisely because of a language decision made elsewhere.
+One structural advantage is unusually broad in Lambda: **DF15 can prove more
+module-private caller sets closed.** Python, JavaScript, Ruby, and Lisp generally
+retain eval or open-world name/dispatch surfaces that limit global entry
+elision. Lambda has no runtime string eval (DF17), so P0.5 can omit `_b` for a
+module-private function whenever the existing escape analysis and three-way
+call-site audit prove the caller set closed. The opportunity comes from a
+language decision made elsewhere; the proof still belongs to Lambda's own
+escape analysis, not to analogy with another compiler.
