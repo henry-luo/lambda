@@ -65,6 +65,13 @@ bool js_dom_has_committed_geometry_snapshot(void* dom_doc);
  */
 void* js_dom_document_svg_element_from_point(void* dom_doc, float x, float y);
 
+/**
+ * Return the exact native target used by document.elementFromPoint() without
+ * allocating a JavaScript wrapper. Automation assertions use this bridge so
+ * their result cannot diverge from the public DOM API.
+ */
+void* js_dom_document_element_from_point_native(void* dom_doc, float x, float y);
+
 // Commits a pending transient-document reflow at the script/event-loop
 // checkpoint. Long-lived Radiant sessions keep ownership of their frame loop.
 bool js_dom_commit_headless_layout(void);

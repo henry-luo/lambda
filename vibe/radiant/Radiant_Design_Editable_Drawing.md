@@ -86,7 +86,7 @@ It is intentionally narrow but real.
 | Affine objects | native `SVGMatrix`/`DOMMatrix` and `SVGPoint`/`DOMPoint` coefficients plus multiply, inverse, translate, scale, rotate, flip, and point transformation | direct fixture; Raphaël and JointJS startup |
 | Coordinate transforms | `createSVGMatrix`, `createSVGPoint`, `getCTM`, and `getScreenCTM` compose SVG transforms with committed layout coordinates | direct hit-test contract; JointJS and Raphaël operations |
 | Geometry | `getBBox` for rect, circle, ellipse, line, polyline, polygon, path, text, image, and group; group bounds union descendants in group coordinates; text uses Radiant font measurement | direct rect/group/path/text assertions and JointJS text assertion |
-| Hit testing | `document.elementFromPoint` returns SVG elements through the normal Radiant event/hit-test path; SVG paths use their actual fill and flattened stroke geometry rather than their bounding boxes, with a 3 CSS-pixel stroke aiming allowance | direct fixture and drag assertions |
+| Hit testing | `document.elementFromPoint` and event-sim `assert_hit_test` use the same exact native target; rect, circle, ellipse, line, polyline, polygon, and path share fill and flattened stroke geometry rather than bounding boxes, including dashes, caps, joins, miter limits, and a 3 CSS-pixel stroke aiming allowance | direct fixture, WPT-derived hit-test suite, and drag assertions |
 | XML | `DOMParser` parses SVG XML and `XMLSerializer` serializes the native SVG subtree, reconstructing XLink-qualified attributes | direct fixture |
 
 Geometry follows Radiant's committed-layout checkpoint. It does not introduce a
@@ -99,6 +99,16 @@ The direct contract lives in `test/html/svg-dom-contract.html` with
 checks SVG-specific `instanceof` identity, rect/group/path/text boxes, CTM
 point conversion and hit testing, XLink lookup, SVG XML parsing and
 serialization, and absence of legacy editing commands.
+
+`test/ui/hit-test/` is the dedicated coordinate-conformance suite. Its paired
+pages under `test/html/hit-test/` adapt the relevant WPT SVG geometry,
+pointer-events, and dashed-stroke cases to deterministic Radiant event replay.
+They cover every basic SVG geometry element, fill rules, transforms and paint
+order, all SVG `pointer-events` geometry modes, CSS cascade overrides, dash
+phase/caps/joins/miter limits, `<use>` instances, text/image/`foreignObject`
+viewport boxes, and nested SVG clipping. `assert_hit_test` intentionally
+checks the one exact target returned by `document.elementFromPoint`; legacy
+`assert_element_at` retains its ancestor-friendly layout-box behavior.
 
 ---
 
@@ -170,10 +180,11 @@ the supported surface.
 bundles and runs, in order:
 
 1. the direct SVG DOM geometry/serialization/hit-test contract;
-2. direct and minified-bundle loop-listener closure regressions;
-3. Raphaël UI replay;
-4. maxGraph UI replay; and
-5. JointJS UI replay.
+2. the dedicated WPT-derived SVG hit-test suite (`make hit-test-ui`);
+3. direct and minified-bundle loop-listener closure regressions;
+4. Raphaël UI replay;
+5. maxGraph UI replay; and
+6. JointJS UI replay.
 
 The UI scenarios drive regular pointer, wheel, focus, keyboard, button, and
 lifecycle events through Radiant. They assert library-owned serialized state
@@ -183,6 +194,7 @@ For native SVG or LambdaJS changes, retain these gates:
 
 ~~~
 make build
+make hit-test-ui
 make test-drawing
 make test-radiant-baseline
 make test-lambda-baseline
@@ -197,17 +209,25 @@ tolerance. The committed UI fixtures remain the deterministic event replay.
 
 ### Verification snapshot — 2026-08-01
 
-- `make build`, `make test-drawing`, the four new direct LambdaJS regressions,
-  and `test_mir_ratchet_gtest` pass. The default-derived-constructor
-  regression also asserts that a base constructor observes the derived
-  `this.constructor`, protecting Bootstrap-style static lookup. The focused
-  gate covers all three real libraries plus the direct SVG contract and bundled
-  listener closure path.
+- `make hit-test-ui` passes all six fixtures (66 exact-target assertions). The
+  suite is a dependency of `make test-drawing`, so library compatibility and
+  native SVG geometry cannot drift apart. It verifies that a thin path only
+  wins within its stroked contour and aim allowance; empty path boxes, dash
+  gaps, bounded viewport overflow, and `pointer-events: none` never steal a
+  neighboring SVG target.
+- `make build` and `make test-drawing` pass. The focused gate covers all three
+  real libraries, the direct SVG contract, bundled listener closures, and the
+  dedicated exact-target SVG geometry suite.
 - The direct SVG contract also places a stroked path above a circle inside the
   path's bounding box. The circle remains pickable away from the actual path,
   while a point 3 CSS pixels from the thin stroke picks the path. This prevents
   a broad path box from stealing circle drags without making thin paths hard to
   aim at.
+- The same contract verifies filled and stroke-only rounded rects, circles,
+  ellipses, polylines, polygons, and paths, plus a line. Fill selects only the
+  actual interior; `fill="none"` selects only the stroked contour and its
+  aiming allowance. Bounding-box corners, shape interiors without fill, and
+  empty container-union gaps select the backing surface instead.
 - The external Chrome 150 oracle completed real pointer drag, focused keyboard,
   control, and destroy/recreate sequences for all three pages, as well as
   maxGraph's native wheel path. JointJS's page-owned host wheel listener passed
@@ -216,15 +236,14 @@ tolerance. The committed UI fixtures remain the deterministic event replay.
   Radiant fixture remains the hardware-event acceptance gate.
 - `make test-radiant-baseline` passes the 4,378-case core layout suite, 23
   view-command tests, 105 page-load tests, and all 211 expected visual cases.
-  The target still returns nonzero for existing form, DOM/UI, and WPT-input
-  baseline failures. A serial current-vs-parent audit found no new failures:
-  DOM/UI improves from 48/63 to 52/63, the four WPT input failures are identical
-  (16 passed / 4 failed), and the `form` corpus improves from three recorded
-  baseline regressions to one. This record does not rebaseline or mask them.
-- `make test-lambda-baseline` passes the input baseline and all drawing-related
-  LambdaJS checks, but its existing `test_js_gtest` Node/system slice cannot
-  resolve `node:assert` and consequently reports 204 module cases. It is not a
-  drawing-runtime semantic failure.
+  The aggregate target still returns nonzero only for the known DOM/UI cases
+  `babel_class_capture`, `bootstrap_data_api_alert`, and `sortable_drag`
+  (60/63), plus the four unchanged WPT input-event failures (16/20). This
+  record does not rebaseline or mask them.
+- `make test-lambda-baseline` passes all 2,104 input cases and the 651-case
+  Lambda runtime suite. Its aggregate remains nonzero for three existing MIR
+  size-ratchet entries and 201 broad Node/system JS cases (204 total), none of
+  which exercise the SVG hit-test path.
 - `make test262-baseline` builds its runner and release executable, then stops
   before executing tests because `ref/test262` is at
   `2b2ecead6e828dd9af13a9ec72065e645724a50f` while the checked-in baseline

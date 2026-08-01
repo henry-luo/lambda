@@ -1,0 +1,24 @@
+{
+  "name": "SVG hit-test: basic shape geometry",
+  "html": "test/html/hit-test/svg-basic-shapes.html",
+  "default_timeout": 0,
+  "viewport": {"width": 720, "height": 480},
+  "events": [
+    {"type": "assert_hit_test", "x": 60, "y": 50, "expected_selector": "#filled-rect"},
+    {"type": "assert_hit_test", "x": 20, "y": 50, "expected_selector": "#filled-rect"},
+    {"type": "assert_hit_test", "x": 180, "y": 50, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 141, "y": 50, "expected_selector": "#stroke-rect"},
+    {"type": "assert_hit_test", "x": 290, "y": 50, "expected_selector": "#filled-circle"},
+    {"type": "assert_hit_test", "x": 390, "y": 50, "expected_selector": "#filled-ellipse"},
+    {"type": "assert_hit_test", "x": 505, "y": 50, "expected_selector": "#stroke-line"},
+    {"type": "assert_hit_test", "x": 70, "y": 110, "expected_selector": "#stroke-polyline"},
+    {"type": "assert_hit_test", "x": 200, "y": 145, "expected_selector": "#filled-polygon"},
+    {"type": "assert_hit_test", "x": 320, "y": 110, "expected_selector": "#stroke-polygon"},
+    {"type": "assert_hit_test", "x": 440, "y": 145, "expected_selector": "#filled-path"},
+    {"type": "assert_hit_test", "x": 585, "y": 123, "expected_selector": "#stroke-path"},
+    {"type": "assert_hit_test", "x": 70, "y": 270, "expected_selector": "#rounded-rect"},
+    {"type": "assert_hit_test", "x": 20, "y": 235, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 220, "y": 275, "expected_selector": "#open-filled-path"},
+    {"type": "assert_hit_test", "x": 410, "y": 270, "expected_selector": "#arc-filled-path"}
+  ]
+}

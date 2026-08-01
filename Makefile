@@ -513,7 +513,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
@@ -2287,7 +2287,29 @@ drawing-editor-e2e: build
 	@./lambda.exe view test/html/editable-maxgraph.html --event-file test/ui/editable-drawing-maxgraph.json --headless --no-log
 	@./lambda.exe view test/html/editable-jointjs.html --event-file test/ui/editable-drawing-jointjs.json --headless --no-log
 
-test-drawing: drawing-editor-e2e
+test-drawing: drawing-editor-e2e hit-test-ui
+
+# Coordinate assertions against document.elementFromPoint(), including ported
+# WPT SVG geometry cases. Each fixture names its own HTML page.
+hit-test-ui: build
+	@echo "Running Radiant hit-test UI suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/hit-test/*.json; do \
+		[ -f "$$json" ] || continue; \
+		name=$$(basename "$$json" .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
+		if [ -z "$$page" ]; then echo "  FAIL $$name (missing html)"; FAIL=$$((FAIL + 1)); continue; fi; \
+		if ./lambda.exe view "$$page" --event-file "$$json" --headless --no-log; then \
+			echo "  PASS $$name"; PASS=$$((PASS + 1)); \
+		else \
+			echo "  FAIL $$name"; FAIL=$$((FAIL + 1)); \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "hit-test-ui: $$PASS/$$TOTAL passed"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
 # The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group

@@ -1,0 +1,16 @@
+{
+  "name": "SVG hit-test: path fill rules and implicit closure",
+  "html": "test/html/hit-test/svg-path-fill-rules.html",
+  "default_timeout": 0,
+  "viewport": {"width": 600, "height": 360},
+  "events": [
+    {"type": "assert_hit_test", "x": 35, "y": 100, "expected_selector": "#evenodd-outline"},
+    {"type": "assert_hit_test", "x": 100, "y": 100, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 235, "y": 100, "expected_selector": "#nonzero-outline"},
+    {"type": "assert_hit_test", "x": 300, "y": 100, "expected_selector": "#nonzero-outline"},
+    {"type": "assert_hit_test", "x": 200, "y": 100, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 400, "y": 100, "expected_selector": "#curved-hole"},
+    {"type": "assert_hit_test", "x": 430, "y": 100, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 100, "y": 240, "expected_selector": "#open-fill"}
+  ]
+}

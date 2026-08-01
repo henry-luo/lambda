@@ -1,0 +1,18 @@
+{
+  "name": "SVG hit-test: use instances, bounded content, and nested viewports",
+  "html": "test/html/hit-test/svg-instance-and-viewport.html",
+  "default_timeout": 0,
+  "viewport": {"width": 800, "height": 380},
+  "events": [
+    {"type": "assert_hit_test", "x": 60, "y": 60, "expected_selector": "#diamond-instance"},
+    {"type": "assert_hit_test", "x": 650, "y": 50, "expected_selector": "#group-instance"},
+    {"type": "assert_hit_test", "x": 210, "y": 55, "expected_selector": "#image-box"},
+    {"type": "assert_hit_test", "x": 325, "y": 52, "expected_selector": "#svg-text"},
+    {"type": "assert_hit_test", "x": 490, "y": 55, "expected_selector": "#foreign-box"},
+    {"type": "assert_hit_test", "x": 50, "y": 180, "expected_selector": "#nested-visible"},
+    {"type": "assert_hit_test", "x": 140, "y": 180, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 200, "y": 180, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 260, "y": 180, "expected_selector": "#re-enabled-child"},
+    {"type": "assert_hit_test", "x": 690, "y": 270, "expected_tag": "svg"}
+  ]
+}

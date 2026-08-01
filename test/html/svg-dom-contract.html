@@ -13,9 +13,9 @@ const svgNs = "http://www.w3.org/2000/svg";
 const xlinkNs = "http://www.w3.org/1999/xlink";
 const svg = document.createElementNS(svgNs, "svg");
 svg.setAttribute("id", "svg-direct-root");
-svg.setAttribute("width", "320");
-svg.setAttribute("height", "220");
-svg.setAttribute("viewBox", "0 0 320 220");
+svg.setAttribute("width", "620");
+svg.setAttribute("height", "460");
+svg.setAttribute("viewBox", "0 0 620 460");
 const group = document.createElementNS(svgNs, "g");
 group.setAttribute("transform", "translate(20 15)");
 const rect = document.createElementNS(svgNs, "rect");
@@ -53,6 +53,70 @@ group.appendChild(overlapCircle);
 group.appendChild(overlapPath);
 svg.appendChild(group);
 svg.appendChild(text);
+function appendShape(tag, id, attributes) {
+  const element = document.createElementNS(svgNs, tag);
+  element.setAttribute("id", id);
+  for (const name of Object.keys(attributes)) element.setAttribute(name, attributes[name]);
+  svg.appendChild(element);
+  return element;
+}
+const shapeBackdrop = appendShape("rect", "svg-shape-backdrop", {
+  x: "0", y: "160", width: "620", height: "280", fill: "#f8fafc"
+});
+appendShape("rect", "svg-shape-filled-rect", {
+  x: "20", y: "180", width: "80", height: "55", rx: "18", fill: "#bfdbfe"
+});
+appendShape("rect", "svg-shape-stroked-rect", {
+  x: "130", y: "180", width: "80", height: "55", rx: "18", fill: "none",
+  stroke: "#1d4ed8", "stroke-width": "2"
+});
+appendShape("circle", "svg-shape-filled-circle", {
+  cx: "280", cy: "207", r: "27", fill: "#bbf7d0"
+});
+appendShape("circle", "svg-shape-stroked-circle", {
+  cx: "400", cy: "207", r: "27", style: "fill: none; stroke: #15803d; stroke-width: 2"
+});
+appendShape("rect", "svg-shape-no-paint", {
+  x: "500", y: "180", width: "80", height: "55", fill: "none"
+});
+appendShape("ellipse", "svg-shape-filled-ellipse", {
+  cx: "60", cy: "300", rx: "36", ry: "22", fill: "#fde68a"
+});
+appendShape("ellipse", "svg-shape-stroked-ellipse", {
+  cx: "170", cy: "300", rx: "36", ry: "22", fill: "none", stroke: "#b45309", "stroke-width": "2"
+});
+appendShape("line", "svg-shape-line", {
+  x1: "250", y1: "275", x2: "330", y2: "325", stroke: "#7e22ce", "stroke-width": "2"
+});
+appendShape("polyline", "svg-shape-polyline", {
+  points: "370,325 410,275 450,325", fill: "none", stroke: "#0f766e", "stroke-width": "2"
+});
+appendShape("polyline", "svg-shape-filled-polyline", {
+  points: "500,325 540,275 580,325", fill: "#99f6e4"
+});
+appendShape("polygon", "svg-shape-filled-polygon", {
+  points: "20,425 60,365 100,425", fill: "#fca5a5"
+});
+appendShape("polygon", "svg-shape-stroked-polygon", {
+  points: "130,425 170,365 210,425", fill: "none", stroke: "#b91c1c", "stroke-width": "2"
+});
+appendShape("path", "svg-shape-filled-path", {
+  d: "M250 425 L290 365 L330 425 Z", fill: "#c4b5fd"
+});
+appendShape("path", "svg-shape-stroked-path", {
+  d: "M370 425 L410 365 L450 425 Z", fill: "none", stroke: "#6d28d9", "stroke-width": "2"
+});
+const inheritedStrokeGroup = document.createElementNS(svgNs, "g");
+inheritedStrokeGroup.setAttribute("fill", "none");
+inheritedStrokeGroup.setAttribute("stroke", "#be123c");
+inheritedStrokeGroup.setAttribute("stroke-width", "2");
+const inheritedStrokeCircle = document.createElementNS(svgNs, "circle");
+inheritedStrokeCircle.setAttribute("id", "svg-shape-inherited-stroke-circle");
+inheritedStrokeCircle.setAttribute("cx", "540");
+inheritedStrokeCircle.setAttribute("cy", "395");
+inheritedStrokeCircle.setAttribute("r", "20");
+inheritedStrokeGroup.appendChild(inheritedStrokeCircle);
+svg.appendChild(inheritedStrokeGroup);
 document.getElementById("svg-direct-host").appendChild(svg);
 
 document.getElementById("run-svg-direct-contract").addEventListener("click", () => {
@@ -74,6 +138,72 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
     point.y = 90;
     const pathAimPoint = point.matrixTransform(overlapPath.getScreenCTM());
     const pathAimHit = document.elementFromPoint(pathAimPoint.x, pathAimPoint.y);
+    const hitShapeAt = (x, y) => {
+      point.x = x;
+      point.y = y;
+      const shapePoint = point.matrixTransform(svg.getScreenCTM());
+      const shapeHit = document.elementFromPoint(shapePoint.x, shapePoint.y);
+      return shapeHit && shapeHit.id;
+    };
+    const shapeHits = {
+      filledRect: hitShapeAt(60, 205),
+      roundedRectGap: hitShapeAt(22, 182),
+      strokedRectCenter: hitShapeAt(170, 205),
+      strokedRectAim: hitShapeAt(170, 177),
+      filledCircle: hitShapeAt(280, 207),
+      circleBoxGap: hitShapeAt(258, 185),
+      strokedCircleCenter: hitShapeAt(400, 207),
+      strokedCircleAim: hitShapeAt(400, 177),
+      noPaintShape: hitShapeAt(540, 207),
+      filledEllipse: hitShapeAt(60, 300),
+      ellipseBoxGap: hitShapeAt(30, 280),
+      strokedEllipseCenter: hitShapeAt(170, 300),
+      strokedEllipseAim: hitShapeAt(170, 275),
+      lineBoxGap: hitShapeAt(290, 275),
+      lineAim: hitShapeAt(280, 291),
+      polylineGap: hitShapeAt(410, 305),
+      polylineAim: hitShapeAt(390, 297),
+      filledPolyline: hitShapeAt(540, 305),
+      filledPolygon: hitShapeAt(60, 405),
+      polygonBoxGap: hitShapeAt(25, 370),
+      strokedPolygonCenter: hitShapeAt(170, 405),
+      strokedPolygonAim: hitShapeAt(150, 392),
+      filledPath: hitShapeAt(290, 405),
+      pathBoxGap: hitShapeAt(255, 370),
+      strokedPathCenter: hitShapeAt(410, 405),
+      strokedPathAim: hitShapeAt(390, 397),
+      inheritedStrokeCircleCenter: hitShapeAt(540, 395),
+      inheritedStrokeCircleAim: hitShapeAt(540, 372)
+    };
+    const shapeGeometryPass =
+      shapeHits.filledRect === "svg-shape-filled-rect" &&
+      shapeHits.roundedRectGap === shapeBackdrop.id &&
+      shapeHits.strokedRectCenter === shapeBackdrop.id &&
+      shapeHits.strokedRectAim === "svg-shape-stroked-rect" &&
+      shapeHits.filledCircle === "svg-shape-filled-circle" &&
+      shapeHits.circleBoxGap === shapeBackdrop.id &&
+      shapeHits.strokedCircleCenter === shapeBackdrop.id &&
+      shapeHits.strokedCircleAim === "svg-shape-stroked-circle" &&
+      shapeHits.noPaintShape === shapeBackdrop.id &&
+      shapeHits.filledEllipse === "svg-shape-filled-ellipse" &&
+      shapeHits.ellipseBoxGap === shapeBackdrop.id &&
+      shapeHits.strokedEllipseCenter === shapeBackdrop.id &&
+      shapeHits.strokedEllipseAim === "svg-shape-stroked-ellipse" &&
+      shapeHits.lineBoxGap === shapeBackdrop.id &&
+      shapeHits.lineAim === "svg-shape-line" &&
+      shapeHits.polylineGap === shapeBackdrop.id &&
+      shapeHits.polylineAim === "svg-shape-polyline" &&
+      shapeHits.filledPolyline === "svg-shape-filled-polyline" &&
+      shapeHits.filledPolygon === "svg-shape-filled-polygon" &&
+      shapeHits.polygonBoxGap === shapeBackdrop.id &&
+      shapeHits.strokedPolygonCenter === shapeBackdrop.id &&
+      shapeHits.strokedPolygonAim === "svg-shape-stroked-polygon" &&
+      shapeHits.filledPath === "svg-shape-filled-path" &&
+      shapeHits.pathBoxGap === shapeBackdrop.id &&
+      shapeHits.strokedPathCenter === shapeBackdrop.id &&
+      shapeHits.strokedPathAim === "svg-shape-stroked-path" &&
+      shapeHits.inheritedStrokeCircleCenter === shapeBackdrop.id &&
+      shapeHits.inheritedStrokeCircleAim === "svg-shape-inherited-stroke-circle";
     const parsed = new DOMParser().parseFromString(
       "<svg xmlns='http://www.w3.org/2000/svg'><path d='M0 0 L4 4'/></svg>",
       "image/svg+xml");
@@ -89,6 +219,7 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
       hit === rect &&
       overlapCircleHit === overlapCircle &&
       pathAimHit === overlapPath &&
+      shapeGeometryPass &&
       image.getAttributeNS(xlinkNs, "href") !== null &&
       parsed.documentElement.namespaceURI === svgNs &&
       serialized.includes("<rect id=\"svg-direct-rect\"") &&
@@ -98,7 +229,8 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
     state.textContent = JSON.stringify({
       box, groupBox, pathBox, textBox, hit: hit && hit.id,
       overlapCircleHit: overlapCircleHit && overlapCircleHit.id,
-      pathAimHit: pathAimHit && pathAimHit.id, matrix: rect.getScreenCTM(),
+      pathAimHit: pathAimHit && pathAimHit.id, shapeGeometryPass, shapeHits,
+      matrix: rect.getScreenCTM(),
       parsedRoot: parsed.documentElement.nodeName, serialized, pass
     });
     state.setAttribute("data-ready", pass ? "true" : "false");

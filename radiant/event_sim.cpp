@@ -1696,12 +1696,29 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_element_at") == 0) {
         ev->type = SIM_EVENT_ASSERT_ELEMENT_AT;
-        ev->at_x = reader.get("x").asInt32();
-        ev->at_y = reader.get("y").asInt32();
+        ItemReader x = reader.get("x");
+        ItemReader y = reader.get("y");
+        ev->at_x = (float)(x.isFloat() ? x.asFloat() : x.asInt());
+        ev->at_y = (float)(y.isFloat() ? y.asFloat() : y.asInt());
         const char* sel = reader.get("expected_selector").cstring();
         if (sel) ev->expected_at_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
         const char* tag = reader.get("expected_tag").cstring();
         if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
+    }
+    else if (strcmp(type_str, "assert_hit_test") == 0) {
+        ev->type = SIM_EVENT_ASSERT_HIT_TEST;
+        ItemReader x = reader.get("x");
+        ItemReader y = reader.get("y");
+        ev->at_x = (float)(x.isFloat() ? x.asFloat() : x.asInt());
+        ev->at_y = (float)(y.isFloat() ? y.asFloat() : y.asInt());
+        const char* sel = reader.get("expected_selector").cstring();
+        if (sel) ev->expected_at_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+        const char* tag = reader.get("expected_tag").cstring();
+        if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
+        if (!ev->expected_at_selector && !ev->expected_at_tag) {
+            log_error("event_sim: assert_hit_test requires expected_selector or expected_tag");
+            return parse_sim_event_fail(ev);
+        }
     }
     else if (strcmp(type_str, "assert_attribute") == 0 || strcmp(type_str, "assert_attr") == 0) {
         ev->type = SIM_EVENT_ASSERT_ATTRIBUTE;
@@ -5247,7 +5264,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             View* root = static_cast<View*>(doc->view_tree->root);
             View* found = find_element_at(root, (float)ev->at_x, (float)ev->at_y, 0, 0);
             if (!found) {
-                log_error("event_sim: assert_element_at FAIL - no element found at (%d, %d)", ev->at_x, ev->at_y);
+                log_error("event_sim: assert_element_at FAIL - no element found at (%.2f, %.2f)", ev->at_x, ev->at_y);
                 ctx->fail_count++;
                 break;
             }
@@ -5256,7 +5273,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (ev->expected_at_tag && found_elem) {
                 const char* tag = found_elem->tag_name;
                 if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
-                    log_error("event_sim: assert_element_at FAIL - expected tag '%s', got '%s' at (%d, %d)",
+                    log_error("event_sim: assert_element_at FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
                              ev->expected_at_tag, tag ? tag : "(null)", ev->at_x, ev->at_y);
                     passed = false;
                 }
@@ -5276,13 +5293,56 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     check = check->parent;
                 }
                 if (!selector_matched) {
-                    log_error("event_sim: assert_element_at FAIL - element at (%d, %d) does not match selector '%s'",
+                    log_error("event_sim: assert_element_at FAIL - element at (%.2f, %.2f) does not match selector '%s'",
                              ev->at_x, ev->at_y, ev->expected_at_selector);
                     passed = false;
                 }
             }
             if (passed) {
-                log_info("event_sim: assert_element_at PASS at (%d, %d)", ev->at_x, ev->at_y);
+                log_info("event_sim: assert_element_at PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_HIT_TEST: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: assert_hit_test - no document");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* found = (DomElement*)js_dom_document_element_from_point_native(
+                doc, ev->at_x, ev->at_y);
+            if (!found) {
+                log_error("event_sim: assert_hit_test FAIL - no element found at (%.2f, %.2f)",
+                    ev->at_x, ev->at_y);
+                ctx->fail_count++;
+                break;
+            }
+            bool passed = true;
+            if (ev->expected_at_tag) {
+                const char* tag = found->tag_name;
+                if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
+                    log_error("event_sim: assert_hit_test FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
+                        ev->expected_at_tag, tag ? tag : "(null)", ev->at_x, ev->at_y);
+                    passed = false;
+                }
+            }
+            if (ev->expected_at_selector) {
+                View* expected = find_element_by_selector(doc, ev->expected_at_selector);
+                // The public DOM method returns one exact element, unlike
+                // assert_element_at's legacy ancestor-friendly box assertion.
+                if (!expected || static_cast<DomElement*>(expected) != found) {
+                    log_error("event_sim: assert_hit_test FAIL - element at (%.2f, %.2f) is not selector '%s'",
+                        ev->at_x, ev->at_y, ev->expected_at_selector);
+                    passed = false;
+                }
+            }
+            if (passed) {
+                log_info("event_sim: assert_hit_test PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
                 ctx->pass_count++;
             } else {
                 ctx->fail_count++;

@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- Adapted from WPT svg/interact/scripted/rect-hittest-001.html and
+     svg/interact/scripted/{rect,ellipse}-hittest-002.html. -->
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+</style>
+<svg id="hit-surface" width="640" height="400" viewBox="0 0 640 400">
+  <rect id="filled-rect" x="20" y="20" width="80" height="60" fill="#36c"/>
+  <rect id="stroke-rect" x="140" y="20" width="80" height="60" fill="none" stroke="#111" stroke-width="4"/>
+  <circle id="filled-circle" cx="290" cy="50" r="30" fill="#c63"/>
+  <ellipse id="filled-ellipse" cx="390" cy="50" rx="45" ry="25" fill="#3a6"/>
+  <line id="stroke-line" x1="465" y1="20" x2="545" y2="80" fill="none" stroke="#639" stroke-width="4"/>
+
+  <polyline id="stroke-polyline" points="20,160 70,110 120,160" fill="none" stroke="#963" stroke-width="4"/>
+  <polygon id="filled-polygon" points="170,110 230,110 250,160 200,185 150,160" fill="#396"/>
+  <polygon id="stroke-polygon" points="295,110 345,110 365,160 320,185 275,160" fill="none" stroke="#936" stroke-width="4"/>
+  <path id="filled-path" d="M410 110 L470 110 L490 160 L440 185 L390 160 Z" fill="#369"/>
+  <path id="stroke-path" d="M540 110 C585 90 615 140 570 180" fill="none" stroke="#693" stroke-width="4"/>
+
+  <rect id="rounded-rect" x="20" y="235" width="100" height="70" rx="20" ry="15" fill="#789"/>
+  <path id="open-filled-path" d="M170 300 L220 235 L270 300" fill="#789"/>
+  <path id="arc-filled-path" d="M380 270 A30 30 0 1 0 440 270 A30 30 0 1 0 380 270 Z" fill="#369"/>
+</svg>

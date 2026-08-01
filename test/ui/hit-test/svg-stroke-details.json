@@ -1,0 +1,19 @@
+{
+  "name": "SVG hit-test: dashed strokes, caps, and miter limits",
+  "html": "test/html/hit-test/svg-stroke-details.html",
+  "default_timeout": 0,
+  "viewport": {"width": 680, "height": 480},
+  "events": [
+    {"type": "assert_hit_test", "x": 110, "y": 100, "expected_selector": "#dashed-circle"},
+    {"type": "assert_hit_test", "x": 87, "y": 142.1, "expected_selector": "#dashed-circle"},
+    {"type": "assert_hit_test", "x": 41, "y": 146.3, "expected_selector": "#dashed-circle"},
+    {"type": "assert_hit_test", "x": 37.4, "y": 144.6, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 260, "y": 300, "expected_selector": "#round-cap"},
+    {"type": "assert_hit_test", "x": 425, "y": 300, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 230, "y": 370, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 405, "y": 370, "expected_selector": "#miter-extended"},
+    {"type": "assert_hit_test", "x": 155, "y": 400, "expected_selector": "#dash-offset"},
+    {"type": "assert_hit_test", "x": 170, "y": 400, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 195, "y": 400, "expected_selector": "#dash-offset"}
+  ]
+}

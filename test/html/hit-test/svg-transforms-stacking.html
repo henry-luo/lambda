@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+</style>
+<svg id="hit-surface" width="480" height="300" viewBox="0 0 480 300">
+  <svg id="nested-svg" x="20" y="20" width="180" height="180" viewBox="0 0 180 180">
+    <g id="translated-group" transform="translate(30 25)">
+      <rect id="translated-rect" x="10" y="10" width="80" height="50" fill="#369"/>
+    </g>
+  </svg>
+  <g id="rotated-group" transform="rotate(30 290 105)">
+    <rect id="rotated-stroke" x="240" y="70" width="100" height="70" fill="none" stroke="#936" stroke-width="12"/>
+  </g>
+  <circle id="back-circle" cx="405" cy="80" r="45" fill="#693"/>
+  <path id="front-path" d="M360 80 L450 35 L450 125 Z" fill="#c63"/>
+  <g id="separated-group">
+    <circle id="group-left" cx="250" cy="230" r="20" fill="#369"/>
+    <circle id="group-right" cx="350" cy="230" r="20" fill="#369"/>
+  </g>
+</svg>

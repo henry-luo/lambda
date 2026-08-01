@@ -54,6 +54,7 @@
  *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
  *     {"type": "assert_position", "element_a": {"selector": "#header"}, "element_b": {"selector": "#content"}, "relation": "above"},
  *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
+ *     {"type": "assert_hit_test", "x": 100.5, "y": 50, "expected_selector": "#svg-shape"},
  *     {"type": "switch_frame", "selector": "iframe#myframe"},
  *     {"type": "switch_frame"},
  *     {"type": "drag_and_drop", "target": {"selector": "#src"}, "to_target": {"selector": "#dest"}},
@@ -137,6 +138,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_STYLE,    // verify computed CSS property value
     SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
+    SIM_EVENT_ASSERT_HIT_TEST, // verify document.elementFromPoint() at coordinates
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
@@ -233,10 +235,11 @@ struct SimEvent {
     float position_tolerance;    // allowed deviation (default 1px)
     // Phase 5: navigate fields
     char* navigate_url;          // path to HTML file
-    // Phase 5: assert_element_at fields
+    // Coordinate hit-test assertion fields. Floating-point coordinates preserve
+    // the sub-pixel cases covered by SVG/WPT hit-test fixtures.
     char* expected_at_selector;  // expected element selector at coords
     char* expected_at_tag;       // expected tag name at coords
-    int at_x, at_y;             // coordinates to test
+    float at_x, at_y;           // coordinates to test
     // Phase 5c: auto-waiting on assertions
     int assert_timeout;          // max wait time in ms (0 = no retry, default)
     int assert_interval;         // retry interval in ms (default 100)
