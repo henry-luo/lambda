@@ -307,6 +307,8 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
 void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
+void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
+    MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_private_instance_method_brands(JsMirTranspiler* mt, MIR_reg_t obj,
     MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item, MIR_reg_t cls_obj);

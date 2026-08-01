@@ -873,6 +873,7 @@ void js_init_class_instance_fields(Item callee, Item object);
 void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
+void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 Item js_private_key_for_class(Item class_item, Item source_name);
 Item js_private_key_for_current_class(Item source_name);

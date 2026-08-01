@@ -1148,6 +1148,7 @@ extern void js_init_class_instance_fields(Item callee, Item object);
 extern void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
+extern void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 extern Item js_private_key_for_class(Item class_item, Item source_name);
 extern Item js_private_key_for_current_class(Item source_name);
@@ -2333,6 +2334,7 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
     {"js_set_class_instance_field_metadata_bulk", FPTR(js_set_class_instance_field_metadata_bulk)},
+    {"js_set_class_instance_field_metadata_key", FPTR(js_set_class_instance_field_metadata_key)},
     {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value)},
     {"js_private_key_for_class", FPTR(js_private_key_for_class)},
     {"js_private_key_for_current_class", FPTR(js_private_key_for_current_class)},

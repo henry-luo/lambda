@@ -12886,8 +12886,9 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     Element* parent_backing = dom_element_to_element(parent);
     int64_t child_index = js_dom_backed_child_index(parent, child_elem);
     if (child_index < 0) {
-        log_error("js_dom_remove_backed_child: child is absent from Mark parent");
-        return false;
+        // Positional DOM APIs can insert a DOM-only element between backed
+        // siblings. Its removal must not delete an unrelated Mark child.
+        return ((DomNode*)parent)->remove_child(child);
     }
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
@@ -13266,6 +13267,37 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         return old_child_arg;
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+
+    if (new_child->is_element() && old_child->is_element() && elem->doc &&
+        elem->doc->input) {
+        DomElement* new_elem = new_child->as_element();
+        DomElement* old_elem = old_child->as_element();
+        int64_t old_index = js_dom_backed_child_index(elem, old_elem);
+        if (new_elem && old_elem && old_index >= 0) {
+            if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                if (!new_child->parent->is_element() ||
+                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    return ItemNull;
+                }
+            }
+            dom_pre_remove(old_child);
+            if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
+            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            Item result = editor.elmt_replace_child({.element = dom_element_to_element(elem)},
+                old_index, {.element = dom_element_to_element(new_elem)});
+            if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+                result.element != dom_element_to_element(elem)) {
+                // The DOM link is committed first so the UI relink keeps the
+                // removed wrapper out of a later Mark-backed reconstruction.
+                log_error("js_dom_replace_child: inline replace changed backing identity");
+                return ItemNull;
+            }
+            dom_post_insert((DomNode*)elem, new_child);
+            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            js_dom_mutation_notify();
+            return old_child_arg;
+        }
+    }
     ((DomNode*)elem)->insert_before(new_child, old_child);
     dom_post_insert((DomNode*)elem, new_child);
     dom_pre_remove(old_child);

@@ -7,6 +7,59 @@ extern "C" void js_dynfunc_cache_reset(void);
 static bool jm_module_phase_progress_is_enabled(void);
 static void jm_log_module_phase_progress(const char* filename, const char* phase);
 
+static JsClassEntry* jm_find_class_entry_by_ast_node(JsMirTranspiler* mt,
+        JsAstNode* class_node) {
+    if (!mt || !class_node) return NULL;
+    for (int ci = 0; ci < mt->class_count; ci++) {
+        if ((JsAstNode*)mt->class_entries[ci].node == class_node) {
+            return &mt->class_entries[ci];
+        }
+    }
+    return NULL;
+}
+
+static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
+        JsIdentifierNode* identifier, int depth) {
+    if (!mt || !identifier || !identifier->entry || !identifier->entry->node || depth > 8) {
+        return NULL;
+    }
+    JsAstNode* binding = (JsAstNode*)identifier->entry->node;
+    if (binding->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+        binding->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_class_entry_by_ast_node(mt, binding);
+    }
+    if (binding->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)binding;
+        for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+            if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* candidate = (JsVariableDeclaratorNode*)item;
+            if (!candidate->id || candidate->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+            JsIdentifierNode* candidate_id = (JsIdentifierNode*)candidate->id;
+            if (!identifier->name || !candidate_id->name ||
+                identifier->name->len != candidate_id->name->len ||
+                strncmp(identifier->name->chars, candidate_id->name->chars,
+                    identifier->name->len) != 0) {
+                continue;
+            }
+            binding = (JsAstNode*)candidate;
+            break;
+        }
+    }
+    if (binding->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return NULL;
+
+    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)binding;
+    if (!declarator->init) return NULL;
+    if (declarator->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+        declarator->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_class_entry_by_ast_node(mt, declarator->init);
+    }
+    if (declarator->init->node_type == JS_AST_NODE_IDENTIFIER) {
+        return jm_find_class_for_superclass_binding(mt,
+            (JsIdentifierNode*)declarator->init, depth + 1);
+    }
+    return NULL;
+}
+
 // ============================================================================
 // ES Module support: deferred MIR cleanup and path resolution
 // ============================================================================
@@ -4448,7 +4501,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
-                ce->superclass = jm_find_class(mt, super_id->name->chars, (int)super_id->name->len);
+                // A minified nested function can reuse a class name as a local
+                // alias. Resolve `extends` through the parser's lexical binding
+                // before consulting spelling-only class metadata.
+                ce->superclass = jm_find_class_for_superclass_binding(mt, super_id, 0);
+                if (!ce->superclass && (!super_id->entry || !super_id->entry->node)) {
+                    ce->superclass = jm_find_class(mt, super_id->name->chars,
+                        (int)super_id->name->len);
+                }
                 // Detect self-referential extends (class x extends x {}):
                 // Per ES spec, the class name is in TDZ during the extends clause.
                 // At compile time, we simply clear the superclass to prevent infinite
@@ -7383,6 +7443,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
                     }
+
+                    jm_emit_class_instance_computed_field_metadata_keys(mt, cls_obj, ce);
 
                     // Emit static field initializers at the class's source position.
                     // Static fields may reference functions/variables declared before.

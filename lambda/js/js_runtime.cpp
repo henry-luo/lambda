@@ -2159,6 +2159,17 @@ extern "C" void js_set_class_instance_field_metadata_value(
     values.array->items[index] = value;
 }
 
+extern "C" void js_set_class_instance_field_metadata_key(
+    Item class_item, int index, Item key) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || index < 0) return;
+    bool found = false;
+    Item keys = js_map_get_fast(class_item.map, "__if_keys__", 11, &found);
+    if (!found || get_type_id(keys) != LMD_TYPE_ARRAY || index >= keys.array->length) {
+        return;
+    }
+    keys.array->items[index] = key;
+}
+
 static bool js_init_class_instance_field(Item callee, Item object, Item field_key,
     bool value_found, Item field_value, bool brand_only) {
     RootFrame roots(4);
@@ -2231,7 +2242,8 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
         int64_t field_count = field_keys.array->length;
         for (int64_t field_index = 0; field_index < field_count; field_index++) {
             Item field_key = field_keys.array->items[field_index];
-            if (get_type_id(field_key) != LMD_TYPE_STRING) break;
+            if (get_type_id(field_key) != LMD_TYPE_STRING &&
+                get_type_id(field_key) != LMD_TYPE_SYMBOL) break;
             bool value_found = values_found && get_type_id(field_values) == LMD_TYPE_ARRAY &&
                 field_index < field_values.array->length;
             Item field_value = value_found ?
@@ -2846,11 +2858,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 if (js_check_exception()) return ItemNull;
                 TypeId rtt = get_type_id(result_root.get());
                 if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
-                    // The parent construct allocates for the forwarded new.target,
-                    // but records itself as constructor; restore the implicit
-                    // derived class identity after the default super dispatch.
+                    // The parent construct allocated for the forwarded new.target.
+                    // Keep that most-derived constructor visible to base bodies:
+                    // `this.constructor` feeds inherited static getters.
                     Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                    js_property_set(result_root.get(), constructor_key, callee_root.get());
+                    js_property_set(result_root.get(), constructor_key, new_target_root.get());
                     js_mark_non_enumerable(result_root.get(), constructor_key);
                     js_init_class_instance_fields(callee_root.get(), result_root.get());
                 }
@@ -2891,14 +2903,15 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_set_prototype(result_root.get(), proto_root.get());
             }
             Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-            js_property_set(result_root.get(), ctor_key, callee_root.get());
+            js_property_set(result_root.get(), ctor_key, new_target_root.get());
             js_mark_non_enumerable(result_root.get(), ctor_key);
             js_init_class_instance_fields(callee_root.get(), result_root.get());
             return result_root.get();
         }
-        // v18c: Set constructor property (instance.constructor === Class)
+        // A base constructor can be invoked for a derived `new`; publishing the
+        // callee here would make inherited static accessors observe the base.
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        js_property_set(object_root.get(), ctor_key, callee_root.get());
+        js_property_set(object_root.get(), ctor_key, new_target_root.get());
         // Mark constructor as non-enumerable (per ES spec)
         js_mark_non_enumerable(object_root.get(), ctor_key);
         // Set __proto__ so instance methods are accessible via prototype chain
