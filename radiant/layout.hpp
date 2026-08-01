@@ -285,6 +285,7 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 float layout_preferred_aspect_ratio(ViewBlock* block);
+bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
 
 namespace radiant {
 
@@ -1963,6 +1964,7 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewB
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
+void clear_grid_template_areas(GridProp* grid_layout);
 void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
 void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);

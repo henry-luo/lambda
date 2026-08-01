@@ -351,6 +351,12 @@ bool dom_text_is_backed(DomText* text_node);
 int64_t dom_text_get_child_index(DomText* text_node);
 
 /**
+ * replace a text node's backed String without relinking its DOM wrapper.
+ * The replacement must be allocated by dom_document_create_string().
+ */
+bool dom_text_replace_backed_string(DomText* text_node, String* replacement);
+
+/**
  * Remove text node from parent (syncs with Lambda)
  * Removes from both DOM tree and Lambda Element's children array
  * @param text_node Text node to remove

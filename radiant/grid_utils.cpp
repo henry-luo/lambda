@@ -215,6 +215,18 @@ int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_
 }
 
 // Enhanced grid template areas parser
+void clear_grid_template_areas(GridProp* grid) {
+    if (!grid) return;
+
+    for (int i = 0; i < grid->area_count; i++) {
+        if (grid->grid_areas && grid->grid_areas[i].name) {
+            mem_free(grid->grid_areas[i].name);
+            grid->grid_areas[i].name = nullptr;
+        }
+    }
+    grid->area_count = 0;
+}
+
 // Parses CSS grid-template-areas syntax like:
 //   "header header header"
 //   "sidebar main aside"
@@ -225,14 +237,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
         return;
     }
 
-    // Free existing area names before clearing
-    for (int i = 0; i < grid->area_count; i++) {
-        if (grid->grid_areas && grid->grid_areas[i].name) {
-            mem_free(grid->grid_areas[i].name);
-            grid->grid_areas[i].name = nullptr;
-        }
-    }
-    grid->area_count = 0;
+    clear_grid_template_areas(grid);
 
     // Constants for grid limits
     const int MAX_GRID_SIZE = 16;   // Support up to 16x16 grids

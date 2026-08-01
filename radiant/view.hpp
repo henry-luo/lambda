@@ -2524,6 +2524,8 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child);
+bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
+                                           float* out_width, float* out_height);
 DisplayValue blockify_display(DisplayValue display);
 
 namespace lam {

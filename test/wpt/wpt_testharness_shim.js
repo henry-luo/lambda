@@ -2149,6 +2149,59 @@ function _wpt_delete_adjacent_list_item_boundary(editRange, startBlock, endBlock
     } catch (_) { return false; }
 }
 
+function _wpt_delete_list_prefix_into_terminal_item(editRange, host, selection) {
+    if (!editRange || !host || !editRange.startContainer || !editRange.endContainer ||
+        editRange.startContainer.nodeType !== 3 || editRange.endContainer.nodeType !== 3 ||
+        editRange.endOffset !== 0) return false;
+    var start = editRange.startContainer;
+    var startBlock = _wpt_editing_block_for_node(start, host);
+    var endItem = _wpt_list_item_ancestor(editRange.endContainer, host);
+    if (!startBlock || !endItem || start.parentNode !== startBlock) return false;
+    var list = _wpt_list_ancestor(endItem, startBlock);
+    if (!list || list.parentNode !== startBlock || endItem.parentNode !== list) return false;
+
+    var between = start.nextSibling;
+    while (between && between !== list) {
+        if (between.nodeType !== 3 || !/^\s*$/.test(between.data || between.textContent || "")) {
+            return false;
+        }
+        between = between.nextSibling;
+    }
+    if (between !== list) return false;
+
+    var has_selected_item = false;
+    for (var before = list.firstChild; before && before !== endItem;
+         before = before.nextSibling) {
+        if (_wpt_is_list_structure_node(before)) has_selected_item = true;
+    }
+    if (!has_selected_item) return false;
+    for (var after = endItem.nextSibling; after; after = after.nextSibling) {
+        if (after.nodeType !== 3 || !/^\s*$/.test(after.data || after.textContent || "")) {
+            return false;
+        }
+    }
+
+    try {
+        var retainedHTML = endItem.innerHTML;
+        if (!_wpt_delete_text_slice(start, editRange.startOffset,
+                                    _wpt_text_node_length(start))) return false;
+        between = start.nextSibling;
+        while (between && between !== list) {
+            var nextBetween = between.nextSibling;
+            startBlock.removeChild(between);
+            between = nextBetween;
+        }
+        // range.deleteContents only removes partial branches, so ending at a
+        // terminal list item's start leaves the selected list shell behind.
+        // lift the unselected item before discarding that selected prefix.
+        list.insertAdjacentHTML("beforebegin", retainedHTML);
+        startBlock.removeChild(list);
+        selection.collapse(start, Math.min(editRange.startOffset,
+                                           _wpt_text_node_length(start)));
+        return true;
+    } catch (_) { return false; }
+}
+
 function _wpt_delete_cross_list_nested_boundary(editRange, host, selection) {
     if (!editRange || !host || !editRange.startContainer || !editRange.endContainer) return false;
     var startItem = _wpt_list_item_ancestor(editRange.startContainer, host);
@@ -2270,6 +2323,7 @@ function _wpt_apply_edit_range_delete(editRange, host, selection, preserveBounda
         if (_wpt_clear_selected_table_cells(editRange, selection)) return true;
         if (_wpt_delete_across_table_cells(editRange, host, selection)) return true;
         if (_wpt_delete_empty_block_boundary(editRange, host, selection)) return true;
+        if (_wpt_delete_list_prefix_into_terminal_item(editRange, host, selection)) return true;
         if (_wpt_delete_cross_list_nested_boundary(editRange, host, selection)) return true;
         if (_wpt_delete_same_root_nested_boundary(editRange, host, selection)) return true;
         if (_wpt_delete_adjacent_list_item_boundary(
