@@ -122,6 +122,10 @@ typedef struct Item {
             return LMD_TYPE_FLOAT;
         }
         if (this->_type_id) {
+            // C16: the out-of-band int carrier is a representation, not a type,
+            // so it reports `int` just as a cell-carried double reports `float`.
+            // Callers that need the carrier must test `_type_id` directly.
+            if (this->_type_id == LMD_TYPE_INT_BIG) return LMD_TYPE_INT;
             return this->_type_id;
         }
         // container types store TypeId at address pointed to by item
@@ -278,11 +282,26 @@ inline ConstItem Item::to_const() const {
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
 static inline bool lambda_item_uses_scalar_home(Item item) {
+    // C16's out-of-band int carrier is cell-backed, so it must rehome with the
+    // other scalars or it dangles when its frame dies. It is tested on the raw
+    // tag because `type_id()` deliberately normalizes it to LMD_TYPE_INT.
+    if (!(item.item & ITEM_DBL_MASK) && item._type_id == LMD_TYPE_INT_BIG) return true;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
     return (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
         !(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
         item.item != ITEM_FLOAT_N0;
+}
+
+// The value of an `int` Item as a double — the C16 canonical numeric view,
+// covering both the compact payload and the out-of-band cell. Poison payloads
+// come back as their sentinel magnitudes, so callers that care must classify
+// with LAMBDA_INT_VALUE_IS_POISON before converting.
+static inline double lambda_int_item_value(Item item) {
+    if (!(item.item & ITEM_DBL_MASK) && item._type_id == LMD_TYPE_INT_BIG) {
+        return *(const double*)(uintptr_t)(item.item & 0x00FFFFFFFFFFFFFFULL);
+    }
+    return (double)item.get_int56();
 }
 
 // Compatibility aggregate: the native root/GC helpers are provided by rt.

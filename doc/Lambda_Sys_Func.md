@@ -851,21 +851,22 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 
 ```lambda
 // Parse JSON string
-let data^err = parse("{\"name\": \"Alice\", \"age\": 30}", 'json')
+let data = parse("{\"name\": \"Alice\", \"age\": 30}", 'json')^
 data.name     // "Alice"
 
 // Auto-detect JSON from content
-let data2^err = parse("{\"x\": 1}")
+let data2 = parse("{\"x\": 1}")^
 data2.x       // 1
 
 // Parse with options map
-let expr^err = parse("x^2 + y", {type: 'math', flavor: 'latex'})
+let expr = parse("x^2 + y", {type: 'math', flavor: 'latex'})^
 
-// Parse CSV from string
-let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv')
+// Parse CSV, falling back to an empty list on failure
+let csv = parse("name,age\nAlice,30\nBob,25", 'csv') ^ { [] }
 ```
 
-> **Note**: `parse()` can raise errors. Use `let result^err = parse(...)` for error-safe handling.
+> **Note**: `parse()` can raise errors. Propagate with `parse(...)^`, or handle
+> locally with `parse(...) ^ { … ~ … }` where `~` is the error.
 
 #### exists(target)
 
@@ -1151,8 +1152,8 @@ pn benchmark() {
 
 Concurrency is available only inside `pn`. A procedure becomes resumable when
 it calls a suspending operation; callers do not need an `async` or `await`
-annotation. Use `^` or `let value^err = ...` with operations that return
-`T^E`.
+annotation. Use `^` to propagate, or `e ^ { … }` to handle locally, with
+operations that return `T^E`.
 
 | Function | Result | Behavior |
 |----------|--------|----------|
@@ -1200,8 +1201,7 @@ error.
 
 ```lambda
 pn main() {
-    let text^err = io.read("data.txt")
-    if (^err) { print(err.message); return }
+    let text = io.read("data.txt") ^ { print(~.message); return }
     print(text)
 }
 ```

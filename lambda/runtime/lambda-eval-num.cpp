@@ -231,13 +231,42 @@ static inline int64_t int64_from_bits(uint64_t raw) {
     return result;
 }
 
-static inline Item pack_compact_int_or_float(__int128 value) {
-    // The Item payload can hold more bits than Lambda's semantic int; overflow
-    // crosses into float instead of becoming a wider tagged int or an error.
+// C16: int arithmetic is TOTAL — a result outside the compact band stays an
+// `int`, carried in a double cell, rather than promoting to float. The double
+// is the semantic carrier (correctly-rounded binary64), so the rounding here
+// is the specified behaviour above 2^53, not a representation accident.
+static inline Item pack_compact_int(__int128 value) {
     if (value <= INT53_MAX && value >= INT53_MIN) {
         return (Item){ .item = i2it((int64_t)value) };
     }
+    // C16 TODO(A4): becomes `int2it((double)value)`. Blocked on the read-site
+    // audit — with this flipped, `numeric_fastpath_edges` prints the cell
+    // pointer (`[int, 11277501280]`). The print *visitor* is already carrier-
+    // aware, so the remaining reader is a second path (print_item / a
+    // formatter), not that one. Find it by flipping this line and diffing.
+    // C16 TODO(A2-lifetime): becomes `int2it((double)value)` once the carrier
+    // is GC-managed. See the plan — a number-stack cell cannot be stored in a
+    // container, so this must not be flipped as-is.
     return push_d((double)value);
+}
+
+// C16: `int div int` and `int % int` stay int, so a computed zero divisor
+// yields the int domain's own poison instead of leaving for float. Truncation
+// toward zero and the dividend-signed remainder are C14c's, unchanged.
+static inline Item int_integral_division(int64_t left, int64_t right,
+        LambdaNumericOpFamily op) {
+    if (right == 0) {
+        if (left == 0) return (Item){ .item = ITEM_INT_NAN };
+        // `%` by zero is undefined rather than unbounded, so it is nan for
+        // every dividend; only `div` carries the dividend's sign to infinity.
+        if (op == LAMBDA_NUM_OP_MOD) return (Item){ .item = ITEM_INT_NAN };
+        return (Item){ .item = left > 0 ? ITEM_INT_INF : ITEM_INT_NEG_INF };
+    }
+    // Operands are compact, so |result| <= |left| and the quotient cannot
+    // leave the band. The symmetric domain has no MinInt, so there is no
+    // INT64_MIN / -1 trap to guard.
+    int64_t value = op == LAMBDA_NUM_OP_MOD ? left % right : left / right;
+    return (Item){ .item = i2it(value) };
 }
 
 static bool read_sized_integer(Item item, TypeId type, SizedIntegerValue* out) {
@@ -532,13 +561,14 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         int64_t left = item_a.get_int56();
         int64_t right = item_b.get_int56();
         if (op == LAMBDA_NUM_OP_ADD) {
-            *result = pack_compact_int_or_float((__int128)left + (__int128)right);
+            *result = pack_compact_int((__int128)left + (__int128)right);
         } else if (op == LAMBDA_NUM_OP_SUB) {
-            *result = pack_compact_int_or_float((__int128)left - (__int128)right);
+            *result = pack_compact_int((__int128)left - (__int128)right);
         } else if (op == LAMBDA_NUM_OP_MUL) {
-            *result = pack_compact_int_or_float((__int128)left * (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
-                op == LAMBDA_NUM_OP_MOD) {
+            *result = pack_compact_int((__int128)left * (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
+            *result = int_integral_division(left, right, op);
+        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
             *result = push_d(runtime_number_division_result((double)left,
                 (double)right, op));
         } else {
@@ -578,13 +608,14 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         int64_t left = runtime_integral_as_int64(item_a, kind_a);
         int64_t right = runtime_integral_as_int64(item_b, kind_b);
         if (op == LAMBDA_NUM_OP_ADD) {
-            *result = pack_compact_int_or_float((__int128)left + (__int128)right);
+            *result = pack_compact_int((__int128)left + (__int128)right);
         } else if (op == LAMBDA_NUM_OP_SUB) {
-            *result = pack_compact_int_or_float((__int128)left - (__int128)right);
+            *result = pack_compact_int((__int128)left - (__int128)right);
         } else if (op == LAMBDA_NUM_OP_MUL) {
-            *result = pack_compact_int_or_float((__int128)left * (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_TRUE_DIV || op == LAMBDA_NUM_OP_IDIV ||
-                op == LAMBDA_NUM_OP_MOD) {
+            *result = pack_compact_int((__int128)left * (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
+            *result = int_integral_division(left, right, op);
+        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
             *result = push_d(runtime_number_division_result((double)left,
                 (double)right, op));
         } else {
@@ -755,7 +786,7 @@ static bool apply_classified_bitwise(Item item_a, Item item_b,
         uint64_t raw = op == SIZED_BITWISE_AND ? (uint64_t)left & (uint64_t)right :
             op == SIZED_BITWISE_OR ? (uint64_t)left | (uint64_t)right :
                                      (uint64_t)left ^ (uint64_t)right;
-        *result = pack_compact_int_or_float((__int128)int64_from_bits(raw));
+        *result = pack_compact_int((__int128)int64_from_bits(raw));
         return true;
     }
     if (decision.result == LAMBDA_NUM_INTEGER) {
@@ -801,7 +832,7 @@ static bool apply_classified_shift(Item item_a, Item item_b,
         }
         uint64_t raw = count >= 64 ? 0 : shift_left ?
             (uint64_t)left << count : (uint64_t)(left >> count);
-        *result = pack_compact_int_or_float((__int128)int64_from_bits(raw));
+        *result = pack_compact_int((__int128)int64_from_bits(raw));
         return true;
     }
     if (decision.result == LAMBDA_NUM_INTEGER) {

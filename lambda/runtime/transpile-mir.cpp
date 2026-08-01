@@ -4801,6 +4801,10 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
                 MIR_new_reg_op(mt->ctx, fast_mul)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
             emit_label(mt, l_promote);
+            // C16 TODO(A4): this promote lane becomes `int2it(prod)` — an
+            // out-of-band product is still an `int`. Blocked on the get_int56
+            // read-site audit; producing the carrier before readers understand
+            // it prints the cell pointer as the value.
             MIR_reg_t boxed_float = emit_box(mt, prod, LMD_TYPE_FLOAT);
             MIR_reg_t slow_mul = native_int_out
                 ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
@@ -4836,6 +4840,7 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         MIR_reg_t dsum = new_reg(mt, "fi_d", MIR_T_D);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dsum),
             MIR_new_reg_op(mt->ctx, sum)));
+        // C16 TODO(A4): becomes `int2it(dsum)` once readers are audited.
         MIR_reg_t boxed_float = emit_box(mt, dsum, LMD_TYPE_FLOAT);
         MIR_reg_t slow_sum = native_int_out
             ? emit_unbox(mt, boxed_float, LMD_TYPE_INT) : boxed_float;
@@ -15123,7 +15128,51 @@ static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
     return body;
 }
 
+// A checked declaration boundary emits `emit_return_if_item_error`, so a body
+// containing one can return an Item even when the signature is clean. That is
+// only representable on a boxed return: a native lane either fails MIR
+// validation (an Item into a `double`) or silently hands the caller error bits
+// as a number, and granting the callee an error lane does not help because a
+// non-`can_raise` caller never reads it (see the `call_error_lane` gate) —
+// the diagnostic would be replaced by a silent 0. So the boundary must deny
+// the native return, exactly as a deferring tail expression does.
+//
+// The test mirrors the emitter's own condition (`declaration_boundary_applies`
+// plus `mir_boundary_is_redundant`): a check is emitted unless the annotation
+// is redundant against the initializer's static type. Anything this misses
+// would be a silent miscompile, so unknown shapes must answer "may defer".
+static bool declaration_may_check_boundary(AstNode* stam) {
+    AstNode* declare = stam->node_type == AST_NODE_LET_STAM ||
+        stam->node_type == AST_NODE_VAR_STAM || stam->node_type == AST_NODE_PUB_STAM
+        ? ((AstLetNode*)stam)->declare : NULL;
+    for (AstNode* d = declare; d; d = d->next) {
+        if (d->node_type != AST_NODE_ASSIGN) continue;
+        AstNamedNode* asn = (AstNamedNode*)d;
+        if (!asn->declared_type || asn->is_type_definition) continue;
+        Type* declared = mir_unwrap_decl_type(asn->declared_type);
+        if (!declared) return true;
+        if (!asn->as || !asn->as->type) return true;
+        if (!lambda_boundary_is_redundant(asn->as->type, declared)) return true;
+    }
+    return false;
+}
+
+static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
+    AstNode* body = fn_node ? mir_unwrap_primary(fn_node->body) : NULL;
+    if (!body) return false;
+    if (body->node_type != AST_NODE_LIST && body->node_type != AST_NODE_CONTENT) {
+        return declaration_may_check_boundary(body);
+    }
+    for (AstNode* stam = ((AstListNode*)body)->item; stam; stam = stam->next) {
+        if (declaration_may_check_boundary(stam)) return true;
+    }
+    return false;
+}
+
 static bool function_return_may_defer(AstFuncNode* fn_node) {
+    // An interior checked boundary can produce a return the native ABI cannot
+    // carry, independently of what the tail expression proves.
+    if (function_body_may_check_boundary(fn_node)) return true;
     AstNode* body = function_body_result_expr(fn_node);
     if (!body) return true;
     if (body->node_type == AST_NODE_CALL_EXPR) {

@@ -1965,8 +1965,8 @@ symmetry: bounded, wrapping, poison-free.
   encode a non-member) with a **tagged pointer to a double cell** above it, following the
   existing out-of-band-float precedent (`d2it`, `lambda.h:1286`). The 53-bit band survives
   as *carrier capacity*, never again as a semantic bound. Full plan, including the
-  `i2it`-overflow-arm fix that closes the O1 divergence and the range-proven-`i64`-lane
-  rule: `vibe/Lambda_Impl_Int_C16.md`.
+  `i2it`-overflow-arm fix that closes the O1 divergence, the range-proven-`i64`-lane rule, and
+  the convergence with the 2026-08-01 tuning work: `vibe/Lambda_Impl_Int_Total.md`.
 - `int.inf`/`int.nan` payload encoding (reserved compact payloads vs. cells) — open, see
   that plan's Phase A.
 - Value-aware admission under §11.4 now passes any finite integral float into int (e.g.

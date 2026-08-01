@@ -616,7 +616,7 @@ pub type Counter {                // Export object type
     value: int = 0;
     fn double() => value * 2
 }
-pub data^err = input(\"f\")       // Exp. data and err
+pub data = input(\"f\") ^ { {} }  // Export, handling err
 ```
 
 **Module Usage:**
@@ -659,12 +659,16 @@ fn compute(x: int) int^ {
 fun()^               // propagate error, discard value
 ```
 
-**`let a^err` — destructure value and error:**
+**`e ^ { }` — handle the error here (`~` is the error):**
 ```lambda
-let result^err = divide(10, x)
-if (^err) print(err.message)  // ^err to check error
-else result * 2
+let result = divide(10, x) ^ {
+  print(~.message)            // ~ = the error
+  0                           // handler value, or raise/return
+}
+result * 2                    // result is clean here
 ```
+`e or default` rescues any falsy value without seeing it;
+`x is error` tests a soft `T | error` value.
 
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` `?` `.?` - Primary, query

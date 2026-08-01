@@ -148,9 +148,11 @@ number      // Union: all numeric value types and sized-storage types
 produces this refinement when the source success type was `any`:
 
 ```lambda
-let value^err = expression_returning_any()
-// value: any \ error
-// err: error? (plus any declared channel-specific error type)
+let value = expression_returning_any() ^ { ~ }
+// value: any (the handler returns the error as data)
+
+let clean = expression_returning_any() ^ { default }
+// clean: any \ error — the failure path never reaches the binding
 ```
 
 The schema validator historically spells its catch-all *valid data* pattern as

@@ -128,6 +128,15 @@ enum EnumTypeId {
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
 
+    // C16 representation, not a type: an `int` whose value lies outside the
+    // compact ±(2^53-1) carrier band. The domain is the float64-representable
+    // integers, so the payload is a tagged pointer to a double cell — the same
+    // shape `d2it` uses for out-of-band floats, because an int-tagged Item can
+    // never hold an inline double (the tag byte and the double's bits collide).
+    // `Item::type_id()` normalizes this to LMD_TYPE_INT, exactly as the three
+    // float representations all report LMD_TYPE_FLOAT.
+    LMD_TYPE_INT_BIG,
+
     LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
@@ -182,6 +191,7 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_TYPE), "type tag must be no
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FUNC), "function tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ANY), "any tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ERROR), "error tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT_BIG), "big-int tag must be non-double");
 #else
 #define LAMBDA_STATIC_ASSERT(cond, msg)
 #endif
@@ -1128,6 +1138,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
+#define ITEM_INT_BIG        ((uint64_t)LMD_TYPE_INT_BIG << 56)
 #define ITEM_INT64          ((uint64_t)LMD_TYPE_INT64 << 56)
 // BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
 #define DECIMAL_BIGINT      2
@@ -1252,10 +1263,40 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #endif
 }
 
-// Lambda compact int is capped to the IEEE float64 safe-integer band; the
-// payload is wider, so every packing/overflow check must enforce this bound.
+// C16: `int` is the float64-representable integers. The contiguous band
+// ±(2^53 - 1) is the *compact carrier's capacity*, not the domain bound — the
+// 56-bit payload is wider still, so packing must keep to this range for the
+// value encoding to stay exact and unambiguous.
 #define INT53_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
 #define INT53_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
+
+// C16 int poison. `int` closes its arithmetic with its own inf/nan rather than
+// leaving the domain (spec §4.1/§4.7), so `7 div 0` is `int.inf`, not float
+// `inf` and not `error()`. The payloads sit above INT53_MAX, which no valid
+// compact value can reach, so a sign-extended read discriminates them without
+// a second tag. Sign extension is what makes the test work for negative
+// values: -1 has every payload high bit set, so the raw payload cannot be
+// compared directly.
+#define ITEM_INT_POISON_BASE  ((int64_t)1 << 54)
+#define ITEM_INT_NAN      (ITEM_INT | (uint64_t)ITEM_INT_POISON_BASE)
+#define ITEM_INT_INF      (ITEM_INT | (uint64_t)(ITEM_INT_POISON_BASE + 1))
+#define ITEM_INT_NEG_INF  (ITEM_INT | (uint64_t)(ITEM_INT_POISON_BASE + 2))
+
+// Values the compact carrier can hold: the band, plus the three poison
+// sentinels. Packed `int[]` lanes store raw int64s, so poison must survive the
+// round-trip through an element read — a vectorized `div` by zero produces an
+// int-family array with per-lane poison (spec §4.7), not an array of errors.
+#define LAMBDA_INT_IS_ENCODABLE(v) \
+    ((((int64_t)(v) <= INT53_MAX) && ((int64_t)(v) >= INT53_MIN)) || \
+     (((int64_t)(v) >= ITEM_INT_POISON_BASE) && \
+      ((int64_t)(v) <= ITEM_INT_POISON_BASE + 2)))
+
+// Classify a sign-extended compact-int payload. Callers that already hold the
+// int64 value use these; they must not be handed a raw (unextended) payload.
+#define LAMBDA_INT_VALUE_IS_POISON(v)  ((int64_t)(v) > INT53_MAX)
+#define LAMBDA_INT_VALUE_IS_NAN(v)     ((int64_t)(v) == ITEM_INT_POISON_BASE)
+#define LAMBDA_INT_VALUE_IS_INF(v)     ((int64_t)(v) == ITEM_INT_POISON_BASE + 1)
+#define LAMBDA_INT_VALUE_IS_NEG_INF(v) ((int64_t)(v) == ITEM_INT_POISON_BASE + 2)
 
 static inline uint64_t lambda_int64_ptr_to_item_bits(const int64_t* ptr) {
     if (!ptr) return ITEM_NULL;
@@ -1276,9 +1317,9 @@ inline uint64_t b2it(uint8_t bool_val) {
 }
 // int56: check range and pack, return ITEM_ERROR on overflow
 #ifndef __cplusplus
-#define i2it(int_val)        (((int64_t)(int_val) <= INT53_MAX && (int64_t)(int_val) >= INT53_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
+#define i2it(int_val)        (LAMBDA_INT_IS_ENCODABLE(int_val) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #else
-#define i2it(int_val)        (((int64_t)(int_val) <= INT53_MAX && (int64_t)(int_val) >= INT53_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
+#define i2it(int_val)        (LAMBDA_INT_IS_ENCODABLE(int_val) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #endif
 // BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
@@ -1733,6 +1774,7 @@ extern "C" {
     Item v2it(List *list);
 
     Item flt2it(double dval);  // canonical double -> Item encoder
+    Item int2it(double value); // canonical C16 int encoder (compact or cell)
     Item push_d(double dval);
     Item box_int64_value(int64_t lval);
     // Compatibility boundary for legacy native helpers whose raw int64 result

@@ -4,7 +4,7 @@
 **Basis:** decision records C1–C17 (with findings A1–A10 and the probe evidence) in
 [`vibe/Lambda_Semantics_Formal.md`](../vibe/Lambda_Semantics_Formal.md) and
 [`vibe/Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md); type-enforcement
-decisions TE-1–TE-14 (with the boundary inventory and measured evidence) in
+decisions TE-1–TE-16 (with the boundary inventory and measured evidence) in
 [`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md),
 summarized in §11.4.
 **Scope:** this document specifies what Lambda's semantics **is by decision** — not
@@ -12,7 +12,9 @@ what any given build implements. Where the implementation disagrees, the
 implementation is wrong; the conformance work is tracked in
 [`vibe/Lambda_Semantics_Impl_Plan.md`](../vibe/Lambda_Semantics_Impl_Plan.md)
 (C16's flex-`int` conformance has its own plan,
-[`vibe/Lambda_Impl_Int_C16.md`](../vibe/Lambda_Impl_Int_C16.md)), and
+[`vibe/Lambda_Impl_Int_Total.md`](../vibe/Lambda_Impl_Int_Total.md); TE-15/TE-16 error
+handling has [`vibe/Lambda_Impl_Error_Handling.md`](../vibe/Lambda_Impl_Error_Handling.md)),
+and
 the executable formal model is specified in
 [`vibe/Lambda_Semantics_DSL_Proposal.md`](../vibe/Lambda_Semantics_DSL_Proposal.md).
 **Style:** each section states the rule in the declarative present, followed by a
@@ -573,9 +575,10 @@ nothing hides bugs. Growth is explicit (`push`/`splice`). [C5]
 ### 7.3 Two error forms, one discharge surface: fn return, pn raise
 
 **The general style remains: `fn` returns error data; `pn` raises failures.**
-The two forms retain different caller obligations, but `^err` and postfix `^`
-are channel-agnostic: they operate on the combined outcome rather than forcing
-the caller to know which representation delivered the error.
+The two forms retain different caller obligations, but the discharge forms —
+the `^ { }` handler and postfix `^` — are channel-agnostic: they operate on the
+combined outcome rather than forcing the caller to know which representation
+delivered the error.
 
 - **Returned errors are data.** `T | error` is an ordinary union and never
   triggers must-handle checking. It is the natural result of set-friendly
@@ -585,25 +588,31 @@ the caller to know which representation delivered the error.
   `any \ error`.
 - **Raised errors are an enforcing channel.** `T^E` is explicit-only:
   inference never creates `^`. Calls carrying a `^` channel must engage the
-  error possibility immediately through `^err`, postfix `^`, an explicitly
-  error-admitting destination, an error arm in `match`, or an explicit
-  `or` rescue. `raise` is licensed only inside a function with a declared
-  `T^E` result. `E` constrains user-raised errors.
-- **`let value^err = e` is total over error-ness and channel-agnostic.** It
+  error possibility immediately, through exactly one of: an error arm in
+  `match`; the `^ { }` handler; postfix `^`; a receiving position that
+  textually admits error (`let x: T^ = e`, `let x: T | error = e`, or a
+  declared parameter/return of that shape); or an explicit `or` rescue.
+  `raise` is licensed only inside a function with a declared `T^E` result.
+  `E` constrains user-raised errors. **Automatic containment does not
+  acknowledge**: §11.4's boundary skip contains *defects*, and a raised error
+  is gated before it can reach that machinery. [TE-16]
+- **`e ^ { … ~ … }` handles the error locally and is channel-agnostic.** It
   receives both error values returned in the value lane and errors delivered
-  through a raised channel. On any error, `value = null` and `err` receives
-  that error; on success, `value` receives the error-free success value and
-  `err = null`. Its typing removes every error constituent from the success
-  side: an `any` outcome becomes `any \ error`; a
-  `T | E1 ^ E2` outcome produces success `T` and error
-  `E1 | E2` (plus `null` on the successful branch).
-- **Postfix `e^` applies the same split but propagates instead of capturing.**
+  through a raised channel, binding the error to `~` inside the braces. Its
+  typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The handler
+  either produces a value of the expected type or diverges (`raise`, `return`,
+  or letting the enclosing block skip); either way the binding it feeds is
+  **statically clean** — the failure path provably does not reach it, so no
+  binding ever holds a null-for-failure placeholder. The handler must be
+  braced: `^` followed by `{` is the handler, `^` followed by anything else is
+  propagation.
+- **Postfix `e^` applies the same split but propagates instead of handling.**
   It yields the error-free success type and forwards the combined error set to
   the enclosing function's declared channel. Using it in a declared plain-`T`
   function is a compile error. An unannotated `fn` has the implicit clean
   contract in §11.4, so an error-possible inferred return is likewise a
   compile error until it is contained or the signature explicitly admits the
-  error. Prefix `^e` and `e is error` remain boolean tests.
+  error. `e is error` is the boolean test.
 - **System `fn` failures are returned values.** They remain chainable and
   set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
   chosen by one principle: *absence in / no answer → `null`*
@@ -615,15 +624,16 @@ the caller to know which representation delivered the error.
   (`T^E`, compile-enforced), though permitted in expression position.
   Reading the filesystem/network is an effect at the head of a pipeline, so
   failure must be consciously engaged. Set-oriented input remains an explicit
-  wrapper: `fn my_input(f) { let d^err = input(f); if (^err) err else d }`,
-  then map over the wrapper.
+  wrapper: `fn my_input(f) { input(f) ^ { ~ } }` — the handler returns the
+  error as data — then map over the wrapper.
 - **System/resource faults are implicit system errors.** Stack overflow,
   memory exhaustion, comparison-depth exhaustion, and compiler-inserted
   boundary defects may propagate through frames without being enumerated in a
   user error type. Operationally every `R^E` can therefore deliver
   `R^(E | error)`: `E` describes user-raised errors, while `error` covers
-  system defects. Channel-agnostic `^err` captures both. Unhandled resource
-  faults still abort with a report.
+  system defects. The channel-agnostic `^ { }` handler captures both — code
+  matching on `~.code` must not assume `E`. Unhandled resource faults still
+  abort with a report.
 - **Every error value is deliberate.** It is constructed by `error()`,
   returned by a `T | error` computation, raised in a `T^E` context, or
   constructed by an explicit runtime contract check such as a failed deferred
@@ -1123,7 +1133,7 @@ sensitivities (§2.3, §5.4) — both by design.
 
 Detailed decision record:
 [`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md)
-(TE-1–TE-14, the boundary inventory, evidence, and the phased plan). This
+(TE-1–TE-16, the boundary inventory, evidence, and the phased plan). This
 section distills its semantic decisions; several are captured nowhere else.
 
 - **Three outcomes, never a fourth.** Every typed boundary resolves to
@@ -1142,7 +1152,7 @@ section distills its semantic decisions; several are captured nowhere else.
   (`T | error`) flow as data; raised errors (`T^E`) demand engagement at the
   immediate expression and alone license `raise`; system faults (stack
   exhaustion, out-of-memory, the `==` depth limit) are unchecked — never in
-  types, transparent through fn frames, caught at a pn `^err` boundary or the
+  types, transparent through fn frames, caught at a pn `^ { }` boundary or the
   global handler. In value positions `T^` ≡ `T | error`; `^` is semantically
   distinctive only on fn returns. [TE-13, C14]
 - **The top and its default.** `any` includes error; `any \ error` is the
@@ -1152,6 +1162,15 @@ section distills its semantic decisions; several are captured nowhere else.
   parameter never enters the function — the call's result is that error.
   Validation-space `any` (`is`, the validator) reads as `any \ error`: usable
   data. [TE-5]
+- **Containment is automatic; handling is explicit.** A failed deferred check
+  *skips* to the end of the closest enclosing safe boundary — the annotated
+  binding, then the enclosing block — and that position receives the error;
+  code between the failure and the boundary never runs, so no binding is ever
+  established from a failed check. Container element positions accept the error
+  as data instead, which is what keeps batch processing alive. Skip is
+  fail-stop and blind; to *handle* an error with access to it, use
+  `e ^ { … ~ … }`, which suppresses the skip. Skip never discharges the raised
+  channel's acknowledgement obligation. [TE-15, TE-16]
 - **Interiors flow, interfaces enforce.** Annotated bindings are contracts: a
   deferred success establishes a clean `x: T`; failure yields the boundary
   error *before the binding exists* — `x` never holds an error. Unannotated
@@ -1248,10 +1267,13 @@ a semantics change:
 7. **Error containment** — every error value is deliberate: constructed by
    `error()`, returned by a `T | error` computation, raised in a `T^E`
    context, or constructed by an explicit runtime contract check. Discharge
-   (`^err` or postfix `^`) is channel-agnostic and strips all error
-   constituents from its success result. No boundary may silently substitute
-   `0`, `null`, or reinterpreted bits. (Resource-fault *timing* is exempt from
-   invariant 3 — when a stack limit fires may differ across tiers.)
+   (the `^ { }` handler or postfix `^`) is channel-agnostic and strips all
+   error constituents from its success result. No boundary may silently
+   substitute `0`, `null`, or reinterpreted bits — **and no binding holds a
+   placeholder for a failure**: a handled failure either yields a real value
+   from its handler or never reaches the binding (TE-16). (Resource-fault
+   *timing* is exempt from invariant 3 — when a stack limit fires may differ
+   across tiers.)
 
 ---
 
@@ -1273,7 +1295,7 @@ a semantics change:
 | §9 mutability, covariance | C4, C4.2a, C12 | both |
 | §10 operators | C6, C10 | `Lambda_Semantics_Formal2.md` |
 | §11 patterns | C7 | ibid. |
-| §11.4 type enforcement | TE-1–TE-14, B1–B13, enforcement §10 | `Lambda_Design_Type_Enforcement.md` |
+| §11.4 type enforcement | TE-1–TE-16, B1–B13, enforcement §10 | `Lambda_Design_Type_Enforcement.md` |
 | §12 metaprogramming | C9, C9a | ibid. |
 
 The decision records preserve the full deliberations — including every

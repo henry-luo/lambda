@@ -19,7 +19,7 @@ This document covers Lambda's error handling system — how errors are created, 
 5. [Error Return Types (`T^E`)](#error-return-types-te)
 6. [Error Handling at Call Sites](#error-handling-at-call-sites)
 7. [Error Propagation (`^` Operator)](#error-propagation--operator)
-8. [Error Destructuring (`let a^err = expr`)](#error-destructuring-let-aerr--expr)
+8. [Error Handling (`e ^ { … }`)](#error-handling-e---)
 9. [Compile-Time Enforcement](#compile-time-enforcement)
 10. [System Functions That Can Raise](#system-functions-that-can-raise)
 11. [Error Code Categories](#error-code-categories)
@@ -39,7 +39,7 @@ no `try`/`throw`/`catch` exception handling. Instead:
 - `T^E` declares an enforcing raised channel; callers must engage it immediately.
 - `raise` originates an error only on a declared `T^E` channel. A
   `T | error` function returns `error(...)` as an ordinary value.
-- `let value^err = e` and postfix `e^` are channel-agnostic: they discharge both
+- The `e ^ { … }` handler and postfix `e^` are channel-agnostic: they discharge both
   returned error values and raised errors through one surface.
 
 This approach is inspired by Rust's `Result<T, E>` and Zig's `T!E`, but with lighter syntax.
@@ -62,12 +62,12 @@ Lambda has a built-in `error` type with the following fields:
 ### Accessing Error Fields
 
 ```lambda
-let result^err = divide(10, 0)
-if (^err) {
-    print("code: " ++ str(err.code))
-    print("message: " ++ err.message)
-    if (err.source is error)
-        print("caused by: " ++ err.source.message)
+let result = divide(10, 0) ^ {
+    print("code: " ++ str(~.code))
+    print("message: " ++ ~.message)
+    if (~.source is error)
+        print("caused by: " ++ ~.source.message)
+    0                       // the handler's value becomes `result`
 }
 ```
 
@@ -189,8 +189,9 @@ the error possibility. Channel-agnostic forms are allowed:
 | Pattern | Meaning | Allowed? |
 |---------|---------|----------|
 | `let a = F()^` | Propagate error, bind unwrapped value | ✅ |
-| `let a^err = F()` | Capture returned or raised error explicitly | ✅ |
+| `let a = F() ^ { … ~ … }` | Handle the error here; `~` is the error | ✅ |
 | `let a: T \| error = F()` | Receive the outcome as an explicit union | ✅ |
+| `let a: T^ = F()` | Same, in the enforcing spelling | ✅ |
 | `F() or default` | Explicitly consume a falsy error | ✅ |
 | `match (F()) { case error: ... }` | Explicitly branch on the error | ✅ |
 | `F()^` | Propagate error, discard value | ✅ |
@@ -199,6 +200,12 @@ the error possibility. Channel-agnostic forms are allowed:
 
 A function returning `T | error` does not impose this must-handle rule.
 `let a = soft_F()` simply infers `a: T | error`.
+
+**Automatic containment is not acknowledgement.** An annotated binding whose
+runtime type check fails skips to the end of the enclosing block, which becomes
+that error — but that mechanism is fail-stop and blind (it cannot tell you an
+error occurred or let you inspect it). It never satisfies the must-handle rule
+for a raised `T^` channel; use one of the ✅ forms above.
 
 ---
 
@@ -236,33 +243,56 @@ fn compute(x: int) int^ {
 
 ---
 
-## Error Destructuring (`let a^err = expr`)
+## Error Handling (`e ^ { … }`)
 
-The `^` in a let binding captures the success value and every error outcome
-into separate variables, regardless of whether the error was returned or
-raised:
+The `^ { … }` handler deals with an error where it happens, instead of
+propagating it. Inside the braces, **`~` is the error** — the same `~` used in
+`match` arms and pipes:
 
 ```lambda
-let result^err = divide(10, x)
-if (^err) {
-    print("error: " ++ err.message)
-    0  // default value
-} else {
-    result * 2
+let result = divide(10, x) ^ {
+    print("error: " ++ ~.message)
+    0                       // handler value becomes `result`
 }
+result * 2
 ```
 
 **Semantics:**
-- If the expression returns or raises an error: the value variable (`result`)
-  is `null`, and the error variable (`err`) holds that error.
-- If the expression succeeds: the value variable holds the value, the error variable is `null`.
-- The success type has all error constituents removed. For an `any` source,
-  `result` has type `any \ error`; for `T | E1 ^ E2`, it has type `T` and
-  `err` admits `E1 | E2` (plus `null` on success).
-- Use `^err` (prefix `^`) to test whether the error variable is an error (see [Checking for Errors](#checking-for-errors)).
+- It is channel-agnostic: it catches an error returned in the value lane, an
+  error delivered through a raised `^E` channel, or both.
+- The handler either **produces a value** of the expected type, or **diverges**
+  — `raise`, `return`, or letting the enclosing block end. Either way the
+  binding is statically clean: on failure the code after it is not reached, so
+  `result` never holds a stand-in value for "it failed".
+- Typing mirrors `or`: the success type has all error constituents removed, then
+  unions with the handler's type. `let a: T = e ^ { … }` therefore requires the
+  handler to yield `T` or diverge.
+- The handler **must be braced**. `^` followed by `{` is a handler; `^`
+  followed by anything else is the propagation operator, so `f()^ - 1`
+  propagates and then subtracts.
 
-This is the primary way to handle either error form locally rather than
-propagating it.
+Use `x is error` to test whether a value is an error (see
+[Checking for Errors](#checking-for-errors)).
+
+### Choosing a form
+
+| Form | Catches | Error accessible? |
+|------|---------|-------------------|
+| `e or default` | any falsy: error, `null`, `false`, `""` | no |
+| `e ^ { … ~ … }` | errors only | yes, as `~` |
+| `e^` | errors only | no — propagates to the caller |
+| `match e { case error: … }` | errors only, with a full success arm | yes, as `~` |
+
+`or` is the terse default when you do not care *why* it failed; `^ { }` is the
+precise instrument when you do — and unlike `or`, it will not silently swallow
+a legitimate `null` or `""`.
+
+> **Migrating from `let a^err = e`.** The destructure form has been retired: it
+> left `a` as `null` on failure while its static type claimed `T`, so unchecked
+> use produced silent null-contaminated results. Rewrite
+> `let a^err = e; if (^err) { H } else { B }` as `let a = e ^ { H }` followed by
+> `B`, or use `match` when both outcomes want full arms. The prefix test
+> `if (^err)` is likewise retired in favour of `if (err is error)`.
 
 ---
 
@@ -303,7 +333,8 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
 |--------|--------|----------|---------|------------|
 | **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | `^E`: ❌; `T \| error`: flows as data |
 | **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()^` |
-| **Destructure error** | `val, err := f()` | `match` on `Result` | `catch \|err\|` | `let val^err = f()` |
+| **Handle error locally** | `val, err := f()` | `match` / `let … else` | `catch \|err\|` | `f() ^ { … ~ … }` |
+| **Value valid when it failed?** | ⚠️ zero value in scope | ❌ not bound | ❌ not bound | ❌ not reached |
 | **Error type** | `(T, error)` tuple | `Result<T, E>` enum | `T!E` error union | `T^E` |
 | **Type preserved?** | ⚠️ Interface (erased) | ✅ Static | ✅ Static | ✅ Static |
 | **Enforcement** | Convention only | Lint attribute | Language rule | Language rule |
@@ -348,8 +379,8 @@ let data = input("file.json")
 // ✅ Propagate error
 let data = input("file.json")^
 
-// ✅ Capture error explicitly
-let data^err = input("file.json")
+// ✅ Handle error explicitly
+let data = input("file.json") ^ { log_warn(~.message); {} }
 
 // ❌ Compile error: unhandled error from 'io.mkdir'
 io.mkdir("output")
@@ -395,38 +426,28 @@ User-created errors (via `error("message")`) default to code 318 (`user_error`).
 
 ## Checking for Errors
 
-There are two ways to test whether a value is an error:
-
-### `^expr` — Error Check Shorthand
-
-The `^` prefix operator is the idiomatic way to check for errors. It returns `true` if the operand is an error, `false` otherwise:
-
-```lambda
-let result^err = divide(10, x)
-if (^err) {
-    print("Error: " ++ err.message)
-}
-```
-
-This is especially concise with error destructuring:
-
-```lambda
-let data^err = input("file.json")
-if (^err) { raise error("failed to load", err) }
-```
-
 ### `expr is error` — Type Check
 
-The `is` operator also works for error testing, and reads more naturally in some contexts:
+`is error` is the way to test whether a value is an error:
 
 ```lambda
-let result = some_operation()
+let result = some_operation()      // soft: infers T | error
 if (result is error) {
     print("Error occurred: " ++ result.message)
 }
 ```
 
-`^expr` is equivalent to `expr is error` — use whichever reads better in context.
+This applies to values that *flow* as data — a soft `T | error` result, or an
+element of a batch. When an error must be engaged rather than inspected, reach
+for `^ { }`, `^`, or `match` instead:
+
+```lambda
+let data = input("file.json") ^ { raise error("failed to load", ~) }
+```
+
+> The prefix form `^expr` has been retired. It existed mainly to test the `err`
+> variable created by `let a^err = …`, which is retired as well. Write
+> `expr is error`.
 
 ---
 
@@ -435,7 +456,7 @@ if (result is error) {
 Error values are **falsy** in Lambda. This means:
 
 - `if (err)` treats errors the same as `null` or `false` — the condition is **not** entered.
-- Use `^err` (not bare `err`) to check for errors in conditions.
+- Use `err is error` (not bare `err`) to check for errors in conditions.
 
 Because errors are falsy, the `or` operator provides a natural **default value** pattern:
 
@@ -443,21 +464,27 @@ Because errors are falsy, the `or` operator provides a natural **default value**
 // If divide returns an error, fall through to 0
 let safe_result = divide(10, x) or 0
 
-// Chain with error destructuring for logging + default
-let result^err = parse(input)
-if (^err) { print("Warning: " ++ err.message) }
-let value = result or default_value
+// Want the diagnostic as well? Use the handler — `or` cannot see why it failed
+let value = parse(input) ^ {
+    print("Warning: " ++ ~.message)
+    default_value
+}
 ```
+
+Note that `nan` is **truthy**, so `a div b or 0` does *not* rescue a zero
+divisor — guard the divisor or test `is nan`. Falsiness marks absence,
+negation, and failure; poison numbers are none of those.
 
 ### Why Errors Are Falsy
 
 | Pattern | With falsy errors | With truthy errors |
 |---------|-------------------|--------------------|
 | `err or default` | ✅ Falls through to default | ❌ Returns the error |
-| `if (^err)` | ✅ Explicit error check | — |
+| `if (err is error)` | ✅ Explicit error check | — |
 | `if (err)` | Treats error like null | Would enter the branch |
 
-Falsy errors enable the `or` default idiom and prevent accidental use of error values as truthy conditions. The `^` prefix provides an explicit, lightweight error check.
+Falsy errors enable the `or` default idiom and prevent accidental use of error
+values as truthy conditions.
 
 ### Pitfall: Bare `error` Is the Type, Not an Error Value
 
@@ -478,7 +505,7 @@ if (error) "yes" else "no"   // → "yes" — and the condition lint warns:
 **Rules of thumb:**
 
 - Only `error(...)` (the constructor), values returned/raised by failing functions, and values that test `is error` are error *values*. Bare `error` is only meaningful in **type positions** — annotations (`int | error`), `is`/`match` right-hand sides, and schemas.
-- `x is error` is the classification test; `^x` is its shorthand. Both operate on `x`'s *value*. Writing the type on the left (`error is error`) asks whether the type itself is an error value — it is not.
+- `x is error` is the classification test, operating on `x`'s *value*. Writing the type on the left (`error is error`) asks whether the type itself is an error value — it is not.
 - The `if (error)` case is caught by the condition lint; `error or 0` currently is not, so a stray bare `error` in an `or` chain silently yields the type. If an `or` chain unexpectedly produces the literal output `error`, look for a missing constructor call.
 
 ---
@@ -496,10 +523,10 @@ fn may_fail(x) int^ {
 // Propagate with ^
 may_fail(5)^
 
-// Destructure to handle locally
-let result^err = may_fail(-1)
-if (^err) {
-    print("Got error: " ++ err.message)  // "negative input"
+// Handle locally with ^ { }
+let result = may_fail(-1) ^ {
+    print("Got error: " ++ ~.message)    // "negative input"
+    0                                     // fallback value
 }
 ```
 
@@ -529,14 +556,12 @@ fn process_file(path: string) ProcessedData^ {
 
 ```lambda
 fn load_config(path: string) Config^ {
-    let content^file_err = input(path, 'text')
-    if (^file_err)
-        raise error("failed to read config file", file_err)
-
-    let parsed^parse_err = input(content, 'json')
-    if (^parse_err)
-        raise error("invalid JSON in config", parse_err)
-
+    let content = input(path, 'text') ^ {
+        raise error("failed to read config file", ~)
+    }
+    let parsed = input(content, 'json') ^ {
+        raise error("invalid JSON in config", ~)
+    }
     parsed
 }
 ```
@@ -548,10 +573,9 @@ pn main() {
     let config = input("config.json", 'json')^
 
     for item in config.items {
-        let result^err = process(item)
-        if (^err) {
-            print("Warning: " ++ err.message)
-            continue
+        let result = process(item) ^ {
+            print("Warning: " ++ ~.message)
+            continue                       // handler may diverge
         }
         output(result, "output/" ++ item.name ++ ".json")^
     }
@@ -571,8 +595,8 @@ pn main() {
 | Create error | `error("message")` | Construct error value |
 | Raise error | `raise error("...")` | Originate error on a declared `^E` channel |
 | Propagate error | `e^` | Strip success errors or propagate any error outcome |
-| Capture error | `let val^err = e` | Destructure returned and raised errors |
-| Check for error | `^err` or `x is error` | Test if value is an error |
+| Handle error | `e ^ { … ~ … }` | Handle returned and raised errors; `~` is the error |
+| Check for error | `x is error` | Test if a value is an error |
 | Default on error | `expr or default` | Errors are falsy, fall through to default |
 
 Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`^` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.

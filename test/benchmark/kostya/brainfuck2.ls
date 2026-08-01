@@ -41,11 +41,11 @@ pn run_bf(prog: string, prog_len: int, jumps: int[]) string {
         var op: int = ord(prog[ip])
         if (op == 43) {
             // '+'
-            tape[dp] = int((tape[dp] + 1) % 256)
+            tape[dp] = (tape[dp] + 1) % 256
         }
         if (op == 45) {
             // '-'
-            tape[dp] = int((tape[dp] + 255) % 256)
+            tape[dp] = (tape[dp] + 255) % 256
         }
         if (op == 62) {
             // '>'

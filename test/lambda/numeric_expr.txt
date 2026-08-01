@@ -36,9 +36,9 @@
 0
 39
 "Modulo by Zero (errors):"
-inf
-nan
-inf
+int.nan
+int.nan
+int.nan
 "Modulo with Boolean/Null (errors):"
 error
 error
@@ -78,8 +78,8 @@ error
 "Division by Zero:"
 inf
 nan
-inf
-nan
+int.inf
+int.nan
 "Boolean Arithmetic (errors):"
 error
 error

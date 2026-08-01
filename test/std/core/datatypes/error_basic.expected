@@ -4,6 +4,6 @@ true
 0
 42
 error
-inf
+int.nan
 10
 true
