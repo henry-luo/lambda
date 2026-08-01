@@ -9,10 +9,13 @@ Usage:
 
 import argparse
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import time
+
+TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -55,6 +58,29 @@ def command_package(suite, name):
     return f"./cmd/{suite}/{name}"
 
 
+def has_port(suite, name):
+    """Whether a Go port exists for one benchmark row."""
+    return name in SUITES.get(suite, ())
+
+
+def build_binary(go, suite, name, build_dir):
+    """Build one port. Returns (executable_path, error_text_or_None)."""
+    executable = build_dir / f"{suite}_{name}"
+    build = subprocess.run(
+        [go, "-C", str(GO_ROOT), "build", "-o", str(executable), command_package(suite, name)],
+        cwd=PROJECT_ROOT, capture_output=True, text=True,
+    )
+    if build.returncode != 0:
+        return None, build.stderr.strip() or f"go build exited {build.returncode}"
+    return executable, None
+
+
+def parse_timing(stdout):
+    """Return the self-reported workload milliseconds, or None."""
+    match = TIMING_RE.search(stdout)
+    return float(match.group(1)) if match else None
+
+
 def main():
     args = parse_args()
     selected_suites = args.suite or list(SUITES)
@@ -74,18 +100,12 @@ def main():
     for suite in selected_suites:
         print(f"{suite}:")
         for name in SUITES[suite]:
-            label = name if suite == "standalone" else f"{suite}/{name}"
-            executable = args.build_dir / label.replace("/", "_")
-            build = subprocess.run(
-                [go, "-C", str(GO_ROOT), "build", "-o", str(executable), command_package(suite, name)],
-                cwd=PROJECT_ROOT, capture_output=True, text=True,
-            )
+            executable, build_error = build_binary(go, suite, name, args.build_dir)
             total += 1
-            if build.returncode != 0:
+            if build_error is not None:
                 failures += 1
                 print(f"  {name:<16} BUILD FAIL")
-                if build.stderr.strip():
-                    print(f"    stderr: {build.stderr.strip()}")
+                print(f"    stderr: {build_error}")
                 continue
             started = time.perf_counter()
             try:
@@ -96,7 +116,12 @@ def main():
                 failures += 1
                 print(f"  {name:<16} TIMEOUT")
                 continue
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            wall_ms = (time.perf_counter() - started) * 1000.0
+            # workload-only time when the port reported it. Process wall time is
+            # not usable here: a freshly built binary pays a few hundred ms of
+            # first-launch verification on macOS, which dwarfs most workloads.
+            body_ms = parse_timing(result.stdout)
+            elapsed_ms = body_ms if body_ms is not None else wall_ms
             if result.returncode == 0:
                 print(f"  {name:<16} PASS  {elapsed_ms:8.2f} ms")
             else:

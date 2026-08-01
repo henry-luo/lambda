@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func fib(n int) int {
@@ -169,7 +170,15 @@ func runR7RS(name string) bool {
 		fmt.Printf("fft: %s\n", pass(ok))
 		return ok
 	case "mbrot":
-		value := mbrotCount(-1.0, -0.5, 0.005, 0, 0)
+		// r7rs/mbrot2.ls fills a 75x75 matrix and reads back (0,0); counting a
+		// single point measured 1/5625 of the workload the other engines run.
+		var matrix [75][75]int
+		for y := 74; y >= 0; y-- {
+			for x := 74; x >= 0; x-- {
+				matrix[x][y] = mbrotCount(-1.0, -0.5, 0.005, x, y)
+			}
+		}
+		value := matrix[0][0]
 		fmt.Printf("mbrot: %s\n", pass(value == 5))
 		return value == 5
 	case "ack":
@@ -3368,7 +3377,19 @@ func runJetStream(name string) bool {
 	}
 }
 
+// Run times the workload and reports it as __TIMING__ milliseconds, the same
+// marker the Lambda/JS/Python ports emit. Timing here rather than around the
+// whole process excludes Go runtime startup, which would otherwise be a large
+// fraction of the sub-10ms benchmarks and make the column incomparable with
+// the Lambda exec_ms values it is meant to bound.
 func Run(suite, name string) bool {
+	started := time.Now()
+	ok := dispatch(suite, name)
+	fmt.Printf("__TIMING__:%.6f\n", float64(time.Since(started).Nanoseconds())/1e6)
+	return ok
+}
+
+func dispatch(suite, name string) bool {
 	switch suite {
 	case "r7rs":
 		return runR7RS(name)
