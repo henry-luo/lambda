@@ -661,11 +661,10 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
 
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
-    int metadata_count = 0;
-    for (int fi = 0; fi < ce->instance_field_count; fi++) {
-        JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-        if (!inf->computed && inf->name) metadata_count++;
-    }
+    // Default derived constructors initialize from this runtime metadata. Keep
+    // computed fields in declaration order too; their keys are published once
+    // class evaluation has completed below.
+    int metadata_count = ce->instance_field_count;
     for (int mi = 0; mi < ce->method_count; mi++) {
         JsClassMethodEntry* me = &ce->methods[mi];
         if (!me->is_static && !me->is_constructor && me->name && jm_is_private_name(me->name)) {
@@ -701,10 +700,20 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
     int metadata_index = 0;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
         JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-        if (inf->computed || !inf->name) continue;
-        String* field_name = jm_class_private_name(mt, ce, inf->name);
-        metadata_names[metadata_index] = field_name->chars;
-        metadata_lens[metadata_index] = (int)field_name->len;
+        if (inf->computed) {
+            // The placeholder cannot escape class evaluation: each computed
+            // key is replaced from its module slot before construction starts.
+            metadata_names[metadata_index] = "__computed_class_field__";
+            metadata_lens[metadata_index] = 24;
+        } else if (inf->name) {
+            String* field_name = jm_class_private_name(mt, ce, inf->name);
+            metadata_names[metadata_index] = field_name->chars;
+            metadata_lens[metadata_index] = (int)field_name->len;
+        } else {
+            log_error("js-mir: instance metadata missing field name at index %d", fi);
+            mt->collection_failed = true;
+            return;
+        }
         metadata_index++;
     }
     for (int mi = 0; mi < ce->method_count; mi++) {
@@ -747,7 +756,6 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
     metadata_index = 0;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
         JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-        if (inf->computed || !inf->name) continue;
         if (inf->initializer && inf->initializer->node_type == JS_AST_NODE_LITERAL) {
             MIR_reg_t field_val = jm_transpile_box_item(mt, inf->initializer);
             jm_call_void_3(mt, "js_set_class_instance_field_metadata_value",
@@ -756,6 +764,21 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, field_val));
         }
         metadata_index++;
+    }
+}
+
+void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
+    MIR_reg_t cls_obj, JsClassEntry* ce) {
+    if (!mt || !ce) return;
+    for (int fi = 0; fi < ce->instance_field_count; fi++) {
+        JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
+        if (!inf->computed || inf->key_module_var_index < 0) continue;
+        MIR_reg_t key = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inf->key_module_var_index));
+        jm_call_void_3(mt, "js_set_class_instance_field_metadata_key",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, fi),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
 }
 
@@ -14209,6 +14232,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     }
                 }
             }
+
+            jm_emit_class_instance_computed_field_metadata_keys(mt, cls_obj, ce);
 
             // Emit static field initializers for class expressions
             if (ctor_super_val) {

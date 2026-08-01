@@ -1089,6 +1089,10 @@ bool dom_element_clear_pseudo_styles(DomElement* element);
 /** Return whether target is root or one of root's DOM descendants. */
 bool dom_subtree_contains_node(DomNode* root, DomNode* target);
 
+/** Replace a linked DOM child without rebuilding the surrounding sibling chain. */
+bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child,
+                                DomNode* new_child);
+
 // ============================================================================
 // Utility Functions
 // ============================================================================

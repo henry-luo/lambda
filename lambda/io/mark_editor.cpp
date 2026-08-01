@@ -137,6 +137,14 @@ static DomNode* mark_editor_create_relinked_ui_child(DomElement* parent, Item ch
     return static_cast<DomNode*>(DomText::create(string_value, parent));
 }
 
+static int mark_editor_relinked_node_index(ArrayList* nodes, DomNode* candidate) {
+    if (!nodes || !candidate) return -1;
+    for (int i = 0; i < arraylist_length(nodes); i++) {
+        if ((DomNode*)arraylist_get(nodes, i) == candidate) return i;
+    }
+    return -1;
+}
+
 //==============================================================================
 // Constructor / Destructor
 //==============================================================================
@@ -210,10 +218,22 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
     DomElement* parent = element_to_dom_element(parent_elem);
     if (!parent) return;
     DomNode* old_first = parent->first_child;
+    ArrayList* old_nodes = arraylist_new(8);
     ArrayList* relinked_nodes = arraylist_new((int)parent_elem->length);
-    if (!relinked_nodes) {
+    if (!old_nodes || !relinked_nodes) {
         log_error("mark_editor_dom_relink: failed to allocate child list");
+        if (old_nodes) arraylist_free(old_nodes);
+        if (relinked_nodes) arraylist_free(relinked_nodes);
         return;
+    }
+
+    for (DomNode* node = old_first; node; node = node->next_sibling) {
+        if (!arraylist_append(old_nodes, node)) {
+            log_error("mark_editor_dom_relink: failed to snapshot child list");
+            arraylist_free(old_nodes);
+            arraylist_free(relinked_nodes);
+            return;
+        }
     }
 
     // Select every node before rewriting links: an inline Mark mutation must
@@ -227,6 +247,43 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
         }
         if (node && !arraylist_append(relinked_nodes, node)) {
             log_error("mark_editor_dom_relink: failed to record child node");
+            arraylist_free(old_nodes);
+            arraylist_free(relinked_nodes);
+            return;
+        }
+    }
+
+    // Mark-backed edits rebuild from Element::items and would otherwise drop
+    // DOM-only nodes such as createComment() results from the sibling chain.
+    // Reinsert each survivor after its nearest preceding old sibling so new
+    // backed children retain the DOM position established by the mutation.
+    for (int i = 0; i < arraylist_length(old_nodes); i++) {
+        DomNode* node = (DomNode*)arraylist_get(old_nodes, i);
+        if (!node || node->parent != parent ||
+            mark_editor_relinked_node_index(relinked_nodes, node) >= 0) continue;
+        int insert_index = -1;
+        for (int prev = i - 1; prev >= 0; prev--) {
+            int previous_index = mark_editor_relinked_node_index(relinked_nodes,
+                (DomNode*)arraylist_get(old_nodes, prev));
+            if (previous_index >= 0) {
+                insert_index = previous_index + 1;
+                break;
+            }
+        }
+        if (insert_index < 0) {
+            for (int next = i + 1; next < arraylist_length(old_nodes); next++) {
+                int next_index = mark_editor_relinked_node_index(relinked_nodes,
+                    (DomNode*)arraylist_get(old_nodes, next));
+                if (next_index >= 0) {
+                    insert_index = next_index;
+                    break;
+                }
+            }
+        }
+        if (insert_index < 0) insert_index = 0;
+        if (!arraylist_insert(relinked_nodes, insert_index, node)) {
+            log_error("mark_editor_dom_relink: failed to preserve DOM-only child");
+            arraylist_free(old_nodes);
             arraylist_free(relinked_nodes);
             return;
         }
@@ -248,6 +305,7 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
         parent->last_child = node;
         prev = node;
     }
+    arraylist_free(old_nodes);
     arraylist_free(relinked_nodes);
 }
 

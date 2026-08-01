@@ -5561,6 +5561,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         }
                     }
 
+                    jm_emit_class_instance_computed_field_metadata_keys(mt, cls_obj, ce);
+
                     // Emit static field initializers
                     if (ctor_super_val) {
                         jm_call_void_2(mt, "js_set_prototype",
