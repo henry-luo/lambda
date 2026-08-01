@@ -93,7 +93,7 @@ static void layout_collect_physical_spacing_candidates(
     LayoutPercentageSpacingCandidate* left) {
     if (!block || !block->specified_style) return;
 
-    CssPropertyId shorthand = margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING;
+    CssPropertyCode shorthand = margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING;
     CssDeclaration* decl = style_tree_get_declaration(block->specified_style, shorthand);
     if (decl && decl->value) {
         layout_consider_percentage_spacing_candidate(top, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 0));
@@ -102,10 +102,10 @@ static void layout_collect_physical_spacing_candidates(
         layout_consider_percentage_spacing_candidate(left, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 3));
     }
 
-    CssPropertyId prop_top = margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP;
-    CssPropertyId prop_right = margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT;
-    CssPropertyId prop_bottom = margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM;
-    CssPropertyId prop_left = margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT;
+    CssPropertyCode prop_top = margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP;
+    CssPropertyCode prop_right = margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT;
+    CssPropertyCode prop_bottom = margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM;
+    CssPropertyCode prop_left = margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT;
 
     CssDeclaration* side_decl = style_tree_get_declaration(block->specified_style, prop_top);
     layout_consider_percentage_spacing_candidate(top, side_decl, side_decl ? side_decl->value : nullptr);
@@ -126,29 +126,29 @@ static void layout_collect_logical_spacing_candidates(
     LayoutPercentageSpacingCandidate* left) {
     if (!block || !block->specified_style) return;
 
-    CssPropertyId inline_prop = margin ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
+    CssPropertyCode inline_prop = margin ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
     CssDeclaration* decl = style_tree_get_declaration(block->specified_style, inline_prop);
     if (decl && decl->value) {
         layout_consider_percentage_spacing_candidate(left, decl, layout_pair_spacing_value(decl->value, false));
         layout_consider_percentage_spacing_candidate(right, decl, layout_pair_spacing_value(decl->value, true));
     }
 
-    CssPropertyId inline_start = margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START;
-    CssPropertyId inline_end = margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END;
+    CssPropertyCode inline_start = margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START;
+    CssPropertyCode inline_end = margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END;
     decl = style_tree_get_declaration(block->specified_style, inline_start);
     layout_consider_percentage_spacing_candidate(left, decl, decl ? decl->value : nullptr);
     decl = style_tree_get_declaration(block->specified_style, inline_end);
     layout_consider_percentage_spacing_candidate(right, decl, decl ? decl->value : nullptr);
 
-    CssPropertyId block_prop = margin ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
+    CssPropertyCode block_prop = margin ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
     decl = style_tree_get_declaration(block->specified_style, block_prop);
     if (decl && decl->value) {
         layout_consider_percentage_spacing_candidate(top, decl, layout_pair_spacing_value(decl->value, false));
         layout_consider_percentage_spacing_candidate(bottom, decl, layout_pair_spacing_value(decl->value, true));
     }
 
-    CssPropertyId block_start = margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START;
-    CssPropertyId block_end = margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END;
+    CssPropertyCode block_start = margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START;
+    CssPropertyCode block_end = margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END;
     decl = style_tree_get_declaration(block->specified_style, block_start);
     layout_consider_percentage_spacing_candidate(top, decl, decl ? decl->value : nullptr);
     decl = style_tree_get_declaration(block->specified_style, block_end);
@@ -195,7 +195,7 @@ float layout_block_given_content_size(ViewBlock* block, bool horizontal) {
     return content_size >= 0.0f ? content_size : 0.0f;
 }
 
-float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyId property, bool horizontal) {
+float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal) {
     if (!lycon || !block || !block->specified_style) return -1.0f;
     CssDeclaration* decl = style_tree_get_declaration(block->specified_style, property);
     if (!decl || !decl->value) return -1.0f;

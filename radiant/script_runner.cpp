@@ -1248,6 +1248,10 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         // capability so libraries select their pointer branch in headless UI.
         "var navigator = {\n"
         "  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"
+        // SVG libraries retain the legacy appName probe when selecting their
+        // browser path; the preamble replaces navigator, so it must preserve
+        // that standard string property as well as the native global does.
+        "  appName: 'Netscape',\n"
         // Navigator.appVersion is legacy but still synchronously string-sniffed
         // by established UI libraries such as noUiSlider.
         "  appVersion: '5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"

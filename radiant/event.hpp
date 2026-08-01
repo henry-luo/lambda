@@ -3190,6 +3190,11 @@ void form_control_set_range_value(DocState* state, View* view, float value);
 // ============================================================================
 
 /**
+ * Check whether an element participates in the HTML disabled/enabled state.
+ */
+bool form_control_supports_disabled_state(View* view);
+
+/**
  * Check if a form control is disabled.
  */
 bool form_control_is_disabled(DocState* state, View* view);

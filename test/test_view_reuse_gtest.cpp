@@ -334,7 +334,7 @@ protected:
         return child;
     }
 
-    CssRule* rule(CssPropertyId property, CssValue* value,
+    CssRule* rule(CssPropertyCode property, CssValue* value,
                   uint32_t source_order = 1) {
         CssDeclaration* declaration = css_declaration_create(
             property, value, {}, CSS_ORIGIN_AUTHOR, doc.document_pool);

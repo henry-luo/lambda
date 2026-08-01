@@ -49,17 +49,17 @@ static bool was_specified_inline(DomElement* elem) {
         // No explicit display property — check if the element defaults to inline.
         // Per HTML spec, phrasing content elements (span, a, em, strong, etc.)
         // default to display:inline.
-        uintptr_t tag = elem->tag_id;
-        return (tag == HTM_TAG_SPAN || tag == HTM_TAG_A ||
-                tag == HTM_TAG_EM || tag == HTM_TAG_STRONG ||
-                tag == HTM_TAG_B || tag == HTM_TAG_I ||
-                tag == HTM_TAG_U || tag == HTM_TAG_S ||
-                tag == HTM_TAG_SMALL || tag == HTM_TAG_CODE ||
-                tag == HTM_TAG_SUB || tag == HTM_TAG_SUP ||
-                tag == HTM_TAG_ABBR || tag == HTM_TAG_CITE ||
-                tag == HTM_TAG_Q || tag == HTM_TAG_VAR ||
-                tag == HTM_TAG_TIME || tag == HTM_TAG_MARK ||
-                tag == HTM_TAG_BDO || tag == HTM_TAG_BDI);
+        NameId tag = elem->tag_id;
+        return (tag == MARKUP_NAME_SPAN || tag == MARKUP_NAME_A ||
+                tag == MARKUP_NAME_EM || tag == MARKUP_NAME_STRONG ||
+                tag == MARKUP_NAME_B || tag == MARKUP_NAME_I ||
+                tag == MARKUP_NAME_U || tag == MARKUP_NAME_S ||
+                tag == MARKUP_NAME_SMALL || tag == MARKUP_NAME_CODE ||
+                tag == MARKUP_NAME_SUB || tag == MARKUP_NAME_SUP ||
+                tag == MARKUP_NAME_ABBR || tag == MARKUP_NAME_CITE ||
+                tag == MARKUP_NAME_Q || tag == MARKUP_NAME_VAR ||
+                tag == MARKUP_NAME_TIME || tag == MARKUP_NAME_MARK ||
+                tag == MARKUP_NAME_BDO || tag == MARKUP_NAME_BDI);
     }
     return false;
 }
@@ -558,9 +558,9 @@ static bool positioned_element_is_replaced(ViewBlock* block) {
     bool is_form_control =
         block->form_control();
     return block->display.inner == RDT_DISPLAY_REPLACED ||
-        block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
-        block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
+        block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
+        block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+        (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
         is_form_control;
 }
 
@@ -684,8 +684,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
     // Replaced elements include iframe (300x150), img (intrinsic from image).
     if (block->display.inner == RDT_DISPLAY_REPLACED) {
-        uintptr_t tag = block->tag();
-        if (tag == HTM_TAG_IFRAME) {
+        NameId tag = block->tag();
+        if (tag == MARKUP_NAME_IFRAME) {
             IntrinsicSize replaced_size = layout_measure_replaced(lycon, block, lycon->available_space);
             if (lycon->block.given_width < 0) {
                 lycon->block.given_width = replaced_size.max_width > 0.0f ? replaced_size.max_width : 300.0f;
@@ -1230,8 +1230,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     calculate_absolute_position(lycon, block, cb, pa_block, pa_line);
 
     // Load image for IMG elements - same as layout_block does for regular flow
-    uintptr_t elmt_name = block->tag();
-    if (elmt_name == HTM_TAG_IMG) {
+    NameId elmt_name = block->tag();
+    if (elmt_name == MARKUP_NAME_IMG) {
         log_debug("[ABS IMG] Loading image for absolutely positioned IMG element");
         const char *value = block->get_attribute("src");
         if (value) {

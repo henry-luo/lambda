@@ -10,3 +10,8 @@ t7:secret
 t7b:true
 t8:false
 t8b:symbol
+t9:A,B,ordinary
+t10:true,registry
+t11:true,3
+t11b:__sym_103
+t12:array,true

@@ -160,10 +160,14 @@ def main():
         includes = ";".join(meta["includes"])
         features = ";".join(meta["features"])
 
-        # native harness eligibility: no includes, not negative, no Test262Error in source
+        # Dynamically compiled source resolves harness globals at runtime, where
+        # native interception is unavailable and would leave `assert` undefined.
+        # Keep those tests on the JS-harness path even when their metadata has no
+        # explicit includes.
         native = 0
         if not meta["includes"] and not meta["is_negative"]:
-            if "Test262Error" not in source:
+            if ("Test262Error" not in source
+                    and not re.search(r"\b(?:eval|Function)\b", source)):
                 native = 1
 
         results.append((path, flags, meta["neg_phase"], meta["neg_type"], includes, features, native))

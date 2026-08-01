@@ -161,9 +161,8 @@ static const char* fd_compute_dirname_direction(DomElement* elem, const char* va
     return "ltr";
 }
 
-// Symbol.iterator key: "__sym_1" (Symbol.iterator = ID 1 in this engine)
 static inline Item make_sym_iterator_key() {
-    return make_str("__sym_1");
+    return js_well_known_symbol_key(1);
 }
 
 // Internal entries array key

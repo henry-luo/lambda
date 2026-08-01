@@ -19,8 +19,8 @@
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 static bool css_value_is_background_color_candidate(const CssValue* value);
-static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value);
-static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value);
+static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyCode prop_id, const CssValue* value);
+static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyCode prop_id, const CssValue* value);
 
 static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
@@ -115,7 +115,7 @@ static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interv
 }
 
 static bool shorthand_overrides_longhand(LayoutContext* lycon,
-                                         CssPropertyId shorthand_id,
+                                         CssPropertyCode shorthand_id,
                                          const CssDeclaration* longhand,
                                          const char* longhand_name) {
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
@@ -268,7 +268,7 @@ static void resolve_counter_property(LayoutContext* lycon, const CssValue* value
 }
 
 static void resolve_background_position_axis(LayoutContext* lycon,
-                                             CssPropertyId property,
+                                             CssPropertyCode property,
                                              const CssValue* value,
                                              BackgroundProp* background,
                                              bool horizontal) {
@@ -388,7 +388,7 @@ static int64_t* border_side_color_specificity(BorderProp* border, CssBoxSide sid
     return &border->top_color_specificity;
 }
 
-static CssPropertyId border_side_width_property(CssBoxSide side) {
+static CssPropertyCode border_side_width_property(CssBoxSide side) {
     switch (side) {
         case CSS_BOX_SIDE_TOP: return CSS_PROPERTY_BORDER_TOP_WIDTH;
         case CSS_BOX_SIDE_RIGHT: return CSS_PROPERTY_BORDER_RIGHT_WIDTH;
@@ -406,7 +406,7 @@ static BorderProp* parent_border_prop(LayoutContext* lycon) {
 }
 
 static void resolve_border_side_width(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
-                                      CssPropertyId prop_id, const CssValue* value, int64_t specificity) {
+                                      CssPropertyCode prop_id, const CssValue* value, int64_t specificity) {
     BorderProp* border = ensure_span_border(lycon, span);
     float* width_slot = border_side_width(border, side);
     int64_t* width_spec = border_side_width_specificity(border, side);
@@ -524,14 +524,14 @@ static void set_margin_side(Margin* margin, CssBoxSide side, float margin_value,
 }
 
 static void resolve_margin_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
-                                CssPropertyId prop_id, const CssValue* value, int64_t specificity) {
+                                CssPropertyCode prop_id, const CssValue* value, int64_t specificity) {
     BoundaryProp* bound = ensure_span_bound(lycon, span);
     float margin_value = resolve_margin_with_inherit(lycon, prop_id, value);
     set_margin_side(&bound->margin, side, margin_value, css_value_axis_type(value), specificity);
 }
 
 static void resolve_margin_pair(LayoutContext* lycon, ViewSpan* span, CssBoxSide first_side,
-                                CssBoxSide second_side, CssPropertyId prop_id,
+                                CssBoxSide second_side, CssPropertyCode prop_id,
                                 const CssValue* value, int64_t specificity) {
     BoundaryProp* bound = ensure_span_bound(lycon, span);
     float margin_value = resolve_margin_with_inherit(lycon, prop_id, value);
@@ -549,13 +549,13 @@ static void set_padding_side(Spacing* padding, CssBoxSide side, float padding_va
 }
 
 static void resolve_padding_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
-                                 CssPropertyId prop_id, const CssValue* value, int64_t specificity) {
+                                 CssPropertyCode prop_id, const CssValue* value, int64_t specificity) {
     BoundaryProp* bound = ensure_span_bound(lycon, span);
     set_padding_side(&bound->padding, side, resolve_padding_with_inherit(lycon, prop_id, value), specificity);
 }
 
 static void resolve_padding_pair(LayoutContext* lycon, ViewSpan* span, CssBoxSide first_side,
-                                 CssBoxSide second_side, CssPropertyId prop_id,
+                                 CssBoxSide second_side, CssPropertyCode prop_id,
                                  const CssValue* value, int64_t specificity) {
     BoundaryProp* bound = ensure_span_bound(lycon, span);
     float padding_value = resolve_padding_with_inherit(lycon, prop_id, value);
@@ -641,7 +641,7 @@ typedef struct ResolvedInsetValue {
 } ResolvedInsetValue;
 
 static ResolvedInsetValue resolve_inset_value(LayoutContext* lycon,
-                                              CssPropertyId prop_id,
+                                              CssPropertyCode prop_id,
                                               const CssValue* value) {
     ResolvedInsetValue resolved = {
         resolve_length_value(lycon, prop_id, value), NAN, true
@@ -658,7 +658,7 @@ static ResolvedInsetValue resolve_inset_value(LayoutContext* lycon,
 }
 
 static void resolve_inset_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide side,
-                               CssPropertyId prop_id, const CssValue* value,
+                               CssPropertyCode prop_id, const CssValue* value,
                                bool inherit_from_parent) {
     PositionProp* position = ensure_span_position(lycon, span);
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -678,7 +678,7 @@ static void resolve_inset_side(LayoutContext* lycon, ViewSpan* span, CssBoxSide 
 }
 
 static void resolve_inset_pair(LayoutContext* lycon, ViewSpan* span, CssBoxSide first_side,
-                               CssBoxSide second_side, CssPropertyId prop_id,
+                               CssBoxSide second_side, CssPropertyCode prop_id,
                                const CssValue* value) {
     PositionProp* position = ensure_span_position(lycon, span);
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword != CSS_VALUE_INHERIT) {
@@ -1788,7 +1788,7 @@ static bool css_line_decoration_style(CssEnum keyword) {
 }
 
 static void resolve_css_line_decoration_component(LayoutContext* lycon,
-                                                  CssPropertyId prop_id,
+                                                  CssPropertyCode prop_id,
                                                   const CssValue* value,
                                                   float* width,
                                                   CssEnum* style,
@@ -2666,7 +2666,7 @@ DisplayValue resolve_display_value(void* child) {
     if (node && node->is_element()) {
         // resolve display from CSS if available
         DomElement* dom_elem = node->as_element();
-        uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
+        NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
 
         log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->source_loc());
 
@@ -2702,8 +2702,8 @@ DisplayValue resolve_display_value(void* child) {
         // layout paths including flex and grid when CSS overrides display.
         if (node->parent && node->parent->is_element()) {
             DomElement* parent_elem = node->parent->as_element();
-            if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->has_attribute("open")) {
-                if (tag_id != HTM_TAG_SUMMARY) {
+            if (parent_elem->tag() == MARKUP_NAME_DETAILS && !parent_elem->has_attribute(MARKUP_NAME_OPEN)) {
+                if (tag_id != MARKUP_NAME_SUMMARY) {
                     DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
                     return none_display;
                 }
@@ -2713,7 +2713,7 @@ DisplayValue resolve_display_value(void* child) {
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
         // when display:none is set by UA defaults for hidden inputs, respect it
-        if (dom_elem && tag_id == HTM_TAG_INPUT) {
+        if (dom_elem && tag_id == MARKUP_NAME_INPUT) {
             const char* type_attr = dom_elem->get_attribute("type");
             if (type_attr && (strcmp(type_attr, "hidden") == 0)) {
                 DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
@@ -2741,16 +2741,16 @@ DisplayValue resolve_display_value(void* child) {
         // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
         // Note: <button> is NOT replaced — it contains flow content (text, spans, etc.)
         // per HTML spec. Its children are laid out normally via CSS_VALUE_FLOW.
-        bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
-                            tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-                            tag_id == HTM_TAG_TEXTAREA ||
-                            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
-                            tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
-                            tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
-                            tag_id == HTM_TAG_WEBVIEW ||
-                            (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
-                            (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
-                            tag_id == HTM_TAG_EMBED);
+        bool is_replaced = (tag_id == MARKUP_NAME_IMG || tag_id == MARKUP_NAME_VIDEO ||
+                            tag_id == MARKUP_NAME_INPUT || tag_id == MARKUP_NAME_SELECT ||
+                            tag_id == MARKUP_NAME_TEXTAREA ||
+                            tag_id == MARKUP_NAME_IFRAME || tag_id == MARKUP_NAME_HR ||
+                            tag_id == MARKUP_NAME_SVG || tag_id == MARKUP_NAME_METER ||
+                            tag_id == MARKUP_NAME_PROGRESS || tag_id == MARKUP_NAME_CANVAS ||
+                            tag_id == MARKUP_NAME_WEBVIEW ||
+                            (tag_id == MARKUP_NAME_OBJECT && dom_elem && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
+                            (tag_id == MARKUP_NAME_AUDIO && dom_elem && dom_elem->has_attribute(MARKUP_NAME_CONTROLS)) ||
+                            tag_id == MARKUP_NAME_EMBED);
         if (dom_elem && dom_elem->specified_style) {
             CssDeclaration* content_decl = style_tree_get_declaration(
                 dom_elem->specified_style, CSS_PROPERTY_CONTENT);
@@ -3039,92 +3039,92 @@ DisplayValue resolve_display_value(void* child) {
         }
 
         // Fall back to default display values based on tag ID
-        if (tag_id == HTM_TAG_HTML || tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
-            tag_id == HTM_TAG_H2 || tag_id == HTM_TAG_H3 ||
-            tag_id == HTM_TAG_H4 || tag_id == HTM_TAG_H5 ||
-            tag_id == HTM_TAG_H6 || tag_id == HTM_TAG_P ||
-            tag_id == HTM_TAG_DIV || tag_id == HTM_TAG_CENTER ||
-            tag_id == HTM_TAG_UL || tag_id == HTM_TAG_OL ||
-            tag_id == HTM_TAG_DL || tag_id == HTM_TAG_DT || tag_id == HTM_TAG_DD ||
-            tag_id == HTM_TAG_HEADER || tag_id == HTM_TAG_MAIN ||
-            tag_id == HTM_TAG_SECTION || tag_id == HTM_TAG_FOOTER ||
-            tag_id == HTM_TAG_ARTICLE || tag_id == HTM_TAG_ASIDE ||
-            tag_id == HTM_TAG_NAV || tag_id == HTM_TAG_ADDRESS ||
-            tag_id == HTM_TAG_BLOCKQUOTE || tag_id == HTM_TAG_DETAILS ||
-            tag_id == HTM_TAG_DIALOG || tag_id == HTM_TAG_FIGURE ||
-            tag_id == HTM_TAG_FIGCAPTION || tag_id == HTM_TAG_HGROUP ||
-            tag_id == HTM_TAG_PRE || tag_id == HTM_TAG_FIELDSET ||
-            tag_id == HTM_TAG_LEGEND || tag_id == HTM_TAG_FORM ||
-            tag_id == HTM_TAG_MENU) {
+        if (tag_id == MARKUP_NAME_HTML || tag_id == MARKUP_NAME_BODY || tag_id == MARKUP_NAME_H1 ||
+            tag_id == MARKUP_NAME_H2 || tag_id == MARKUP_NAME_H3 ||
+            tag_id == MARKUP_NAME_H4 || tag_id == MARKUP_NAME_H5 ||
+            tag_id == MARKUP_NAME_H6 || tag_id == MARKUP_NAME_P ||
+            tag_id == MARKUP_NAME_DIV || tag_id == MARKUP_NAME_CENTER ||
+            tag_id == MARKUP_NAME_UL || tag_id == MARKUP_NAME_OL ||
+            tag_id == MARKUP_NAME_DL || tag_id == MARKUP_NAME_DT || tag_id == MARKUP_NAME_DD ||
+            tag_id == MARKUP_NAME_HEADER || tag_id == MARKUP_NAME_MAIN ||
+            tag_id == MARKUP_NAME_SECTION || tag_id == MARKUP_NAME_FOOTER ||
+            tag_id == MARKUP_NAME_ARTICLE || tag_id == MARKUP_NAME_ASIDE ||
+            tag_id == MARKUP_NAME_NAV || tag_id == MARKUP_NAME_ADDRESS ||
+            tag_id == MARKUP_NAME_BLOCKQUOTE || tag_id == MARKUP_NAME_DETAILS ||
+            tag_id == MARKUP_NAME_DIALOG || tag_id == MARKUP_NAME_FIGURE ||
+            tag_id == MARKUP_NAME_FIGCAPTION || tag_id == MARKUP_NAME_HGROUP ||
+            tag_id == MARKUP_NAME_PRE || tag_id == MARKUP_NAME_FIELDSET ||
+            tag_id == MARKUP_NAME_LEGEND || tag_id == MARKUP_NAME_FORM ||
+            tag_id == MARKUP_NAME_MENU) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (tag_id == HTM_TAG_LI || tag_id == HTM_TAG_SUMMARY) {
+        } else if (tag_id == MARKUP_NAME_LI || tag_id == MARKUP_NAME_SUMMARY) {
             display.outer = CSS_VALUE_LIST_ITEM;
             display.inner = CSS_VALUE_FLOW;
             display.list_item = true;
-        } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
-            tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-            tag_id == HTM_TAG_TEXTAREA ||
-            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
-            tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
-            tag_id == HTM_TAG_WEBVIEW ||
-            (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
-            (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
-            tag_id == HTM_TAG_EMBED) {
+        } else if (tag_id == MARKUP_NAME_IMG || tag_id == MARKUP_NAME_VIDEO ||
+            tag_id == MARKUP_NAME_INPUT || tag_id == MARKUP_NAME_SELECT ||
+            tag_id == MARKUP_NAME_TEXTAREA ||
+            tag_id == MARKUP_NAME_IFRAME || tag_id == MARKUP_NAME_METER ||
+            tag_id == MARKUP_NAME_PROGRESS || tag_id == MARKUP_NAME_CANVAS ||
+            tag_id == MARKUP_NAME_WEBVIEW ||
+            (tag_id == MARKUP_NAME_OBJECT && dom_elem && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
+            (tag_id == MARKUP_NAME_AUDIO && dom_elem && dom_elem->has_attribute(MARKUP_NAME_CONTROLS)) ||
+            tag_id == MARKUP_NAME_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_BUTTON) {
+        } else if (tag_id == MARKUP_NAME_BUTTON) {
             // <button> is inline-block with flow children (not replaced)
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (tag_id == HTM_TAG_OBJECT) {
+        } else if (tag_id == MARKUP_NAME_OBJECT) {
             // <object> without data attribute: inline flow (renders fallback children)
             display.outer = CSS_VALUE_INLINE;
             display.inner = CSS_VALUE_FLOW;
-        } else if (tag_id == HTM_TAG_HR) {
+        } else if (tag_id == MARKUP_NAME_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_RUBY) {
+        } else if (tag_id == MARKUP_NAME_RUBY) {
             // HTML ruby establishes an inline ruby formatting context, not a
             // regular inline flow box containing sequential base and <rt> text.
             display.outer = CSS_VALUE_INLINE;
             display.inner = CSS_VALUE_RUBY;
-        } else if (tag_id == HTM_TAG_SVG) {
+        } else if (tag_id == MARKUP_NAME_SVG) {
             // SVG elements are inline replaced elements by default
             display.outer = CSS_VALUE_INLINE;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE ||
-            tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
-            tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
-            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
-            tag_id == HTM_TAG_RP ||
-            tag_id == HTM_TAG_DATALIST) {
+        } else if (tag_id == MARKUP_NAME_SCRIPT || tag_id == MARKUP_NAME_STYLE ||
+            tag_id == MARKUP_NAME_HEAD || tag_id == MARKUP_NAME_TITLE || tag_id == MARKUP_NAME_META ||
+            tag_id == MARKUP_NAME_LINK || tag_id == MARKUP_NAME_BASE || tag_id == MARKUP_NAME_NOSCRIPT ||
+            tag_id == MARKUP_NAME_TEMPLATE || tag_id == MARKUP_NAME_MAP || tag_id == MARKUP_NAME_AREA ||
+            tag_id == MARKUP_NAME_RP ||
+            tag_id == MARKUP_NAME_DATALIST) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
-        } else if (tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
+        } else if (tag_id == MARKUP_NAME_OPTION || tag_id == MARKUP_NAME_OPTGROUP) {
             // Option/optgroup inside select/datalist: block 0x0 (browsers report 0x0)
             // Outside select/datalist: normal block flow (shows text content)
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (tag_id == HTM_TAG_TABLE) {
+        } else if (tag_id == MARKUP_NAME_TABLE) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE;
-        } else if (tag_id == HTM_TAG_CAPTION) {
+        } else if (tag_id == MARKUP_NAME_CAPTION) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (tag_id == HTM_TAG_THEAD || tag_id == HTM_TAG_TBODY || tag_id == HTM_TAG_TFOOT) {
+        } else if (tag_id == MARKUP_NAME_THEAD || tag_id == MARKUP_NAME_TBODY || tag_id == MARKUP_NAME_TFOOT) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_ROW_GROUP;
-        } else if (tag_id == HTM_TAG_TR) {
+        } else if (tag_id == MARKUP_NAME_TR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_ROW;
-        } else if (tag_id == HTM_TAG_TH || tag_id == HTM_TAG_TD) {
+        } else if (tag_id == MARKUP_NAME_TH || tag_id == MARKUP_NAME_TD) {
             display.outer = CSS_VALUE_TABLE_CELL;
             display.inner = CSS_VALUE_TABLE_CELL;
-        } else if (tag_id == HTM_TAG_COLGROUP) {
+        } else if (tag_id == MARKUP_NAME_COLGROUP) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
-        } else if (tag_id == HTM_TAG_COL) {
+        } else if (tag_id == MARKUP_NAME_COL) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN;
         } else {
@@ -3803,7 +3803,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     return result;
 }
 
-static float* inherited_spacing_slot(BoundaryProp* bound, CssPropertyId prop_id) {
+static float* inherited_spacing_slot(BoundaryProp* bound, CssPropertyCode prop_id) {
     if (!bound) return nullptr;
     switch (prop_id) {
         case CSS_PROPERTY_MARGIN_TOP: return &bound->margin.top;
@@ -3819,7 +3819,7 @@ static float* inherited_spacing_slot(BoundaryProp* bound, CssPropertyId prop_id)
 }
 
 static float resolve_spacing_with_inherit(LayoutContext* lycon,
-                                          CssPropertyId prop_id,
+                                          CssPropertyCode prop_id,
                                           const CssValue* value) {
     if (value->type != CSS_VALUE_TYPE_KEYWORD || value->data.keyword != CSS_VALUE_INHERIT) {
         return resolve_length_value(lycon, prop_id, value);
@@ -3829,15 +3829,15 @@ static float resolve_spacing_with_inherit(LayoutContext* lycon,
     float* inherited = parent ? inherited_spacing_slot(parent->bound, prop_id) : nullptr;
     if (inherited) {
         log_debug("[CSS] %s: inheriting %.2f from parent",
-                  css_property_name_from_id(prop_id), *inherited);
+                  css_property_spelling_from_code(prop_id), *inherited);
         return *inherited;
     }
     log_debug("[CSS] %s: no parent value, using zero",
-              css_property_name_from_id(prop_id));
+              css_property_spelling_from_code(prop_id));
     return 0.0f;
 }
 
-static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId prop_id,
+static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyCode prop_id,
                                          const CssValue* value) {
     return resolve_spacing_with_inherit(lycon, prop_id, value);
 }
@@ -3859,7 +3859,7 @@ static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBo
     return true;
 }
 
-static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId prop_id,
+static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyCode prop_id,
                                           const CssValue* value) {
     return resolve_spacing_with_inherit(lycon, prop_id, value);
 }
@@ -4501,7 +4501,7 @@ static void apply_grid_template_track_value(const CssValue* value,
 static bool resolve_font_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
-    CssPropertyId prop_id = (CssPropertyId)node->property_id;
+    CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
 
     // Only process font-related properties in first pass
     // These must be resolved before width/height/etc. which may use em/ex units
@@ -4527,7 +4527,7 @@ static bool resolve_font_property_callback(AvlNode* node, void* context) {
 static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
-    CssPropertyId prop_id = (CssPropertyId)node->property_id;
+    CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
 
     // Skip font properties (already processed in first pass)
     if (prop_id == CSS_PROPERTY_FONT ||
@@ -4870,7 +4870,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             lycon->font.style = span->font;
             lycon->font.current_font_size = span->fontp()->font_size;
         }
-    } else if (dom_elem->tag() == HTM_TAG_TEXTAREA) {
+    } else if (dom_elem->tag() == MARKUP_NAME_TEXTAREA) {
         ViewSpan* span = lam::view_require_element(lycon->view);
         if (span && span->font && span->fontp()->font_size > 0) {
             lycon->font.style = span->font;
@@ -4935,7 +4935,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
     // Handle CSS inheritance for inheritable properties not explicitly set
     // Important inherited properties: font-family, font-size, font-weight, color, etc.
-    static const CssPropertyId inheritable_props[] = {
+    static const CssPropertyCode inheritable_props[] = {
         CSS_PROPERTY_FONT_FAMILY,
         CSS_PROPERTY_FONT_SIZE,
         CSS_PROPERTY_FONT_WEIGHT,
@@ -4976,7 +4976,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 parent->tag_name, parent_tree != NULL, parent->font != nullptr);
 
         for (size_t i = 0; i < num_inheritable; i++) {
-            CssPropertyId prop_id = inheritable_props[i];
+            CssPropertyCode prop_id = inheritable_props[i];
 
             // Check if this property is already set on the element
             CssDeclaration* existing = style_tree_get_declaration(style_tree, prop_id);
@@ -4986,9 +4986,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
 
             if (prop_id == CSS_PROPERTY_WHITE_SPACE) {
-                uintptr_t tag = dom_elem->tag();
+                NameId tag = dom_elem->tag();
                 ViewSpan* span = lam::view_require_element(lycon->view);
-                if ((tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP) &&
+                if ((tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP) &&
                     span->blk && span->block_mut()->white_space == CSS_VALUE_PRE) {
                     // The UA preformatted declaration applies on this element,
                     // so it wins over an inherited author value from its parent.
@@ -5082,8 +5082,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // size, so inheritance must not overwrite it with the parent's
             // computed font-size unless author CSS explicitly set font-size.
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
-                uintptr_t tag = dom_elem->tag();
-                if (tag == HTM_TAG_TABLE && lycon->doc && lycon->doc->view_tree &&
+                NameId tag = dom_elem->tag();
+                if (tag == MARKUP_NAME_TABLE && lycon->doc && lycon->doc->view_tree &&
                     is_quirks_mode(lycon->doc->view_tree->html_version)) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     span->ensure_font(lycon);
@@ -5093,8 +5093,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     log_debug("[FONT INHERIT] Quirks table keeps initial medium font-size");
                     continue;
                 }
-                if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
-                    tag == HTM_TAG_SAMP || tag == HTM_TAG_TT) {
+                if (tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD ||
+                    tag == MARKUP_NAME_SAMP || tag == MARKUP_NAME_TT) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     bool has_ua_monospace_size = span->font && span->fontp()->family &&
                         str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace") &&
@@ -5105,7 +5105,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         continue;
                     }
                 }
-                if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+                if (tag >= MARKUP_NAME_H1 && tag <= MARKUP_NAME_H6) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     if (span->font && span->fontp()->font_size > 0) {
                         log_debug("[FONT INHERIT] Heading keeps UA font-size %.1f",
@@ -5113,8 +5113,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         continue;
                     }
                 }
-                if (tag == HTM_TAG_SMALL || tag == HTM_TAG_BIG ||
-                    tag == HTM_TAG_SUB || tag == HTM_TAG_SUP) {
+                if (tag == MARKUP_NAME_SMALL || tag == MARKUP_NAME_BIG ||
+                    tag == MARKUP_NAME_SUB || tag == MARKUP_NAME_SUP) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     if (span->font && span->fontp()->font_size > 0 &&
                         !span->fontp()->font_size_from_medium) {
@@ -5123,10 +5123,10 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         continue;
                     }
                 }
-                if (tag == HTM_TAG_INPUT || tag == HTM_TAG_BUTTON ||
-                    tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA) {
+                if (tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_BUTTON ||
+                    tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
-                    bool is_textarea_ua_medium = tag == HTM_TAG_TEXTAREA &&
+                    bool is_textarea_ua_medium = tag == MARKUP_NAME_TEXTAREA &&
                         span->font && span->fontp()->family &&
                         str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace") &&
                         span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium;
@@ -5149,7 +5149,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // creating a CSS_PROPERTY_FONT_FAMILY declaration)
             // Apply for any parent with computed font->family (handles font shorthand case)
             if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->fontp()->family) {
-                if (dom_elem->tag() == HTM_TAG_TEXTAREA) {
+                if (dom_elem->tag() == MARKUP_NAME_TEXTAREA) {
                     CssDeclaration* own_font_family = style_tree_get_declaration(
                         style_tree, CSS_PROPERTY_FONT_FAMILY);
                     CssDeclaration* own_font = style_tree_get_declaration(
@@ -5500,7 +5500,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // CSS Tables 3 §5: The table grid box uses border-box sizing by default.
     // Only apply to actual <table> HTML elements, not to other elements with display:table.
     // Only apply if not explicitly set by author CSS.
-    bool is_html_table = (dom_elem->tag_id == HTM_TAG_TABLE) ||
+    bool is_html_table = (dom_elem->tag_id == MARKUP_NAME_TABLE) ||
         (dom_elem->tag_name && strcmp(dom_elem->tag_name, "table") == 0);
     if (is_html_table && di == CSS_VALUE_TABLE) {
         ViewBlock* block = lam::view_as_block(span);
@@ -5599,7 +5599,7 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
 }
 
 static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
-                                       CssPropertyId prop_id, const CssValue* value) {
+                                       CssPropertyCode prop_id, const CssValue* value) {
     BlockProp* props = ensure_span_block(lycon, block);
     DomElement* parent = (lycon->elmt && lycon->elmt->parent)
         ? lycon->elmt->parent->as_element() : nullptr;
@@ -5637,7 +5637,7 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
             return;
     }
 
-    const char* property_name = css_property_name_from_id(prop_id);
+    const char* property_name = css_property_spelling_from_code(prop_id);
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
         if (parent_props) {
             *constraint = parent_constraint;
@@ -5732,7 +5732,7 @@ static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
         : "[CSS] list-style: set list-style-type=none");
 }
 
-void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
+void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
 #ifdef RADIANT_TRACE_CSS_PROPERTIES
     // Property-level tracing is opt-in; cascade runs for every matched
     // declaration and otherwise overwhelms large online registry pages.
@@ -5747,7 +5747,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     if (!value) { log_debug("No value in declaration");  return; }
 #ifdef RADIANT_TRACE_CSS_PROPERTIES
     log_debug("[Lambda CSS Property] Processing property %d, %s, value type=%d",
-        prop_id, css_property_name_from_id(prop_id), value->type);
+        prop_id, css_property_spelling_from_code(prop_id), value->type);
 #endif
     int64_t specificity = get_cascade_priority(decl);
 #ifdef RADIANT_TRACE_CSS_PROPERTIES
@@ -5795,7 +5795,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
     // centralized entry tracing keeps ordinary debug builds informative while cases log only extra context.
     log_debug("[CSS] Processing property %d (%s), value type=%d",
-        prop_id, css_property_name_from_id(prop_id), value->type);
+        prop_id, css_property_spelling_from_code(prop_id), value->type);
 
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
@@ -9075,7 +9075,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->scroller->overflow_y = overflow_value;
                 }
                 log_debug("[CSS] %s: %s -> 0x%04X",
-                          css_property_name_from_id(prop_id),
+                          css_property_spelling_from_code(prop_id),
                           css_enum_name_or_unknown(css_enum_info(overflow_value)),
                           overflow_value);
             }

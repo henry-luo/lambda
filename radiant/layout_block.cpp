@@ -238,7 +238,7 @@ typedef struct ObjectViewBoxUsedRect {
 } ObjectViewBoxUsedRect;
 
 static bool resolve_object_view_box_component(LayoutContext* lycon, const CssValue* value,
-                                              CssPropertyId prop_id, float reference,
+                                              CssPropertyCode prop_id, float reference,
                                               float auto_value, float* out_value) {
     if (!value || !out_value) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -289,7 +289,7 @@ static bool image_orientation_uses_from_image(DomElement* element) {
 }
 
 static bool image_is_generated_content_child(ViewBlock* block) {
-    if (!block || block->tag() != HTM_TAG_IMG || !block->parent || !block->parent->is_element()) {
+    if (!block || block->tag() != MARKUP_NAME_IMG || !block->parent || !block->parent->is_element()) {
         return false;
     }
     DomElement* parent = lam::dom_require_element(block->parent);
@@ -327,7 +327,7 @@ static void apply_contain_intrinsic_used_size(LayoutContext* lycon, ViewBlock* b
 }
 
 static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlock* block) {
-    if (!lycon || !block || block->tag() != HTM_TAG_CANVAS ||
+    if (!lycon || !block || block->tag() != MARKUP_NAME_CANVAS ||
         lycon->block.given_width <= 0.0f || lycon->block.given_height <= 0.0f) {
         return;
     }
@@ -814,7 +814,7 @@ static void shift_margin_collapse_floats(FloatBox* floats, ViewElement* parent,
 }
 
 static inline bool is_root_element_block(ViewBlock* block) {
-    return block && block->tag_id == HTM_TAG_HTML;
+    return block && block->tag_id == MARKUP_NAME_HTML;
 }
 
 // Quirks mode: check if an element has "quirky" block-start margin.
@@ -823,13 +823,13 @@ static inline bool is_root_element_block(ViewBlock* block) {
 // Chromium's HasMarginBlockStartQuirk / quirky container behavior.
 // A margin is quirky when: (1) element is in the quirky list, AND
 // (2) margin-top still has UA specificity (not overridden by author CSS).
-static inline bool is_quirky_margin_tag(uintptr_t tag) {
-    return tag == HTM_TAG_P || tag == HTM_TAG_H1 || tag == HTM_TAG_H2 ||
-           tag == HTM_TAG_H3 || tag == HTM_TAG_H4 || tag == HTM_TAG_H5 ||
-           tag == HTM_TAG_H6 || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
-           tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_PRE ||
-           tag == HTM_TAG_DL || tag == HTM_TAG_FIGURE || tag == HTM_TAG_HR ||
-           tag == HTM_TAG_FIELDSET || tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+static inline bool is_quirky_margin_tag(NameId tag) {
+    return tag == MARKUP_NAME_P || tag == MARKUP_NAME_H1 || tag == MARKUP_NAME_H2 ||
+           tag == MARKUP_NAME_H3 || tag == MARKUP_NAME_H4 || tag == MARKUP_NAME_H5 ||
+           tag == MARKUP_NAME_H6 || tag == MARKUP_NAME_UL || tag == MARKUP_NAME_OL ||
+           tag == MARKUP_NAME_BLOCKQUOTE || tag == MARKUP_NAME_PRE ||
+           tag == MARKUP_NAME_DL || tag == MARKUP_NAME_FIGURE || tag == MARKUP_NAME_HR ||
+           tag == MARKUP_NAME_FIELDSET || tag == MARKUP_NAME_MENU || tag == MARKUP_NAME_DIR;
 }
 
 static inline bool has_quirky_margin_top(ViewBlock* block) {
@@ -847,9 +847,9 @@ static inline bool has_quirky_margin_bottom(ViewBlock* block) {
 static inline bool is_quirky_container(ViewBlock* block, LayoutContext* lycon) {
     if (!block || !lycon->doc || !lycon->doc->view_tree) return false;
     if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
-    return block->tag_id == HTM_TAG_BODY ||
-           block->tag_id == HTM_TAG_TD ||
-           block->tag_id == HTM_TAG_TH;
+    return block->tag_id == MARKUP_NAME_BODY ||
+           block->tag_id == MARKUP_NAME_TD ||
+           block->tag_id == MARKUP_NAME_TH;
 }
 
 bool layout_quirky_container_ignores_child_margin_bottom(
@@ -1135,6 +1135,10 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
                         log_debug("[PSEUDO] Setting display: block for ::%s", is_before ? "before" : "after");
                     } else if (val->data.keyword == CSS_VALUE_INLINE_BLOCK) {
                         pseudo_elem->display.outer = CSS_VALUE_INLINE_BLOCK;
+                    } else if (val->data.keyword == CSS_VALUE_TABLE) {
+                        // css table pseudo-elements must establish a block-level formatting context so clear:both contains preceding floats.
+                        pseudo_elem->display.outer = CSS_VALUE_BLOCK;
+                        pseudo_elem->display.inner = CSS_VALUE_TABLE;
                     }
                 }
             }
@@ -1430,12 +1434,12 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
         // Note: At the time ::first-letter is created, child styles may not be
         // fully resolved yet. Check both display.inner (if resolved) and the
         // element's tag name for known replaced elements.
-        uintptr_t tag = elem->tag();
+        NameId tag = elem->tag();
         bool is_replaced = (elem->display.inner == RDT_DISPLAY_REPLACED) ||
-            tag == HTM_TAG_IMG || tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS ||
-            tag == HTM_TAG_IFRAME || tag == HTM_TAG_EMBED || tag == HTM_TAG_OBJECT ||
-            tag == HTM_TAG_INPUT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_SELECT ||
-            tag == HTM_TAG_SVG || tag == HTM_TAG_BR || tag == HTM_TAG_AUDIO;
+            tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS ||
+            tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_OBJECT ||
+            tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_SELECT ||
+            tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_BR || tag == MARKUP_NAME_AUDIO;
         if (is_replaced) {
             if (suppressed) *suppressed = true;
             return nullptr;
@@ -3094,14 +3098,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // HTML rendering spec §15.5.12: First legend child of fieldset shrinks to fit content.
     // Done post-layout because children's styles aren't resolved during pre-layout
     // intrinsic measurement. Uses max_width tracked during child layout.
-    if (block->tag_id == HTM_TAG_LEGEND && display != CSS_VALUE_INLINE_BLOCK) {
+    if (block->tag_id == MARKUP_NAME_LEGEND && display != CSS_VALUE_INLINE_BLOCK) {
         ViewElement* pa = block->parent_view();
-        if (pa && pa->tag_id == HTM_TAG_FIELDSET) {
+        if (pa && pa->tag_id == MARKUP_NAME_FIELDSET) {
             // Only the first legend child gets shrink-to-fit
             bool is_first_legend = true;
             for (View* sib = pa->first_child; sib; sib = sib->next()) {
                 if (sib == static_cast<View*>(block)) break;
-                if (sib->is_element() && lam::view_require_element(sib)->tag_id == HTM_TAG_LEGEND) {
+                if (sib->is_element() && lam::view_require_element(sib)->tag_id == MARKUP_NAME_LEGEND) {
                     is_first_legend = false;
                     break;
                 }
@@ -4091,7 +4095,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             // CSS 2.1 §9.5.2: <br> with clear property forces subsequent floats to
             // appear below cleared floats. Advance advance_y past existing floats so
             // subsequent floats in the prescan are positioned on a new row.
-            if (elem->tag() == HTM_TAG_BR && elem->specified_style && elem->specified_style->tree) {
+            if (elem->tag() == MARKUP_NAME_BR && elem->specified_style && elem->specified_style->tree) {
                 AvlNode* clear_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_CLEAR);
                 if (clear_node) {
                     StyleNode* sn = (StyleNode*)clear_node->declaration;
@@ -4252,11 +4256,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls, SVG
-        uintptr_t elmt_name = block->tag();
-        if (elmt_name == HTM_TAG_IFRAME) {
+        NameId elmt_name = block->tag();
+        if (elmt_name == MARKUP_NAME_IFRAME) {
             layout_iframe(lycon, block, block->display);
         }
-        else if (elmt_name == HTM_TAG_WEBVIEW) {
+        else if (elmt_name == MARKUP_NAME_WEBVIEW) {
             // <webview> element: replaced block with default intrinsic size 300x150 (like iframe)
             // Web view creation/positioning happens in post-layout sync
             if (!block->embed) {
@@ -4279,11 +4283,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                          block->width, block->height);
             }
         }
-        else if (elmt_name == HTM_TAG_SVG) {
+        else if (elmt_name == MARKUP_NAME_SVG) {
             // Inline SVG element: use width/height attributes or viewBox for intrinsic size
             layout_inline_svg(lycon, block);
         }
-        else if (elmt_name == HTM_TAG_HR) {
+        else if (elmt_name == MARKUP_NAME_HR) {
             // hr element: Use explicit height if specified, otherwise use border height
             if (lycon->block.given_height >= 0) {
                 // CSS height property is set - use it as content height
@@ -4303,14 +4307,14 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
         }
         else if (block->form_control() &&
-                 elmt_name != HTM_TAG_BUTTON) {
+                 elmt_name != MARKUP_NAME_BUTTON) {
             // Form control elements (input, select, textarea) - replaced elements with intrinsic size
             // Note: <button> elements have content children, so they go through normal layout flow
             layout_form_control(lycon, block);
         }
-        // else HTM_TAG_IMG - handled by layout_block_content width/height
+        // else MARKUP_NAME_IMG - handled by layout_block_content width/height
     } else if (block->form_control() &&
-               block->tag() != HTM_TAG_BUTTON) {
+               block->tag() != MARKUP_NAME_BUTTON) {
         // Form control fallback (for cases where display.inner != RDT_DISPLAY_REPLACED)
         layout_form_control(lycon, block);
     } else {  // layout block child content
@@ -4387,9 +4391,17 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     // inline content flow
                     do {
                         float pre_advance_y = lycon->block.advance_y;
+                        bool child_is_floated = false;
+                        if (child->is_element()) {
+                            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+                            CssEnum child_float = get_element_float_value(child_elem);
+                            child_is_floated = child_float == CSS_VALUE_LEFT || child_float == CSS_VALUE_RIGHT;
+                        }
                         // Phase 16: skip unchanged block elements in incremental layout
+                        // floated children must rerun so their parent BFC receives the new float contribution.
                         if (lycon->doc && lycon->doc->incremental_layout
                             && child->is_element() && !child->layout_dirty
+                            && !child_is_floated
                             && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
                             DomElement* skip_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
                             verify_incremental_layout_skip(lycon, child, pre_advance_y);
@@ -5520,14 +5532,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Don't reset floats - they belong to the parent BFC
     }
 
-    uintptr_t elmt_name = block->tag();
+    NameId elmt_name = block->tag();
     apply_contain_intrinsic_used_size(lycon, block);
     apply_canvas_object_view_box_auto_size(lycon, block);
 
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
     // 'height: auto', use intrinsic dimensions. Per HTML spec, iframe default
     // intrinsic size is 300x150. Skip if a percentage is stored (resolve later).
-    if (elmt_name == HTM_TAG_IFRAME) {
+    if (elmt_name == MARKUP_NAME_IFRAME) {
         bool has_width_percent = block->blk && !isnan(block->block()->given_width_percent);
         bool has_height_percent = block->blk && !isnan(block->block()->given_height_percent);
         if (lycon->block.given_width < 0 && !has_width_percent) {
@@ -5573,7 +5585,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
 
-    if (elmt_name == HTM_TAG_SVG) {
+    if (elmt_name == MARKUP_NAME_SVG) {
         Element* native_elem = block->as_element() ? dom_element_backing(block->as_element()) : nullptr;
         SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
         bool parent_has_definite_slot = pa_block &&
@@ -5623,7 +5635,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     CssDeclaration* content_replacement_decl = nullptr;
     CssContentImage content_replacement_image = {nullptr, 1.0f};
-    if (elmt_name != HTM_TAG_IMG && block->display.inner == RDT_DISPLAY_REPLACED &&
+    if (elmt_name != MARKUP_NAME_IMG && block->display.inner == RDT_DISPLAY_REPLACED &&
         block->specified_style) {
         content_replacement_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
         if (content_replacement_decl) {
@@ -5632,7 +5644,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     bool is_generated_content_image = content_replacement_image.url && content_replacement_image.url[0];
 
-    if (elmt_name == HTM_TAG_IMG || is_generated_content_image) { // load image intrinsic width and height
+    if (elmt_name == MARKUP_NAME_IMG || is_generated_content_image) { // load image intrinsic width and height
         log_debug("[IMG LAYOUT] Processing image-backed element: %s", block->source_loc());
         const char *value = is_generated_content_image ? content_replacement_image.url : block->get_attribute("src");
         log_debug("%s [IMG LAYOUT] source: %s", block->source_loc(), value ? value : "NULL");
@@ -6112,7 +6124,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             uintptr_t ancestor_tag = ancestor->tag();
             ViewBlock* ancestor_block = ancestor->is_block()
                 ? lam::view_require_block(ancestor) : nullptr;
-            if (ancestor_tag == HTM_TAG_CENTER) {
+            if (ancestor_tag == MARKUP_NAME_CENTER) {
                 parent_legacy_block_align = CSS_VALUE_CENTER;
                 break;
             }
@@ -6138,7 +6150,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     break;
                 }
             }
-            if (ancestor_tag == HTM_TAG_TD || ancestor_tag == HTM_TAG_TH) break;
+            if (ancestor_tag == MARKUP_NAME_TD || ancestor_tag == MARKUP_NAME_TH) break;
         }
 
         // Legacy HTML alignment maps align=center/right to -webkit-center/right,
@@ -6703,7 +6715,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // normal block auto-width fill. Re-apply the resolved replaced dimensions
     // after inner layout so parent min/available width does not leak into the
     // SVG viewport.
-    if (block->tag() == HTM_TAG_SVG && block->blk) {
+    if (block->tag() == MARKUP_NAME_SVG && block->blk) {
         bool is_border_box = layout_uses_border_box(block);
         if (block->block()->given_width >= 0.0f) {
             block->content_width = is_border_box
@@ -6727,7 +6739,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // The first legend child of a fieldset is positioned at the block-start border edge
     // (overlapping the top border), not inside the content area. All subsequent siblings
     // shift up by the border-top width since the legend replaces the border gap.
-    if (block->is_element() && block->tag() == HTM_TAG_FIELDSET && block->first_child) {
+    if (block->is_element() && block->tag() == MARKUP_NAME_FIELDSET && block->first_child) {
         float border_top = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top : 0;
         float padding_top = block->bound ? block->boundary()->padding.top : 0;
         float legend_shift = border_top + padding_top;
@@ -6736,7 +6748,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // Find the first legend child
             ViewBlock* first_legend = nullptr;
             for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-                if (child->is_element() && child->as_element()->tag() == HTM_TAG_LEGEND) {
+                if (child->is_element() && child->as_element()->tag() == MARKUP_NAME_LEGEND) {
                     first_legend = lam::view_require_block(static_cast<View*>(child->as_element()));
                     break;
                 }
@@ -7125,8 +7137,8 @@ static void align_and_discard_phantom_inline_line(LayoutContext* lycon) {
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     layout_block_count++;
     auto t_block_start = high_resolution_clock::now();
-    uintptr_t tag = elmt->tag();
-    if (tag == HTM_TAG_IMG) {
+    NameId tag = elmt->tag();
+    if (tag == MARKUP_NAME_IMG) {
         log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->source_loc());
     }
 
@@ -7186,23 +7198,23 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // No explicit display in style — use tag default.
                 // Inline tags (span, a, em, etc.) and inline-block tags (input,
                 // select, textarea, img, button, etc.) are all inline-level.
-                was_inline_level = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
-                              elem->tag_id == HTM_TAG_EM || elem->tag_id == HTM_TAG_STRONG ||
-                              elem->tag_id == HTM_TAG_B || elem->tag_id == HTM_TAG_I ||
-                              elem->tag_id == HTM_TAG_U || elem->tag_id == HTM_TAG_S ||
-                              elem->tag_id == HTM_TAG_SMALL || elem->tag_id == HTM_TAG_CODE ||
-                              elem->tag_id == HTM_TAG_SUB || elem->tag_id == HTM_TAG_SUP ||
-                              elem->tag_id == HTM_TAG_ABBR || elem->tag_id == HTM_TAG_CITE ||
-                              elem->tag_id == HTM_TAG_Q || elem->tag_id == HTM_TAG_VAR ||
-                              elem->tag_id == HTM_TAG_TIME || elem->tag_id == HTM_TAG_MARK ||
-                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI ||
-                              elem->tag_id == HTM_TAG_IMG || elem->tag_id == HTM_TAG_INPUT ||
-                              elem->tag_id == HTM_TAG_SELECT || elem->tag_id == HTM_TAG_TEXTAREA ||
-                              elem->tag_id == HTM_TAG_BUTTON || elem->tag_id == HTM_TAG_VIDEO ||
-                              elem->tag_id == HTM_TAG_IFRAME || elem->tag_id == HTM_TAG_CANVAS ||
-                              elem->tag_id == HTM_TAG_METER || elem->tag_id == HTM_TAG_PROGRESS ||
-                              elem->tag_id == HTM_TAG_EMBED || elem->tag_id == HTM_TAG_OBJECT ||
-                              elem->tag_id == HTM_TAG_SVG || elem->tag_id == HTM_TAG_LABEL);
+                was_inline_level = (elem->tag_id == MARKUP_NAME_SPAN || elem->tag_id == MARKUP_NAME_A ||
+                              elem->tag_id == MARKUP_NAME_EM || elem->tag_id == MARKUP_NAME_STRONG ||
+                              elem->tag_id == MARKUP_NAME_B || elem->tag_id == MARKUP_NAME_I ||
+                              elem->tag_id == MARKUP_NAME_U || elem->tag_id == MARKUP_NAME_S ||
+                              elem->tag_id == MARKUP_NAME_SMALL || elem->tag_id == MARKUP_NAME_CODE ||
+                              elem->tag_id == MARKUP_NAME_SUB || elem->tag_id == MARKUP_NAME_SUP ||
+                              elem->tag_id == MARKUP_NAME_ABBR || elem->tag_id == MARKUP_NAME_CITE ||
+                              elem->tag_id == MARKUP_NAME_Q || elem->tag_id == MARKUP_NAME_VAR ||
+                              elem->tag_id == MARKUP_NAME_TIME || elem->tag_id == MARKUP_NAME_MARK ||
+                              elem->tag_id == MARKUP_NAME_BDO || elem->tag_id == MARKUP_NAME_BDI ||
+                              elem->tag_id == MARKUP_NAME_IMG || elem->tag_id == MARKUP_NAME_INPUT ||
+                              elem->tag_id == MARKUP_NAME_SELECT || elem->tag_id == MARKUP_NAME_TEXTAREA ||
+                              elem->tag_id == MARKUP_NAME_BUTTON || elem->tag_id == MARKUP_NAME_VIDEO ||
+                              elem->tag_id == MARKUP_NAME_IFRAME || elem->tag_id == MARKUP_NAME_CANVAS ||
+                              elem->tag_id == MARKUP_NAME_METER || elem->tag_id == MARKUP_NAME_PROGRESS ||
+                              elem->tag_id == MARKUP_NAME_EMBED || elem->tag_id == MARKUP_NAME_OBJECT ||
+                              elem->tag_id == MARKUP_NAME_SVG || elem->tag_id == MARKUP_NAME_LABEL);
             }
         }
         if (elem->position) {
@@ -7415,14 +7427,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // inline-blocks with overflow != visible use bottom margin edge baseline.
         // Even though textarea may not have an explicit scroller, treat it as
         // replaced for baseline purposes.
-        bool is_select_listbox = block->tag() == HTM_TAG_SELECT &&
+        bool is_select_listbox = block->tag() == MARKUP_NAME_SELECT &&
             (!block->form || block->form->multiple || block->form->select_size > 1);
-        bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
-            block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-            (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
-            block->tag() == HTM_TAG_TEXTAREA ||
+        bool is_replaced = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
+            block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+            (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
+            block->tag() == MARKUP_NAME_TEXTAREA ||
             is_select_listbox);
-        bool is_broken_alt_image = block->tag() == HTM_TAG_IMG &&
+        bool is_broken_alt_image = block->tag() == MARKUP_NAME_IMG &&
             block->embed && block->embedp()->broken_alt_fallback;
         if (is_broken_alt_image) {
             is_replaced = false;
@@ -7627,7 +7639,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (is_inline_table && table_baseline >= 0) {
                     // Inline-table with first-row baseline found
                     item_baseline = (block->bound ? block->boundary()->margin.top : 0) + table_baseline;
-                } else if (block->tag() == HTM_TAG_TEXTAREA) {
+                } else if (block->tag() == MARKUP_NAME_TEXTAREA) {
                     // Textarea is a scrollable text control whose inline baseline
                     // matches the bottom border edge in browsers; margin-bottom
                     // contributes below the baseline, not above it.

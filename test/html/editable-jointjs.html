@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Radiant editable drawing — JointJS</title>
+<link rel="stylesheet" href="editable-drawing.css">
+<h1>JointJS SVG drawing probe</h1>
+<p>Creates an upstream Paper, two labelled elements, and one link.</p>
+<button id="destroy" type="button">Destroy drawing</button>
+<button id="recreate" type="button">Recreate drawing</button>
+<button id="move-source" type="button" data-drawing-action="moveSource">Move source</button>
+<button id="resize-source" type="button" data-drawing-action="resizeSource">Resize source</button>
+<button id="reconnect-link" type="button" data-drawing-action="reconnectLink">Reconnect link</button>
+<button id="pan-zoom" type="button" data-drawing-action="panZoom">Pan and zoom</button>
+<button id="show-tools" type="button" data-drawing-action="addTools">Show tools</button>
+<button id="remove-tools" type="button" data-drawing-action="removeTools">Remove tools</button>
+<div id="drawing-slot"><div id="drawing-host" aria-label="JointJS drawing"></div></div>
+<h2>Library state</h2><pre id="drawing-state"></pre>
+<h2>Capability report</h2><pre id="drawing-capabilities"></pre>
+<script type="module" src="../drawing-editors/build/jointjs/jointjs.js"></script>

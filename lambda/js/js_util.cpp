@@ -727,9 +727,8 @@ static bool js_util_is_arguments_exotic(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    bool found = false;
-    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
-    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* s = it2s(tag);
     return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
 }
@@ -1725,7 +1724,7 @@ static bool js_util_has_constructor_prototype(Item value, const char* ctor_name,
         Item ctor_proto = js_property_get(ctor, make_string_item("prototype", 9));
         if (proto.item == ctor_proto.item) return true;
     }
-    Item tag = js_property_get(proto, make_string_item("__sym_4", 7));
+    Item tag = js_property_get(proto, js_well_known_symbol_key(4));
     return js_util_string_equals(tag, ctor_name);
 }
 
@@ -1742,7 +1741,7 @@ static bool js_util_is_real_regexp(Item value) {
 static bool js_util_is_regexp_like_value(Item value) {
     if (js_util_is_real_regexp(value)) return true;
     return js_util_has_constructor_prototype(value, "RegExp", 6) ||
-           js_util_string_equals(js_property_get(value, make_string_item("__sym_4", 7)), "RegExp");
+           js_util_string_equals(js_property_get(value, js_well_known_symbol_key(4)), "RegExp");
 }
 
 static bool js_util_is_url_like_value(Item value) {

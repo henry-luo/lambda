@@ -233,11 +233,11 @@ static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) 
         child->view_type != RDT_VIEW_INLINE) {
         return false;
     }
-    return static_cast<DomNode*>(child)->tag() == HTM_TAG_RT;
+    return static_cast<DomNode*>(child)->tag() == MARKUP_NAME_RT;
 }
 
 static bool ruby_annotation_node(DomNode* node) {
-    return node && node->is_element() && node->tag() == HTM_TAG_RT;
+    return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
 static void offset_ruby_annotation_tree(View* view, float offset_x, float offset_y) {
@@ -986,7 +986,7 @@ static int detect_math_element(DomElement* elem) {
     }
 
     // check for tag <math>
-    if (elem->tag() == HTM_TAG_MATH) {
+    if (elem->tag() == MARKUP_NAME_MATH) {
         return 1;  // MathML element
     }
 
@@ -1328,7 +1328,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // HTML5 §4.5.27: <wbr> represents a line break opportunity.
     // It doesn't generate a box — browsers report (0,0,0,0) via getBoundingClientRect.
     // Equivalent to U+200B ZWSP per Unicode Line Breaking Algorithm.
-    if (elmt->tag() == HTM_TAG_WBR) {
+    if (elmt->tag() == MARKUP_NAME_WBR) {
         ViewSpan* wbr_span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
         wbr_span->x = 0;
         wbr_span->y = 0;
@@ -1347,7 +1347,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         return;
     }
 
-    if (elmt->tag() == HTM_TAG_BR) {
+    if (elmt->tag() == MARKUP_NAME_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
         // Position <br> at the trimmed content edge for LTR, or at the

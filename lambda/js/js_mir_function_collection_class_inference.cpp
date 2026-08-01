@@ -829,7 +829,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             sf->name ? (int)sf->name->len : 0, sf->name ? sf->name->chars : "");
                     } else if (!fd->is_static && fd->key &&
                         ce->instance_field_count < ce->instance_field_capacity) {
-                        // Instance field (public or private — private already renamed to __private_)
+                        // Instance field source names retain # until class evaluation allocates identity.
                         JsInstanceFieldEntry* inf = &ce->instance_fields[ce->instance_field_count];
                         inf->computed = fd->computed;
                         inf->key_expr = fd->key;
@@ -2267,6 +2267,9 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     int pc = jm_count_params(fn);
     fc->param_count = pc;
     fc->formal_length = jm_formal_length(fn);
+    for (int i = 0; i < JS_MIR_TYPED_PARAM_LIMIT; i++) {
+        fc->param_types[i] = LMD_TYPE_ANY;
+    }
 
     // detect rest params (...rest as last parameter)
     fc->has_rest_param = false;
@@ -2301,7 +2304,13 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         }
     }
 
-    if (pc == 0 || pc > 16) return;
+    if (pc == 0) return;
+    if (pc > JS_MIR_TYPED_PARAM_LIMIT) {
+        // Native type metadata has sixteen slots, while the boxed ABI accepts
+        // arbitrary arity. Leave high-arity functions boxed rather than let a
+        // later inference pass read past this fixed specialization record.
+        return;
+    }
 
     // Phase 3.4: Check for TS type annotations on parameters first
     // If ALL params have annotations, use them. Otherwise fall through to body-scan.
@@ -2357,7 +2366,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     if (use_annotations) return;  // annotations took priority
 
     // Build parameter name array
-    char param_names[16][128];
+    char param_names[JS_MIR_TYPED_PARAM_LIMIT][128];
     JsAstNode* p = fn->params;
     for (int i = 0; i < pc && p; i++, p = p->next) {
         jm_get_param_name(p, i, param_names[i], 128);
@@ -2378,7 +2387,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // Accumulate evidence
-    FnParamEvidence evidence[16] = {};
+    FnParamEvidence evidence[JS_MIR_TYPED_PARAM_LIMIT] = {};
     jm_infer_walk(fn->body, param_names, evidence, pc,
                   self_name[0] ? self_name : NULL);
 
@@ -2387,18 +2396,18 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     // (e.g., x >= 0, x * 3 + 1) flows back to the original parameter.
     {
         // Scan top-level statements of function body for `let/var/const x = param`
-        char alias_names[16][128];
-        int alias_map[16];  // alias_map[i] = param index that alias i maps to
+        char alias_names[JS_MIR_TYPED_PARAM_LIMIT][128];
+        int alias_map[JS_MIR_TYPED_PARAM_LIMIT];  // alias_map[i] = param index that alias i maps to
         int alias_count = 0;
         JsBlockNode* body_blk = (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT)
             ? (JsBlockNode*)fn->body : NULL;
         if (body_blk) {
             JsAstNode* stmt = body_blk->statements;
-            while (stmt && alias_count < 16) {
+            while (stmt && alias_count < JS_MIR_TYPED_PARAM_LIMIT) {
                 if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
                     JsAstNode* decl = vd->declarations;
-                    while (decl && alias_count < 16) {
+                    while (decl && alias_count < JS_MIR_TYPED_PARAM_LIMIT) {
                         if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
                             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
                             if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -2427,7 +2436,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             }
         }
         if (alias_count > 0) {
-            FnParamEvidence alias_evidence[16] = {};
+            FnParamEvidence alias_evidence[JS_MIR_TYPED_PARAM_LIMIT] = {};
             jm_infer_walk(fn->body, alias_names, alias_evidence, alias_count,
                           self_name[0] ? self_name : NULL);
             // Merge alias evidence back to original params
@@ -3083,11 +3092,18 @@ JsClassEntry* jm_matching_static_superclass(JsClassEntry* ce, JsAstNode* heritag
         return NULL;
     }
     JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
-    if (!heritage_id->name || heritage_id->name->len != ce->superclass->name->len ||
+    if (!heritage_id->name) return NULL;
+    bool matches_name = heritage_id->name->len == ce->superclass->name->len &&
         strncmp(heritage_id->name->chars, ce->superclass->name->chars,
-            heritage_id->name->len) != 0) {
-        // Static alias inference is optimization metadata; a differently named
-        // heritage binding must still be evaluated in its lexical environment.
+            heritage_id->name->len) == 0;
+    bool matches_alias = ce->superclass->alias_name &&
+        heritage_id->name->len == ce->superclass->alias_name->len &&
+        strncmp(heritage_id->name->chars, ce->superclass->alias_name->chars,
+            heritage_id->name->len) == 0;
+    if (!matches_name && !matches_alias) {
+        // Only the class declaration name and the collector-recorded alias
+        // identify this exact class binding. Any other identifier must retain
+        // its lexical runtime lookup because it can be shadowed.
         return NULL;
     }
     return ce->superclass;

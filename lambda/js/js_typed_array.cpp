@@ -1872,7 +1872,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
             ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
             return js_throw_type_error("ArrayBuffer species constructor must be an object");
         }
-        Item species_key = (Item){.item = s2it(heap_create_name("__sym_6"))};
+        Item species_key = js_well_known_symbol_key(6);
         Item species = js_property_get(ctor, species_key);
         if (js_check_exception()) return ItemNull;
         TypeId species_type = get_type_id(species);
@@ -2078,7 +2078,7 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
                 ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
                 return js_throw_type_error("SharedArrayBuffer species constructor must be an object");
             }
-            Item species_key = (Item){.item = s2it(heap_create_name("__sym_6"))};
+            Item species_key = js_well_known_symbol_key(6);
             Item species = js_property_get(ctor, species_key);
             if (js_check_exception()) return ItemNull;
             TypeId species_type = get_type_id(species);
@@ -2481,7 +2481,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         return js_typed_array_new_from_array(type_id, arg);
     }
     if (arg_type == LMD_TYPE_ARRAY) {
-        Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
+        Item iter_key = js_well_known_symbol_key(1);
         Item iter_method = js_property_get(arg_root.get(), iter_key);
         if (js_check_exception()) return ItemNull;
         TypeId iter_type = get_type_id(iter_method);
@@ -2505,7 +2505,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             if (js_check_exception()) return ItemNull;
             return js_typed_array_new_from_array(type_id, values);
         }
-        Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
+        Item iter_key = js_well_known_symbol_key(1);
         iter_method = js_property_get(arg_root.get(), iter_key);
         if (js_check_exception()) return ItemNull;
         TypeId iter_type = get_type_id(iter_method);

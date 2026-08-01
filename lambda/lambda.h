@@ -630,6 +630,7 @@ typedef struct String {
         struct {
             uint8_t is_ascii:1;   // enables O(1) indexing when every byte is ASCII
             uint8_t is_buffer:1;  // exclusively owned GC string-builder storage
+            uint8_t is_pooled:1;  // NameRecord metadata prefix immediately precedes this String
         };
     };
     char chars[];       // UTF-8 string data (null-terminated)
@@ -1619,13 +1620,26 @@ struct Context {
     uint64_t mir_bitcast_scratch;
 };
 
+// A property key specification is compiler-neutral data stored in the sealed
+// MIR module image. `name_offset` is relative to the beginning of the
+// specification array and is valid only for an ordinary STRING key.
+typedef struct PropertyKeySpec {
+    uint32_t predefined_id;
+    uint32_t name_offset;
+    uint32_t name_length;
+    uint32_t reserved;
+} PropertyKeySpec;
+
 // Immutable BSS metadata for one sealed MIR module.  It describes code only;
 // mutable bindings and inline caches are allocated per EvalContext.
 typedef struct LambdaModuleLayout {
     uint32_t module_id;
     uint32_t var_count;
     uint32_t member_ic_count;
+    uint32_t property_key_count;
+    uint32_t property_key_bytes_size;
     uint32_t reserved;
+    const PropertyKeySpec* property_key_specs;
 } LambdaModuleLayout;
 
 typedef struct LambdaModuleVarRef {

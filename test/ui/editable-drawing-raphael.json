@@ -1,0 +1,20 @@
+{
+  "name": "Raphael SVG probe creates and releases an SVG-only paper",
+  "html": "test/html/editable-raphael.html",
+  "viewport": {"width": 720, "height": 640},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-ready", "equals": "true", "assert_timeout": 1000},
+    {"type": "assert_count", "target": {"selector": "#drawing-host svg"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": "#drawing-host canvas"}, "equals": 0},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-capabilities"}, "attribute": "data-library", "equals": "raphael"},
+    {"type": "mouse_drag", "target": {"selector": "#drawing-host", "offset_x": 100, "offset_y": 75}, "dx": 30, "dy": 20, "button": 0},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-host"}, "attribute": "data-raphael-hit", "equals": "rectangle"},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-host"}, "attribute": "data-raphael-dragged", "equals": "true"},
+    {"type": "click", "target": {"selector": "#destroy"}},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-destroyed", "equals": "true"},
+    {"type": "assert_count", "target": {"selector": "#drawing-host svg"}, "equals": 0},
+    {"type": "click", "target": {"selector": "#recreate"}},
+    {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-recreated", "equals": "true", "assert_timeout": 1000},
+    {"type": "assert_count", "target": {"selector": "#drawing-host svg"}, "equals": 1}
+  ]
+}

@@ -216,7 +216,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested and throwing fixed argument-root extents.",
       "budgets": {
         "default": {
-          "module_insns": 4420
+          "module_insns": 4421
         }
       }
     },
@@ -309,13 +309,13 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function.",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case also resolves class-owned unique PropertyKeyRefs instead of encoding private identity in a spelling.",
       "budgets": {
         "darwin-debug": {
-          "module_insns": 6696,
+          "module_insns": 6821,
           "functions": {
             "js_main": {
-              "insns": 3729
+              "insns": 3854
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 12
@@ -325,10 +325,10 @@
             {
               "name": "js_main",
               "roots": 11,
-              "root_stores": 845,
+              "root_stores": 844,
               "scalar_homes": 6,
               "number_scratch": 0,
-              "safepoints": 1748
+              "safepoints": 1877
             }
           ]
         },

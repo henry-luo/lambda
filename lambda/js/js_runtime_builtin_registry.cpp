@@ -657,7 +657,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 
     // Symbol.iterator = values (same function object as TypedArray.prototype.values per spec)
     {
-        Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+        Item si_key = js_well_known_symbol_key(1);
         Item values_key = (Item){.item = s2it(heap_create_name("values", 6))};
         Item values_fn = js_property_get(proto, values_key);
         js_property_set(proto, si_key, values_fn);
@@ -673,7 +673,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         tag_getter->param_count = 0;
         tag_getter->formal_length = -1;
         Item getter_item = (Item){.function = (Function*)tag_getter};
-        Item tag_name = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_name = js_well_known_symbol_key(4);
         js_install_native_accessor(proto, tag_name, getter_item, ItemNull, JSPD_NON_ENUMERABLE);
     }
 
@@ -689,7 +689,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 
         // Install get [Symbol.species]() { return this; } on %TypedArray%
         // Phase 3 Stage A: route through unified js_install_native_accessor.
-        Item species_name = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+        Item species_name = js_well_known_symbol_key(6);
         Item getter_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "get [Symbol.species]", 0);
         js_install_native_accessor(base_ctor, species_name, getter_fn, ItemNull, JSPD_NON_ENUMERABLE);
     }
@@ -706,9 +706,9 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
     bool needs_species = binding && (binding->flags & JS_BUILTIN_OWNER_BINDING_SPECIES);
     if (needs_species) {
-        // install getter: __get___sym_6 → function that returns this
+        // install the Symbol.species getter that returns this
         // Phase 3 Stage A: route through unified js_install_native_accessor.
-        Item species_name = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+        Item species_name = js_well_known_symbol_key(6);
         Item getter_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "get [Symbol.species]", 0);
         js_install_native_accessor(ctor_item, species_name, getter_fn, ItemNull, JSPD_NON_ENUMERABLE);
     }

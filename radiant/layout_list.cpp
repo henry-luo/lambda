@@ -46,7 +46,7 @@ static const char* counter_name_from_css_value(CssValue* item) {
     return nullptr;
 }
 
-static bool get_element_counter_property_value(DomElement* elem, CssPropertyId property,
+static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode property,
                                                const char* counter_name,
                                                int implicit_value, int* out_value) {
     if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
@@ -187,7 +187,7 @@ static const char* get_reversed_counter_name(CssFunction* func) {
 // Counter Spec Extraction from Style Trees
 // ============================================================================
 
-const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_property,
+const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon) {
     if (!style || !style->tree) return nullptr;
 
@@ -273,15 +273,15 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
 // List Container Counter Setup
 // ============================================================================
 
-static bool is_html_list_container_tag(uintptr_t tag) {
-    return tag == HTM_TAG_OL || tag == HTM_TAG_UL ||
-        tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+static bool is_html_list_container_tag(NameId tag) {
+    return tag == MARKUP_NAME_OL || tag == MARKUP_NAME_UL ||
+        tag == MARKUP_NAME_MENU || tag == MARKUP_NAME_DIR;
 }
 
 void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomElement* dom_elem) {
     if (!lycon->counter_context || !dom_elem) return;
 
-    uintptr_t tag = dom_elem->tag_id;
+    NameId tag = dom_elem->tag_id;
     if (!is_html_list_container_tag(tag)) return;
 
     // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
@@ -297,7 +297,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
     int start_value = 0;  // default: counter-reset: list-item 0
     bool is_reversed_ol = false;
-    if (tag == HTM_TAG_OL) {
+    if (tag == MARKUP_NAME_OL) {
         // Check <ol reversed> attribute
         is_reversed_ol = dom_elem->has_attribute("reversed");
         const char* start_attr = dom_elem->get_attribute("start");
@@ -337,7 +337,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
                     total += inc;
                     last_nz = inc;
                 }
-            } else if (child_elem->tag_id == HTM_TAG_LI) {
+            } else if (child_elem->tag_id == MARKUP_NAME_LI) {
                 // implicit list-item -1 for reversed OL
                 total += -1;
                 last_nz = -1;
@@ -512,16 +512,16 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     // Detect if parent is <ol reversed>
     bool parent_reversed = false;
-    if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
+    if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
         DomElement* parent_elem = dom_elem->parent_element();
-        if (parent_elem && parent_elem->tag_id == HTM_TAG_OL &&
+        if (parent_elem && parent_elem->tag_id == MARKUP_NAME_OL &&
             parent_elem->has_attribute("reversed")) {
             parent_reversed = true;
         }
     }
 
     // Handle <li value="N"> attribute: sets counter to N before increment
-    if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
+    if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
         const char* value_attr = dom_elem->get_attribute("value");
         if (value_attr) {
             int li_value = atoi(value_attr);

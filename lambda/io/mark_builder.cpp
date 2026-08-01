@@ -405,6 +405,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
             if (name_str) {
                 element_type->name.str = name_str->chars;
                 element_type->name.length = name_str->len;
+                element_type->name_id = name_ref_id(name_str);
             }
             elmt_ = (element);
         }

@@ -26,6 +26,10 @@
 #endif
 
 extern "C" Item js_to_property_key(Item key);
+static inline bool js_key_is_well_known_symbol(Item key, int64_t symbol_id) {
+    Item well_known_key = js_well_known_symbol_key(symbol_id);
+    return well_known_key.item != ItemNull.item && key.item == well_known_key.item;
+}
 extern __thread EvalContext* context;
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver);
@@ -586,21 +590,6 @@ static bool js_reflect_target_is_object(Item target) {
            type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT;
 }
 
-static int js_private_key_class_index(String* private_key) {
-    if (!private_key || private_key->len <= 10 ||
-        strncmp(private_key->chars, "__private_", 10) != 0) return -1;
-    const char* p = private_key->chars + 10;
-    const char* end = private_key->chars + private_key->len;
-    if (p >= end || *p < '0' || *p > '9') return -1;
-    int idx = 0;
-    while (p < end && *p >= '0' && *p <= '9') {
-        idx = idx * 10 + (*p - '0');
-        p++;
-    }
-    if (p >= end || *p != '_') return -1;
-    return idx;
-}
-
 static int js_class_private_index(Item class_item) {
     if (get_type_id(class_item) != LMD_TYPE_MAP) return -1;
     bool found = false;
@@ -615,6 +604,94 @@ extern "C" void js_set_private_class_index(Item class_item, int index) {
     Item key = (Item){.item = s2it(heap_create_name(JS_PRIVATE_CLASS_INDEX_KEY, JS_PRIVATE_CLASS_INDEX_KEY_LEN))};
     Item val = (Item){.item = i2it(index)};
     js_property_set(class_item, key, val);
+}
+
+static bool js_private_source_name(Item source_name) {
+    if (get_type_id(source_name) != LMD_TYPE_STRING) return false;
+    String* source = it2s(source_name);
+    return source && source->len > 1 && source->chars[0] == '#';
+}
+
+static Item js_private_environment_for_class(Item class_item, bool create) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP) return ItemNull;
+    Item environment_key = (Item){.item = s2it(heap_create_name("__pk_env__", 10))};
+    Item environment = js_property_get(class_item, environment_key);
+    if (get_type_id(environment) == LMD_TYPE_MAP) return environment;
+    if (!create) return ItemNull;
+
+    RootFrame roots(3);
+    Rooted<Item> class_root(roots, class_item);
+    Rooted<Item> key_root(roots, environment_key);
+    Rooted<Item> environment_root(roots, js_new_object());
+    if (!roots.valid()) return ItemNull;
+    // The environment is class-owned so each evaluation receives fresh private
+    // records even when the compiled class entry and its source spellings repeat.
+    js_property_set(class_root.get(), key_root.get(), environment_root.get());
+    if (js_check_exception()) return ItemNull;
+    js_mark_non_enumerable(class_root.get(), key_root.get());
+    return environment_root.get();
+}
+
+extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
+    if (!js_private_source_name(source_name) || !js_input || !js_input->name_pool) {
+        return js_throw_type_error("Invalid private name binding");
+    }
+    RootFrame roots(4);
+    Rooted<Item> class_root(roots, class_item);
+    Rooted<Item> source_root(roots, source_name);
+    Rooted<Item> environment_root(roots,
+        js_private_environment_for_class(class_root.get(), true));
+    Rooted<Item> key_root(roots, ItemNull);
+    if (!roots.valid() || get_type_id(environment_root.get()) != LMD_TYPE_MAP) return ItemNull;
+    String* source = it2s(source_root.get());
+    NameRef binding_name = name_pool_create_len(js_input->name_pool, source->chars, source->len);
+    if (!binding_name) return ItemNull;
+    // Private source literals are distinct heap strings; the class environment
+    // must index their shared spelling with the ordinary pooled NameRecord.
+    source_root.set((Item){.item = s2it(binding_name)});
+    Item key = js_property_get(environment_root.get(), source_root.get());
+    if (get_type_id(key) == LMD_TYPE_STRING &&
+        property_key_requires_identity(it2s(key)) &&
+        property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
+        return key;
+    }
+    PropertyKeyRef private_key = name_pool_create_unique_private(js_input->name_pool,
+        {source->chars, source->len});
+    if (!private_key) return ItemNull;
+    key_root.set((Item){.item = s2it(private_key)});
+    // Source spelling resolves a lexical private binding only inside this hidden
+    // environment; the installed object property always uses the unique record.
+    js_property_set(environment_root.get(), source_root.get(), key_root.get());
+    if (js_check_exception()) return ItemNull;
+    return key_root.get();
+}
+
+extern "C" Item js_private_key_for_current_class(Item source_name) {
+    if (js_current_private_home_class.item == 0 ||
+        js_current_private_home_class.item == ItemNull.item) {
+        Item eval_key = js_eval_private_resolve(source_name);
+        if (get_type_id(eval_key) == LMD_TYPE_STRING &&
+            property_key_requires_identity(it2s(eval_key)) &&
+            property_key_kind(it2s(eval_key)) == NAME_KEY_PRIVATE) {
+            return eval_key;
+        }
+        return js_throw_type_error("Private name used outside its declaring class");
+    }
+    return js_private_key_for_class(js_current_private_home_class, source_name);
+}
+
+extern "C" Item js_private_home_class_enter(Item class_item) {
+    Item previous = js_current_private_home_class;
+    // Field initializer code is emitted at the construction site rather than
+    // through a method wrapper, so establish its lexical class explicitly.
+    js_current_private_home_class = class_item;
+    js_current_private_home_class_index = js_class_private_index(class_item);
+    return previous;
+}
+
+extern "C" void js_private_home_class_leave(Item previous_class) {
+    js_current_private_home_class = previous_class;
+    js_current_private_home_class_index = js_class_private_index(previous_class);
 }
 
 extern "C" Item js_bound_function_target(Item func_item) {
@@ -666,11 +743,12 @@ extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
     if (class_proto_found && class_proto.item != ItemNull.item) {
         home = target;
     } else {
-        bool ctor_found = false;
-        Item ctor = js_map_get_fast(target.map, "constructor", 11, &ctor_found);
-        if (ctor_found && get_type_id(ctor) == LMD_TYPE_MAP) {
-            bool ctor_proto_found = false;
-            Item ctor_proto = js_map_get_fast(ctor.map, "__instance_proto__", 18, &ctor_proto_found);
+        Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+        Item ctor = js_property_get(target, constructor_key);
+        if (get_type_id(ctor) == LMD_TYPE_MAP) {
+            Item ctor_proto_key = (Item){.item = s2it(heap_create_name("__instance_proto__", 18))};
+            Item ctor_proto = js_property_get(ctor, ctor_proto_key);
+            bool ctor_proto_found = ctor_proto.item != ItemNull.item;
             if (ctor_proto_found && ctor_proto.item != ItemNull.item) home = ctor;
         }
     }
@@ -680,6 +758,22 @@ extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
     js_set_function_home_class(fn_item, home);
     Item home_key = (Item){.item = s2it(heap_create_name(JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN))};
     js_func_init_property(fn_item, home_key, home);
+}
+
+extern "C" void js_refresh_prototype_method_homes(Item prototype, Item class_item) {
+    if (get_type_id(prototype) != LMD_TYPE_MAP || get_type_id(class_item) != LMD_TYPE_MAP ||
+        !prototype.map || !prototype.map->type || !prototype.map->data) return;
+    TypeMap* type = (TypeMap*)prototype.map->type;
+    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        // Accessor slots use the FUNC tag for Item compatibility, but hold a
+        // smaller JsAccessorPair; writing JsFunction home metadata would run
+        // past that layout and corrupt a later accessor's getter pointer.
+        if (entry->type && entry->type->type_id == LMD_TYPE_FUNC &&
+                !jspd_is_accessor(entry)) {
+            Item method = map_shape_field_to_item(prototype.map->data, entry);
+            if (get_type_id(method) == LMD_TYPE_FUNC) js_set_function_home_class(method, class_item);
+        }
+    }
 }
 
 static bool js_is_function_prototype_map(Item item) {
@@ -1951,29 +2045,59 @@ static bool js_can_host_private_slots(Item object) {
 }
 
 static bool js_private_storage_has_own(Item object, Item private_key) {
-    if (get_type_id(private_key) != LMD_TYPE_STRING) return false;
-    String* key_str = it2s(private_key);
-    if (!key_str) return false;
+    if (get_type_id(private_key) != LMD_TYPE_STRING ||
+        !property_key_requires_identity(it2s(private_key)) ||
+        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return false;
     Item lookup_object = object;
     if (js_is_proxy(object)) {
         lookup_object = js_proxy_private_slots(object, false);
     }
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
-    JsShapeSlotStatus status = js_own_shape_slot_status(
-        lookup_object, key_str->chars, (int)key_str->len, NULL, NULL);
+    JsShapeSlotStatus status = js_own_shape_slot_status_key(
+        lookup_object, it2s(private_key), NULL, NULL);
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
-static bool js_private_brand_storage_has_own(Item object, String* field_key_str) {
-    if (!field_key_str || field_key_str->len <= 10 ||
-        strncmp(field_key_str->chars, "__private_", 10) != 0) return false;
-    char brand_key[512];
-    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
-        (int)field_key_str->len, field_key_str->chars);
-    if (brand_key_len <= 0) return false;
-    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
-    Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
-    return js_private_storage_has_own(object, brand_key_item);
+static Item js_private_brand_key_for_class(Item class_item) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || !js_input || !js_input->name_pool) {
+        return ItemNull;
+    }
+    bool found = false;
+    Item brand = js_map_get_fast(class_item.map, "__pk_brand__", 12, &found);
+    if (found && get_type_id(brand) == LMD_TYPE_STRING &&
+        property_key_requires_identity(it2s(brand)) &&
+        property_key_kind(it2s(brand)) == NAME_KEY_PRIVATE) {
+        return brand;
+    }
+    PropertyKeyRef brand_key = name_pool_create_unique_private(js_input->name_pool,
+        {"<private brand>", 15});
+    if (!brand_key) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> class_root(roots, class_item);
+    Rooted<Item> key_root(roots,
+        (Item){.item = s2it(heap_create_name("__pk_brand__", 12))});
+    Rooted<Item> brand_root(roots, (Item){.item = s2it(brand_key)});
+    if (!roots.valid()) return ItemNull;
+    // The brand belongs to the evaluated class, never to a diagnostic member spelling.
+    js_property_set(class_root.get(), key_root.get(), brand_root.get());
+    if (js_check_exception()) return ItemNull;
+    js_mark_non_enumerable(class_root.get(), key_root.get());
+    return brand_root.get();
+}
+
+static Item js_private_brand_key_for_class_existing(Item class_item) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item brand = js_map_get_fast(class_item.map, "__pk_brand__", 12, &found);
+    if (!found || get_type_id(brand) != LMD_TYPE_STRING ||
+        !property_key_requires_identity(it2s(brand)) ||
+        property_key_kind(it2s(brand)) != NAME_KEY_PRIVATE) return ItemNull;
+    return brand;
+}
+
+static bool js_private_brand_storage_has_own(Item object, Item class_item) {
+    Item brand_key = js_private_brand_key_for_class(class_item);
+    return brand_key.item != ItemNull.item && js_private_storage_has_own(object, brand_key);
 }
 
 // Brand-check bypass scoped to private-field *definition* only. Distinct from
@@ -2003,8 +2127,11 @@ extern "C" void js_set_class_instance_field_metadata_bulk(Item class_item,
         if (!field_names[i] || field_lens[i] <= 0) return;
         // The arrays are rooted because interning each name may collect before
         // the class object has published the metadata properties.
-        keys_root.get().array->items[i] =
-            (Item){.item = s2it(heap_create_name(field_names[i], field_lens[i]))};
+        Item source_key = (Item){.item = s2it(heap_create_name(field_names[i], field_lens[i]))};
+        keys_root.get().array->items[i] = js_private_source_name(source_key)
+            ? js_private_key_for_class(class_root.get(), source_key)
+            : source_key;
+        if (js_check_exception()) return;
         values_root.get().array->items[i] = make_js_undefined();
         kinds_root.get().array->items[i] = (Item){.item = i2it(field_kinds[i] ? 1 : 0)};
     }
@@ -2041,39 +2168,43 @@ static bool js_init_class_instance_field(Item callee, Item object, Item field_ke
     Rooted<Item> value_root(roots, field_value);
     if (!roots.valid()) return false;
 
-    String* field_key_str = it2s(key_root.get());
-    if (field_key_str && field_key_str->len > 10 &&
-        strncmp(field_key_str->chars, "__private_", 10) == 0) {
+    bool private_key = get_type_id(key_root.get()) == LMD_TYPE_STRING &&
+        property_key_requires_identity(it2s(key_root.get())) &&
+        property_key_kind(it2s(key_root.get())) == NAME_KEY_PRIVATE;
+    if (private_key) {
         bool duplicate_private = brand_only ?
-            js_private_brand_storage_has_own(object_root.get(), field_key_str) :
+            js_private_brand_storage_has_own(object_root.get(), callee_root.get()) :
             js_private_storage_has_own(object_root.get(), key_root.get());
         if (duplicate_private) {
+            if (brand_only) {
+                // Derived public field initializers install their private-method
+                // brand immediately after `super()`; metadata finalization must
+                // treat that same class brand as already established.
+                return true;
+            }
             js_throw_type_error("Cannot initialize private member twice on the same object");
             return false;
         }
     }
     if (!brand_only) {
         if (!value_found) value_root.set(make_js_undefined());
-        if (field_key_str && field_key_str->len > 10 &&
-            strncmp(field_key_str->chars, "__private_", 10) == 0) {
+        if (private_key) {
             js_property_set(object_root.get(), key_root.get(), value_root.get());
         } else {
+            if (it2b(js_has_own_property(object_root.get(), key_root.get()))) {
+                // Explicit derived-field lowering runs immediately after `super()`;
+                // metadata finalization must not replace that evaluated value.
+                return true;
+            }
             js_create_data_property(object_root.get(), key_root.get(), value_root.get());
         }
         if (js_check_exception()) return false;
     }
-    field_key_str = it2s(key_root.get());
-    if (field_key_str && field_key_str->len > 10 &&
-        strncmp(field_key_str->chars, "__private_", 10) == 0) {
-        char brand_key[512];
-        int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
-            (int)field_key_str->len, field_key_str->chars);
-        if (brand_key_len > 0) {
-            if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
-            key_root.set((Item){.item = s2it(heap_create_name(brand_key, brand_key_len))});
-            js_property_set(object_root.get(), key_root.get(), callee_root.get());
-            if (js_check_exception()) return false;
-        }
+    if (private_key) {
+        key_root.set(js_private_brand_key_for_class(callee_root.get()));
+        if (key_root.get().item == ItemNull.item) return false;
+        js_property_set(object_root.get(), key_root.get(), callee_root.get());
+        if (js_check_exception()) return false;
     }
     return true;
 }
@@ -2166,26 +2297,40 @@ extern "C" void js_init_class_instance_fields(Item callee, Item object) {
 
 extern "C" void js_private_brand_add(Item object, Item private_key, Item callee) {
     if (!js_can_host_private_slots(object)) return;
-    if (get_type_id(private_key) != LMD_TYPE_STRING) return;
-    String* field_key_str = it2s(private_key);
-    if (!field_key_str || field_key_str->len <= 10 ||
-        strncmp(field_key_str->chars, "__private_", 10) != 0) return;
-    if (js_private_brand_storage_has_own(object, field_key_str)) {
-        js_throw_type_error("Cannot initialize private member twice on the same object");
+    if (get_type_id(private_key) != LMD_TYPE_STRING ||
+        !property_key_requires_identity(it2s(private_key)) ||
+        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return;
+    if (object.item == callee.item) {
+        // Static private members are found as own slots on the constructor;
+        // giving it the instance brand would expose prototype-private methods.
         return;
     }
-    char brand_key[512];
-    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
-        (int)field_key_str->len, field_key_str->chars);
-    if (brand_key_len <= 0) return;
-    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
-    Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
+    if (js_private_brand_storage_has_own(object, callee)) {
+        if (!js_private_storage_has_own(object, private_key)) {
+            // Instance methods have no own member slot; seeing their class
+            // brand again means construction is trying to initialize them twice.
+            js_throw_type_error("Cannot initialize private member twice on the same object");
+        }
+        return;
+    }
+    Item brand_key_item = js_private_brand_key_for_class(callee);
+    if (brand_key_item.item == ItemNull.item) return;
+    // Brand installation is the declaration step for a class-owned identity
+    // key; ordinary private writes must remain subject to the brand check.
+    bool saved_define = js_private_define_active;
+    js_private_define_active = true;
     js_property_set(object, brand_key_item, callee);
+    js_private_define_active = saved_define;
 }
 
 // Define (add) a private field's value on the instance, bypassing the brand
 // check for THIS write only (ES PrivateFieldAdd at the field's definition).
 extern "C" Item js_private_field_define(Item object, Item private_key, Item value) {
+    if (js_private_storage_has_own(object, private_key)) {
+        // PrivateFieldAdd is distinct from assignment: an existing private
+        // slot means this receiver was already initialized by the class.
+        return js_throw_type_error("Cannot initialize private member twice on the same object");
+    }
     bool saved = js_private_define_active;
     js_private_define_active = true;
     js_property_set(object, private_key, value);
@@ -2779,6 +2924,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
         }
+        // A class with no explicit constructor never enters js_call_function to
+        // consume the pending target, so clear it before the next construct.
+        js_pending_new_target = ItemNull;
+        js_has_pending_new_target = false;
         return object_root.get();
     }
     // Not a function or class object — throw TypeError
@@ -2870,7 +3019,7 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
 
     Item S = (Item){.item = ITEM_NULL};
     {
-        Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+        Item species_key = js_well_known_symbol_key(6);
         Item own_species = ItemNull;
         JsOwnGetStatus own_st = js_ordinary_get_own(C, species_key, C, &own_species);
         if (own_st == JS_OWN_READY) {
@@ -2979,7 +3128,7 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
         return (Item){.item = ITEM_NULL};
     }
 
-    Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+    Item species_key = js_well_known_symbol_key(6);
     Item S = (Item){.item = ITEM_NULL};
     {
         Item own_species = ItemNull;
@@ -3065,10 +3214,15 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
         ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool, sizeof(ShapeEntry) + sizeof(StrView));
         StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
         String* key_str = heap_create_name(prop_names[i], (size_t)prop_lens[i]);
+        if (!key_str) return js_new_object();
         nv->str = key_str->chars;
         nv->length = key_str->len;
         se->name = nv;
-        se->name_id = typemap_name_id(nv->str, (int)nv->length);
+        se->name_hash = typemap_name_hash(nv->str, (int)nv->length);
+        se->predefined_id = name_ref_id(key_str);
+        // Constructor shapes are runtime-canonical, so key identity is never
+        // reconstructed from compiler-owned spelling bytes after this point.
+        se->key_ref = key_str;
         se->type = type_info[LMD_TYPE_NULL].type;
         se->byte_offset = i * (int)sizeof(void*);  // 8-byte slots
         se->next = NULL;
@@ -3730,7 +3884,7 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
     case MAP_KIND_TYPED_ARRAY: {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_4", 7) == 0) {
+            if (js_key_is_well_known_symbol(key, 4)) {
                 const char* ta_name = js_typed_array_type_name(object);
                 *out_result = ta_name ? (Item){.item = s2it(heap_create_name(ta_name, (int)strlen(ta_name)))}
                                       : make_js_undefined();
@@ -3995,12 +4149,9 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
     case MAP_KIND_CSS_NAMESPACE:
         return false;
     case MAP_KIND_ITERATOR:
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk->len == 7 && strncmp(sk->chars, "__sym_1", 7) == 0) {
-                *out_result = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-                return true;
-            }
+        if (js_key_is_well_known_symbol(key, 1)) {
+            *out_result = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+            return true;
         }
         *out_result = make_js_undefined();
         return true;
@@ -4073,25 +4224,6 @@ static bool js_is_restricted_function_property_name(String* str_key) {
          (str_key->len == 9 && strncmp(str_key->chars, "arguments", 9) == 0));
 }
 
-static bool js_private_key_is_unscoped(String* key) {
-    if (!key || key->len <= 10 || strncmp(key->chars, "__private_", 10) != 0) return false;
-    char first = key->chars[10];
-    return first < '0' || first > '9';
-}
-
-static bool js_private_scoped_key_matches_suffix(StrView* candidate, const char* suffix, int suffix_len) {
-    if (!candidate || !candidate->str || !suffix || suffix_len <= 0) return false;
-    const char* chars = candidate->str;
-    int len = (int)candidate->length;
-    if (len <= 11 + suffix_len || strncmp(chars, "__private_", 10) != 0) return false;
-    int pos = 10;
-    if (chars[pos] < '0' || chars[pos] > '9') return false;
-    while (pos < len && chars[pos] >= '0' && chars[pos] <= '9') pos++;
-    if (pos >= len || chars[pos] != '_') return false;
-    pos++;
-    return len - pos == suffix_len && memcmp(chars + pos, suffix, suffix_len) == 0;
-}
-
 static bool js_property_key_needs_object_to_key(Item key) {
     TypeId key_type = get_type_id(key);
     return key_type == LMD_TYPE_MAP || key_type == LMD_TYPE_ARRAY ||
@@ -4104,69 +4236,59 @@ static bool js_is_private_internal_property_key(Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* sk = it2s(key);
     if (!sk) return false;
-    return (sk->len > 10 && strncmp(sk->chars, "__private_", 10) == 0) ||
-           (sk->len > 8 && strncmp(sk->chars, "__brand_", 8) == 0) ||
+    if (property_key_requires_identity(sk) && property_key_kind(sk) == NAME_KEY_PRIVATE) {
+        return true;
+    }
+    return (sk->len > 8 && strncmp(sk->chars, "__brand_", 8) == 0) ||
            (sk->len == 13 && strncmp(sk->chars, "__promise_idx", 13) == 0) ||
            (sk->len == 9 && strncmp(sk->chars, "__gen_idx", 9) == 0) ||
            (sk->len == 4 && strncmp(sk->chars, "__rd", 4) == 0);
-}
-
-static Item js_private_find_scoped_key_on_map(Map* map, const char* suffix, int suffix_len) {
-    if (!map || !map->type) return ItemNull;
-    TypeMap* map_type = (TypeMap*)map->type;
-    for (ShapeEntry* entry = map_type->shape; entry; entry = entry->next) {
-        if (!js_private_scoped_key_matches_suffix(entry->name, suffix, suffix_len)) continue;
-        return (Item){.item = s2it(heap_create_name(entry->name->str, (int)entry->name->length))};
-    }
-    return ItemNull;
-}
-
-static Item js_private_find_scoped_key_on_object_chain(Item object, const char* suffix, int suffix_len) {
-    Item current = object;
-    int depth = 0;
-    while (get_type_id(current) == LMD_TYPE_MAP && depth < 32) {
-        Item key = js_private_find_scoped_key_on_map(current.map, suffix, suffix_len);
-        if (key.item != ItemNull.item) return key;
-        current = js_get_prototype(current);
-        depth++;
-    }
-    return ItemNull;
 }
 
 static Item js_private_brand_owner(Item object, String* private_key, bool* out_found);
 
 static bool js_private_brand_mismatch(Item object, String* private_key) {
     if (!private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
-    if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return false;
+    if (!property_key_requires_identity(private_key) ||
+        property_key_kind(private_key) != NAME_KEY_PRIVATE) return false;
+    Item private_key_item = (Item){.item = s2it(private_key)};
+    if (js_private_storage_has_own(object, private_key_item)) return false;
     bool found = false;
-    Item brand = js_private_brand_owner(object, private_key, &found);
-    if (!found) return true;
-    int key_class_index = js_private_key_class_index(private_key);
-    if (key_class_index >= 0 && key_class_index == js_current_private_home_class_index &&
-        js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item) {
-        return brand.item != js_current_private_home_class.item;
-    }
-    return false;
+    (void)js_private_brand_owner(object, private_key, &found);
+    return !found;
 }
 
 static Item js_private_brand_owner(Item object, String* private_key, bool* out_found) {
     if (out_found) *out_found = false;
     if (!private_key || get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
-    if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return ItemNull;
-    Item lookup_object = object;
-    if (js_is_proxy(object)) {
-        lookup_object = js_proxy_private_slots(object, false);
-        if (get_type_id(lookup_object) != LMD_TYPE_MAP) return ItemNull;
+    if (!property_key_requires_identity(private_key) ||
+        property_key_kind(private_key) != NAME_KEY_PRIVATE) return ItemNull;
+    Item lookup_object = js_is_proxy(object) ? js_proxy_private_slots(object, false) : object;
+    if (get_type_id(lookup_object) != LMD_TYPE_MAP) return ItemNull;
+    TypeMap* type = (TypeMap*)lookup_object.map->type;
+    for (ShapeEntry* entry = type ? type->shape : NULL; entry; entry = entry->next) {
+        PropertyKeyRef candidate_brand_key = entry->key_ref;
+        if (!candidate_brand_key || !property_key_requires_identity(candidate_brand_key) ||
+            property_key_kind(candidate_brand_key) != NAME_KEY_PRIVATE) continue;
+        Item candidate = ItemNull;
+        Item candidate_key_item = (Item){.item = s2it(candidate_brand_key)};
+        if (js_ordinary_get_own(lookup_object, candidate_key_item, lookup_object,
+                &candidate) != JS_OWN_READY || get_type_id(candidate) != LMD_TYPE_MAP) continue;
+        Item declared_brand_key = js_private_brand_key_for_class_existing(candidate);
+        if (declared_brand_key.item != candidate_key_item.item) continue;
+        bool proto_found = false;
+        Item proto = js_map_get_fast(candidate.map, "__instance_proto__", 18, &proto_found);
+        if (!proto_found || get_type_id(proto) != LMD_TYPE_MAP) continue;
+        JsShapeSlotStatus member_status = js_own_shape_slot_status_key(
+            proto, private_key, NULL, NULL);
+        if (member_status == JS_SHAPE_SLOT_DATA || member_status == JS_SHAPE_SLOT_ACCESSOR) {
+            // A private key is the declaration identity; method brands must
+            // verify that exact key instead of the caller's mutable home class.
+            if (out_found) *out_found = true;
+            return candidate;
+        }
     }
-    char brand_key[512];
-    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
-        (int)private_key->len, private_key->chars);
-    if (brand_key_len <= 0) return ItemNull;
-    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
-    bool found = false;
-    Item brand = js_map_get_fast(lookup_object.map, brand_key, brand_key_len, &found);
-    if (out_found) *out_found = found;
-    return found ? brand : ItemNull;
+    return ItemNull;
 }
 
 static Item js_private_method_lookup_from_brand(Item receiver, Item key, String* private_key, bool* out_found) {
@@ -4174,12 +4296,6 @@ static Item js_private_method_lookup_from_brand(Item receiver, Item key, String*
     bool brand_found = false;
     Item brand = js_private_brand_owner(receiver, private_key, &brand_found);
     if (!brand_found || brand.item == ItemNull.item) return ItemNull;
-    int key_class_index = js_private_key_class_index(private_key);
-    if (key_class_index >= 0 && key_class_index == js_current_private_home_class_index &&
-        js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item &&
-        brand.item != js_current_private_home_class.item) {
-        return ItemNull;
-    }
     if (get_type_id(brand) != LMD_TYPE_MAP) return ItemNull;
     bool proto_found = false;
     Item proto = js_map_get_fast(brand.map, "__instance_proto__", 18, &proto_found);
@@ -4200,14 +4316,28 @@ static Item js_private_method_lookup_from_brand(Item receiver, Item key, String*
     return ItemNull;
 }
 
+extern "C" Item js_private_in(Item object, Item private_key) {
+    if (get_type_id(private_key) != LMD_TYPE_STRING ||
+        !property_key_requires_identity(it2s(private_key)) ||
+        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) {
+        return (Item){.item = b2it(false)};
+    }
+    if (js_private_storage_has_own(object, private_key)) return (Item){.item = b2it(true)};
+    bool found = false;
+    (void)js_private_brand_owner(object, it2s(private_key), &found);
+    return (Item){.item = b2it(found)};
+}
+
 static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
     if ((!js_private_field_initializing && !js_eval_initializer_context) ||
-        !js_private_key_is_unscoped(key) || get_type_id(object) != LMD_TYPE_MAP) {
+        !js_private_source_name((Item){.item = s2it(key)}) || get_type_id(object) != LMD_TYPE_MAP) {
         return ItemNull;
     }
-    const char* suffix = key->chars + 10;
-    int suffix_len = (int)key->len - 10;
-    return js_private_find_scoped_key_on_object_chain(object, suffix, suffix_len);
+    Item private_key = js_eval_private_resolve((Item){.item = s2it(key)});
+    if (get_type_id(private_key) != LMD_TYPE_STRING ||
+        !property_key_requires_identity(it2s(private_key)) ||
+        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return ItemNull;
+    return private_key;
 }
 
 static bool js_object_prototype_builtin_deleted(const char* key_str, int key_len) {
@@ -4230,7 +4360,7 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
         JsClass cls = js_class_id(object);
         if (cls == JS_CLASS_STRING) {
             // String.prototype[Symbol.iterator]
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+            if (js_key_is_well_known_symbol((Item){.item = s2it(str_key)}, 1)) {
                 if (out_found) *out_found = true;
                 return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
             }
@@ -4268,8 +4398,8 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
                 if (out_found) *out_found = true;
                 return date_method;
             }
-            // Symbol.toPrimitive (stored as __sym_2)
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
+            // Symbol.toPrimitive is selected by its unique generated key.
+            if (js_key_is_well_known_symbol((Item){.item = s2it(str_key)}, 2)) {
                 if (out_found) *out_found = true;
                 return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
             }
@@ -4292,7 +4422,7 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
             // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
         } else if (cls == JS_CLASS_ARRAY) {
             // Array.prototype[Symbol.iterator] -> values
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+            if (js_key_is_well_known_symbol((Item){.item = s2it(str_key)}, 1)) {
                 if (out_found) *out_found = true;
                 return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
             }
@@ -4353,7 +4483,7 @@ static Item js_map_builtin_fallback_get(Item object, String* str_key,
     // v55: Collection (Set/Map) method resolution via Symbol.iterator and named methods.
     JsCollectionData* cd = js_get_collection_data(object);
     if (cd) {
-        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+        if (js_key_is_well_known_symbol((Item){.item = s2it(str_key)}, 1)) {
             if (out_found) *out_found = true;
             return cd->type == JS_COLLECTION_SET
                 ? js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "[Symbol.iterator]", 0)
@@ -4415,12 +4545,12 @@ extern "C" Item js_property_get(Item object, Item key) {
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
-        if (private_key && private_key->len > 10 &&
-            strncmp(private_key->chars, "__private_", 10) == 0 &&
+        if (private_key && property_key_requires_identity(private_key) &&
+            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
             !js_can_host_private_slots(object)) {
             char msg[256];
-            snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                (int)(private_key->len - 10), private_key->chars + 10);
+            snprintf(msg, sizeof(msg), "Cannot read private member %.*s from an object whose class did not declare it",
+                (int)private_key->len, private_key->chars);
             return js_throw_type_error(msg);
         }
     }
@@ -4436,12 +4566,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (st == JS_OWN_READY) {
                     if (get_type_id(key) == LMD_TYPE_STRING) {
                         String* private_key = it2s(key);
-                        if (private_key && private_key->len > 10 &&
-                            strncmp(private_key->chars, "__private_", 10) == 0 &&
+                        if (private_key && property_key_requires_identity(private_key) &&
+                            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
                             js_private_brand_mismatch(object, private_key)) {
                             char msg[256];
-                            snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                                (int)(private_key->len - 10), private_key->chars + 10);
+                            snprintf(msg, sizeof(msg), "Cannot read private member %.*s from an object whose class did not declare it",
+                                (int)private_key->len, private_key->chars);
                             return js_throw_type_error(msg);
                         }
                     }
@@ -4528,11 +4658,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* private_key = it2s(key);
-                    if (private_key && private_key->len > 10 && strncmp(private_key->chars, "__private_", 10) == 0 &&
+                    if (private_key && property_key_requires_identity(private_key) &&
+                        property_key_kind(private_key) == NAME_KEY_PRIVATE &&
                         js_private_brand_mismatch(object, private_key)) {
                         char msg[256];
-                        snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                            (int)(private_key->len - 10), private_key->chars + 10);
+                        snprintf(msg, sizeof(msg), "Cannot read private member %.*s from an object whose class did not declare it",
+                            (int)private_key->len, private_key->chars);
                         return js_throw_type_error(msg);
                     }
                 }
@@ -4606,12 +4737,12 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Use _ex variant to distinguish "found, returned JS null" from "not found".
         if (!own_found && get_type_id(key) == LMD_TYPE_STRING) {
             String* private_key = it2s(key);
-            if (private_key && private_key->len > 10 &&
-                strncmp(private_key->chars, "__private_", 10) == 0) {
+            if (private_key && property_key_requires_identity(private_key) &&
+                property_key_kind(private_key) == NAME_KEY_PRIVATE) {
                 if (js_private_brand_mismatch(object, private_key)) {
                     char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                        (int)(private_key->len - 10), private_key->chars + 10);
+                    snprintf(msg, sizeof(msg), "Cannot read private member %.*s from an object whose class did not declare it",
+                        (int)private_key->len, private_key->chars);
                     return js_throw_type_error(msg);
                 }
                 bool private_method_found = false;
@@ -4644,20 +4775,6 @@ extern "C" Item js_property_get(Item object, Item key) {
             Item builtin = js_map_builtin_fallback_get(
                 object, str_key, own_was_deleted_sentinel, &builtin_found);
             if (builtin_found) return builtin;
-        }
-        // v37: Private member brand check — accessing #field on wrong object throws TypeError
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* pk = it2s(key);
-            if (pk && pk->len > 10 && strncmp(pk->chars, "__private_", 10) == 0) {
-                Item resolved_private_key = js_eval_initializer_resolve_private_key(object, pk);
-                if (resolved_private_key.item != ItemNull.item) {
-                    return js_property_get(object, resolved_private_key);
-                }
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                         (int)(pk->len - 10), pk->chars + 10);
-                return js_throw_type_error(msg);
-            }
         }
         return make_js_undefined();
     } else if (type == LMD_TYPE_VMAP && js_host_object_type(object)) {
@@ -4736,9 +4853,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                     return js_get_prototype_of(object);
                 }
-                // Symbol.iterator → values method (Symbol.iterator has well-known ID=1, key "__sym_1")
+                // Symbol.iterator is selected by its unique generated key.
                 // v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted
-                if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                if (js_key_is_well_known_symbol(key, 1)) {
                     if (g_array_sym_iter_ever_set) {
                         Item sym_override = js_check_array_sym_iterator();
                         if (sym_override.item == ITEM_JS_UNDEFINED) return make_js_undefined();  // deleted
@@ -4781,13 +4898,6 @@ extern "C" Item js_property_get(Item object, Item key) {
                         Item result = js_property_get(proto, key);
                         if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
                     }
-                }
-                // v37: Private member brand check on array objects
-                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
-                             (int)(str_key->len - 10), str_key->chars + 10);
-                    return js_throw_type_error(msg);
                 }
                 return make_js_undefined();
             }
@@ -4896,8 +5006,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                 return js_get_prototype_of(object);
             }
-            // Symbol.iterator → string iterator factory (Symbol.iterator has well-known ID=1, key "__sym_1")
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+            // Symbol.iterator uses the generated identity key.
+            if (js_key_is_well_known_symbol(key, 1)) {
                 return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
             }
             // v20: Check string builtin methods before falling through to index access
@@ -5085,8 +5195,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
                                 js_property_set(unscopal_val, uk, (Item){.item = b2it(true)});
                             }
-                            // store as __sym_11 (Symbol.unscopables)
-                            Item us_k = (Item){.item = s2it(heap_create_name("__sym_11", 8))};
+                            Item us_k = js_well_known_symbol_key(11);
                             js_property_set(fn->prototype, us_k, unscopal_val);
                             js_mark_non_enumerable(fn->prototype, us_k);
                             js_mark_non_writable(fn->prototype, us_k);
@@ -5172,20 +5281,20 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item vo_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
                             js_property_set(fn->prototype, vo_key, vo_fn);
                             js_mark_non_enumerable(fn->prototype, vo_key);
-                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+                            Item tp_key = js_well_known_symbol_key(2);
                             Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                             js_property_set(fn->prototype, tp_key, tp_fn);
                             js_mark_non_enumerable(fn->prototype, tp_key);
                             js_mark_non_writable(fn->prototype, tp_key);
                             // Symbol.toStringTag = "Symbol"
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("Symbol", 6))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
                             js_mark_non_enumerable(fn->prototype, tag_key);
                         }
                         if (nl == 6 && strncmp(nm, "BigInt", 6) == 0) {
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("BigInt", 6))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
@@ -5200,7 +5309,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 7 && strncmp(nm, "WeakRef", 7) == 0) ||
                             (nl == 20 && strncmp(nm, "FinalizationRegistry", 20) == 0);
                         if (needs_tostring_tag) {
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name(nm, nl))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             // v41: Mark Symbol.toStringTag non-writable, non-enumerable per spec
@@ -5214,7 +5323,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item size_getter = js_get_or_create_builtin(JS_BUILTIN_MAP_SIZE_GETTER, "get size", 0);
                             js_install_native_accessor(fn->prototype, size_key, size_getter, ItemNull, JSPD_NON_ENUMERABLE);
                             // Symbol.iterator = entries
-                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_key = js_well_known_symbol_key(1);
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
                             js_property_set(fn->prototype, si_key, si_fn);
                             js_mark_non_enumerable(fn->prototype, si_key);
@@ -5232,7 +5341,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 js_mark_non_enumerable(fn->prototype, keys_key);
                             }
                             // Symbol.iterator = values
-                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_key = js_well_known_symbol_key(1);
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "[Symbol.iterator]", 0);
                             js_property_set(fn->prototype, si_key, si_fn);
                             js_mark_non_enumerable(fn->prototype, si_key);
@@ -5255,7 +5364,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 4 && strncmp(nm, "Date", 4) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.toPrimitive
-                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+                            Item tp_key = js_well_known_symbol_key(2);
                             Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                             js_property_set(fn->prototype, tp_key, tp_fn);
                             js_mark_non_enumerable(fn->prototype, tp_key);
@@ -5272,16 +5381,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 6 && strncmp(nm, "RegExp", 6) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // v83: Symbol-keyed methods (@@match, @@replace, @@search, @@split, @@matchAll)
-                            struct { const char* sym_key; int sym_len; int bid; const char* display; int pc; } sym_methods[] = {
-                                {"__sym_7",  7, JS_BUILTIN_REGEXP_SYMBOL_MATCH,     "[Symbol.match]",    1},
-                                {"__sym_8",  7, JS_BUILTIN_REGEXP_SYMBOL_REPLACE,   "[Symbol.replace]",  2},
-                                {"__sym_9",  7, JS_BUILTIN_REGEXP_SYMBOL_SEARCH,    "[Symbol.search]",   1},
-                                {"__sym_10", 8, JS_BUILTIN_REGEXP_SYMBOL_SPLIT,     "[Symbol.split]",    2},
-                                {"__sym_13", 8, JS_BUILTIN_REGEXP_SYMBOL_MATCHALL,  "[Symbol.matchAll]", 1},
-                                {NULL, 0, 0, NULL, 0}
+                            struct { int symbol_id; int bid; const char* display; int pc; } sym_methods[] = {
+                                {7, JS_BUILTIN_REGEXP_SYMBOL_MATCH,     "[Symbol.match]",    1},
+                                {8, JS_BUILTIN_REGEXP_SYMBOL_REPLACE,   "[Symbol.replace]",  2},
+                                {9, JS_BUILTIN_REGEXP_SYMBOL_SEARCH,    "[Symbol.search]",   1},
+                                {10, JS_BUILTIN_REGEXP_SYMBOL_SPLIT,    "[Symbol.split]",    2},
+                                {13, JS_BUILTIN_REGEXP_SYMBOL_MATCHALL, "[Symbol.matchAll]", 1},
+                                {0, 0, NULL, 0}
                             };
-                            for (int mi = 0; sym_methods[mi].sym_key; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(sym_methods[mi].sym_key, sym_methods[mi].sym_len))};
+                            for (int mi = 0; sym_methods[mi].symbol_id; mi++) {
+                                Item mk = js_well_known_symbol_key(sym_methods[mi].symbol_id);
                                 Item mf = js_get_or_create_builtin(sym_methods[mi].bid, sym_methods[mi].display, sym_methods[mi].pc);
                                 js_property_set(fn->prototype, mk, mf);
                                 js_mark_non_enumerable(fn->prototype, mk);
@@ -5317,7 +5426,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, ctor_key, ctor_val);
                             js_mark_non_enumerable(fn->prototype, ctor_key);
                             // Symbol.toStringTag = "Promise"
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("Promise", 7))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
@@ -5327,7 +5436,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.iterator = values
-                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_key = js_well_known_symbol_key(1);
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ARR_VALUES, "[Symbol.iterator]", 0);
                             js_property_set(fn->prototype, si_key, si_fn);
                             js_mark_non_enumerable(fn->prototype, si_key);
@@ -5341,7 +5450,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_mark_non_enumerable(fn->prototype, length_key);
                             js_mark_non_configurable(fn->prototype, length_key);
                             // Symbol.iterator
-                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_key = js_well_known_symbol_key(1);
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
                             js_property_set(fn->prototype, si_key, si_fn);
                             js_mark_non_enumerable(fn->prototype, si_key);
@@ -5366,7 +5475,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item arguments_key = (Item){.item = s2it(heap_create_name("arguments", 9))};
                             js_install_native_accessor(fn->prototype, caller_key, thrower, thrower, JSPD_NON_ENUMERABLE);
                             js_install_native_accessor(fn->prototype, arguments_key, thrower, thrower, JSPD_NON_ENUMERABLE);
-                            Item has_instance_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
+                            Item has_instance_key = js_well_known_symbol_key(3);
                             Item has_instance = js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
                             js_property_set(fn->prototype, has_instance_key, has_instance);
                             js_mark_non_writable(fn->prototype, has_instance_key);
@@ -5386,7 +5495,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 8 && strncmp(nm, "DataView", 8) == 0) {
                             js_class_stamp(fn->prototype, JS_CLASS_DATA_VIEW);
                             // Symbol.toStringTag
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("DataView", 8))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
@@ -5397,7 +5506,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 11 && strncmp(nm, "ArrayBuffer", 11) == 0) {
                             js_class_stamp(fn->prototype, JS_CLASS_ARRAY_BUFFER);
                             // Symbol.toStringTag
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("ArrayBuffer", 11))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
@@ -5407,7 +5516,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // SharedArrayBuffer.prototype methods
                         if (nl == 17 && strncmp(nm, "SharedArrayBuffer", 17) == 0) {
                             js_class_stamp(fn->prototype, JS_CLASS_SHARED_ARRAY_BUFFER);
-                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_key = js_well_known_symbol_key(4);
                             Item tag_val = (Item){.item = s2it(heap_create_name("SharedArrayBuffer", 17))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
@@ -5471,7 +5580,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             // virtual deletes materialize a safe slot whose JSPD_DELETED bit is
             // the authoritative absence state.
             // Function.prototype[@@hasInstance] — default OrdinaryHasInstance
-            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_3", 7) == 0) {
+            if (js_key_is_well_known_symbol(key, 3)) {
                 return js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
             }
             // ES6+ §16: Function.prototype.caller and .arguments are poison pill accessors
@@ -5562,7 +5671,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
                 }
-                if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
+                if (js_key_is_well_known_symbol(key, 2)) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                 }
                 if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
@@ -5631,6 +5740,14 @@ extern "C" Item js_property_get(Item object, Item key) {
     }
 
     return make_js_undefined();
+}
+
+static PropertyKeyRef js_canonical_string_key(String* key) {
+    if (!key) return NULL;
+    // Document Input owns syntax names, but JavaScript shapes survive that
+    // boundary. Canonical runtime STRING keys must therefore come from the
+    // isolate NamePool used by every property operation.
+    return heap_create_name(key->chars, key->len);
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value);
@@ -6089,11 +6206,17 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
     }
 }
 
-static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, int name_len) {
+static bool js_proto_chain_has_nonwritable_data_impl(Item object, PropertyKeyRef identity_key,
+                                                     const char* name, int name_len) {
+    if (!name || name_len < 0) return false;
     Item proto = js_get_prototype_of(object);
     int depth = 0;
     while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
-        ShapeEntry* se = js_find_shape_entry(proto, name, name_len);
+        // Symbol/private spelling is not its property identity; use the exact
+        // record so inherited non-writable slots cannot be shadowed by writes.
+        ShapeEntry* se = identity_key
+            ? js_find_shape_entry_key(proto, identity_key)
+            : js_find_shape_entry(proto, name, name_len);
         if (se) {
             if (jspd_is_accessor(se)) return false;
             return !js_props_query_writable(proto.map, se, name, name_len);
@@ -6102,6 +6225,16 @@ static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, i
         depth++;
     }
     return false;
+}
+
+static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, int name_len) {
+    return js_proto_chain_has_nonwritable_data_impl(object, NULL, name, name_len);
+}
+
+static bool js_proto_chain_has_nonwritable_data(Item object, PropertyKeyRef key) {
+    return key && js_proto_chain_has_nonwritable_data_impl(
+        object, property_key_requires_identity(key) ? key : NULL,
+        key->chars, (int)key->len);
 }
 
 static bool js_is_class_constructor_map(Item object) {
@@ -6562,7 +6695,12 @@ static Item js_property_set_map(Item object, Item key, Item value) {
     }
     // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
     TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
+    if (kt == LMD_TYPE_INT && js_key_is_symbol(key)) {
+        // Map storage indexes Symbols by their NamePool record; treating the
+        // compact public id as a number would publish a different string key.
+        key = js_to_property_key(key);
+        if (js_check_exception()) return value;
+    } else if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char buf[64];
         if (kt == LMD_TYPE_INT) {
             snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
@@ -6588,13 +6726,13 @@ static Item js_property_set_map(Item object, Item key, Item value) {
     if (private_internal_property_key && js_is_proxy(object)) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* private_key = it2s(key);
-            if (private_key && private_key->len > 10 &&
-                strncmp(private_key->chars, "__private_", 10) == 0 &&
+            if (private_key && property_key_requires_identity(private_key) &&
+                property_key_kind(private_key) == NAME_KEY_PRIVATE &&
                 !js_private_define_active &&
                 js_private_brand_mismatch(object, private_key)) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                    (int)private_key->len - 10, private_key->chars + 10);
+                snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                    (int)private_key->len, private_key->chars);
                 return js_throw_type_error(msg);
             }
         }
@@ -6662,7 +6800,9 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                     !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
                 bool own_accessor_property = false;
                 if (!internal_non_symbol && sk) {
-                    ShapeEntry* shape_entry = js_find_shape_entry(object, sk->chars, (int)sk->len);
+                    ShapeEntry* shape_entry = property_key_requires_identity(sk)
+                        ? js_find_shape_entry_key(object, sk)
+                        : js_find_shape_entry(object, sk->chars, (int)sk->len);
                     own_accessor_property = shape_entry && jspd_is_accessor(shape_entry);
                 }
                 if (!internal_non_symbol && !own_accessor_property) {
@@ -6681,12 +6821,18 @@ static Item js_property_set_map(Item object, Item key, Item value) {
     // causing reads to dereference the integer as a JsAccessorPair* and crash.
     if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
         String* str_key = it2s(key);
-        if (str_key && str_key->len > 0 && str_key->len < 200) {
+        if (str_key && str_key->len < 200) {
             // Phase 2b fast path: consult ShapeEntry::flags first.
             // 1 → entry exists & writable → allow write.
             // 0 → entry exists & non-writable → throw immediately.
             // -1 → no entry on this map; default writable.
-            int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
+            // Private and Symbol keys share source text across unrelated
+            // declarations, so their attributes must use the installed record.
+            // Empty-description Symbols are valid keys too, not absent names.
+            int fp = property_key_requires_identity(str_key)
+                ? js_prop_attrs_fast_path_key(object, str_key, JSPD_NON_WRITABLE)
+                : js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len,
+                    JSPD_NON_WRITABLE);
             if (fp == 0) {
                 js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                 return value;
@@ -6746,23 +6892,27 @@ static Item js_property_set_map(Item object, Item key, Item value) {
             // Stage A1.4: IS_ACCESSOR setter dispatch on own + proto chain
             // routed through js_ordinary_set_via_accessor.
             {
-                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
+                if (property_key_requires_identity(str_key) &&
+                    property_key_kind(str_key) == NAME_KEY_PRIVATE &&
                     !js_private_define_active &&
                     js_private_brand_mismatch(object, str_key)) {
                     char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                        (int)str_key->len - 10, str_key->chars + 10);
+                    snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                        (int)str_key->len, str_key->chars);
                     return js_throw_type_error(msg);
                 }
                 Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
-                JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
-                    object, str_key->chars, (int)str_key->len, value, recv);
+                JsSetterDispatchStatus st = property_key_requires_identity(str_key)
+                    ? js_ordinary_set_via_accessor_key(object, str_key, value, recv)
+                    : js_ordinary_set_via_accessor(
+                        object, str_key->chars, (int)str_key->len, value, recv);
                 if (st == JS_SET_DISPATCHED) return value;
                 if (st == JS_SET_NO_SETTER) {
-                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                    if (property_key_requires_identity(str_key) &&
+                        property_key_kind(str_key) == NAME_KEY_PRIVATE) {
                         char msg[256];
-                        snprintf(msg, sizeof(msg), "'#%.*s' was defined without a setter",
-                            (int)str_key->len - 10, str_key->chars + 10);
+                        snprintf(msg, sizeof(msg), "'%.*s' was defined without a setter",
+                            (int)str_key->len, str_key->chars);
                         return js_throw_type_error(msg);
                     }
                     // Accessor with no callable setter: strict TypeError, sloppy no-op.
@@ -6772,26 +6922,35 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                 }
                 // JS_SET_NOT_FOUND: fall through to normal data write below.
             }
-            bool has_own_before_set = js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
+            JsShapeSlotStatus own_key_status = property_key_requires_identity(str_key)
+                ? js_own_shape_slot_status_key(object, str_key, NULL, NULL)
+                : JS_SHAPE_SLOT_ABSENT;
+            // A private or Symbol slot is unnameable by bytes, so its existing
+            // own property must be tested by the same record used for the write.
+            bool has_own_before_set = property_key_requires_identity(str_key)
+                ? own_key_status == JS_SHAPE_SLOT_DATA || own_key_status == JS_SHAPE_SLOT_ACCESSOR
+                : js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
             bool class_intrinsic_define = !has_own_before_set && js_is_class_constructor_map(object) &&
                 ((str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) ||
                  (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
             if (!has_own_before_set && !class_intrinsic_define &&
-                js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
-                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                js_proto_chain_has_nonwritable_data(object, str_key)) {
+                if (property_key_requires_identity(str_key) &&
+                    property_key_kind(str_key) == NAME_KEY_PRIVATE) {
                     char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot assign to private method '#%.*s'",
-                        (int)str_key->len - 10, str_key->chars + 10);
+                    snprintf(msg, sizeof(msg), "Cannot assign to private method '%.*s'",
+                        (int)str_key->len, str_key->chars);
                     return js_throw_type_error(msg);
                 }
                 js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                 return value;
             }
             if (!has_own_before_set && !js_private_define_active &&
-                str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                property_key_requires_identity(str_key) &&
+                property_key_kind(str_key) == NAME_KEY_PRIVATE) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                    (int)str_key->len - 10, str_key->chars + 10);
+                snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                    (int)str_key->len, str_key->chars);
                 return js_throw_type_error(msg);
             }
             // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
@@ -6811,11 +6970,16 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
-            ShapeEntry* found_entry = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+            bool identity_key = string_is_pooled(str_key) &&
+                property_key_requires_identity(str_key);
+            ShapeEntry* found_entry = identity_key
+                ? js_find_shape_entry_key(object, str_key)
+                : js_find_shape_entry(object, str_key->chars, (int)str_key->len);
             if (found_entry) {
                 // v37: If deleted sentinel, move entry to end of list for correct enum order
-                JsShapeSlotStatus slot_status = js_own_shape_slot_status(
-                    object, str_key->chars, (int)str_key->len, NULL, NULL);
+                JsShapeSlotStatus slot_status = identity_key
+                    ? js_own_shape_slot_status_key(object, str_key, NULL, NULL)
+                    : js_own_shape_slot_status(object, str_key->chars, (int)str_key->len, NULL, NULL);
                 if (m->data) {
                     if (slot_status == JS_SHAPE_SLOT_DELETED) {
                         bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
@@ -6840,8 +7004,12 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                         map_type->last = found_entry;
                     }
                 }
-                if (slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) {
+                if ((slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) && !identity_key) {
                     js_shape_entry_set_deleted(object, str_key->chars, (int)str_key->len, /*is_deleted=*/false);
+                } else if (slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) {
+                    // Unique keys never share a transition shape, so clearing this
+                    // tombstone cannot mutate a sibling object's descriptor.
+                    found_entry->flags &= (uint8_t)~JSPD_DELETED;
                 }
                 fn_map_set(object, key, value);
                 js_sync_global_var_module_binding(object, key, value);
@@ -6885,7 +7053,17 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
-            map_put(m, str_key, value, js_input);
+            PropertyKeyRef canonical_key = key_type == LMD_TYPE_STRING &&
+                property_key_requires_identity(str_key) ? str_key :
+                (key_type == LMD_TYPE_STRING ? js_canonical_string_key(str_key) : NULL);
+            map_put(m, canonical_key ? canonical_key : str_key, value, js_input);
+            TypeMap* shape = (TypeMap*)m->type;
+            ShapeEntry* entry = canonical_key ? typemap_hash_lookup_key(shape, canonical_key) : NULL;
+            if (entry && canonical_key) {
+                // JS maps own canonical keys; Input shapes deliberately retain NULL.
+                entry->key_ref = canonical_key;
+                entry->predefined_id = name_ref_id(canonical_key);
+            }
             js_sync_global_var_module_binding(object, key, value);
         }
     } else {
@@ -7090,12 +7268,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
-        if (private_key && private_key->len > 10 &&
-            strncmp(private_key->chars, "__private_", 10) == 0 &&
+        if (private_key && property_key_requires_identity(private_key) &&
+            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
             !js_can_host_private_slots(object)) {
             char msg[256];
-            snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                (int)private_key->len - 10, private_key->chars + 10);
+            snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                (int)private_key->len, private_key->chars);
             return js_throw_type_error(msg);
         }
     }
@@ -7221,20 +7399,18 @@ extern "C" Item js_property_set_v(Item object, Item key, Item value, int64_t str
 static Item js_private_property_set_checked(Item object, Item key, Item value) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
-        if (private_key && private_key->len > 10 &&
-            strncmp(private_key->chars, "__private_", 10) == 0) {
+        if (private_key && property_key_requires_identity(private_key) &&
+            property_key_kind(private_key) == NAME_KEY_PRIVATE) {
             if (!js_can_host_private_slots(object)) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                    (int)private_key->len - 10, private_key->chars + 10);
+                snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                    (int)private_key->len, private_key->chars);
                 return js_throw_type_error(msg);
             }
-            if (!js_private_define_active &&
-                !js_private_storage_has_own(object, key) &&
-                !js_private_brand_storage_has_own(object, private_key)) {
+            if (!js_private_define_active && js_private_brand_mismatch(object, private_key)) {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                    (int)private_key->len - 10, private_key->chars + 10);
+                snprintf(msg, sizeof(msg), "Cannot write private member '%.*s' to an object whose class did not declare it",
+                    (int)private_key->len, private_key->chars);
                 return js_throw_type_error(msg);
             }
         }
@@ -7698,7 +7874,7 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
         const char* name, int name_len, uint32_t name_id) {
-    return typemap_shape_name_equals_id(entry, name, name_len, name_id);
+    return typemap_shape_name_equals_hash(entry, name, name_len, name_id);
 }
 
 static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
@@ -7769,7 +7945,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
+    ShapeEntry* entry = typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
@@ -7805,7 +7981,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = typemap_shape_entry_name_id(entry);
+    out_entry->name_id = typemap_shape_entry_name_hash(entry);
     out_entry->receiver_kind = receiver_kind;
     *out_value = value;
     return true;
@@ -7816,7 +7992,7 @@ static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name,
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
     if (ic->name == name && ic->name_len == name_len) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
+    uint32_t name_id = typemap_name_hash(name, name_len);
     if (out_name_id) *out_name_id = name_id;
     if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
@@ -7846,7 +8022,7 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
-    if (name_id == 0) name_id = typemap_name_id(name, name_len);
+    if (name_id == 0) name_id = typemap_name_hash(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -7928,7 +8104,7 @@ static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
     if (ic->name == name && ic->name_len == name_len) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
+    uint32_t name_id = typemap_name_hash(name, name_len);
     if (out_name_id) *out_name_id = name_id;
     if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
@@ -8075,7 +8251,7 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
+    ShapeEntry* entry = typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         return false;
@@ -8111,7 +8287,7 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = typemap_shape_entry_name_id(entry);
+    out_entry->name_id = typemap_shape_entry_name_hash(entry);
     out_entry->receiver_kind = receiver_kind;
     return true;
 }
@@ -8165,7 +8341,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
         js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
         return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
     }
-    if (name_id == 0) name_id = typemap_name_id(name, name_len);
+    if (name_id == 0) name_id = typemap_name_hash(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -9517,6 +9693,45 @@ static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_co
 #endif
 }
 
+// Compiled JS wrappers use a fixed MIR signature, so the dynamic dispatcher
+// must materialize each supported arity as an exact C++ function-pointer type.
+// Library constructors routinely exceed the native-specialization limit of 16
+// formals; keep this broader boxed-call ABI separate from that optimization.
+enum { JS_MIR_CONTEXT_CALL_MAX_ARITY = 32 };
+
+template <size_t... Indices>
+struct JsMirCallArgSequence {};
+
+template <size_t Count, size_t... Indices>
+struct JsMirMakeCallArgSequence
+    : JsMirMakeCallArgSequence<Count - 1, Count - 1, Indices...> {};
+
+template <size_t... Indices>
+struct JsMirMakeCallArgSequence<0, Indices...> {
+    typedef JsMirCallArgSequence<Indices...> Type;
+};
+
+template <bool HasEnv, size_t... Indices>
+static Item js_invoke_mir_context_wrapper_impl(void* func_ptr, Context* runtime,
+        const Item* args, Item env, uint64_t* scalar_result_home,
+        JsMirCallArgSequence<Indices...>) {
+    if constexpr (HasEnv) {
+        typedef Item (*Fn)(Context*, Item,
+            decltype((void)Indices, Item{})..., uint64_t*);
+        return ((Fn)func_ptr)(runtime, env, args[Indices]..., scalar_result_home);
+    }
+    typedef Item (*Fn)(Context*, decltype((void)Indices, Item{})..., uint64_t*);
+    return ((Fn)func_ptr)(runtime, args[Indices]..., scalar_result_home);
+}
+
+template <size_t Count, bool HasEnv>
+static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
+        const Item* args, Item env, uint64_t* scalar_result_home) {
+    return js_invoke_mir_context_wrapper_impl<HasEnv>(func_ptr, runtime,
+        args, env, scalar_result_home,
+        typename JsMirMakeCallArgSequence<Count>::Type());
+}
+
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
@@ -9678,7 +9893,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     typedef Item (*P16H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
 
     // Pad missing arguments with undefined to match declared param count
-    Item padded_args[16];
+    Item padded_args[JS_MIR_CONTEXT_CALL_MAX_ARITY];
     Item undef = make_js_undefined();
     int effective_count = arg_count;
     Item* effective_args = args;
@@ -9687,12 +9902,20 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     // Collect excess args into a JS array for the rest parameter
     bool has_rest = (fn->param_count < 0);
     int real_param_count = has_rest ? -fn->param_count : fn->param_count;
+    if (real_param_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
+        // The rest array occupies one declared operand, so reject unsupported
+        // arities before its slot can overrun the fixed dispatch buffer.
+        log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI",
+            real_param_count);
+        return ItemError;
+    }
 
     if (has_rest) {
         int regular_count = real_param_count - 1;  // params before rest
         effective_count = real_param_count;
         // Copy regular args, then build rest array from remaining
-        for (int i = 0; i < regular_count && i < 16; i++) {
+        for (int i = 0; i < regular_count &&
+                i < JS_MIR_CONTEXT_CALL_MAX_ARITY; i++) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
         // Build rest array from args[regular_count..arg_count-1]
@@ -9705,7 +9928,10 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         effective_args = padded_args;
     } else if (arg_count < fn->param_count) {
         effective_count = fn->param_count;
-        if (effective_count > 16) effective_count = 16;
+        if (effective_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
+            log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI", effective_count);
+            return ItemError;
+        }
         for (int i = 0; i < effective_count; i++) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
@@ -9769,6 +9995,9 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         typedef Item (*C15H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
         typedef Item (*C16H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
         Context* runtime = fn->runtime_context;
+#define JS_MIR_CONTEXT_CALL_CASE(count, has_env, env_value) \
+        case count: return js_invoke_mir_context_wrapper<count, has_env>( \
+            fn->func_ptr, runtime, effective_args, env_value, scalar_result_home)
         if (fn->env) {
             Item env = {.item = (uint64_t)fn->env};
             switch (effective_count) {
@@ -9788,6 +10017,23 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             case 13: return ((C14H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
             case 14: return ((C15H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
             case 15: return ((C16H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+            JS_MIR_CONTEXT_CALL_CASE(16, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(17, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(18, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(19, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(20, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(21, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(22, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(23, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(24, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(25, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(26, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(27, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(28, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(29, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(30, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(31, true, env);
+            JS_MIR_CONTEXT_CALL_CASE(32, true, env);
             default: return ItemError;
             }
         }
@@ -9808,8 +10054,26 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         case 13: return ((C13H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
         case 14: return ((C14H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
         case 15: return ((C15H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+        JS_MIR_CONTEXT_CALL_CASE(16, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(17, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(18, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(19, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(20, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(21, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(22, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(23, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(24, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(25, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(26, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(27, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(28, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(29, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(30, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(31, false, ItemNull);
+        JS_MIR_CONTEXT_CALL_CASE(32, false, ItemNull);
         default: return ItemError;
         }
+#undef JS_MIR_CONTEXT_CALL_CASE
     }
 
     if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
@@ -9932,7 +10196,7 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d)",
+        log_error("js-debug-callee: non-function callee at site_id=%lld (type=%d)",
             (long long)site_id, get_type_id(callee));
     }
     // diagnostics must be observational; returning null changed the checked
@@ -9960,9 +10224,8 @@ static bool js_runtime_is_arguments_exotic(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    bool found = false;
-    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
-    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* str = it2s(tag);
     return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
 }
@@ -10023,7 +10286,7 @@ static bool js_object_to_string_result_from_tag(Item tag, Item* out_result) {
 
 static bool js_object_to_string_shape_tag(Item object, Item receiver,
                                           bool include_proto, Item* out_result) {
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_key = js_well_known_symbol_key(4);
     Item tag = ItemNull;
     JsOwnGetStatus own_status = js_ordinary_get_own(object, tag_key, receiver, &tag);
     if (own_status == JS_OWN_READY) {
@@ -10061,7 +10324,7 @@ static Item js_object_to_string_tag_override(Item this_val) {
         receiver = js_to_object(this_val);
     }
 
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_key = js_well_known_symbol_key(4);
     Item tag = js_property_get(receiver, tag_key);
     if (js_exception_pending) return ItemNull;
     if (get_type_id(tag) != LMD_TYPE_STRING) return ItemNull;
@@ -10700,85 +10963,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
             return (Item){.item = ITEM_TRUE};
         }
-        // Check if the property exists and is enumerable.
-        if (get_type_id(property_object) == LMD_TYPE_ARRAY) {
-            if (!it2b(js_has_own_property(property_object, arg0))) return (Item){.item = ITEM_FALSE};
-            Item k;
-            // Symbol keys → __sym_N format (must check before js_to_string)
-            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
-                int64_t id = -(it2i(arg0) + (int64_t)JS_SYMBOL_BASE);
-                char buf[32];
-                snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-                k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-            } else {
-                k = js_to_string(arg0);
-            }
-            if (get_type_id(k) == LMD_TYPE_STRING) {
-                String* ks = it2s(k);
-                // "length" is always non-enumerable for arrays
-                if (ks && ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)
-                    return (Item){.item = ITEM_FALSE};
-                if (ks && js_array_has_props(property_object.array)) {
-                    ShapeEntry* se = js_find_shape_entry(property_object,
-                        ks->chars, (int)ks->len);
-                    Map* pm = js_array_props(property_object.array);
-                    if (!js_props_query_enumerable(pm, se, ks->chars, (int)ks->len))
-                        return (Item){.item = ITEM_FALSE};
-                }
-            }
-            return (Item){.item = ITEM_TRUE};
+        // Descriptor synthesis retains the canonical Symbol record, whereas
+        // the old per-container probes rebuilt a spelling and lost its slot.
+        Item desc = js_object_get_own_property_descriptor(property_object, arg0);
+        if (js_exception_pending || get_type_id(desc) != LMD_TYPE_MAP) {
+            return (Item){.item = ITEM_FALSE};
         }
-        // v20: Virtual builtin methods are non-enumerable — check map shape directly
-        if (get_type_id(property_object) == LMD_TYPE_MAP) {
-            // Symbol keys: use __sym_N key for property lookup (not js_to_string which throws)
-            Item k = js_to_property_key(arg0);
-            if (js_exception_pending) return (Item){.item = ITEM_FALSE};
-            if (get_type_id(k) == LMD_TYPE_STRING) {
-                String* ks = it2s(k);
-                Map* m = property_object.map;
-                if (m && m->type) {
-                    ShapeEntry* found_entry = NULL;
-                    JsShapeSlotStatus status = js_own_shape_slot_status(
-                        property_object, ks->chars, (int)ks->len, NULL, &found_entry);
-                    // A2-T7: legacy __get_X/__set_X marker fallback retired.
-                    // Accessors are stored as JsAccessorPair slots with an
-                    // IS_ACCESSOR shape entry, so the status query above sees
-                    // both data and accessor properties.
-                    if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR)
-                        return (Item){.item = ITEM_FALSE};
-                    return (Item){.item = b2it(js_props_query_enumerable(m, found_entry,
-                        ks->chars, (int)ks->len))};
-                }
-            }
-        }
-        // Function objects: name, length, prototype, arguments, caller are non-enumerable
-        if (get_type_id(property_object) == LMD_TYPE_FUNC) {
-            Item k = js_to_property_key(arg0);
-            if (js_exception_pending) return (Item){.item = ITEM_FALSE};
-            if (get_type_id(k) == LMD_TYPE_STRING) {
-                String* ks = it2s(k);
-                if (ks && ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
-                           (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) ||
-                           (ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) ||
-                           (ks->len == 9 && strncmp(ks->chars, "arguments", 9) == 0) ||
-                           (ks->len == 6 && strncmp(ks->chars, "caller", 6) == 0))) {
-                    return (Item){.item = ITEM_FALSE};
-                }
-                JsFunction* fn = (JsFunction*)property_object.function;
-                if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    ShapeEntry* se = NULL;
-                    JsShapeSlotStatus status = js_own_shape_slot_status(
-                        property_object, ks->chars, (int)ks->len, NULL, &se);
-                    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
-                        return (Item){.item = b2it(js_props_query_enumerable(fn->properties_map.map,
-                            se, ks->chars, (int)ks->len))};
-                    }
-                }
-            }
-        }
-        Item has = js_has_own_property(property_object, arg0);
-        if (!it2b(has)) return (Item){.item = ITEM_FALSE};
-        return (Item){.item = ITEM_TRUE};
+        Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+        return js_to_boolean(js_property_get(desc, enumerable_key));
     }
     case JS_BUILTIN_OBJ_TO_STRING: {
         // ES spec §20.1.3.6: Object.prototype.toString returns "[object <tag>]"
@@ -10923,7 +11115,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(heap_create_name("[object Number]", 15))};
         if (js_is_bigint_egress(this_val)) {
             Item wrapped = js_to_object(this_val);
-            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+            Item tag_key = js_well_known_symbol_key(4);
             if (js_has_property(wrapped, tag_key)) {
                 return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
             }
@@ -10934,7 +11126,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (tt == LMD_TYPE_MAP) {
             Map* m = this_val.map;
             if (m) {
-                // Check for custom Symbol.toStringTag FIRST (well-known symbol ID=4, stored as __sym_4)
+                // Check for custom Symbol.toStringTag first through its realm-local key.
                 // ES spec: @@toStringTag takes priority when explicitly set
                 // Check own property first, then prototype chain
                 Item tag_result = ItemNull;
@@ -11677,7 +11869,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (src_type == LMD_TYPE_ARRAY || src_type == LMD_TYPE_STRING) {
             is_iterable = true;
         } else if (src_type == LMD_TYPE_MAP || src_type == LMD_TYPE_ELEMENT) {
-            Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+            Item iter_key = js_well_known_symbol_key(1);
             Item iter_fn = js_property_get(source, iter_key);
             if (js_exception_pending) return ItemNull;
             if (get_type_id(iter_fn) == LMD_TYPE_FUNC) is_iterable = true;
@@ -11758,11 +11950,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
         // Set Symbol.toStringTag for [object String Iterator]
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
+        js_property_set(iter, js_well_known_symbol_key(4),
                          (Item){.item = s2it(heap_create_name("String Iterator", 15))});
         // [Symbol.iterator]() returns this
         Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
+        js_property_set(iter, js_well_known_symbol_key(1), si_fn);
         return iter;
     }
     case JS_BUILTIN_STRING_ITER_NEXT: {
@@ -12372,7 +12564,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     }
                     return js_throw_type_error("Species constructor is not an object");
                 }
-                Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+                Item species_key = js_well_known_symbol_key(6);
                 Item species_val = js_property_get(ctor_val, species_key);
                 if (js_exception_pending) return make_js_undefined();
                 if (species_val.item != ItemNull.item && get_type_id(species_val) != LMD_TYPE_NULL
@@ -12437,8 +12629,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
         Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
-        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        js_property_set(iter, js_well_known_symbol_key(1), si_fn);
+        Item tag_key = js_well_known_symbol_key(4);
         js_property_set(iter, tag_key, (Item){.item = s2it(heap_create_name("RegExp String Iterator", 22))});
         return iter;
     }
@@ -12737,7 +12929,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
         // [Symbol.iterator]() returns this
         Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
+        js_property_set(iter, js_well_known_symbol_key(1), si_fn);
         return iter;
     }
     case JS_BUILTIN_COLL_ITER_NEXT: {
@@ -18414,7 +18606,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
         js_map_get_fast(pattern_item.map, "__rd", 4, &has_rd);
         // ES §22.2.3.1: IsRegExp(pattern) first reads @@match. This matters
         // even for real RegExp objects because the getter can mutate `pattern`.
-        Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+        Item sym_match_key = js_well_known_symbol_key(7);
         Item sym_match_val = js_property_get(pattern_item, sym_match_key);
         if (js_exception_pending) return ItemNull;
         bool pattern_is_regexp = false;
@@ -19649,7 +19841,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         }
         // Get C[@@species] (Phase 3 Stage C: js_property_get fast-path
         // handles IS_ACCESSOR dispatch for FUNC and MAP receivers).
-        Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+        Item species_key = js_well_known_symbol_key(6);
         Item S = js_property_get(C, species_key);
         if (js_exception_pending) return js_array_new(0);
         if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED || get_type_id(S) == LMD_TYPE_NULL) {
@@ -21260,7 +21452,7 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                 Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
                 js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
                 Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-                js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
+                js_property_set(iter, js_well_known_symbol_key(1), si_fn);
                 return iter;
             }
             if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
@@ -22923,7 +23115,7 @@ static bool js_string_is_regexp(Item value, bool* out) {
     *out = false;
     if (!js_string_protocol_arg_is_object(value)) return true;
 
-    Item match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+    Item match_key = js_well_known_symbol_key(7);
     Item match_val = js_property_get(value, match_key);
     if (js_exception_pending) return false;
     if (match_val.item != ITEM_JS_UNDEFINED && get_type_id(match_val) != LMD_TYPE_UNDEFINED) {
@@ -23306,7 +23498,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // ES spec §21.1.3.21: check [Symbol.split] on separator
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_10", 8))};
+            Item sym_key = js_well_known_symbol_key(10);
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -23466,7 +23658,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // ES spec §21.1.3.14: check [Symbol.replace] on searchValue
         if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_8", 7))};
+            Item sym_key = js_well_known_symbol_key(8);
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -23630,7 +23822,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             // Step 2a: IsRegExp(searchValue) check — accesses [Symbol.match]
             bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
-                Item match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+                Item match_key = js_well_known_symbol_key(7);
                 Item match_val = js_property_get(args[0], match_key);
                 if (js_exception_pending) return make_js_undefined();
                 if (match_val.item != ItemNull.item && get_type_id(match_val) != LMD_TYPE_UNDEFINED
@@ -23660,7 +23852,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
             }
             // Step 2c: Check for [Symbol.replace] method (GetMethod semantics)
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_8", 7))};
+            Item sym_key = js_well_known_symbol_key(8);
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return make_js_undefined();
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -23791,7 +23983,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // ES spec §21.1.3.15: check [Symbol.search] on regexp
         if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_9", 7))};
+            Item sym_key = js_well_known_symbol_key(9);
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -23823,7 +24015,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             String* pat = it2s(arg_str);
             if (pat) {
                 Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
-                Item sym_key = (Item){.item = s2it(heap_create_name("__sym_9", 7))};
+                Item sym_key = js_well_known_symbol_key(9);
                 Item sym_fn = js_property_get(regex, sym_key);
                 if (js_exception_pending) return ItemNull;
                 if (sym_fn.item != ItemNull.item && sym_fn.item != ITEM_JS_UNDEFINED
@@ -23851,7 +24043,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         } else if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL &&
                    js_string_protocol_arg_is_object(args[0])) {
             // ES spec §21.1.3.11: check [Symbol.match] on regexp
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+            Item sym_key = js_well_known_symbol_key(7);
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -23915,7 +24107,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             String* pat = it2s(arg_str);
             if (pat) {
                 Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
-                Item sym_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+                Item sym_key = js_well_known_symbol_key(7);
                 Item sym_fn = js_property_get(regex, sym_key);
                 if (js_exception_pending) return ItemNull;
                 if (sym_fn.item != ItemNull.item && sym_fn.item != ITEM_JS_UNDEFINED
@@ -23941,8 +24133,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             // Step 2a: isRegExp check (only for objects)
             bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
-                // Check for __sym_7 (Symbol.match) or __rd
-                Item sym_match_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("__sym_7", 7))});
+                // Check for Symbol.match or __rd.
+                Item sym_match_val = js_property_get(args[0], js_well_known_symbol_key(7));
                 if (sym_match_val.item != ItemNull.item && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED) {
                     is_regexp = js_is_truthy(sym_match_val);
                 } else {
@@ -23971,7 +24163,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
             }
             // Step 2c: matcher = GetMethod(regexp, @@matchAll)
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_13", 8))};
+            Item sym_key = js_well_known_symbol_key(13);
             Item sym_fn = js_property_get(args[0], sym_key);
             // GetMethod: undefined/null → skip, callable → use, else TypeError
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -24000,7 +24192,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         regex = js_create_regex(pat, pat_len, "g", 1);
         if (regex.item == ItemNull.item) return js_array_new(0);
         // Step 5: Return Invoke(rx, @@matchAll, « S »)
-        Item rx_sym_key = (Item){.item = s2it(heap_create_name("__sym_13", 8))};
+        Item rx_sym_key = js_well_known_symbol_key(13);
         Item rx_matcher = js_property_get(regex, rx_sym_key);
         if (rx_matcher.item != ItemNull.item && get_type_id(rx_matcher) == LMD_TYPE_FUNC) {
             Item invoke_args[1] = { S };
@@ -24697,7 +24889,7 @@ static Item js_array_species_create(Item original_array, int64_t length) {
         {
             // Phase 3 Stage C: js_property_get fast-path handles IS_ACCESSOR
             // dispatch for FUNC, MAP and ARRAY receivers.
-            Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+            Item species_key = js_well_known_symbol_key(6);
             S = js_property_get(C, species_key);
             if (js_exception_pending) return ItemNull;
         }
@@ -27130,7 +27322,7 @@ includes_slow_path:
     // concat - returns new array that is the concatenation
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         const int64_t MAX_SAFE_LEN = 9007199254740991LL; // 2^53 - 1
-        Item spread_key = (Item){.item = s2it(heap_create_name("__sym_12", 8))};
+        Item spread_key = js_well_known_symbol_key(12);
         Item spread_symbol = (Item){.item = i2it(-(int64_t)(12 + JS_SYMBOL_BASE))};
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
 
@@ -28150,8 +28342,8 @@ static Item js_get_math_object() {
         // Mark as Math for Object.prototype.toString
         Item mk = (Item){.item = s2it(heap_create_name("__is_math__", 11))};
         js_property_set(js_math_object, mk, (Item){.item = b2it(true)});
-        // v18n: Add Symbol.toStringTag for Math (stored as __sym_4 to match Object.prototype.toString)
-        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        // v18n: Add Symbol.toStringTag for Math with the realm-local symbol key.
+        Item tag_k = js_well_known_symbol_key(4);
         js_property_set(js_math_object, tag_k, (Item){.item = s2it(heap_create_name("Math", 4))});
         // v41: Mark Symbol.toStringTag as non-writable, non-enumerable (configurable: true per spec)
         js_mark_non_writable(js_math_object, tag_k);
@@ -28199,7 +28391,7 @@ extern "C" Item js_get_json_object_value() {
                 if (get_type_id(op) == LMD_TYPE_MAP) js_set_prototype(js_json_object, op);
             }
         }
-        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_k = js_well_known_symbol_key(4);
         js_property_set(js_json_object, tag_k, (Item){.item = s2it(heap_create_name("JSON", 4))});
         // v41: Mark Symbol.toStringTag as non-writable, non-enumerable (configurable: true per spec)
         js_mark_non_writable(js_json_object, tag_k);
@@ -28233,7 +28425,7 @@ extern "C" Item js_get_css_object_value() {
     js_install_builtin_method_specs(js_css_namespace_object, JS_BUILTIN_OWNER_CSS_METHOD);
 
     // toStringTag
-    Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_k = js_well_known_symbol_key(4);
     js_property_set(js_css_namespace_object, tag_k, (Item){.item = s2it(heap_create_name("CSS", 3))});
     js_mark_non_writable(js_css_namespace_object, tag_k);
     js_mark_non_enumerable(js_css_namespace_object, tag_k);
@@ -28316,7 +28508,7 @@ extern "C" Item js_get_intl_object_value() {
     js_property_set(js_intl_object,
         (Item){.item = s2it(heap_create_name("Segmenter"))},
         js_new_function((void*)js_intl_segmenter_new, 2));
-    Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_k = js_well_known_symbol_key(4);
     js_property_set(js_intl_object, tag_k,
         (Item){.item = s2it(heap_create_name("Intl", 4))});
     js_mark_non_writable(js_intl_object, tag_k);
@@ -28620,7 +28812,7 @@ extern "C" Item js_get_reflect_object_value() {
                 if (get_type_id(op) == LMD_TYPE_MAP) js_set_prototype(js_reflect_object, op);
             }
         }
-        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_k = js_well_known_symbol_key(4);
         js_property_set(js_reflect_object, tag_k, (Item){.item = s2it(heap_create_name("Reflect", 7))});
         js_mark_non_writable(js_reflect_object, tag_k);
         js_mark_non_enumerable(js_reflect_object, tag_k);
@@ -28641,7 +28833,7 @@ extern "C" Item js_get_atomics_object_value() {
         // spec: Atomics [[Prototype]] = %ObjectPrototype%
         js_runtime_namespaces_ensure_roots();
         js_atomics_object = js_new_object();
-        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_k = js_well_known_symbol_key(4);
         js_property_set(js_atomics_object, tag_k, (Item){.item = s2it(heap_create_name("Atomics", 7))});
         js_mark_non_writable(js_atomics_object, tag_k);
         js_mark_non_enumerable(js_atomics_object, tag_k);
@@ -29094,8 +29286,7 @@ static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
 static JsShapeSlotStatus js_proto_shape_slot_status(Map* m, ShapeEntry* se,
         Item* out_slot) {
     if (out_slot) *out_slot = ItemNull;
-    if (!m || !se || !m->data || se->byte_offset < 0 ||
-            se->byte_offset > (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+    if (!m || !se || !m->data || !shape_entry_storage_fits_data(se, m->data_cap)) {
         return JS_SHAPE_SLOT_ABSENT;
     }
     if (map_ctor_offset_is_reserved(m, se->byte_offset)) {
@@ -29139,6 +29330,8 @@ extern "C" void js_object_proto_setter(Item object, Item value) {
 
 // Set the prototype of an object (stores as __proto__ property on Map)
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    if (get_type_id(object) == LMD_TYPE_MAP && get_type_id(prototype) == LMD_TYPE_MAP) {
+    }
     // Proxy [[SetPrototypeOf]] trap
     if (js_is_proxy(object)) {
         js_proxy_trap_set_prototype_of(object, prototype);
@@ -29397,7 +29590,11 @@ extern "C" void js_mark_non_enumerable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
+    if (property_key_requires_identity(str)) {
+        js_shape_entry_update_flags_key(object, str, JSPD_NON_ENUMERABLE, 0);
+    } else {
+        js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
+    }
 }
 
 // Mark a property as non-writable through ShapeEntry flags.
@@ -29406,13 +29603,18 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
+    if (property_key_requires_identity(str)) {
+        js_shape_entry_update_flags_key(object, str, JSPD_NON_WRITABLE, 0);
+    } else {
+        js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
+    }
 }
 
 extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    if (!str || str->len <= 10 || strncmp(str->chars, "__private_", 10) != 0) return;
+    if (!str || !property_key_requires_identity(str) ||
+        property_key_kind(str) != NAME_KEY_PRIVATE) return;
     js_mark_non_writable(object, name);
 }
 
@@ -29422,7 +29624,11 @@ extern "C" void js_mark_non_configurable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    js_attr_set_configurable(object, str->chars, (int)str->len, /*configurable=*/false);
+    if (property_key_requires_identity(str)) {
+        js_shape_entry_update_flags_key(object, str, JSPD_NON_CONFIGURABLE, 0);
+    } else {
+        js_attr_set_configurable(object, str->chars, (int)str->len, /*configurable=*/false);
+    }
 }
 
 // Mark all user-visible properties on an object as non-enumerable (used for class prototypes)
@@ -29436,7 +29642,12 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
         if (!entry->name) { entry = entry->next; continue; }
         const char* name = entry->name->str;
         int name_len = (int)entry->name->length;
-        // skip internal properties  
+        if (entry->key_ref && property_key_requires_identity(entry->key_ref)) {
+            js_shape_entry_update_flags_key(object, entry->key_ref, JSPD_NON_ENUMERABLE, 0);
+            entry = entry->next;
+            continue;
+        }
+        // skip internal properties
         if (name_len >= 2 && name[0] == '_' && name[1] == '_') {
             entry = entry->next;
             continue;
@@ -29595,17 +29806,28 @@ static Item js_get_implicit_proto(Item object) {
 // from js_proto_class_method_dispatch after class identity is resolved.
 // Returns ItemNull when the key doesn't match any class-specific method
 // or when the class has no dispatch table.
-static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, int key_len) {
+static Item js_proto_class_dispatch_for_class(JsClass cls, Item key) {
+    if (key.item == js_well_known_symbol_key(1).item) {
+        if (cls == JS_CLASS_STRING) {
+            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+        }
+        if (cls == JS_CLASS_ARRAY) return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+    }
+    if (key.item == js_well_known_symbol_key(2).item && cls == JS_CLASS_DATE) {
+        return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+    }
+    if (get_type_id(key) != LMD_TYPE_STRING || property_key_requires_identity(it2s(key))) {
+        return ItemNull;
+    }
+    String* string_key = it2s(key);
+    const char* key_str = string_key->chars;
+    int key_len = (int)string_key->len;
     switch (cls) {
     case JS_CLASS_BOOLEAN:
         return js_lookup_builtin_method(LMD_TYPE_BOOL, key_str, key_len);
     case JS_CLASS_STRING:
-        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
         return js_lookup_builtin_method(LMD_TYPE_STRING, key_str, key_len);
     case JS_CLASS_ARRAY:
-        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
-            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
         return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
     case JS_CLASS_NUMBER:
         return js_lookup_builtin_prototype_method_for_class(JS_CLASS_NUMBER, key_str, key_len);
@@ -29614,8 +29836,6 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
     case JS_CLASS_DATE: {
         Item date_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_DATE, key_str, key_len);
         if (date_method.item != ItemNull.item) return date_method;
-        if (key_len == 7 && strncmp(key_str, "__sym_2", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
         return ItemNull;
     }
     case JS_CLASS_REGEXP:
@@ -29633,8 +29853,7 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
 //
 // Class identity is resolved once from the stamped byte, then dispatched
 // through the unified js_proto_class_dispatch_for_class table.
-static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int key_len) {
-    if (!key_str || key_len <= 0) return ItemNull;
+static Item js_proto_class_method_dispatch(Item proto, Item key) {
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
     Map* pm = proto.map;
     bool ip_own = false;
@@ -29643,7 +29862,7 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
 
     JsClass cls = js_class_id(proto);
     if (cls == JS_CLASS_NONE) return ItemNull;
-    return js_proto_class_dispatch_for_class(cls, key_str, key_len);
+    return js_proto_class_dispatch_for_class(cls, key);
 }
 
 // Walk the prototype chain to find a property
@@ -29669,7 +29888,7 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
     if (key_str && get_type_id(object) == LMD_TYPE_MAP) {
         JsOwnSlotStatus own_status = js_ordinary_own_status(object, key_str, key_len);
         if (own_status != JS_HAS_DELETED) {
-            Item cm = js_proto_class_method_dispatch(object, key_str, key_len);
+            Item cm = js_proto_class_method_dispatch(object, property);
             if (cm.item != ItemNull.item) {
                 if (out_found) *out_found = true;
                 return cm;
@@ -29756,7 +29975,7 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
         // BUT: skip if the key was explicitly deleted on this proto level (own
         // slot is the deleted sentinel), so the lookup falls through.
         if (key_str && own_get_status != JS_OWN_DELETED) {
-            Item cm = js_proto_class_method_dispatch(proto, key_str, key_len);
+            Item cm = js_proto_class_method_dispatch(proto, property);
             if (cm.item != ItemNull.item) {
                 if (out_found) *out_found = true;
                 return cm;
@@ -29865,6 +30084,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
             "__gen_idx", 9, &idx)) return;
     if (idx < 0 || idx >= js_generator_count) return;
     if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
+    gc_mark_item(gc, js_generators[idx].private_home_class.item);
     gc_mark_item(gc, js_generators[idx].delegate.item);
 }
 
@@ -29962,7 +30182,7 @@ static Item js_get_async_iterator_proto() {
             if (get_type_id(obj_proto) == LMD_TYPE_MAP) js_set_prototype(proto, obj_proto);
         }
     }
-    Item si_key = (Item){.item = s2it(heap_create_name("__sym_5", 7))};
+    Item si_key = js_well_known_symbol_key(5);
     Item si_fn = js_create_uncached_builtin_function(JS_BUILTIN_ITER_IDENTITY, "[Symbol.asyncIterator]", 0);
     js_property_set(proto, si_key, si_fn);
     js_mark_non_enumerable(proto, si_key);
@@ -29989,7 +30209,7 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
         js_mark_non_enumerable(proto, key);
     }
     // Symbol.toStringTag = "AsyncGenerator" | "Generator" (non-writable, non-enum, configurable)
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_key = js_well_known_symbol_key(4);
     Item tag_val = (Item){.item = s2it(heap_create_name(
         is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
     js_property_set(proto, tag_key, tag_val);
@@ -30011,10 +30231,11 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     // Generator construction performs several allocating property/prototype
     // operations after creating the owning map. Keep that fresh map in an
     // exact native home so its GC tracer continuously owns the raw env.
-    RootFrame roots(3);
+    RootFrame roots(4);
     Rooted<Item> obj_root(roots, ItemNull);
     Rooted<Item> proto_root(roots, ItemNull);
     Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> private_home_root(roots, js_current_private_home_class);
 
     // Allocate a new generator slot (no recycling — old generator objects may still
     // hold __gen_idx references to completed slots, causing index collisions)
@@ -30046,6 +30267,10 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->started = false;
     gen->executing = false;
     gen->is_async = (is_async != 0);
+    // A generator resumes after its creating method has returned, so retain
+    // the lexical class home instead of resolving private names from stale
+    // ambient call state on a later next().
+    gen->private_home_class = private_home_root.get();
     gen->delegate = ItemNull;
     gen->delegate_resume = -1;
     gen->delegate_idx = 0;
@@ -30078,7 +30303,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
         }
     }
     // Set [Symbol.iterator]() to return this (generators are their own iterable)
-    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item si_key = js_well_known_symbol_key(1);
     Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
     js_property_set(obj_root.get(), si_key, si_fn);
 
@@ -30283,11 +30508,13 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     }
     if (!js_mir_owner_is_current(gen->runtime_context,
             "js-generator-next")) return ItemError;
-    RootFrame roots(4);
+    RootFrame roots(6);
     Rooted<Item> generator_root(roots, generator);
     Rooted<Item> input_root(roots, input);
     Rooted<Item> result_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> saved_private_home_root(roots, js_current_private_home_class);
+    Rooted<Item> generator_private_home_root(roots, gen->private_home_class);
 
     bool is_async = gen->is_async;
 
@@ -30372,8 +30599,18 @@ run_state_machine:
     // The state machine returns {value, next_state} as a 2-element array
     // If next_state == -1, the generator is done
     // If next_state == -3, this is yield* delegation: value is the iterable
+    int saved_private_home_index = js_current_private_home_class_index;
+    Item generator_private_home = generator_private_home_root.get();
+    if (generator_private_home.item != ItemNull.item &&
+        generator_private_home.item != 0 &&
+        get_type_id(generator_private_home) != LMD_TYPE_UNDEFINED) {
+        js_current_private_home_class = generator_private_home;
+        js_current_private_home_class_index = js_class_private_index(generator_private_home);
+    }
     result_root.set(js_invoke_mir_state(gen->state_fn,
         gen->env, input_root.get(), gen->state));
+    js_current_private_home_class = saved_private_home_root.get();
+    js_current_private_home_class_index = saved_private_home_index;
     Item result = result_root.get();
 
     if (get_type_id(result) == LMD_TYPE_ARRAY) {
@@ -30770,7 +31007,7 @@ static Item js_make_iterator_proto(Item* cache, int next_builtin_id,
         js_mark_non_enumerable(proto_root.get(), next_key);
     }
 
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_key = js_well_known_symbol_key(4);
     tag_val_root.set((Item){.item = s2it(heap_create_name(tag, tag_len))});
     js_property_set(proto_root.get(), tag_key, tag_val_root.get());
     js_mark_non_writable(proto_root.get(), tag_key);
@@ -30790,7 +31027,7 @@ static Item js_get_iterator_proto() {
     Rooted<Item> si_fn_root(roots, ItemNull);
     // The cache becomes the persistent owner only after the prototype is
     // complete, so construction needs exact temporary ownership.
-    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item si_key = js_well_known_symbol_key(1);
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
@@ -30895,7 +31132,7 @@ static Item js_create_array_iterator_object(Item source, int kind) {
     js_property_set(iter_root.get(), (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
     js_property_set(iter_root.get(), (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(kind)});
     si_fn_root.set(js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0));
-    js_property_set(iter_root.get(), (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn_root.get());
+    js_property_set(iter_root.get(), js_well_known_symbol_key(1), si_fn_root.get());
     return iter_root.get();
 }
 
@@ -30947,7 +31184,7 @@ Item js_check_array_sym_iterator() {
     if (get_type_id(array_proto) != LMD_TYPE_MAP) return ItemNull;
     Item sym_iter = ItemNull;
     JsShapeSlotStatus status =
-        js_own_shape_slot_status(array_proto, "__sym_1", 7, &sym_iter, NULL);
+        js_own_shape_slot_status_key(array_proto, it2s(js_well_known_symbol_key(1)), &sym_iter, NULL);
     if (status == JS_SHAPE_SLOT_ABSENT) return ItemNull;  // not present on Array.prototype — use default
     if (status == JS_SHAPE_SLOT_DELETED) return make_js_undefined();  // deleted
     if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
@@ -31060,7 +31297,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
         }
 
         // Check for [Symbol.iterator]()
-        Item iter_factory = js_property_get_str(iterable, "__sym_1", 7);
+        Item iter_factory = js_property_get(iterable, js_well_known_symbol_key(1));
         if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
@@ -31088,7 +31325,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     }
     if (tid == LMD_TYPE_ELEMENT) {
         // Check for [Symbol.iterator]()
-        Item iter_factory = js_property_get_str(iterable, "__sym_1", 7);
+        Item iter_factory = js_property_get(iterable, js_well_known_symbol_key(1));
         if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
@@ -31107,7 +31344,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
         tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_SYMBOL ||
         js_is_bigint_egress(iterable)) {
         Item wrapped = js_to_object(iterable);
-        Item iter_factory = js_property_get_str(wrapped, "__sym_1", 7);
+        Item iter_factory = js_property_get(wrapped, js_well_known_symbol_key(1));
         if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, wrapped, NULL, 0);
@@ -31147,7 +31384,7 @@ extern "C" Item js_get_iterator(Item iterable) {
 extern "C" Item js_get_async_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_ARRAY) {
-        Item iter_factory = js_property_get_str(iterable, "__sym_5", 7);
+        Item iter_factory = js_property_get(iterable, js_well_known_symbol_key(5));
         if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
@@ -32635,7 +32872,7 @@ static Item js_promise_species_constructor(Item promise) {
         return js_throw_type_error("Promise species constructor is not an object");
     }
 
-    Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+    Item species_key = js_well_known_symbol_key(6);
     Item species = js_property_get(constructor, species_key);
     if (js_check_exception()) return ItemNull;
     TypeId species_type = get_type_id(species);

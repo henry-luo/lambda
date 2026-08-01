@@ -140,11 +140,11 @@ class DeclarationAssertions {
 public:
     // Assert declaration property and value
     static void AssertDeclaration(const CssDeclaration* decl,
-                                  CssPropertyId expected_property_id) {
+                                  CssPropertyCode expected_property_id) {
         ASSERT_NE(decl, nullptr) << "Declaration is NULL";
         ASSERT_NE(decl->value, nullptr) << "Declaration value is NULL";
 
-        EXPECT_EQ(decl->property_id, expected_property_id)
+        EXPECT_EQ(decl->property_code, expected_property_id)
             << "Property ID mismatch";
     }
 
@@ -157,7 +157,7 @@ public:
 
     // Assert declaration with importance
     static void AssertDeclarationWithImportance(const CssDeclaration* decl,
-                                                CssPropertyId expected_property_id,
+                                                CssPropertyCode expected_property_id,
                                                 bool expected_important) {
         AssertDeclaration(decl, expected_property_id);
         AssertImportant(decl, expected_important);

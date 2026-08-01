@@ -229,12 +229,12 @@ TEST_F(KeyframeParsingTest, SimpleOpacityFromTo) {
     EXPECT_FLOAT_EQ(kf->stops[1].offset, 1.0f);
 
     EXPECT_EQ(kf->stops[0].property_count, 1);
-    EXPECT_EQ(kf->stops[0].properties[0].property_id, CSS_PROPERTY_OPACITY);
+    EXPECT_EQ(kf->stops[0].properties[0].property_code, CSS_PROPERTY_OPACITY);
     EXPECT_EQ(kf->stops[0].properties[0].value_type, ANIM_VAL_FLOAT);
     EXPECT_FLOAT_EQ(kf->stops[0].properties[0].value.f, 0.0f);
 
     EXPECT_EQ(kf->stops[1].property_count, 1);
-    EXPECT_EQ(kf->stops[1].properties[0].property_id, CSS_PROPERTY_OPACITY);
+    EXPECT_EQ(kf->stops[1].properties[0].property_code, CSS_PROPERTY_OPACITY);
     EXPECT_FLOAT_EQ(kf->stops[1].properties[0].value.f, 1.0f);
 }
 
@@ -261,7 +261,7 @@ TEST_F(KeyframeParsingTest, TransformKeyframes) {
     ASSERT_NE(kf, nullptr);
     EXPECT_EQ(kf->stop_count, 2);
 
-    EXPECT_EQ(kf->stops[0].properties[0].property_id, CSS_PROPERTY_TRANSFORM);
+    EXPECT_EQ(kf->stops[0].properties[0].property_code, CSS_PROPERTY_TRANSFORM);
     EXPECT_EQ(kf->stops[0].properties[0].value_type, ANIM_VAL_TRANSFORM);
     TransformFunction* tf = kf->stops[0].properties[0].value.transform;
     ASSERT_NE(tf, nullptr);
@@ -277,7 +277,7 @@ TEST_F(KeyframeParsingTest, ColorKeyframes) {
     ASSERT_NE(kf, nullptr);
     EXPECT_EQ(kf->stop_count, 2);
 
-    EXPECT_EQ(kf->stops[0].properties[0].property_id, CSS_PROPERTY_BACKGROUND_COLOR);
+    EXPECT_EQ(kf->stops[0].properties[0].property_code, CSS_PROPERTY_BACKGROUND_COLOR);
     EXPECT_EQ(kf->stops[0].properties[0].value_type, ANIM_VAL_COLOR);
     EXPECT_EQ(kf->stops[0].properties[0].value.color.r, 255);
     EXPECT_EQ(kf->stops[0].properties[0].value.color.g, 0);
@@ -369,12 +369,12 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     DomElement* element = createMockElement(&mock);
 
     CssAnimatedProp prop_from;
-    prop_from.property_id = CSS_PROPERTY_OPACITY;
+    prop_from.property_code = CSS_PROPERTY_OPACITY;
     prop_from.value_type = ANIM_VAL_FLOAT;
     prop_from.value.f = 0.0f;
 
     CssAnimatedProp prop_to;
-    prop_to.property_id = CSS_PROPERTY_OPACITY;
+    prop_to.property_code = CSS_PROPERTY_OPACITY;
     prop_to.value_type = ANIM_VAL_FLOAT;
     prop_to.value.f = 1.0f;
 
@@ -405,13 +405,13 @@ TEST_F(AnimationTickTest, ColorAnimation) {
 
     CssAnimatedProp prop_from;
     memset(&prop_from, 0, sizeof(prop_from));
-    prop_from.property_id = CSS_PROPERTY_COLOR;
+    prop_from.property_code = CSS_PROPERTY_COLOR;
     prop_from.value_type = ANIM_VAL_COLOR;
     prop_from.value.color.r = 255; prop_from.value.color.a = 255;
 
     CssAnimatedProp prop_to;
     memset(&prop_to, 0, sizeof(prop_to));
-    prop_to.property_id = CSS_PROPERTY_COLOR;
+    prop_to.property_code = CSS_PROPERTY_COLOR;
     prop_to.value_type = ANIM_VAL_COLOR;
     prop_to.value.color.b = 255; prop_to.value.color.a = 255;
 
@@ -438,7 +438,7 @@ TEST_F(AnimationTickTest, ThreeStopInterpolation) {
 
     CssAnimatedProp props[3];
     for (int i = 0; i < 3; i++) {
-        props[i].property_id = CSS_PROPERTY_OPACITY;
+        props[i].property_code = CSS_PROPERTY_OPACITY;
         props[i].value_type = ANIM_VAL_FLOAT;
     }
     props[0].value.f = 1.0f;

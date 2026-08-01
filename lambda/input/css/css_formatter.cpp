@@ -107,8 +107,8 @@ static void append_css_ident(CssFormatter* formatter, const char* ident) {
 // NOTE: Most CSS properties use SPACE separation between values
 // Only specific longhand properties use comma separation for multiple values
 // Shorthand properties always use space separation (commas are handled during parsing)
-static bool property_uses_comma_separated_list(CssPropertyId property_id) {
-    switch (property_id) {
+static bool property_uses_comma_separated_list(CssPropertyCode property_code) {
+    switch (property_code) {
         // Properties that use comma-separated lists for multiple values
         case CSS_PROPERTY_FONT_FAMILY:                      // Multiple font names
         case CSS_PROPERTY_BACKGROUND_IMAGE:                 // Multiple background images
@@ -155,7 +155,7 @@ static void format_number_clean(StringBuf* output, double value) {
 // ============================================================================
 
 // Internal helper with property context
-static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyId property_id);
+static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code);
 
 // Format value (complete implementation)
 void css_format_value(CssFormatter* formatter, CssValue* value) {
@@ -163,7 +163,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
 }
 
 // Internal implementation with property context
-static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyId property_id) {
+static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code) {
     if (!formatter || !value) return;
 
     // Don't reset buffer - append to existing content
@@ -335,7 +335,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             // Determine separator based on property type
             if (value->data.list.values) {
                 bool use_comma = value->data.list.comma_separated ||
-                    property_uses_comma_separated_list(property_id);
+                    property_uses_comma_separated_list(property_code);
                 for (size_t i = 0; i < (size_t)value->data.list.count; i++) {
                     if (i > 0) {
                         if (use_comma) {
@@ -348,7 +348,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                         // Recursively format list values
                         StringBuf* temp = formatter->output;
                         formatter->output = stringbuf_new(formatter->pool);
-                        css_format_value_with_property(formatter, value->data.list.values[i], property_id);
+                        css_format_value_with_property(formatter, value->data.list.values[i], property_code);
                         String* formatted_str = stringbuf_to_string(formatter->output);
                         formatter->output = temp;
                         if (formatted_str) {
@@ -393,7 +393,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
 const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* pool) {
     if (!declaration || !pool) return "";
 
-    bool is_custom = declaration->property_id == CSS_PROPERTY_CUSTOM ||
+    bool is_custom = declaration->property_code == CSS_PROPERTY_CUSTOM ||
         (declaration->property_name && declaration->property_name[0] == '-' &&
          declaration->property_name[1] == '-');
     bool has_var = declaration->value_text && strstr(declaration->value_text, "var(");
@@ -413,7 +413,7 @@ const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* p
             // CSSOM serializes parsed component values; raw source would retain
             // non-canonical numbers, whitespace, escapes, and unclosed functions.
             css_format_value_with_property(
-                formatter, declaration->value, declaration->property_id);
+                formatter, declaration->value, declaration->property_code);
             String* result = stringbuf_to_string(formatter->output);
             if (result) return result->chars;
         }
@@ -434,7 +434,7 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
     // Get property name - prefer stored name, fall back to lookup
     const char* property_name = decl->property_name;
     if (!property_name) {
-        property_name = css_property_get_name(decl->property_id);
+        property_name = css_property_spelling_from_code(decl->property_code);
     }
     if (!property_name) {
         property_name = "<unknown-property>";
@@ -447,7 +447,7 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
     // Format value - use temporary buffer with property context
     StringBuf* temp = formatter->output;
     formatter->output = stringbuf_new(formatter->pool);
-    css_format_value_with_property(formatter, decl->value, decl->property_id);
+    css_format_value_with_property(formatter, decl->value, decl->property_code);
     String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 
@@ -459,13 +459,13 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
 }
 
 // Legacy function for backward compatibility
-const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value) {
+const char* css_format_declaration(CssFormatter* formatter, CssPropertyCode property_code, CssValue* value) {
     if (!formatter || !value) return NULL;
 
     // Don't reset buffer - append to existing content
 
     // Get property name
-    const char* property_name = css_property_get_name(property_id);
+    const char* property_name = css_property_spelling_from_code(property_code);
     if (!property_name) {
         property_name = "<unknown-property>";
     }
@@ -477,7 +477,7 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
     // Format value - use temporary buffer with property context
     StringBuf* temp = formatter->output;
     formatter->output = stringbuf_new(formatter->pool);
-    css_format_value_with_property(formatter, value, property_id);
+    css_format_value_with_property(formatter, value, property_code);
     String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 

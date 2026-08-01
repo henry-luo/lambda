@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
-#include <vector>
 #include <string>
 #include <memory>
-#include <algorithm>
 #include <chrono>
 
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
+#include "../../lambda/core/well_known_markup_names.h"
 
 extern "C" {
 #include "../../lib/mempool.h"
@@ -78,20 +77,20 @@ TEST_F(CssPropertySystemTest, PropertyDatabaseInitialization) {
     EXPECT_TRUE(css_property_exists(CSS_PROPERTY_MARGIN_TOP));
 
     // Check non-existent property
-    EXPECT_FALSE(css_property_exists(static_cast<CssPropertyId>(99999)));
+    EXPECT_FALSE(css_property_exists(static_cast<CssPropertyCode>(99999)));
 }
 
 TEST_F(CssPropertySystemTest, PropertyLookupById) {
-    const CssProperty* color_prop = css_property_get_by_id(CSS_PROPERTY_COLOR);
+    const CssProperty* color_prop = css_property_get_by_code(CSS_PROPERTY_COLOR);
     ASSERT_NE(color_prop, nullptr);
-    EXPECT_EQ(color_prop->id, CSS_PROPERTY_COLOR);
+    EXPECT_EQ(color_prop->code, CSS_PROPERTY_COLOR);
     EXPECT_STREQ(color_prop->name, "color");
     EXPECT_EQ(color_prop->type, PROP_TYPE_COLOR);
     EXPECT_EQ(color_prop->inheritance, PROP_INHERIT_YES);
 
-    const CssProperty* width_prop = css_property_get_by_id(CSS_PROPERTY_WIDTH);
+    const CssProperty* width_prop = css_property_get_by_code(CSS_PROPERTY_WIDTH);
     ASSERT_NE(width_prop, nullptr);
-    EXPECT_EQ(width_prop->id, CSS_PROPERTY_WIDTH);
+    EXPECT_EQ(width_prop->code, CSS_PROPERTY_WIDTH);
     EXPECT_STREQ(width_prop->name, "width");
     EXPECT_EQ(width_prop->type, PROP_TYPE_LENGTH);
     EXPECT_EQ(width_prop->inheritance, PROP_INHERIT_NO);
@@ -100,11 +99,11 @@ TEST_F(CssPropertySystemTest, PropertyLookupById) {
 TEST_F(CssPropertySystemTest, PropertyLookupByName) {
     const CssProperty* color_prop = css_property_get_by_name("color");
     ASSERT_NE(color_prop, nullptr);
-    EXPECT_EQ(color_prop->id, CSS_PROPERTY_COLOR);
+    EXPECT_EQ(color_prop->code, CSS_PROPERTY_COLOR);
 
     const CssProperty* margin_prop = css_property_get_by_name("margin-top");
     ASSERT_NE(margin_prop, nullptr);
-    EXPECT_EQ(margin_prop->id, CSS_PROPERTY_MARGIN_TOP);
+    EXPECT_EQ(margin_prop->code, CSS_PROPERTY_MARGIN_TOP);
 
     // Test case sensitivity
     EXPECT_EQ(css_property_get_by_name("COLOR"), nullptr);
@@ -114,10 +113,34 @@ TEST_F(CssPropertySystemTest, PropertyLookupByName) {
 }
 
 TEST_F(CssPropertySystemTest, PropertyIdByName) {
-    EXPECT_EQ(css_property_get_id_by_name("color"), CSS_PROPERTY_COLOR);
-    EXPECT_EQ(css_property_get_id_by_name("width"), CSS_PROPERTY_WIDTH);
-    EXPECT_EQ(css_property_get_id_by_name("font-size"), CSS_PROPERTY_FONT_SIZE);
-    EXPECT_EQ(css_property_get_id_by_name("non-existent"), 0);
+    EXPECT_EQ(css_property_code_from_name("color"), CSS_PROPERTY_COLOR);
+    EXPECT_EQ(css_property_code_from_name("width"), CSS_PROPERTY_WIDTH);
+    EXPECT_EQ(css_property_code_from_name("font-size"), CSS_PROPERTY_FONT_SIZE);
+    EXPECT_EQ(css_property_code_from_name("non-existent"), 0);
+}
+
+TEST_F(CssPropertySystemTest, GeneratedNameIdentityMapsToDenseCode) {
+    EXPECT_EQ(css_property_name_id(CSS_PROPERTY_COLOR), MARKUP_NAME_COLOR);
+    EXPECT_EQ(css_property_code_from_name_id(MARKUP_NAME_COLOR), CSS_PROPERTY_COLOR);
+    EXPECT_EQ(css_property_name_id(CSS_PROPERTY_WIDTH), MARKUP_NAME_WIDTH);
+    EXPECT_EQ(css_property_code_from_name_id(MARKUP_NAME_WIDTH), CSS_PROPERTY_WIDTH);
+    EXPECT_EQ(css_property_code_from_name_id(NAME_ID_NONE), static_cast<CssPropertyCode>(0));
+}
+
+TEST_F(CssPropertySystemTest, EveryStandardPropertyHasGeneratedNameIdentity) {
+    int mapped_count = 0;
+    int iterated_count = css_property_foreach([](const CssProperty* property, void* context) {
+        int* count = (int*)context;
+        EXPECT_NE(property->name_id, NAME_ID_NONE) << property->name;
+        EXPECT_EQ(css_property_code_from_name_id(property->name_id), property->code) << property->name;
+        EXPECT_EQ(css_property_name_id(property->code), property->name_id) << property->name;
+        (*count)++;
+        return true;
+    }, &mapped_count);
+
+    EXPECT_EQ(iterated_count, mapped_count);
+    EXPECT_EQ(mapped_count, css_property_get_count());
+    EXPECT_EQ(well_known_name_id({"--custom", 8}), NAME_ID_NONE);
 }
 
 TEST_F(CssPropertySystemTest, PropertyCharacteristics) {
@@ -158,8 +181,8 @@ TEST_F(CssPropertySystemTest, InitialValues) {
 
 TEST_F(CssPropertySystemTest, CustomProperties) {
     // Register custom properties
-    CssPropertyId custom1 = css_property_register_custom("--my-color", pool);
-    CssPropertyId custom2 = css_property_register_custom("--my-size", pool);
+    CssPropertyCode custom1 = css_property_register_custom("--my-color", pool);
+    CssPropertyCode custom2 = css_property_register_custom("--my-size", pool);
 
     EXPECT_GT(custom1, 0);
     EXPECT_GT(custom2, 0);
@@ -346,7 +369,7 @@ TEST_F(CssDeclarationTest, DeclarationCreation) {
         CSS_PROPERTY_COLOR, color_value, spec, CSS_ORIGIN_AUTHOR, pool);
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, CSS_PROPERTY_COLOR);
+    EXPECT_EQ(decl->property_code, CSS_PROPERTY_COLOR);
     EXPECT_EQ(decl->value, color_value);
     EXPECT_EQ(decl->origin, CSS_ORIGIN_AUTHOR);
     EXPECT_EQ(decl->ref_count, 1);
@@ -432,13 +455,13 @@ protected:
         CssPropertySystemTest::TearDown();
     }
 
-    CssDeclaration* create_test_declaration(CssPropertyId property_id,
+    CssDeclaration* create_test_declaration(CssPropertyCode property_code,
                                            void* value,
                                            uint8_t classes = 1,
                                            bool important = false,
                                            int source_order = 1) {
         CssSpecificity spec = css_specificity_create(0, 0, classes, 0, important);
-        CssDeclaration* decl = css_declaration_create(property_id, value, spec, CSS_ORIGIN_AUTHOR, pool);
+        CssDeclaration* decl = css_declaration_create(property_code, value, spec, CSS_ORIGIN_AUTHOR, pool);
         decl->source_order = source_order;
         return decl;
     }
@@ -670,19 +693,27 @@ TEST_F(StyleTreeTest, TreeTraversal) {
     style_tree_apply_declaration(style_tree, create_test_declaration(CSS_PROPERTY_HEIGHT, height_value));
 
     // Test traversal
-    std::vector<CssPropertyId> visited_properties;
+    struct VisitedProperties {
+        CssPropertyCode values[3];
+        int count;
+    } visited_properties = {};
 
     int count = style_tree_foreach(style_tree, [](StyleNode* node, void* context) -> bool {
-        std::vector<CssPropertyId>* props = static_cast<std::vector<CssPropertyId>*>(context);
-        props->push_back(static_cast<CssPropertyId>(node->base.property_id));
+        VisitedProperties* properties = (VisitedProperties*)context;
+        if (properties->count >= 3) return false;
+        properties->values[properties->count++] = (CssPropertyCode)node->base.property_id;
         return true;
     }, &visited_properties);
 
     EXPECT_EQ(count, 3);
-    EXPECT_EQ(visited_properties.size(), 3);
+    EXPECT_EQ(visited_properties.count, 3);
 
     // Properties should be visited in sorted order (AVL tree in-order traversal)
-    EXPECT_TRUE(std::is_sorted(visited_properties.begin(), visited_properties.end()));
+    for (int index = 1; index < visited_properties.count; index++) {
+        CssPropertyCode previous = visited_properties.values[index - 1];
+        CssPropertyCode current = visited_properties.values[index];
+        EXPECT_LE(previous, current);
+    }
 }
 
 TEST_F(StyleTreeTest, TreeStatistics) {
@@ -784,7 +815,7 @@ TEST_F(StyleTreeTest, TreeSubset) {
     style_tree_apply_declaration(style_tree, create_test_declaration(CSS_PROPERTY_HEIGHT, height_value));
 
     // Create subset with only color and width
-    CssPropertyId subset_props[] = { CSS_PROPERTY_COLOR, CSS_PROPERTY_WIDTH };
+    CssPropertyCode subset_props[] = { CSS_PROPERTY_COLOR, CSS_PROPERTY_WIDTH };
     Pool* subset_pool = pool_create();
 
     StyleTree* subset = style_tree_create_subset(style_tree, subset_props, 2, subset_pool);
@@ -811,12 +842,12 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
 
     // Add many declarations to stress test the system
     for (int prop = 1; prop <= property_count; prop++) {
-        CssPropertyId property_id = static_cast<CssPropertyId>(prop);
+        CssPropertyCode property_code = static_cast<CssPropertyCode>(prop);
 
         for (int decl = 0; decl < declarations_per_property; decl++) {
             void* test_value = create_test_color(decl * 50, 0, 0); // Varying values
             CssDeclaration* declaration = create_test_declaration(
-                property_id, test_value, decl + 1, false, decl + 1);
+                property_code, test_value, decl + 1, false, decl + 1);
 
             StyleNode* node = style_tree_apply_declaration(style_tree, declaration);
             ASSERT_NE(node, nullptr);
@@ -835,8 +866,8 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
     start = std::chrono::high_resolution_clock::now();
 
     for (int prop = 1; prop <= property_count; prop++) {
-        CssPropertyId property_id = static_cast<CssPropertyId>(prop);
-        CssDeclaration* decl = style_tree_get_declaration(style_tree, property_id);
+        CssPropertyCode property_code = static_cast<CssPropertyCode>(prop);
+        CssDeclaration* decl = style_tree_get_declaration(style_tree, property_code);
         EXPECT_NE(decl, nullptr);
     }
 

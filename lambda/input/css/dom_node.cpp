@@ -9,240 +9,29 @@
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
-#include "../../../lib/hashmap.h"
 #include "../../../lib/str.h"
-#include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
-#include <strings.h>  // For strcasecmp
+#include "../../core/well_known_markup_names.h"
 
-/**
- * HTML Element Information
- * Maps tag names to their numeric IDs for fast lookup
- */
-struct HtmlElementInfo {
-    const char* tag_name;    // HTML tag name (lowercase)
-    uintptr_t tag_id;        // HTM_TAG_* constant
-};
-
-// Static table of HTML elements ordered by tag ID
-// This provides O(1) lookup by ID and enables hashtable initialization
-static const HtmlElementInfo html_elements[] = {
-    // Core HTML elements (sorted by HTM_TAG_* enum order)
-    {"a", HTM_TAG_A},
-    {"abbr", HTM_TAG_ABBR},
-    {"address", HTM_TAG_ADDRESS},
-    {"animatemotion", HTM_TAG_ANIMATEMOTION},
-    {"animatetransform", HTM_TAG_ANIMATETRANSFORM},
-    {"area", HTM_TAG_AREA},
-    {"article", HTM_TAG_ARTICLE},
-    {"aside", HTM_TAG_ASIDE},
-    {"audio", HTM_TAG_AUDIO},
-    {"b", HTM_TAG_B},
-    {"base", HTM_TAG_BASE},
-    {"bdi", HTM_TAG_BDI},
-    {"bdo", HTM_TAG_BDO},
-    {"big", HTM_TAG_BIG},
-    {"blockquote", HTM_TAG_BLOCKQUOTE},
-    {"body", HTM_TAG_BODY},
-    {"br", HTM_TAG_BR},
-    {"button", HTM_TAG_BUTTON},
-    {"canvas", HTM_TAG_CANVAS},
-    {"caption", HTM_TAG_CAPTION},
-    {"center", HTM_TAG_CENTER},
-    {"cite", HTM_TAG_CITE},
-    {"code", HTM_TAG_CODE},
-    {"col", HTM_TAG_COL},
-    {"colgroup", HTM_TAG_COLGROUP},
-    {"data", HTM_TAG_DATA},
-    {"datalist", HTM_TAG_DATALIST},
-    {"dd", HTM_TAG_DD},
-    {"del", HTM_TAG_DEL},
-    {"details", HTM_TAG_DETAILS},
-    {"dfn", HTM_TAG_DFN},
-    {"dialog", HTM_TAG_DIALOG},
-    {"div", HTM_TAG_DIV},
-    {"dl", HTM_TAG_DL},
-    {"dt", HTM_TAG_DT},
-    {"em", HTM_TAG_EM},
-    {"embed", HTM_TAG_EMBED},
-    {"fieldset", HTM_TAG_FIELDSET},
-    {"figcaption", HTM_TAG_FIGCAPTION},
-    {"figure", HTM_TAG_FIGURE},
-    {"font", HTM_TAG_FONT},
-    {"footer", HTM_TAG_FOOTER},
-    {"form", HTM_TAG_FORM},
-    {"h1", HTM_TAG_H1},
-    {"h2", HTM_TAG_H2},
-    {"h3", HTM_TAG_H3},
-    {"h4", HTM_TAG_H4},
-    {"h5", HTM_TAG_H5},
-    {"h6", HTM_TAG_H6},
-    {"head", HTM_TAG_HEAD},
-    {"header", HTM_TAG_HEADER},
-    {"hgroup", HTM_TAG_HGROUP},
-    {"hr", HTM_TAG_HR},
-    {"html", HTM_TAG_HTML},
-    {"i", HTM_TAG_I},
-    {"iframe", HTM_TAG_IFRAME},
-    {"img", HTM_TAG_IMG},
-    {"input", HTM_TAG_INPUT},
-    {"ins", HTM_TAG_INS},
-    {"kbd", HTM_TAG_KBD},
-    {"label", HTM_TAG_LABEL},
-    {"legend", HTM_TAG_LEGEND},
-    {"li", HTM_TAG_LI},
-    {"lineargradient", HTM_TAG_LINEARGRADIENT},
-    {"link", HTM_TAG_LINK},
-    {"listing", HTM_TAG_LISTING},
-    {"main", HTM_TAG_MAIN},
-    {"map", HTM_TAG_MAP},
-    {"mark", HTM_TAG_MARK},
-    {"menu", HTM_TAG_MENU},
-    {"meta", HTM_TAG_META},
-    {"meter", HTM_TAG_METER},
-    {"nav", HTM_TAG_NAV},
-    {"noscript", HTM_TAG_NOSCRIPT},
-    {"object", HTM_TAG_OBJECT},
-    {"ol", HTM_TAG_OL},
-    {"optgroup", HTM_TAG_OPTGROUP},
-    {"option", HTM_TAG_OPTION},
-    {"output", HTM_TAG_OUTPUT},
-    {"p", HTM_TAG_P},
-    {"param", HTM_TAG_PARAM},
-    {"picture", HTM_TAG_PICTURE},
-    {"pre", HTM_TAG_PRE},
-    {"progress", HTM_TAG_PROGRESS},
-    {"q", HTM_TAG_Q},
-    {"radialgradient", HTM_TAG_RADIALGRADIENT},
-    // Ruby tags must retain their HTML identities so the layout engine can
-    // establish ruby formatting rather than treating them as unknown spans.
-    {"rb", HTM_TAG_RB},
-    {"rp", HTM_TAG_RP},
-    {"rt", HTM_TAG_RT},
-    {"rtc", HTM_TAG_RTC},
-    {"ruby", HTM_TAG_RUBY},
-    {"s", HTM_TAG_S},
-    {"samp", HTM_TAG_SAMP},
-    {"script", HTM_TAG_SCRIPT},
-    {"section", HTM_TAG_SECTION},
-    {"select", HTM_TAG_SELECT},
-    {"small", HTM_TAG_SMALL},
-    {"source", HTM_TAG_SOURCE},
-    {"span", HTM_TAG_SPAN},
-    {"strike", HTM_TAG_STRIKE},
-    {"strong", HTM_TAG_STRONG},
-    {"style", HTM_TAG_STYLE},
-    {"sub", HTM_TAG_SUB},
-    {"summary", HTM_TAG_SUMMARY},
-    {"sup", HTM_TAG_SUP},
-    {"svg", HTM_TAG_SVG},
-    {"table", HTM_TAG_TABLE},
-    {"tbody", HTM_TAG_TBODY},
-    {"td", HTM_TAG_TD},
-    {"template", HTM_TAG_TEMPLATE},
-    {"textarea", HTM_TAG_TEXTAREA},
-    {"tfoot", HTM_TAG_TFOOT},
-    {"th", HTM_TAG_TH},
-    {"thead", HTM_TAG_THEAD},
-    {"time", HTM_TAG_TIME},
-    {"title", HTM_TAG_TITLE},
-    {"tr", HTM_TAG_TR},
-    {"track", HTM_TAG_TRACK},
-    {"tt", HTM_TAG_TT},
-    {"u", HTM_TAG_U},
-    {"ul", HTM_TAG_UL},
-    {"var", HTM_TAG_VAR},
-    {"video", HTM_TAG_VIDEO},
-    {"wbr", HTM_TAG_WBR},
-    {"webview", HTM_TAG_WEBVIEW},
-    {"xmp", HTM_TAG_XMP},
-};
-
-static const size_t html_elements_count = sizeof(html_elements) / sizeof(html_elements[0]);
-
-// Global hashtable for tag name lookups (initialized once)
-static HashMap* g_tag_name_map = nullptr;
-
-/**
- * Hash function for HtmlElementInfo (case-insensitive tag name hash)
- */
-static uint64_t html_element_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const HtmlElementInfo* elem = (const HtmlElementInfo*)item;
-    // use lowercase tag name for hashing
-    return hashmap_sip(elem->tag_name, strlen(elem->tag_name), seed0, seed1);
+// The generated records are the one source of tag identity. This runs only at
+// the DOM construction boundary, so custom/foreign tags can retain byte names
+// without a second semantic tag hashmap.
+static NameId markup_name_id_from_html_tag(const char* tag_name) {
+    if (!tag_name) return NAME_ID_NONE;
+    size_t length = strlen(tag_name);
+    for (size_t index = 0; index < g_well_known_markup_name_count; index++) {
+        const WellKnownNameRecord* record = &g_well_known_markup_names[index];
+        if (record->len == length && str_icmp(record->chars, record->len, tag_name, length) == 0) {
+            return record->meta.predefined_id;
+        }
+    }
+    return NAME_ID_NONE;
 }
 
-/**
- * Compare function for HtmlElementInfo (case-insensitive tag name comparison)
- */
-static int html_element_compare(const void* a, const void* b, void* udata) {
-    const HtmlElementInfo* elem_a = (const HtmlElementInfo*)a;
-    const HtmlElementInfo* elem_b = (const HtmlElementInfo*)b;
-    // case-insensitive comparison of tag names
-    return str_icmp(elem_a->tag_name, strlen(elem_a->tag_name), elem_b->tag_name, strlen(elem_b->tag_name));
+NameId DomNode::tag_name_to_id(const char* tag_name) {
+    return markup_name_id_from_html_tag(tag_name);
 }
 
-/**
- * Initialize the tag name hashtable (called once on first use)
- */
-static void init_tag_name_map() {
-    if (g_tag_name_map) return;
-
-    // create hashtable with capacity for all HTML elements
-    g_tag_name_map = hashmap_new(
-        sizeof(HtmlElementInfo),
-        html_elements_count,
-        0, 0,  // random seeds (0 uses default)
-        html_element_hash,
-        html_element_compare,
-        nullptr,  // no element free function needed (static data)
-        nullptr   // no user data
-    );
-
-    if (!g_tag_name_map) {
-        log_error("Failed to create tag name hashtable");
-        return;
-    }
-
-    // populate hashtable with all HTML elements
-    for (size_t i = 0; i < html_elements_count; i++) {
-        hashmap_set(g_tag_name_map, &html_elements[i]);
-    }
-
-    log_debug("Initialized tag name hashtable with %zu elements", html_elements_count);
-}
-
-/**
- * Convert HTML tag name string to tag ID using hashtable lookup
- * This is called once during element creation to populate the tag_id field
- */
-uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
-    if (!tag_name) return 0;
-
-    // lazy initialization of hashtable on first use
-    if (!g_tag_name_map) {
-        init_tag_name_map();
-    }
-
-    if (!g_tag_name_map) {
-        log_error("Tag name hashtable not initialized");
-        return 0;
-    }
-
-    // lookup tag name in hashtable (O(1) average case)
-    // strcasecmp in comparison function handles case-insensitive matching
-    HtmlElementInfo search_key = {tag_name, 0};
-    const HtmlElementInfo* result = (const HtmlElementInfo*)hashmap_get(g_tag_name_map, &search_key);
-
-    if (result) {
-        return result->tag_id;
-    }
-
-    // for unknown tags, return 0 (similar to HTM_TAG__UNDEF behavior)
-    return 0;
-}
-
-// Get tag ID for element nodes
-uintptr_t DomNode::tag() const {
+NameId DomNode::tag() const {
     const DomElement* elem = as_element();
     return elem ? elem->tag_id : 0;
 }
@@ -487,12 +276,12 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
     }
 
     // Get property name using the property database
-    const char* prop_name = css_get_property_name(decl->property_id);
+    const char* prop_name = css_property_spelling_from_code(decl->property_code);
 
     if (!prop_name) {
         // If no name available, print with property ID for debugging
         char prop_id_buf[32];
-        snprintf(prop_id_buf, sizeof(prop_id_buf), "property-%d", (int)decl->property_id);
+        snprintf(prop_id_buf, sizeof(prop_id_buf), "property-%d", (int)decl->property_code);
         strbuf_append_str(ctx->buf, prop_id_buf);
     } else {
         // Print property name

@@ -95,6 +95,15 @@ static bool event_view_pointer_events_none(View* view) {
     return false;
 }
 
+static bool event_view_is_float(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    CssEnum float_value = elem->position
+        ? elem->positionp()->float_prop
+        : layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+    return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
+}
+
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
@@ -826,29 +835,48 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 }
 
 void target_children(EventContext* evcon, View* view) {
-    do {
-        if (view->is_block()) {
-            ViewBlock* block = lam::view_require_block(view);
-            if (radiant_stack_is_deferred_from_normal_flow(view)) {
+    if (!evcon || !view) return;
+
+    bool has_float_child = false;
+    for (View* child = view; child; child = child->next()) {
+        if (event_view_is_float(child)) {
+            has_float_child = true;
+            break;
+        }
+    }
+
+    View* last = view;
+    if (has_float_child) {
+        while (last->next()) last = last->next();
+    }
+
+    // floating siblings can overlap after shrink-to-fit; later floats paint on
+    // top of earlier ones, so their normal-flow hit order must be reversed.
+    for (View* child = has_float_child ? last : view;
+         child && !evcon->target;
+         child = has_float_child
+             ? (child == view ? nullptr : static_cast<View*>(child->prev_sibling))
+             : child->next()) {
+        if (child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            if (radiant_stack_is_deferred_from_normal_flow(child)) {
                 // skip deferred stacking entries; target_block_view walks them in reverse paint order.
             } else {
                 target_block_view(evcon, block);
             }
         }
-        else if (view->view_type == RDT_VIEW_INLINE) {
-            if (radiant_stack_is_deferred_from_normal_flow(view)) {
-                view = view->next();
+        else if (child->view_type == RDT_VIEW_INLINE) {
+            if (radiant_stack_is_deferred_from_normal_flow(child)) {
                 continue;
             }
-            ViewSpan* span = lam::view_require_element(view);
+            ViewSpan* span = lam::view_require_element(child);
             target_inline_view(evcon, span);
         }
-        else if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
+        else if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(child);
             target_text_view(evcon, text);
         }
-        view = view->next();
-    } while (view && !evcon->target);
+    }
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
@@ -934,11 +962,11 @@ static bool target_inside_click_control(View* target) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
             switch (elem->tag()) {
-                case HTM_TAG_A:
-                case HTM_TAG_BUTTON:
-                case HTM_TAG_INPUT:
-                case HTM_TAG_SELECT:
-                case HTM_TAG_TEXTAREA:
+                case MARKUP_NAME_A:
+                case MARKUP_NAME_BUTTON:
+                case MARKUP_NAME_INPUT:
+                case MARKUP_NAME_SELECT:
+                case MARKUP_NAME_TEXTAREA:
                     return true;
                 default:
                     break;
@@ -1081,8 +1109,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = event_view_owner_state(static_cast<View*>(block));
         if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
-                                           &scroll_x, &scroll_y, NULL, NULL);
+        // overflow-visible boxes may allocate a pane to record intrinsic overflow,
+        // but that pane does not establish a scrolling coordinate space for hits.
+        if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
+            scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
+                                               &scroll_x, &scroll_y, NULL, NULL);
+        }
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
     }
@@ -1244,10 +1276,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // assumed to be all text) and the click snaps to the nearest text via the
     // margin-text-hit above, so the image can never be clicked/selected.
     uintptr_t self_tag = block->tag();
-    bool is_replaced_block = self_tag == HTM_TAG_IMG || self_tag == HTM_TAG_VIDEO ||
-        self_tag == HTM_TAG_CANVAS || self_tag == HTM_TAG_IFRAME ||
-        self_tag == HTM_TAG_EMBED || self_tag == HTM_TAG_OBJECT ||
-        self_tag == HTM_TAG_HR;
+    bool is_replaced_block = self_tag == MARKUP_NAME_IMG || self_tag == MARKUP_NAME_VIDEO ||
+        self_tag == MARKUP_NAME_CANVAS || self_tag == MARKUP_NAME_IFRAME ||
+        self_tag == MARKUP_NAME_EMBED || self_tag == MARKUP_NAME_OBJECT ||
+        self_tag == MARKUP_NAME_HR;
     if (!pointer_events_none && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
@@ -1280,6 +1312,27 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
         setup_font(evcon->ui_context, &evcon->font, default_font);
         target_block_view(evcon, lam::view_require_block(root_view));
+        DomNode* root_node = static_cast<DomNode*>(root_view);
+        DomDocument* doc = root_node && root_node->is_element()
+            ? root_node->as_element()->doc : nullptr;
+        MousePositionEvent* mouse = &evcon->event.mouse_position;
+        DomElement* svg_hit = doc ? (DomElement*)js_dom_document_svg_element_from_point(
+            doc, (float)mouse->x, (float)mouse->y) : nullptr;
+        if (svg_hit && evcon->target) {
+            bool target_contains_svg = false;
+            for (DomNode* node = (DomNode*)svg_hit; node; node = node->parent) {
+                if (node == static_cast<DomNode*>(evcon->target)) {
+                    target_contains_svg = true;
+                    break;
+                }
+            }
+            if (target_contains_svg) {
+                // SVG paint geometry has no per-shape CSS boxes. Preserve the
+                // normal page-layer winner, then refine only inside that winner
+                // with the SVG CTM/bounds hit result used by elementFromPoint().
+                evcon->target = static_cast<View*>(svg_hit);
+            }
+        }
         evcon->font = pa_font;
     }
     else {
@@ -1314,7 +1367,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     }
     uintptr_t name = span->tag();
     log_debug("fired at view %s", span->node_name());
-    if (name == HTM_TAG_A) {
+    if (name == MARKUP_NAME_A) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
@@ -5431,6 +5484,11 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
         dom_element_clear_pseudo_styles(e);
         e->set_styles_resolved(false);
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
+            if ((uintptr_t)c < 4096) {
+                log_error("drawing recascade invalid child link: parent=%p tag=%s child=%p",
+                          (void*)e, e->tag_name ? e->tag_name : "?", (void*)c);
+                return;
+            }
             clear_cascaded_styles_recursive(c);
         }
     }
@@ -5695,7 +5753,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
 static bool is_input_type(View* view, const char* expected_type) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
-    if (elem->tag() != HTM_TAG_INPUT) return false;
+    if (elem->tag() != MARKUP_NAME_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && strcmp(type, expected_type) == 0;
 }
@@ -5775,7 +5833,7 @@ static View* find_checkbox_radio_input(View* target) {
         if (current->is_element()) {
             ViewElement* elem = lam::view_require_element(current);
             log_debug("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
-            if (elem->tag() == HTM_TAG_LABEL) {
+            if (elem->tag() == MARKUP_NAME_LABEL) {
                 label_element = current;
                 log_debug("find_checkbox_radio_input: found label element");
                 break;
@@ -5960,7 +6018,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
 static bool is_select(View* view) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
-    return elem->tag() == HTM_TAG_SELECT;
+    return elem->tag() == MARKUP_NAME_SELECT;
 }
 
 /**
@@ -6269,14 +6327,14 @@ bool is_view_focusable(View* view) {
         }
 
         switch (tag) {
-        case HTM_TAG_A:
+        case MARKUP_NAME_A:
             // <a> is focusable if it has href
             return elem->get_attribute("href") != NULL;
-        case HTM_TAG_BUTTON:
-        case HTM_TAG_SELECT:
-        case HTM_TAG_TEXTAREA:
+        case MARKUP_NAME_BUTTON:
+        case MARKUP_NAME_SELECT:
+        case MARKUP_NAME_TEXTAREA:
             return true;
-        case HTM_TAG_INPUT: {
+        case MARKUP_NAME_INPUT: {
             // Input is focusable unless type="hidden"
             const char* type = elem->get_attribute("type");
             return !type || strcmp(type, "hidden") != 0;
@@ -7598,7 +7656,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward mouse button events to layer-mode webview
-        if (evcon.target && evcon.target->is_element()) {
+        if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {
+            // SVG paint hits target leaf geometry without a CSS block box;
+            // only block views can own an embedded layer webview.
             ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embedp()->webview &&
                 tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
@@ -8622,7 +8682,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward scroll to layer-mode webview
-        if (evcon.target && evcon.target->is_element()) {
+        if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {
+            // SVG paint hits target leaf geometry without a CSS block box;
+            // only block views can own an embedded layer webview.
             ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embedp()->webview &&
                 tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
@@ -8864,7 +8926,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             ViewElement* fe = lam::view_require_element(focused);
             uint32_t tag = fe->tag();
             bool handled = false;
-            if (tag == HTM_TAG_INPUT && key_event->key == RDT_KEY_SPACE) {
+            if (tag == MARKUP_NAME_INPUT && key_event->key == RDT_KEY_SPACE) {
                 if (is_checkbox(focused) || is_radio(focused)) {
                     bool js_click_dispatched = false;
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
@@ -8875,7 +8937,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     handled = true;
                 }
-            } else if (tag == HTM_TAG_BUTTON) {
+            } else if (tag == MARKUP_NAME_BUTTON) {
                 // Disabled buttons are inert.
                 DomElement* delem = lam::dom_require_element(focused);
                 bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
@@ -8884,7 +8946,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         0, 0, 0, 0, false, false, false, false, 1);
                     handled = true;
                 }
-            } else if (tag == HTM_TAG_SELECT) {
+            } else if (tag == MARKUP_NAME_SELECT) {
                 // Space / Enter on a focused <select> opens (or toggles)
                 // the dropdown popup, matching native browser behavior.
                 DomElement* delem = lam::dom_require_element(focused);

@@ -238,7 +238,7 @@ typedef struct SvgViewBox {
 static SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
 static float parse_svg_length(const char* value, float default_value);
 static Color parse_svg_color(const char* value);
-static bool parse_svg_transform(const char* transform_str, float matrix[6]);
+bool svg_parse_transform(const char* transform_str, float matrix[6]);
 
 // ---------------------------------------------------------------------------
 // SVG PaintIR/display-list dispatch helpers
@@ -881,7 +881,7 @@ void render_svg_initial_paint(const ViewSpan* view, Color current_color,
 // SVG Transform Parsing
 // ============================================================================
 
-static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
+bool svg_parse_transform(const char* transform_str, float matrix[6]) {
     if (!transform_str || !matrix) return false;
 
     // initialize to identity matrix: [a, b, c, d, e, f] = [1, 0, 0, 1, 0, 0]
@@ -1192,7 +1192,7 @@ static RdtMatrix compose_element_transform(SvgInlineRenderContext* ctx, Element*
     if (!transform_str) return ctx->transform;
 
     float m[6];
-    if (!parse_svg_transform(transform_str, m)) return ctx->transform;
+    if (!svg_parse_transform(transform_str, m)) return ctx->transform;
 
     RdtMatrix local = {
         m[0], m[2], m[4],  // a, c, e
@@ -1489,7 +1489,7 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     const char* pt = get_svg_attr(pattern_elem, "patternTransform");
     if (pt && *pt) {
         float pm[6];
-        if (parse_svg_transform(pt, pm)) {
+        if (svg_parse_transform(pt, pm)) {
             pattern_matrix.e11 = pm[0]; pattern_matrix.e12 = pm[2]; pattern_matrix.e13 = pm[4];
             pattern_matrix.e21 = pm[1]; pattern_matrix.e22 = pm[3]; pattern_matrix.e23 = pm[5];
             pattern_matrix.e31 = 0.0f;  pattern_matrix.e32 = 0.0f;  pattern_matrix.e33 = 1.0f;
@@ -2432,6 +2432,10 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
     return path;
 }
 
+RdtPath* svg_parse_path_d(const char* d) {
+    return parse_svg_path_d(d);
+}
+
 static bool svg_parse_path_end_info(const char* d, SvgPathEndInfo* info) {
     if (!d || !*d || !info) return false;
     RdtPath* parsed = parse_svg_path_d(d, info, true);
@@ -3104,9 +3108,16 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
  * Measure text width using the font system for accurate positioning.
  * Falls back to rough estimate if font handle unavailable.
  */
-static float measure_svg_text_width(const char* text, float font_size_px,
-                                    FontContext* font_ctx, const char* font_family, int weight) {
-    if (!text || !*text) return 0;
+bool svg_measure_text_metrics(const char* text, float font_size_px,
+                              FontContext* font_ctx, const char* font_family,
+                              int weight, FontSlant slant,
+                              SvgTextMetrics* out_metrics) {
+    if (!out_metrics) return false;
+    *out_metrics = {};
+    if (!text || !*text) return true;
+
+    out_metrics->ascent = font_size_px * 0.8f;
+    out_metrics->descent = font_size_px - out_metrics->ascent;
 
     // try measuring with the font system
     if (font_ctx && font_family) {
@@ -3114,19 +3125,37 @@ static float measure_svg_text_width(const char* text, float font_size_px,
         style.family = font_family;
         style.size_px = font_size_px;
         style.weight = (FontWeight)weight;
-        style.slant = FONT_SLANT_NORMAL;
+        style.slant = slant;
 
         FontHandle* handle = font_resolve(font_ctx, &style);
         if (handle) {
             TextExtents ext = font_measure_text(handle, text, (int)strlen(text));
+            const FontMetrics* metrics = font_get_metrics(handle);
+            if (metrics) {
+                out_metrics->ascent = metrics->ascender;
+                out_metrics->descent = -metrics->descender;
+                out_metrics->used_font_metrics = true;
+            }
             font_handle_release(handle);
-            if (ext.width > 0) return ext.width;
+            if (ext.width > 0) {
+                out_metrics->width = ext.width;
+                return true;
+            }
         }
     }
 
     // fallback: rough estimate
     size_t len = strlen(text);
-    return len * font_size_px * 0.55f;
+    out_metrics->width = len * font_size_px * 0.55f;
+    return true;
+}
+
+static float measure_svg_text_width(const char* text, float font_size_px,
+                                    FontContext* font_ctx, const char* font_family, int weight) {
+    SvgTextMetrics metrics = {};
+    svg_measure_text_metrics(text, font_size_px, font_ctx, font_family, weight,
+                             FONT_SLANT_NORMAL, &metrics);
+    return metrics.width;
 }
 
 static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,

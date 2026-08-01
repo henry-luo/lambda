@@ -436,7 +436,7 @@ static bool radiant_layout_style_snapshot_callback(StyleNode* node, void* contex
     if (!node || !node->winning_decl || !context) return true;
     CssDeclaration* decl = node->winning_decl;
     const char* name = decl->property_name ? decl->property_name :
-        css_property_get_name(decl->property_id);
+        css_property_spelling_from_code(decl->property_code);
     if (!name || !decl->value_text) return true;
 
     RadiantStyleSnapshotContext* snapshot = (RadiantStyleSnapshotContext*)context;

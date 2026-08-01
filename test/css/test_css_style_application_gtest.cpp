@@ -58,7 +58,7 @@ protected:
     }
 
     // Helper: Create CSS declaration with specificity
-    CssDeclaration* create_declaration(CssPropertyId prop_id, const char* value,
+    CssDeclaration* create_declaration(CssPropertyCode prop_id, const char* value,
                                       uint8_t ids = 0, uint8_t classes = 0,
                                       uint8_t elements = 0) {
         char* val = (char*)pool_alloc(pool, strlen(value) + 1);

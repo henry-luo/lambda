@@ -1,4 +1,5 @@
 #include "css_style.hpp"
+#include "well_known_css_property_mapping.h"
 #include <string.h>
 #include "../../../lib/mem.h"
 #include "../../../lib/color.h"
@@ -445,18 +446,8 @@ static CssProperty property_definitions[] = {
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
-CSSPropertyID css_property_id_from_name(const char* name) {
-    // delegate to hash-based lookup
-    return css_property_get_id_by_name(name);
-}
-
-const char* css_property_name_from_id(CSSPropertyID id) {
-    // delegate to hash-based lookup
-    return css_get_property_name(id);
-}
-
-CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
-    switch (id) {
+CSSPropertyType css_property_get_expected_type(CssPropertyCode property_code) {
+    switch (property_code) {
         case CSS_PROP_COLOR:
         case CSS_PROP_BACKGROUND_COLOR:
             return CSS_PROP_TYPE_COLOR;
@@ -484,14 +475,14 @@ CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
     }
 }
 
-bool css_property_enhanced_validate_value(CSSPropertyID id, CSSPropertyValue* value) {
+bool css_property_enhanced_validate_value(CssPropertyCode id, CSSPropertyValue* value) {
     if (!value) return false;
 
     CSSPropertyType expected = css_property_get_expected_type(id);
     return value->type == expected || value->type == CSS_PROP_TYPE_KEYWORD;
 }
 
-bool css_property_validate_value(CssPropertyId id, CssValue* value) {
+bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
     if (!value) return false;
 
     // Property-specific validation
@@ -622,7 +613,7 @@ static CssProperty* g_property_hash[PROPERTY_HASH_SIZE];
 // Custom property registry
 static CssProperty* g_custom_properties = NULL;
 static int g_custom_property_count = 0;
-static CssPropertyId g_next_custom_id = static_cast<CssPropertyId>(CSS_PROPERTY_CUSTOM + 1);
+static CssPropertyCode g_next_custom_id = static_cast<CssPropertyCode>(CSS_PROPERTY_CUSTOM + 1);
 
 // ============================================================================
 // Property Value Validators
@@ -650,6 +641,26 @@ static unsigned int hash_string(const char* str) {
     }
 
     return hash % PROPERTY_HASH_SIZE;
+}
+
+static NameId css_standard_name_id(CssPropertyCode property_code) {
+    switch (property_code) {
+#define CSS_PROPERTY_NAME_ID_CASE(code, name_id) case code: return name_id;
+        WELL_KNOWN_CSS_PROPERTY_NAME_IDS(CSS_PROPERTY_NAME_ID_CASE)
+#undef CSS_PROPERTY_NAME_ID_CASE
+    default:
+        return NAME_ID_NONE;
+    }
+}
+
+static CssPropertyCode css_standard_code_from_name_id(NameId name_id) {
+    switch (name_id) {
+#define CSS_PROPERTY_CODE_CASE(code, generated_name_id) case generated_name_id: return code;
+        WELL_KNOWN_CSS_PROPERTY_NAME_IDS(CSS_PROPERTY_CODE_CASE)
+#undef CSS_PROPERTY_CODE_CASE
+    default:
+        return static_cast<CssPropertyCode>(0);
+    }
 }
 
 // ============================================================================
@@ -682,6 +693,10 @@ bool css_property_system_init(Pool* pool) {
 
     // Build hash table for name lookups
     for (int i = 0; i < g_property_count; i++) {
+        // The generated map keeps sparse identity separate from dense dispatch;
+        // a missing NameId here means the catalog and behavior table drifted.
+        g_property_database[i].name_id = css_standard_name_id(g_property_database[i].code);
+        assert(g_property_database[i].name_id != NAME_ID_NONE);
         unsigned int hash = hash_string(g_property_database[i].name);
 
         // Handle collisions with chaining (simplified)
@@ -705,16 +720,16 @@ void css_property_system_cleanup(void) {
     g_property_count = 0;
     g_custom_properties = NULL;
     g_custom_property_count = 0;
-    g_next_custom_id = static_cast<CssPropertyId>(CSS_PROPERTY_CUSTOM + 1);
+    g_next_custom_id = static_cast<CssPropertyCode>(CSS_PROPERTY_CUSTOM + 1);
 }
 
-const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
+const CssProperty* css_property_get_by_code(CssPropertyCode property_code) {
     if (!g_system_initialized) return NULL;
 
     // Handle custom properties
-    if (property_id >= CSS_PROPERTY_CUSTOM && property_id < CSS_PROPERTY_COUNT) {
+    if (property_code >= CSS_PROPERTY_CUSTOM && property_code < CSS_PROPERTY_COUNT) {
         for (int i = 0; i < g_custom_property_count; i++) {
-            if (g_custom_properties[i].id == property_id) {
+            if (g_custom_properties[i].code == property_code) {
                 return &g_custom_properties[i];
             }
         }
@@ -723,7 +738,7 @@ const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
 
     // Handle standard properties
     for (int i = 0; i < g_property_count; i++) {
-        if (g_property_database[i].id == property_id) {
+        if (g_property_database[i].code == property_code) {
             return &g_property_database[i];
         }
     }
@@ -785,39 +800,54 @@ const CssProperty* css_property_get_by_name(const char* name) {
     return NULL;
 }
 
-CssPropertyId css_property_get_id_by_name(const char* name) {
+CssPropertyCode css_property_code_from_name(const char* name) {
+    if (!name) return static_cast<CssPropertyCode>(0);
+    NameId name_id = well_known_name_id({name, strlen(name)});
+    CssPropertyCode standard_code = css_standard_code_from_name_id(name_id);
+    if (standard_code != 0) return standard_code;
+
+    // Custom and vendor spellings intentionally retain their byte-based path.
     const CssProperty* prop = css_property_get_by_name(name);
-    return prop ? prop->id : static_cast<CssPropertyId>(0);
+    return prop ? prop->code : static_cast<CssPropertyCode>(0);
 }
 
-const char* css_get_property_name(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+CssPropertyCode css_property_code_from_name_id(NameId name_id) {
+    if (name_id == NAME_ID_NONE) return static_cast<CssPropertyCode>(0);
+    return css_standard_code_from_name_id(name_id);
+}
+
+NameId css_property_name_id(CssPropertyCode property_code) {
+    return css_standard_name_id(property_code);
+}
+
+const char* css_property_spelling_from_code(CssPropertyCode property_code) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     return prop ? prop->name : NULL;
 }
 
-bool css_property_exists(CssPropertyId property_id) {
-    return css_property_get_by_id(property_id) != NULL;
+bool css_property_exists(CssPropertyCode property_code) {
+    return css_property_get_by_code(property_code) != NULL;
 }
 
-bool css_property_is_inherited(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+bool css_property_is_inherited(CssPropertyCode property_code) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     return prop && (prop->inheritance == PROP_INHERIT_YES);
 }
 
-bool css_property_is_animatable(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+bool css_property_is_animatable(CssPropertyCode property_code) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     return prop && prop->animatable;
 }
 
-bool css_property_is_shorthand(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+bool css_property_is_shorthand(CssPropertyCode property_code) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     return prop && prop->shorthand;
 }
 
-int css_property_get_longhand_properties(CssPropertyId shorthand_id,
-                                        CssPropertyId* longhand_ids,
+int css_property_get_longhand_properties(CssPropertyCode shorthand_id,
+                                        CssPropertyCode* longhand_ids,
                                         int max_count) {
-    const CssProperty* prop = css_property_get_by_id(shorthand_id);
+    const CssProperty* prop = css_property_get_by_code(shorthand_id);
     if (!prop || !prop->shorthand || !longhand_ids || max_count <= 0) {
         return 0;
     }
@@ -830,8 +860,8 @@ int css_property_get_longhand_properties(CssPropertyId shorthand_id,
     return count;
 }
 
-void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+void* css_property_get_initial_value(CssPropertyCode property_code, Pool* pool) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop || !prop->initial_value) {
         return NULL;
     }
@@ -844,11 +874,11 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
     return value;
 }
 
-bool css_property_validate_value_from_string(CssPropertyId property_id,
+bool css_property_validate_value_from_string(CssPropertyCode property_code,
                                 const char* value_str,
                                 void** parsed_value,
                                 Pool* pool) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+    const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop || !value_str || !parsed_value) {
         return false;
     }
@@ -878,7 +908,7 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
 
             // Properties that cannot have negative values
             bool disallow_negative = false;
-            switch (property_id) {
+            switch (property_code) {
                 // width, height, and their min/max variants cannot be negative
                 case CSS_PROPERTY_WIDTH:
                 case CSS_PROPERTY_HEIGHT:
@@ -926,13 +956,13 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
     return false;
 }
 
-void* css_property_compute_value(CssPropertyId property_id,
+void* css_property_compute_value(CssPropertyCode property_code,
                                 void* specified_value,
                                 void* parent_value,
                                 Pool* pool) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+    const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop || !specified_value) {
-        return css_property_get_initial_value(property_id, pool);
+        return css_property_get_initial_value(property_code, pool);
     }
 
     // Use property-specific computation function
@@ -948,13 +978,13 @@ void* css_property_compute_value(CssPropertyId property_id,
 // Custom Property Support
 // ============================================================================
 
-CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
+CssPropertyCode css_property_register_custom(const char* name, Pool* pool) {
     if (!name || strncmp(name, "--", 2) != 0) {
-        return static_cast<CssPropertyId>(0); // Invalid custom property name
+        return static_cast<CssPropertyCode>(0); // Invalid custom property name
     }
 
     // Check if already registered
-    CssPropertyId existing = css_property_get_custom_id(name);
+    CssPropertyCode existing = css_property_get_custom_id(name);
     if (existing) {
         return existing;
     }
@@ -965,13 +995,13 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     }
 
     if (g_custom_property_count >= 100) {
-        return static_cast<CssPropertyId>(0); // Too many custom properties
+        return static_cast<CssPropertyCode>(0); // Too many custom properties
     }
 
     // Create new custom property
     CssProperty* custom_prop = &g_custom_properties[g_custom_property_count];
-    custom_prop->id = g_next_custom_id;
-    g_next_custom_id = static_cast<CssPropertyId>(static_cast<int>(g_next_custom_id) + 1);
+    custom_prop->code = g_next_custom_id;
+    g_next_custom_id = static_cast<CssPropertyCode>(static_cast<int>(g_next_custom_id) + 1);
     custom_prop->name = name; // Assume name is already allocated in pool
     custom_prop->type = PROP_TYPE_CUSTOM;
     custom_prop->inheritance = PROP_INHERIT_YES; // Custom properties inherit by default
@@ -984,25 +1014,25 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     custom_prop->compute_value = NULL;
 
     g_custom_property_count++;
-    return custom_prop->id;
+    return custom_prop->code;
 }
 
-CssPropertyId css_property_get_custom_id(const char* name) {
+CssPropertyCode css_property_get_custom_id(const char* name) {
     if (!name || strncmp(name, "--", 2) != 0) {
-        return static_cast<CssPropertyId>(0);
+        return static_cast<CssPropertyCode>(0);
     }
 
     for (int i = 0; i < g_custom_property_count; i++) {
         if (strcmp(g_custom_properties[i].name, name) == 0) {
-            return g_custom_properties[i].id;
+            return g_custom_properties[i].code;
         }
     }
 
-    return static_cast<CssPropertyId>(0);
+    return static_cast<CssPropertyCode>(0);
 }
 
-bool css_property_is_custom(CssPropertyId property_id) {
-    return property_id > CSS_PROPERTY_CUSTOM && property_id < g_next_custom_id;
+bool css_property_is_custom(CssPropertyCode property_code) {
+    return property_code > CSS_PROPERTY_CUSTOM && property_code < g_next_custom_id;
 }
 
 // ============================================================================
@@ -1263,19 +1293,14 @@ bool css_parse_color(const char* value_str, CssColor* color) {
 // Debugging and Utility Functions
 // ============================================================================
 
-const char* css_property_get_name(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
-    return prop ? prop->name : NULL;
-}
-
-void css_property_print_info(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
+void css_property_print_info(CssPropertyCode property_code) {
+    const CssProperty* prop = css_property_get_by_code(property_code);
     if (!prop) {
-        log_debug("Property ID %u: NOT FOUND", (unsigned int)property_id);
+        log_debug("CSS property code %u: not found", (unsigned int)property_code);
         return;
     }
 
-    log_debug("Property: %s (ID: %u)", prop->name, (unsigned int)prop->id);
+    log_debug("CSS property code: %s (%u)", prop->name, (unsigned int)prop->code);
     log_debug("  Type: %d", prop->type);
     log_debug("  Inherits: %s", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
     log_debug("  Initial: %s", prop->initial_value);

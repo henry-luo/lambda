@@ -181,6 +181,23 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
 // be inspected by the active backend or when the callback aborts traversal.
 bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 
+// Shared SVG geometry parsing for rendering and DOM geometry queries. The
+// returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
+RdtPath* svg_parse_path_d(const char* d);
+bool svg_parse_transform(const char* transform_str, float matrix[6]);
+
+typedef struct SvgTextMetrics {
+    float width;
+    float ascent;
+    float descent;
+    bool used_font_metrics;
+} SvgTextMetrics;
+
+bool svg_measure_text_metrics(const char* text, float font_size_px,
+                              FontContext* font_ctx, const char* font_family,
+                              int weight, FontSlant slant,
+                              SvgTextMetrics* out_metrics);
+
 // ---------------------------------------------------------------------------
 // Fill
 // ---------------------------------------------------------------------------
@@ -1720,7 +1737,7 @@ struct RenderBackend {
     void (*render_image)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
 
     // ── Inline SVG subscene ────────────────────────────────────────────
-    // Called for HTM_TAG_SVG blocks. If NULL, skipped.
+    // Called for MARKUP_NAME_SVG blocks. If NULL, skipped.
     void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
     void (*render_svg_subscene)(void* ctx, const PaintSvgSubscene* subscene);
@@ -3627,7 +3644,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 
 /**
  * Render inline SVG element in document context
- * Called by raster and vector render walkers when element is HTM_TAG_SVG.
+ * Called by raster and vector render walkers when element is MARKUP_NAME_SVG.
  *
  * @param rdcon Render context with canvas, scale, clip, etc.
  * @param view ViewBlock for the SVG element

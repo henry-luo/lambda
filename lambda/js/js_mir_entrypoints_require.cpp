@@ -69,6 +69,17 @@ static long js_mir_phase_now_us(void) {
 #endif
 }
 
+static bool js_mir_phase_progress_is_enabled(void) {
+    const char* value = getenv("LAMBDA_JS_MIR_PHASE_PROGRESS");
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static void js_mir_log_phase_progress(const char* filename, const char* phase, long elapsed_us) {
+    if (!js_mir_phase_progress_is_enabled()) return;
+    log_notice("js-mir-phase: file=%s phase=%s elapsed_ms=%ld",
+        filename ? filename : "<string>", phase, elapsed_us / 1000L);
+}
+
 extern "C" void js_mir_reset_last_phase_timing(void) {
     memset(&g_last_js_mir_phase_timing, 0, sizeof(g_last_js_mir_phase_timing));
 }
@@ -637,6 +648,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "parse", g_last_js_mir_phase_timing.parse_us);
     log_mem_stage("js-core: ts_parsed");
 
     TSNode root = ts_tree_root_node(tp->tree);
@@ -653,6 +665,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "ast", g_last_js_mir_phase_timing.ast_us);
     log_mem_stage("js-core: ast_built");
 
     // Run early error detection (static semantic validation)
@@ -667,6 +680,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "early", g_last_js_mir_phase_timing.early_us);
 
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
@@ -746,6 +760,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
 #endif
     jm_load_imports(runtime, js_ast, filename);
     g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "imports", g_last_js_mir_phase_timing.imports_us);
     log_mem_stage("js-core: imports_loaded");
 
     bool use_mir_interp_for_script = g_mir_interp_mode != 0;
@@ -808,6 +823,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     phase_start = js_mir_phase_now_us();
     bool transpile_ok = transpile_js_mir_ast(mt, js_ast);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "mir", g_last_js_mir_phase_timing.mir_us);
     log_mem_stage("js-core: ast_to_mir");
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
@@ -922,6 +938,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     phase_start = js_mir_phase_now_us();
     MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : gen_interface, import_resolver);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
+    js_mir_log_phase_progress(filename, "link", g_last_js_mir_phase_timing.link_us);
     log_mem_stage("js-core: mir_linked");
     void* js_debug_info = jm_build_js_debug_info(mt, filename);
     context->debug_info = (ArrayList*)js_debug_info;

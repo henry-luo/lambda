@@ -115,7 +115,7 @@ void css_specificity_print(CssSpecificity specificity) {
 // CSS Declaration Implementation
 // ============================================================================
 
-CssDeclaration* css_declaration_create(CssPropertyId property_id,
+CssDeclaration* css_declaration_create(CssPropertyCode property_code,
                                       void* value,
                                       CssSpecificity specificity,
                                       CssOrigin origin,
@@ -123,7 +123,7 @@ CssDeclaration* css_declaration_create(CssPropertyId property_id,
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     if (!decl) return NULL;
 
-    decl->property_id = property_id;
+    decl->property_code = property_code;
     decl->value = static_cast<CssValue*>(value);
     decl->specificity = specificity;
     decl->origin = origin;
@@ -637,12 +637,12 @@ static WeakDeclaration* weak_list_remove(WeakDeclaration** head, CssDeclaration*
 // Style Node Implementation
 // ============================================================================
 
-static StyleNode* style_node_create(CssPropertyId property_id, Pool* pool) {
+static StyleNode* style_node_create(CssPropertyCode property_code, Pool* pool) {
     StyleNode* node = (StyleNode*)pool_calloc(pool, sizeof(StyleNode));
     if (!node) return NULL;
 
     // Initialize base AVL node
-    node->base.property_id = property_id;
+    node->base.property_id = property_code;
     node->base.declaration = node; // Point to self for easy casting
     node->base.height = 1;
     node->base.left = NULL;
@@ -693,7 +693,7 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
         int cmp = css_declaration_cascade_compare(declaration, node->winning_decl);
         // DEBUG: Log cascade comparison
         log_debug("[CASCADE] Prop %d: new(spec:%u,ord:%d) vs cur(spec:%u,ord:%d) => cmp=%d",
-            declaration->property_id, css_specificity_to_value(declaration->specificity),
+            declaration->property_code, css_specificity_to_value(declaration->specificity),
             declaration->source_order, css_specificity_to_value(node->winning_decl->specificity),
             node->winning_decl->source_order, cmp);
 
@@ -786,7 +786,7 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
     declaration->source_order = style_tree->next_source_order++;
 
     // Find or create style node for this property
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, declaration->property_id);
+    AvlNode* avl_node = avl_tree_search(style_tree->tree, declaration->property_code);
     StyleNode* node = NULL;
 
     if (avl_node) {
@@ -794,10 +794,10 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
         node = (StyleNode*)avl_node->declaration;
     } else {
         // New property
-        node = style_node_create(declaration->property_id, style_tree->pool);
+        node = style_node_create(declaration->property_code, style_tree->pool);
         if (!node) return NULL;
 
-        AvlNode* inserted = avl_tree_insert(style_tree->tree, declaration->property_id, node);
+        AvlNode* inserted = avl_tree_insert(style_tree->tree, declaration->property_code, node);
         if (!inserted) {
             style_node_destroy(node);
             return NULL;
@@ -813,10 +813,10 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
     return NULL;
 }
 
-CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyId property_id) {
+CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code) {
     if (!style_tree) return NULL;
 
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     if (!avl_node) return NULL;
 
     StyleNode* node = (StyleNode*)avl_node->declaration;
@@ -824,42 +824,42 @@ CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyId 
 }
 
 void* style_tree_get_computed_value(StyleTree* style_tree,
-                                   CssPropertyId property_id,
+                                   CssPropertyCode property_code,
                                    StyleTree* parent_tree) {
     if (!style_tree) return NULL;
 
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     if (!avl_node) {
         // Check for inheritance
-        if (css_property_is_inherited(property_id) && parent_tree) {
-            return style_tree_get_computed_value(parent_tree, property_id, NULL);
+        if (css_property_is_inherited(property_code) && parent_tree) {
+            return style_tree_get_computed_value(parent_tree, property_code, NULL);
         }
 
         // Return initial value
-        return css_property_get_initial_value(property_id, style_tree->pool);
+        return css_property_get_initial_value(property_code, style_tree->pool);
     }
 
     StyleNode* node = (StyleNode*)avl_node->declaration;
     return style_node_get_computed_value(node, parent_tree);
 }
 
-bool style_tree_remove_property(StyleTree* style_tree, CssPropertyId property_id) {
+bool style_tree_remove_property(StyleTree* style_tree, CssPropertyCode property_code) {
     if (!style_tree) return false;
 
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     if (!avl_node) return false;
 
     StyleNode* node = (StyleNode*)avl_node->declaration;
     style_node_destroy(node);
 
-    void* removed = avl_tree_remove(style_tree->tree, property_id);
+    void* removed = avl_tree_remove(style_tree->tree, property_code);
     return removed != NULL;
 }
 
 bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declaration) {
     if (!style_tree || !declaration) return false;
 
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, declaration->property_id);
+    AvlNode* avl_node = avl_tree_search(style_tree->tree, declaration->property_code);
     if (!avl_node) return false;
 
     StyleNode* node = (StyleNode*)avl_node->declaration;
@@ -901,13 +901,13 @@ bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
 
     bool removed_any = false;
 
-    for (int property_id = CSS_PROPERTY_DISPLAY; property_id < CSS_PROPERTY_COUNT; property_id++) {
+    for (int property_code = CSS_PROPERTY_DISPLAY; property_code < CSS_PROPERTY_COUNT; property_code++) {
         bool property_changed = true;
 
         while (property_changed) {
             property_changed = false;
 
-            AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+            AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
             if (!avl_node) break;
 
             StyleNode* node = (StyleNode*)avl_node->declaration;
@@ -938,12 +938,12 @@ bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
             }
         }
 
-        AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+        AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
         if (avl_node) {
             StyleNode* node = (StyleNode*)avl_node->declaration;
             if (node && !node->winning_decl && !node->weak_list) {
                 style_node_destroy(node);
-                avl_tree_remove(style_tree->tree, property_id);
+                avl_tree_remove(style_tree->tree, property_code);
             }
         }
     }
@@ -960,13 +960,13 @@ bool style_tree_remove_non_inline_declarations(StyleTree* style_tree) {
 
     bool removed_any = false;
 
-    for (int property_id = CSS_PROPERTY_DISPLAY; property_id < CSS_PROPERTY_COUNT; property_id++) {
+    for (int property_code = CSS_PROPERTY_DISPLAY; property_code < CSS_PROPERTY_COUNT; property_code++) {
         bool property_changed = true;
 
         while (property_changed) {
             property_changed = false;
 
-            AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+            AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
             if (!avl_node) break;
 
             StyleNode* node = (StyleNode*)avl_node->declaration;
@@ -997,12 +997,12 @@ bool style_tree_remove_non_inline_declarations(StyleTree* style_tree) {
             }
         }
 
-        AvlNode* avl_node = avl_tree_search(style_tree->tree, property_id);
+        AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
         if (avl_node) {
             StyleNode* node = (StyleNode*)avl_node->declaration;
             if (node && !node->winning_decl && !node->weak_list) {
                 style_node_destroy(node);
-                avl_tree_remove(style_tree->tree, property_id);
+                avl_tree_remove(style_tree->tree, property_code);
             }
         }
     }
@@ -1018,7 +1018,7 @@ bool style_tree_remove_non_inline_declarations(StyleTree* style_tree) {
 // Style Inheritance Implementation
 // ============================================================================
 
-bool css_should_inherit_property(CssPropertyId property_id, CssDeclaration* declaration) {
+bool css_should_inherit_property(CssPropertyCode property_code, CssDeclaration* declaration) {
     // Check for explicit inherit keyword
     if (declaration && declaration->value) {
         // This would check if the value is the "inherit" keyword
@@ -1026,27 +1026,27 @@ bool css_should_inherit_property(CssPropertyId property_id, CssDeclaration* decl
     }
 
     // Check if property inherits by default
-    return css_property_is_inherited(property_id);
+    return css_property_is_inherited(property_code);
 }
 
 bool style_tree_inherit_property(StyleTree* child_tree,
                                 StyleTree* parent_tree,
-                                CssPropertyId property_id) {
+                                CssPropertyCode property_code) {
     if (!child_tree || !parent_tree) return false;
 
     // Get parent's computed value
-    void* parent_value = style_tree_get_computed_value(parent_tree, property_id, NULL);
+    void* parent_value = style_tree_get_computed_value(parent_tree, property_code, NULL);
     if (!parent_value) return false;
 
     // Create inherited declaration
     CssSpecificity inherit_spec = css_specificity_create(0, 0, 0, 0, false);
     CssDeclaration* inherit_decl = css_declaration_create(
-        property_id, parent_value, inherit_spec, CSS_ORIGIN_AUTHOR, child_tree->pool);
+        property_code, parent_value, inherit_spec, CSS_ORIGIN_AUTHOR, child_tree->pool);
 
     if (!inherit_decl) return false;
 
     // Apply to child tree (only if no existing declaration)
-    AvlNode* existing = avl_tree_search(child_tree->tree, property_id);
+    AvlNode* existing = avl_tree_search(child_tree->tree, property_code);
     if (!existing) {
         StyleNode* node = style_tree_apply_declaration(child_tree, inherit_decl);
         return node != NULL;
@@ -1065,7 +1065,7 @@ int style_tree_apply_inheritance(StyleTree* child_tree, StyleTree* parent_tree) 
     // This would typically iterate through all properties that inherit by default
     // For brevity, showing the pattern with a few common inherited properties
 
-    CssPropertyId inherited_props[] = {
+    CssPropertyCode inherited_props[] = {
         CSS_PROPERTY_COLOR,
         CSS_PROPERTY_FONT_FAMILY,
         CSS_PROPERTY_FONT_SIZE,
@@ -1161,7 +1161,7 @@ void style_node_print_cascade(StyleNode* node) {
         return;
     }
 
-    const char* prop_name = css_get_property_name(static_cast<CssPropertyId>(node->base.property_id));
+    const char* prop_name = css_property_spelling_from_code(static_cast<CssPropertyCode>(node->base.property_id));
     printf("StyleNode for %s (ID: %lu):\n",
            prop_name ? prop_name : "unknown", node->base.property_id);
 
@@ -1267,8 +1267,8 @@ static int declaration_source_order_compare(const void* left, const void* right)
     if (a->source_order != b->source_order) {
         return a->source_order < b->source_order ? -1 : 1;
     }
-    if (a->property_id != b->property_id) {
-        return a->property_id < b->property_id ? -1 : 1;
+    if (a->property_code != b->property_code) {
+        return a->property_code < b->property_code ? -1 : 1;
     }
     return 0;
 }
@@ -1381,7 +1381,7 @@ bool style_tree_is_empty(StyleTree* style_tree) {
 static bool declaration_winner_equal(const CssDeclaration* left,
                                      const CssDeclaration* right) {
     if (left == right) return true;
-    if (!left || !right || left->property_id != right->property_id ||
+    if (!left || !right || left->property_code != right->property_code ||
         left->origin != right->origin || left->important != right->important ||
         memcmp(&left->specificity, &right->specificity,
                sizeof(CssSpecificity)) != 0) return false;
@@ -1400,8 +1400,8 @@ bool style_tree_winners_equal(StyleTree* left, StyleTree* right) {
     if (!left || !right) return false;
     for (int property = CSS_PROPERTY_DISPLAY; property < CSS_PROPERTY_COUNT; property++) {
         if (!declaration_winner_equal(
-                style_tree_get_declaration(left, (CssPropertyId)property),
-                style_tree_get_declaration(right, (CssPropertyId)property))) {
+                style_tree_get_declaration(left, (CssPropertyCode)property),
+                style_tree_get_declaration(right, (CssPropertyCode)property))) {
             return false;
         }
     }
@@ -1420,7 +1420,7 @@ int style_tree_merge(StyleTree* target, StyleTree* source) {
 }
 
 StyleTree* style_tree_create_subset(StyleTree* source,
-                                   CssPropertyId* property_ids,
+                                   CssPropertyCode* property_ids,
                                    int property_count,
                                    Pool* target_pool) {
     if (!source || !property_ids || property_count <= 0 || !target_pool) {
@@ -1443,7 +1443,7 @@ StyleTree* style_tree_create_subset(StyleTree* source,
             // exercised by tests today.
             if (node->winning_decl) {
                 CssDeclaration* copied = css_declaration_create(
-                    node->winning_decl->property_id,
+                    node->winning_decl->property_code,
                     node->winning_decl->value,
                     node->winning_decl->specificity,
                     node->winning_decl->origin,
@@ -1459,7 +1459,7 @@ StyleTree* style_tree_create_subset(StyleTree* source,
             WeakDeclaration* weak = node->weak_list;
             while (weak) {
                 CssDeclaration* copied = css_declaration_create(
-                    weak->declaration->property_id,
+                    weak->declaration->property_code,
                     weak->declaration->value,
                     weak->declaration->specificity,
                     weak->declaration->origin,

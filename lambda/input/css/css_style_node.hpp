@@ -103,14 +103,14 @@ bool style_tree_remove_non_inline_declarations(StyleTree* style_tree);
 
 /**
  * Create a CSS declaration
- * @param property_id CSS property ID
+ * @param property_code CSS property ID
  * @param value Parsed property value
  * @param specificity Selector specificity
  * @param origin Declaration origin
  * @param pool Memory pool for allocation
  * @return New declaration or NULL on failure
  */
-CssDeclaration* css_declaration_create(CssPropertyId property_id,
+CssDeclaration* css_declaration_create(CssPropertyCode property_code,
                                       void* value,
                                       CssSpecificity specificity,
                                       CssOrigin origin,
@@ -152,29 +152,29 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
 /**
  * Get the winning declaration for a property
  * @param style_tree Style tree to query
- * @param property_id Property to look up
+ * @param property_code Property to look up
  * @return Winning declaration or NULL if not set
  */
-CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyId property_id);
+CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code);
 
 /**
  * Get the computed value for a property
  * @param style_tree Style tree to query
- * @param property_id Property to look up
+ * @param property_code Property to look up
  * @param parent_tree Parent element's style tree (for inheritance)
  * @return Computed value or NULL if not available
  */
 void* style_tree_get_computed_value(StyleTree* style_tree,
-                                   CssPropertyId property_id,
+                                   CssPropertyCode property_code,
                                    StyleTree* parent_tree);
 
 /**
  * Remove a property from the style tree
  * @param style_tree Style tree to modify
- * @param property_id Property to remove
+ * @param property_code Property to remove
  * @return true if property was removed, false if not found
  */
-bool style_tree_remove_property(StyleTree* style_tree, CssPropertyId property_id);
+bool style_tree_remove_property(StyleTree* style_tree, CssPropertyCode property_code);
 
 /**
  * Remove a specific declaration from the style tree
@@ -224,22 +224,22 @@ CssDeclaration* style_node_resolve_cascade(StyleNode* node);
 
 /**
  * Check if a property should inherit from parent
- * @param property_id Property to check
+ * @param property_code Property to check
  * @param declaration Current declaration (may specify inherit keyword)
  * @return true if should inherit, false otherwise
  */
-bool css_should_inherit_property(CssPropertyId property_id, CssDeclaration* declaration);
+bool css_should_inherit_property(CssPropertyCode property_code, CssDeclaration* declaration);
 
 /**
  * Inherit a property value from parent
  * @param child_tree Child element's style tree
  * @param parent_tree Parent element's style tree
- * @param property_id Property to inherit
+ * @param property_code Property to inherit
  * @return true if inheritance was applied, false otherwise
  */
 bool style_tree_inherit_property(StyleTree* child_tree,
                                 StyleTree* parent_tree,
-                                CssPropertyId property_id);
+                                CssPropertyCode property_code);
 
 /**
  * Apply inheritance for all inherited properties
@@ -255,10 +255,10 @@ int style_tree_apply_inheritance(StyleTree* child_tree, StyleTree* parent_tree);
 
 /**
  * Check if a property inherits by default
- * @param property_id Property ID
+ * @param property_code Property ID
  * @return true if property inherits by default, false otherwise
  */
-bool css_property_is_inherited(CssPropertyId property_id);
+bool css_property_is_inherited(CssPropertyCode property_code);
 
 /**
  * Invalidate computed values in a style tree
@@ -363,7 +363,7 @@ int style_tree_merge(StyleTree* target, StyleTree* source);
  * @return Subset tree or NULL on failure
  */
 StyleTree* style_tree_create_subset(StyleTree* source,
-                                   CssPropertyId* property_ids,
+                                   CssPropertyCode* property_ids,
                                    int property_count,
                                    Pool* target_pool);
 

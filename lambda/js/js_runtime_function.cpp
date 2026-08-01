@@ -541,72 +541,22 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     }
 }
 
-extern "C" Item js_symbol_get_description(Item sym);
-
-static const char* js_private_display_suffix(const char* name, int len) {
-    if (!name || len <= 10 || strncmp(name, "__private_", 10) != 0) return NULL;
-    const char* suffix = name + 10;
-    const char* end = name + len;
-    const char* p = suffix;
-    while (p < end && *p >= '0' && *p <= '9') p++;
-    if (p > suffix && p < end && *p == '_') suffix = p + 1;
-    return suffix;
-}
-
-static const char* js_hash_private_display_suffix(const char* name, int len) {
-    if (!name || len <= 3 || name[0] != '#') return NULL;
-    const char* suffix = name + 1;
-    const char* end = name + len;
-    const char* p = suffix;
-    while (p < end && *p >= '0' && *p <= '9') p++;
-    if (p > suffix && p < end && *p == '_') return p + 1;
-    return NULL;
-}
-
 static Item js_private_display_name_item(Item name_item) {
-    if (get_type_id(name_item) != LMD_TYPE_STRING) return name_item;
-    String* name = it2s(name_item);
-    if (!name) return name_item;
-
-    char display[320];
-    const char* suffix = js_private_display_suffix(name->chars, (int)name->len);
-    const char* hash_suffix = js_hash_private_display_suffix(name->chars, (int)name->len);
-    if (suffix) {
-        snprintf(display, sizeof(display), "#%s", suffix);
-    } else if (hash_suffix) {
-        snprintf(display, sizeof(display), "#%s", hash_suffix);
-    } else if (name->len > 14 && strncmp(name->chars, "get __private_", 14) == 0) {
-        suffix = js_private_display_suffix(name->chars + 4, (int)name->len - 4);
-        if (!suffix) return name_item;
-        snprintf(display, sizeof(display), "get #%s", suffix);
-    } else if (name->len > 14 && strncmp(name->chars, "set __private_", 14) == 0) {
-        suffix = js_private_display_suffix(name->chars + 4, (int)name->len - 4);
-        if (!suffix) return name_item;
-        snprintf(display, sizeof(display), "set #%s", suffix);
-    } else {
-        return name_item;
-    }
-    return (Item){.item = s2it(heap_create_name(display, strlen(display)))};
+    // Private NameRecords retain their source spelling; rewriting it could
+    // conflate a valid #123_name with a former compiler-private encoding.
+    return name_item;
 }
 
-static int js_function_name_from_symbol_key(String* key, char* out, int out_size) {
-    if (!key || key->len <= 6 || strncmp(key->chars, "__sym_", 6) != 0) return -1;
-    int64_t id = 0;
-    for (int i = 6; i < (int)key->len; i++) {
-        char c = key->chars[i];
-        if (c < '0' || c > '9') return -1;
-        id = id * 10 + (int64_t)(c - '0');
-    }
-    Item sym = (Item){.item = i2it(-(id + (int64_t)JS_SYMBOL_BASE))};
-    Item desc = js_symbol_get_description(sym);
-    if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
+static int js_function_name_from_symbol_key(PropertyKeyRef key, char* out, int out_size) {
+    if (!key || !property_key_requires_identity(key) ||
+            property_key_kind(key) != NAME_KEY_SYMBOL) return -1;
+    // SetFunctionName uses an empty name for Symbol(), not the diagnostic
+    // bracket form that is required only when the Symbol has a description.
+    if (key->len == 0) {
         if (out_size > 0) out[0] = '\0';
         return 0;
     }
-    if (get_type_id(desc) != LMD_TYPE_STRING) return -1;
-    String* desc_str = it2s(desc);
-    if (!desc_str) return -1;
-    int len = snprintf(out, out_size, "[%.*s]", (int)desc_str->len, desc_str->chars);
+    int len = snprintf(out, out_size, "[%.*s]", (int)key->len, key->chars);
     if (len < 0) return -1;
     if (len >= out_size) len = out_size - 1;
     return len;
@@ -621,17 +571,8 @@ extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item
     char base[256];
     int base_len = js_function_name_from_symbol_key(key, base, (int)sizeof(base));
     if (base_len < 0) {
-        const char* private_suffix = js_private_display_suffix(key->chars, (int)key->len);
-        if (private_suffix) {
-            base_len = snprintf(base, sizeof(base), "#%s", private_suffix);
-            if (base_len >= (int)sizeof(base)) base_len = (int)sizeof(base) - 1;
-        } else if ((private_suffix = js_hash_private_display_suffix(key->chars, (int)key->len)) != NULL) {
-            base_len = snprintf(base, sizeof(base), "#%s", private_suffix);
-            if (base_len >= (int)sizeof(base)) base_len = (int)sizeof(base) - 1;
-        } else {
-            base_len = key->len < (int)sizeof(base) - 1 ? (int)key->len : (int)sizeof(base) - 1;
-            memcpy(base, key->chars, base_len);
-        }
+        base_len = key->len < (int)sizeof(base) - 1 ? (int)key->len : (int)sizeof(base) - 1;
+        memcpy(base, key->chars, base_len);
         base[base_len] = '\0';
     }
 

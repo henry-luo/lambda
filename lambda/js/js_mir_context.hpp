@@ -44,6 +44,10 @@ struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 typedef MirRootBinding JsMirRootBinding;
 typedef MirEnvBinding JsMirEnvBinding;
 
+// Native parameter specialization and its analysis records have a fixed ABI
+// shape. Functions with more parameters still use the fully boxed JS path.
+enum { JS_MIR_TYPED_PARAM_LIMIT = 16 };
+
 // Native bodies state their ABI result independently of the JS-inferred
 // return type. BOXED/VOID remain unavailable until their complete lowering and
 // direct-call contracts exist; treating either as an integer changes JS.
@@ -188,7 +192,7 @@ struct JsFuncCollected {
     bool closure_env_has_parent_link; // copied closure env carries direct parent scope_env for mixed loop captures
     int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
     // Phase 4: Type inference results
-    TypeId param_types[16];         // inferred parameter types
+    TypeId param_types[JS_MIR_TYPED_PARAM_LIMIT]; // native-specialization parameter types
     TypeId return_type;             // inferred return type
     ScalarReturnClass boxed_return_scalar_class; // caller-home need for boxed body
     int param_count;                // cached param count
@@ -292,7 +296,7 @@ struct JsStaticFieldEntry {
 
 // Instance field entry for class (non-static field initializers)
 struct JsInstanceFieldEntry {
-    String* name;                   // field name (already __private_ prefixed if private, NULL if computed)
+    String* name;                   // source field name (#name if private, NULL if computed)
     JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression (NULL if no initializer)
     int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)

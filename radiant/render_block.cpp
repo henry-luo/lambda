@@ -57,7 +57,7 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
 
     View* view = static_cast<View*>(block);
     if (!view->parent) return false;
-    if (block->tag_id == HTM_TAG_HTML || block->tag_id == HTM_TAG_BODY) return false;
+    if (block->tag_id == MARKUP_NAME_HTML || block->tag_id == MARKUP_NAME_BODY) return false;
 
     bool has_transform = rdcon->has_transform ||
         (block->transform && block->transformp()->functions);
@@ -474,7 +474,7 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
 static bool block_should_paint_children(ViewBlock* block) {
     if (!block) return false;
     if (block->form_control() &&
-        block->tag() != HTM_TAG_BUTTON) {
+        block->tag() != MARKUP_NAME_BUTTON) {
         return false;
     }
     return true;

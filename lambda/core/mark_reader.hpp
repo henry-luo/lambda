@@ -359,7 +359,9 @@ public:
 
     // Element properties
     const char* tagName() const { return element_type_ ? element_type_->name.str : nullptr; }
+    NameId tagId() const { return element_type_ ? element_type_->name_id : NAME_ID_NONE; }
     bool hasTag(const char* tag_name) const;
+    bool hasTag(NameId tag_id) const { return tag_id != NAME_ID_NONE && tagId() == tag_id; }
     int64_t childCount() const { return element_ ? ((const List*)element_)->length : 0; }
     int64_t attrCount() const { return element_type_ ? ((const TypeMap*)element_type_)->length : 0; }
     bool isEmpty() const;
@@ -372,6 +374,7 @@ public:
 
     // New methods from proposal
     ElementReader findChildElement(const char* tag_name) const;
+    ElementReader findChildElement(NameId tag_id) const;
     bool hasChildElements() const;
     void allText(StringBuf* sb) const;
 

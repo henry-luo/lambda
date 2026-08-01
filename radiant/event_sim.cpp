@@ -527,6 +527,10 @@ static bool sim_count_visitor(View* view, void* udata) {
 // Count elements matching a CSS selector in the document
 static int count_elements_by_selector(DomDocument* doc, const char* selector_text) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return 0;
+    // Script-driven DOM mutations update the DOM immediately but replace the
+    // retained ViewTree on reflow. Count against the refreshed tree so this
+    // assertion has the same post-mutation visibility as selector targets.
+    sim_flush_pending_reflow(doc);
 
     Pool* pool = doc->document_pool;
     if (!pool) return 0;
@@ -901,7 +905,7 @@ static View* find_element_at(View* root, float abs_x, float abs_y, float parent_
 static bool sim_is_checkbox_or_radio(View* view) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
-    if (elem->tag() != HTM_TAG_INPUT) return false;
+    if (elem->tag() != MARKUP_NAME_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
 }
@@ -4295,11 +4299,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Walk up to find the <select> element
             View* select_view = elem;
             while (select_view && select_view->is_element() &&
-                   (lam::view_require_element(select_view))->tag() != HTM_TAG_SELECT) {
+                   (lam::view_require_element(select_view))->tag() != MARKUP_NAME_SELECT) {
                 select_view = select_view->parent;
             }
             if (!select_view || !select_view->is_element() ||
-                (lam::view_require_element(select_view))->tag() != HTM_TAG_SELECT) {
+                (lam::view_require_element(select_view))->tag() != MARKUP_NAME_SELECT) {
                 log_error("event_sim: select_option - target is not a <select> element");
                 break;
             }
@@ -4814,7 +4818,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // for HTML <input>/<textarea>. Falling back to the attribute keeps
             // legacy non-FormControl widgets (e.g. todo.ls) working.
             const char* actual = nullptr;
-            if (dom_elem->tag() == HTM_TAG_SELECT) {
+            if (dom_elem->tag() == MARKUP_NAME_SELECT) {
                 // A select's value comes from live option selectedness, not
                 // from the select's immutable content attribute/edit buffer.
                 DocState* state = (DocState*)uicon->document->state;
@@ -5943,7 +5947,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ViewBlock* block = lam::view_require_block(view);
-            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embedp()->webview || !block->embedp()->webview->handle) {
+            if (block->tag_id != MARKUP_NAME_WEBVIEW || !block->embed || !block->embedp()->webview || !block->embedp()->webview->handle) {
                 log_warn("event_sim: webview_eval_js - '%s' has no active webview handle (headless?), skipped", ev->target_selector);
                 break;
             }
@@ -5962,7 +5966,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ViewBlock* block = lam::view_require_block(view);
-            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embedp()->webview) {
+            if (block->tag_id != MARKUP_NAME_WEBVIEW || !block->embed || !block->embedp()->webview) {
                 log_warn("event_sim: webview_wait_load - '%s' has no active webview (headless?), skipped", ev->target_selector);
                 break;
             }

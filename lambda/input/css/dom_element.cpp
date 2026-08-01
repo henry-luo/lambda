@@ -21,9 +21,14 @@
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
-#include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
 void element_dom_map_remove(HashMap* map, Element* elem);
+
+bool dom_document_owns_node_storage(DomDocument* doc, const void* storage) {
+    if (!doc || !storage) return false;
+    return (doc->input && doc->input->arena && arena_owns(doc->input->arena, storage)) ||
+        (doc->node_arena && arena_owns(doc->node_arena, storage));
+}
 
 extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(Element* root) {
     (void)root;
@@ -90,14 +95,24 @@ static void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
 }
 
 static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value) {
-    if (!doc || !doc->node_arena || !string_value) return nullptr;
-    if (!arena_owns(doc->node_arena, string_value)) return nullptr;
+    if (!doc || !string_value) return nullptr;
+    if (!dom_document_owns_node_storage(doc, string_value)) return nullptr;
 
     DomText* candidate = string_to_dom_text(string_value);
-    if (!arena_owns(doc->node_arena, candidate)) return nullptr;
+    if (!dom_document_owns_node_storage(doc, candidate)) return nullptr;
     if (candidate->node_type != DOM_NODE_TEXT) return nullptr;
     if (candidate->native_string != string_value) return nullptr;
     return candidate;
+}
+
+static DomText* dom_find_text_child(DomElement* parent, String* string_value) {
+    if (!parent || !string_value) return nullptr;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->is_text()) continue;
+        DomText* text = child->as_text();
+        if (text && text->native_string == string_value) return text;
+    }
+    return nullptr;
 }
 
 static String* dom_create_mutation_string(MarkBuilder* builder, const char* content, bool use_dom_text_string) {
@@ -288,7 +303,7 @@ bool dom_document_add_resource(DomDocument* document, void* data,
 // DOM Element Creation and Destruction
 // ============================================================================
 
-static uint32_t dom_document_alloc_node_id(DomDocument* doc) {
+uint32_t dom_document_alloc_node_id(DomDocument* doc) {
     if (!doc) return 0;
     uint32_t id = doc->next_node_id++;
     if (id == 0) id = doc->next_node_id++;
@@ -507,6 +522,12 @@ void dom_element_clear(DomElement* element) {
 
 void dom_element_clear_cascaded_styles(DomElement* element) {
     if (!element) return;
+    if (!element->doc) {
+        log_error("drawing recascade element missing document: element=%p tag=%s parent=%p",
+                  (void*)element, element->tag_name ? element->tag_name : "?",
+                  (void*)element->parent);
+        return;
+    }
 
     bool changed = false;
     if (element->specified_style_shared()) {
@@ -517,9 +538,9 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         element->mark_specified_style_owned();
         changed = true;
     } else if (element->specified_style_borrowed()) {
-        element->specified_style = style_tree_create(element->doc->document_pool);
-        element->mark_specified_style_owned();
-        changed = true;
+        // retained pseudo boxes must keep borrowing the source pseudo-style tree;
+        // detaching here leaves reused boxes with an empty tree after recascade.
+        return;
     } else if (element->specified_style) {
         if (style_tree_has_inline_declarations(element->specified_style)) {
             // Inline declarations are live DOM state. Reparse-on-recascade both
@@ -740,6 +761,13 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     return false;
 }
 
+bool DomElement::set_attribute(NameId name_id, const char* value) {
+    StrView name = well_known_name_view(name_id);
+    // DOM storage still accepts bytes, but generated callers must preserve the
+    // NameId until this single backing-map boundary.
+    return name.str ? set_attribute(name.str, value) : false;
+}
+
 const char* DomElement::get_attribute(const char* name) {
     DomElement* element = this;
     if (!name || name[0] == '\0') {
@@ -771,6 +799,11 @@ const char* DomElement::get_attribute(const char* name) {
     }
 
     return nullptr;
+}
+
+const char* DomElement::get_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str ? get_attribute(name.str) : nullptr;
 }
 
 bool DomElement::remove_attribute(const char* name) {
@@ -819,6 +852,11 @@ bool DomElement::remove_attribute(const char* name) {
     return false;
 }
 
+bool DomElement::remove_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str ? remove_attribute(name.str) : false;
+}
+
 bool DomElement::has_attribute(const char* name) {
     DomElement* element = this;
     if (!name) {
@@ -835,6 +873,11 @@ bool DomElement::has_attribute(const char* name) {
     }
 
     return false;
+}
+
+bool DomElement::has_attribute(NameId name_id) {
+    StrView name = well_known_name_view(name_id);
+    return name.str && has_attribute(name.str);
 }
 
 const char** DomElement::attribute_names(int* count) {
@@ -1243,7 +1286,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // Validate the property value before applying
-    if (!css_property_validate_value(declaration->property_id, declaration->value)) {
+    if (!css_property_validate_value(declaration->property_code, declaration->value)) {
         return false;
     }
 
@@ -1288,21 +1331,21 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
     return applied_count;
 }
 
-CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id) {
+CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyCode property_code) {
     if (!element || !element->specified_style) {
         return NULL;
     }
 
-    return style_tree_get_declaration(element->specified_style, property_id);
+    return style_tree_get_declaration(element->specified_style, property_code);
 }
 
-bool dom_element_remove_property(DomElement* element, CssPropertyId property_id) {
+bool dom_element_remove_property(DomElement* element, CssPropertyCode property_code) {
     if (!element || !element->specified_style) {
         return false;
     }
 
     if (!style_epoch_ensure_owned(element)) return false;
-    bool removed = style_tree_remove_property(element->specified_style, property_id);
+    bool removed = style_tree_remove_property(element->specified_style, property_code);
 
     if (removed) {
         element->style_version++;
@@ -1390,7 +1433,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                 if (style_tree_apply_declaration(*target_style, element_decl)) {
                     applied_count++;
                     log_debug("[CSS] Applied %s property %d to <%s>",
-                              pseudo_name, element_decl->property_id, element->tag_name);
+                              pseudo_name, element_decl->property_code, element->tag_name);
                 }
             }
         }
@@ -1405,7 +1448,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 }
 
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
-                                                     CssPropertyId property_id, int pseudo_element) {
+                                                     CssPropertyCode property_code, int pseudo_element) {
     if (!element) {
         return NULL;
     }
@@ -1426,7 +1469,7 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         return NULL;
     }
 
-    return style_tree_get_declaration(style, property_id);
+    return style_tree_get_declaration(style, property_code);
 }
 
 bool dom_element_has_before_content(DomElement* element) {
@@ -2589,9 +2632,6 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         log_error("dom_text_set_content: failed to get child index");
         return false;
     }
-    DomNode* saved_prev = text_node->prev_sibling;
-    DomNode* saved_next = text_node->next_sibling;
-
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     String* new_s = dom_create_mutation_string(
@@ -2615,33 +2655,34 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
 
     if (parent->doc->input->ui_mode) {
-        // Copy DOM properties from old text_node to new embedded DomText
         String* new_string = new_string_item.get_string();
-        DomText* new_dt = dom_text_from_fat_string(parent->doc, new_string);
-        if (new_dt) {
-            new_dt->set_symbol(text_node->is_symbol());
-            new_dt->rect = text_node->rect;
-            new_dt->font = text_node->font;
-            new_dt->view_type = text_node->view_type;
-            // Replacing the fat String transfers the retained layout handles to
-            // its embedded DomText; leaving them on the retired node double-recycled
-            // the TextRect chain at the next asynchronous layout checkpoint.
-            text_node->rect = nullptr;
-            text_node->font = nullptr;
-            text_node->view_type = RDT_VIEW_NONE;
-            new_dt->parent = parent;
-            new_dt->prev_sibling = saved_prev;
-            new_dt->next_sibling = saved_next;
-            if (new_dt->prev_sibling) {
-                new_dt->prev_sibling->next_sibling = new_dt;
+        DomText* replacement = dom_text_from_fat_string(parent->doc, new_string);
+        if (!replacement || replacement->parent != parent) {
+            replacement = dom_find_text_child(parent, new_string);
+        }
+        if (replacement && replacement != text_node) {
+            DomNode* prev = replacement->prev_sibling;
+            DomNode* next = replacement->next_sibling;
+            // Inline Mark replacement creates a wrapper for the new String, but
+            // a Text data mutation must retain its existing DOM node identity.
+            // Replace that transient wrapper in the live chain before exposing
+            // the new backing string, so later removal cannot use stale links.
+            text_node->parent = parent;
+            text_node->prev_sibling = prev;
+            text_node->next_sibling = next;
+            if (prev) {
+                prev->next_sibling = text_node;
             } else {
-                parent->first_child = new_dt;
+                parent->first_child = text_node;
             }
-            if (new_dt->next_sibling) {
-                new_dt->next_sibling->prev_sibling = new_dt;
+            if (next) {
+                next->prev_sibling = text_node;
             } else {
-                parent->last_child = new_dt;
+                parent->last_child = text_node;
             }
+            replacement->parent = nullptr;
+            replacement->prev_sibling = nullptr;
+            replacement->next_sibling = nullptr;
         }
     }
 
@@ -2732,28 +2773,14 @@ bool dom_text_remove(DomText* text_node) {
         return false;
     }
 
-    // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
-    if (!parent->doc->input->ui_mode) {
-        if (text_node->prev_sibling) {
-            text_node->prev_sibling->next_sibling = text_node->next_sibling;
-        } else if (text_node->parent && text_node->parent->is_element()) {
-            DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
-            parent_elem->first_child = text_node->next_sibling;
-        }
-
-        if (text_node->next_sibling) {
-            text_node->next_sibling->prev_sibling = text_node->prev_sibling;
-        } else if (text_node->parent && text_node->parent->is_element()) {
-            // Text node was last child
-            DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
-            parent_elem->last_child = text_node->prev_sibling;
-        }
+    // MarkEditor rebuilds surviving UI-mode siblings, but the removed Text
+    // wrapper still owns the old links.  The base unlinker clears that wrapper
+    // and schedules its lifecycle teardown without disturbing the new chain.
+    if (!((DomNode*)parent)->remove_child(text_node)) {
+        log_error("dom_text_remove: failed to unlink DOM text node");
+        return false;
     }
 
-    // Clear references
-    text_node->parent = nullptr;
-    text_node->prev_sibling = nullptr;
-    text_node->next_sibling = nullptr;
     text_node->native_string = nullptr;
     log_debug("dom_text_remove: removed text node at index %lld", child_idx);
     return true;
@@ -3203,6 +3230,13 @@ HashMap* element_dom_map_create(void) {
     return element_dom_map_new(64);
 }
 
+static bool dom_element_has_embedded_ui_storage(DomDocument* doc, Element* elem) {
+    if (!doc || !elem) return false;
+    DomElement* storage = element_to_dom_element(elem);
+    return dom_document_owns_node_storage(doc, storage) &&
+        storage->node_type == DOM_NODE_ELEMENT;
+}
+
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem) {
     if (!map || !elem || !dom_elem) return;
     ElementDomMapEntry entry;
@@ -3295,9 +3329,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         }
     }
 
-    // UI-mode Lambda elements already occupy zeroed DomElement storage.
+    // UI-mode MarkBuilder values embed a DomElement, but HTML/XML fragment
+    // parsers still produce plain Elements. Only reuse storage after proving it
+    // is an embedded DOM allocation; reverse-casting a parsed Element corrupts
+    // the preceding allocation and loses its future DOM wrapper.
     bool ui_mode = doc->input && doc->input->ui_mode;
-    DomElement* dom_elem = ui_mode
+    DomElement* dom_elem = ui_mode && dom_element_has_embedded_ui_storage(doc, elem)
         ? DomElement::create_in(element_to_dom_element(elem), doc, tag_name, elem)
         : DomElement::create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;

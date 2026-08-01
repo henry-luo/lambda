@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/runtime-state.h"
@@ -38,6 +39,37 @@ extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
+static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
+    if (!state) return false;
+    JsWellKnownRefs* refs = &state->well_known;
+    refs->constructor = well_known_key_ref(JS_NAME_CONSTRUCTOR);
+    refs->prototype = well_known_key_ref(JS_NAME_PROTOTYPE);
+    refs->name = well_known_key_ref(JS_NAME_NAME);
+    refs->to_string = well_known_key_ref(JS_NAME_TO_STRING);
+    refs->value_of = well_known_key_ref(JS_NAME_VALUE_OF);
+    refs->symbol_iterator = well_known_key_ref(JS_SYMBOL_ITERATOR);
+    refs->symbol_to_primitive = well_known_key_ref(JS_SYMBOL_TO_PRIMITIVE);
+    refs->symbol_has_instance = well_known_key_ref(JS_SYMBOL_HAS_INSTANCE);
+    refs->symbol_to_string_tag = well_known_key_ref(JS_SYMBOL_TO_STRING_TAG);
+    refs->symbol_async_iterator = well_known_key_ref(JS_SYMBOL_ASYNC_ITERATOR);
+    refs->symbol_species = well_known_key_ref(JS_SYMBOL_SPECIES);
+    refs->symbol_match = well_known_key_ref(JS_SYMBOL_MATCH);
+    refs->symbol_replace = well_known_key_ref(JS_SYMBOL_REPLACE);
+    refs->symbol_search = well_known_key_ref(JS_SYMBOL_SEARCH);
+    refs->symbol_split = well_known_key_ref(JS_SYMBOL_SPLIT);
+    refs->symbol_unscopables = well_known_key_ref(JS_SYMBOL_UNSCOPABLES);
+    refs->symbol_is_concat_spreadable = well_known_key_ref(JS_SYMBOL_IS_CONCAT_SPREADABLE);
+    refs->symbol_match_all = well_known_key_ref(JS_SYMBOL_MATCH_ALL);
+    refs->symbol_async_dispose = well_known_key_ref(JS_SYMBOL_ASYNC_DISPOSE);
+    refs->symbol_dispose = well_known_key_ref(JS_SYMBOL_DISPOSE);
+    return refs->constructor && refs->prototype && refs->name && refs->to_string &&
+        refs->value_of && refs->symbol_iterator && refs->symbol_to_primitive &&
+        refs->symbol_has_instance && refs->symbol_to_string_tag && refs->symbol_async_iterator &&
+        refs->symbol_species && refs->symbol_match && refs->symbol_replace && refs->symbol_search &&
+        refs->symbol_split && refs->symbol_unscopables && refs->symbol_is_concat_spreadable &&
+        refs->symbol_match_all && refs->symbol_async_dispose && refs->symbol_dispose;
+}
+
 bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
     if (!eval_context_thread_matches(runtime_context)) {
         log_error("js-thread-init: EvalContext is not current owner");
@@ -64,6 +96,14 @@ bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
         runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
         runtime_context->js_state->test262_agent.current_slot = -1;
         runtime_context->js_state->operations.next_symbol_id = 100;
+        if (!js_runtime_state_init_well_known_refs(runtime_context->js_state)) {
+            // A missing generated record would make pointer identity silently
+            // fall back to bytes, so fail before any realm executes code.
+            log_error("js-runtime-state: incomplete generated well-known key table");
+            mem_free(runtime_context->js_state);
+            runtime_context->js_state = NULL;
+            return false;
+        }
         runtime_context->js_state->global_string_caches.last_from_char_code_cp = -1;
         runtime_context->js_state->global_string_caches.ascii_chars_epoch = ~0ULL;
         runtime_context->js_state->stream.default_byte_hwm = 16 * 1024;
@@ -156,6 +196,12 @@ void js_runtime_state_destroy_context(void) {
     jm_compile_recovery_state_destroy_context(runtime_context->js_state);
     js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    if (runtime_context->js_state->operations.symbol_registry) {
+        hashmap_free(runtime_context->js_state->operations.symbol_registry);
+    }
+    if (runtime_context->js_state->operations.symbol_description_registry) {
+        hashmap_free(runtime_context->js_state->operations.symbol_description_registry);
+    }
     // Promise records are allocated lazily outside the fixed state capsule.
     // They must leave with their owning context so another context cannot
     // inherit semantic state or retain a multi-megabyte unused table.
@@ -756,8 +802,36 @@ extern "C" int64_t js_key_is_symbol_c(Item key) {
     return js_key_is_symbol(key) ? 1 : 0;
 }
 
+extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
+    JsRuntimeState* state = js_active_runtime_state;
+    if (!state) return ItemNull;
+    JsWellKnownRefs* refs = &state->well_known;
+    PropertyKeyRef key = NULL;
+    switch (symbol_id) {
+    case 1: key = refs->symbol_iterator; break;
+    case 2: key = refs->symbol_to_primitive; break;
+    case 3: key = refs->symbol_has_instance; break;
+    case 4: key = refs->symbol_to_string_tag; break;
+    case 5: key = refs->symbol_async_iterator; break;
+    case 6: key = refs->symbol_species; break;
+    case 7: key = refs->symbol_match; break;
+    case 8: key = refs->symbol_replace; break;
+    case 9: key = refs->symbol_search; break;
+    case 10: key = refs->symbol_split; break;
+    case 11: key = refs->symbol_unscopables; break;
+    case 12: key = refs->symbol_is_concat_spreadable; break;
+    case 13: key = refs->symbol_match_all; break;
+    case 14: key = refs->symbol_async_dispose; break;
+    case 15: key = refs->symbol_dispose; break;
+    default: return ItemNull;
+    }
+    // Initialization rejects an incomplete table, so a NULL here means an
+    // invalid internal ID rather than a spelling-compatible fallback.
+    return key ? (Item){.item = s2it(key)} : ItemNull;
+}
+
 // ES2020 §7.1.14 ToPropertyKey(argument)
-// ToPrimitive(string hint), then Symbols → internal __sym_N string,
+// ToPrimitive(string hint), then Symbols → their unique NameRecord key,
 // strings → as-is, others → ToString.
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) return js_symbol_to_key(key);
@@ -1054,6 +1128,9 @@ extern "C" void js_batch_reset() {
     js_reset_proto_key();
     js_reset_template_registry();
     js_iterator_proto_cache_reset();
+    // Registry symbol keys belong to the discarded realm's NamePool; retaining
+    // them would let a fresh realm dereference dead unique NameRecords.
+    js_symbol_registry_batch_reset();
     // reset function pointer → JsFunction cache (JsFunction* in old pool)
     js_func_cache_reset();
     // reset builtin function cache (defined later in file, called via forward decl)
@@ -1222,6 +1299,9 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_proto_key();
     js_reset_template_registry();
     js_iterator_proto_cache_reset();
+    // Partial resets can also release the active heap, so reset realm-owned
+    // registry keys before a subsequent compilation can reuse stale records.
+    js_symbol_registry_batch_reset();
     // reset function pointer → JsFunction cache
     js_func_cache_reset();
     js_builtin_cache_reset();
@@ -1924,13 +2004,13 @@ extern "C" Item js_build_arguments_object() {
     js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
     js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
 
-    tag_key_root.set((Item){.item = s2it(heap_create_name("__sym_4", 7))});
+    tag_key_root.set(js_well_known_symbol_key(4));
     js_property_set(companion_root.get(), tag_key_root.get(),
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
     js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
-    iterator_key_root.set((Item){.item = s2it(heap_create_name("__sym_1", 7))});
+    iterator_key_root.set(js_well_known_symbol_key(1));
     iterator_root.set(js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6));
     js_property_set(companion_root.get(), iterator_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());

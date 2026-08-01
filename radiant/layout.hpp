@@ -1116,7 +1116,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
-const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_property,
+const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 
@@ -2060,7 +2060,7 @@ bool layout_resolve_deferred_percentage(float percent, float percentage_base, fl
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
 float layout_block_given_content_size(ViewBlock* block, bool horizontal);
-float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyId property, bool horizontal);
+float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 
@@ -2456,7 +2456,7 @@ TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
 float calc_normal_line_height(struct FontHandle* handle);
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
-CssEnum layout_specified_keyword(DomElement* element, CssPropertyId property,
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
                                        DomElement* owner, float target_font_size);

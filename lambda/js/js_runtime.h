@@ -29,6 +29,9 @@ Item js_undefined(void);
 Item make_js_undefined(void);
 Item js_make_string_len(const char* str, int len);
 Item js_make_string(const char* str);
+// Converts a well-known Symbol numeric ID to its generated realm-local ref.
+// Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
+Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
 bool is_callable(Item value);
 
@@ -184,6 +187,7 @@ Item js_property_set_v(Item object, Item key, Item value, int64_t strict);
 // Tune8 §2.2: js_private_property_set takes strict flag (4-arg);
 // js_private_property_set_strict removed.
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
+Item js_private_field_define(Item object, Item private_key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
@@ -715,6 +719,7 @@ int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
 void js_prepare_compiled_preamble_vars(int declaration_count);
 extern int js_batch_execution_mode;
+void js_symbol_registry_batch_reset(void);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
@@ -863,11 +868,17 @@ int64_t js_global_lexical_set_if_exists(Item key, Item value);
 void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
+void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 void js_init_class_instance_fields(Item callee, Item object);
 void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
+Item js_private_key_for_class(Item class_item, Item source_name);
+Item js_private_key_for_current_class(Item source_name);
+Item js_private_in(Item object, Item private_key);
+Item js_private_home_class_enter(Item class_item);
+void js_private_home_class_leave(Item previous_class);
 void js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);

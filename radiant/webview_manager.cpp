@@ -162,7 +162,7 @@ void webview_set_visible(WebViewHandle* handle, bool visible) {
 static bool tree_has_webview(View* view) {
     ViewElement* elem = lam::view_as_element(view);
     if (!elem) return false;
-    if (elem->tag_id == HTM_TAG_WEBVIEW && elem->embed && elem->embedp()->webview) {
+    if (elem->tag_id == MARKUP_NAME_WEBVIEW && elem->embed && elem->embedp()->webview) {
         return true;
     }
     DomNode* child = elem->first_child;
@@ -195,7 +195,7 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
         scroll_dy = -scroll_y;
     }
 
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embedp()->webview) {
+    if (block->tag_id == MARKUP_NAME_WEBVIEW && block->embed && block->embedp()->webview) {
         WebViewProp* wv = block->embedp()->webview;
 
         if (wv->mode == WEBVIEW_MODE_LAYER) {
@@ -337,7 +337,7 @@ static bool poll_dirty_walk(ViewBlock* block) {
     if (!block) return false;
     bool any_dirty = false;
 
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embedp()->webview) {
+    if (block->tag_id == MARKUP_NAME_WEBVIEW && block->embed && block->embedp()->webview) {
         WebViewProp* wv = block->embedp()->webview;
         if (wv->mode == WEBVIEW_MODE_LAYER && wv->handle && wv->surface) {
             // check the platform dirty flag (set by navigation delegate / mutation observer)

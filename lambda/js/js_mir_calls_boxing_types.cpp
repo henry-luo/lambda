@@ -517,34 +517,21 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
 }
 
 static const char* jm_private_display_suffix_from_name(const char* name) {
-    if (!name) return name;
-    const char* suffix = name;
-    if (strncmp(name, "__private_", 10) == 0) {
-        suffix = name + 10;
-    } else if (strncmp(name, "get __private_", 14) == 0 ||
-               strncmp(name, "set __private_", 14) == 0) {
-        suffix = name + 14;
-    } else {
-        return name;
-    }
-    const char* p = suffix;
-    while (*p >= '0' && *p <= '9') p++;
-    if (p > suffix && *p == '_') suffix = p + 1;
-    return suffix;
+    return name && name[0] == '#' ? name + 1 : name;
 }
 
 static const char* jm_function_display_name(const char* name, char* buffer,
         size_t buffer_size) {
     if (!name || !name[0]) return NULL;
     const char* display_name = name;
-    if (strncmp(name, "__private_", 10) == 0) {
+    if (name[0] == '#') {
         snprintf(buffer, buffer_size, "#%s", jm_private_display_suffix_from_name(name));
         display_name = buffer;
-    } else if (strncmp(name, "get __private_", 14) == 0) {
-        snprintf(buffer, buffer_size, "get #%s", jm_private_display_suffix_from_name(name));
+    } else if (strncmp(name, "get #", 5) == 0) {
+        snprintf(buffer, buffer_size, "get #%s", jm_private_display_suffix_from_name(name + 4));
         display_name = buffer;
-    } else if (strncmp(name, "set __private_", 14) == 0) {
-        snprintf(buffer, buffer_size, "set #%s", jm_private_display_suffix_from_name(name));
+    } else if (strncmp(name, "set #", 5) == 0) {
+        snprintf(buffer, buffer_size, "set #%s", jm_private_display_suffix_from_name(name + 4));
         display_name = buffer;
     }
     return display_name;

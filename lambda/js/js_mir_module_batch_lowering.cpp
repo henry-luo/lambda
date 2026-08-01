@@ -4,6 +4,8 @@
 #include "../jube/jube_registry.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
+static bool jm_module_phase_progress_is_enabled(void);
+static void jm_log_module_phase_progress(const char* filename, const char* phase);
 
 // ============================================================================
 // ES Module support: deferred MIR cleanup and path resolution
@@ -4092,6 +4094,108 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // All named function declarations inside the IIFE need to be reachable as module consts
     // so that class methods defined inside the IIFE can capture them.
     {
+        auto find_promotable_iife = [&](JsAstNode* stmt) -> JsFunctionNode* {
+            if (!stmt) return NULL;
+            JsAstNode* expr = NULL;
+            if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+                expr = ((JsExpressionStatementNode*)stmt)->expression;
+            } else if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
+                for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                    if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                    JsFunctionNode* iife = jm_find_iife_function_expr(
+                        ((JsVariableDeclaratorNode*)d)->init);
+                    if (iife) {
+                        expr = ((JsVariableDeclaratorNode*)d)->init;
+                        break;
+                    }
+                }
+            }
+            if (!expr || expr->node_type != JS_AST_NODE_CALL_EXPRESSION) return NULL;
+            JsFunctionNode* iife_fn = jm_find_iife_function_expr(expr);
+            if (!iife_fn || !iife_fn->body || iife_fn->is_async || iife_fn->is_generator) return NULL;
+            if (!iife_fn->name) return iife_fn;
+
+            char self_name[128];
+            snprintf(self_name, sizeof(self_name), "_js_%.*s",
+                (int)iife_fn->name->len, iife_fn->name->chars);
+            struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_body_refs(iife_fn->body, refs);
+            bool self_referencing = jm_name_set_has(refs, self_name);
+            hashmap_free(refs);
+            return self_referencing ? NULL : iife_fn;
+        };
+
+        // The IIFE-promotion table is name keyed. A minifier legitimately reuses
+        // a short name in sibling wrappers, so only promote names owned by one
+        // wrapper; otherwise distinct lexical bindings would share one module slot.
+        struct hashmap* iife_binding_counts = hashmap_new(sizeof(JsNameSetEntry), 256, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        auto note_iife_binding = [&](const char* name) {
+            JsNameSetEntry lookup;
+            memset(&lookup, 0, sizeof(lookup));
+            snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+            JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(iife_binding_counts, &lookup);
+            if (existing) {
+                existing->var_kind++;
+                return;
+            }
+            lookup.var_kind = 1;
+            hashmap_set(iife_binding_counts, &lookup);
+        };
+        auto iife_binding_is_unique = [&](const char* name) -> bool {
+            JsNameSetEntry lookup;
+            memset(&lookup, 0, sizeof(lookup));
+            snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+            JsNameSetEntry* entry = (JsNameSetEntry*)hashmap_get(iife_binding_counts, &lookup);
+            return entry && entry->var_kind == 1;
+        };
+        for (JsAstNode* count_stmt = program->body; count_stmt; count_stmt = count_stmt->next) {
+            JsFunctionNode* iife_fn = find_promotable_iife(count_stmt);
+            if (!iife_fn || iife_fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) continue;
+            struct hashmap* wrapper_bindings = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            JsBlockNode* block = (JsBlockNode*)iife_fn->body;
+            for (JsAstNode* s = block->statements; s; s = s->next) {
+                if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                    JsFunctionNode* fn = (JsFunctionNode*)s;
+                    if (fn->name) {
+                        char name[128];
+                        snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                        jm_name_set_add(wrapper_bindings, name);
+                    }
+                } else if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
+                    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+                        char name[128];
+                        snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        jm_name_set_add(wrapper_bindings, name);
+                    }
+                }
+            }
+            struct hashmap* function_hoists = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_body_locals(iife_fn->body, function_hoists, true);
+            size_t hoist_iter = 0;
+            void* hoist_item = NULL;
+            while (hashmap_iter(function_hoists, &hoist_iter, &hoist_item)) {
+                JsNameSetEntry* entry = (JsNameSetEntry*)hoist_item;
+                if (entry->from_func_decl) jm_name_set_add(wrapper_bindings, entry->name);
+            }
+            hashmap_free(function_hoists);
+            size_t binding_iter = 0;
+            void* binding_item = NULL;
+            while (hashmap_iter(wrapper_bindings, &binding_iter, &binding_item)) {
+                note_iife_binding(((JsNameSetEntry*)binding_item)->name);
+            }
+            hashmap_free(wrapper_bindings);
+        }
+
         auto top_level_declares_name = [&](const char* candidate, JsAstNode* ignored_stmt) -> bool {
             if (!candidate) return false;
             JsAstNode* top = program->body;
@@ -4138,6 +4242,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 (int)fn->name->len, fn->name->chars);
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
+            if (!iife_binding_is_unique(mce.name)) return;
             if (!hashmap_get(mt->module_consts, &lookup)) {
                 mce.const_type = MCONST_MODVAR;
                 // Direct IIFE function declarations are promoted out of the
@@ -4153,58 +4258,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Scan top-level statements for IIFE patterns
         JsAstNode* stmt = program->body;
         while (stmt) {
-            // Unwrap expression statements and bundled `var ns = function(){...}();`
-            // initializers. Both forms create an IIFE scope whose local bindings can
-            // be captured by nested closures after the initializer has run.
-            JsAstNode* expr = NULL;
-            if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-                JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
-                expr = es->expression;
-            } else if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
-                JsAstNode* d = vd->declarations;
-                while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                        if (jm_find_iife_function_expr(decl->init)) {
-                            expr = decl->init;
-                            break;
-                        }
-                    }
-                    d = d->next;
-                }
-            } else {
-                stmt = stmt->next;
-                continue;
-            }
-            // Look for CALL_EXPRESSION whose callee is a function literal
-            if (!expr || expr->node_type != JS_AST_NODE_CALL_EXPRESSION) {
-                stmt = stmt->next;
-                continue;
-            }
-            JsFunctionNode* iife_fn = jm_find_iife_function_expr(expr);
-            if (!iife_fn || !iife_fn->body) { stmt = stmt->next; continue; }
-
-            // Js53 P3 Bug C-1 fix: async (and generator) IIFEs have their own
-            // state-machine env-slot storage for locals. Promoting their `var`
-            // declarations to module-vars (the sync-IIFE optimization below)
-            // causes the await fast-path's resolved value to be lost when the
-            // module-var slot is written from inside the state machine. Skip
-            // the IIFE-modvar promotion for async/generator IIFEs.
-            if (iife_fn->is_async || iife_fn->is_generator) { stmt = stmt->next; continue; }
-
-            bool self_referencing_named_iife = false;
-            if (iife_fn->name) {
-                char self_name[128];
-                snprintf(self_name, sizeof(self_name), "_js_%.*s",
-                    (int)iife_fn->name->len, iife_fn->name->chars);
-                struct hashmap* iife_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_body_refs(iife_fn->body, iife_refs);
-                self_referencing_named_iife = jm_name_set_has(iife_refs, self_name);
-                hashmap_free(iife_refs);
-            }
-            if (self_referencing_named_iife) { stmt = stmt->next; continue; }
+            JsFunctionNode* iife_fn = find_promotable_iife(stmt);
+            if (!iife_fn) { stmt = stmt->next; continue; }
 
             // Mark this IIFE body function so its var decls use module vars
             JsFuncCollected* iife_fc = jm_find_collected_func(mt, iife_fn);
@@ -4230,6 +4285,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     snprintf(vname, sizeof(vname), "_js_%.*s",
                                         (int)vid->name->len, vid->name->chars);
                                     if (top_level_declares_name(vname, stmt)) {
+                                        d = d->next;
+                                        continue;
+                                    }
+                                    if (!iife_binding_is_unique(vname)) {
                                         d = d->next;
                                         continue;
                                     }
@@ -4268,6 +4327,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (iife_effective_strict) continue;
                     if (top_level_declares_name(e->name, stmt)) continue;
                     if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
+                    if (!iife_binding_is_unique(e->name)) continue;
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
@@ -4288,6 +4348,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             stmt = stmt->next;
         }
+        hashmap_free(iife_binding_counts);
     }
 
     // Add class names as module-level identifiers so they can be captured.
@@ -5813,7 +5874,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // local variable tracing to resolve the return type.
         if (fc->return_type == LMD_TYPE_ANY) {
             bool has_typed_param = false;
-            for (int j = 0; j < fc->param_count; j++) {
+            for (int j = 0; j < fc->param_count &&
+                    j < JS_MIR_TYPED_PARAM_LIMIT; j++) {
                 if (fc->param_types[j] == LMD_TYPE_INT || fc->param_types[j] == LMD_TYPE_FLOAT) {
                     has_typed_param = true; break;
                 }
@@ -5870,8 +5932,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // narrow to INT/FLOAT when ALL call sites pass compatible types.
     if (mt->func_count > 0) {
         // allocate evidence per function per param (max 16 params)
-        FnParamEvidence (*evi)[16] = (FnParamEvidence (*)[16])mem_calloc(
-            mt->func_count * 16, sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
+        FnParamEvidence (*evi)[JS_MIR_TYPED_PARAM_LIMIT] =
+            (FnParamEvidence (*)[JS_MIR_TYPED_PARAM_LIMIT])mem_calloc(
+            mt->func_count * JS_MIR_TYPED_PARAM_LIMIT,
+            sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
         // Program bodies are linked statement lists; walking only the head
         // misses later top-level calls that seed recursive parameter types.
         for (JsAstNode* top = (JsAstNode*)program->body; top; top = top->next) {
@@ -5889,7 +5953,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (fc->node && (fc->node->is_generator || fc->node->is_async)) continue;
             if (fc->has_scope_env) continue; // params may be captured by child closures — don't narrow
             bool narrowed = false;
-            for (int p = 0; p < fc->param_count && p < 16; p++) {
+            for (int p = 0; p < fc->param_count &&
+                    p < JS_MIR_TYPED_PARAM_LIMIT; p++) {
                 if (fc->param_types[p] != LMD_TYPE_ANY) continue;
                 FnParamEvidence* e = &evi[i][p];
                 int total = e->int_evidence + e->float_evidence + e->other_evidence;
@@ -7329,18 +7394,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                             // Also store as own property on class for hasOwnProperty/in/getOwnPropertyDescriptor
                             if (sf->name) {
-                                char display_buf[256];
-                                const char* display_name = sf->name->chars;
-                                if (strncmp(display_name, "__private_", 10) == 0) {
-                                    int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                                    display_name = display_buf;
-                                    (void)len;
-                                }
-                                MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                                MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                                 jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                                 MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                                if (jm_is_private_name(sf->name)) {
+                                    key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                                }
                                 jm_call_void_1(mt, "js_check_class_static_field_key",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                                 jm_call_3(mt, "js_create_data_property", MIR_T_I64,
@@ -7391,18 +7454,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     MIR_new_reg_op(mt->ctx, val),
                                     MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                             }
-                            char display_buf[256];
-                            const char* display_name = sf->name->chars;
-                            if (strncmp(display_name, "__private_", 10) == 0) {
-                                int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                                display_name = display_buf;
-                                (void)len;
-                            }
-                            MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                            MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                             MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                            if (jm_is_private_name(sf->name)) {
+                                key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                            }
                             jm_call_void_1(mt, "js_check_class_static_field_key",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                             jm_call_3(mt, "js_create_data_property", MIR_T_I64,
@@ -7874,6 +7935,7 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
 // are pre-compiled and will be registered before this module executes.
 // Returns true on success; populates node->mir_ctx and node->js_main_func.
 bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
+    jm_log_module_phase_progress(node->path, "parallel-compile-begin");
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-parallel: failed to create transpiler for '%s'", node->path);
@@ -7957,6 +8019,7 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     node->mir_ctx = ctx;
     node->js_main_func = (void*)js_main;
     node->compiled = true;
+    jm_log_module_phase_progress(node->path, "parallel-compile-end");
     return true;
 }
 
@@ -8080,7 +8143,9 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
 
             uint32_t prev_module_state_id = js_get_active_module_state_id();
             if (!js_activate_module_state(nodes[idx].module_var_count)) continue;
+            jm_log_module_phase_progress(nodes[idx].path, "parallel-execute-begin");
             Item namespace_obj = js_main((Context*)context);
+            jm_log_module_phase_progress(nodes[idx].path, "parallel-execute-end");
             js_set_active_module_state_id(prev_module_state_id);
 
             // register in module cache
@@ -8122,8 +8187,38 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 // ES Module loading: compile and execute a module, returning its namespace
 // ============================================================================
 
+static bool jm_module_phase_progress_is_enabled(void) {
+    const char* value = getenv("LAMBDA_JS_MIR_PHASE_PROGRESS");
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static void jm_log_module_phase_progress(const char* filename, const char* phase) {
+    if (!jm_module_phase_progress_is_enabled()) return;
+    log_notice("js-module-phase: file=%s phase=%s",
+        filename ? filename : "<module>", phase);
+}
+
+static bool jm_module_has_static_imports(JsAstNode* ast) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    JsProgramNode* program = (JsProgramNode*)ast;
+    for (JsAstNode* statement = program->body; statement; statement = statement->next) {
+        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION) return true;
+    }
+    return false;
+}
+
+static bool jm_module_has_top_level_await(JsAstNode* ast) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    JsProgramNode* program = (JsProgramNode*)ast;
+    for (JsAstNode* statement = program->body; statement; statement = statement->next) {
+        if (jm_count_awaits(statement) > 0) return true;
+    }
+    return false;
+}
+
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
+    jm_log_module_phase_progress(filename, "begin");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
     // binds the Context-owned JS state. Test262's hot batch path calls this
     // entrypoint directly; without this bind, TLA state dereferences a null
@@ -8151,6 +8246,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     extern void js_tla_exit_module(void);
 
+    jm_log_module_phase_progress(filename, "parse-begin");
     if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
         // Js57 P7b: parse failure is a SyntaxError. Return ITEM_ERROR (not
         // ItemNull) so the batch driver short-circuits its post-test global
@@ -8162,8 +8258,10 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
+    jm_log_module_phase_progress(filename, "parse-end");
 
     TSNode root = ts_tree_root_node(tp->tree);
+    jm_log_module_phase_progress(filename, "ast-begin");
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
@@ -8172,11 +8270,13 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
+    jm_log_module_phase_progress(filename, "ast-end");
 
     // Js57 P7b: run early-error checks before any further compilation. The
     // module path previously skipped this and crashed on illegal forms like
     // `await 0;` (escaped await — contextually-reserved keyword written
     // with a unicode escape, which is a SyntaxError per the spec).
+    jm_log_module_phase_progress(filename, "early-begin");
     int p7b_early_errors = js_check_early_errors(tp, js_ast);
     if (p7b_early_errors > 0) {
         log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
@@ -8185,6 +8285,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
+    jm_log_module_phase_progress(filename, "early-end");
 
     // Js57 P5: register the current module BEFORE jm_load_imports so the
     // inherit-awaited-target call inside the loader has a registry entry to
@@ -8210,23 +8311,28 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // import (suppress > 0) also stay on the sync path so `await import('…')`
     // callers see the fully-evaluated namespace.
     extern int js_dynamic_import_suppress_module_drain;
+    bool module_has_top_level_await = jm_module_has_top_level_await(js_ast);
     if (js_tla_module_depth_get() >= 2 && js_dynamic_import_suppress_module_drain == 0) {
-        int p7d_tla_count = 0;
-        if (js_ast && js_ast->node_type == JS_AST_NODE_PROGRAM) {
-            JsProgramNode* prog = (JsProgramNode*)js_ast;
-            for (JsAstNode* stmt = prog->body; stmt; stmt = stmt->next) {
-                p7d_tla_count += jm_count_awaits(stmt);
-                if (p7d_tla_count > 0) break;
-            }
-        }
-        if (p7d_tla_count > 0) {
+        if (module_has_top_level_await) {
             js_module_mark_has_tla(p7d_self_spec_item);
             log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
         }
     }
 
     // Recursively load this module's imports first
+    jm_log_module_phase_progress(filename, "imports-begin");
+#ifndef _WIN32
+    if (js_tla_module_depth_get() == 1 && js_dynamic_import_suppress_module_drain == 0 &&
+            !module_has_top_level_await && jm_module_has_static_imports(js_ast)) {
+        // Module entries bypass the script entry point where the static graph is
+        // normally precompiled.  Preserve one graph-wide dependency pass here;
+        // otherwise a wide browser module graph pays serial parse/link work at
+        // the first document task even though its imports are already known.
+        jm_precompile_js_imports(runtime, js_source, filename);
+    }
+#endif
     jm_load_imports(runtime, js_ast, filename);
+    jm_log_module_phase_progress(filename, "imports-end");
 
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
@@ -8247,6 +8353,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     mt->module = MIR_new_module(ctx, "js_module");
 
+    jm_log_module_phase_progress(filename, "mir-begin");
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
         jm_clear_active_js_transpile(NULL, mt, NULL);
@@ -8256,6 +8363,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    jm_log_module_phase_progress(filename, "mir-end");
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);
@@ -8267,7 +8375,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
+    jm_log_module_phase_progress(filename, "link-begin");
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    jm_log_module_phase_progress(filename, "link-end");
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -8323,7 +8433,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_debug("P7d: module '%s' pending=%d — deferring body", filename, p7d_pending);
         // namespace stays as the empty/placeholder until deferred run completes.
     } else {
+        jm_log_module_phase_progress(filename, "execute-begin");
         namespace_obj = js_main((Context*)context);
+        jm_log_module_phase_progress(filename, "execute-end");
         module_body_threw = js_check_exception() != 0;
     }
     // Microtasks retain their function owner context, while module-vars and

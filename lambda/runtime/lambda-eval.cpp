@@ -7038,7 +7038,9 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     name->str = name_copy;
     name->length = key_length;
     added->name = name;
-    added->name_id = typemap_name_id(name->str, (int)name->length);
+    added->name_hash = typemap_name_hash(name->str, (int)name->length);
+    added->predefined_id = NAME_ID_NONE;
+    added->key_ref = NULL;
     added->type = type_info[value_type].type;
     added->byte_offset = offset;
     map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
@@ -7374,7 +7376,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         nv->str = e->name->str;
         nv->length = e->name->length;
         ne->name = nv;
-        ne->name_id = e->name_id ? e->name_id : typemap_name_id(nv->str, (int)nv->length);
+        ne->name_hash = e->name_hash ? e->name_hash : typemap_name_hash(nv->str, (int)nv->length);
+        ne->predefined_id = e->predefined_id;
+        ne->key_ref = e->key_ref;
         ne->type = type_info[ft].type;
         bool fixed_slot = field_index < fixed_slot_count;
         ne->byte_offset = fixed_slot ? e->byte_offset : byte_offset;
@@ -7720,7 +7724,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
 
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
-        size_t key_len, ShapeEntry* entry, TypeId value_type) {
+        size_t key_len, PropertyKeyRef key_ref, ShapeEntry* entry, TypeId value_type) {
     if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
     TypeId field_type = entry->type->type_id;
     if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
@@ -7730,7 +7734,11 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     if (!clone) return entry;
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
-    ShapeEntry* refreshed = map_find_shape_entry(clone, key_cstr, key_len);
+    ShapeEntry* refreshed = key_ref && property_key_requires_identity(key_ref)
+        ? typemap_hash_lookup_key(clone, key_ref)
+        : map_find_shape_entry(clone, key_cstr, key_len);
+    // Ordinary Input and runtime strings have distinct pool addresses; only
+    // Symbol/private keys may use pointer identity to recover the cloned slot.
     return refreshed ? refreshed : entry;
 }
 
@@ -7787,11 +7795,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
     // chars are NUL-terminated, and JS property names may contain any byte.
     const char* key_cstr = NULL;
     size_t key_len = 0;
+    String* key_string = NULL;
     TypeId key_type = get_type_id(key);
     if (key_type == LMD_TYPE_STRING) {
-        String* s = key.get_safe_string();
-        key_cstr = s ? s->chars : NULL;
-        key_len = s ? s->len : 0;
+        key_string = key.get_safe_string();
+        key_cstr = key_string ? key_string->chars : NULL;
+        key_len = key_string ? key_string->len : 0;
     } else if (key_type == LMD_TYPE_SYMBOL) {
         Symbol* sym = key.get_safe_symbol();
         key_cstr = sym ? sym->chars : NULL;
@@ -7804,13 +7813,19 @@ void fn_map_set(Item map_item, Item key, Item value) {
         log_error("fn_map_set: null key string");
         return;
     }
+    PropertyKeyRef key_ref = key_type == LMD_TYPE_STRING &&
+        string_is_pooled(key_string) ? key_string : NULL;
+    bool identity_key = key_ref && property_key_requires_identity(key_ref);
 
     // find field in shape
     TypeId value_type = get_type_id(value);
     ShapeEntry* entry = map_type->shape;
     while (entry) {
         bool name_matches = false;
-        if (entry->name && entry->name->str && entry->name->length == key_len) {
+        if (identity_key) {
+            // Symbol/private diagnostic bytes are not property identity.
+            name_matches = entry->key_ref && property_key_equal(entry->key_ref, key_ref);
+        } else if (entry->name && entry->name->str && entry->name->length == key_len) {
             // A6: pointer comparison first (interned strings share char* pointers)
             name_matches = (entry->name->str == key_cstr ||
                 memcmp(entry->name->str, key_cstr, key_len) == 0);
@@ -7818,7 +7833,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
         if (name_matches) {
             TypeId field_type = entry->type->type_id;
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
-                type_slot, key_cstr, key_len, entry, value_type);
+                type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return;
             // A reserved constructor slot becomes observable only at the
             // source assignment that reaches this storage write.

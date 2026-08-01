@@ -504,7 +504,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
     lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
@@ -513,7 +513,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
@@ -560,6 +560,7 @@ help:
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
 	@echo "                     (automatic when grammar.js changes)"
+	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
 	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
 	@echo "                     Automatically regenerates LaTeX parser if grammar.js changes"
 	@echo ""
@@ -580,6 +581,8 @@ help:
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
 	@echo "  test-editable        - Run all focused editable and upstream editor checks"
+	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
+	@echo "  test-drawing         - Run all editable-drawing compatibility probes"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
 	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
@@ -1385,6 +1388,10 @@ type-chart:
 # Generate grammar explicitly (useful for development)
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
+
+generate-names:
+	$(PYTHON) -B utils/generate_well_known_names.py
+	@echo "Generated NameId catalogs."
 
 # Generate TypeScript grammar explicitly
 generate-grammar-typescript: $(TS_PARSER_C)
@@ -2268,6 +2275,17 @@ editable-editor-e2e: build
 	@./lambda.exe view test/html/editable-editorjs.html --event-file test/ui/editable-editors-editorjs-page.json --headless --no-log
 
 test-editable: editable-unit editable-ui editable-editor-e2e
+
+# Pinned drawing packages are built locally by test/drawing-editors; this target
+# never installs packages and exercises ordinary DOM/SVG/event lifetime paths.
+drawing-editor-e2e: build
+	@cd test/drawing-editors && node tools/build.mjs
+	@./lambda.exe view test/html/svg-dom-contract.html --event-file test/ui/svg-dom-contract.json --headless --no-log
+	@./lambda.exe view test/html/editable-raphael.html --event-file test/ui/editable-drawing-raphael.json --headless --no-log
+	@./lambda.exe view test/html/editable-maxgraph.html --event-file test/ui/editable-drawing-maxgraph.json --headless --no-log
+	@./lambda.exe view test/html/editable-jointjs.html --event-file test/ui/editable-drawing-jointjs.json --headless --no-log
+
+test-drawing: drawing-editor-e2e
 
 # Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
 # The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group

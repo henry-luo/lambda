@@ -2344,9 +2344,13 @@ static void prepare_all_tests(
                     continue;
                 }
                 meta = parse_metadata(source);
-                // compute native eligibility inline (no cache available)
+                // Dynamically compiled source resolves harness globals at runtime,
+                // where native interception is unavailable and would leave assert
+                // undefined; preserve the JS-harness environment for those tests.
                 if (meta.includes.empty() && !meta.is_negative
-                    && source.find("Test262Error") == std::string::npos) {
+                    && source.find("Test262Error") == std::string::npos
+                    && source.find("eval") == std::string::npos
+                    && source.find("Function") == std::string::npos) {
                     cached_native_harness = true;
                 }
             }

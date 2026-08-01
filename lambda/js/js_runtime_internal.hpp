@@ -203,11 +203,18 @@ static inline bool js_key_is_symbol(Item key) {
     return it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
 }
 
+extern "C" PropertyKeyRef js_symbol_property_key(Item sym);
+
 static inline Item js_symbol_to_key(Item sym) {
-    int64_t id = -(it2i(sym) + (int64_t)JS_SYMBOL_BASE);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-    return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    PropertyKeyRef semantic_key = js_symbol_property_key(sym);
+    if (semantic_key) {
+        // Every Symbol has a registered semantic NameRecord.  Property
+        // identity may never depend on the historical diagnostic encoding.
+        return (Item){.item = s2it(semantic_key)};
+    }
+    // An encoded Symbol without a registered NameRecord is invalid runtime
+    // state; manufacturing a printable string here would alias a user key.
+    return ItemNull;
 }
 
 namespace {

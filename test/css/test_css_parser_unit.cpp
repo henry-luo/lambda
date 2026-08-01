@@ -247,7 +247,7 @@ TEST_F(CssParserUnitTest, Declaration_Color_Name) {
     auto decl = parser.ParseDeclaration("color: red");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
     EXPECT_EQ(decl->value->type, CSS_VALUE_TYPE_KEYWORD);
     EXPECT_FALSE(decl->important);
@@ -258,7 +258,7 @@ TEST_F(CssParserUnitTest, Declaration_Color_Hex) {
     auto decl = parser.ParseDeclaration("color: #ff0000");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     // Value should be parsed (type may vary based on implementation)
     ASSERT_NE(decl->value, nullptr);
 }
@@ -268,7 +268,7 @@ TEST_F(CssParserUnitTest, Declaration_BackgroundColor) {
     auto decl = parser.ParseDeclaration("background-color: blue");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("background-color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("background-color"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -277,7 +277,7 @@ TEST_F(CssParserUnitTest, Declaration_Display_Block) {
     auto decl = parser.ParseDeclaration("display: block");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("display"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("display"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -286,7 +286,7 @@ TEST_F(CssParserUnitTest, Declaration_Display_Flex) {
     auto decl = parser.ParseDeclaration("display: flex");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("display"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("display"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -295,7 +295,7 @@ TEST_F(CssParserUnitTest, Declaration_Position_Relative) {
     auto decl = parser.ParseDeclaration("position: relative");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("position"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("position"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -308,7 +308,7 @@ TEST_F(CssParserUnitTest, Declaration_Width_Pixels) {
     auto decl = parser.ParseDeclaration("width: 100px");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("width"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("width"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -317,7 +317,7 @@ TEST_F(CssParserUnitTest, Declaration_Height_Percent) {
     auto decl = parser.ParseDeclaration("height: 50%");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("height"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("height"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -326,7 +326,7 @@ TEST_F(CssParserUnitTest, Declaration_FontSize_Em) {
     auto decl = parser.ParseDeclaration("font-size: 1.5em");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("font-size"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("font-size"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -335,7 +335,7 @@ TEST_F(CssParserUnitTest, Declaration_Margin_Rem) {
     auto decl = parser.ParseDeclaration("margin: 2rem");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("margin"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("margin"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -344,7 +344,7 @@ TEST_F(CssParserUnitTest, Declaration_Padding_Zero) {
     auto decl = parser.ParseDeclaration("padding: 0");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("padding"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("padding"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -353,7 +353,7 @@ TEST_F(CssParserUnitTest, Declaration_LineHeight_Unitless) {
     auto decl = parser.ParseDeclaration("line-height: 1.5");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("line-height"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("line-height"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -366,7 +366,7 @@ TEST_F(CssParserUnitTest, Declaration_Margin_FourValues) {
     auto decl = parser.ParseDeclaration("margin: 10px 20px 30px 40px");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("margin"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("margin"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -375,7 +375,7 @@ TEST_F(CssParserUnitTest, Declaration_Padding_TwoValues) {
     auto decl = parser.ParseDeclaration("padding: 10px 20px");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("padding"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("padding"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -384,7 +384,7 @@ TEST_F(CssParserUnitTest, Declaration_Border_Shorthand) {
     auto decl = parser.ParseDeclaration("border: 1px solid black");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("border"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("border"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -393,7 +393,7 @@ TEST_F(CssParserUnitTest, Declaration_Font_Shorthand) {
     auto decl = parser.ParseDeclaration("font: 14px Arial, sans-serif");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("font"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("font"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -406,7 +406,7 @@ TEST_F(CssParserUnitTest, Declaration_Important_Color) {
     auto decl = parser.ParseDeclaration("color: red !important");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
     EXPECT_TRUE(decl->important);
 }
@@ -416,7 +416,7 @@ TEST_F(CssParserUnitTest, Declaration_Important_WithWhitespace) {
     auto decl = parser.ParseDeclaration("width: 100px  !important");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("width"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("width"));
     ASSERT_NE(decl->value, nullptr);
     EXPECT_TRUE(decl->important);
 }
@@ -426,7 +426,7 @@ TEST_F(CssParserUnitTest, Declaration_Important_NoSpaceBeforeExclamation) {
     auto decl = parser.ParseDeclaration("display: block!important");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("display"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("display"));
     EXPECT_TRUE(decl->important);
 }
 
@@ -447,7 +447,7 @@ TEST_F(CssParserUnitTest, Declaration_Color_RGB) {
     auto decl = parser.ParseDeclaration("color: rgb(255, 0, 0)");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -456,7 +456,7 @@ TEST_F(CssParserUnitTest, Declaration_Color_RGBA) {
     auto decl = parser.ParseDeclaration("color: rgba(255, 0, 0, 0.5)");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -474,7 +474,7 @@ TEST_F(CssParserUnitTest, Declaration_Width_Calc) {
     auto decl = parser.ParseDeclaration("width: calc(100% - 20px)");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("width"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("width"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -483,8 +483,22 @@ TEST_F(CssParserUnitTest, Declaration_CustomProperty_Var) {
     auto decl = parser.ParseDeclaration("color: var(--primary-color)");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
+}
+
+TEST_F(CssParserUnitTest, DeclarationCarriesGeneratedOrDynamicNameIdentity) {
+    auto parser = CreateParser();
+
+    auto standard = parser.ParseDeclaration("color: red");
+    ASSERT_NE(standard, nullptr);
+    EXPECT_NE(standard->name_id, NAME_ID_NONE);
+    EXPECT_EQ(css_property_code_from_name_id(standard->name_id), standard->property_code);
+
+    auto custom = parser.ParseDeclaration("--theme-accent: red");
+    ASSERT_NE(custom, nullptr);
+    EXPECT_EQ(custom->name_id, NAME_ID_NONE);
+    EXPECT_EQ(css_property_code_from_name_id(custom->name_id), static_cast<CssPropertyCode>(0));
 }
 
 TEST_F(CssParserUnitTest, Declaration_Display_CustomLayoutFunctionArgument) {
@@ -512,7 +526,7 @@ TEST_F(CssParserUnitTest, Declaration_Display_CustomLayoutDeclarationParser) {
     auto decl = parser.ParseDeclaration("display: LaYoUt(graph)");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("display"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("display"));
     ASSERT_NE(decl->value, nullptr);
     EXPECT_EQ(decl->value->type, CSS_VALUE_TYPE_FUNCTION);
     CssFunction* fn = decl->value->data.function;
@@ -535,7 +549,7 @@ TEST_F(CssParserUnitTest, Declaration_WithSemicolon) {
     auto decl = parser.ParseDeclaration("color: red;");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
 }
 
@@ -544,7 +558,7 @@ TEST_F(CssParserUnitTest, Declaration_WithWhitespace) {
     auto decl = parser.ParseDeclaration("  color  :  red  ");
 
     ASSERT_NE(decl, nullptr);
-    EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
+    EXPECT_EQ(decl->property_code, css_property_code_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
 }
 

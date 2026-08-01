@@ -472,35 +472,22 @@ static void jm_emit_global_var_property_sync(JsMirTranspiler* mt, JsModuleConstE
 }
 
 bool jm_is_private_name(String* name) {
-    return name && name->len > 10 && strncmp(name->chars, "__private_", 10) == 0;
+    return name && name->len > 1 && name->chars[0] == '#';
 }
 
 String* jm_class_private_name(JsMirTranspiler* mt, JsClassEntry* ce, String* name) {
-    if (!jm_is_private_name(name) || !mt || !ce || !mt->tp || !mt->tp->name_pool) return name;
-    const char* p = name->chars + 10;
-    const char* end = name->chars + name->len;
-    const char* q = p;
-    while (q < end && *q >= '0' && *q <= '9') q++;
-    if (q > p && q < end && *q == '_') return name;
-    int class_index = (int)(ce - mt->class_entries);
-    char buf[384];
-    int len = snprintf(buf, sizeof(buf), "__private_%d_%.*s",
-        class_index, (int)(name->len - 10), name->chars + 10);
-    if (len <= 0) return name;
-    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    return name_pool_create_len(mt->tp->name_pool, buf, len);
+    // A class index is compilation metadata, not JavaScript private identity.
+    // Runtime class evaluation owns the unique key allocation.
+    (void)mt;
+    (void)ce;
+    return name;
 }
 
 static void jm_private_name_suffix(String* name, const char** suffix, int* suffix_len) {
     *suffix = NULL; *suffix_len = 0;
     if (!jm_is_private_name(name)) return;
-    const char* p = name->chars + 10;
-    const char* end = name->chars + name->len;
-    const char* q = p;
-    while (q < end && *q >= '0' && *q <= '9') q++;
-    if (q > p && q < end && *q == '_') p = q + 1;
-    *suffix = p;
-    *suffix_len = (int)(end - p);
+    *suffix = name->chars + 1;
+    *suffix_len = (int)name->len - 1;
 }
 
 static bool jm_private_name_suffix_eq(String* name, const char* suffix, int suffix_len) {
@@ -582,11 +569,11 @@ static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String*
     return NULL;
 }
 
-static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
-    if (!jm_is_private_name(name) || !mt) return name;
+static JsClassEntry* jm_resolve_private_owner(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
+    if (!jm_is_private_name(name) || !mt) return NULL;
     const char* suffix = NULL; int suffix_len = 0;
     jm_private_name_suffix(name, &suffix, &suffix_len);
-    if (!suffix || suffix_len <= 0) return name;
+    if (!suffix || suffix_len <= 0) return NULL;
 
     JsClassEntry* best = NULL;
     uint32_t best_start = 0;
@@ -603,6 +590,16 @@ static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_no
             best_len = clen;
         }
     }
+    return best;
+}
+
+static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
+    if (!jm_is_private_name(name) || !mt) return name;
+    const char* suffix = NULL; int suffix_len = 0;
+    jm_private_name_suffix(name, &suffix, &suffix_len);
+    if (!suffix || suffix_len <= 0) return name;
+
+    JsClassEntry* best = jm_resolve_private_owner(mt, access_node, name);
     if (best) return jm_class_private_name(mt, best, name);
     Item eval_resolved = js_eval_private_resolve((Item){.item = s2it(name)});
     if (get_type_id(eval_resolved) == LMD_TYPE_STRING) {
@@ -610,6 +607,26 @@ static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_no
         return name_pool_create_len(mt->tp->name_pool, resolved_name->chars, (int)resolved_name->len);
     }
     return jm_class_private_name(mt, mt->current_class, name);
+}
+
+static MIR_reg_t jm_emit_private_key_for_access(JsMirTranspiler* mt,
+        JsAstNode* access_node, String* name) {
+    MIR_reg_t source_key = jm_box_string_literal(mt, name->chars, (int)name->len);
+    JsClassEntry* owner = jm_resolve_private_owner(mt, access_node, name);
+    JsClassEntry* lexical_home = access_node
+        ? jm_find_innermost_class_for_node(mt, access_node) : mt->current_class;
+    if (owner && owner != lexical_home) {
+        MIR_reg_t owner_class = jm_emit_class_object_for_entry(mt, owner);
+        if (owner_class) {
+            // Only an enclosing declaration bypasses the method home class;
+            // a re-evaluated local class must retain its own fresh private keys.
+            return jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_class),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, source_key));
+        }
+    }
+    return jm_call_1(mt, "js_private_key_for_current_class", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, source_key));
 }
 
 MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
@@ -634,8 +651,8 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
-        if (key_name != prop->name) {
-            return jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
+        if (jm_is_private_name(key_name)) {
+            return jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
         }
         return jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
     }
@@ -823,6 +840,16 @@ static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_re
 
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
+    MIR_reg_t private_home_class = 0;
+    if (jm_class_or_ancestor_has_private_members(ce)) {
+        private_home_class = jm_emit_class_object_for_entry(mt, ce);
+        if (private_home_class) jm_create_gc_root_slot(mt, private_home_class);
+    }
+    if (private_home_class) {
+        // Private instance methods are branded before any field initializer;
+        // otherwise a public field after `super()` cannot call its own method.
+        jm_emit_private_instance_method_brands(mt, obj, private_home_class, ce);
+    }
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
         JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
         if (!inf) continue;
@@ -850,7 +877,19 @@ static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_re
             continue;
         }
 
+        MIR_reg_t previous_private_home = 0;
+        if (inf->initializer && private_home_class) {
+            previous_private_home = jm_call_1(mt, "js_private_home_class_enter", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, private_home_class));
+            jm_create_gc_root_slot(mt, previous_private_home);
+        }
         MIR_reg_t val = inf->initializer ? jm_transpile_box_item(mt, inf->initializer) : jm_emit_undefined(mt);
+        if (previous_private_home) {
+            // `super()` initializes public fields before the derived method resumes,
+            // so this path must supply the lexical private home explicitly.
+            jm_call_void_1(mt, "js_private_home_class_leave",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, previous_private_home));
+        }
         jm_emit_exc_propagate_check(mt);
         jm_call_3(mt, "js_create_data_property", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -1861,19 +1900,14 @@ void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt) {
 
 static void jm_emit_eval_private_bind_name(JsMirTranspiler* mt, JsClassEntry* ce, String* name) {
     if (!mt || !ce || !jm_is_private_name(name)) return;
-    const char* suffix = NULL; int suffix_len = 0;
-    jm_private_name_suffix(name, &suffix, &suffix_len);
-    if (!suffix || suffix_len <= 0) return;
-    char unscoped_buf[384];
-    int unscoped_len = snprintf(unscoped_buf, sizeof(unscoped_buf), "__private_%.*s", suffix_len, suffix);
-    if (unscoped_len <= 0) return;
-    if (unscoped_len >= (int)sizeof(unscoped_buf)) unscoped_len = (int)sizeof(unscoped_buf) - 1;
-    String* scoped_name = jm_class_private_name(mt, ce, name);
-    MIR_reg_t unscoped_item = jm_box_string_literal(mt, unscoped_buf, unscoped_len);
-    MIR_reg_t scoped_item = jm_box_string_literal(mt, scoped_name->chars, (int)scoped_name->len);
+    (void)ce;
+    MIR_reg_t source_item = jm_box_string_literal(mt, name->chars, (int)name->len);
+    MIR_reg_t private_key = jm_emit_private_key_for_access(mt, NULL, name);
+    // Direct eval inherits the lexical private environment as NameRecord
+    // identity, never as a user-observable spelling-derived property name.
     jm_call_void_2(mt, "js_eval_private_bind",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, unscoped_item),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, scoped_item));
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, source_item),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, private_key));
 }
 
 static bool jm_emit_eval_private_env_push(JsMirTranspiler* mt) {
@@ -2614,15 +2648,14 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         return jm_emit_null(mt);
     }
 
-    // Special case: #field in obj — left side is __private_* identifier, use as string key
+    // `#field in obj` resolves the current class's lexical private binding.
     MIR_reg_t left;
     if (bin->op == JS_OP_IN && bin->left &&
         bin->left->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* lid = (JsIdentifierNode*)bin->left;
-        if (lid->name && lid->name->len > 10 &&
-            strncmp(lid->name->chars, "__private_", 10) == 0) {
+        if (jm_is_private_name(lid->name)) {
             String* private_name = jm_resolve_private_name(mt, bin->left, lid->name);
-            left = jm_box_string_literal(mt, private_name->chars, (int)private_name->len);
+            left = jm_emit_private_key_for_access(mt, bin->left, private_name);
         } else {
             left = jm_transpile_box_item(mt, bin->left);
         }
@@ -3898,7 +3931,13 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
             }
         } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
-            prop_key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+            String* key_name = jm_resolve_private_name(mt, (JsAstNode*)member->property, prop->name);
+            prop_key = jm_box_string_literal(mt, key_name->chars, key_name->len);
+            // Destructuring writes bypass ordinary Reference lowering, so a
+            // private member must still use its lexical class identity.
+            if (jm_is_private_name(key_name)) {
+                prop_key = jm_emit_private_key_for_access(mt, (JsAstNode*)member->property, key_name);
+            }
         } else {
             prop_key = jm_transpile_box_item(mt, member->property);
         }
@@ -8702,6 +8741,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(mt, (JsAstNode*)m->property, prop->name);
             MIR_reg_t method_name = jm_box_string_literal(mt, method_key_name->chars, method_key_name->len);
+            if (jm_is_private_name(method_key_name)) {
+                // Method-call lowering bypasses the generic member path, so it
+                // must recover the class-owned key instead of dispatching on
+                // the source spelling shared by unrelated private declarations.
+                method_name = jm_emit_private_key_for_access(mt, (JsAstNode*)m->property,
+                    method_key_name);
+            }
 
             if (!m->optional && !jm_has_optional_chain(m->object)) {
                 // Match CallExpression evaluation order: obj.method(args)
@@ -8935,7 +8981,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // Direct MIR calls bypass js_invoke_fn, so they cannot seed the
                     // actual call-site values used to materialize `arguments`.
                     if (p3_method && p3_method->fc->uses_arguments) p3_method = NULL;
-                    if (p3_method && p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
+                    // Direct dispatch bypasses JsFunction invocation, which is where
+                    // a method's lexical private-name home is installed.
+                    if (p3_method && !jm_class_or_ancestor_has_private_members(p3_ce) &&
+                        p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
                         log_debug("P3: direct method call %.*s.%.*s() in %s",
                             (int)(p3_ce->name ? p3_ce->name->len : 0),
                             p3_ce->name ? p3_ce->name->chars : "",
@@ -10054,7 +10103,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t evaluated_callee = jm_transpile_box_item(mt, call->callee);
+    // ECMAScript evaluates the callee before its arguments.  Keep that value
+    // in its own rooted register because an argument such as `fn(fn = 0)` may
+    // overwrite the identifier register used to resolve the callee.
+    MIR_reg_t callee = jm_new_reg(mt, "callee", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, evaluated_callee)));
+    jm_create_gc_root_slot(mt, callee);
 
     // Generator spill: if any argument contains a yield, the callee register will be lost
     // after the yield suspend/resume cycle. Save it to an env slot and restore after args.
@@ -11435,6 +11491,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
             String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
             key = jm_box_string_literal(mt, key_name->chars, key_name->len);
+            if (jm_is_private_name(key_name)) {
+                key = jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
+            }
         } else {
             key = jm_transpile_box_item(mt, mem->property);
         }
@@ -11486,6 +11545,11 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
             String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
             key = jm_box_string_literal(mt, key_name->chars, key_name->len);
+            // Optional chaining has its own lowering branch; it must not fall
+            // back to the shared private spelling or unrelated classes collide.
+            if (jm_is_private_name(key_name)) {
+                key = jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
+            }
         } else {
             key = jm_transpile_box_item(mt, mem->property);
         }
@@ -11536,6 +11600,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
         key = jm_box_string_literal(mt, key_name->chars, key_name->len);
+        if (jm_is_private_name(key_name)) {
+            key = jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
+        }
     } else {
         key = jm_transpile_box_item(mt, mem->property);
     }
@@ -13799,6 +13866,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                jm_call_void_2(mt, "js_refresh_prototype_method_homes",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Set up prototype's __proto__ chain for instanceof on parent classes
                 {
                     JsClassEntry* sc = static_superclass;
@@ -13942,6 +14012,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Mark all prototype methods as non-enumerable (ES spec)
+                jm_call_void_2(mt, "js_refresh_prototype_method_homes",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 jm_call_void_1(mt, "js_mark_all_non_enumerable",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
             } else {
@@ -14238,18 +14311,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                     // Also store as own property on class for hasOwnProperty/in/getOwnPropertyDescriptor
                     if (sf->name) {
-                        char display_buf[256];
-                        const char* display_name = sf->name->chars;
-                        if (strncmp(display_name, "__private_", 10) == 0) {
-                            int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                            display_name = display_buf;
-                            (void)len;
-                        }
-                        MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                        MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                         jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                         MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                        if (jm_is_private_name(sf->name)) {
+                            key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                        }
                         jm_call_void_1(mt, "js_check_class_static_field_key",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                         jm_call_3(mt, "js_create_data_property", MIR_T_I64,
@@ -14295,18 +14366,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             MIR_new_reg_op(mt->ctx, val),
                             MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                     }
-                    char display_buf[256];
-                    const char* display_name = sf->name->chars;
-                    if (strncmp(display_name, "__private_", 10) == 0) {
-                        int len = snprintf(display_buf, sizeof(display_buf), "#%s", display_name + 10);
-                        display_name = display_buf;
-                        (void)len;
-                    }
-                    MIR_reg_t fn_name = jm_box_string_literal(mt, display_name, strlen(display_name));
+                    MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                     jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
                     MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+                    if (jm_is_private_name(sf->name)) {
+                        key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                    }
                     jm_call_void_1(mt, "js_check_class_static_field_key",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                     jm_call_3(mt, "js_create_data_property", MIR_T_I64,

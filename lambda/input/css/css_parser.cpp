@@ -2195,9 +2195,10 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     if (!decl) return NULL;
 
     // Get property ID from name
-    decl->property_id = css_property_id_from_name(property_name);
+    decl->property_code = css_property_code_from_name(property_name);
+    decl->name_id = well_known_name_id({property_name, strlen(property_name)});
 
-    // Store original property name (important for vendor-prefixed properties where property_id = -1)
+    // Store original property name (important for vendor-prefixed properties where property_code = -1)
     decl->property_name = property_name;
 
     // Capture raw value text from source tokens (for faithful CSSOM serialization)
@@ -2221,14 +2222,14 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // Debug: Print property name and ID for troubleshooting
     log_debug("[CSS Parser] Property: '%s' -> ID: %d, important=%d, value_count=%d",
-            property_name, decl->property_id, is_important, value_count);
+            property_name, decl->property_code, is_important, value_count);
 
     decl->important = is_important;
     decl->valid = true;
     decl->ref_count = 1;
 
     // Special handling for font-family: combine multi-word font names
-    if (decl->property_id == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
+    if (decl->property_code == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
         decl->value = css_parse_font_family_values(tokens, value_start, *pos, pool);
     }
     // Create value(s) from tokens
@@ -2441,7 +2442,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Debug: print the value type
     if (decl->value) {
         log_debug("[CSS Parse] Declaration for property ID %d: value type = %d",
-               decl->property_id, decl->value->type);
+               decl->property_code, decl->value->type);
         if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
             log_debug("[CSS Parse]   Length value = %.2f", decl->value->data.length.value);
         }
@@ -2451,7 +2452,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     if (decl->value) {
         // Check if this property disallows negative values
         bool disallow_negative = false;
-        switch (decl->property_id) {
+        switch (decl->property_code) {
             // width, height, and their min/max variants cannot be negative
             case CSS_PROPERTY_WIDTH:
             case CSS_PROPERTY_HEIGHT:
@@ -2517,7 +2518,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 // reject negative value for properties that don't allow it
                 // per CSS spec, return NULL to prevent invalid declaration from entering cascade
                 log_debug("[CSS Parse] Rejecting negative value for property ID %d",
-                       decl->property_id);
+                       decl->property_code);
                 return NULL;
             }
         }
@@ -2526,7 +2527,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Validate: for standard properties, {}-blocks are only valid if the entire
     // value is wrapped in a single {} block (per CSS syntax spec / csswg-drafts#9317).
     // Custom properties (--*) allow arbitrary {}-blocks.
-    if (decl->value && decl->property_id > 0) {
+    if (decl->value && decl->property_code > 0) {
         // check if value contains any brace tokens
         bool has_braces = false;
         if (decl->value->type == CSS_VALUE_TYPE_LIST) {
@@ -3156,8 +3157,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
         log_debug(" After parsing: decl=%p", (void*)decl);
         if (decl) {
-            log_debug(" Parsed declaration: property_id=%d for position %d",
-                    decl->property_id, decl_count);
+            log_debug(" Parsed declaration: property_code=%d for position %d",
+                    decl->property_code, decl_count);
 
             if (seen_nested_rule) {
                 // Declaration after nested rule → collect for CSSNestedDeclarations
@@ -3238,7 +3239,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     log_debug(" Created rule with %d declarations:", decl_count);
     for (int i = 0; i < decl_count && i < 5; i++) {
         if (declarations[i]) {
-            log_debug("   Declaration[%d]: property_id=%d", i, declarations[i]->property_id);
+            log_debug("   Declaration[%d]: property_code=%d", i, declarations[i]->property_code);
         }
     }
 

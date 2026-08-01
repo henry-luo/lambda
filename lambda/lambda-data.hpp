@@ -89,10 +89,12 @@ typedef struct LambdaModuleState {
     Item* vars;
     uint64_t* var_payloads;
     void* member_ics;
+    PropertyKeyRef* property_keys;
     void* consts;
     void* type_list;
     uint32_t var_count;
     uint32_t member_ic_count;
+    uint32_t property_key_count;
     uint32_t module_id;
     bool vars_registered;
 } LambdaModuleState;
@@ -306,7 +308,9 @@ typedef struct ShapeEntry {
     struct ShapeEntry* next;
     Target* ns;  // namespace target (NULL for unqualified fields)
     struct AstNode* default_value;  // default value expression (NULL if none)
-    uint32_t name_id;  // Tune12 P3: stable non-zero name fingerprint, 0 = unset
+    uint32_t name_hash;  // FNV lookup hash; never an identity.
+    NameId predefined_id;  // generated global identity, NAME_ID_NONE for dynamic names.
+    PropertyKeyRef key_ref;  // canonical runtime key; Input-owned shapes keep this NULL.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
@@ -368,7 +372,7 @@ typedef struct TypeMap : Type {
 typedef struct TypeMapTransition {
     const char* name;
     uint32_t name_len;
-    uint32_t name_id;
+    uint32_t name_hash;  // hash routes transition lookup; spelling remains authoritative.
     TypeId value_type;
     uint8_t flags;
     TypeMap* target;
@@ -430,6 +434,17 @@ static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
     return field ? type_field_storage_type_id(field->type) : LMD_TYPE_NULL;
 }
 
+static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
+        int64_t data_cap) {
+    if (!field || field->byte_offset < 0 || data_cap < 0) return false;
+    TypeId storage_type = shape_entry_storage_type_id(field);
+    int storage_size = type_info[storage_type].byte_size;
+    // Packed maps may end in a one-byte undefined/bool field; requiring a
+    // pointer-width tail made that valid final field appear absent after a
+    // sibling type change rebuilt the shape.
+    return storage_size > 0 && field->byte_offset <= data_cap - storage_size;
+}
+
 Item map_field_to_item(void* field_ptr, TypeId type_id);
 Item scalar_storage_read(Item item, bool immortal);
 
@@ -448,18 +463,28 @@ static inline uint32_t typemap_fnv1a(const char* key, int len) {
     return hash_fnv1a_32(key, (size_t)len);
 }
 
-static inline uint32_t typemap_name_id(const char* key, int len) {
+static inline uint32_t typemap_name_hash(const char* key, int len) {
     if (!key || len < 0) return 0;
     uint32_t id = typemap_fnv1a(key, len);
     return id ? id : 1;
 }
 
-static inline uint32_t typemap_shape_entry_name_id(ShapeEntry* entry) {
+static inline uint32_t typemap_shape_entry_name_hash(ShapeEntry* entry) {
     if (!entry || !entry->name || !entry->name->str) return 0;
-    if (entry->name_id == 0) {
-        entry->name_id = typemap_name_id(entry->name->str, (int)entry->name->length);
+    if (entry->name_hash == 0) {
+        entry->name_hash = typemap_name_hash(entry->name->str, (int)entry->name->length);
     }
-    return entry->name_id;
+    return entry->name_hash;
+}
+
+// Shape hashes route probes only.  SYMBOL and PRIVATE records deliberately
+// carry a unique hash, because equal diagnostic spellings are not equal keys.
+static inline uint32_t typemap_shape_entry_key_hash(ShapeEntry* entry) {
+    if (!entry) return 0;
+    if (entry->key_ref) {
+        return property_key_hash(entry->key_ref);
+    }
+    return typemap_shape_entry_name_hash(entry);
 }
 
 static inline bool typemap_ptr_is_plausible(void* p) {
@@ -522,28 +547,64 @@ static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expecte
     }
 }
 
-static inline bool typemap_shape_name_equals_id(ShapeEntry* e, const char* key,
-        int key_len, uint32_t key_id) {
+static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key,
+        int key_len, uint32_t key_hash) {
     if (!e || !e->name || !e->name->str || !key || key_len < 0) return false;
-    uint32_t entry_id = typemap_shape_entry_name_id(e);
-    if (entry_id != 0 && key_id != 0 && entry_id != key_id) return false;
+    // A byte lookup is an explicitly non-canonical boundary.  It must never
+    // discover a symbol/private entry merely because its diagnostic bytes match.
+    if (e->key_ref && property_key_requires_identity(e->key_ref)) return false;
+    uint32_t entry_hash = typemap_shape_entry_name_hash(e);
+    if (entry_hash != 0 && key_hash != 0 && entry_hash != key_hash) return false;
     if (e->name->str == key && e->name->length == (size_t)key_len) return true;
     return e->name->length == (size_t)key_len &&
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
+static inline bool typemap_shape_key_equals(ShapeEntry* entry, PropertyKeyRef key) {
+    if (!entry || !key) return false;
+    if (entry->key_ref) {
+        // Runtime shapes must not fall back to spelling equality: an ordinary
+        // key was canonicalized before shape publication just like SYMBOL/PRIVATE.
+        return property_key_equal(entry->key_ref, key);
+    }
+    if (property_key_requires_identity(key)) return false;
+    return entry->name && typemap_shape_name_equals_hash(entry, key->chars,
+        (int)key->len, typemap_name_hash(key->chars, (int)key->len));
+}
+
+static inline bool typemap_shape_entries_equal(ShapeEntry* left, ShapeEntry* right) {
+    if (!left || !right) return false;
+    if (left->key_ref && right->key_ref) {
+        return property_key_equal(left->key_ref, right->key_ref);
+    }
+    if (left->key_ref || right->key_ref) {
+        PropertyKeyRef runtime_key = left->key_ref ? left->key_ref : right->key_ref;
+        ShapeEntry* input_entry = left->key_ref ? right : left;
+        if (property_key_requires_identity(runtime_key)) return false;
+        // Input shapes intentionally have no key_ref. An ordinary runtime key
+        // must merge with that byte-owned field instead of creating a stale slot.
+        return input_entry->name && typemap_shape_name_equals_hash(input_entry,
+            runtime_key->chars, (int)runtime_key->len,
+            property_key_hash(runtime_key));
+    }
+    if (!left->name || !right->name) return left->name == right->name;
+    return typemap_shape_name_equals_hash(left, right->name->str,
+        (int)right->name->length,
+        typemap_name_hash(right->name->str, (int)right->name->length));
+}
+
 static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
-    return typemap_shape_name_equals_id(e, key, key_len, typemap_name_id(key, key_len));
+    return typemap_shape_name_equals_hash(e, key, key_len, typemap_name_hash(key, key_len));
 }
 
 // Canonical shape-chain lookup. Keeps last-writer-wins semantics for duplicate
 // names and covers entries that were not inserted into the fixed inline hash.
-static inline ShapeEntry* typemap_shape_lookup_last_by_id(TypeMap* tm,
-        const char* key, int key_len, uint32_t key_id) {
+static inline ShapeEntry* typemap_shape_lookup_last_by_hash(TypeMap* tm,
+        const char* key, int key_len, uint32_t key_hash) {
     if (!tm) return NULL;
     ShapeEntry* found = NULL;
     for (ShapeEntry* e = tm->shape; e; e = e->next) {
-        if (typemap_shape_name_equals_id(e, key, key_len, key_id)) {
+        if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             found = e;
         }
     }
@@ -551,7 +612,16 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_id(TypeMap* tm,
 }
 
 static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key, int key_len) {
-    return typemap_shape_lookup_last_by_id(tm, key, key_len, typemap_name_id(key, key_len));
+    return typemap_shape_lookup_last_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
+}
+
+static inline ShapeEntry* typemap_shape_lookup_key_last(TypeMap* tm, PropertyKeyRef key) {
+    if (!tm || !key) return NULL;
+    ShapeEntry* found = NULL;
+    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+        if (typemap_shape_key_equals(entry, key)) found = entry;
+    }
+    return found;
 }
 
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
@@ -561,7 +631,7 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     ShapeEntry** slots = typemap_hash_slots(tm);
     int capacity = typemap_hash_capacity(tm);
     if (!slots || capacity <= 0) return;
-    uint32_t h = typemap_shape_entry_name_id(entry);
+    uint32_t h = typemap_shape_entry_key_hash(entry);
     uint32_t idx = h & ((uint32_t)capacity - 1);
     for (int probe = 0; probe < capacity; probe++) {
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
@@ -571,9 +641,9 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
             tm->field_count++;
             return;
         }
-        // last-writer-wins: replace existing entry with same name
-        if (typemap_shape_name_equals(slots[slot],
-                                      entry->name->str, (int)entry->name->length)) {
+        // last-writer-wins applies to the definitive property identity, not
+        // to diagnostics bytes shared by two Symbols or private names.
+        if (typemap_shape_entries_equal(slots[slot], entry)) {
             slots[slot] = entry;
             return;
         }
@@ -616,21 +686,21 @@ static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Poo
 // Returns the ShapeEntry or NULL if not found.
 // A6: Uses pointer comparison first (interned strings via name pool share
 // the same char* pointer), falling back to memcmp only on pointer mismatch.
-static inline ShapeEntry* typemap_hash_lookup_by_id(TypeMap* tm, const char* key,
-        int key_len, uint32_t key_id) {
+static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* key,
+        int key_len, uint32_t key_hash) {
     if (!tm || !key || key_len < 0) return NULL;
-    if (key_id == 0) key_id = typemap_name_id(key, key_len);
+    if (key_hash == 0) key_hash = typemap_name_hash(key, key_len);
     int capacity = typemap_hash_capacity(tm);
     ShapeEntry** slots = typemap_hash_slots(tm);
     if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint16_t)capacity) {
-        return typemap_shape_lookup_last_by_id(tm, key, key_len, key_id);
+        return typemap_shape_lookup_last_by_hash(tm, key, key_len, key_hash);
     }
-    uint32_t idx = key_id & ((uint32_t)capacity - 1);
+    uint32_t idx = key_hash & ((uint32_t)capacity - 1);
     for (int probe = 0; probe < capacity; probe++) {
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (typemap_shape_name_equals_id(e, key, key_len, key_id)) {
+        if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             return e;
         }
     }
@@ -638,11 +708,30 @@ static inline ShapeEntry* typemap_hash_lookup_by_id(TypeMap* tm, const char* key
 }
 
 static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
-    return typemap_hash_lookup_by_id(tm, key, key_len, typemap_name_id(key, key_len));
+    return typemap_hash_lookup_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
+}
+
+static inline ShapeEntry* typemap_hash_lookup_key(TypeMap* tm, PropertyKeyRef key) {
+    if (!tm || !key) return NULL;
+    uint32_t key_hash = property_key_hash(key);
+    int capacity = typemap_hash_capacity(tm);
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    if (!slots || capacity <= 0 || tm->field_count == 0 ||
+            tm->field_count >= (uint16_t)capacity) {
+        return typemap_shape_lookup_key_last(tm, key);
+    }
+    uint32_t index = key_hash & ((uint32_t)capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        ShapeEntry* entry = slots[(index + (uint32_t)probe) & ((uint32_t)capacity - 1)];
+        if (!entry) return NULL;
+        if (typemap_shape_key_equals(entry, key)) return entry;
+    }
+    return NULL;
 }
 
 typedef struct TypeElmt : TypeMap {
     StrView name;  // local name of the element
+    NameId name_id;  // generated element identity; NAME_ID_NONE for custom names.
     int64_t content_length;  // no. of content items, needed for element type
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;

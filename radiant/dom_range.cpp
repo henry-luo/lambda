@@ -18,7 +18,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
-#include "view.hpp"  // For HTM_TAG_* constants
+#include "view.hpp"  // For MARKUP_NAME_* constants
 #include "render.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -981,19 +981,19 @@ static bool removed_node_is_atomic_selection_boundary(const DomNode* child) {
     if (!child || !child->is_element()) return false;
     const DomElement* elem = child->as_element();
     if (!elem) return false;
-    uintptr_t tag = elem->tag();
-    return tag == HTM_TAG_IFRAME ||
-        tag == HTM_TAG_IMG ||
-        tag == HTM_TAG_HR ||
-        tag == HTM_TAG_INPUT ||
-        tag == HTM_TAG_SELECT ||
-        tag == HTM_TAG_TEXTAREA ||
-        tag == HTM_TAG_VIDEO ||
-        tag == HTM_TAG_CANVAS ||
-        tag == HTM_TAG_EMBED ||
-        tag == HTM_TAG_OBJECT ||
-        tag == HTM_TAG_AUDIO ||
-        tag == HTM_TAG_BUTTON;
+    NameId tag = elem->tag();
+    return tag == MARKUP_NAME_IFRAME ||
+        tag == MARKUP_NAME_IMG ||
+        tag == MARKUP_NAME_HR ||
+        tag == MARKUP_NAME_INPUT ||
+        tag == MARKUP_NAME_SELECT ||
+        tag == MARKUP_NAME_TEXTAREA ||
+        tag == MARKUP_NAME_VIDEO ||
+        tag == MARKUP_NAME_CANVAS ||
+        tag == MARKUP_NAME_EMBED ||
+        tag == MARKUP_NAME_OBJECT ||
+        tag == MARKUP_NAME_AUDIO ||
+        tag == MARKUP_NAME_BUTTON;
 }
 
 static DomText* last_text_descendant_for_selection(DomNode* node) {
@@ -1874,7 +1874,7 @@ static bool tag_is_block(const char* tag) {
 }
 
 // Forward decl: defined after CSS lookup helpers below.
-static CssEnum effective_keyword(const DomElement* e, CssPropertyId prop);
+static CssEnum effective_keyword(const DomElement* e, CssPropertyCode prop);
 
 // Find the nearest ancestor element (or self) that is a block-level element.
 static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
@@ -1976,7 +1976,7 @@ char* dom_range_to_string(const DomRange* r) {
 // Look up a single CSS keyword on this element's specified style. Returns the
 // CssEnum keyword or 0 if the property is not declared (or its value isn't a
 // keyword). Walks no ancestors; the cascade is built by the caller below.
-static CssEnum specified_keyword(const DomElement* e, CssPropertyId prop) {
+static CssEnum specified_keyword(const DomElement* e, CssPropertyCode prop) {
     if (!e || !e->specified_style || !e->specified_style->tree) return (CssEnum)0;
     AvlNode* n = avl_tree_search(e->specified_style->tree, prop);
     if (!n) return (CssEnum)0;
@@ -1995,7 +1995,7 @@ static CssEnum specified_keyword(const DomElement* e, CssPropertyId prop) {
 // the rendered-stringify CSS visibility classifier so the test
 // `script-and-style-elements.html` can detect `style { display: block }`
 // without forcing a full layout.
-static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
+static CssEnum cascaded_keyword(const DomElement* e, CssPropertyCode prop) {
     if (!e || !e->doc) return (CssEnum)0;
     DomDocument* doc = e->doc;
     if (!doc->stylesheets || doc->stylesheet_count <= 0) return (CssEnum)0;
@@ -2041,7 +2041,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
             if (matched_pseudo != PSEUDO_ELEMENT_NONE) continue;
             for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
                 CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                if (!decl || decl->property_id != prop) continue;
+                if (!decl || decl->property_code != prop) continue;
                 if (!decl->value || decl->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
                 if (!best || css_specificity_compare(match_spec, best_spec) >= 0) {
                     best = decl;
@@ -2055,7 +2055,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
 
 // `specified_keyword` first; if absent, fall back to a one-shot cascade
 // lookup over the document's stylesheets.
-static CssEnum effective_keyword(const DomElement* e, CssPropertyId prop) {
+static CssEnum effective_keyword(const DomElement* e, CssPropertyCode prop) {
     CssEnum kw = specified_keyword(e, prop);
     if (kw != 0) return kw;
     return cascaded_keyword(e, prop);
@@ -2434,8 +2434,8 @@ bool dom_selection_user_select_all_range_for_node(DomNode* node,
                                                   out_start, out_end);
 }
 
-static bool triple_click_cell_tag(uintptr_t tag) {
-    return tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+static bool triple_click_cell_tag(NameId tag) {
+    return tag == MARKUP_NAME_TD || tag == MARKUP_NAME_TH;
 }
 
 static DomElement* nearest_triple_click_cell(DomNode* node) {
@@ -2445,7 +2445,7 @@ static DomElement* nearest_triple_click_cell(DomNode* node) {
         DomElement* elem = cur->as_element();
         if (!elem) continue;
         if (triple_click_cell_tag(elem->tag())) return elem;
-        if (elem->tag() == HTM_TAG_TR || elem->tag() == HTM_TAG_TABLE) {
+        if (elem->tag() == MARKUP_NAME_TR || elem->tag() == MARKUP_NAME_TABLE) {
             return nullptr;
         }
     }
@@ -2465,16 +2465,16 @@ bool dom_selection_triple_click_range_for_node(DomNode* node,
 // True iff the HTML UA stylesheet implicitly sets `white-space: pre` on this
 // element by virtue of its tag (`<pre>`, `<listing>`, `<xmp>`, `<plaintext>`,
 // `<textarea>`). Mirrors the layout-time defaults applied in
-// resolve_htm_style.cpp HTM_TAG_PRE/LISTING/XMP and the textarea / plaintext
+// resolve_htm_style.cpp MARKUP_NAME_PRE/LISTING/XMP and the textarea / plaintext
 // behavior baked into the parser.
 static bool tag_implies_white_space_pre(const DomElement* e) {
     if (!e) return false;
     switch ((int)e->tag_id) {
-        case HTM_TAG_PRE:
-        case HTM_TAG_LISTING:
-        case HTM_TAG_XMP:
-        case HTM_TAG_PLAINTEXT:
-        case HTM_TAG_TEXTAREA:
+        case MARKUP_NAME_PRE:
+        case MARKUP_NAME_LISTING:
+        case MARKUP_NAME_XMP:
+        case MARKUP_NAME_PLAINTEXT:
+        case MARKUP_NAME_TEXTAREA:
             return true;
         default:
             return false;

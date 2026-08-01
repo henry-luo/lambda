@@ -619,6 +619,32 @@ struct JsRuntimeOperationState {
     HashMap* symbol_description_registry = NULL;
 };
 
+// Generated records are process-pinned, but the table is realm-owned so hot
+// paths never resolve a catalog ID repeatedly and future realm policy stays
+// out of mutable process-global state.
+struct JsWellKnownRefs {
+    PropertyKeyRef constructor = NULL;
+    PropertyKeyRef prototype = NULL;
+    PropertyKeyRef name = NULL;
+    PropertyKeyRef to_string = NULL;
+    PropertyKeyRef value_of = NULL;
+    PropertyKeyRef symbol_iterator = NULL;
+    PropertyKeyRef symbol_to_primitive = NULL;
+    PropertyKeyRef symbol_has_instance = NULL;
+    PropertyKeyRef symbol_to_string_tag = NULL;
+    PropertyKeyRef symbol_async_iterator = NULL;
+    PropertyKeyRef symbol_species = NULL;
+    PropertyKeyRef symbol_match = NULL;
+    PropertyKeyRef symbol_replace = NULL;
+    PropertyKeyRef symbol_search = NULL;
+    PropertyKeyRef symbol_split = NULL;
+    PropertyKeyRef symbol_unscopables = NULL;
+    PropertyKeyRef symbol_is_concat_spreadable = NULL;
+    PropertyKeyRef symbol_match_all = NULL;
+    PropertyKeyRef symbol_async_dispose = NULL;
+    PropertyKeyRef symbol_dispose = NULL;
+};
+
 struct JsDiagnosticsChannelState {
     Item channel_names[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
     Item channels[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
@@ -792,6 +818,7 @@ struct JsGeneratorStateRecord {
     bool started = false;
     bool executing = false;
     bool is_async = false;
+    Item private_home_class = {};
     Item delegate = {};
     int64_t delegate_resume = -1;
     int delegate_idx = 0;
@@ -974,6 +1001,7 @@ struct JsRuntimeState {
     JsIteratorState iterators = {};
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
+    JsWellKnownRefs well_known = {};
     JsDiagnosticsChannelState diagnostics_channels = {};
     JsAsyncHooksState async_hooks = {};
     JsPromiseRuntimeState promises = {};

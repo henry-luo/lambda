@@ -7,6 +7,9 @@
 #include "../lambda/core/name_pool.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/core/well_known_markup_names.h"
+#include "../lambda/core/well_known_lambda_names.h"
+#include "../lambda/js/js_well_known_names.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
 #include "../lib/test_utils.h"
@@ -36,6 +39,127 @@ TEST_F(NamePoolTest, BasicNameCreation) {
     EXPECT_EQ(name1, name2);
     EXPECT_STREQ(name1->chars, "element");
     EXPECT_EQ(name1->len, 7);
+    EXPECT_TRUE(string_is_pooled(name1));
+    EXPECT_FALSE(name1->is_buffer);
+    EXPECT_EQ(name_ref_meta(name1)->hash, typemap_name_hash("element", 7));
+    EXPECT_EQ(name_ref_id(name1), NAME_ID_NONE);
+    EXPECT_TRUE(name_pool_verify(name_pool));
+
+    name_pool_release(name_pool);
+}
+
+TEST_F(NamePoolTest, NameRecordClassifiesArrayIndexesAndUniqueKeys) {
+    NamePool* name_pool = name_pool_create(pool, nullptr);
+    ASSERT_NE(name_pool, nullptr);
+
+    String* index = name_pool_create_name(name_pool, "4294967294");
+    String* overflow = name_pool_create_name(name_pool, "4294967295");
+    ASSERT_NE(index, nullptr);
+    ASSERT_NE(overflow, nullptr);
+    EXPECT_EQ(property_key_array_index(index), 0xFFFFFFFEu);
+    EXPECT_EQ(property_key_array_index(overflow), NAME_ARRAY_INDEX_NONE);
+
+    PropertyKeyRef first = name_pool_create_unique_symbol(name_pool, {"same", 4});
+    PropertyKeyRef second = name_pool_create_unique_symbol(name_pool, {"same", 4});
+    PropertyKeyRef private_key = name_pool_create_unique_private(name_pool, {"same", 4});
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(private_key, nullptr);
+    EXPECT_NE(first, second);
+    EXPECT_FALSE(property_key_equal(first, second));
+    EXPECT_EQ(property_key_kind(first), NAME_KEY_SYMBOL);
+    EXPECT_EQ(property_key_kind(private_key), NAME_KEY_PRIVATE);
+    EXPECT_NE(property_key_hash(first), property_key_hash(second));
+    EXPECT_NE(property_key_hash(first), property_key_hash(private_key));
+    EXPECT_EQ(property_key_array_index(first), NAME_ARRAY_INDEX_NONE);
+    EXPECT_TRUE(string_is_pooled(first));
+    EXPECT_FALSE(first->is_buffer);
+
+    name_pool_release(name_pool);
+}
+
+TEST_F(NamePoolTest, GeneratedNamesArePinnedAndSharedAcrossPools) {
+    NamePool* first_pool = name_pool_create(pool, nullptr);
+    NamePool* second_pool = name_pool_create(pool, nullptr);
+    ASSERT_NE(first_pool, nullptr);
+    ASSERT_NE(second_pool, nullptr);
+
+    String* first = name_pool_create_name(first_pool, "div");
+    String* second = name_pool_create_name(second_pool, "div");
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first, second);
+    EXPECT_EQ(name_ref_id(first), MARKUP_NAME_DIV);
+    EXPECT_EQ(well_known_name_id({"div", 3}), MARKUP_NAME_DIV);
+    StrView spelling = well_known_name_view(MARKUP_NAME_DIV);
+    EXPECT_EQ(spelling.length, 3u);
+    EXPECT_EQ(memcmp(spelling.str, "div", 3), 0);
+    EXPECT_EQ(well_known_key_ref(MARKUP_NAME_DIV), first);
+    EXPECT_EQ(name_pool_count(first_pool), 0u);
+    EXPECT_EQ(name_pool_lookup(second_pool, "div"), first);
+
+    name_pool_release(second_pool);
+    name_pool_release(first_pool);
+}
+
+TEST_F(NamePoolTest, GeneratedNameSurvivesCallerPoolTeardown) {
+    NameRef pinned = nullptr;
+    {
+        Pool* short_lived = pool_create();
+        ASSERT_NE(short_lived, nullptr);
+        NamePool* names = name_pool_create(short_lived, nullptr);
+        ASSERT_NE(names, nullptr);
+        pinned = name_pool_create_name(names, "html");
+        ASSERT_NE(pinned, nullptr);
+        name_pool_release(names);
+        pool_destroy(short_lived);
+    }
+    EXPECT_TRUE(string_is_pooled(pinned));
+    EXPECT_EQ(name_ref_id(pinned), MARKUP_NAME_HTML);
+    EXPECT_EQ(memcmp(pinned->chars, "html", 4), 0);
+}
+
+TEST_F(NamePoolTest, GeneratedCatalogRecordsRoundTripAndPreserveKinds) {
+    struct Catalog {
+        const WellKnownNameRecord* records;
+        size_t count;
+    } catalogs[] = {
+        {g_well_known_markup_names, g_well_known_markup_name_count},
+        {g_well_known_lambda_names, g_well_known_lambda_name_count},
+        {g_well_known_js_names, g_well_known_js_name_count},
+    };
+
+    for (const Catalog& catalog : catalogs) {
+        for (size_t index = 0; index < catalog.count; index++) {
+            const WellKnownNameRecord* record = &catalog.records[index];
+            NameRef ref = well_known_name_ref(record->meta.predefined_id);
+            ASSERT_NE(ref, nullptr);
+            EXPECT_TRUE(string_is_pooled(ref));
+            EXPECT_FALSE(ref->is_buffer);
+            EXPECT_EQ(name_ref_meta_const(ref), &record->meta);
+            EXPECT_EQ(name_ref_id(ref), record->meta.predefined_id);
+            EXPECT_EQ(property_key_kind(ref), record->meta.key_kind);
+            EXPECT_EQ(well_known_name_id({record->chars, record->len}),
+                      record->meta.predefined_id);
+        }
+    }
+
+    EXPECT_EQ(property_key_kind(well_known_key_ref(JS_SYMBOL_ITERATOR)), NAME_KEY_SYMBOL);
+    EXPECT_EQ(property_key_kind(well_known_key_ref(JS_NAME_CONSTRUCTOR)), NAME_KEY_STRING);
+}
+
+TEST_F(NamePoolTest, OrdinaryStringCannotAliasWellKnownSymbolRecord) {
+    NamePool* name_pool = name_pool_create(pool, nullptr);
+    ASSERT_NE(name_pool, nullptr);
+
+    String* ordinary = name_pool_create_name(name_pool, "Symbol.iterator");
+    PropertyKeyRef symbol = well_known_key_ref(JS_SYMBOL_ITERATOR);
+    ASSERT_NE(ordinary, nullptr);
+    ASSERT_NE(symbol, nullptr);
+    EXPECT_NE(ordinary, symbol);
+    EXPECT_EQ(property_key_kind(ordinary), NAME_KEY_STRING);
+    EXPECT_EQ(property_key_kind(symbol), NAME_KEY_SYMBOL);
+    EXPECT_EQ(ordinary->len, symbol->len);
+    EXPECT_EQ(memcmp(ordinary->chars, symbol->chars, ordinary->len), 0);
 
     name_pool_release(name_pool);
 }
