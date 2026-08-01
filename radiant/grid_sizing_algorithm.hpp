@@ -166,6 +166,7 @@ inline void flush_planned_base_size_increases(TrackArray& tracks) {
 struct GridItemContribution {
     float min_content_contribution;    // Item's min-content size in this axis (actual text min-content)
     float max_content_contribution;    // Item's max-content size in this axis
+    float minimum_contribution;        // Item's automatic minimum after overflow and explicit min-size rules
     size_t track_start;                // First track index spanned (0-based)
     size_t track_span;                 // Number of tracks spanned
     bool crosses_flexible_track;       // Whether item spans any flexible (fr) track
@@ -547,7 +548,9 @@ inline void resolve_intrinsic_track_sizes(
     TrackArray& tracks,
     ContribArray& contributions,
     float gap,
-    float axis_inner_size = -1.0f
+    float axis_inner_size = -1.0f,
+    bool is_min_content_constraint = false,
+    bool is_max_content_constraint = false
 ) {
     if (contributions.empty() || tracks.empty()) return;
 
@@ -577,8 +580,10 @@ inline void resolve_intrinsic_track_sizes(
         // tracks at all. In that case, use max-content in Phase 1 so the track reaches its
         // correct size. This handles degenerate minmax(max-content, min-content) tracks
         // where the effective sizing IS max-content but Phase 2 won't fire.
-        float minimum_contribution = contrib.is_scroll_container ? 0.0f : contrib.min_content_contribution;
-        float p1_contrib = minimum_contribution;
+        // Under an intrinsic constraint, auto minimum tracks use the item's
+        // limited min-content contribution; otherwise they use its minimum contribution.
+        float p1_contrib = (is_min_content_constraint || is_max_content_constraint)
+            ? contrib.min_content_contribution : contrib.minimum_contribution;
         {
             size_t p1_end = grid_min_value(contrib.track_start + contrib.track_span, tracks.size());
             bool all_max_content_min = true;
@@ -713,7 +718,9 @@ inline void resolve_intrinsic_track_sizes(
 
         size_t end = grid_min_value(contrib.track_start + contrib.track_span, tracks.size());
 
-        if (contrib.is_scroll_container) {
+        if (contrib.is_scroll_container && is_max_content_constraint) {
+            // Under a max-content constraint, auto minimum tracks also receive
+            // limited max-content. A min-content constraint must leave its free space zero.
             // For scroll containers: two distributions in Phase 2b:
             //
             // (A) Distribute limited_max_content to auto-min/not-min-content-MAX tracks.
@@ -765,14 +772,11 @@ inline void resolve_intrinsic_track_sizes(
                 }
             }
 
-            // --- Part (B): Step 2.3 max-content minimums for MaxContent MIN tracks ---
-            distribute_max_content_minimum(tracks, contrib, end, gap);
-
-        } else {
-            // For non-scroll containers: §11.5 step 2.3 — distribute max_content
-            // to tracks with a max-content MIN sizing function.
-            distribute_max_content_minimum(tracks, contrib, end, gap);
         }
+
+        // CSS Grid §12.5 step 2.3 applies to max-content minimum tracks in every
+        // sizing mode; the scroll-container exception above applies only to auto minimums.
+        distribute_max_content_minimum(tracks, contrib, end, gap);
     }
 
     // §11.5 Step 2.4: Intrinsic maximums — increase growth_limit for intrinsic MAX tracks.
@@ -855,18 +859,15 @@ inline void resolve_intrinsic_track_sizes(
             });
         }
 
-        // Step 2.5: Max-content maximums — distribute max-content to max-content/auto MAX tracks
-        // Per CSS Grid §11.5: targets tracks with max-content or auto max sizing function.
-        // Note: Auto MAX is also spec-eligible but for scroll containers with only spanning
-        // items, including Auto gives empty auto tracks finite gl that maximize inflates.
-        // Only include Auto MAX for non-scroll-container items.
+        // Step 2.5: Max-content maximums — distribute max-content to max-content/auto MAX tracks.
+        // Scroll containment changes the automatic minimum contribution, not the
+        // max-content contribution used to establish auto track growth limits.
         {
             float extra = contrib.max_content_contribution - effective_gl_sum();
-            bool include_auto = !contrib.is_scroll_container;
-            distribute_to_gl(extra, [include_auto](const EnhancedGridTrack& t) {
+            distribute_to_gl(extra, [](const EnhancedGridTrack& t) {
                 auto mt = t.max_track_sizing_function.type;
                 if (mt == SizingFunctionType::MaxContent) return true;
-                if (include_auto && mt == SizingFunctionType::Auto) return true;
+                if (mt == SizingFunctionType::Auto) return true;
                 return false;
             });
         }
@@ -1056,8 +1057,11 @@ inline void resolve_intrinsic_track_sizes(
 inline void maximize_tracks(
     TrackArray& tracks,
     float axis_inner_size,
-    float axis_available_space
+    float axis_available_space,
+    bool is_min_content_constraint = false
 ) {
+    // CSS Grid §12.6 gives a min-content-constrained grid zero free space.
+    if (is_min_content_constraint) return;
     // CSS Grid §11.6: Maximize Tracks.
     // When the container is indefinite (intrinsic sizing), we are computing the grid's
     // max-content size. Every non-flex track with a finite growth limit should be grown
@@ -1142,8 +1146,11 @@ inline void expand_flexible_tracks(
     float axis_available_space,
     const ContribArray& contributions = ContribArray(),
     float gap = 0.0f,
-    float* out_intrinsic_total = nullptr
+    float* out_intrinsic_total = nullptr,
+    bool is_min_content_constraint = false
 ) {
+    // CSS Grid §12.7 fixes the used flex fraction at zero under this constraint.
+    if (is_min_content_constraint) return;
     // If no flexible tracks, nothing to do
     float flex_factor_sum = 0.0f;
     for (const auto& track : tracks) {

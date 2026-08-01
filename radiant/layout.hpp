@@ -198,8 +198,21 @@ struct TextIntrinsicWidths {
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
-float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width);
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
+                                   bool ignore_definite_block_size = false);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
+
+bool layout_element_inline_axis_is_vertical(DomElement* element);
+CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
+                                                            bool horizontal);
+CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
+                                                                   bool horizontal,
+                                                                   bool minimum);
+CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
+CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
+CssEnum layout_intrinsic_max_size_keyword(ViewBlock* block, bool horizontal);
+float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
+                                            float max_size, float available_outer_size);
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
@@ -223,7 +236,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     float available_width,
                                     float line_height,
                                     CssEnum text_transform = CSS_VALUE_NONE,
-                                    CssEnum font_variant = CSS_VALUE_NONE);
+                                    CssEnum font_variant = CSS_VALUE_NONE,
+                                    bool preserve_forced_line_breaks = false);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
@@ -285,7 +299,10 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 float layout_preferred_aspect_ratio(ViewBlock* block);
+float layout_used_preferred_aspect_ratio(ViewBlock* block);
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
+bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
+CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
 
 namespace radiant {
 
@@ -526,6 +543,12 @@ float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizin
 float layout_floor_border_box_width(ViewBlock* block, float border_width);
 float layout_floor_border_box_height(ViewBlock* block, float border_height);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margin_box_size,
+                                         bool horizontal);
+float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_box_size,
+                                       bool horizontal);
+void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin_box_size,
+                                        bool available_size_is_definite, bool horizontal);
 
 static inline CssEnum layout_box_sizing(ViewBlock* block) {
     return (block && block->blk) ? block->block()->box_sizing : CSS_VALUE_CONTENT_BOX;
@@ -538,6 +561,9 @@ static inline bool layout_uses_border_box(ViewBlock* block) {
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
+float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspect_ratio,
+                                                   float* content_width, float* content_height);
 float layout_clamp_min_max_width(ViewBlock* block, float width);
 float layout_clamp_min_max_height(ViewBlock* block, float height);
 
@@ -1127,6 +1153,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 
 bool is_multicol_container(ViewBlock* block);
 float multicol_normal_gap_size(ViewBlock* block);
+float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
@@ -1494,6 +1521,10 @@ typedef struct FlexContainerLayout : FlexProp {
     // and flex-grow should NOT distribute additional space
     bool main_axis_is_indefinite;
 
+    // A min-size can enlarge the used flex container without making its
+    // automatic main size a definite percentage basis for descendants.
+    bool main_axis_available_size_is_definite;
+
     // CSS Flexbox §9.4: Whether container has a definite cross size
     // True if container has explicit CSS height (row flex) or width (column flex)
     // False for auto-size containers that derive cross size from content
@@ -1505,6 +1536,9 @@ typedef struct FlexContainerLayout : FlexProp {
     // pass-local flex state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } FlexContainerLayout;
+
+bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* flex_layout);
+bool flex_item_has_content_flex_basis(ViewElement* item);
 
 // ============================================================================
 // Layout Axis Helpers
@@ -1918,6 +1952,8 @@ typedef struct GridContainerLayout : GridProp {
     float content_height;
     bool has_explicit_height;
     bool is_shrink_to_fit_width;
+    bool is_min_content_width;
+    bool is_max_content_width;
     float row_intrinsic_height;
     struct LayoutContext* lycon;
     bool auto_fit_columns[64];
@@ -2063,6 +2099,14 @@ bool layout_apply_deferred_percentage(float percent, float percentage_base, floa
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
 float layout_block_given_content_size(ViewBlock* block, bool horizontal);
 float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal);
+bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
+bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
+bool layout_block_has_automatic_height(ViewBlock* block);
+WritingMode layout_block_writing_mode(ViewBlock* block);
+bool layout_block_inline_axis_is_vertical(ViewBlock* block);
+bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal);
+float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal);
+float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 
@@ -2554,6 +2598,31 @@ struct BlockContextScope {
     // Non-copyable
     BlockContextScope(const BlockContextScope&) = delete;
     BlockContextScope& operator=(const BlockContextScope&) = delete;
+};
+
+/**
+ * Scoped percentage containing block for nested style or intrinsic queries.
+ *
+ * Style resolution persists used percentage values in the view, so a nested
+ * query must expose its real containing block rather than an ancestor context.
+ */
+// tier-3: layout-transient, valid within pass
+struct PercentageContainingBlockWidthScope {
+    LayoutContext* lycon;
+    BlockContext* saved_parent;
+    BlockContext containing_block;
+
+    PercentageContainingBlockWidthScope(LayoutContext* l, float content_width)
+        : lycon(l), saved_parent(l->block.parent), containing_block{} {
+        if (saved_parent) containing_block = *saved_parent;
+        containing_block.content_width = content_width;
+        lycon->block.parent = &containing_block;
+    }
+    ~PercentageContainingBlockWidthScope() {
+        lycon->block.parent = saved_parent;
+    }
+    PercentageContainingBlockWidthScope(const PercentageContainingBlockWidthScope&) = delete;
+    PercentageContainingBlockWidthScope& operator=(const PercentageContainingBlockWidthScope&) = delete;
 };
 
 /**

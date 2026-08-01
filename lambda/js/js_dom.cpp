@@ -14322,6 +14322,23 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
     return ItemNull;
 }
 
+static void js_dom_clone_content_attributes(DomElement* source, DomElement* clone) {
+    if (!source || !clone || source->is_synthetic()) return;
+
+    int attr_count = 0;
+    const char** attr_names = source->attribute_names(&attr_count);
+    for (int attr_index = 0; attr_index < attr_count; attr_index++) {
+        const char* name = attr_names[attr_index];
+        const char* value = source->get_attribute(name);
+        if (value) {
+            clone->set_attribute(name, value);
+        } else if (source->has_attribute(name)) {
+            // Boolean markup attributes have presence but no string payload.
+            clone->set_attribute(name, "");
+        }
+    }
+}
+
 extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
@@ -14332,15 +14349,7 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
     Item _clean_elem = _clone_builder.element(elem->tag_name).final();
     DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
     if (!clone) return ItemNull;
-    if (!elem->is_synthetic()) {
-        int attr_count = 0;
-        const char** attr_names = elem->attribute_names(&attr_count);
-        for (int _ai = 0; _ai < attr_count; _ai++) {
-            const char* aname = attr_names[_ai];
-            const char* aval  = elem->get_attribute(aname);
-            if (aval) clone->set_attribute(aname, aval);
-        }
-    }
+    js_dom_clone_content_attributes(elem, clone);
     Item orig_expando = expando_get_map((DomNode*)elem);
     if (orig_expando.item != ITEM_NULL) {
         Item clone_expando = expando_get_or_create_map((DomNode*)clone);
@@ -15255,16 +15264,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         Item _clean_elem = _clone_builder.element(elem->tag_name).final();
         DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
         if (!clone) return ItemNull;
-        // copy all content attributes from original to clone (per DOM spec §4.6)
-        if (!elem->is_synthetic()) {
-            int attr_count = 0;
-            const char** attr_names = elem->attribute_names(&attr_count);
-            for (int _ai = 0; _ai < attr_count; _ai++) {
-                const char* aname = attr_names[_ai];
-                const char* aval  = elem->get_attribute(aname);
-                if (aval) clone->set_attribute(aname, aval);
-            }
-        }
+        // Copy all content attributes from original to clone (DOM §4.6).
+        js_dom_clone_content_attributes(elem, clone);
         // also copy IDL-set attributes stored in expando that may not be in
         // Lambda backing yet (e.g. ele.type="url" on a fresh createElement)
         {

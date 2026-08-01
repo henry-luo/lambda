@@ -530,6 +530,14 @@ static int css_keyword_compare(const void *a, const void *b, void *udata) {
 CssEnum css_enum_by_name(const char* name) {
     if (!name) return CSS_VALUE__UNDEF;
 
+    // the legacy WebKit spelling is a CSS Sizing `stretch` alias; leaving it
+    // custom discards the sizing declaration before layout can resolve it.
+    static const char webkit_fill_available[] = "-webkit-fill-available";
+    if (str_icmp(name, strlen(name), webkit_fill_available,
+                 sizeof(webkit_fill_available) - 1) == 0) {
+        return CSS_VALUE_STRETCH;
+    }
+
     static HashMap* keyword_cache = NULL;
 
     // initialize hashmap on first use

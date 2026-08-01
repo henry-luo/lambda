@@ -68,6 +68,16 @@ static FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node, cons
     return run;
 }
 
+static void flex_store_intrinsic_sizes(ViewElement* item, float min_width, float max_width,
+                                       float min_height, float max_height) {
+    item->fi->intrinsic_width.min_content = min_width;
+    item->fi->intrinsic_width.max_content = max_width;
+    item->fi->has_intrinsic_width = true;
+    item->fi->intrinsic_height.min_content = min_height;
+    item->fi->intrinsic_height.max_content = max_height;
+    item->fi->has_intrinsic_height = true;
+}
+
 static bool css_flex_direction_keyword_is_row(CssEnum direction, bool* recognized) {
     if (recognized) *recognized = true;
     if (direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE) {
@@ -542,12 +552,21 @@ static float flex_measure_normal_line_height_for_font(LayoutContext* lycon,
     return fallback;
 }
 
-static float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width) {
+static float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
+                                               float percentage_containing_width = -1.0f) {
     if (!lycon || !node) return 0.0f;
     ViewBlock* block = node->is_element() ? lam::view_as_block(node->as_element()) : NULL;
     if (!block) return calculate_max_content_height(lycon, node, width);
 
     AvailableSpace available = AvailableSpace::make_width_definite(width);
+    if (percentage_containing_width > 0.0f) {
+        // The intrinsic query re-resolves style, so percentages must retain the
+        // flex container's definite cross-size instead of the outer block width.
+        PercentageContainingBlockWidthScope percentage_parent_scope(
+            lycon, percentage_containing_width);
+        IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, available);
+        return sizes.max_content_height;
+    }
     IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, available);
     return sizes.max_content_height;
 }
@@ -1737,6 +1756,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     item->block()->given_width : -1;
                 float explicit_height = (item->blk && item->block_mut()->given_height >= 0) ?
                     item->block()->given_height : -1;
+                float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(
+                    lam::view_as_block(item));
+                float used_aspect_ratio = preferred_aspect_ratio > 0.0f
+                    ? preferred_aspect_ratio : w / h;
 
                 // Also check max-width as constraint
                 float max_width_constraint = layout_positive_max_width_or(
@@ -1747,13 +1770,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     min_width = max_width = explicit_width;
                     min_height = max_height = explicit_height;
                 } else if (explicit_width > 0) {
-                    // Width specified, compute height from aspect ratio
+                    // A definite CSS axis transfers through the preferred ratio;
+                    // using the natural ratio here inflates flex auto-minimums.
                     min_width = max_width = explicit_width;
-                    min_height = max_height = explicit_width * h / w;
+                    min_height = max_height = explicit_width / used_aspect_ratio;
                 } else if (explicit_height > 0) {
-                    // Height specified, compute width from aspect ratio
+                    // Keep intrinsic contributions consistent with normal replaced sizing.
                     min_height = max_height = explicit_height;
-                    min_width = max_width = explicit_height * w / h;
+                    min_width = max_width = explicit_height * used_aspect_ratio;
                 } else if (max_width_constraint > 0 && max_width_constraint < w) {
                     // Max-width constrains the image
                     min_width = max_width = max_width_constraint;
@@ -1778,18 +1802,49 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             min_height = max_height = 0.0f;
         }
 
-        // Store computed intrinsic sizes
-        item->fi->intrinsic_width.min_content = min_width;
-        item->fi->intrinsic_width.max_content = max_width;
-        item->fi->has_intrinsic_width = true;
-
-        item->fi->intrinsic_height.min_content = min_height;
-        item->fi->intrinsic_height.max_content = max_height;
-        item->fi->has_intrinsic_height = true;
+        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
 
         log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%.1fx%.1f", max_width, max_height);
 
         // Restore font before returning
+        if (font_changed) {
+            lycon->font = saved_font;
+        }
+        return;
+    }
+
+    if (is_replaced && elmt_name == MARKUP_NAME_CANVAS) {
+        ViewBlock* block = lam::view_as_block(item);
+        float natural_width = 0.0f;
+        float natural_height = 0.0f;
+        if (block && block->blk &&
+            layout_canvas_natural_size(block, &natural_width, &natural_height) &&
+            natural_width > 0.0f && natural_height > 0.0f) {
+            min_width = max_width = natural_width;
+            min_height = max_height = natural_height;
+
+            bool main_is_horizontal = is_main_axis_horizontal(flex_layout);
+            bool cross_is_horizontal = !main_is_horizontal;
+            CssEnum cross_size_type = cross_is_horizontal
+                ? block->block()->given_width_type : block->block()->given_height_type;
+            if (cross_size_type == CSS_VALUE_STRETCH && flex_layout->has_definite_cross_size) {
+                float stretch_border_size = layout_stretch_fit_border_box_size(
+                    block, flex_layout->cross_axis_size, cross_is_horizontal);
+                float stretch_content_size = layout_content_size_from_border_box(
+                    block, stretch_border_size, cross_is_horizontal);
+                float natural_ratio = natural_width / natural_height;
+                // A definite stretch cross size participates in the canvas's
+                // min-content contribution before Flexbox §4.5 combines suggestions.
+                if (cross_is_horizontal) {
+                    min_width = max_width = stretch_content_size;
+                    min_height = max_height = stretch_content_size / natural_ratio;
+                } else {
+                    min_height = max_height = stretch_content_size;
+                    min_width = max_width = stretch_content_size * natural_ratio;
+                }
+            }
+        }
+        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
         if (font_changed) {
             lycon->font = saved_font;
         }
@@ -2010,20 +2065,25 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             // hardcoded tag-based estimates (e.g. p=36px, h1=32px + artificial margins).
             {
                 float available_width = 10000.0f;
-                // In column flex, text wraps at the container's cross-axis width
-                // (which is the horizontal axis). Use that instead of 10000px so
-                // calculate_max_content_height produces realistic wrapped heights.
+                float percentage_containing_width = -1.0f;
+                // A stretched column-flex item uses the container cross size. A
+                // non-stretch item instead uses its max-content cross size; using
+                // the container width would transfer that arbitrary size through
+                // aspect-ratio into its flex base size.
                 if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
                     flex_layout->cross_axis_size > 0) {
-                    available_width = flex_layout->cross_axis_size;
-                    // Subtract item's own margin from container cross-axis
-                    if (item->bound)
-                        available_width -= item->boundary()->margin.left + item->boundary()->margin.right;
-                    // A column-flex item's auto cross size is the stretched cross
-                    // size constrained by its own min/max-width.  Height
-                    // measurement must use that constrained content width; otherwise
-                    // children such as width:100% images are measured too wide and
-                    // produce an inflated flex base size.
+                    percentage_containing_width = flex_layout->cross_axis_size;
+                    if (flex_item_will_stretch_cross_axis(item, flex_layout)) {
+                        available_width = flex_layout->cross_axis_size;
+                        // Subtract item's own margin from container cross-axis.
+                        if (item->bound) {
+                            available_width -= item->boundary()->margin.left +
+                                item->boundary()->margin.right;
+                        }
+                    } else {
+                        available_width = max_width;
+                    }
+
                     if (item->blk) {
                         if (item->block()->given_width >= 0.0f) {
                             available_width = item->block()->given_width;
@@ -2035,10 +2095,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     if (item->bound) {
                         available_width -= layout_boundary_metrics(item->bound).pad_border_h;
                     }
-                    if (available_width <= 0) available_width = 10000.0f;
+                    if (available_width < 0.0f) available_width = 0.0f;
                 }
                 min_height = max_height = flex_measure_intrinsic_max_height(
-                    lycon, static_cast<DomNode*>(item), available_width);
+                    lycon, static_cast<DomNode*>(item), available_width,
+                    percentage_containing_width);
                 // calculate_max_content_height returns border-box values (includes the
                 // element's own padding+border). Convert back to content-box so all
                 // stored intrinsic sizes are content-box — resolve_flex_item_constraints

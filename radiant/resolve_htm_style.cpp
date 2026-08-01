@@ -324,6 +324,21 @@ static float html_pixel_dimension_or_default(DomNode* element, const char* attri
     return default_value;
 }
 
+bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height) {
+    if (!block || block->tag() != MARKUP_NAME_CANVAS || !out_width || !out_height) {
+        return false;
+    }
+
+    DomElement* element = block->as_element();
+    if (!element) return false;
+
+    // Canvas attributes define its bitmap coordinate space, which remains its
+    // natural size when CSS leaves the corresponding box size automatic.
+    *out_width = html_pixel_dimension_or_default(element, "width", 300.0f, true);
+    *out_height = html_pixel_dimension_or_default(element, "height", 150.0f, true);
+    return true;
+}
+
 static void apply_html_replaced_pixel_size(LayoutContext* lycon, DomNode* element,
                                            ViewBlock* block, float default_width,
                                            float default_height, bool require_digit_start,
@@ -1712,14 +1727,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 DocState* state = (DocState*)lycon->doc->state;
                 form_control_set_disabled(state, block, true);
             }
-            if (block->has_attribute("multiple")) block->form->multiple = 1;
-            // HTML §4.10.7: size attr specifies visible rows in listbox mode
-            const char* size_attr = block->get_attribute("size");
-            if (size_attr) {
-                int size_val = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
-                if (size_val > 0) block->form->select_size = size_val;
-            }
-
             // Count options and find selected index
             int option_count = 0;
             int selected_idx = -1;
@@ -1737,6 +1744,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
             DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
             form_control_set_selected_index(state, (View*)block, init_index);
+        }
+        // Intrinsic measurement can allocate FormControlProp before HTML defaults
+        // resolve, so derive listbox mode from the current markup on every pass.
+        block->form->multiple = block->has_attribute("multiple");
+        block->form->select_size = 0;
+        // HTML §4.10.7: size attr specifies visible rows in listbox mode.
+        const char* size_attr = block->get_attribute("size");
+        if (size_attr) {
+            int size_val = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
+            if (size_val > 0) block->form->select_size = size_val;
         }
         // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
         {

@@ -3510,6 +3510,7 @@ struct SvgIntrinsicSize {
     float aspect_ratio;          // width / height
     bool has_intrinsic_width;
     bool has_intrinsic_height;
+    bool has_intrinsic_aspect_ratio;
 };
 
 // ============================================================================

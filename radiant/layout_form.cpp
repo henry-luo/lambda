@@ -108,10 +108,12 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     float calibrated_char_w = default_content_w / FormDefaults::TEXT_SIZE_CHARS;  // 7.25
 
     float content_w = 0;
-    if (size == FormDefaults::TEXT_SIZE_CHARS) {
-        // Chrome keeps the default text-control `size=20` visual width at the
-        // UA calibrated content width; author font metrics affect text drawing,
-        // but not this default intrinsic control width.
+    bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
+        !form_control_has_specified_font(block);
+    if (uses_ua_default_width) {
+        // Keep the UA calibration only when the control retains the UA font.
+        // With an author font, HTML's `size` is measured in that font's average
+        // character width, including the default value of 20.
         content_w = default_content_w;
     } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
@@ -149,6 +151,11 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
             content_w = content_w * font->font_size / ua_font_size;
         }
+    }
+    if (!uses_ua_default_width && !form->appearance_none) {
+        // Native text controls reserve an inline editing gutter inside the CSS
+        // content box; `appearance:none` removes that UA-only geometry.
+        content_w += FormDefaults::TEXT_SIZE_CONTENT_GUTTER_H;
     }
     form->intrinsic_width = content_w;
 
@@ -328,6 +335,14 @@ float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arro
     return calculated > min_select_width ? calculated : min_select_width;
 }
 
+static float layout_select_listbox_row_height(const FormControlProp* form) {
+    // Empty native listboxes use the compact anonymous-option metric; real
+    // option rows use the 17px metric measured by their option layout.
+    return form && form->option_count == 0
+        ? FormDefaults::SELECT_EMPTY_LISTBOX_ROW_HEIGHT
+        : FormDefaults::SELECT_OPTION_ROW_HEIGHT;
+}
+
 /**
  * Calculate intrinsic size for a select element based on option text.
  * Measures the longest option text using font metrics to determine width.
@@ -398,12 +413,6 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
     bool is_listbox = form->multiple || form->select_size > 1;
     if (is_listbox) {
-        // Native listboxes include each option's inline padding and the select border.
-        float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
-            2.0f * FormDefaults::SELECT_BORDER;
-        float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
-        form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
-
         // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
         int visible_rows;
         if (form->select_size > 0) {
@@ -414,10 +423,21 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             visible_rows = 1;
         }
 
-        // Chrome listbox select: row_height = 17px, border = 1px all sides
-        // border-box height = visible_rows * row_height + top_border + bottom_border
-        const float row_height = 17.0f;
-        form->intrinsic_height = visible_rows * row_height + 2.0f;
+        float row_height = layout_select_listbox_row_height(form);
+        BoxMetrics box = layout_box_metrics(block);
+        if (form->option_count == 0) {
+            // With no option content, the native listbox contributes only its
+            // actual padding and border; it has no themed minimum width.
+            form->intrinsic_width = box.pad_border_h;
+            form->intrinsic_height = visible_rows * row_height + box.pad_border_v;
+        } else {
+            // Native listboxes include each option's inline padding and the select border.
+            float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
+                2.0f * FormDefaults::SELECT_BORDER;
+            float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
+            form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
+            form->intrinsic_height = visible_rows * row_height + 2.0f;
+        }
     } else {
         // Combo box mode
         // CSS `appearance: none` removes the native dropdown arrow; the page
@@ -475,8 +495,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     if (block->blk && block->block_mut()->given_width < 0) {
         block->blk->given_width = form->intrinsic_width;
     }
-    // Always update given_height to match computed intrinsic height (may differ from default)
-    if (block->blk) {
+    // A containment fallback is an already-resolved used height; native listbox
+    // measurement must not overwrite it with the control's automatic height.
+    if (block->blk && block->block_mut()->given_height < 0) {
         block->blk->given_height = form->intrinsic_height;
     }
 }
@@ -627,7 +648,16 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // This ensures the form control's internal text baseline aligns correctly
         // with surrounding inline text, keeping line box height minimal.
         float font_ascender = (font && font->ascender > 0) ? font->ascender : (font ? font->font_size * 0.8f : 13.0f);
-        lycon->block.last_line_ascender = border_top + pad_top + font_ascender;
+        float select_baseline_offset = 0.0f;
+        if (is_single_line_select) {
+            float natural_line_height = FormDefaults::SELECT_HEIGHT - 2.0f;
+            // A definite select height centers its native line box; collapsed
+            // heights retain the baseline of the control's natural line box.
+            select_baseline_offset = max(0.0f,
+                (block->content_height - natural_line_height) * 0.5f);
+        }
+        lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
+            select_baseline_offset;
         lycon->block.last_line_max_ascender = lycon->block.last_line_ascender;
     }
 
@@ -648,8 +678,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         float option_width = block->width - border_left - border_right - block->boundary()->padding.left - block->boundary()->padding.right;
         if (option_width < 0) option_width = 0;
 
-        // row_height matches Chrome's listbox option row (17px per CSS spec / Chrome UA)
-        const float row_height = 17.0f;
+        float row_height = layout_select_listbox_row_height(form);
         // hr margin-top per UA stylesheet: 0.5em (HTML spec §10 / Chrome UA)
         float fs = (font && font->font_size > 0) ? font->font_size : 13.333f;
         const float hr_margin_top = fs * 0.5f;

@@ -202,6 +202,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             }
         }
 
+        // a grid area's final size is the containing block for stretch min/max.
+        // Resolving during intrinsic track sizing incorrectly turns the keyword into 0.
+        layout_resolve_stretch_minmax_axis(item, track_width, true, true);
+        layout_resolve_stretch_minmax_axis(item, track_height, true, false);
+
         // Store track area dimensions and base position for alignment phase
         gi->track_area_width = track_width;
         gi->track_area_height = track_height;
@@ -221,7 +226,10 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
                     ? layout_floor_border_box_width(item, content_width)
                     : layout_border_width_from_content_box(item, content_width);
             } else if (item->block()->given_width > 0) {
-                item_width = item->block()->given_width;
+                // Grid placement uses border-box geometry, while a content-box
+                // `width` declaration stores only its content dimension.
+                item_width = layout_css_size_to_border_box(
+                    item->bound, layout_box_sizing(item), item->block()->given_width, true);
             }
 
             if (!isnan(item->block()->given_height_percent)) {
@@ -231,14 +239,18 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
                     ? layout_floor_border_box_height(item, content_height)
                     : layout_border_height_from_content_box(item, content_height);
             } else if (item->block()->given_height > 0) {
-                item_height = item->block()->given_height;
+                // Grid placement uses border-box geometry, while a content-box
+                // `height` declaration stores only its content dimension.
+                item_height = layout_css_size_to_border_box(
+                    item->bound, layout_box_sizing(item), item->block()->given_height, false);
             }
         }
 
-        // apply min/max after resolving the item to border-box dimensions
+        // grid positioning uses border-box geometry; content-box constraints must
+        // be converted before clamping rather than compared to a border-box size.
         if (item->blk) {
-            item_width = layout_apply_min_max_width(item, item_width, true);
-            item_height = layout_apply_min_max_height(item, item_height, true);
+            item_width = layout_apply_min_max_border_box_axis(item, item_width, true);
+            item_height = layout_apply_min_max_border_box_axis(item, item_height, false);
         }
 
         // Apply container offset (borders and padding)
@@ -452,12 +464,13 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             if (row_baseline_count[r] <= 0) continue;
             float needed = row_max_baseline[r] + row_max_below[r];
             radiant::grid::EnhancedGridTrack* row_track = &(*grid_layout->computed_rows)[r];
-            bool is_definite_track = radiant::grid::grid_track_is_definite(*row_track);
+            bool track_allows_content_growth =
+                radiant::grid::grid_track_allows_content_growth(*row_track);
             bool has_baseline_group = row_baseline_count[r] > 1;
             bool should_resize = has_baseline_group
                 ? fabsf(needed - row_track->base_size) > 0.5f
                 : needed > row_track->base_size + 0.5f;
-            if (!is_definite_track && should_resize) {
+            if (track_allows_content_growth && should_resize) {
                 // True baseline-sharing groups need their fitted row size recomputed
                 // across passes; single-item rows keep align-content stretch space.
                 row_track->base_size = needed;
@@ -562,6 +575,58 @@ void align_grid_items(GridContainerLayout* grid_layout) {
     log_debug("Grid items aligned\n");
 }
 
+static bool grid_axis_stretches_aspect_ratio(int self_alignment,
+                                              int container_alignment) {
+    if (self_alignment == CSS_VALUE_STRETCH) return true;
+    if (self_alignment == CSS_VALUE_AUTO || self_alignment == CSS_VALUE__UNDEF) {
+        return container_alignment == CSS_VALUE_STRETCH;
+    }
+    // CSS Box Alignment: normal behaves as start for an aspect-ratio grid item.
+    return false;
+}
+
+static int resolve_grid_item_self_alignment(const ViewBlock* item,
+                                            const GridItemProp* grid_item,
+                                            int container_alignment,
+                                            bool horizontal) {
+    CssEnum self_alignment = horizontal ? (CssEnum)grid_item->justify_self
+                                        : (CssEnum)grid_item->align_self_grid;
+    int resolved = horizontal
+        ? radiant::resolve_justify_self(self_alignment, container_alignment)
+        : radiant::resolve_align_self(self_alignment, container_alignment);
+    bool resolves_from_normal = self_alignment == CSS_VALUE_NORMAL ||
+        ((self_alignment == CSS_VALUE_AUTO || self_alignment == CSS_VALUE__UNDEF) &&
+         container_alignment == CSS_VALUE_NORMAL);
+    if (resolves_from_normal && item->display.inner == RDT_DISPLAY_REPLACED &&
+        !item->form) {
+        // Native controls use the replaced layout path internally, but their outer
+        // widget boxes still stretch under normal grid alignment in browsers.
+        return CSS_VALUE_START;
+    }
+    return resolved;
+}
+
+static float grid_item_intrinsic_minimum_size(GridContainerLayout* grid_layout,
+                                              ViewBlock* item,
+                                              GridItemProp* grid_item,
+                                              bool horizontal) {
+    if (!item || !grid_item) return 0.0f;
+    CssEnum keyword = layout_intrinsic_min_size_keyword(item, horizontal);
+    if (keyword != CSS_VALUE_MIN_CONTENT && keyword != CSS_VALUE_MAX_CONTENT) return 0.0f;
+
+    if (horizontal && grid_item->has_measured_size) {
+        return keyword == CSS_VALUE_MIN_CONTENT ? grid_item->measured_min_width
+                                                : grid_item->measured_max_width;
+    }
+
+    if (!grid_layout || !grid_layout->lycon) return 0.0f;
+    // Row measurements are deferred until column tracks have their final widths,
+    // so an intrinsic min-height cannot use the width-only pass-one cache.
+    IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
+        grid_layout->lycon, item, !horizontal);
+    return keyword == CSS_VALUE_MIN_CONTENT ? sizes.min_content : sizes.max_content;
+}
+
 // Align a single grid item
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     GridItemProp* gi = grid_item_prop(item);
@@ -632,49 +697,9 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     item->x += margin_left;
     item->y += margin_top;
 
-    // Check if item has aspect-ratio constraint
-    // IMPORTANT: fi and gi are in a union - for grid items, fi is overwritten by gi
-    // So we need to check specified_style directly for aspect-ratio
-    float aspect_ratio = 0;
-
-    // First check fi (only valid for flex items)
-    if (item->flex_item() && item->fi->aspect_ratio > 0) {
-        aspect_ratio = item->fi->aspect_ratio;
-    }
-    // For grid items, check specified_style directly
-    else if (item->specified_style) {
-        CssDeclaration* aspect_decl = style_tree_get_declaration(
-            item->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-        if (aspect_decl && aspect_decl->value) {
-            if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                aspect_ratio = (float)aspect_decl->value->data.number.value;
-                log_debug("align_grid_item: aspect-ratio from specified_style: %.3f", aspect_ratio);
-            } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                       aspect_decl->value->data.list.count >= 2) {
-                // Handle "width / height" format - find two numbers in the list
-                double numerator = 0, denominator = 0;
-                bool got_numerator = false, got_denominator = false;
-                for (int i = 0; i < aspect_decl->value->data.list.count && !got_denominator; i++) {
-                    CssValue* v = aspect_decl->value->data.list.values[i];
-                    if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
-                        if (!got_numerator) {
-                            numerator = v->data.number.value;
-                            got_numerator = true;
-                        } else {
-                            denominator = v->data.number.value;
-                            got_denominator = true;
-                        }
-                    }
-                }
-                if (got_numerator && got_denominator && denominator > 0) {
-                    aspect_ratio = (float)(numerator / denominator);
-                    log_debug("align_grid_item: aspect-ratio from specified_style list: %.3f", aspect_ratio);
-                } else if (got_numerator) {
-                    aspect_ratio = (float)numerator;
-                }
-            }
-        }
-    }
+    // Grid items share the aspect-ratio resolver with intrinsic sizing so an
+    // image's `auto <ratio>` uses its natural ratio after the image has loaded.
+    float aspect_ratio = layout_used_preferred_aspect_ratio(item);
     // CSS Grid §11.7: Stretch only applies when the item's size is 'auto'.
     // Intrinsic sizing keywords (fit-content, min-content, max-content) are NOT auto
     // and should prevent stretch alignment.
@@ -690,11 +715,22 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     float max_width = (item->blk && item->block_mut()->given_max_width > 0) ? item->block_mut()->given_max_width : 0;
     float max_height = (item->blk && item->block_mut()->given_max_height > 0) ? item->block_mut()->given_max_height : 0;
 
+    bool inline_stretches_ratio = grid_axis_stretches_aspect_ratio(
+        gi->justify_self, grid_layout->justify_items);
+    bool block_stretches_ratio = grid_axis_stretches_aspect_ratio(
+        gi->align_self_grid, grid_layout->align_items);
+    // A stretch axis combined with a definite opposite axis determines both
+    // used sizes, so CSS Sizing §4.2 does not apply the preferred ratio.
+    bool ratio_is_ignored = (inline_stretches_ratio && block_stretches_ratio) ||
+        (has_explicit_width && block_stretches_ratio) ||
+        (has_explicit_height && inline_stretches_ratio);
+    bool use_aspect_ratio = aspect_ratio > 0.0f && !ratio_is_ignored;
+
     log_debug("align_grid_item: aspect_ratio=%.6f, available=%dx%d",
               aspect_ratio, available_width, available_height);
 
     // If aspect-ratio is set, compute the missing dimension
-    if (aspect_ratio > 0) {
+    if (use_aspect_ratio) {
         if (has_explicit_width && !has_explicit_height) {
             // Width is explicit, compute height from aspect ratio
             item->height = item->width / aspect_ratio;
@@ -735,14 +771,21 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                           max_height, item->width, item->height);
             } else {
                 // No explicit size, no max constraints.
-                // CSS Grid: with default stretch alignment, determine which axis takes priority.
-                // If min-height is specified (block-axis constraint), anchor the block axis first
-                // and derive inline from it (height → width). This transfers the block constraint
-                // through the aspect-ratio to produce the correct minimum inline size.
-                // Otherwise use the inline axis first (width → height), per CSS Grid §6.6.
+                // An explicit stretch axis supplies the ratio's definite axis.
+                // With neither axis stretched, prefer the inline normal axis.
                 float min_h = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
                 float min_w = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
-                if (min_h > 0 && min_w == 0) {
+                if (block_stretches_ratio && !inline_stretches_ratio) {
+                    item->height = available_height;
+                    item->width = item->height * aspect_ratio;
+                    log_debug("align_grid_item: aspect-ratio block stretch: width=%.1f, height=%.1f",
+                              item->width, item->height);
+                } else if (inline_stretches_ratio && !block_stretches_ratio) {
+                    item->width = available_width;
+                    item->height = item->width / aspect_ratio;
+                    log_debug("align_grid_item: aspect-ratio inline stretch: width=%.1f, height=%.1f",
+                              item->width, item->height);
+                } else if (min_h > 0 && min_w == 0) {
                     // Block-axis minimum: anchor at available_height (stretch), derive width
                     item->height = (float)available_height;
                     item->width = item->height * aspect_ratio;
@@ -761,24 +804,33 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         // Apply max-width/max-height constraints after aspect-ratio calculation
         if (max_width > 0 && item->width > max_width) {
             item->width = max_width;
-            item->height = max_width / aspect_ratio;
+            // A definite block size wins when an inline constraint clamps width.
+            if (!has_explicit_height) item->height = max_width / aspect_ratio;
         }
         if (max_height > 0 && item->height > max_height) {
             item->height = max_height;
-            item->width = max_height * aspect_ratio;
+            // A definite inline size remains fixed when its derived height clamps.
+            if (!has_explicit_width) item->width = max_height * aspect_ratio;
         }
         // Apply min-width/min-height constraints (min wins over max per CSS spec)
         float min_width = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
         float min_height = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
         if (min_width > 0 && item->width < min_width) {
             item->width = min_width;
-            item->height = min_width / aspect_ratio;
+            if (!has_explicit_height) item->height = min_width / aspect_ratio;
         }
         if (min_height > 0 && item->height < min_height) {
             item->height = min_height;
-            item->width = min_height * aspect_ratio;
+            if (!has_explicit_width) item->width = min_height * aspect_ratio;
         }
     }
+
+    float intrinsic_min_width = grid_item_intrinsic_minimum_size(grid_layout, item, gi, true);
+    float intrinsic_min_height = grid_item_intrinsic_minimum_size(grid_layout, item, gi, false);
+    // Intrinsic min-size keywords floor the used grid item size after its
+    // percentage size resolves; treating them as zero loses that CSS constraint.
+    if (intrinsic_min_width > item->width) item->width = intrinsic_min_width;
+    if (intrinsic_min_height > item->height) item->height = intrinsic_min_height;
 
     // P6: Auto margins override justify-self/align-self, consuming available free space (CSS Grid §8.1)
     bool applied_horiz_auto = false, applied_vert_auto = false;
@@ -822,20 +874,22 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply justify-self (horizontal alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int justify = radiant::resolve_justify_self(gi->justify_self, grid_layout->justify_items);
+    int justify = resolve_grid_item_self_alignment(
+        item, gi, grid_layout->justify_items, true);
 
-    // For non-stretch alignment, use content width if available (set by Pass 3 content layout)
-    // This allows center/start/end to work correctly with intrinsic content size
+    // For non-stretch alignment, an auto-sized grid item uses fit-content sizing.
+    // Its max-content width is capped by the grid area but never below min-content.
     float actual_width = item->width;
     if (!applied_horiz_auto && justify != CSS_VALUE_STRETCH && !has_explicit_width) {
-        // Use content width if it was computed in Pass 3
-        if (item->content_width > 0 && item->content_width < available_width) {
-            actual_width = item->content_width;
+        if (gi->has_measured_size) {
+            actual_width = fmaxf(gi->measured_min_width,
+                                 fminf(gi->measured_max_width, available_width));
+            actual_width = layout_apply_min_max_border_box_axis(item, actual_width, true);
             item->width = actual_width;
-        } else if (gi->has_measured_size &&
-                   gi->measured_max_width > 0 &&
-                   gi->measured_max_width < available_width) {
-            actual_width = gi->measured_max_width;
+        } else if (item->content_width > 0) {
+            // Without an intrinsic measurement, the laid-out content is the only
+            // available max-content estimate, so do not let it bypass the track.
+            actual_width = fminf(item->content_width, available_width);
             item->width = actual_width;
         }
     }
@@ -846,8 +900,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (!radiant::alignment_is_stretch(justify)) {
             item->x += radiant::compute_alignment_offset_simple(justify, free_width);
         } else {
-            // Stretch to fill track area (unless item has explicit width or aspect-ratio)
-            if (!has_explicit_width && aspect_ratio <= 0) {
+            // Stretch to fill track area unless the preferred ratio still determines size.
+            if (!has_explicit_width && !use_aspect_ratio) {
                 item->width = available_width;
                 // CSS Grid §8.1: stretch is clamped by max-width/min-width
                 // Convert max-width to border-box coordinates for comparison with item->width
@@ -879,7 +933,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply align-self (vertical alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int align = radiant::resolve_align_self(gi->align_self_grid, grid_layout->align_items);
+    int align = resolve_grid_item_self_alignment(
+        item, gi, grid_layout->align_items, false);
 
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
@@ -913,8 +968,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (!radiant::alignment_is_stretch(align)) {
             item->y += radiant::compute_alignment_offset_simple(align, free_height);
         } else {
-            // Stretch to fill track area (unless item has explicit height or aspect-ratio)
-            if (!has_explicit_height && aspect_ratio <= 0) {
+            // Stretch to fill track area unless the preferred ratio still determines size.
+            if (!has_explicit_height && !use_aspect_ratio) {
                 item->height = available_height;
                 // CSS Grid §8.1: stretch is clamped by max-height/min-height
                 // Convert max-height to border-box coordinates for comparison with item->height

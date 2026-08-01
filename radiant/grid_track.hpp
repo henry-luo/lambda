@@ -478,6 +478,15 @@ inline bool grid_track_is_definite(const EnhancedGridTrack& track) {
     return definite_min && definite_max;
 }
 
+/** Whether item content may increase the track beyond its resolved base size. */
+inline bool grid_track_allows_content_growth(const EnhancedGridTrack& track) {
+    SizingFunctionType max_type = track.max_track_sizing_function.type;
+    return max_type == SizingFunctionType::Auto ||
+        max_type == SizingFunctionType::MinContent ||
+        max_type == SizingFunctionType::MaxContent ||
+        max_type == SizingFunctionType::Fr;
+}
+
 /**
  * Fixed-capacity array of track indices (size_t).
  */

@@ -393,6 +393,9 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, "contain-intrinsic-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, "contain-intrinsic-height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "contain-intrinsic-size", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE, "contain-intrinsic-inline-size", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE, "contain-intrinsic-block-size", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_CONTENT_VISIBILITY, "content-visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
 
     // Baseline Properties
     {CSS_PROPERTY_ALIGNMENT_BASELINE, "alignment-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "baseline", false, false, NULL, 0, validate_keyword, NULL},
@@ -426,6 +429,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OVERFLOW_BLOCK, "overflow-block", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_CLIP_MARGIN, "overflow-clip-margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_OVERFLOW_INLINE, "overflow-inline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_SCROLLBAR_GUTTER, "scrollbar-gutter", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_OVERSCROLL_BEHAVIOR, "overscroll-behavior", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_RUBY_ALIGN, "ruby-align", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "space-around", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_RUBY_POSITION, "ruby-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "alternate", false, false, NULL, 0, validate_keyword, NULL},

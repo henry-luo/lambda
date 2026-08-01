@@ -127,6 +127,51 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
     return child_extent + box.pad_border_v;
 }
 
+static void grid_store_inline_first_baseline(LayoutContext* lycon,
+                                             GridContainerLayout* grid_layout,
+                                             ViewBlock* grid_container) {
+    if (!lycon || !grid_layout || !grid_container || !grid_container->blk ||
+        grid_container->display.outer != CSS_VALUE_INLINE_BLOCK ||
+        grid_container->display.inner != CSS_VALUE_GRID) {
+        return;
+    }
+
+    int first_row = 0;
+    for (int i = 0; i < grid_layout->item_count; i++) {
+        GridItemProp* grid_item = grid_item_prop(grid_layout->grid_items[i]);
+        if (!grid_item) continue;
+        int row_start = grid_item->computed_grid_row_start;
+        if (row_start > 0 && (first_row == 0 || row_start < first_row)) {
+            first_row = row_start;
+        }
+    }
+
+    if (first_row == 0) return;
+
+    for (int i = 0; i < grid_layout->item_count; i++) {
+        ViewBlock* item = grid_layout->grid_items[i];
+        GridItemProp* grid_item = grid_item_prop(item);
+        if (!item || !grid_item || grid_item->computed_grid_row_start != first_row) {
+            continue;
+        }
+
+        float item_baseline = item->blk ? item->block()->first_line_baseline : -1.0f;
+        if (item_baseline <= 0.0f) {
+            item_baseline = radiant::compute_element_first_baseline(lycon, item, true);
+        }
+        if (item_baseline >= 0.0f) {
+            // Inline-grid uses its first row's first available item baseline;
+            // treating its laid-out tracks as an empty inline-block adds a strut below it.
+            float grid_baseline = item->y + item_baseline;
+            grid_container->blk->first_line_baseline = grid_baseline;
+            // The enclosing block finalizer owns the persistent BlockProp state,
+            // so publish the baseline through its active flow context as well.
+            lycon->block.first_line_ascender = grid_baseline;
+            return;
+        }
+    }
+}
+
 // ============================================================================
 // Main Entry Point
 // ============================================================================
@@ -310,10 +355,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
             radiant::grid::EnhancedGridTrack* row_track = &(*gl->computed_rows)[r];
             if (max_content_h > row_track->base_size + 0.5f) {
-                // CSS Grid §7.2.1: Fixed-size tracks (length, percentage) are definite
-                // and should NOT be changed from content — content overflows instead.
-                // Only auto/intrinsic/flexible tracks reconcile to laid-out content.
-                if (radiant::grid::grid_track_is_definite(*row_track)) {
+                // A finite max track size (for example minmax(auto, 50px))
+                // caps the row; overflowing items must not enlarge it afterward.
+                if (!radiant::grid::grid_track_allows_content_growth(*row_track)) {
                     continue;
                 }
                 log_debug("GRID row[%d] height updated: %.1f -> %.1f (from content)",
@@ -330,6 +374,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // Re-align items after content is laid out (now items have final heights)
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
+
+    grid_store_inline_first_baseline(lycon, lycon->grid_container, grid_container);
 
     // Apply relative positioning offsets (position:relative + top/left/bottom/right)
     // Must be done AFTER final alignment so offsets are relative to the aligned position
@@ -377,9 +423,25 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // Only do this for containers with auto height (no explicit height set)
     // ========================================================================
     GridContainerLayout* grid_layout = lycon->grid_container;
-    bool has_explicit_height = grid_container->blk && grid_container->block_mut()->given_height > 0;
+    // Size containment excludes in-flow grid items from the container's size;
+    // their overflowing tracks must not feed back into its intrinsic fallback.
+    bool has_explicit_height = !layout_block_has_automatic_height(grid_container) ||
+        layout_block_has_size_containment_in_axis(grid_container, false);
 
-    if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height) {
+    // A row with a fixed maximum establishes the auto grid block size;
+    // overflowing items must not feed back into that size.
+    bool has_non_definite_row = false;
+    if (grid_layout) {
+        for (int row = 0; row < grid_layout->computed_row_count; row++) {
+            if (radiant::grid::grid_track_allows_content_growth(
+                    (*grid_layout->computed_rows)[row])) {
+                has_non_definite_row = true;
+                break;
+            }
+        }
+    }
+
+    if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height && has_non_definite_row) {
         // Find the maximum extent of all grid items
         float max_item_bottom = 0;
         for (int i = 0; i < grid_layout->item_count; i++) {
@@ -771,18 +833,16 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
         if (item->block()->given_width > 0) {
-            float w = item->block()->given_width;
-            if (layout_uses_border_box(item)) {
-                w = layout_floor_border_box_width(item, w);
-            }
+            float w = layout_css_size_to_border_box(
+                item->bound, layout_box_sizing(item), item->block()->given_width, true);
+            w = layout_floor_border_box_width(item, w);
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
         if (item->block()->given_height > 0) {
-            float h = item->block()->given_height;
-            if (layout_uses_border_box(item)) {
-                h = layout_floor_border_box_height(item, h);
-            }
+            float h = layout_css_size_to_border_box(
+                item->bound, layout_box_sizing(item), item->block()->given_height, false);
+            h = layout_floor_border_box_height(item, h);
             *min_height = *max_height = h;
             has_explicit_height = true;
         }
@@ -1001,6 +1061,12 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         } else {
             grid_item->content_height = lycon->block.advance_y;
         }
+    }
+
+    if (grid_item->blk && lycon->block.first_line_ascender > 0.0f) {
+        // Grid item layout bypasses finalize_block_flow, so retain its first
+        // in-flow line baseline for the inline-grid container baseline.
+        grid_item->blk->first_line_baseline = lycon->block.first_line_ascender;
     }
 
     // Restore parent context

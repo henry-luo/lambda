@@ -1433,18 +1433,95 @@ static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t pro
     return false;
 }
 
-static bool css_contain_value_has_size(const CssValue* value) {
-    if (css_value_identifier_is(value, "size") || css_value_identifier_is(value, "strict")) {
+static bool css_value_has_identifier(const CssValue* value, const char* identifier) {
+    if (css_value_identifier_is(value, identifier)) {
         return true;
     }
     if (!value || value->type != CSS_VALUE_TYPE_LIST) return false;
     for (int i = 0; i < value->data.list.count; i++) {
         CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-        if (css_value_identifier_is(item, "size") || css_value_identifier_is(item, "strict")) {
+        if (css_value_identifier_is(item, identifier)) {
             return true;
         }
     }
     return false;
+}
+
+static bool css_contain_value_has_size(const CssValue* value) {
+    return css_value_has_identifier(value, "size") ||
+        css_value_has_identifier(value, "strict");
+}
+
+static bool css_contain_value_has_inline_size(const CssValue* value) {
+    return css_value_has_identifier(value, "inline-size");
+}
+
+static bool css_content_visibility_value_is_hidden(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_HIDDEN;
+}
+
+bool layout_element_inline_axis_is_vertical(DomElement* element) {
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* ancestor = node->as_element();
+        CssDeclaration* declaration = ancestor && ancestor->specified_style
+            ? style_tree_get_declaration(ancestor->specified_style, CSS_PROPERTY_WRITING_MODE)
+            : nullptr;
+        if (!declaration || !declaration->value ||
+            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
+            continue;
+        }
+        CssEnum writing_mode = declaration->value->data.keyword;
+        if (writing_mode == CSS_VALUE_VERTICAL_LR || writing_mode == CSS_VALUE_VERTICAL_RL) {
+            return true;
+        }
+        if (writing_mode == CSS_VALUE_HORIZONTAL_TB) return false;
+    }
+    return false;
+}
+
+static CssDeclaration* layout_select_physical_size_alias(DomElement* element,
+                                                          CssPropertyCode physical_property,
+                                                          CssPropertyCode logical_property) {
+    if (!element || !element->specified_style) return nullptr;
+    CssDeclaration* physical = style_tree_get_declaration(
+        element->specified_style, physical_property);
+    CssDeclaration* logical = style_tree_get_declaration(
+        element->specified_style, logical_property);
+    if (!physical) return logical;
+    if (!logical) return physical;
+
+    // Logical and physical aliases address one used axis, so their cascade
+    // priorities—not property storage order—select the specified size.
+    return css_declaration_cascade_compare(logical, physical) > 0 ? logical : physical;
+}
+
+CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
+                                                            bool horizontal) {
+    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(element);
+    CssPropertyCode physical_property = horizontal ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
+    CssPropertyCode logical_property = (horizontal != inline_axis_is_vertical)
+        ? CSS_PROPERTY_INLINE_SIZE : CSS_PROPERTY_BLOCK_SIZE;
+    return layout_select_physical_size_alias(element, physical_property, logical_property);
+}
+
+CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
+                                                                   bool horizontal,
+                                                                   bool minimum) {
+    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(element);
+    CssPropertyCode physical_property;
+    CssPropertyCode logical_property;
+    if (minimum) {
+        physical_property = horizontal ? CSS_PROPERTY_MIN_WIDTH : CSS_PROPERTY_MIN_HEIGHT;
+        logical_property = (horizontal != inline_axis_is_vertical)
+            ? CSS_PROPERTY_MIN_INLINE_SIZE : CSS_PROPERTY_MIN_BLOCK_SIZE;
+    } else {
+        physical_property = horizontal ? CSS_PROPERTY_MAX_WIDTH : CSS_PROPERTY_MAX_HEIGHT;
+        logical_property = (horizontal != inline_axis_is_vertical)
+            ? CSS_PROPERTY_MAX_INLINE_SIZE : CSS_PROPERTY_MAX_BLOCK_SIZE;
+    }
+    return layout_select_physical_size_alias(element, physical_property, logical_property);
 }
 
 static bool resolve_contain_intrinsic_size_value(LayoutContext* lycon, const CssValue* value,
@@ -1453,25 +1530,23 @@ static bool resolve_contain_intrinsic_size_value(LayoutContext* lycon, const Css
     *out_width = -1.0f;
     *out_height = -1.0f;
     if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-            float length = -1.0f;
-            if (!resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
-                                                  item, &length)) {
-                continue;
-            }
-            if (*out_width < 0.0f) {
-                *out_width = length;
-            } else {
-                *out_height = length;
-                break;
-            }
+        int count = value->data.list.count;
+        CssValue** values = value->data.list.values;
+        if (count > 0 && values) {
+            resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+                                             values[0], out_width);
+        }
+        if (count > 1 && values) {
+            // `none` still occupies its grammar slot: skipping it shifts a
+            // following fallback from height into width (or the reverse).
+            resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+                                             values[1], out_height);
+        } else if (count == 1) {
+            *out_height = *out_width;
         }
     } else {
         resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
                                          value, out_width);
-    }
-    if (*out_width >= 0.0f && *out_height < 0.0f) {
         *out_height = *out_width;
     }
     return *out_width >= 0.0f || *out_height >= 0.0f;
@@ -1484,9 +1559,20 @@ bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* ele
     *out_height = -1.0f;
     if (!lycon || !element || !element->specified_style) return false;
 
+    ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    CssDeclaration* content_visibility_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_CONTENT_VISIBILITY);
+    bool content_visibility_hidden = (block && block->blk &&
+        block->block()->content_visibility_hidden) ||
+        (content_visibility_decl &&
+         css_content_visibility_value_is_hidden(content_visibility_decl->value));
     CssDeclaration* contain_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTAIN);
-    if (!contain_decl || !css_contain_value_has_size(contain_decl->value)) return false;
+    bool contains_size = content_visibility_hidden ||
+        (contain_decl && css_contain_value_has_size(contain_decl->value));
+    bool contains_inline_size = contain_decl &&
+        css_contain_value_has_inline_size(contain_decl->value);
+    if (!contains_size && !contains_inline_size) return false;
 
     CssDeclaration* size_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE);
@@ -1505,6 +1591,13 @@ bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* ele
     if (height_decl && (!size_decl || height_decl->source_order > size_decl->source_order)) {
         resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT,
                                          height_decl->value, out_height);
+    }
+    if (!contains_size) {
+        if (layout_element_inline_axis_is_vertical(element)) {
+            *out_width = -1.0f;
+        } else {
+            *out_height = -1.0f;
+        }
     }
     return *out_width >= 0.0f || *out_height >= 0.0f;
 }
@@ -4636,6 +4729,18 @@ static bool apply_grid_template_shorthand(const CssValue* value, GridProp* grid)
     return true;
 }
 
+static bool apply_grid_shorthand(const CssValue* value, GridProp* grid) {
+    if (!apply_grid_template_shorthand(value, grid)) return false;
+
+    // The `<grid-template>` branch of `grid` resets the implicit grid; otherwise
+    // `grid: auto / 0` leaves an old auto column that can grow to item content.
+    clear_grid_template_track_list(&grid->grid_auto_rows);
+    clear_grid_template_track_list(&grid->grid_auto_columns);
+    grid->grid_auto_flow = CSS_VALUE_ROW;
+    grid->is_dense_packing = false;
+    return true;
+}
+
 // ============================================================================
 // Main Style Resolution
 // ============================================================================
@@ -5751,29 +5856,39 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
     float* constraint = nullptr;
     float* percentage = nullptr;
     float parent_constraint = 0.0f;
+    CssEnum* constraint_type = nullptr;
+    CssEnum parent_constraint_type = CSS_VALUE_AUTO;
     bool is_maximum = false;
 
     switch (prop_id) {
         case CSS_PROPERTY_MIN_WIDTH:
             constraint = &props->given_min_width;
             percentage = &props->given_min_width_percent;
+            constraint_type = &props->given_min_width_type;
             if (parent_props) parent_constraint = parent_props->given_min_width;
+            if (parent_props) parent_constraint_type = parent_props->given_min_width_type;
             break;
         case CSS_PROPERTY_MAX_WIDTH:
             constraint = &props->given_max_width;
             percentage = &props->given_max_width_percent;
+            constraint_type = &props->given_max_width_type;
             if (parent_props) parent_constraint = parent_props->given_max_width;
+            if (parent_props) parent_constraint_type = parent_props->given_max_width_type;
             is_maximum = true;
             break;
         case CSS_PROPERTY_MIN_HEIGHT:
             constraint = &props->given_min_height;
             percentage = &props->given_min_height_percent;
+            constraint_type = &props->given_min_height_type;
             if (parent_props) parent_constraint = parent_props->given_min_height;
+            if (parent_props) parent_constraint_type = parent_props->given_min_height_type;
             break;
         case CSS_PROPERTY_MAX_HEIGHT:
             constraint = &props->given_max_height;
             percentage = &props->given_max_height_percent;
+            constraint_type = &props->given_max_height_type;
             if (parent_props) parent_constraint = parent_props->given_max_height;
+            if (parent_props) parent_constraint_type = parent_props->given_max_height_type;
             is_maximum = true;
             break;
         default:
@@ -5784,9 +5899,11 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
         if (parent_props) {
             *constraint = parent_constraint;
+            *constraint_type = parent_constraint_type;
             log_debug("[CSS] %s: inherit %.2f from parent", property_name, *constraint);
         } else if (is_maximum) {
             *constraint = -1.0f;
+            *constraint_type = CSS_VALUE_NONE;
             log_debug("[CSS] %s: inherit without parent, treating as none", property_name);
         }
         return;
@@ -5794,7 +5911,19 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
     if (is_maximum && value->type == CSS_VALUE_TYPE_KEYWORD &&
         value->data.keyword == CSS_VALUE_NONE) {
         *constraint = -1.0f;
+        *constraint_type = CSS_VALUE_NONE;
         log_debug("[CSS] %s: none (unconstrained)", property_name);
+        return;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_MIN_CONTENT ||
+         value->data.keyword == CSS_VALUE_MAX_CONTENT ||
+         value->data.keyword == CSS_VALUE_FIT_CONTENT)) {
+        // Intrinsic constraints resolve only after their content contribution is known.
+        *constraint = -1.0f;
+        *constraint_type = value->data.keyword;
+        *percentage = NAN;
+        log_debug("[CSS] %s: intrinsic keyword %d", property_name, value->data.keyword);
         return;
     }
     if (prop_id == CSS_PROPERTY_MAX_WIDTH &&
@@ -5805,6 +5934,8 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
     } else {
         float resolved = resolve_length_value(lycon, prop_id, value);
         *constraint = isnan(resolved) ? (is_maximum ? -1.0f : 0.0f) : resolved;
+        *constraint_type = value->type == CSS_VALUE_TYPE_KEYWORD
+            ? value->data.keyword : CSS_VALUE__UNDEF;
         log_debug("[CSS] %s: %.2f px", property_name, *constraint);
     }
     *percentage = value->type == CSS_VALUE_TYPE_PERCENTAGE
@@ -5840,6 +5971,7 @@ static void css_set_flex_item_values(DomElement* span,
     span->fi->flex_shrink = shrink;
     span->fi->flex_basis = basis;
     span->fi->flex_basis_is_percent = basis_is_percent;
+    span->fi->flex_basis_is_content = false;
 }
 
 static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
@@ -5924,15 +6056,30 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         return;  // Custom properties don't have standard processing
     }
 
-    // Map CSS logical dimension properties to physical equivalents (horizontal LTR writing mode)
-    // CSS Logical Properties: https://www.w3.org/TR/css-logical-1/
+    // Map logical dimensions after reading the specified writing mode, because
+    // `inline-size` is physical height in vertical writing modes.
+    DomElement* current_element = lycon->elmt && lycon->elmt->is_element()
+        ? lycon->elmt->as_element() : nullptr;
+    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
     switch (prop_id) {
-        case CSS_PROPERTY_INLINE_SIZE:     prop_id = CSS_PROPERTY_WIDTH;      break;
-        case CSS_PROPERTY_BLOCK_SIZE:      prop_id = CSS_PROPERTY_HEIGHT;     break;
-        case CSS_PROPERTY_MIN_INLINE_SIZE: prop_id = CSS_PROPERTY_MIN_WIDTH;  break;
-        case CSS_PROPERTY_MAX_INLINE_SIZE: prop_id = CSS_PROPERTY_MAX_WIDTH;  break;
-        case CSS_PROPERTY_MIN_BLOCK_SIZE:  prop_id = CSS_PROPERTY_MIN_HEIGHT; break;
-        case CSS_PROPERTY_MAX_BLOCK_SIZE:  prop_id = CSS_PROPERTY_MAX_HEIGHT; break;
+        case CSS_PROPERTY_INLINE_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_HEIGHT : CSS_PROPERTY_WIDTH;
+            break;
+        case CSS_PROPERTY_BLOCK_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
+            break;
+        case CSS_PROPERTY_MIN_INLINE_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MIN_HEIGHT : CSS_PROPERTY_MIN_WIDTH;
+            break;
+        case CSS_PROPERTY_MAX_INLINE_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MAX_HEIGHT : CSS_PROPERTY_MAX_WIDTH;
+            break;
+        case CSS_PROPERTY_MIN_BLOCK_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MIN_WIDTH : CSS_PROPERTY_MIN_HEIGHT;
+            break;
+        case CSS_PROPERTY_MAX_BLOCK_SIZE:
+            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MAX_WIDTH : CSS_PROPERTY_MAX_HEIGHT;
+            break;
         default: break;
     }
 
@@ -6861,7 +7008,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 (value->data.keyword == CSS_VALUE_AUTO ||
                  value->data.keyword == CSS_VALUE_MAX_CONTENT ||
                  value->data.keyword == CSS_VALUE_MIN_CONTENT ||
-                 value->data.keyword == CSS_VALUE_FIT_CONTENT)) {
+                 value->data.keyword == CSS_VALUE_FIT_CONTENT ||
+                 value->data.keyword == CSS_VALUE_STRETCH)) {
                 width = -1;  // auto/intrinsic width - will be calculated during layout
             } else {
                 width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
@@ -6906,7 +7054,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 (value->data.keyword == CSS_VALUE_AUTO ||
                  value->data.keyword == CSS_VALUE_MAX_CONTENT ||
                  value->data.keyword == CSS_VALUE_MIN_CONTENT ||
-                 value->data.keyword == CSS_VALUE_FIT_CONTENT)) {
+                 value->data.keyword == CSS_VALUE_FIT_CONTENT ||
+                 value->data.keyword == CSS_VALUE_STRETCH)) {
                 height = -1;  // auto/intrinsic height - will be calculated during layout
             } else {
                 height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value);
@@ -9225,6 +9374,36 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
 
+        case CSS_PROPERTY_SCROLLBAR_GUTTER: {
+            if (!block || !value) break;
+            block->ensure_scroll(lycon);
+            block->scroller->scrollbar_gutter_stable = css_value_has_identifier(value, "stable");
+            block->scroller->scrollbar_gutter_both_edges =
+                css_value_has_identifier(value, "both-edges");
+            // A gutter only reserves layout space in the stable mode; `auto`
+            // remains dependent on whether a scrollbar is later needed.
+            if (!block->scroller->scrollbar_gutter_stable) {
+                block->scroller->scrollbar_gutter_both_edges = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_APPEARANCE: {
+            if (!block || !block->form || !value ||
+                value->type != CSS_VALUE_TYPE_KEYWORD) {
+                break;
+            }
+            CssEnum appearance = value->data.keyword;
+            // Form intrinsic metrics include UA chrome only while the control
+            // retains its native appearance; this also covers the webkit alias.
+            block->form->appearance_none = appearance == CSS_VALUE_NONE;
+            block->form->appearance_base_select = appearance == CSS_VALUE_BASE_SELECT;
+            log_debug("[CSS] appearance: none=%d base-select=%d",
+                      block->form->appearance_none,
+                      block->form->appearance_base_select);
+            break;
+        }
+
         // ===== GROUP 9: White-space Property =====
 
         case CSS_PROPERTY_WHITE_SPACE: {
@@ -9821,6 +10000,18 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
 
+        case CSS_PROPERTY_GRID: {
+            if (!block) {
+                log_debug("[CSS] grid: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            if (!apply_grid_shorthand(value, block->embedp()->grid)) {
+                log_debug("[CSS] grid: unsupported grammar");
+            }
+            break;
+        }
+
         case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
             if (!block) {
                 log_debug("[CSS] grid-template-areas: Cannot apply to non-block element");
@@ -10205,17 +10396,26 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
                 span->fi->flex_basis = -1; // -1 indicates auto
                 span->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis_is_content = false;
                 log_debug("[CSS] flex-basis: auto");
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                       value->data.keyword == CSS_VALUE_CONTENT) {
+                span->fi->flex_basis = -1;
+                span->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis_is_content = true;
+                log_debug("[CSS] flex-basis: content");
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float basis_value = resolve_length_value(lycon, prop_id, value);
                 span->fi->flex_basis = basis_value;
                 span->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis_is_content = false;
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // DEBUG: log raw percentage value to diagnose parsing issue
                 log_debug("[CSS DEBUG] flex-basis percentage raw: %f", value->data.percentage.value);
                 span->fi->flex_basis = (float)value->data.percentage.value;
                 span->fi->flex_basis_is_percent = true;
+                span->fi->flex_basis_is_content = false;
                 log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value,
                     span->fi->flex_basis);
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
@@ -10223,6 +10423,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 float basis_value = (float)value->data.number.value;
                 span->fi->flex_basis = basis_value;
                 span->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis_is_content = false;
                 log_debug("[CSS] flex-basis: %.2f (unitless number)", basis_value);
             }
             break;
@@ -11490,8 +11691,23 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!block || !value) break;
             ensure_span_block(lycon, block);
             bool contains_size = css_contain_value_has_size(value);
+            bool contains_inline_size = css_contain_value_has_inline_size(value);
             block->blk->contain_size = contains_size;
-            log_debug("[CSS] contain size containment: %d", contains_size);
+            block->blk->contain_inline_size = contains_inline_size;
+            log_debug("[CSS] contain size containment: full=%d inline=%d",
+                      contains_size, contains_inline_size);
+            break;
+        }
+
+        case CSS_PROPERTY_CONTENT_VISIBILITY: {
+            if (!block || !value) break;
+            ensure_span_block(lycon, block);
+            block->blk->content_visibility_hidden =
+                css_content_visibility_value_is_hidden(value);
+            // CSS Containment 2: `hidden` applies size containment while its
+            // contents are skipped; `visible` and `auto` keep normal layout.
+            log_debug("[CSS] content-visibility hidden=%d",
+                      block->blk->content_visibility_hidden);
             break;
         }
 
@@ -11517,12 +11733,36 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
 
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE:
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE: {
+            if (!block || !value) break;
+            float intrinsic_size = -1.0f;
+            resolve_contain_intrinsic_length(lycon, prop_id, value, &intrinsic_size);
+            bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(block->as_element());
+            bool applies_to_width = prop_id == CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE
+                ? !inline_axis_is_vertical : inline_axis_is_vertical;
+            ensure_span_block(lycon, block);
+            // Logical intrinsic-size longhands map after writing-mode resolution;
+            // treating them as physical width/height loses vertical containment fallbacks.
+            if (applies_to_width) {
+                block->blk->contain_intrinsic_width = intrinsic_size;
+            } else {
+                block->blk->contain_intrinsic_height = intrinsic_size;
+            }
+            log_debug("[CSS] %s: %.1f -> %s",
+                      css_property_spelling_from_code(prop_id), intrinsic_size,
+                      applies_to_width ? "width" : "height");
+            break;
+        }
+
         case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE: {
             if (!block || !value) break;
             float first = -1.0f;
             float second = -1.0f;
             resolve_contain_intrinsic_size_value(lycon, value, &first, &second);
-            if (first >= 0.0f) {
+            if (first >= 0.0f || second >= 0.0f) {
+                // A `none <length>` shorthand overrides only the block axis;
+                // do not discard that valid one-axis intrinsic-size fallback.
                 ensure_span_block(lycon, block);
                 block->blk->contain_intrinsic_width = first;
                 block->blk->contain_intrinsic_height = second;

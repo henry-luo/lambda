@@ -1705,7 +1705,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         } else {
             item_baseline = item_height; // default: bottom margin edge
         }
-        if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
+        bool is_inline_grid = block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+            block->display.inner == CSS_VALUE_GRID;
+        if (is_inline_grid && block->blk &&
+            block->block()->first_line_baseline > 0.0f) {
+            item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                block->block()->first_line_baseline;
+        } else if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
                 (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||

@@ -588,7 +588,7 @@ typedef struct {
 // FlexItemProp definition (needed by flex.hpp)
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
-    float flex_basis;  // -1 for auto
+    float flex_basis;  // -1 for automatic/content keyword bases
     float flex_grow;
     float flex_shrink;
     CssEnum align_self;  // AlignType
@@ -616,6 +616,7 @@ typedef struct FlexItemProp {
 
     // Flags for percentage values and measurement state
     uint8_t flex_basis_is_percent : 1;
+    uint8_t flex_basis_is_content : 1;
     uint8_t is_margin_top_auto : 1;
     uint8_t is_margin_right_auto : 1;
     uint8_t is_margin_bottom_auto : 1;
@@ -1147,6 +1148,8 @@ typedef struct BlockProp {
     const CssValue* text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
+    CssEnum given_min_width_type, given_max_width_type;
+    CssEnum given_min_height_type, given_max_height_type;
     CssEnum list_style_type;
     CssEnum list_style_position;  // inside, outside
     char* list_style_image;         // URL or none
@@ -1182,6 +1185,8 @@ typedef struct BlockProp {
     float contain_intrinsic_width;
     float contain_intrinsic_height;
     bool contain_size;
+    bool contain_inline_size;
+    bool content_visibility_hidden;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
     float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)
@@ -1285,6 +1290,8 @@ typedef struct ScrollProp {
     ScrollPane* pane;
     bool has_hz_overflow, has_vt_overflow;
     bool has_hz_scroll, has_vt_scroll;
+    bool scrollbar_gutter_stable, scrollbar_gutter_both_edges;
+    float intrinsic_gutter_width, intrinsic_gutter_height;
 
     Bound clip; // clipping rect, relative to the block border box
     bool has_clip;
@@ -1306,7 +1313,7 @@ typedef struct FlexProp {
     TextDirection text_direction;
     // First baseline of this flex container (computed after layout)
     // Used when this container participates in parent's baseline alignment
-    int first_baseline;
+    float first_baseline;
     bool has_baseline_child;       // true if first line has baseline-aligned items
 } FlexProp;
 
@@ -1969,6 +1976,7 @@ namespace FormDefaults {
     constexpr float TEXT_PADDING_H = 2.0f;
     constexpr float TEXT_PADDING_V = 1.0f;
     constexpr float TEXT_BORDER = 2.0f;
+    constexpr float TEXT_SIZE_CONTENT_GUTTER_H = 8.0f;
     constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
 
     // Checkbox/Radio: square controls
@@ -1994,6 +2002,8 @@ namespace FormDefaults {
     constexpr float SELECT_ARROW_WIDTH = 16.0f; // painted arrow glyph area
     constexpr float SELECT_NATIVE_ARROW_AREA = 20.0f; // themed arrow button and text gap
     constexpr float SELECT_BORDER = 1.0f;
+    constexpr float SELECT_EMPTY_LISTBOX_ROW_HEIGHT = 16.0f;
+    constexpr float SELECT_OPTION_ROW_HEIGHT = 17.0f;
     constexpr float OPTION_PADDING_H = 2.0f;
     constexpr float BASE_SELECT_PADDING_H = 8.0f;
     constexpr float BASE_SELECT_PADDING_V = 4.0f;

@@ -41,6 +41,24 @@ bool is_multicol_container(ViewBlock* block) {
            block->multicol_prop()->column_height > 0;
 }
 
+float multicol_empty_intrinsic_inline_size(ViewBlock* block) {
+    if (!block || !block->multicol_prop() ||
+        block->multicol_prop()->column_width <= 0.0f) {
+        return 0.0f;
+    }
+
+    const MultiColumnProp* multicol = block->multicol_prop();
+    int column_count = multicol->column_count > 0 ? multicol->column_count : 1;
+    float gap = multicol->column_gap_is_normal
+        ? multicol_normal_gap_size(block)
+        : multicol->column_gap;
+    if (gap < 0.0f) gap = 0.0f;
+
+    // Fixed columns are formatting-structure contributions, not child content;
+    // an empty size-contained box retains their inline geometry without a fallback.
+    return multicol->column_width * column_count + gap * (column_count - 1);
+}
+
 /**
  * Calculate actual column dimensions based on CSS Multi-column spec
  */

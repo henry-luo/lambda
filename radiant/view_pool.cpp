@@ -874,8 +874,10 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;
         grid->align_content = CSS_VALUE_START;
-        grid->justify_items = CSS_VALUE_STRETCH;
-        grid->align_items = CSS_VALUE_STRETCH;
+        // CSS Grid initial self-alignment is normal; aspect-ratio sizing must
+        // distinguish it from an explicitly requested stretch.
+        grid->justify_items = CSS_VALUE_NORMAL;
+        grid->align_items = CSS_VALUE_NORMAL;
         grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps
         grid->row_gap = 0;

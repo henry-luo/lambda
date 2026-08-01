@@ -503,6 +503,10 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container) return;
 
+    // A display-only flex container still needs persistent baseline state; inline-flex
+    // otherwise falls back to its bottom edge after laying out its first flex line.
+    alloc_flex_prop(lycon, flex_container);
+
     // guard against exponential flex-in-flex nesting (fuzzer-found O(n²) timeout)
     lycon->flex_depth++;
     if (lycon->flex_depth > MAX_FLEX_DEPTH) {
@@ -717,8 +721,14 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                 }
                 if (item && item->fi) {
                     float item_contribution = 0;
+                    // `content` ignores the main-size property, so its contribution
+                    // must use the flex-basis algorithm before auto-height is fixed.
+                    if (flex_item_has_content_flex_basis(item)) {
+                        item_contribution = calculate_flex_basis(item, flex_layout);
+                        log_debug("AUTO-HEIGHT: column flex item content basis = %.1f", item_contribution);
+                    }
                     // Priority 1: flex-basis (if explicit, it defines the main-axis starting size)
-                    if (item->fi->flex_basis >= 0) {
+                    else if (item->fi->flex_basis >= 0) {
                         item_contribution = item->fi->flex_basis;
                         log_debug("AUTO-HEIGHT: column flex item flex-basis = %.1f", item_contribution);
                     }
@@ -1360,6 +1370,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // Column flex: main axis is height
         // Only update if no explicit height and content is larger than current height
         bool has_explicit_height = (flex_item->blk && flex_item->block_mut()->given_height >= 0);
+        bool has_explicit_main_minimum = layout_has_explicit_min_height(flex_item);
         // Also treat height as definite if parent column flex set it via flex-grow/shrink
         if (!has_explicit_height && flex_item->fi && flex_item->fi->main_size_from_flex) {
             has_explicit_height = true;
@@ -1368,7 +1379,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
         // Per CSS Sizing Level 4 §7, aspect-ratio fixes box dimensions; content overflows but doesn't resize the box
         bool has_aspect_ratio = (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f);
-        if (!has_explicit_height && !is_replaced && !has_aspect_ratio && flex_item->content_height > 0) {
+        // An explicit min-height, including stretch resolved against an indefinite
+        // basis, fixes the flex minimum; content must overflow instead of restoring auto-min sizing.
+        if (!has_explicit_height && !has_explicit_main_minimum && !is_replaced &&
+            !has_aspect_ratio && flex_item->content_height > 0) {
             float total_height = flex_content_border_box_height(flex_item);
 
             // If content height is larger than flex-determined height, update
