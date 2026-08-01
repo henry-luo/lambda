@@ -1491,6 +1491,7 @@ static void js_dom_install_window_frames_global(void);
 static void js_dom_install_window_dialog_globals(void);
 static void js_dom_install_window_computed_style_global(void);
 static void js_dom_install_dom_parser_global(void);
+static void js_dom_install_xml_serializer_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -1553,6 +1554,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         extern void js_dom_install_option_constructor(void);
         js_dom_install_option_constructor();
         js_dom_install_dom_parser_global();
+        js_dom_install_xml_serializer_global();
         js_history_install_globals();
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
@@ -5445,6 +5447,142 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             strbuf_append_char(sb, '>');
         }
     }
+}
+
+static void collect_xml_attr_value(const char* value, StrBuf* sb) {
+    if (!value || !sb) return;
+    for (const char* p = value; *p; p++) {
+        if (*p == '&') strbuf_append_str(sb, "&amp;");
+        else if (*p == '<') strbuf_append_str(sb, "&lt;");
+        else if (*p == '"') strbuf_append_str(sb, "&quot;");
+        else if (*p == '\r') strbuf_append_str(sb, "&#13;");
+        else strbuf_append_char(sb, *p);
+    }
+}
+
+static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb) {
+    if (!value || !sb) return;
+    for (size_t i = 0; i < length; i++) {
+        char ch = value[i];
+        if (ch == '&') strbuf_append_str(sb, "&amp;");
+        else if (ch == '<') strbuf_append_str(sb, "&lt;");
+        else if (ch == '>') strbuf_append_str(sb, "&gt;");
+        else strbuf_append_char(sb, ch);
+    }
+}
+
+static void collect_xml_node(DomNode* node, StrBuf* sb) {
+    if (!node || !sb || js_dom_is_generated_pseudo_node(node)) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text && text->text && text->length > 0) {
+            collect_xml_text_value(text->text, text->length, sb);
+        }
+        return;
+    }
+    if (node->is_comment()) {
+        DomComment* comment = node->as_comment();
+        strbuf_append_str(sb, "<!--");
+        if (comment && comment->content && comment->length > 0) {
+            strbuf_append_str_n(sb, comment->content, (int)comment->length);
+        }
+        strbuf_append_str(sb, "-->");
+        return;
+    }
+    if (!node->is_element()) return;
+
+    DomElement* elem = node->as_element();
+    const char* tag = elem && elem->tag_name ? elem->tag_name : "";
+    if (strcmp(tag, "#document-fragment") == 0) {
+        for (DomNode* child = js_dom_first_script_visible_child(elem); child;
+             child = js_dom_next_script_visible_sibling(child)) {
+            collect_xml_node(child, sb);
+        }
+        return;
+    }
+
+    strbuf_append_char(sb, '<');
+    strbuf_append_str(sb, tag);
+    int attr_count = 0;
+    const char** attr_names = elem->attribute_names(&attr_count);
+    bool has_xlink_attr = false;
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        if (!name || js_dom_is_internal_attr(name)) continue;
+        char xlink_name[128];
+        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
+        if (elem->get_attribute(xlink_name)) {
+            has_xlink_attr = true;
+            break;
+        }
+    }
+    if (has_xlink_attr && !elem->get_attribute("xmlns:xlink")) {
+        // XLink attributes mirror an unprefixed renderer attribute internally;
+        // XMLSerializer must restore their qualified XML identity on output.
+        strbuf_append_str(sb, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+    }
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        if (!name || js_dom_is_internal_attr(name)) continue;
+        char xlink_name[128];
+        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
+        bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
+        strbuf_append_char(sb, ' ');
+        if (is_xlink_attr) strbuf_append_str(sb, "xlink:");
+        strbuf_append_str(sb, name);
+        strbuf_append_str(sb, "=\"");
+        const char* value = elem->get_attribute(name);
+        if (value) collect_xml_attr_value(value, sb);
+        strbuf_append_char(sb, '"');
+    }
+
+    DomNode* child = js_dom_first_script_visible_child(elem);
+    if (!child) {
+        strbuf_append_str(sb, "/>");
+        return;
+    }
+    strbuf_append_char(sb, '>');
+    while (child) {
+        collect_xml_node(child, sb);
+        child = js_dom_next_script_visible_sibling(child);
+    }
+    strbuf_append_str(sb, "</");
+    strbuf_append_str(sb, tag);
+    strbuf_append_char(sb, '>');
+}
+
+static Item js_dom_xml_serializer_constructor(void) {
+    return make_js_undefined();
+}
+
+static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
+    if (!node) {
+        DomDocument* doc = js_document_proxy_doc_from_item(node_item);
+        node = doc ? (DomNode*)doc->root : nullptr;
+    }
+    if (!node) return js_throw_type_error("XMLSerializer.serializeToString requires a Node");
+
+    // ModelXmlSerializer exports MaxGraph's detached XML trees through this
+    // standard DOM API; serializing the live node preserves namespaces and
+    // attributes instead of substituting a format-specific graph snapshot.
+    StrBuf* sb = strbuf_new_cap(256);
+    collect_xml_node(node, sb);
+    String* result = heap_create_name(sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+static void js_dom_install_xml_serializer_global(void) {
+    Item global = js_get_global_this();
+    Item ctor = js_new_function((void*)js_dom_xml_serializer_constructor, 0);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("XMLSerializer"))});
+    Item proto = js_new_object();
+    js_property_set(proto, js_string_key("constructor"), ctor);
+    js_property_set(proto, js_string_key("serializeToString"),
+        js_new_function((void*)js_dom_xml_serializer_serialize_to_string, 1));
+    js_property_set(ctor, js_string_key("prototype"), proto);
+    js_property_set(global, js_string_key("XMLSerializer"), ctor);
 }
 
 static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
@@ -11975,6 +12113,256 @@ static bool js_dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
     return true;
 }
 
+static const float JS_DOM_SVG_PATH_HIT_AIM_SLOP_PX = 3.0f;
+static const int JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH = 10;
+
+typedef struct JsDomSvgPathHitContext {
+    float point_x;
+    float point_y;
+    float curve_flatness;
+    float nearest_stroke_distance_sq;
+    int fill_winding;
+    int fill_crossings;
+    bool fill_on_edge;
+    bool has_current;
+    bool subpath_has_draw;
+    bool subpath_closed;
+    float current_x;
+    float current_y;
+    float subpath_start_x;
+    float subpath_start_y;
+} JsDomSvgPathHitContext;
+
+static float js_dom_svg_point_segment_distance_sq(float point_x, float point_y,
+                                                  float start_x, float start_y,
+                                                  float end_x, float end_y) {
+    float dx = end_x - start_x;
+    float dy = end_y - start_y;
+    float length_sq = dx * dx + dy * dy;
+    if (length_sq <= 0.000001f) {
+        float px = point_x - start_x;
+        float py = point_y - start_y;
+        return px * px + py * py;
+    }
+    float projection = ((point_x - start_x) * dx + (point_y - start_y) * dy) /
+        length_sq;
+    if (projection < 0.0f) projection = 0.0f;
+    if (projection > 1.0f) projection = 1.0f;
+    float closest_x = start_x + dx * projection;
+    float closest_y = start_y + dy * projection;
+    float px = point_x - closest_x;
+    float py = point_y - closest_y;
+    return px * px + py * py;
+}
+
+static void js_dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
+                                              float start_x, float start_y,
+                                              float end_x, float end_y) {
+    if (!context || fabsf(end_y - start_y) <= 0.000001f) return;
+    bool upward = start_y <= context->point_y && end_y > context->point_y;
+    bool downward = start_y > context->point_y && end_y <= context->point_y;
+    if (!upward && !downward) return;
+    float side = (end_x - start_x) * (context->point_y - start_y) -
+        (context->point_x - start_x) * (end_y - start_y);
+    if (fabsf(side) <= 0.000001f) {
+        context->fill_on_edge = true;
+        return;
+    }
+    if (upward && side > 0.0f) {
+        context->fill_winding++;
+        context->fill_crossings++;
+    } else if (downward && side < 0.0f) {
+        context->fill_winding--;
+        context->fill_crossings++;
+    }
+}
+
+static void js_dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
+                                            float start_x, float start_y,
+                                            float end_x, float end_y,
+                                            bool include_stroke) {
+    if (!context) return;
+    if (include_stroke) {
+        float distance_sq = js_dom_svg_point_segment_distance_sq(
+            context->point_x, context->point_y, start_x, start_y, end_x, end_y);
+        if (distance_sq < context->nearest_stroke_distance_sq) {
+            context->nearest_stroke_distance_sq = distance_sq;
+        }
+    }
+    js_dom_svg_path_hit_add_fill_edge(context, start_x, start_y, end_x, end_y);
+}
+
+static void js_dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
+    if (!context || !context->has_current || !context->subpath_has_draw ||
+        context->subpath_closed) {
+        return;
+    }
+    // SVG fill implicitly closes an open subpath, while its stroke does not.
+    js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+                                    context->subpath_start_x, context->subpath_start_y,
+                                    false);
+}
+
+static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
+                                              float start_x, float start_y,
+                                              float control1_x, float control1_y,
+                                              float control2_x, float control2_y,
+                                              float end_x, float end_y,
+                                              int depth) {
+    if (!context) return;
+    float flatness_sq = context->curve_flatness * context->curve_flatness;
+    float control1_distance_sq = js_dom_svg_point_segment_distance_sq(
+        control1_x, control1_y, start_x, start_y, end_x, end_y);
+    float control2_distance_sq = js_dom_svg_point_segment_distance_sq(
+        control2_x, control2_y, start_x, start_y, end_x, end_y);
+    if (depth >= JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH ||
+        (control1_distance_sq <= flatness_sq && control2_distance_sq <= flatness_sq)) {
+        js_dom_svg_path_hit_add_segment(context, start_x, start_y, end_x, end_y, true);
+        return;
+    }
+    float start_control1_x = (start_x + control1_x) * 0.5f;
+    float start_control1_y = (start_y + control1_y) * 0.5f;
+    float controls_x = (control1_x + control2_x) * 0.5f;
+    float controls_y = (control1_y + control2_y) * 0.5f;
+    float control2_end_x = (control2_x + end_x) * 0.5f;
+    float control2_end_y = (control2_y + end_y) * 0.5f;
+    float middle_control1_x = (start_control1_x + controls_x) * 0.5f;
+    float middle_control1_y = (start_control1_y + controls_y) * 0.5f;
+    float middle_control2_x = (controls_x + control2_end_x) * 0.5f;
+    float middle_control2_y = (controls_y + control2_end_y) * 0.5f;
+    float middle_x = (middle_control1_x + middle_control2_x) * 0.5f;
+    float middle_y = (middle_control1_y + middle_control2_y) * 0.5f;
+    js_dom_svg_path_hit_flatten_cubic(context, start_x, start_y,
+        start_control1_x, start_control1_y, middle_control1_x, middle_control1_y,
+        middle_x, middle_y, depth + 1);
+    js_dom_svg_path_hit_flatten_cubic(context, middle_x, middle_y,
+        middle_control2_x, middle_control2_y, control2_end_x, control2_end_y,
+        end_x, end_y, depth + 1);
+}
+
+static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
+                                      const float* args, int arg_count) {
+    JsDomSvgPathHitContext* context = (JsDomSvgPathHitContext*)userdata;
+    if (!context) return false;
+    switch (command) {
+    case RDT_PATH_MOVE:
+        if (arg_count < 2) return false;
+        js_dom_svg_path_hit_finish_subpath(context);
+        context->current_x = args[0];
+        context->current_y = args[1];
+        context->subpath_start_x = args[0];
+        context->subpath_start_y = args[1];
+        context->has_current = true;
+        context->subpath_has_draw = false;
+        context->subpath_closed = false;
+        return true;
+    case RDT_PATH_LINE:
+        if (arg_count < 2 || !context->has_current) return false;
+        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+                                        args[0], args[1], true);
+        context->current_x = args[0];
+        context->current_y = args[1];
+        context->subpath_has_draw = true;
+        context->subpath_closed = false;
+        return true;
+    case RDT_PATH_QUAD:
+        if (arg_count < 4 || !context->has_current) return false;
+        js_dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
+            context->current_x + (args[0] - context->current_x) * (2.0f / 3.0f),
+            context->current_y + (args[1] - context->current_y) * (2.0f / 3.0f),
+            args[2] + (args[0] - args[2]) * (2.0f / 3.0f),
+            args[3] + (args[1] - args[3]) * (2.0f / 3.0f),
+            args[2], args[3], 0);
+        context->current_x = args[2];
+        context->current_y = args[3];
+        context->subpath_has_draw = true;
+        context->subpath_closed = false;
+        return true;
+    case RDT_PATH_CUBIC:
+        if (arg_count < 6 || !context->has_current) return false;
+        js_dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
+            args[0], args[1], args[2], args[3], args[4], args[5], 0);
+        context->current_x = args[4];
+        context->current_y = args[5];
+        context->subpath_has_draw = true;
+        context->subpath_closed = false;
+        return true;
+    case RDT_PATH_CLOSE:
+        if (!context->has_current || !context->subpath_has_draw) return true;
+        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+                                        context->subpath_start_x, context->subpath_start_y,
+                                        true);
+        context->current_x = context->subpath_start_x;
+        context->current_y = context->subpath_start_y;
+        context->subpath_closed = true;
+        return true;
+    case RDT_PATH_RECT:
+    case RDT_PATH_CIRCLE:
+        // SVG path data is lowered to move/line/cubic commands before this
+        // visitor. Other backend-only path primitives have no SVG `d` source.
+        return false;
+    }
+    return false;
+}
+
+static bool js_dom_svg_paint_is_visible(DomElement* elem, const char* paint_name,
+                                        const char* opacity_name,
+                                        bool paint_is_visible_by_default) {
+    if (!elem || !paint_name || !opacity_name) return false;
+    const char* paint = elem->get_attribute(paint_name);
+    if (paint && (!*paint || strcasecmp(paint, "none") == 0)) return false;
+    if (!paint && !paint_is_visible_by_default) return false;
+    float paint_opacity = js_dom_svg_attribute_number(elem, opacity_name, 1.0f);
+    float opacity = js_dom_svg_attribute_number(elem, "opacity", 1.0f);
+    return paint_opacity > 0.0f && opacity > 0.0f;
+}
+
+static bool js_dom_svg_path_contains_viewport_point(DomElement* elem,
+                                                    float viewport_x,
+                                                    float viewport_y) {
+    if (!elem) return false;
+    const char* d = elem->get_attribute("d");
+    if (!d || !*d) return false;
+    bool has_fill = js_dom_svg_paint_is_visible(elem, "fill", "fill-opacity", true);
+    bool has_stroke = js_dom_svg_paint_is_visible(elem, "stroke", "stroke-opacity", false);
+    if (!has_fill && !has_stroke) return false;
+    RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
+    float local_x = 0.0f;
+    float local_y = 0.0f;
+    if (!js_dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
+                                            &local_x, &local_y)) {
+        return false;
+    }
+    float scale_x = hypotf(screen_ctm.e11, screen_ctm.e21);
+    float scale_y = hypotf(screen_ctm.e12, screen_ctm.e22);
+    float min_scale = LMB_MIN(scale_x, scale_y);
+    if (min_scale < 0.0001f) min_scale = 0.0001f;
+    RdtPath* path = svg_parse_path_d(d);
+    if (!path) return false;
+    JsDomSvgPathHitContext context = {};
+    context.point_x = local_x;
+    context.point_y = local_y;
+    context.curve_flatness = 0.5f / min_scale;
+    context.nearest_stroke_distance_sq = 1.0e30f;
+    bool visited = rdt_path_visit(path, js_dom_svg_path_hit_visit, &context);
+    if (visited) js_dom_svg_path_hit_finish_subpath(&context);
+    rdt_path_free(path);
+    if (!visited) return false;
+    if (has_fill) {
+        const char* fill_rule = elem->get_attribute("fill-rule");
+        bool even_odd = fill_rule && strcasecmp(fill_rule, "evenodd") == 0;
+        if (context.fill_on_edge || (even_odd
+                ? (context.fill_crossings & 1) != 0
+                : context.fill_winding != 0)) {
+            return true;
+        }
+    }
+    if (!has_stroke) return false;
+    float stroke_width = js_dom_svg_attribute_number(elem, "stroke-width", 1.0f);
+    float hit_radius = stroke_width * 0.5f + JS_DOM_SVG_PATH_HIT_AIM_SLOP_PX / min_scale;
+    return context.nearest_stroke_distance_sq <= hit_radius * hit_radius;
+}
+
 static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
     if (!elem || !elem->tag_name) return true;
     const char* tag = elem->tag_name;
@@ -11996,6 +12384,9 @@ static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
 static bool js_dom_svg_element_contains_viewport_point(DomElement* elem,
                                                        float x, float y) {
     if (!elem || js_dom_svg_element_skips_hit_test(elem)) return false;
+    if (elem->tag_name && strcasecmp(elem->tag_name, "path") == 0) {
+        return js_dom_svg_path_contains_viewport_point(elem, x, y);
+    }
     JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(elem);
     if (!bounds.valid) return false;
     RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
@@ -12748,8 +13139,9 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     Element* parent_backing = dom_element_to_element(parent);
     int64_t child_index = js_dom_backed_child_index(parent, child_elem);
     if (child_index < 0) {
-        log_error("js_dom_remove_backed_child: child is absent from Mark parent");
-        return false;
+        // Positional DOM APIs can insert a DOM-only element between backed
+        // siblings. Its removal must not delete an unrelated Mark child.
+        return ((DomNode*)parent)->remove_child(child);
     }
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
@@ -13128,6 +13520,37 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         return old_child_arg;
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+
+    if (new_child->is_element() && old_child->is_element() && elem->doc &&
+        elem->doc->input) {
+        DomElement* new_elem = new_child->as_element();
+        DomElement* old_elem = old_child->as_element();
+        int64_t old_index = js_dom_backed_child_index(elem, old_elem);
+        if (new_elem && old_elem && old_index >= 0) {
+            if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                if (!new_child->parent->is_element() ||
+                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    return ItemNull;
+                }
+            }
+            dom_pre_remove(old_child);
+            if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
+            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            Item result = editor.elmt_replace_child({.element = dom_element_to_element(elem)},
+                old_index, {.element = dom_element_to_element(new_elem)});
+            if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+                result.element != dom_element_to_element(elem)) {
+                // The DOM link is committed first so the UI relink keeps the
+                // removed wrapper out of a later Mark-backed reconstruction.
+                log_error("js_dom_replace_child: inline replace changed backing identity");
+                return ItemNull;
+            }
+            dom_post_insert((DomNode*)elem, new_child);
+            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            js_dom_mutation_notify();
+            return old_child_arg;
+        }
+    }
     ((DomNode*)elem)->insert_before(new_child, old_child);
     dom_post_insert((DomNode*)elem, new_child);
     dom_pre_remove(old_child);

@@ -3205,6 +3205,20 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_emit_dynamic_new_expr(mt, call, arg_count);
     }
     if (ce) {
+        if (!ce->constructor && ce->node && ce->node->superclass) {
+            // A default derived constructor must dispatch through the class
+            // object's [[Construct]] path. Rebuilding an ancestor body here
+            // loses that body's HomeObject, so its nested super() resolves
+            // against whichever outer class call happened to be active.
+            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
+            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            jm_call_void_1(mt, "js_set_new_target",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
+            return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt),
+                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+        }
         // Create new object — use pre-shaped allocation when constructor has this.prop assigns
         // so that P3 (js_set_shaped_slot) and P4 (js_get_shaped_slot) can use slot-indexed access.
         // Skip pre-shaping when instance fields are present: field inits run before ctor body
@@ -5546,6 +5560,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             }
                         }
                     }
+
+                    jm_emit_class_instance_computed_field_metadata_keys(mt, cls_obj, ce);
 
                     // Emit static field initializers
                     if (ctor_super_val) {

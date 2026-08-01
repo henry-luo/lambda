@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loop listener closure contract</title>
+<link rel="stylesheet" href="editable-drawing.css">
+<h1>Loop listener closure contract</h1>
+<div id="loop-controls">
+  <button id="loop-skip" type="button">Skip</button>
+  <button id="loop-one" type="button" data-action="one">One</button>
+  <button id="loop-two" type="button" data-action="two">Two</button>
+</div>
+<pre id="loop-state"></pre>
+<script>
+function install_loop_listeners() {
+  const state = document.getElementById("loop-state");
+  let drawing = null;
+
+  function report_failure(error) {
+    drawing = null;
+    state.setAttribute("data-error", error.message);
+  }
+
+  for (const button of document.querySelectorAll("#loop-controls button")) {
+    const action = button.getAttribute("data-action");
+    if (!action) continue;
+    button.addEventListener("click", () => {
+      try {
+        state.setAttribute("data-action-dispatched", action);
+        if (!drawing) throw new Error("drawing is unavailable");
+        state.textContent = action + ":" + drawing.name;
+      } catch (error) {
+        report_failure(error);
+      }
+    });
+  }
+
+  drawing = { name: "ready" };
+  state.setAttribute("data-ready", "true");
+}
+
+install_loop_listeners();
+</script>

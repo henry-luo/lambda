@@ -314,10 +314,19 @@ struct NativeFuncInfo {
     char name[128];           // mangled function name (native version)
     TypeId param_types[16];   // resolved (declared or inferred) TypeId per param
     MIR_type_t param_mir[16]; // MIR type per param
+    // Keep source authority separate from the chosen physical carrier. A
+    // native param inferred from callers needs an exact entry guard; a
+    // declared native param instead relies on its checked boundary.
+    bool param_is_declared[16];
+    bool param_is_inferred_specialization[16];
     int param_count;          // number of user params (excluding _env_ptr, _self, _vargs)
     TypeId return_type;       // resolved return TypeId (LMD_TYPE_ANY if unknown)
     MIR_type_t return_mir;    // MIR return type
     bool has_native;          // true if a native version was generated
+    bool has_inferred_specialization;
+    bool inferred_shape_closed;
+    bool needs_boxed_slow_body;
+    bool needs_boxed_entry;
 };
 HASHMAP_DEFINE_STRKEY(native_func, struct NativeFuncInfo, name)
 
@@ -353,6 +362,10 @@ struct CallSiteEntry {
     // joined static type per argument position. LMD_TYPE_ERROR is the "no call
     // site seen yet" sentinel; LMD_TYPE_ANY means unknown or conflicting.
     TypeId arg_types[16];
+    // One candidate exact shape among known call sites. A deferred Item does
+    // not erase a concrete candidate, because it can enter the boxed slow
+    // lane; two different concrete shapes do erase it.
+    TypeId specialization_types[16];
     // the name is referenced somewhere other than direct-callee position (or is
     // reachable from outside the unit), so unseen callers are possible
     bool escaped;
@@ -1493,6 +1506,112 @@ static void register_native_func_info(MirTranspiler* mt, const char* name, Nativ
 // Only types that map to a different native type than boxed Item are worth unboxing.
 static bool mir_is_native_param_type(TypeId tid) {
     return is_native_param_type_id(tid);
+}
+
+static bool mir_function_has_borrowed_params(AstFuncNode* fn_node,
+        bool is_proc_fn) {
+    // Proc parameters participate in caller-visible write-back, and `var`
+    // parameters borrow a caller root. A raw carrier would sever that shared
+    // Item ownership, so these functions stay on the boxed ABI for now.
+    if (is_proc_fn) return true;
+    for (AstNamedNode* param = fn_node ? fn_node->param : NULL; param;
+            param = (AstNamedNode*)param->next) {
+        TypeParam* type_param = (TypeParam*)param->type;
+        if (type_param && type_param->is_var_param) return true;
+    }
+    return false;
+}
+
+// Build the entry plan from source declarations plus whole-unit call evidence.
+// A closed exact inferred shape is an implementation fact, never a contract:
+// an escaped or mixed caller set keeps the boxed slow body available.
+static void plan_native_func_specialization(MirTranspiler* mt,
+        AstFuncNode* fn_node, NativeFuncInfo* nfi) {
+    if (!nfi || !fn_node) return;
+
+    nfi->has_inferred_specialization = false;
+    nfi->inferred_shape_closed = false;
+    nfi->needs_boxed_slow_body = false;
+    nfi->needs_boxed_entry = false;
+
+    AstNamedNode* param = fn_node->param;
+    for (int i = 0; i < nfi->param_count && param; i++) {
+        bool declared = param->declared_type &&
+            param->declared_type->type_id != LMD_TYPE_ANY;
+        nfi->param_is_declared[i] = declared;
+        nfi->param_is_inferred_specialization[i] = !declared &&
+            mir_is_native_param_type(nfi->param_types[i]);
+        if (nfi->param_is_inferred_specialization[i]) {
+            nfi->has_inferred_specialization = true;
+        }
+        param = (AstNamedNode*)param->next;
+    }
+    CallSiteEntry key;
+    memset(&key, 0, sizeof(key));
+    key.fn = fn_node;
+    CallSiteEntry* callers = mt && mt->callsite_info
+        ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
+    nfi->needs_boxed_entry = callers && callers->escaped;
+    // A non-matching visible declared argument still needs the admission
+    // trampoline.  It may normalize (for example int -> float) even though it
+    // never needs an inferred slow body.
+    if (callers && callers->has_call) {
+        for (int i = 0; i < nfi->param_count; i++) {
+            if (!nfi->param_is_declared[i]) continue;
+            if (callers->arg_types[i] != nfi->param_types[i]) {
+                nfi->needs_boxed_entry = true;
+                break;
+            }
+        }
+    }
+    if (!nfi->has_inferred_specialization) return;
+
+    bool closed = callers && !callers->escaped;
+    if (closed && callers->has_call) {
+        for (int i = 0; i < nfi->param_count; i++) {
+            if (!nfi->param_is_inferred_specialization[i]) continue;
+            if (callers->arg_types[i] != nfi->param_types[i]) {
+                closed = false;
+                break;
+            }
+        }
+    }
+
+    nfi->inferred_shape_closed = closed;
+    nfi->needs_boxed_slow_body = !closed;
+    nfi->needs_boxed_entry = nfi->needs_boxed_entry || !closed;
+}
+
+// A boxed entry is only an implementation companion for dynamic reachability.
+// Direct, closed call graphs can use the one generated body without inventing
+// an otherwise-observable ABI symbol; `main` and task roots are host entries.
+static bool mir_function_needs_boxed_entry(MirTranspiler* mt,
+        AstFuncNode* fn_node) {
+    if (!fn_node) return true;
+    AstNode* fn_as = (AstNode*)fn_node;
+    TypeFunc* fn_type = fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)fn_as->type : NULL;
+    bool is_main = fn_as->node_type == AST_NODE_PROC && fn_node->name &&
+        fn_node->name->len == 4 &&
+        memcmp(fn_node->name->chars, "main", 4) == 0;
+    if (is_main || (fn_type && fn_type->is_public) ||
+            (fn_node->analysis && (fn_node->analysis->needs_task_context ||
+                fn_node->analysis->may_await))) {
+        return true;
+    }
+
+    StrBuf* name_buf = strbuf_new_cap(64);
+    write_fn_name(name_buf, fn_node, NULL);
+    NativeFuncInfo* nfi = find_native_func_info(mt, name_buf->str);
+    strbuf_free(name_buf);
+    if (nfi && nfi->needs_boxed_entry) return true;
+
+    CallSiteEntry key;
+    memset(&key, 0, sizeof(key));
+    key.fn = fn_node;
+    CallSiteEntry* callers = mt && mt->callsite_info
+        ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
+    return callers && callers->escaped;
 }
 
 static bool mir_is_native_scalar_value_type(TypeId tid) {
@@ -11037,6 +11156,53 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // Phase 4: Check if target function has a native version for optimized calling
             NativeFuncInfo* call_nfi = fn_mangled ? find_native_func_info(mt, fn_mangled) : nullptr;
             bool native_call = (call_nfi && call_nfi->has_native && local_func);
+            // A direct raw call needs proof for both lanes: declared params
+            // need their value already admitted to the destination carrier,
+            // while inferred params need the exact specialization shape.  All
+            // other calls enter `_b`, which either normalizes a declaration or
+            // selects the complete inferred slow body.
+            bool routed_to_boxed_entry = false;
+            bool routed_to_inferred_slow_body = false;
+            StrBuf* entry_name_buf = NULL;
+            const char* direct_call_name = fn_mangled;
+            if (native_call && fn_def) {
+                for (int i = 0; i < call_nfi->param_count; i++) {
+                    if (!call_nfi->param_is_declared[i] &&
+                            !call_nfi->param_is_inferred_specialization[i]) {
+                        continue;
+                    }
+                    TypeId argument_tid = resolved_args[i]
+                        ? get_effective_type(mt, resolved_args[i]) : LMD_TYPE_ANY;
+                    if (argument_tid != call_nfi->param_types[i]) {
+                        routed_to_boxed_entry = true;
+                        if (call_nfi->param_is_inferred_specialization[i]) {
+                            routed_to_inferred_slow_body = true;
+                        }
+                        break;
+                    }
+                }
+                if (routed_to_boxed_entry) {
+                    entry_name_buf = strbuf_new_cap(64);
+                    write_fn_name_ex(entry_name_buf, fn_def,
+                        ident->entry ? ident->entry->import : NULL, "_b");
+                    MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
+                    if (boxed_entry) {
+                        local_func = boxed_entry;
+                        direct_call_name = entry_name_buf->str;
+                        native_call = false;
+                        log_debug("mir: direct call '%s' routed through boxed entry '%s'",
+                            fn_mangled, direct_call_name);
+                    } else {
+                        // A missing wrapper is only possible for a malformed
+                        // forward set. Keep the existing raw lowering rather
+                        // than publishing an unresolved MIR call target.
+                        routed_to_boxed_entry = false;
+                        routed_to_inferred_slow_body = false;
+                        strbuf_free(entry_name_buf);
+                        entry_name_buf = NULL;
+                    }
+                }
+            }
 
             // Emit args in parameter order, filling defaults for missing slots
             MIR_op_t arg_ops[16];
@@ -11236,8 +11402,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             bool call_native_return = (native_call && call_nfi->return_type != LMD_TYPE_ANY);
             MIR_type_t ret_type = call_native_return ? call_nfi->return_mir : MIR_T_I64;
             bool call_error_lane = call_native_return && call_fn_type && call_fn_type->can_raise;
-            LocalFuncEntry* local_entry = local_func && fn_mangled
-                ? find_local_func_entry(mt, fn_mangled) : NULL;
+            LocalFuncEntry* local_entry = local_func && direct_call_name
+                ? find_local_func_entry(mt, direct_call_name) : NULL;
             int scalar_home_id = 0;
             MIR_type_t call_types[16];
             MIR_op_t call_ops[16];
@@ -11258,7 +11424,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
                     (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR),
                     false, true};
-                MirCallResult direct = em_call_direct(&mt->em, fn_mangled,
+                MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
                     local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
                     call_ops, &options);
                 result = direct.normal.reg;
@@ -11323,7 +11489,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
 
             // P4-3.3: Post-call type handling for return values
-            TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
+            // A declared-only wrapper still returns the source's declared
+            // result and can recover its known carrier. An inferred guard miss
+            // may execute arbitrary source semantics, so it must remain Item.
+            TypeId call_tid = routed_to_inferred_slow_body ? LMD_TYPE_ANY
+                : get_effective_type(mt, (AstNode*)call_node);
             if (call_native_return && !result_is_boxed) {
                 // Native function returns native value directly
                 if (call_tid == call_nfi->return_type) {
@@ -11397,6 +11567,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_new_reg_op(mt->ctx, parameter_error_result)));
                 emit_label(mt, parameter_error_done);
 
+                if (entry_name_buf) strbuf_free(entry_name_buf);
                 if (name_buf) strbuf_free(name_buf);
                 return joined_result;
             }
@@ -11408,6 +11579,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 mt->region_capability_reg = saved_region_capability_reg;
             }
 
+            if (entry_name_buf) strbuf_free(entry_name_buf);
             if (name_buf) strbuf_free(name_buf);
             result = root_gc_result_if_needed(mt, result, ret_type, call_tid, "call_rv");
             return result;
@@ -14639,15 +14811,16 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
                                        TypeId* out_types, int param_count) {
     if (!fn_node->body || param_count == 0) return;
 
-    // M2: call-site evidence, only usable when the name cannot be reached by a
-    // caller the collect pass did not see.
+    // Exact direct-call evidence is still valuable when the function also
+    // escapes: it selects a raw fast shape, while the escaped entry keeps the
+    // boxed slow body for every unseen caller.
     const CallSiteEntry* cs = NULL;
     if (mt && mt->callsite_info) {
         CallSiteEntry key;
         memset(&key, 0, sizeof(key));
         key.fn = fn_node;
         const CallSiteEntry* found = (const CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
-        if (found && found->has_call && !found->escaped) cs = found;
+        if (found && found->has_call) cs = found;
     }
 
     AstNode* fn_as = (AstNode*)fn_node;
@@ -14711,8 +14884,12 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
     for (int c = 0; c < ctx_count; c++) {
         int pi = ctx_indices[c];
         if (cs && pi < cs->param_count) {
-            if (cs->arg_types[pi] == LMD_TYPE_INT) ctxs[c].evidence |= INFER_CALLSITE_INT;
-            else if (cs->arg_types[pi] == LMD_TYPE_FLOAT) ctxs[c].evidence |= INFER_CALLSITE_FLOAT;
+            TypeId specialization_type = cs->specialization_types[pi];
+            if (specialization_type == LMD_TYPE_INT) {
+                ctxs[c].evidence |= INFER_CALLSITE_INT;
+            } else if (specialization_type == LMD_TYPE_FLOAT) {
+                ctxs[c].evidence |= INFER_CALLSITE_FLOAT;
+            }
         }
         TypeId inferred = resolve_inferred_type(&ctxs[c], is_proc);
         log_debug("mir: infer_param_types_batched('%s') aliases=%d evidence=%d → %d",
@@ -14933,6 +15110,100 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
 // calls the native version, and returns the (already boxed) result.
 // Used for dynamic dispatch (Function*) and cross-module calls.
 // ============================================================================
+static MIR_reg_t emit_exact_inferred_shape_test(MirTranspiler* mt,
+        MIR_reg_t item, TypeId type_id) {
+    if (type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t inline_bits = new_reg(mt, "guard_float_bits", MIR_T_I64);
+        MIR_reg_t inline_float = new_reg(mt, "guard_float_inline", MIR_T_I64);
+        MIR_reg_t tagged_float = new_reg(mt, "guard_float_tagged", MIR_T_I64);
+        MIR_reg_t result = new_reg(mt, "guard_float", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, inline_bits), MIR_new_reg_op(mt->ctx, item),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_NE,
+            MIR_new_reg_op(mt->ctx, inline_float),
+            MIR_new_reg_op(mt->ctx, inline_bits), MIR_new_int_op(mt->ctx, 0)));
+        MIR_reg_t tag = emit_item_tag(mt, item);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, tagged_float), MIR_new_reg_op(mt->ctx, tag),
+            MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, inline_float),
+            MIR_new_reg_op(mt->ctx, tagged_float)));
+        return result;
+    }
+
+    switch (type_id) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_STRING:
+        break;
+    default: {
+        MIR_reg_t no_match = new_reg(mt, "guard_unsupported", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, no_match), MIR_new_int_op(mt->ctx, 0)));
+        return no_match;
+    }
+    }
+
+    MIR_reg_t tag = emit_item_tag(mt, item);
+    MIR_reg_t result = new_reg(mt, "guard_tag", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, tag),
+        MIR_new_int_op(mt->ctx, type_id)));
+    return result;
+}
+
+static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
+        TypeFunc* fn_type) {
+    Type* saved_return_type = mt->current_return_type;
+    TypeId saved_native_return_tid = mt->native_return_tid;
+    bool saved_block_returned = mt->block_returned;
+    AstFuncNode* saved_tco_func = mt->tco_func;
+    MIR_label_t saved_tco_label = mt->tco_label;
+    MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
+    bool saved_tail_position = mt->in_tail_position;
+
+    // This is the source-equivalent lane. It must not inherit the raw body's
+    // return ABI or tail-call rewrite, because its bindings remain boxed Items.
+    mt->current_return_type = fn_type
+        ? (fn_type->return_contract ? fn_type->return_contract : fn_type->returned)
+        : NULL;
+    mt->native_return_tid = LMD_TYPE_ANY;
+    mt->block_returned = false;
+    mt->tco_func = NULL;
+    mt->tco_label = NULL;
+    mt->tco_count_reg = 0;
+    mt->in_tail_position = false;
+
+    MIR_reg_t result = transpile_box_item(mt, fn_node->body);
+    if (!mt->block_returned) {
+        TypeId body_tid = get_effective_type(mt, fn_node->body);
+        if (return_contract_needs_checked_boundary(mt->current_return_type) &&
+                (body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL ||
+                 (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
+                  body_tid == LMD_TYPE_MAP && fn_node->body->type !=
+                      mt->current_return_type))) {
+            result = emit_checked_boundary(mt, result, body_tid,
+                mir_unwrap_decl_type(mt->current_return_type), "function return");
+            emit_return_if_item_error(mt, result);
+        }
+        result = emit_coerce_boxed_to_declared(mt, result,
+            mt->current_return_type);
+    }
+
+    mt->current_return_type = saved_return_type;
+    mt->native_return_tid = saved_native_return_tid;
+    mt->block_returned = saved_block_returned;
+    mt->tco_func = saved_tco_func;
+    mt->tco_label = saved_tco_label;
+    mt->tco_count_reg = saved_tco_count_reg;
+    mt->in_tail_position = saved_tail_position;
+    return result;
+}
+
 static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     AstFuncNode* fn_node, NativeFuncInfo* nfi, bool is_method)
 {
@@ -15021,6 +15292,19 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     MIR_op_t call_args[33];
     MIR_var_t call_vars[33];
+    // Finish all boxed parameter preparation before choosing a lane.  The slow
+    // body shares these bindings, so it must see the same defaults and checked
+    // declared values as the raw call would have received.
+    MIR_reg_t prepared_params[16] = {0};
+    bool has_slow_body = nfi && nfi->needs_boxed_slow_body;
+    MIR_reg_t inferred_guard = 0;
+    MIR_label_t slow_body_label = NULL;
+    if (has_slow_body) {
+        inferred_guard = new_reg(mt, "inferred_guard", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, inferred_guard), MIR_new_int_op(mt->ctx, 1)));
+        slow_body_label = new_label(mt);
+    }
     int call_arg_count = 0;
     if (is_closure) {
         MIR_reg_t env = MIR_reg(mt->ctx, "_env_ptr", wrapper_func);
@@ -15033,7 +15317,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     param = fn_node->param;
     int user_index = 0;
-    while (param && call_arg_count < 31) {
+    while (param && user_index < 16) {
         char prefixed[68];
         snprintf(prefixed, sizeof(prefixed), "_%.*s", (int)param->name->len, param->name->chars);
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
@@ -15085,18 +15369,43 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             }
         }
 
-        if (nfi && user_index < nfi->param_count &&
-                mir_is_native_param_type(nfi->param_types[user_index])) {
-            MIR_reg_t unboxed = emit_unbox(mt, preg, nfi->param_types[user_index]);
+        // The boundary can allocate and can change an exact numeric value's
+        // Item tag. Rebind and root the finalized Item before a later default,
+        // guard, or slow body observes this parameter.
+        set_var(mt, parameter_name, preg, MIR_T_I64, LMD_TYPE_ANY);
+
+        prepared_params[user_index] = preg;
+        if (has_slow_body && user_index < nfi->param_count &&
+                nfi->param_is_inferred_specialization[user_index]) {
+            MIR_reg_t exact = emit_exact_inferred_shape_test(mt, preg,
+                nfi->param_types[user_index]);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, inferred_guard),
+                MIR_new_reg_op(mt->ctx, inferred_guard),
+                MIR_new_reg_op(mt->ctx, exact)));
+        }
+        user_index++;
+        param = (AstNamedNode*)param->next;
+    }
+    if (has_slow_body) {
+        // An inferred carrier is only a fast-path specialization.  Do not
+        // unbox an unmatched Item: source semantics continue below instead.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, slow_body_label),
+            MIR_new_reg_op(mt->ctx, inferred_guard)));
+    }
+    for (int i = 0; i < user_index; i++) {
+        MIR_reg_t prepared = prepared_params[i];
+        if (nfi && i < nfi->param_count &&
+                mir_is_native_param_type(nfi->param_types[i])) {
+            MIR_reg_t unboxed = emit_unbox(mt, prepared, nfi->param_types[i]);
             call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, unboxed);
-            call_vars[call_arg_count] = {nfi->param_mir[user_index], "p", 0};
+            call_vars[call_arg_count] = {nfi->param_mir[i], "p", 0};
         } else {
-            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, preg);
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, prepared);
             call_vars[call_arg_count] = {MIR_T_I64, "p", 0};
         }
         call_arg_count++;
-        user_index++;
-        param = (AstNamedNode*)param->next;
     }
     if (is_variadic) {
         MIR_reg_t vargs = MIR_reg(mt->ctx, "_vargs", wrapper_func);
@@ -15175,6 +15484,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     // The wrapper's side-number frame is about to be reclaimed; its result
     // must therefore be adopted by the caller-provided home in the epilogue.
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed_result));
+    if (has_slow_body) {
+        emit_label(mt, slow_body_label);
+        MIR_reg_t slow_result = emit_boxed_slow_body(mt, fn_node, fn_type);
+        emit_function_return(mt, MIR_new_reg_op(mt->ctx, slow_result));
+    }
     finish_function_epilogue(mt);
     finalize_gc_root_publication(mt, wrapper_name->str);
     finalize_side_root_frame(mt);
@@ -15225,6 +15539,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     bool is_async_proc = is_proc_fn && fn_node->analysis &&
         fn_node->analysis->may_await;
     bool region_producer = mir_region_producer_candidate(fn_node);
+    bool has_borrowed_params = mir_function_has_borrowed_params(fn_node,
+        is_proc_fn);
 
     // ===== Phase 4: Pre-resolve all parameter types (declared + inferred) =====
     // We resolve types BEFORE creating the MIR function so we can decide whether
@@ -15283,7 +15599,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             break;
         }
     }
-    if (!needs_task_context && !is_closure && !is_method && !is_variadic &&
+    if (!needs_task_context && !is_async_proc && !has_borrowed_params &&
+            !is_closure && !is_method && !is_variadic &&
             !has_typed_array_param) {
         for (int i = 0; i < user_param_count; i++) {
             if (mir_is_native_param_type(resolved_param_types[i])) {
@@ -15316,6 +15633,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         TypeId ret_tid = infer_return_type(fn_node);
         nfi.return_type = ret_tid;
         nfi.return_mir = (ret_tid != LMD_TYPE_ANY) ? type_to_mir(ret_tid) : MIR_T_I64;
+        plan_native_func_specialization(mt, fn_node, &nfi);
         register_native_func_info(mt, name_buf->str, &nfi);
         log_debug("mir: dual version - native '%s' with %d params, return=%d",
             name_buf->str, user_param_count, ret_tid);
@@ -15742,6 +16060,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, func);
 
         TypeId tid = resolved_param_types[pi];
+        bool param_has_declared_contract = param->declared_type &&
+            param->declared_type->type_id != LMD_TYPE_ANY;
 
         log_debug("mir: param '%s' type_id=%d has_annotation=%d native=%d", pname, tid,
             param->type ? param->type->type_id : -1, generate_native);
@@ -15752,12 +16072,18 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_type_t mtype = type_to_mir(tid);
             set_var(mt, pname, preg, mtype, tid);
             log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
-        } else if (!generate_native && mir_is_native_param_type(tid)) {
-            // Boxed version: params arrive as boxed Items, unbox to native type
+        } else if (!generate_native && param_has_declared_contract &&
+                mir_is_native_param_type(tid)) {
+            // A declared scalar boundary has already admitted this Item, so the
+            // boxed body can use its declared representation directly.
             MIR_reg_t unboxed = emit_unbox(mt, preg, tid);
             MIR_type_t mtype = type_to_mir(tid);
             set_var(mt, pname, unboxed, mtype, tid);
         } else {
+            // Inferred types belong only to a generated raw specialization.
+            // Keeping them in a boxed-only body would coerce an escaped `pn`
+            // caller into the first visible call shape instead of executing
+            // the source-level slow semantics.
             // Untyped, nullable optional, or complex type: keep as boxed Item.
             // Preserve known container type (e.g. ARRAY_NUM from annotation) so
             // the transpiler can generate fast paths for array access.
@@ -15886,7 +16212,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Check if this function is eligible for tail call optimization.
     // If so, wrap the body in a loop: tco_label -> body -> (tail calls jump back)
     // with an iteration counter to prevent infinite loops.
-    bool use_tco = should_use_tco(fn_node);
+    NativeFuncInfo* tco_nfi = generate_native
+        ? find_native_func_info(mt, name_buf->str) : NULL;
+    // A self-recursive inferred specialization can receive an open shape
+    // through its public entry.  Its boxed slow lane must re-enter source
+    // semantics rather than jump into the raw loop with coercing assignments.
+    bool use_tco = should_use_tco(fn_node) &&
+        !(tco_nfi && tco_nfi->has_inferred_specialization);
     AstFuncNode* saved_tco_func = mt->tco_func;
     MIR_label_t saved_tco_label = mt->tco_label;
     MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
@@ -16055,11 +16387,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_finish_func(mt->ctx);
     mt->current_return_type = saved_current_return_type;
 
-    // Every raw Lambda function uses the widened JIT ABI. Publish one boxed,
-    // single-lane wrapper for dynamic calls, methods, imports, and host bridges.
+    // Publish the Item ABI only when dynamic/host reachability needs it.  A
+    // closed direct graph keeps a single body; when inference is open this is
+    // instead the guarded fast/slow companion selected above.
     NativeFuncInfo* wrapper_nfi = generate_native
         ? find_native_func_info(mt, name_buf->str) : NULL;
-    emit_boxed_abi_wrapper(mt, name_buf->str, fn_node, wrapper_nfi, is_method);
+    if (mir_function_needs_boxed_entry(mt, fn_node)) {
+        emit_boxed_abi_wrapper(mt, name_buf->str, fn_node, wrapper_nfi, is_method);
+    }
 
     // Restore function context
     mt->em.func_item = saved_func_item;
@@ -16299,7 +16634,10 @@ static CallSiteEntry* mir_callsite_entry(MirTranspiler* mt, AstFuncNode* fn, boo
     key.fn = fn;
     CallSiteEntry* found = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
     if (found || !create) return found;
-    for (int i = 0; i < 16; i++) key.arg_types[i] = LMD_TYPE_ERROR;  // "unset"
+    for (int i = 0; i < 16; i++) {
+        key.arg_types[i] = LMD_TYPE_ERROR;  // "unset"
+        key.specialization_types[i] = LMD_TYPE_ERROR;
+    }
     int count = 0;
     for (AstNamedNode* p = fn->param; p && count < 16; p = (AstNamedNode*)p->next) count++;
     key.param_count = count;
@@ -16345,6 +16683,19 @@ static void mir_callsite_join_arg(CallSiteEntry* e, int pos, TypeId tid) {
     if (e->arg_types[pos] != tid) e->arg_types[pos] = LMD_TYPE_ANY;
 }
 
+static void mir_callsite_join_specialization_type(CallSiteEntry* e, int pos,
+        TypeId tid) {
+    if (pos < 0 || pos >= e->param_count || pos >= 16 ||
+            tid == LMD_TYPE_ANY) {
+        return;
+    }
+    if (e->specialization_types[pos] == LMD_TYPE_ERROR) {
+        e->specialization_types[pos] = tid;
+    } else if (e->specialization_types[pos] != tid) {
+        e->specialization_types[pos] = LMD_TYPE_ANY;
+    }
+}
+
 // Record one direct call. Returns true when the callee identifier was consumed
 // as a callee (so the walk must not also count it as an escaping reference).
 static bool mir_callsite_record(MirTranspiler* mt, AstCallNode* call) {
@@ -16366,7 +16717,9 @@ static bool mir_callsite_record(MirTranspiler* mt, AstCallNode* call) {
             e->escaped = true;
             return true;
         }
-        mir_callsite_join_arg(e, pos, mir_callsite_arg_type(mt, a));
+        TypeId arg_type = mir_callsite_arg_type(mt, a);
+        mir_callsite_join_arg(e, pos, arg_type);
+        mir_callsite_join_specialization_type(e, pos, arg_type);
     }
     return true;
 }
@@ -16415,13 +16768,6 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, name_buf->str);
             register_local_func(mt, name_buf->str, fwd);
 
-            StrBuf* wrapper_fwd_name = strbuf_new_cap(64);
-            write_fn_name_ex(wrapper_fwd_name, fn_node, NULL, "_b");
-            MIR_item_t wrapper_fwd = MIR_new_forward(mt->ctx, wrapper_fwd_name->str);
-            register_local_func(mt, wrapper_fwd_name->str, wrapper_fwd);
-            log_debug("mir: forward-declared ABI wrapper '%s'", wrapper_fwd_name->str);
-            strbuf_free(wrapper_fwd_name);
-
             // Also register by raw name for fallback lookup
             if (fn_node->name) {
                 char raw_name[128];
@@ -16432,10 +16778,8 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                 }
             }
 
-            // Phase 4: Forward-declare the boxed wrapper (_b) for functions that
-            // will generate dual versions. Also pre-register NativeFuncInfo so that
-            // call sites in other functions can use the native calling convention
-            // even when the target function hasn't been transpiled yet.
+            // Pre-register native call facts so direct callers compiled before
+            // their target can select its raw ABI without creating a wrapper.
             {
                 bool is_closure = (fn_node->captures != nullptr);
                 bool is_method = false; // in prepass, method_owner is not set
@@ -16445,12 +16789,18 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                 bool is_variadic = ft && ft->is_variadic;
                 bool needs_task_context = fn_as->node_type == AST_NODE_PROC &&
                     fn_node->analysis && fn_node->analysis->needs_task_context;
-                if (!needs_task_context && !is_closure && !is_variadic && !is_method) {
+                bool is_async_proc = fn_as->node_type == AST_NODE_PROC &&
+                    fn_node->analysis && fn_node->analysis->may_await;
+                bool is_proc = (fn_as->node_type == AST_NODE_PROC);
+                bool has_borrowed_params = mir_function_has_borrowed_params(
+                    fn_node, is_proc);
+                if (!needs_task_context && !is_async_proc && !has_borrowed_params &&
+                        !is_closure &&
+                        !is_variadic && !is_method) {
                     // Resolve all param types (matching transpile_func_def logic)
                     TypeId fwd_param_types[16];
                     int fwd_param_count = 0;
                     bool has_native = false;
-                    bool is_proc = (fn_as->node_type == AST_NODE_PROC);
                     {
                         TypeParam* tp = ft ? ft->param : NULL;
                         AstNamedNode* p = fn_node->param;
@@ -16495,6 +16845,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
                         nfi.return_type = fwd_ret_tid;
                         nfi.return_mir = (fwd_ret_tid != LMD_TYPE_ANY) ? type_to_mir(fwd_ret_tid) : MIR_T_I64;
+                        plan_native_func_specialization(mt, fn_node, &nfi);
                         register_native_func_info(mt, name_buf->str, &nfi);
                         log_debug("mir: pre-registered NativeFuncInfo for '%s', return=%d",
                             name_buf->str, fwd_ret_tid);
@@ -16513,12 +16864,22 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                             }
                             nfi.return_type = fwd_ret_tid;
                             nfi.return_mir = type_to_mir(fwd_ret_tid);
+                            plan_native_func_specialization(mt, fn_node, &nfi);
                             register_native_func_info(mt, name_buf->str, &nfi);
                             log_debug("mir: pre-registered NativeFuncInfo for '%s' (return-only), return=%d",
                                 name_buf->str, fwd_ret_tid);
                         }
                     }
                 }
+                if (mir_function_needs_boxed_entry(mt, fn_node)) {
+                    StrBuf* wrapper_fwd_name = strbuf_new_cap(64);
+                    write_fn_name_ex(wrapper_fwd_name, fn_node, NULL, "_b");
+                    MIR_item_t wrapper_fwd = MIR_new_forward(mt->ctx, wrapper_fwd_name->str);
+                    register_local_func(mt, wrapper_fwd_name->str, wrapper_fwd);
+                    log_debug("mir: forward-declared ABI wrapper '%s'", wrapper_fwd_name->str);
+                    strbuf_free(wrapper_fwd_name);
+                }
+
                 NativeFuncInfo* fwd_nfi = find_native_func_info(mt,
                     name_buf->str);
                 bool native_return = fwd_nfi &&
@@ -16605,6 +16966,19 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             // a consumed callee ident is a call, not an escaping reference
             if (call->function && !consumed_callee) prepass_forward_declare(mt, call->function);
             if (call->argument) prepass_forward_declare(mt, call->argument);
+            break;
+        }
+        case AST_NODE_START: {
+            AstStartNode* start = (AstStartNode*)node;
+            if (mt->prepass_collect_only && start->call) {
+                // `start f(...)` materializes a Function* and invokes it later
+                // through the public context ABI.  Treating its inner syntax as
+                // an ordinary direct call could elide `_b` and leave the task
+                // dispatcher calling a raw body with a mismatched ABI.
+                AstFuncNode* target = mir_ident_local_func(start->call->function);
+                if (target) mir_callsite_mark_escaped(mt, target);
+            }
+            if (start->call) prepass_forward_declare(mt, (AstNode*)start->call);
             break;
         }
         case AST_NODE_BINARY:
@@ -16746,12 +17120,15 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
 static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child) {
     if (!mt->callsite_info) return;
     for (int round = 0; round < MIR_CALLSITE_MAX_ROUNDS; round++) {
-        // reset the joins; `escaped` is monotone and deliberately kept
+        // Reset the joins; `escaped` is monotone and deliberately kept.
         size_t iter = 0;
         void* item = NULL;
         while (hashmap_iter(mt->callsite_info, &iter, &item)) {
             CallSiteEntry* e = (CallSiteEntry*)item;
-            for (int i = 0; i < 16; i++) e->arg_types[i] = LMD_TYPE_ERROR;
+            for (int i = 0; i < 16; i++) {
+                e->arg_types[i] = LMD_TYPE_ERROR;
+                e->specialization_types[i] = LMD_TYPE_ERROR;
+            }
             e->has_call = false;
         }
 

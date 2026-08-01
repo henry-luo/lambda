@@ -1570,6 +1570,13 @@ static MIR_reg_t jm_get_named_property_boxed(JsMirTranspiler* mt,
 // recursive expressions. Falls back to unbox from boxed Item when needed.
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId expr_type, TypeId target_type) {
+    if (target_type == LMD_TYPE_ANY) {
+        // A mixed native entry carries this formal as an Item. Reusing the
+        // numeric fallback below would coerce an arbitrary JS value merely to
+        // satisfy an ABI register type, defeating the boxed slow semantics.
+        return jm_transpile_box_item(mt, expr);
+    }
+
     // Literals: emit native constant directly (bypass boxing)
     if (expr && expr->node_type == JS_AST_NODE_LITERAL) {
         JsLiteralNode* lit = (JsLiteralNode*)expr;

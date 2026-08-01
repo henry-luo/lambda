@@ -7,6 +7,59 @@ extern "C" void js_dynfunc_cache_reset(void);
 static bool jm_module_phase_progress_is_enabled(void);
 static void jm_log_module_phase_progress(const char* filename, const char* phase);
 
+static JsClassEntry* jm_find_class_entry_by_ast_node(JsMirTranspiler* mt,
+        JsAstNode* class_node) {
+    if (!mt || !class_node) return NULL;
+    for (int ci = 0; ci < mt->class_count; ci++) {
+        if ((JsAstNode*)mt->class_entries[ci].node == class_node) {
+            return &mt->class_entries[ci];
+        }
+    }
+    return NULL;
+}
+
+static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
+        JsIdentifierNode* identifier, int depth) {
+    if (!mt || !identifier || !identifier->entry || !identifier->entry->node || depth > 8) {
+        return NULL;
+    }
+    JsAstNode* binding = (JsAstNode*)identifier->entry->node;
+    if (binding->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+        binding->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_class_entry_by_ast_node(mt, binding);
+    }
+    if (binding->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)binding;
+        for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+            if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* candidate = (JsVariableDeclaratorNode*)item;
+            if (!candidate->id || candidate->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+            JsIdentifierNode* candidate_id = (JsIdentifierNode*)candidate->id;
+            if (!identifier->name || !candidate_id->name ||
+                identifier->name->len != candidate_id->name->len ||
+                strncmp(identifier->name->chars, candidate_id->name->chars,
+                    identifier->name->len) != 0) {
+                continue;
+            }
+            binding = (JsAstNode*)candidate;
+            break;
+        }
+    }
+    if (binding->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return NULL;
+
+    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)binding;
+    if (!declarator->init) return NULL;
+    if (declarator->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+        declarator->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_class_entry_by_ast_node(mt, declarator->init);
+    }
+    if (declarator->init->node_type == JS_AST_NODE_IDENTIFIER) {
+        return jm_find_class_for_superclass_binding(mt,
+            (JsIdentifierNode*)declarator->init, depth + 1);
+    }
+    return NULL;
+}
+
 // ============================================================================
 // ES Module support: deferred MIR cleanup and path resolution
 // ============================================================================
@@ -229,16 +282,6 @@ static bool jm_child_can_use_parent_scope_env(JsFuncCollected* parent, JsFuncCol
     return child != NULL;
 }
 
-static bool jm_capture_is_transitive_through_parent(JsFuncCollected* parent,
-        struct hashmap* parent_locals, const char* name) {
-    if (!parent || !name) return false;
-    if (parent_locals && jm_name_set_has(parent_locals, name)) return false;
-    for (int pc = 0; pc < parent->capture_count; pc++) {
-        if (strcmp(parent->captures[pc].name, name) == 0) return true;
-    }
-    return false;
-}
-
 static void jm_collect_function_private_self_name(JsFunctionNode* fn,
         struct hashmap* locals) {
     if (!fn || !locals || fn->node_type != JS_AST_NODE_FUNCTION_EXPRESSION || !fn->name) return;
@@ -264,52 +307,108 @@ static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
     return link_slot;
 }
 
+static bool jm_scope_env_key_binding_start(const FnCapture* cap, uint32_t* out_start) {
+    if (!cap || !out_start) return false;
+    const char* at = strchr(cap->scope_env_key, '@');
+    if (!at || !at[1] || at[1] < '0' || at[1] > '9') return false;
+    uint32_t start = 0;
+    for (const char* cursor = at + 1; *cursor >= '0' && *cursor <= '9'; cursor++) {
+        start = start * 10u + (uint32_t)(*cursor - '0');
+    }
+    *out_start = start;
+    return true;
+}
+
+static bool jm_function_captures_lexical_for_head(const JsFunctionNode* fn,
+        const char* name) {
+    if (!fn || !name) return false;
+    for (int i = 0; i < fn->lexical_for_head_capture_count; i++) {
+        if (strcmp(fn->lexical_for_head_capture_names[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static bool jm_ts_node_contains_byte(TSNode node, uint32_t byte) {
+    return !ts_node_is_null(node) &&
+        byte >= ts_node_start_byte(node) && byte < ts_node_end_byte(node);
+}
+
+static bool jm_ts_loop_owns_binding(TSNode node,
+        uint32_t closure_start, uint32_t binding_start) {
+    if (ts_node_is_null(node) || !jm_ts_node_contains_byte(node, closure_start)) return false;
+    const char* type = ts_node_type(node);
+    if (strcmp(type, "for_statement") == 0 ||
+        strcmp(type, "for_in_statement") == 0 ||
+        strcmp(type, "while_statement") == 0 ||
+        strcmp(type, "do_statement") == 0) {
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+        bool closure_in_body = jm_ts_node_contains_byte(body, closure_start);
+        bool binding_in_body = jm_ts_node_contains_byte(body, binding_start);
+        // Per-iteration bindings can be declared either in the loop body or
+        // in a for/for-in header immediately before that body.  A forced
+        // capture alone is not evidence of loop ownership: normal nested
+        // callbacks force their parent lexical cell too.
+        bool binding_in_header = binding_start >= ts_node_start_byte(node) &&
+            binding_start < ts_node_start_byte(body);
+        if (closure_in_body && (binding_in_body || binding_in_header)) {
+            return true;
+        }
+    }
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        if (jm_ts_loop_owns_binding(ts_node_named_child(node, i),
+                closure_start, binding_start)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_capture_is_loop_private(JsFuncCollected* child,
+        JsFuncCollected* parent, const FnCapture* cap) {
+    if (!cap || !cap->force_env_capture || !cap->is_let_const) return false;
+    uint32_t binding_start = 0;
+    if (!jm_scope_env_key_binding_start(cap, &binding_start)) {
+        // Tree-sitter's for-in/for-of lexical head uses the compiler's
+        // dedicated marker rather than a source-keyed reference. Preserve its
+        // per-iteration cell without classifying ordinary forced captures as
+        // loop-private.
+        return child && jm_function_captures_lexical_for_head(child->node, cap->name);
+    }
+    if (!child || !child->node || !parent || !parent->node) return false;
+    // A lexical declared in a loop body needs one closure cell per iteration;
+    // a function-local lexical merely carries a source key to disambiguate it
+    // from a same-named module binding and must remain in the shared parent env.
+    return jm_ts_loop_owns_binding(parent->node->node,
+        ts_node_start_byte(child->node->node), binding_start);
+}
+
 static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollected* parent) {
     if (!child || !parent || parent->scope_env_count <= 0) return;
-    struct hashmap* parent_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (parent->node) {
-        JsAstNode* param = parent->node->params;
-        while (param) {
-            jm_collect_pattern_names(param, parent_locals);
-            param = param->next;
-        }
-        if (parent->node->body) {
-            // capture propagation can add parent locals to parent->captures;
-            // collect all body locals so they are not mistaken for transitive cells.
-            jm_collect_body_locals(parent->node->body, parent_locals, false);
-        }
-        // A named function expression's self name is local to that activation;
-        // treating it as transitive resolves recursive child closures globally.
-        jm_collect_function_private_self_name(parent->node, parent_locals);
-    }
     bool has_loop_private = false;
     bool has_shared_parent = false;
     for (int k = 0; k < child->capture_count; k++) {
-        if (child->captures[k].force_env_capture) {
+        FnCapture* cap = &child->captures[k];
+        bool loop_private = jm_capture_is_loop_private(child, parent, cap);
+        if (loop_private) {
             has_loop_private = true;
-        } else if (child->captures[k].scope_env_slot >= 0 &&
-                   jm_capture_is_transitive_through_parent(parent, parent_locals, child->captures[k].name)) {
+        } else if (cap->scope_env_slot >= 0) {
             has_shared_parent = true;
         }
     }
     if (!has_loop_private || !has_shared_parent) {
-        hashmap_free(parent_locals);
         return;
     }
     child->closure_env_has_parent_link = true;
     child->closure_env_parent_link_slot =
         jm_parent_link_slot_after_captures(child, parent->scope_env_count);
     for (int k = 0; k < child->capture_count; k++) {
-        if (!child->captures[k].force_env_capture &&
-            child->captures[k].scope_env_slot >= 0 &&
-            jm_capture_is_transitive_through_parent(parent, parent_locals, child->captures[k].name)) {
-            // parent-local captures must stay in this activation's env; only
-            // true transitive captures may read through the copied parent link.
-            child->captures[k].grandparent_slot = child->captures[k].scope_env_slot;
+        FnCapture* cap = &child->captures[k];
+        bool loop_private = jm_capture_is_loop_private(child, parent, cap);
+        if (!loop_private && cap->scope_env_slot >= 0) {
+            cap->grandparent_slot = cap->scope_env_slot;
         }
     }
-    hashmap_free(parent_locals);
     log_debug("js-mir: mixed loop closure '%s' keeps shared parent captures via env slot %d",
         child->name, child->closure_env_parent_link_slot);
 }
@@ -3079,8 +3178,10 @@ void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
 
 // ============================================================================
 // Phase 3.5: Call-site type propagation
-// Scan function bodies for calls with literal arguments that contradict the
-// inferred param types. Widen those params to ANY and revoke native eligibility.
+// A contradictory argument shape no longer revokes an inferred native body: its
+// boxed entry guards the raw call and runs complete boxed lowering on a miss.
+// Callback function expressions remain an exclusion because their receiver and
+// callback context are not represented by the scalar raw ABI.
 // ============================================================================
 
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
@@ -3115,18 +3216,17 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                     else if (expected == LMD_TYPE_FLOAT)
                         ok = (arg_type == LMD_TYPE_FLOAT || arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_ANY);
                     if (!ok) {
-                        log_debug("js-mir P3.5 callsite: widening %s param %d from type %d to ANY (literal mismatch)",
-                            callee_fc->name, i, expected);
-                        callee_fc->param_types[i] = LMD_TYPE_ANY;
-                        callee_fc->has_native_version = false;
+                        log_debug("js-mir P3.5 callsite: preserving native shape for %s param %d; boxed entry handles literal mismatch",
+                            callee_fc->name, i);
                     }
                 }
                 arg = arg->next;
             }
         }
-        // v18l: Revoke native version for function expressions passed as callback
-        // arguments. The caller (e.g. reduce, map, forEach) may pass any type,
-        // so unboxing to native int/float inside the boxed wrapper is unsafe.
+        // A callback can receive a dynamic receiver/context that the scalar
+        // raw ABI does not carry. Its argument guard alone cannot prove that
+        // hidden calling convention, so leave callback bodies boxed until the
+        // native entry also models it.
         {
             JsAstNode* cb_arg = call->arguments;
             while (cb_arg) {
@@ -3134,7 +3234,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                     cb_arg->node_type == JS_AST_NODE_ARROW_FUNCTION) {
                     JsFuncCollected* cb_fc = jm_find_collected_func(mt, (JsFunctionNode*)cb_arg);
                     if (cb_fc && cb_fc->has_native_version) {
-                        log_debug("js-mir P3.5 callsite: revoking native for callback '%s' (passed as argument)",
+                        log_debug("js-mir P3.5 callsite: callback '%s' stays boxed for dynamic receiver context",
                             cb_fc->name);
                         cb_fc->has_native_version = false;
                     }
@@ -4401,7 +4501,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
-                ce->superclass = jm_find_class(mt, super_id->name->chars, (int)super_id->name->len);
+                // A minified nested function can reuse a class name as a local
+                // alias. Resolve `extends` through the parser's lexical binding
+                // before consulting spelling-only class metadata.
+                ce->superclass = jm_find_class_for_superclass_binding(mt, super_id, 0);
+                if (!ce->superclass && (!super_id->entry || !super_id->entry->node)) {
+                    ce->superclass = jm_find_class(mt, super_id->name->chars,
+                        (int)super_id->name->len);
+                }
                 // Detect self-referential extends (class x extends x {}):
                 // Per ES spec, the class name is in TDZ during the extends clause.
                 // At compile time, we simply clear the superclass to prevent infinite
@@ -5893,14 +6000,21 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                          jm_p6_function_allows_native_specialization(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
+        bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
-                if (fc->param_types[j] != LMD_TYPE_INT && fc->param_types[j] != LMD_TYPE_FLOAT) {
+                TypeId param_type = fc->param_types[j];
+                if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
+                    has_native_param = true;
+                    continue;
+                }
+                if (param_type != LMD_TYPE_ANY) {
                     eligible = false;
                     break;
                 }
             }
         }
+        if (!has_native_param) eligible = false;
         fc->has_native_version = eligible;
         fc->native_return_kind = !eligible ? NATIVE_RETURN_NONE :
             fc->return_type == LMD_TYPE_FLOAT ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
@@ -5910,9 +6024,18 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
         }
 
-        // TCO eligibility: native-eligible function with at least one tail-recursive call
+        // Mixed native/Item entries keep the Item formal stable across every
+        // tail iteration. Retain TCO for all-native signatures only.
         fc->is_tco_eligible = false;
-        if (eligible && jm_has_tail_call(fc->node->body, fc)) {
+        if (eligible && has_native_param) {
+            for (int j = 0; j < fc->param_count; j++) {
+                if (fc->param_types[j] == LMD_TYPE_ANY) {
+                    has_native_param = false;
+                    break;
+                }
+            }
+        }
+        if (eligible && has_native_param && jm_has_tail_call(fc->node->body, fc)) {
             fc->is_tco_eligible = true;
             log_debug("js-mir TCO: %s eligible for tail-call optimization", fc->name);
         }
@@ -5986,10 +6109,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                  jm_p6_function_allows_native_specialization(fc) &&
                                  !fc->has_non_simple_params &&
                                  fc->param_count <= 16);
+                bool has_native_param = false;
                 if (eligible) {
                     for (int p = 0; p < fc->param_count; p++) {
                         TypeId pt = fc->param_types[p];
-                        if (pt != LMD_TYPE_INT && pt != LMD_TYPE_FLOAT) {
+                        if (pt == LMD_TYPE_INT || pt == LMD_TYPE_FLOAT) {
+                            has_native_param = true;
+                            continue;
+                        }
+                        if (pt != LMD_TYPE_ANY) {
                             eligible = false; break;
                         }
                     }
@@ -5999,6 +6127,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             eligible = false;
                     }
                 }
+                if (!has_native_param) eligible = false;
                 if (eligible && !fc->has_native_version) {
                     fc->has_native_version = true;
                     fc->native_return_kind = fc->return_type == LMD_TYPE_FLOAT
@@ -6011,7 +6140,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // P6 can make recursive accumulator functions native-eligible;
                 // recompute TCO after narrowing so deep tail calls stay loops.
-                fc->is_tco_eligible = eligible && jm_has_tail_call(fc->node->body, fc);
+                bool all_native_params = has_native_param;
+                for (int p = 0; p < fc->param_count; p++) {
+                    if (fc->param_types[p] == LMD_TYPE_ANY) {
+                        all_native_params = false;
+                        break;
+                    }
+                }
+                fc->is_tco_eligible = eligible && all_native_params &&
+                    jm_has_tail_call(fc->node->body, fc);
             }
         }
         mem_free(evi);
@@ -6147,7 +6284,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 native->params = fc->native_param_analysis;
                 for (int p = 0; p < fc->param_count; p++) {
                     ValueRep rep = fc->param_types[p] == LMD_TYPE_FLOAT
-                        ? VALUE_REP_F64 : VALUE_REP_I64;
+                        ? VALUE_REP_F64 : fc->param_types[p] == LMD_TYPE_ANY
+                            ? VALUE_REP_ITEM : VALUE_REP_I64;
                     native->params[p] = {fc->param_types[p], rep, 0};
                 }
             }
@@ -7305,6 +7443,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
                     }
+
+                    jm_emit_class_instance_computed_field_metadata_keys(mt, cls_obj, ce);
 
                     // Emit static field initializers at the class's source position.
                     // Static fields may reference functions/variables declared before.

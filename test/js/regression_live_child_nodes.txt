@@ -1,0 +1,3 @@
+fresh:3
+live:3
+tail:true

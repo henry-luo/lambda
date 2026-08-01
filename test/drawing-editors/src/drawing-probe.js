@@ -30,6 +30,7 @@ function publish_capabilities(capabilities, library) {
 
 export function install_drawing_probe({ library, create, destroy, serialize }) {
   const { host, slot, state, capabilities } = drawing_host();
+  const controls = document.getElementById("drawing-controls");
   let drawing = null;
 
   publish_capabilities(capabilities, library);
@@ -79,11 +80,13 @@ export function install_drawing_probe({ library, create, destroy, serialize }) {
   document.getElementById("recreate").addEventListener("click", () => {
     try { recreate_drawing(); } catch (error) { report_failure(error); }
   });
+
   for (const button of document.querySelectorAll("button")) {
     const action = button.getAttribute("data-drawing-action");
     if (!action) continue;
     button.addEventListener("click", () => {
       try {
+        state.setAttribute("data-action-dispatched", action);
         if (!drawing || !drawing.actions || typeof drawing.actions[action] !== "function") {
           throw new Error(`drawing action is unavailable: ${action} (drawing=${!!drawing}, actions=${!!(drawing && drawing.actions)}, handler=${drawing && drawing.actions ? typeof drawing.actions[action] : "none"})`);
         }
@@ -103,10 +106,11 @@ export function install_drawing_probe({ library, create, destroy, serialize }) {
     state.textContent = JSON.stringify({ library, error: message });
   }
 
-  try { create_drawing(); } catch (error) { report_failure(error); }
   globalThis.__drawingProbe = {
     destroy: destroy_drawing,
     recreate: recreate_drawing,
     read() { return state.textContent; }
   };
+
+  try { create_drawing(); } catch (error) { report_failure(error); }
 }

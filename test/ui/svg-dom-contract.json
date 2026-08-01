@@ -8,6 +8,9 @@
     {"type": "assert_count", "target": {"selector": "#svg-direct-host svg"}, "equals": 1},
     {"type": "assert_count", "target": {"selector": "#svg-direct-host canvas"}, "equals": 0},
     {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"hit\":\"svg-direct-rect\""},
-    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"parsedRoot\":\"SVG\""}
+    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"overlapCircleHit\":\"svg-overlap-circle\""},
+    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"pathAimHit\":\"svg-overlap-path\""},
+    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"parsedRoot\":\"SVG\""},
+    {"type": "assert_text", "target": {"selector": "#svg-direct-state"}, "contains": "\"serialized\":\"<svg"}
   ]
 }

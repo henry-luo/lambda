@@ -9,13 +9,13 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function.",
       "budgets": {
         "default": {
-          "module_insns": 161,
+          "module_insns": 196,
           "functions": {
             "_twice_#": {
               "insns": 79
             },
             "main": {
-              "insns": 50
+              "insns": 49
             }
           },
           "frames": [
@@ -137,10 +137,10 @@
       "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including conservative exception-extraction safepoints.",
       "budgets": {
         "default": {
-          "module_insns": 291,
+          "module_insns": 322,
           "functions": {
             "js_main": {
-              "insns": 74
+              "insns": 75
             }
           },
           "frames": [
@@ -205,7 +205,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots in each generated root frame.",
       "budgets": {
         "default": {
-          "module_insns": 4288
+          "module_insns": 4299
         }
       }
     },
@@ -216,7 +216,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested and throwing fixed argument-root extents.",
       "budgets": {
         "default": {
-          "module_insns": 4421
+          "module_insns": 4435
         }
       }
     },
@@ -275,31 +275,31 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 514,
+          "module_insns": 434,
           "functions": {
             "_closed_gap_#": {
-              "insns": 129
+              "insns": 75
             },
             "_open_gap_#": {
-              "insns": 29
+              "insns": 75
             }
           },
           "frames": [
             {
               "name": "_closed_gap_#",
-              "roots": 0,
+              "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 2,
+              "scalar_homes": 1,
               "number_scratch": 0,
               "safepoints": 3
             },
             {
               "name": "_open_gap_#",
-              "roots": 2,
+              "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 0,
+              "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 2
+              "safepoints": 3
             }
           ]
         }

@@ -6,13 +6,26 @@
     "@maxgraph/core": "0.16.0",
     "jointjs": "3.7.7"
   },
-  "exclusions": ["canvas", "react", "foreignObject", "drawing-library polyfills"],
+  "configurations": {
+    "raphael": "Raphael SVG branch only",
+    "maxgraph": "@maxgraph/core SVG graph only",
+    "jointjs": "JointJS core SVG Paper only"
+  },
+  "exclusions": ["canvas", "react", "foreignObject", "drawing-library polyfills", "execCommand", "queryCommand APIs"],
+  "verification": {
+    "directSvgFixture": "test/ui/svg-dom-contract.json",
+    "headlessGate": "make test-drawing",
+    "browserOracle": "Chrome 150 initial SVG render captured for Raphaël, maxGraph, and JointJS on 2026-08-01"
+  },
   "capabilities": [
     {"capability":"harness.lifecycle","library":"shared","status":"implemented","fixture":"test/html/editable-raphael.html","notes":"All probes create, destroy, and recreate one library-owned SVG host."},
-    {"capability":"svg.identity","library":"shared","status":"pending","notes":"Requires real SVG interfaces and typed wrapper identity."},
-    {"capability":"svg.namespaced-attributes","library":"raphael","status":"pending","notes":"Required for XLink image and pattern compatibility."},
-    {"capability":"svg.bounds-and-transforms","library":"raphael","status":"pending","notes":"Requires getBBox, getScreenCTM, and affine matrix values."},
-    {"capability":"graph.gestures","library":"maxgraph","status":"pending","notes":"Requires SVG hit testing and document gesture routing."},
-    {"capability":"svg.ctm-and-text-metrics","library":"jointjs","status":"pending","notes":"Requires native affine conversion and font-backed SVG text geometry."}
+    {"capability":"svg.identity","library":"shared","status":"implemented","fixture":"test/ui/svg-dom-contract.json","notes":"SVGElement, SVGSVGElement, SVGGraphicsElement, SVGPathElement, SVGTextContentElement, and SVGAngle use native prototypes over the retained DOM tree."},
+    {"capability":"svg.namespaced-attributes","library":"raphael","status":"implemented","fixture":"test/ui/svg-dom-contract.json","notes":"setAttributeNS/getAttributeNS/removeAttributeNS preserve XLink href and XMLSerializer emits its namespace-qualified spelling."},
+    {"capability":"svg.bounds-and-transforms","library":"shared","status":"implemented","fixture":"test/ui/svg-dom-contract.json","notes":"Native getBBox, createSVGMatrix/createSVGPoint, DOMMatrix/DOMPoint, getCTM, and getScreenCTM use Radiant geometry and affine transforms."},
+    {"capability":"svg.path-group-text-bounds","library":"shared","status":"implemented","fixture":"test/ui/svg-dom-contract.json","notes":"Shape, path, group, and font-backed text boxes are covered by the direct contract and JointJS text geometry assertion."},
+    {"capability":"svg.dom-parser-serializer","library":"shared","status":"implemented","fixture":"test/ui/svg-dom-contract.json","notes":"DOMParser parses SVG XML and XMLSerializer serializes the native SVG tree, including XLink href."},
+    {"capability":"graph.gestures","library":"maxgraph","status":"implemented","fixture":"test/ui/editable-drawing-maxgraph.json","notes":"The real graph receives pointer drag, wheel, focused keyboard movement, resize, reconnect, pan/zoom, undo/redo, and destroy/recreate events."},
+    {"capability":"svg.ctm-and-text-metrics","library":"jointjs","status":"implemented","fixture":"test/ui/editable-drawing-jointjs.json","notes":"The real SVG Paper supports drag, wheel, focused keyboard movement, link reconnect, tools, scale/translate, text getBBox, and destroy/recreate."},
+    {"capability":"svg-only-rendering","library":"shared","status":"implemented","fixture":"test/ui/editable-drawing-raphael.json","notes":"Every drawing fixture asserts one SVG projection and zero canvas nodes."}
   ]
 }

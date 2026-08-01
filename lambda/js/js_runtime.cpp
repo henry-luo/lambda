@@ -2159,6 +2159,17 @@ extern "C" void js_set_class_instance_field_metadata_value(
     values.array->items[index] = value;
 }
 
+extern "C" void js_set_class_instance_field_metadata_key(
+    Item class_item, int index, Item key) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || index < 0) return;
+    bool found = false;
+    Item keys = js_map_get_fast(class_item.map, "__if_keys__", 11, &found);
+    if (!found || get_type_id(keys) != LMD_TYPE_ARRAY || index >= keys.array->length) {
+        return;
+    }
+    keys.array->items[index] = key;
+}
+
 static bool js_init_class_instance_field(Item callee, Item object, Item field_key,
     bool value_found, Item field_value, bool brand_only) {
     RootFrame roots(4);
@@ -2231,7 +2242,8 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
         int64_t field_count = field_keys.array->length;
         for (int64_t field_index = 0; field_index < field_count; field_index++) {
             Item field_key = field_keys.array->items[field_index];
-            if (get_type_id(field_key) != LMD_TYPE_STRING) break;
+            if (get_type_id(field_key) != LMD_TYPE_STRING &&
+                get_type_id(field_key) != LMD_TYPE_SYMBOL) break;
             bool value_found = values_found && get_type_id(field_values) == LMD_TYPE_ARRAY &&
                 field_index < field_values.array->length;
             Item field_value = value_found ?
@@ -2837,7 +2849,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         if (ctor_root.get().item == ItemNull.item || get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
             bool super_own = false;
             super_root.set(js_map_get_fast(callee_root.get().map, "__super_class__", 15, &super_own));
-            if (super_own && get_type_id(super_root.get()) == LMD_TYPE_FUNC) {
+            if (super_own && js_is_constructor_internal(super_root.get())) {
                 js_pending_new_target = new_target_root.get();
                 js_has_pending_new_target = true;
                 result_root.set(js_new_from_class_object(super_root.get(), args, argc));
@@ -2846,6 +2858,12 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 if (js_check_exception()) return ItemNull;
                 TypeId rtt = get_type_id(result_root.get());
                 if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
+                    // The parent construct allocated for the forwarded new.target.
+                    // Keep that most-derived constructor visible to base bodies:
+                    // `this.constructor` feeds inherited static getters.
+                    Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                    js_property_set(result_root.get(), constructor_key, new_target_root.get());
+                    js_mark_non_enumerable(result_root.get(), constructor_key);
                     js_init_class_instance_fields(callee_root.get(), result_root.get());
                 }
                 return result_root.get();
@@ -2885,14 +2903,20 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_set_prototype(result_root.get(), proto_root.get());
             }
             Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-            js_property_set(result_root.get(), ctor_key, callee_root.get());
+            js_property_set(result_root.get(), ctor_key, new_target_root.get());
             js_mark_non_enumerable(result_root.get(), ctor_key);
             js_init_class_instance_fields(callee_root.get(), result_root.get());
             return result_root.get();
         }
-        // v18c: Set constructor property (instance.constructor === Class)
+        // A base constructor can be invoked for a derived `new`; publishing the
+        // callee here would make inherited static accessors observe the base.
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        js_property_set(object_root.get(), ctor_key, callee_root.get());
+        Item instance_constructor = new_target_root.get().item != ItemNull.item
+            ? new_target_root.get() : callee_root.get();
+        // A default derived constructor forwards into its parent before that
+        // parent body reads `this.constructor`; retain the original new.target
+        // here instead of correcting it only after the parent returns.
+        js_property_set(object_root.get(), ctor_key, instance_constructor);
         // Mark constructor as non-enumerable (per ES spec)
         js_mark_non_enumerable(object_root.get(), ctor_key);
         // Set __proto__ so instance methods are accessible via prototype chain
@@ -13477,26 +13501,32 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
     if (js_current_private_home_class.item != 0 &&
         js_current_private_home_class.item != ItemNull.item &&
         get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(js_current_private_home_class) == LMD_TYPE_MAP) {
+            bool explicit_super_found = false;
+            Item explicit_super = js_map_get_fast_ext(
+                js_current_private_home_class.map, "__proto__", 9, &explicit_super_found);
+            if (explicit_super_found) {
+                // Object.setPrototypeOf changes a class constructor's live
+                // [[Prototype]], so its explicit slot always wins over the
+                // definition-time heritage value below.
+                return explicit_super;
+            }
+            bool super_found = false;
+            Item recorded_super = js_map_get_fast(
+                js_current_private_home_class.map, "__super_class__", 15, &super_found);
+            // Anonymous bundled classes can have no concrete [[Prototype]]
+            // slot until their class setup completes. Falling through to the
+            // implicit Function.prototype then makes nested super() reject a
+            // valid recorded heritage class.
+            if (super_found) {
+                return recorded_super;
+            }
+        }
         Item current_super = js_get_prototype_of(js_current_private_home_class);
         TypeId current_super_type = get_type_id(current_super);
         if (current_super.item != ItemNull.item && current_super_type != LMD_TYPE_NULL &&
                 current_super_type != LMD_TYPE_UNDEFINED) {
-            // GetSuperConstructor observes the class constructor's mutable
-            // [[Prototype]], including a non-constructor installed through
-            // Object.setPrototypeOf. Return it before IsConstructor so MIR has
-            // already evaluated the super() arguments when the runtime throws.
             return current_super;
-        }
-        if (get_type_id(js_current_private_home_class) == LMD_TYPE_MAP) {
-            bool super_found = false;
-            Item recorded_super = js_map_get_fast(
-                js_current_private_home_class.map, "__super_class__", 15, &super_found);
-            // Runtime-valued heritage cannot be reconstructed from the static
-            // class table. Class creation records its exact value here, which is
-            // the lexical [[GetPrototypeOf]] target for super() resolution.
-            if (super_found && js_super_callee_is_constructor(recorded_super)) {
-                return recorded_super;
-            }
         }
     }
     TypeId receiver_type = get_type_id(receiver);
@@ -13534,7 +13564,11 @@ static bool js_super_callee_is_constructor(Item callee) {
         return js_is_constructor_internal(callee);
     }
     TypeId type = get_type_id(callee);
-    if (type == LMD_TYPE_MAP) return js_is_class_object_item(callee);
+    if (type == LMD_TYPE_MAP) {
+        // Bundled class aliases can retain only their callable __ctor__ metadata.
+        // super() must use the same IsConstructor predicate as ordinary new.
+        return js_is_constructor_internal(callee);
+    }
     if (type != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)callee.function;
     if (!fn) return false;
