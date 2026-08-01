@@ -9,13 +9,13 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function.",
       "budgets": {
         "default": {
-          "module_insns": 161,
+          "module_insns": 196,
           "functions": {
             "_twice_#": {
               "insns": 79
             },
             "main": {
-              "insns": 50
+              "insns": 49
             }
           },
           "frames": [
@@ -275,31 +275,31 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 514,
+          "module_insns": 434,
           "functions": {
             "_closed_gap_#": {
-              "insns": 129
+              "insns": 75
             },
             "_open_gap_#": {
-              "insns": 29
+              "insns": 75
             }
           },
           "frames": [
             {
               "name": "_closed_gap_#",
-              "roots": 0,
+              "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 2,
+              "scalar_homes": 1,
               "number_scratch": 0,
               "safepoints": 3
             },
             {
               "name": "_open_gap_#",
-              "roots": 2,
+              "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 0,
+              "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 2
+              "safepoints": 3
             }
           ]
         }
