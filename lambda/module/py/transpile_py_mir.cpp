@@ -35,8 +35,6 @@ extern "C" void py_reset_module_vars();
 static const uint64_t PY_ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
 static const uint64_t PY_ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t PY_ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
-static const uint64_t PY_ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
-static const uint64_t PY_MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 // These fixed compiler tables describe generated MIR state.  Each limit is
 // checked at collection/lowering time so a larger program never loses state.
@@ -1078,9 +1076,10 @@ static PmCompilerRegister pm_emit_null(PyMirTranspiler* mt) {
 }
 
 static PmCompilerRegister pm_box_int_const(PyMirTranspiler* mt, int64_t value) {
+    // C16: the int encoding is a pure function of the value, so a constant
+    // folds completely. Tag-OR is wrong now — an int Item is not a payload.
     PmCompilerRegister r = pm_new_reg(mt, "boxi", PM_COMPILER_VALUE_I64);
-    uint64_t tagged = PY_ITEM_INT_TAG | ((uint64_t)value & PY_MASK56);
-    pm_emit_i64_immediate(mt, r, (int64_t)tagged);
+    pm_emit_i64_immediate(mt, r, (int64_t)lambda_int_box_double((double)value));
     return r;
 }
 
@@ -1192,21 +1191,15 @@ static PmCompilerRegister pm_box_int_reg(PyMirTranspiler* mt, PmCompilerRegister
     int64_t INT53_MIN_VAL = INT53_MIN;
 
     PmCompilerRegister result = pm_new_reg(mt, "bxi", PM_COMPILER_VALUE_I64);
-    PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
-    PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
     PmCompilerRegister le_max = pm_new_reg(mt, "le", PM_COMPILER_VALUE_I64);
     PmCompilerRegister ge_min = pm_new_reg(mt, "ge", PM_COMPILER_VALUE_I64);
     PmCompilerRegister in_range = pm_new_reg(mt, "rng", PM_COMPILER_VALUE_I64);
 
+    // The range test is Python's own: outside it the value becomes a bigint,
+    // because Python ints are arbitrary precision. It is not a carrier bound.
     pm_emit_i64_operation(mt, JUBE_COMPILER_I64_LE, le_max, val, 0, INT53_MAX_VAL);
     pm_emit_i64_operation(mt, JUBE_COMPILER_I64_GE, ge_min, val, 0, INT53_MIN_VAL);
     pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, in_range, le_max, ge_min, 0);
-    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked, val, 0,
-        (int64_t)PY_MASK56);
-    // OR permits an immediate left operand in MIR, so keep its source as the
-    // value operand and let the descriptor carry the tag immediate on right.
-    pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged, masked, 0,
-        (int64_t)PY_ITEM_INT_TAG);
 
     PmCompilerLabel l_ok = pm_new_label(mt);
     PmCompilerLabel l_end = pm_new_label(mt);
@@ -1218,7 +1211,11 @@ static PmCompilerRegister pm_box_int_reg(PyMirTranspiler* mt, PmCompilerRegister
     pm_emit_i64_register_move(mt, result, promoted);
     pm_emit_jump(mt, l_end);
     pm_emit_label(mt, l_ok);
-    pm_emit_i64_register_move(mt, result, tagged);
+    // C16: an int Item carries rotated IEEE bits, so it must be produced by the
+    // encoder; this compiler API has no float conversion, hence the i64 entry.
+    PmCompilerRegister boxed = pm_call_semantic_1(mt, "int2it_i64", PM_COMPILER_VALUE_I64,
+        pm_call_operand_register(PM_COMPILER_VALUE_I64, val));
+    pm_emit_i64_register_move(mt, result, boxed);
     pm_emit_label(mt, l_end);
     return result;
 }
@@ -1575,14 +1572,9 @@ static PmCompilerRegister pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode*
             pm_emit_jump(mt, l_end);
             // fast path: inline box the native result
             pm_emit_label(mt, l_ok);
-            PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
-            PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
-            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked, res, 0,
-                (int64_t)PY_MASK56);
-            // The descriptor has one immediate position; OR is commutative, so
-            // retain the tagged representation without exposing raw MIR operands.
-            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged, masked, 0,
-                (int64_t)PY_ITEM_INT_TAG);
+            // C16: an int Item carries rotated IEEE bits, not a tagged payload.
+            PmCompilerRegister tagged = pm_call_semantic_1(mt, "int2it_i64",
+                PM_COMPILER_VALUE_I64, pm_call_operand_register(PM_COMPILER_VALUE_I64, res));
             pm_emit_i64_register_move(mt, final_result, tagged);
             pm_emit_jump(mt, l_end);
         } else {
@@ -3104,7 +3096,7 @@ static PmCompilerRegister pm_transpile_list_comprehension(PyMirTranspiler* mt, P
 
     // loop index
     PmCompilerRegister idx = pm_new_reg(mt, "comp_idx", PM_COMPILER_VALUE_I64);
-    pm_emit_i64_immediate(mt, idx, (int64_t)(PY_ITEM_INT_TAG | 0));
+    pm_emit_i64_immediate(mt, idx, (int64_t)lambda_int_box_double(0.0));
 
     PmCompilerLabel l_start = pm_new_label(mt);
     PmCompilerLabel l_end = pm_new_label(mt);
@@ -3171,7 +3163,7 @@ static PmCompilerRegister pm_transpile_dict_comprehension(PyMirTranspiler* mt, P
         pm_call_operand_register(PM_COMPILER_VALUE_I64, iterable));
 
     PmCompilerRegister idx = pm_new_reg(mt, "comp_idx", PM_COMPILER_VALUE_I64);
-    pm_emit_i64_immediate(mt, idx, (int64_t)(PY_ITEM_INT_TAG | 0));
+    pm_emit_i64_immediate(mt, idx, (int64_t)lambda_int_box_double(0.0));
 
     PmCompilerLabel l_start = pm_new_label(mt);
     PmCompilerLabel l_end = pm_new_label(mt);
@@ -3635,12 +3627,10 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
                             pm_emit_jump(mt, l_end);
                             // fast path: inline box
                             pm_emit_label(mt, l_ok);
-                            PmCompilerRegister masked = pm_new_reg(mt, "mask", PM_COMPILER_VALUE_I64);
-                            PmCompilerRegister tagged = pm_new_reg(mt, "tag", PM_COMPILER_VALUE_I64);
-                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_AND, masked,
-                                res, 0, (int64_t)PY_MASK56);
-                            pm_emit_i64_operation(mt, JUBE_COMPILER_I64_OR, tagged,
-                                masked, 0, (int64_t)PY_ITEM_INT_TAG);
+                            // C16: rotated IEEE bits, not a tagged payload.
+                            PmCompilerRegister tagged = pm_call_semantic_1(mt, "int2it_i64",
+                                PM_COMPILER_VALUE_I64,
+                                pm_call_operand_register(PM_COMPILER_VALUE_I64, res));
                             pm_emit_i64_register_move(mt, var->reg, tagged);
                             pm_emit_jump(mt, l_end);
                         } else {

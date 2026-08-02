@@ -360,6 +360,120 @@ TEST(ItemRepresentation, NonPointerDiscriminatorWordsDoNotReadHeaders) {
     EXPECT_NE(get_type_id(synthetic), LMD_TYPE_RAW_POINTER);
 }
 
+// ---------------------------------------------------------------------------
+// Boxed `int` representation.
+//
+// These are written against the canonical encoder/accessors rather than raw
+// bits, so they hold before and after the rotated inline-int cutover
+// (`vibe/Lambda_Type_Int_Boxing.md`). A bit-level expectation here would have
+// to be rewritten by the very change it is meant to protect.
+// ---------------------------------------------------------------------------
+
+namespace {
+// Values every int representation must carry exactly. Band edges included
+// because they are where a carrier-capacity bug shows up first.
+const int64_t kIntRoundTripValues[] = {
+    0, 1, -1, 2, -2, 3, -3, 42, -42, 255, 256, -256,
+    32767, -32768, 2147483647, -2147483648LL,
+    4503599627370496LL,   // 2^52
+    -4503599627370496LL,
+    9007199254740990LL,   // 2^53 - 2
+    INT53_MAX, INT53_MIN,
+    // Past the old carrier band: these are the values the retired compact
+    // encoding could not hold at all (it returned ITEM_ERROR — the O1 defect).
+    9007199254740992LL,   // 2^53
+    -9007199254740992LL,
+    18014398509481984LL,  // 2^54
+    4611686018427387904LL,  // 2^62
+    -4611686018427387904LL,
+};
+}  // namespace
+
+TEST(ItemRepresentation, IntBoxRoundTripsThroughBothAccessors) {
+    for (int64_t value : kIntRoundTripValues) {
+        Item boxed = {.item = i2it(value)};
+        EXPECT_EQ(get_type_id(boxed), LMD_TYPE_INT) << "value " << value;
+        EXPECT_EQ(lambda_int_item_to_i64(boxed), value);
+        EXPECT_EQ(lambda_int_item_value(boxed), (double)value);
+        EXPECT_EQ(it2i(boxed), value);
+    }
+}
+
+TEST(ItemRepresentation, IntEncodingIsCanonical) {
+    // One value, one encoding: equal values must produce bit-identical Items,
+    // and distinct values must never collide.
+    for (int64_t value : kIntRoundTripValues) {
+        EXPECT_EQ(i2it(value), i2it(value)) << "value " << value;
+        for (int64_t other : kIntRoundTripValues) {
+            if (other == value) continue;
+            EXPECT_NE(i2it(value), i2it(other)) << value << " vs " << other;
+        }
+    }
+}
+
+TEST(ItemRepresentation, IntItemsStayOutOfDoubleSpace) {
+    for (int64_t value : kIntRoundTripValues) {
+        Item boxed = {.item = i2it(value)};
+        EXPECT_EQ(boxed.item & ITEM_DBL_MASK, UINT64_C(0)) << "value " << value;
+    }
+}
+
+TEST(ItemRepresentation, IntItemsNeverCollideWithInternalSentinels) {
+    // The sentinel tag is reserved precisely so no value can alias it.
+    for (int64_t value : kIntRoundTripValues) {
+        Item boxed = {.item = i2it(value)};
+        EXPECT_NE(boxed.item, ITEM_JS_DELETED_SENTINEL) << "value " << value;
+        EXPECT_NE(boxed.item, ITEM_JS_ITER_DONE_SENTINEL) << "value " << value;
+        EXPECT_NE(boxed.item, (uint64_t)ITEM_NULL) << "value " << value;
+        EXPECT_NE(boxed.item, (uint64_t)ITEM_ERROR) << "value " << value;
+    }
+}
+
+TEST(ItemRepresentation, IntPoisonIsDistinctAndClassifies) {
+    Item inf = {.item = ITEM_INT_INF};
+    Item neg_inf = {.item = ITEM_INT_NEG_INF};
+    Item nan_item = {.item = ITEM_INT_NAN};
+
+    for (Item poison : {inf, neg_inf, nan_item}) {
+        EXPECT_EQ(get_type_id(poison), LMD_TYPE_INT);
+        EXPECT_EQ(poison.item & ITEM_DBL_MASK, UINT64_C(0));
+        // Poison must never alias a finite value.
+        for (int64_t value : kIntRoundTripValues) {
+            EXPECT_NE(poison.item, i2it(value)) << "aliases " << value;
+        }
+    }
+    EXPECT_NE(inf.item, neg_inf.item);
+    EXPECT_NE(inf.item, nan_item.item);
+    EXPECT_NE(neg_inf.item, nan_item.item);
+}
+
+TEST(ItemRepresentation, IntStoresIntoContainerWithoutBorrowedStorage) {
+    // The escape path that exposed the number-stack carrier defect: an int
+    // stored into a container must own its value outright. A representation
+    // that borrows frame-scoped storage would need `extra` tail words here and
+    // would dangle once the producing frame unwound.
+    const size_t count = sizeof(kIntRoundTripValues) / sizeof(kIntRoundTripValues[0]);
+    Item storage[2 * sizeof(kIntRoundTripValues) / sizeof(kIntRoundTripValues[0])] = {};
+    Array arr = {};
+    arr.type_id = LMD_TYPE_ARRAY;
+    arr.items = storage;
+    arr.length = (int64_t)count;
+    arr.capacity = (int64_t)(sizeof(storage) / sizeof(storage[0]));
+
+    for (size_t i = 0; i < count; i++) {
+        array_set(&arr, (int64_t)i, (Item){.item = i2it(kIntRoundTripValues[i])});
+    }
+
+    EXPECT_EQ(arr.extra, 0) << "int must not consume owned tail storage";
+    for (size_t i = 0; i < count; i++) {
+        Item read_back = arr.items[i];
+        EXPECT_EQ(get_type_id(read_back), LMD_TYPE_INT);
+        EXPECT_EQ(lambda_int_item_to_i64(read_back), kIntRoundTripValues[i]);
+        // Stored form must be the boxed form unchanged — no rehoming happened.
+        EXPECT_EQ(read_back.item, i2it(kIntRoundTripValues[i]));
+    }
+}
+
 TEST(ItemRepresentation, SelfTaggedFloatEncoderKeepsInBandBitsImmediate) {
     double value = 1.5;
     uint64_t bits = 0;

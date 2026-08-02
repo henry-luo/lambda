@@ -292,6 +292,7 @@ MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);
+MIR_reg_t jm_box_int_double(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg);

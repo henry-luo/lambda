@@ -1,366 +1,379 @@
-# Lambda — Total `int` Implementation Plan (C16)
+# Lambda — Total `int` Implementation Plan (C16 × Rotation Boxing)
 
-**Status:** IN PROGRESS — landed work is green and committed-quality; the critical path is
-**BLOCKED on a design decision** (§0.3). Last worked 2026-08-02.
+**Status:** IN PROGRESS — rewritten 2026-08-02 around the selected representation:
+**sign-bit-rotation inline ints** (`Lambda_Type_Int_Boxing.md` §2.10, normative for the
+encoding; its §4 MIR rotate patch is prerequisite P1; β re-bias is the recorded no-patch
+fallback). The earlier plan's §0.3 carrier blocker is dissolved — no cell exists to home — and
+its A1/A2 items are superseded by Phases P/R0/R1 below. Landed work (§0.1) is green and kept.
 
-**Gate state:** `test_lambda_gtest` **651/651** · `test_lambda_std_gtest` **104/104** ·
-`test_mir_ratchet_gtest` 9/15 — **all 6 ratchet failures are pre-existing on master**
-(verified by stashing all changes and re-running). Note the companion tuning doc records only
-*one* pre-existing ratchet failure, so five went red in that work uncaught. **Triage them
-before B1**, whose entire purpose is shrinking emission — a shrink cannot be verified against
-a red ratchet.
+**Progress 2026-08-02: Phases P and R0 are DONE and green.** Baseline 3710/3716 with the same
+6 pre-existing `js_*` ratchet failures and no new ones; the suite grew by the 6 new int
+representation tests. Landed:
 
-**Supersedes:** `Lambda_Impl_Int_C16.md` (earlier, narrower draft).
+| Item | What landed |
+|---|---|
+| **P1 MIR rotate** | `MIR_ROTR` (64-bit) added to the vendored MIR — enum (`mir.h`), descriptor row (`mir.c`), interpreter label + `ROTR64()` `SCASE` (`mir-interp.c`), x86-64 `SHOP (MIR_ROTR, "D3 /1", "C1 /1")` **plus an immediate bypass in machinize** so a constant rotate keeps its imm8 form instead of being forced through `cl`, and aarch64 `RORV` + a new `SO` pattern letter driving `EXTR Rd,Rn,Rn,#imm` (matcher + encoder + the letter table's doc block). Only rotate-**right** exists, deliberately: aarch64 has no rotate-left, and `rotl(b,1) ≡ rotr(b,63)` covers boxing. `libmir.a` rebuilt; `ref/mir` + `include/mir.h` synced. Verified by `temp/mir_rotr_smoke.c` (130 checks: JIT immediate form, JIT register form, and the `rotl(b,1)`/`rotr(b,1)` round trip). |
+| **P2 sentinels** | `ITEM_SENTINEL_TAG` (`0x1F`) introduced; both JS sentinels moved off `0x9E`/`0x9F` onto it with distinct payloads, so the `100` octant is now unoccupied. |
+| **P3 asserts** | Tag-space partition comment rewritten to state all three octant roles; `ITEM_INT_OCTANT` / `ITEM_TAG_IS_NOT_INLINE_INT` added; the `LMD_TYPE_COUNT <= 0x20` assert kept but re-motivated as a **hard ceiling** (0x80–0x9F is no longer tag headroom) and paired with a `LMD_CONTAINER_HEAP_START` bound plus sentinel-tag asserts. |
+| **R0.1 accessors** | `lambda_int_item_to_i64` added beside `lambda_int_item_value`; **all 68 raw `get_int56()` reads migrated** across 22 files, classified by consumer (double-feeding sites → `_value`, index/count/i64-storage → `_to_i64`). `it2i` was already a funnel, so its several-hundred callers needed no change. |
+| **R0.2 emission** | `emit_box_int` documented as *the* box funnel (peer: `emit_unbox(.., LMD_TYPE_INT)`). **`emit_unbox_int_mask` deleted** with its 6 call sites: it masked values that were *already* native `int64`, so it was not a representation dependency at all — only a name that looked like one, and a live bug (a negative `offset`/`limit` masked into a huge positive, emptying the array; the runtime already clamps negatives correctly). |
+| **R0.3 tests** | 6 int representation tests in `test/test_item_repr_gtest.cpp`, written against the canonical encoder/accessors rather than raw bits so they survive the cutover: round-trip through both accessors, canonical encoding (equal ⇒ bit-identical, distinct ⇒ never colliding), out-of-double-space, no collision with internal sentinels, poison distinctness/classification, and container store without borrowed tail storage (`extra == 0` — the §0.3 defect as an assertion). |
 
-**Design authority:** `vibe/Lambda_Semantics_Formal2.md` **C16** (rulings 1–14 + the
-poison-symmetry summary) and **C17** (converters keep returning `error()`; nan stays truthy),
-normative in `doc/Lambda_Formal_Semantics.md` §3, §4 (head), §4.1, §4.2, §4.6, §4.7, §5.1,
-§11.4. Failure containment is `vibe/Lambda_Design_Type_Enforcement.md` TE-15/TE-16 —
-implemented separately in `Lambda_Impl_Error_Handling.md`.
+**Phase R1 — the encoding cutover — is LANDED.** Baseline **3700/3716**. Ints are now carried
+as rotated IEEE bits at every magnitude; `2147483647 * 2147483647` stays `int` (O1 closed),
+`type(1.0)` is still `float`, poison prints `int.inf`/`int.nan`, and no int value allocates.
 
-**Performance authority / companion:** `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`. That analysis
-and this plan are the same work seen from two sides: it measured a **9.48x** gap to C2MIR and
-named M1–M8; C16 deletes one whole mechanism (M2), makes another sound (B1), and root-causes
-the C14c script fallout (§12.1). **Land this plan before re-baselining the Result18 typed
-columns** — several numbers there measure machinery this change removes.
+| R1 item | What landed |
+|---|---|
+| **R1.1 encoders** | `ITEM_INT_CLASS_MASK`/`_BITS`, `lambda_rotr64`, `lambda_int_box_double`, `lambda_int_unbox_double`, the six sentinels (`ITEM_INT_ZERO`/`ONE`/`NEG_ONE`/`INF`/`NEG_INF`/`NAN`), and the `>= 2^257` drift arm — all header-only so `core/` needs no runtime link. **`i2it` is now total** (`lambda_int_box_double((double)v)`); its `ITEM_ERROR` overflow arm — the O1 mechanism — is gone. |
+| **R1.2 dispatch** | `type_id()` gained the inline-int arm (sign test after the double test). `int2it` reimplemented as the canonical cold-path encoder (no allocation); `int2it_i64` added for callers holding a native i64. |
+| **R1.3 poison** | Sentinel payloads 3/4/5; `LAMBDA_INT_VALUE_IS_*` re-expressed over the *double* value; printing extracted to one shared `print_int_value` used by both the Item visitor and the TypedItem printer. |
+| **R1.4 pack path** | `pack_compact_int` packs through `lambda_int_box_double`, so interpreter and JIT cannot disagree about the boundary. |
+| **R1.5 JIT** | `emit_box_int_double` (class test + `MIR_ROTR`, cold → `int2it`); `emit_box_int` converts i64→double first. **Both flexint promote lanes now box as `int`** instead of float — the O1 fix in generated code. |
+| **emitter sweep** | The cutover surfaced *five* more open-coded compact-encoding sites that R0.2 had not reached, each found by a failing test: the JS `jm_box_int_const`/`jm_box_int_reg` pair plus three `ITEM_INT_TAG \| reg` index boxings (array-spread, spread-call, collection inference) — this was ~180 JS failures, since indices 0/1 alias the new sentinels and only index ≥2 diverges; the JIT's `MIR_INDEX_RESULT_BOXED_INT` packed-lane load; and the Python and Ruby transpilers' own box helpers. **No open-coded int tag/mask remains in any emitter.** |
+| **storage** | `TypedItem`'s int arm carries `double_val` (D3, pulled forward — the ANY map-field path was silently storing rotated bits); `type_info` is now sized by `LAMBDA_TAG_SPACE_SIZE` because it is indexed by the *tag byte*, which reserved sentinel tags can reach (ASan caught this as a global-buffer-overflow). |
+| **sentinel hygiene** | `ITEM_JS_JUBE_LAZY_SENTINEL` was a magic payload on the **int** tag and only survived because the old compact encoding round-tripped it as a value. It is now `i2it(ITEM_JS_JUBE_LAZY_MAGIC)` — a real int value — so property storage round-trips it by construction under any encoding. |
+| **goldens** | `int_promotion`, `number_model_realign`, `numeric_fastpath_edges` updated: every changed line is `float` → `int` with the **value unchanged** — exactly C16 ruling 1 + the O1 close-out. |
 
-**The change in one line.** Flex `int` becomes the float64-representable integers, so *int
-arithmetic is total in `double`*. The 53-bit band survives only as the **compact-Item carrier
-capacity**, never again as a semantic boundary.
+**A5, D1, R1.6 and the budget re-baseline all landed the same day. Baseline is
+`3717/3717` — fully green, which is *better than the starting state* (`3710/3716`, with six
+`js_*` ratchet probes already red on master).**
+
+| Item | What landed |
+|---|---|
+| **A5 — `INT64_ERROR` boundary** | `fn_len`, `index_of`, `fn_idiv_i` and the shift builtins report failure in-band as `INT64_ERROR` (`= INT64_MAX`); the retired compact encoder rejected that value *by accident of its range check*, which is the only reason those errors ever surfaced. The test is now explicit, and folded into `emit_box_int`'s fast-path predicate (`in_class & (val != INT64_ERROR)`) so it costs one extra compare rather than a second branch. `emit_box_int_double`, the hot arithmetic path, stays free of it — a native double lane cannot carry the sentinel. The sentinel convention itself is still owed a proper retirement. |
+| **D1 — `ELEM_INT` is a double lane** | Ruled option (b), now real: the packed `int` lane is float64-backed, so per-lane poison is the IEEE special and needs no lane sentinel. Converted: the four `ArrayNum` accessors, `array_int_set`/`array_int_fill`/`array_int_get`, `write_arr_elem_from_double` (which **still rounds** — the int lane holds integers, so a fractional store rounds exactly as the i64 lane did, with poison passing through untouched), the reduction dispatch, `fn_fill`, `fn_unique`, the negate path, histogram/label, `ensure_typed_array`, specialize→generic, and **three separate JIT store paths plus four indexed-load policies** (two new result kinds, `*_FROM_DOUBLE`). The i64 SIMD kernels for vector arithmetic are now gated to `ELEM_INT64`; the int lane takes the representation-neutral path, which is a known Phase F performance item. |
+| **R1.6 — deletions** | `LMD_TYPE_INT_BIG` (enum slot, assert, `ITEM_INT_BIG`, `get_type_name` arm), the `INT_BIG` arm of `lambda_item_uses_scalar_home` **and of `lambda_item_adopt_scalar_home`** — so **`int` is formally out of the scalar-home world**, which now covers exactly `int64`, `uint64` and cell-backed tiny floats, as it did before C16. `get_int56` is deleted outright. The compact tag/mask constants in the JS, Python and Ruby emitters were deleted too — the compiler proved them dead (`-Wunused-const-variable`), which is the tidiest possible confirmation that no open-coded encoding survives. |
+| **MIR budgets** | Re-baselined, 22 values across 12 probes, after first slimming `emit_box_int` twice: folding the A5 guard into the class predicate, then replacing the cold-path runtime call with an inline closed-form sentinel map — which removed the added **safepoint and scalar home** the call had introduced into every function that boxes an int. Measured against master by stashing: the six `js_*` probes' numbers are **identical** on master, so that growth is entirely pre-existing and none of it is attributable to this work; the six `lambda_*` probes plus the `scalar_home_donation` fixture are this work's, from the rotation sequence replacing mask/or. Expect Phase B (B1) to shrink these materially and require another re-baseline. |
+| **gates** | `test/lambda/int_total_c16.ls` + golden pins the plan's §4 properties end to end: totality at the band edge, the O1 repro, poison in all four forms, poison through a container, **per-lane poison in a packed `int[]`** (only expressible because of D1), a sparse-band value round-tripping through a list *and* a map field, and `type()` separating int from float at every magnitude. The C++ representation suite gained the values past the old band (2⁵³, 2⁵⁴, 2⁶²) that the retired encoding could not hold at all. |
+
+**Phases B, C, E and F all landed 2026-08-02. Baseline `3717/3717`; MIR ratchet 15/15.**
+
+| Item | What landed |
+|---|---|
+| **B1 — flexint dual lane deleted** | `int ⊕ int` is now one `DADD`/`DSUB`/`DMUL`. The range check, the branch and both boxing arms are gone, because C16 left no boundary to test. The `I2D` on each operand is exact **by construction** — any `int` that fits an i64 lane is a float64-representable integer, that being the definition of the domain — so only the arithmetic rounds, once, exactly as the interpreter's pack path does. Emission shrank sharply where int arithmetic lives: `_twice_#` 84→58, `_closed_gap_#`/`_open_gap_#` 80→57, `_accumulate_#` 113→90, one js_script probe −243. Budgets tightened to lock it in. |
+| **B1 — shift band test deleted** | The shift builtin still promoted past 2⁵³. Removed: scaling by a power of two moves the exponent and leaves the mantissa alone, so a valid `int` shifts to a valid `int` at any magnitude. `bitwise_lane_preservation` now also prints the exact value (2⁶² as `4611686018427387904`, not the lossy float rendering). |
+| **B3 — overflow class retired** | `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` deleted; an int result carries the IEEE rule a float does. The field was write-only, so this is a classification correction plus the comments that cited it. |
+| **C1 — lexer split by exponent sign** | `positive_exponent_part` / `negative_exponent_part` in `grammar.js`; an integer-spelled mantissa with a non-negative exponent joins `integer` (`10e1` is int 100) and a negative exponent stays float (`10e-1`). The `n`/`m` suffix and imaginary rules take the new token too. Both int-literal *value* parsers had to learn the exponent as well (`build_ast.cpp` via a new shared `lambda_parse_int_literal`, and the JIT's `parse_int_literal`) — strtoll stops at the `e`. |
+| **C2 — band diagnostic** | Already present and now load-bearing: `1e16` is a compile error. Its consequence is real migration — `1e308` is *lexically an integer* and must be spelled `1.0e308` when a float is meant. Applied to `numeric_fastpath_edges`, `vector_performance` and `std/boundary/numeric_limits`. |
+| **E1 — admission by integrality** | `contract_numeric_admit_signed` gained a dedicated `int` arm. It no longer routes through int64 (which cannot even hold the domain) nor gates on ±(2⁵³−1): any finite integral value admits at any magnitude. |
+| **E2 — poison admission** | A shared infinity re-tags into int's own (ruling 14 — same value), a foreign nan rejects like `3.5`. Pinned in `test_lambda_errors_gtest`, whose pre-C16 assertions that both were refused are now the C16 rule with the reasoning recorded. |
+| **E3 — `is` lattice** | Verified already conformant: `5 is int64` is false, `i32 ⊑ int ⊑ integer` holds, `int ⊑ float` is definitional. No change needed. |
+| **E4 — elision int→float arm** | **Does not apply, and must not be added.** Its premise was that both carriers are doubles so admission is a pure retag — true for the β and erasure designs, false for rotation: an int Item is `rotl(bits,1)` and a float Item is raw bits, so the boundary genuinely converts (and sentinels are a table lookup). §3 T-A1's original "Proven ≠ redundant" reasoning stands unchanged. |
+| **F1 — range-proven i64 lane** | For a native-int consumer of ADD/SUB the i64 result is used directly when it lands within ±(2⁵³−1), where it is both exact and representable and therefore identical to the double answer; otherwise the already-computed double result is narrowed. This is the design's range-proven lane discharged at run time rather than statically. |
+| **F2 — re-measure** | Release build, AWFY suite, median of 3, measured against a stashed pre-C16 build of the same tree. |
+
+**F2 numbers (AWFY, exec_ms, MIR engine).** Geometric mean **+0.5%** — the correctness work is
+performance-neutral overall. Recovered by F1: `permute` 1.63→1.62 (was 1.69 before F1),
+`towers` 4.21→4.35 (was 4.53). Improved: `sieve` −3%, `nbody` −3%, `json` −2%, `cd` −2%,
+`havlak` −2%. **Open regression: `mandelbrot` 81.3→87.9 (+8%), stable across re-runs and not
+recovered by F1** — it is float-dominated, so the cause is not int arithmetic itself and wants
+its own profile before more lane work. Two further F1 opportunities remain unexplored: MUL has
+no cheap exactness proof and always takes the double narrowing, and D1 gated the i64 SIMD
+kernels for `ELEM_INT` vector arithmetic to `ELEM_INT64`, leaving the int lane on the
+representation-neutral path.
+
+**Also fixed en route (pre-existing, unrelated to C16):** five vendored tree-sitter grammars
+(`bash`, `javascript`, `latex-math`, `ruby`, `typescript`) shipped a `parser.c` generated for an
+older tree-sitter alongside a newer `src/tree_sitter/parser.h` that no longer declares
+`TSFieldMapSlice`. It was invisible only because their `.a` artifacts predated the drift; the
+first clean rebuild (`make release`, already failing on master for this reason) removed them and
+neither release nor debug could build. Synced each to the compatible header, so a clean build
+works again.
+
+**Remaining:** the `mandelbrot` profile above; the two F1 opportunities; and one C16-completeness
+gap — **a declared-`int` native i64 lane cannot carry poison**, so `int.inf` admitted at such a
+boundary degrades on unbox. The boundary itself is correct (E2); the lane is not, and the
+design's answer is the default double lane (§2). Two Radiant `puppertino` failures are
+pre-existing on master (verified by stash) and unrelated.
+
+**Supersedes:** the 2026-08-01 revision of this file (compact+cell carrier plan) and
+`Lambda_Impl_Int_C16.md`.
+
+**Design authority:** semantics — `vibe/Lambda_Semantics_Formal2.md` C16 (+C17 rejection),
+normative in `doc/Lambda_Formal_Semantics.md` §3–§5, §11.4; **representation —
+`vibe/Lambda_Type_Int_Boxing.md`** (encoding, sentinels, drift, MIR patch);
+representation contract — `Lambda_Design_Item_Boxing.md` §6; scalar ownership —
+`Lambda_Design_Scalar_GC_Invariant.md` (int **exits** its scope entirely).
+Failure containment is TE-15/TE-16, implemented separately.
+
+**Performance authority / companion:** `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (M1–M8). C16
+deletes M2 outright (Phase B). **Land this plan before re-baselining Result18 typed columns.**
+
+**The change in one line.** Flex `int` = the float64-representable integers, total in
+`double`; boxed ints are their own rotated IEEE bits — one `rotl`/`rotr` from the native
+lane, no cells, no number stack, no scalar homes, at any magnitude.
 
 ---
 
 ## 0. Current state
 
-### 0.1 Done and green
+### 0.1 Done and green (kept from the prior revision)
 
-| Item | What landed |
-|---|---|
-| **B4 — `div`/`%` stay `int`** | `lambda_numeric_classify` no longer routes int `div`/`%` to float (nor `integer` to decimal); `int_integral_division` in `lambda-eval-num.cpp` serves both classifier arms. Truncation-toward-zero and dividend-signed remainder are C14c's, unchanged. Verified: `7 div 2 → 3 (int)`, `-7 div 2 → -3`, `-7 % 2 → -1`. |
-| **A3 — int poison** | `int.inf` / `-int.inf` / `int.nan` as reserved compact payloads above `INT53_MAX`, discriminated by a sign-extended read (`LAMBDA_INT_VALUE_IS_POISON` and friends). No new tag, no cell. `i2it` admits them via `LAMBDA_INT_IS_ENCODABLE` so poison survives a packed-lane round-trip. Zero divisor: `7 div 0 → int.inf`, `-7 div 0 → -int.inf`, `0 div 0 → int.nan`, `x % 0 → int.nan` (undefined, not unbounded). |
-| **B5 — vector lanes** | Vectorized `div`/`%` now match the scalar rule per lane (`[6,0,8] div 0` → `[int.inf, int.nan, int.inf]`). The spec required this; it had never actually held. |
-| **Poison printing** | Was a three-site duplication (`print_array_num_elem` + two flat-array loops); extracted to `print_packed_int_elem` (`core/print.cpp`). Any future poison-representation change goes through that one helper. |
-| **D2 — C14c cleanup** | The `int(…)` workarounds removed from `brainfuck`, `brainfuck2`, `json2`, `json_gen2` — dead code now that `%` returns int. The documented >300 s hang is root-caused away (brainfuck: correct output, 728 ms debug). The recommended "sweep for `div`/`%` into packed arrays" is **cancelled**, not deferred. |
-| **A6** | The `INT53_MAX` comment rewritten to say *carrier capacity*, not domain bound — it was the clearest surviving statement of the retired semantics. |
-| **A2 — carrier (INERT)** | Built and building, but **nothing produces it**: `LMD_TYPE_INT_BIG` (slot 28, non-double asserted), `type_id()`/`get_type_name` normalization to `int`, `box_int_number_stack` + `int2it` encoder, `lambda_int_item_value` accessor, `lambda_item_uses_scalar_home`/`lambda_item_adopt_scalar_home` rehoming, and `int2it` registered in the JIT symbol table. See §0.3 — the cell's *home* is wrong. |
-| **A4 (partial)** | The print visitor `ItemOf<LMD_TYPE_INT>` reads via `lambda_int_item_value` and renders out-of-band ints with `%.0f` (exact: every representable value above 2⁵³ is integral). |
-
-**Landed alongside — a pre-existing miscompile, separate concern, own commit.**
-`fn f(x) float { let p: float = x; p }` failed MIR validation: an interior checked boundary
-emits an error return that a native lane cannot carry (MIR rejects an Item into a `double`;
-worse, it *silently accepts* it into an `int`, handing the caller error bits as a number).
-Fixed by extending `function_return_may_defer` with `function_body_may_check_boundary`, which
-denies the native return so the error rides the boxed Item. **Granting the callee an error
-lane was tried and rejected**: the caller only reads `Context.mir_return_lane` for `can_raise`
-callees, so the error silently became `0` — trading a loud crash for the exact substitution
-§13-invariant-7 forbids.
-
-### 0.2 Outstanding
-
-| Phase | Outstanding |
-|---|---|
-| A | **A1** (flip `i2it`'s overflow arm) and **A2 completion** — both blocked on §0.3. **A4/A5** read-site audit: one known reader remains; classify each site *numeric* (→ `lambda_int_item_value`) vs *index/count* (→ `get_int56()`, in-band by construction). |
-| B | **B1 flexint deletion** — the main perf event, and the largest single deletion. **B2** (`pack_compact_int` computing in double), **B3** (retire `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` for the flex tier). All depend on A. |
-| C | Not started, and **fully independent of A/B** — the lexer split (`grammar.js:27`, why `10e1` is float today) plus the literal band diagnostic. Can be done in parallel by anyone. ⚠ Also needs the *int literal parser* to accept exponent form, or `10e1` will tokenize as int and then fail to parse its value. |
-| D | **D1** `ELEM_INT` lane decision (recommendation on record: keep the i64 lane, widen the array on an out-of-band store). |
-| E | Not started — integrality admission, poison admission, the `is`-lattice change (`int ⊑ int64` dies; visible flip: `5 is int64` → false). |
-| F | Not started — range-proven i64 lanes, re-measure. |
-| ruling 13 | `integer.inf`/`integer.nan` and `integer div integer → integer` still unimplemented; shares the mpdec specials unblock with `decimal.inf`/`decimal.nan`. |
-
-### 0.3 ⚠ BLOCKING DESIGN ISSUE — the carrier has no legal home
-
-**Symptom.** With either producer flipped on, an out-of-band int stored into a container
-prints as a raw pointer whose value *changes between runs* (11130012512 → 11277501280 →
-9068249952). That instability is the tell: a stale read-site would print a *stable* wrong
-number.
-
-**Root cause.** Not a read-site bug. `box_int_number_stack` allocates on the **side number
-stack**, which is frame-scoped. Repro: `show(2147483647 * 2147483647)` where
-`fn show(v) => [type(v), v]` (`numeric_fastpath_edges:39`) — the product is celled, stored
-into the array, and then `show` returns, restoring the number-frame watermark and reclaiming
-the cell. The array holds a dangling pointer. No read-site fix can help; the value is gone.
-
-**Why floats never exposed this.** `flt2it` only takes a cell for tiny/subnormal doubles —
-every normal-magnitude double is inline self-tagged. Out-of-band *ints* are the exact inverse:
-all large, so they would take a cell on the **common** path. The existing scalar machinery was
-tuned for a case that almost never happens; C16 makes it the norm.
-
-**GC-allocating the cell is NOT available.** `heap_alloc`/`heap_calloc` *abort* on scalar type
-ids ("heap-scalar-invariant", `lambda-mem.cpp:596`, `:617`), enforcing the **No-Scalar-Cell
-Invariant** — `vibe/Lambda_Design_Scalar_GC_Invariant.md`, status IMPLEMENTED, user-confirmed
-2026-07-22: *no wide-scalar payload is ever allocated in the GC object zone.*
-
-**The three options.** Everything else in C16 — `div`/`%` staying int, poison, totality
-*within* the band, the honest static type — is unaffected by this choice and already landed.
-
-- **(i) Follow the `int64` pattern — destination-owned storage.** Wide scalars escape their
-  frame today via caller-donated homes and destination-owned storage: when an `int64` enters a
-  container, the *container* owns the payload. Correct and invariant-preserving, but it
-  touches every container-insertion site, and it means `2147483647 * 2147483647` — a common
-  32-bit overflow pattern that used to become a free inline float — now needs destination
-  storage.
-- **(ii) Cap flex `int` at the compact band.** Arithmetic stays total *within* ±(2⁵³−1) and
-  saturates to poison beyond, carrying no sparse values. Needs no carrier at all, so A1/A2
-  collapse to nothing and B1 unblocks immediately. **But it amends C16 ruling 1.** Assistant's
-  read: more attractive than it looks — the sparse band's practical value is thin, since
-  values above 2⁵³ that must stay exact belong in `i64`/`integer`/`decimal`, which is already
-  C16's own documented guidance — while its cost has turned out to be structural.
-- **(iii) Keep promotion above 2⁵³** for the sparse band only. Cheapest, but re-opens O1 and
-  re-introduces the "static type says int, value is float" hole that motivated C16.
-
-**Until this is decided**, both producers stay reverted and carry `TODO` comments naming the
-exact edit: `pack_compact_int` (`lambda-eval-num.cpp`) and the two JIT flex-int promote lanes
-(`transpile-mir.cpp`). The tree is green with the carrier inert.
-
-### 0.4 Method note — audit empirically, and sequence audit-before-flip
-
-The plan originally ordered A2 (carrier) → A4/A5 (read audit). **That is backwards.** With
-producers live and readers unaudited, every misreader surfaces the cell pointer as the value.
-Blast radius measured at 2–4 tests, so it fails loudly rather than silently. The audit is also
-far cheaper done empirically than by cold-reading ~90 `get_int56` sites: flip a producer, run
-`test_lambda_gtest`, and the misreaders announce themselves.
-
----
-
-## 1. The constraint that shapes everything: tag space
-
-Audited 2026-08-01 against `lambda/lambda.h` (this closes C16's open "boxed encoding /
-tag-space audit" item):
-
-- An inline double **is its own Item, using all 64 bits** — `lambda_float_ptr_to_item`
-  ([lambda.h:1293-1301](../lambda/lambda.h:1293)) returns the raw bits whenever
-  `bits & ITEM_DBL_MASK` (`0x6000000000000000`, [lambda.h:140](../lambda/lambda.h:140)) is
-  non-zero.
-- Every *tagged* value spends its high byte on the tag and keeps a **56-bit payload**
-  (`ITEM_HIGH_BYTE_MASK`, asserted at [lambda.h:1246](../lambda/lambda.h:1246)).
-
-**Consequence: an int-tagged Item can never carry an inline double.** "Represent `int` as
-float64 internally" is available in *native lanes only*; the boxed representation must stay
-either a compact integer payload or a **tagged pointer to a double cell** — exactly what
-`d2it` ([lambda.h:1286](../lambda/lambda.h:1286)) already does for out-of-band floats. The
-design below follows that precedent rather than inventing a carrier.
-
-## 2. Three carrier layers
-
-| Layer | Carrier | Notes |
+| Item | What landed | Fate under rotation |
 |---|---|---|
-| Boxed `Item` | compact 56-bit payload for `\|v\| ≤ 2⁵³`; double-cell pointer above | two int tags. ⚠ **The cell's home is unresolved — see §0.3.** Under option (ii) this row collapses to the compact payload alone. |
-| JIT native lane (default) | `double` (`MIR_T_D`) | no tag, no checks — the semantics *is* binary64 |
-| JIT native lane (optimized) | `i64`, **only when range-proven ≤ 2⁵³** | invisible optimization; unproven ⇒ stays double and is still correct |
+| **B4 — `div`/`%` stay `int`** | classifier no longer routes int `div`/`%` to float (nor `integer` to decimal); `int_integral_division` serves both arms; truncation/remainder semantics C14c's | **kept as-is** |
+| **A3 — int poison** | `int.inf`/`-int.inf`/`int.nan` as reserved compact payloads above `INT53_MAX` (`LAMBDA_INT_VALUE_IS_POISON` family, [lambda.h:1280](../lambda/lambda.h:1280)) | **semantics kept; representation migrates** to sentinel payloads 3/4/5 in R1.3 |
+| **B5 — vector lanes** | per-lane poison for vectorized `div`/`%` (`[6,0,8] div 0` → `[int.inf, int.nan, int.inf]`) | **semantics kept; mechanism simplifies** under D1's double lane — IEEE hardware produces the specials, the sentinel-payload writes delete |
+| **Poison printing** | three-site duplication extracted to `print_packed_int_elem` (`core/print.cpp`) | **reworked** in R1.3/D1 (lane-aware; sentinel decode) |
+| **D2 — C14c cleanup** | `int(…)` wrappers removed from brainfuck/brainfuck2/json2/json_gen2; hang root-caused away; the div/%-sweep **cancelled** | kept |
+| **A6** | `INT53_MAX` comment rewritten to "carrier capacity" | **needs one more pass** in R1.6: the compact carrier dies, so `INT53_MAX`'s surviving roles are the *literal/parser band* (rulings 6+9) and the *i64 range-proof bound* (F1) — say exactly that |
+| **A2 carrier (inert)** | `LMD_TYPE_INT_BIG` + `int2it` + `box_int_number_stack` + rehoming predicate arm — built, never produced | **scheduled for deletion** (R1.6), not completion |
+| **Miscompile fix** | `function_return_may_defer` extended with `function_body_may_check_boundary` (interior checked boundary vs native return lane) | kept; separate concern |
 
-**Keep the compact threshold at 2⁵³; do not widen to the payload's 2⁵⁵.** Above 2⁵³ not every
-integer is float64-representable (evens, then multiples of 4), so a wider compact payload
-could encode a value that is *not a member of the int domain*. Capping at 2⁵³ keeps "a compact
-payload is always a valid `int`" true by construction and both conversion directions exact.
+### 0.2 Superseded items → new home
 
-**Why the `i64` lane must stay range-proven.** Below 2⁵³, `i64` and `double` arithmetic agree
-exactly. Above it they diverge: `i64` produces exact values such as `2⁵³ + 1` which are **not
-in the int domain**. The proof obligation is soundness-critical — but because the *default* is
-`double`, a missing proof costs speed, never correctness. That is the property which makes the
-O1-class divergence unrepresentable rather than merely fixed.
+- **A1** (`i2it` overflow arm → cell): dissolved. Under rotation, `i2it` from an `int64`
+  source is **total** — every i64 magnitude < 2⁶³ ≪ 2²⁵⁷ is in-band — so the
+  `: ITEM_ERROR` arm ([lambda.h:1279](../lambda/lambda.h:1279)) and the O1 divergence die by
+  construction in R1.1.
+- **A2** (second tag), **§0.3** (carrier home), and the five container escape arms: dissolved
+  / cancelled. Record: prior revision in git history; analysis in `Lambda_Type_Int_Boxing.md`
+  §2.1–§2.2.
+- **A4/A5** (read-site audits): reshaped into the R0.1 accessor funnel — same site inventory,
+  now a mechanical centralization instead of a per-site classification.
+- **B2** (`pack_compact_int` computing in double): absorbed into R1.4.
 
----
+### 0.3 Method note (revised for a representation cutover)
 
-## 3. Convergence with the tuning work
-
-`Lambda_Tune_Typed_Vs_C2MIR.md` landed A1, A2 (partial), A3 (partial), B1, C2, D1a, D1b
-(partial), D3 on 2026-08-01. This plan interacts with nearly all of it. Read this table
-before touching either document's items.
-
-| Tuning item | State there | What C16 does to it |
-|---|---|---|
-| **M2** — flexint lane boxes declared-int arithmetic | open cost, ~9–20 instrs/op | **Deleted.** No promote lane exists; `int ⊕ int` is one `DADD`/`ADD`. The entire box-or-promote decision disappears. |
-| **A2** — checked-unboxed int arithmetic (partial) | landed for one consumer, +2–3% | The plumbing (`native_int_out` on `transpile_binary_out`, [transpile-mir.cpp:4669](../lambda/runtime/transpile-mir.cpp:4669)) **survives and generalizes**: it stops being "box or not" and becomes "which carrier". Its cold lane changes *meaning* — today box-float-then-`it2i` (a **type** change, deliberately preserving O1); under C16 it widens the carrier to double at the **same** type. |
-| **A2** — unwired consumers (decl/assign initializers, for-range bounds) | listed as remaining | **Subsumed.** With `double` as the default native carrier there is no consumer list to wire: unboxed *is* the lane. |
-| **M1 / A1** — statically-true boundary elision | landed, the session's big win | **Amplified twice.** (i) `int ⊕ int : int` is now honest, so more boundaries classify PROVEN instead of ANY-downgraded. (ii) int→float admission becomes a **pure retag** (both are doubles), so `lambda_boundary_is_redundant` ([type_contract.hpp:31](../lambda/runtime/type_contract.hpp:31)) can gain an int→float arm — today that widening is the exact reason elision had to be conservative ("Proven ≠ redundant", §3 T-A1). |
-| **M3 / A3** — native returns, load-bearing half not landed | blocked on "what does every `return` produce" analysis | Analysis unchanged, **payoff grows**: pure-int bodies become provably non-raising (int arithmetic cannot fail), so more functions qualify for a native return *with no error lane at all*. |
-| **D2** — scalar return mode | blocked on the same analysis | Same. Implement D2 + A3 together, after this plan. |
-| **B1** — native counted `for` | landed, sieve −37% | **Made sound.** The i64 induction variable is exactly a range-proven lane (§2); before C16 it silently depended on INT53 semantics. Extend the same proof to array indices (§4 Phase F). |
-| **M7 / C1 / C2** — typed arrays | landed | **New work.** `ELEM_INT` reads box through `i2it` ([lambda-data-runtime.cpp:488](../lambda/runtime/lambda-data-runtime.cpp:488)), which today returns `ITEM_ERROR` outside INT53 — the O1 mechanism *inside arrays*. Needs the lane decision in Phase D. |
-| **§12.1** — brainfuck hang; the C14c `int % int → float` fallout | fixed per-script with `int(...)` wrappers; a sweep was recommended | **Root-caused away.** C16 ruling 4 returns `div`/`%` to `int`. The wrappers in `brainfuck2.ls`, `fft2`, `cd2`, `json2` become dead code and should be removed; **the recommended sweep is cancelled**, not deferred. |
-| **O1** — INT53 divergence | "stays open; A2 doesn't need it resolved" | **Closed.** |
-| "Don't touch INT53 overflow semantics to buy speed" | stated guidance | Superseded in *motive only*: C16 is a correctness decision (TE-15 made every int-annotated binding a potential defect site). The speed is a consequence. |
-| "Don't add declared types to benchmark sources" | stated guidance | **Keep** until this plan lands; C16 removes the last int-specific reason annotations pessimize, but T-A/T-C rows must be re-measured first. |
-
-**Sequencing note.** Phase B below deletes code that A2 just parameterized. Do not treat that
-as reverting A2 — the parameter stays, the branch it selects between changes. Land Phase B on
-top of A2 rather than around it.
+The prior revision's lesson — audit readers before flipping producers — generalizes. A
+representation change cannot be flipped site-by-site (the canonical-encoding rule forbids
+mixed producers), so the plan follows the **double-boxing v3 template**
+(`Lambda_Impl_Double_Boxing (done).md`): guardrails and centralization first with **zero
+behavior change** (R0), then the encoding switch behind a transition flag (R1, `LAMBDA_ROT_INT`),
+then hardening and flag deletion. After R0, every producer and consumer goes through a
+canonical helper, so the flag switches one place per direction, and the §0.4-style empirical
+audit ("flip, run `test_lambda_gtest`, misreaders announce themselves") still applies — at
+helper granularity instead of site granularity.
 
 ---
 
-## 4. Phase order
+## 1. Representation summary (normative spec: `Lambda_Type_Int_Boxing.md` §3)
+
+| value | boxed encoding |
+|---|---|
+| `2 ≤ \|v\| < 2²⁵⁷`, integral | `rotl(bits, 1)` — the `100` octant; positives even, negatives odd (sign at bit 0) |
+| `0` / `+1` / `−1` | `ITEM_INT \| 0` / `\| 1` / `\| 2` (0 and +1 **bit-identical to today's compact**) |
+| `int.inf` / `−int.inf` / `int.nan` | `ITEM_INT \| 3` / `\| 4` / `\| 5` |
+| `\|v\| ≥ 2²⁵⁷` | raw double bits (inline float) — reflection drift, spec footnote |
+
+Core sequences: box = class check `(b & 0x7000000000000000) == 0x4000000000000000` → `rotl 1`
+(slow path: sentinel select / drift); unbox = bit-63 test → `rotr 1` (sentinel path: one
+`payload ≤ 5` compare, à la `Item::get_double`'s `double_ptr <= 1`); unbox→i64 adds
+`cvttsd2si`. `type_id()`: `DBL_MASK → FLOAT; (int64)item < 0 → INT; else high byte`.
+Literal `0`/`±1`/poison **compile to sentinel constants** — no runtime class check for
+constant operands. No int value at any magnitude allocates or touches a scalar home.
+
+---
+
+## 2. Phase order
 
 ```text
-Phase A (representation: carriers, converters, poison)
-    └── Phase B (arithmetic: delete flexint lowering, div/% domains)
-            ├── Phase C (frontend: lexer, literals, inference, printing)
-            ├── Phase D (packed arrays + C14c workaround removal)
-            └── Phase E (boundaries: admission, lattice, elision arms)
-                    └── Phase F (perf: range-proven i64 lanes, re-measure)
+Phase P (prerequisites: MIR rotate, sentinel relocation, asserts)
+    └── Phase R0 (centralize accessors/emitters + guardrails — no behavior change)
+            └── Phase R1 (the encoding cutover, flag-gated; deletions; flag removal)
+                    └── Phase B (arithmetic: flexint dual-lane deletion, overflow-class retirement)
+                            ├── Phase C (frontend: lexer, literals, printing)   [independent of R*/B — can run any time]
+                            ├── Phase D (storage: ELEM_INT double lane, map int fields)
+                            └── Phase E (boundaries: admission, lattice, elision)
+                                    └── Phase F (perf: range-proven i64 lanes, re-measure)
 ```
 
-⚠ **Two corrections to this order, both learned in implementation (§0.4):**
-1. **Within A, audit readers BEFORE flipping producers.** A2-then-A4 is backwards.
-2. **Phase C does not depend on A or B** and can proceed in parallel at any time. In practice
-   D2 was also completed early, since B4 alone unblocked it.
+### Phase P — prerequisites (each independently landable now)
 
-### Phase A — representation
+- **P1. MIR rotate patch** (`Lambda_Type_Int_Boxing.md` §4). Add `MIR_ROTL`/`MIR_ROTR`
+  (64-bit): insn enum ([ref/mir/mir.h:110](../ref/mir/mir.h:110)), descriptor rows
+  ([ref/mir/mir.c:217](../ref/mir/mir.c:217)), interp label+`SCASE`
+  ([ref/mir/mir-interp.c:1001](../ref/mir/mir-interp.c:1001), [:1323](../ref/mir/mir-interp.c:1323)),
+  x86-64 `SHOP` rows — ROL/ROR are the shifts' own `D3`/`C1` family at `/0`,`/1`
+  ([ref/mir/mir-gen-x86_64.c:1745](../ref/mir/mir-gen-x86_64.c:1745)) — and aarch64
+  `EXTR Rd,Rn,Rn,#imm` patterns ([ref/mir/mir-gen-aarch64.c:1707](../ref/mir/mir-gen-aarch64.c:1707);
+  `rotl 1` ≡ `ror 63`). Rebuild `mac-deps/mir/libmir.a`
+  ([build_lambda_config.json:140](../build_lambda_config.json:140)); keep `include/mir.h` in
+  sync; add a MIR-level rotate smoke test. Until P1 lands, `emit_int_box/unbox` (R0.2) may
+  emit the `LSH+URSH+OR` 3-insn fallback behind the same interface.
+- **P2. Relocate the JS sentinels** `ITEM_JS_DELETED_SENTINEL` (`0x9E…`) and
+  `ITEM_JS_ITER_DONE_SENTINEL` (`0x9F…`) ([lambda.h:1138](../lambda/lambda.h:1138)) to free
+  low-tag bytes `0x1E`/`0x1F` (runtime-only constants; `LMD_TYPE_COUNT` = 0x1D today, fits).
+  Hard prerequisite for the `type_id()` sign arm — unrelocated they'd classify as int.
+- **P3. Assert restructure** at [lambda.h:162-165](../lambda/lambda.h:162): replace
+  `LMD_TYPE_COUNT ≤ 0x20` with per-tag `ITEM_TAG_IS_NON_DOUBLE` assertions (as its own
+  comment anticipated) **plus** a new invariant: no TypeId may enter `0x80–0x9F` — that range
+  is now the int inline space, not tag headroom. Amend `Lambda_Type_Double_Boxing.md` §2.3
+  and the `Lambda_Design_Item_Boxing.md` taxonomy (new row: *inline rotated int*).
 
-- **A1. `i2it`'s overflow arm is the O1 fix** ([lambda.h:1279-1282](../lambda/lambda.h:1279)).
-  Today `… : ITEM_ERROR` — the exact mechanism behind the measured divergence (a raw
-  out-of-band `i64` re-boxed through the 53-bit guard yields the bare `ITEM_ERROR` singleton;
-  repro `temp/overflow_fn_test3.ls`). It becomes "box into a double cell".
-  **BLOCKED on §0.3**; moot under option (ii).
-- **A2. Second int tag** for the sparse band — **built, inert, and its cell home is wrong.**
-  The tag, normalization, encoder, accessor and rehoming all exist (§0.1); what does not work
-  is the *storage*: the number-stack cell cannot escape into a container (§0.3). ⚠ The
-  original wording below ("on the existing scalar-home / number-stack machinery") is exactly
-  the mistake — `lambda_item_adopt_scalar_home` covers the **return** path only, not container
-  insertion. **BLOCKED on §0.3**; deleted entirely under option (ii).
-- **A3. Poison values** `int.inf` / `-int.inf` / `int.nan`, and (C16 ruling 13)
-  `integer.inf` / `-integer.inf` / `integer.nan`. The int trio can plausibly live as three
-  reserved compact payloads (zero-alloc) — evaluate against A2's cell carrier. `integer` is
-  mpdec-backed, so its poison rides the **same unblock as `decimal.inf`/`decimal.nan`**
-  (mpdecimal supports the specials; the Lambda wrapper filters them —
-  `lambda-decimal.cpp` ~:306/:374/:420).
-- **A4. Unbox path.** The natural target for an int Item is now a `double`: compact ⇒ `i2d`,
-  sparse ⇒ load from cell. One branch, at dynamic boundaries only. Audit `it2i` consumers —
-  14 in `transpile-mir.cpp`, 23 in `lambda-eval-num.cpp`, 13 in `lambda-vector.cpp`.
-  **`transpile.cpp` (39 uses) is the FROZEN C2MIR path — do not touch it** (CLAUDE rule 14).
-- **A5. Audit `i2it`'s `ITEM_ERROR` consumers.** Any site reading that return as a meaningful
-  error signal changes behavior silently once A1 lands. This includes `lambda-data-runtime.cpp`
-  (Phase D) and the emitter's inline re-box sequences.
-- **A6. Rewrite the comment at [lambda.h:1255-1256](../lambda/lambda.h:1255)** ("compact int is
-  capped to the IEEE float64 safe-integer band; every packing/overflow check must enforce this
-  bound"). It is the clearest statement of the *retired* semantics and will mislead every
-  future reader; it must say **carrier capacity**, not domain bound.
+### Phase R0 — centralize and guard (zero behavior change; every edit testable alone)
 
-### Phase B — arithmetic
+- **R0.1. Accessor funnel.** Two canonical read forms, compact-implemented for now:
+  `lambda_int_item_value(Item) → double` (exists, [lambda.hpp:300](../lambda/lambda.hpp:300))
+  and new `lambda_int_item_to_i64(Item) → int64` for index/count consumers (debug-asserts
+  classified-finite input; poison consumers classify first, existing discipline). Migrate all
+  raw `get_int56()` payload reads and ad-hoc re-box sequences to them: ~90 sites overall —
+  14 `it2i` consumers in `transpile-mir.cpp`, 23 in `lambda-eval-num.cpp`, 13 in
+  `lambda-vector.cpp`, remainder in print/compare/convert paths.
+  **`transpile.cpp` (39 uses) is the FROZEN C2MIR path — do not touch** (CLAUDE rule 14).
+- **R0.2. Emission funnel.** All JIT int box/unbox and int type-test sequences go through
+  shared `emit_int_box` / `emit_int_unbox` / `emit_int_type_test` helpers (today emitting the
+  compact sequences). Inventory anchors: the inline INT53 re-box at
+  [transpile-mir.cpp:10510](../lambda/runtime/transpile-mir.cpp:10510), the arg-site special
+  case at [:11382](../lambda/runtime/transpile-mir.cpp:11382), and every emitted
+  "high-byte == INT" compare.
+- **R0.3. Guardrails + baseline** (double-boxing S0 shape): representation round-trip tests
+  (value ↔ Item for band edges, 0/±1, poison, 2⁵³±, 2¹⁰⁰-scale, drift boundary 2²⁵⁷);
+  canonical-encoding assertions (one encoding per value); capture MIR budgets and perf
+  baseline (release build).
 
-- **B1. Delete the flexint dual-lane emission.** `mir_is_flexint_int_arith`
-  ([:4645](../lambda/runtime/transpile-mir.cpp:4645)), `mir_emit_flexint_native_int`
-  ([:4672](../lambda/runtime/transpile-mir.cpp:4672)), and the boxing arms in
-  `transpile_binary_out` ([:4680–4840](../lambda/runtime/transpile-mir.cpp:4680)) collapse:
-  `int ⊕ int` is a single double (or range-proven i64) operation. Keep `native_int_out` as the
-  carrier selector. Also retire the duplicated inline INT53 test at
-  [:10510-10522](../lambda/runtime/transpile-mir.cpp:10510) and the arg-site special case at
-  [:11382](../lambda/runtime/transpile-mir.cpp:11382). **This is the largest single deletion
-  and the main perf event**; expect `test/mir/mir_budgets.json` (MT7, 0% slack) to move — an
-  *unexplained* jump means a gate is missing.
-- **B2. `pack_compact_int_or_float`** ([lambda-eval-num.cpp:234](../lambda/runtime/lambda-eval-num.cpp:234),
-  called from the `+`/`-`/`*` arms at :535-539, :581) becomes "pack int, choosing carrier by
-  magnitude" — it no longer changes *type*. Switch its `__int128` computation to `double` so
-  the interpreter and JIT cannot disagree about rounding.
-- **B3. Overflow classification.** `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT`
-  ([lambda-number.hpp:40](../lambda/runtime/lambda-number.hpp:40), set at :183, :205, :281) is
-  retired for the flex tier; the int arm saturates to poison at the float-range extremes.
-  Consumers at `transpile-mir.cpp` :4085 and :10454 follow.
-- **B4. `div`/`%` domain change** (C16 rulings 4 + 13). `lambda_numeric_classify`
-  ([lambda-number.hpp:179-183](../lambda/runtime/lambda-number.hpp:179) for the common
-  int/float pair, [:265-274](../lambda/runtime/lambda-number.hpp:265) for the general arm) must
-  stop mapping `int div int` → float and `integer div integer` → decimal. Zero divisor yields
-  the domain's own poison. Sized `i64`/`u64` enter `integer` first, so `i64 div u64 → integer`
-  (was decimal). **`/` is untouched everywhere.**
-- **B5. Vector lanes.** Integer-array `div` stays an int-family array with per-lane poison
-  (spec §4.7), replacing today's float-array result (`lambda-vector.cpp`).
+### Phase R1 — the cutover (behind `LAMBDA_ROT_INT`; S1/S2/S3 shape; flag deleted at the end)
 
-### Phase C — frontend
+- **R1.1. Encoders.** New box/unbox in `lambda.h`: class-check macro, `rotl`/`rotr` forms,
+  the six sentinels (payload table §1), drift arm. `i2it(int64)` reimplemented **total**
+  (0/±1 → sentinels; else convert+rotate; no range check needed from i64 sources — the
+  `ITEM_ERROR` arm dies here, closing O1; verify with `temp/overflow_fn_test3.ls` and the
+  `show(2147483647 * 2147483647)` repro, both must show one consistent int answer).
+- **R1.2. Dispatch.** `type_id()` sign arm ([lambda.hpp:118](../lambda/lambda.hpp:118));
+  GC `item_to_ptr`/marker: `100` octant and INT byte are never pointers (SG7 early-out
+  extends); `emit_int_type_test` switches to octant-or-sentinel-byte (two compares).
+- **R1.3. Poison migration.** `ITEM_INT_NAN/INF/NEG_INF` and the `LAMBDA_INT_VALUE_IS_*`
+  family ([lambda.h:1280-1299](../lambda/lambda.h:1280)) move from 2⁵⁴-based payloads to
+  sentinel payloads 3/4/5 with a `payload ≤ 5` classifier; `LAMBDA_INT_IS_ENCODABLE` retires;
+  printing reads sentinels (spec §4.6 spellings unchanged).
+- **R1.4. Interpreter pack path.** `pack_compact_int_or_float`
+  ([lambda-eval-num.cpp:234](../lambda/runtime/lambda-eval-num.cpp:234), callers :535-539,
+  :581) becomes "compute in `double`, pack via rotation" — absorbing old B2; interpreter and
+  JIT can no longer disagree about rounding.
+- **R1.5. JIT lowering flip.** `emit_int_box/unbox` emit `MIR_ROTL`/`MIR_ROTR` sequences
+  (+ sentinel screens); constant operands fold to sentinel/rotated immediates at emission
+  time.
+- **R1.6. Deletions + flag removal.** Delete: compact packing producers, `LMD_TYPE_INT_BIG`
+  (slot, `type_id()` normalization, `get_type_name` arm), `int2it`
+  ([lambda.h:1777](../lambda/lambda.h:1777)), `box_int_number_stack`, the INT arm of
+  `lambda_item_uses_scalar_home` ([lambda.hpp:284](../lambda/lambda.hpp:284)), the JIT
+  symbol-table registration, `get_int56`'s remaining internal uses. Re-pass the `INT53_MAX`
+  comment (§0.1/A6 note). Run the full gate set, then delete `LAMBDA_ROT_INT` — no
+  escape-hatch flag survives, per the double-boxing precedent.
 
-- **C1. Lexer (C16 ruling 9).** [grammar.js:24-28](../lambda/tree-sitter-lambda/grammar.js:24):
-  `float_literal` includes `seq(integer_literal, exponent_part)` (line 27), which is why `10e1`
-  is a float today. Split `exponent_part` (line 23) by sign: an integer-spelled mantissa with a
-  **non-negative** exponent joins `integer` ([:259](../lambda/tree-sitter-lambda/grammar.js:259)),
-  a negative exponent stays `float` ([:261](../lambda/tree-sitter-lambda/grammar.js:261)). Then
-  `make generate-grammar` — never hand-edit `parser.c`.
-- **C2. Literal range check.** Unsuffixed int-form literals outside ±(2⁵³−1) are compile errors
-  *even where sparsely representable* (`1e16` errors; `1.0e16` / `1e16n` are the fixes).
-  Frontend diagnostic, no runtime path.
-- **C3. Parser data homes unchanged** (C16 ruling 6): `int` iff within ±(2⁵³−1), else `int64`,
-  else `decimal`. Do not widen ingestion to sparse representability.
-- **C4. Inference.** `build_ast.cpp` keeps calling `lambda_numeric_classify`; the change is
-  inside the classifier (B3/B4). **Verify the TS-3 consequence**: `int ⊕ int` must now yield a
-  clean `int` static type with no ANY downgrade — that is what feeds A1's elision.
-- **C5. Printing** (spec §4.6): finite ints print as integers at every magnitude, no exponent
-  form; poison prints `int.inf` / `-int.inf` / `int.nan` and the `integer.*` trio, all
-  parseable. **Golden churn expected** wherever today's escapes printed float-formatted
-  (`1.80144e+16` → `18014398509481982`).
+### Phase B — arithmetic (unchanged goals; now lands on the rotation base)
 
-### Phase D — packed arrays and the C14c cleanup
+- **B1. Delete the flexint dual-lane emission** — the main perf event and largest single
+  deletion: `mir_is_flexint_int_arith` ([transpile-mir.cpp:4645](../lambda/runtime/transpile-mir.cpp:4645)),
+  `mir_emit_flexint_native_int` ([:4672](../lambda/runtime/transpile-mir.cpp:4672)), the
+  boxing arms in `transpile_binary_out` ([:4680-4840](../lambda/runtime/transpile-mir.cpp:4680)).
+  `int ⊕ int` becomes one `DADD`/`DSUB`/`DMUL`; keep `native_int_out` as the carrier
+  selector. Expect `test/mir/mir_budgets.json` (MT7, 0% slack) to move; unexplained jumps
+  mean a missing gate. **Triage the 6 pre-existing ratchet failures first.**
+- **B3. Overflow classification.** Retire `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` for the flex
+  tier ([lambda-number.hpp:40](../lambda/runtime/lambda-number.hpp:40), set at :183, :205,
+  :281; consumers [transpile-mir.cpp:4085](../lambda/runtime/transpile-mir.cpp:4085), :10454).
+  The int arm saturates to poison only at the float-range extremes (IEEE does it for free).
+- B2 absorbed into R1.4; B4/B5 landed (§0.1).
 
-- **D1. `ELEM_INT` lane decision.** `array_num_get`-side read boxes via `i2it`
-  ([lambda-data-runtime.cpp:488](../lambda/runtime/lambda-data-runtime.cpp:488)) — today an
-  out-of-band element reads back as `ITEM_ERROR`. Two options:
-  - **(a) RECOMMENDED — keep `int[]` as an i64 lane for the compact band; widen the array on
-    an out-of-band store.** Rationale: int arrays are overwhelmingly indices and counters, so
-    the i64 lane is what makes `a[i]` a single indexed load (avoiding a `cvttsd2si` per
-    access); sparse-band elements are vanishingly rare; and per-array widening reuses the
-    existing specialize→generic conversion machinery. Cost: one range test on the store path,
-    which the store already performs.
-  - **(b) Make `int[]` a double lane.** Uniform with the semantic carrier, exact for every int
-    by construction, same 8 bytes/element, no store check — but every index use pays a
-    `d2i`, and it merges `ELEM_INT` with `ELEM_FLOAT64`, which the number-model record
-    explicitly kept distinct as "real semantics".
-  Whichever is chosen, the read at :488 must stop being able to produce `ITEM_ERROR`.
-- **D2. Remove the C14c workarounds.** `int % int → int` is restored, so the `int(...)`
-  wrappers added to `brainfuck2.ls`, `fft2`, `cd2`, and `json2` are dead; remove them and
-  re-verify each against its golden. The untyped `brainfuck.ls` fix from §12.1 likewise
-  reverts to the natural spelling. **Cancel** the recommended "sweep for `div`/`%` flowing
-  into packed arrays" — its root cause is gone.
+### Phase C — frontend (independent — can proceed in parallel with everything above)
+
+- **C1. Lexer** ([grammar.js:24-28](../lambda/tree-sitter-lambda/grammar.js:24)): split
+  `exponent_part` by sign — integer-spelled mantissa with non-negative exponent joins
+  `integer_literal`; negative exponent stays float. `make generate-grammar`; never hand-edit
+  `parser.c`. ⚠ The int literal *parser* must accept exponent form or `10e1` fails to value.
+- **C2. Literal band diagnostic**: unsuffixed int-form literals outside ±(2⁵³−1) are compile
+  errors (`1e16` errors; `1.0e16`/`1e16n` are the fixes). Unchanged by rotation — the band is
+  a frontend rule (ruling 9), not a carrier bound.
+- **C3. Parser data homes unchanged** (ruling 6): int iff within ±(2⁵³−1), else int64, else
+  decimal.
+- **C4. Inference**: classifier-internal (B3); verify `int ⊕ int` yields clean `int` static
+  type with no ANY downgrade (feeds E4/A1-class elision).
+- **C5. Printing** (spec §4.6): finite ints print as integers at every magnitude; poison
+  spellings parseable. Golden churn expected only where escapes printed float-formatted.
+
+### Phase D — storage companions (both **ruled** 2026-08-02)
+
+- **D1. `ELEM_INT` = double lane** (option (b), user-ruled; supersedes the old (a)
+  recommendation). Backing store becomes f64; the read at
+  [lambda-data-runtime.cpp:488](../lambda/runtime/lambda-data-runtime.cpp:488) boxes via
+  rotation and can no longer produce `ITEM_ERROR`; no widen-on-store machinery; stores of
+  in-band values are a plain double write. Per-lane poison = actual IEEE specials (the B5
+  sentinel-payload writes delete); printing is lane-type-aware (rework
+  `print_packed_int_elem`). Sweep: ArrayNum factory/SIMD/copy/`==` paths (⚠ representation
+  sensitivity noted in the typed-array work), `lambda/io` static-values arm, format side.
+  `ELEM_INT` stays a distinct elem type — semantics tag, shared backing.
+- **D3. Map `int` fields = double payload words** (user-ruled). `_map_read_field`'s INT arm
+  ([lambda-data-runtime.cpp:2167](../lambda/runtime/lambda-data-runtime.cpp:2167)) changes
+  from `i2it(*(int64_t*))` to box-from-double; store side writes the double; **JIT
+  shaped-field access emission switches int fields to `MIR_T_D` moves** — aligning field
+  loads with the native lane (no convert on load). Same pass covers `TypedItem`'s int arm
+  (`int_val` → `double_val`), validator numeric arm, `mark_builder`/`mark_reader`, and the
+  static input-arena map storage.
 
 ### Phase E — boundaries
 
-- **E1. Value-aware admission** switches from the band test to an **integrality** test: any
-  finite integral double (e.g. `1e300`) passes an `int` boundary. Confirm the validator and
-  `lambda_type_check`'s numeric arm use integrality, not `INT53_MAX`.
-- **E2. Poison admission** (C16 rulings 12 + 14): narrowing verifies membership — a shared
-  `inf` passes and re-tags, a **foreign nan rejects** like `3.5`, sized-int boundaries admit no
-  poison. Widening needs **no check** (poison classifies upward), so `int → float` and
-  `int → integer` stay statically closed.
-- **E3. `is` lattice** (ruling 10): drop `int ⊑ int64`; the chain is `i32 ⊑ int ⊑ integer`
-  (onward to `decimal`), `int ⊑ float` definitional, `int ∥ int64`. Enumerate affected goldens
-  — this is a visible flip (`5 is int64` → false).
-- **E4. Extend A1's elision with an int→float arm.** With both carried as doubles, that
-  admission is a retag; `lambda_boundary_is_redundant` can return true for it, which is
-  precisely the case §3 T-A1 had to exclude ("it *widens* `int` to `float`"). Guard the
-  bidirectional trap: float→int is still a *narrowing* and must keep its check.
+- **E1. Admission = integrality** (any finite integral double passes an `int` boundary), not
+  `INT53_MAX`. Confirm validator + `lambda_type_check` numeric arms.
+- **E2. Poison admission** (rulings 12+14): narrowing verifies membership — shared `inf`
+  passes and re-tags (sentinel 3/4), foreign nan rejects; sized-int boundaries admit no
+  poison; widening needs no check (poison classifies upward).
+- **E3. `is` lattice** (ruling 10): drop `int ⊑ int64`; chain `i32 ⊑ int ⊑ integer`;
+  `int ∥ int64`; visible flip `5 is int64` → false — enumerate goldens.
+- **E4. Elision int→float arm.** Under rotation this is literal: widening an in-band int to
+  float is `rotr 1` (the raw bits) — a pure retag, so `lambda_boundary_is_redundant`
+  ([type_contract.hpp:31](../lambda/runtime/type_contract.hpp:31)) gains the int→float arm.
+  Guard the trap: float→int remains a narrowing with its check.
 
 ### Phase F — performance
 
-- **F1. Range-proven `i64` lanes.** Now the only reason to keep an integer lane: a double-lane
-  array index pays `cvttsd2si` per access. B1 (native counted `for`) already establishes the
-  proof for loop counters; extend it to indices derived from `len()` and from proven counters.
-- **F2. Re-measure and re-baseline.** Re-run `run_benchmarks.py -e mir,c2mir,go --typed`;
-  update the Result18 typed columns and the `Lambda_Tune_Typed_Vs_C2MIR.md` per-class
-  scorecard. Expected movement concentrated in the **sieve-class** (M2 gone from the body) and
-  the **fib-class** (M2 gone from `n-1`; A3 still the binding constraint). Release build only.
+- **F1. Range-proven `i64` lanes** for loop counters and indices (extends the landed native
+  counted `for`). This is `INT53_MAX`'s surviving runtime role: the proof bound below which
+  i64 and double arithmetic agree exactly. Unproven ⇒ double ⇒ still correct.
+- **F2. Re-measure**: `run_benchmarks.py -e mir,c2mir,go --typed`; update Result18 typed
+  columns + the tuning doc's per-class scorecard. Expected movement: sieve-class (M2 gone
+  from the body), fib-class (M2 gone from `n-1`). Also record boxed-unbox deltas: to-double
+  now 1-op (was sign-extend+`SCVTF`), to-index pays `cvttsd2si` (F1 mitigates). Release
+  build only.
 
 ---
 
-## 5. Gates
+## 3. Convergence with the tuning work (updated where rotation changes the row)
 
-- `make test-lambda-baseline` 100% per phase; `make build-test` green.
-- MIR budgets re-baselined **with per-gate justification** — Phase B should shrink them
-  materially, and a shrink is as suspicious as a growth if it is not explained.
-- New `*.ls` tests with `*.txt` goldens for: totality (`(2⁵³−1) + (2⁵³−1)` stays int),
-  `div`/`%` poison in both int and integer domains, poison printing/round-trip, `10e1` vs
-  `10.e1` vs `1e16`, lattice flips (`5 is int64` → false), narrowing nan rejection, widening
-  poison flow-through, and an `int[]` element in the sparse band (Phase D).
-- **The C16 equivalence property, asserted directly: erasing the `i64` lane must not change
-  any result.** F1's optimization is unobservable — spec §13 invariants 1 and 3 applied here.
-- The `temp/overflow_fn_test3.ls` repro must show one consistent answer in both boxed and
-  native-arithmetic consumption (the O1 close-out).
+| Tuning item | What this plan does to it |
+|---|---|
+| **M2** — flexint lane boxes declared-int arithmetic | **Deleted** (B1). `int ⊕ int` is one `DADD`. |
+| **A2** — checked-unboxed int arithmetic plumbing | Survives as the carrier selector; its cold lane becomes **rotation box** — a carrier change at the *same* type (previously box-float-then-`it2i`, a type change). |
+| **A2** — unwired consumers | Subsumed: with `double` the default native carrier, unboxed *is* the lane. |
+| **M1/A1** — boundary elision | Amplified: honest `int ⊕ int : int` types (C4) + the E4 int→float retag arm — now literally `rotr`. |
+| **M3/A3 + D2** — native/scalar returns | Payoff grows: pure-int bodies are provably non-raising **and** their returns are self-contained words (no scalar-home threading ever) — more functions qualify for native returns with no error lane. Implement after this plan. |
+| **B1 (tuning)** — native counted `for` | Made sound: the i64 induction variable is a range-proven lane (F1). |
+| **M7/C1/C2** — typed arrays | `ELEM_INT` lane decision now **ruled** (D1 = double lane); the `i2it → ITEM_ERROR` read hole closes structurally. |
+| **O1** — INT53 divergence | **Closed** at R1.1 (`i2it` total). |
+| "Don't add declared types to benchmark sources" | Keep until F2 re-measures. |
 
-## 6. Open before coding
+## 4. Gates
 
-- **§0.3 — the carrier's home. This is the blocker; everything else in A/B waits on it.**
-- ~~A2's tag-slot choice~~ — RESOLVED: slot 28, four were free (`LMD_TYPE_COUNT` 28 ≤ 0x20).
-- ~~Whether int poison uses reserved compact payloads or cells~~ — RESOLVED: reserved compact
-  payloads above `INT53_MAX`, zero-alloc, no second tag needed.
-- D1's `int[]` lane decision (recommendation: (a) keep i64, widen on out-of-band store).
-  Note this partly depends on §0.3: under option (ii) there is no sparse element to store.
-- Bitwise/shift domain over the sparse band (C16 open item; recommendation on record: define
-  for finite values within ±(2⁵³−1), `error()` outside — bit reinterpretation is not number
-  math).
-- Whether `Lambda_Type_Numbers.md` and `Lambda_Semantics_Number_Model.md` need the same
-  amendment pass as the spec (both predate C16; the latter's `is`-lattice section is known
-  stale per ruling 10).
+- `make test-lambda-baseline` 100% per phase; `make build-test` green; ratchet triage before B1.
+- **Zero-golden-churn gate for P/R0/R1**: the rotation cutover is semantics-neutral, so any
+  golden diff before Phase C/E is a defect by definition — this is the strongest single check
+  the plan has; use it.
+- R0.3 representation round-trip suite; canonical-encoding assertions on in debug builds.
+- New `*.ls` tests + goldens: totality (`(2⁵³−1) + (2⁵³−1)` stays int, exact), `div`/`%`
+  poison both domains, poison print/round-trip, sentinel values through containers/maps/
+  closures/forced GC (the old §0.3 repro `show(2147483647 * 2147483647)` becomes a test),
+  a 2¹⁰⁰-scale int in list/map/`int[]`, drift boundary behavior at 2²⁵⁷, `10e1`/`10.e1`/
+  `1e16`, lattice flips, narrowing nan rejection, widening poison flow-through.
+- MIR budgets re-baselined per phase **with justification** (R1.5 changes sequences, B1
+  shrinks them; both must be explained).
+- **Equivalence properties asserted directly**: erasing the F1 `i64` lane changes no result;
+  boxed and native consumption of the same expression agree (O1 close-out via
+  `temp/overflow_fn_test3.ls`); raw-word equality ⟺ value equality for int Items
+  (canonical encoding).
+- Total-order/hash spot-checks: int vs float same-value compare and map-key behavior
+  unchanged across the cutover.
+
+## 5. Open before coding
+
+- **P1 approval** — the MIR fork precedent (five table rows + `libmir.a` rebuild). Fallback
+  if declined: β re-bias (`Lambda_Type_Int_Boxing.md` §2.5) — same plan shape, different
+  R1.1/R1.5 sequences, no P1.
+- Sentinel payload assignment confirmation (§1 table; note 0/+1 keep today's bit patterns —
+  any stale compact reader is still correct for exactly those two values during review).
+- Whether `Lambda_Type_Numbers.md` / `Lambda_Semantics_Number_Model.md` take the same
+  amendment pass (both predate C16; the latter's `is`-lattice section is stale per ruling 10).
+- Bitwise/shift domain over large ints (C16 open item; recommendation on record: define
+  within ±(2⁵³−1), `error()` outside).
+- ruling 13 residue: `integer.inf`/`integer.nan` + `integer div integer → integer` share the
+  mpdec specials unblock with `decimal.inf`/`decimal.nan` — independent of this plan.

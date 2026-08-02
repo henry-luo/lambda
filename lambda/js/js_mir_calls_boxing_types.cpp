@@ -257,6 +257,39 @@ MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
 // Boxing helpers
 // ============================================================================
 
+static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg);
+
+// Box a double known to be integral as an `int` Item — the JS-side peer of
+// `emit_box_int_double`. Hot arm is the class test plus one rotate; the
+// sentinels and the >= 2^257 drift go to `int2it`.
+MIR_reg_t jm_box_int_double(JsMirTranspiler* mt, MIR_reg_t d_reg) {
+    MIR_reg_t result = jm_new_reg(mt, "jboxi", MIR_T_I64);
+    MIR_reg_t bits = jm_emit_double_bits(mt, d_reg);
+    MIR_reg_t cls = jm_new_reg(mt, "jicls", MIR_T_I64);
+    MIR_reg_t in_class = jm_new_reg(mt, "jiclsok", MIR_T_I64);
+    MIR_label_t l_inline = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, cls),
+        MIR_new_reg_op(mt->ctx, bits), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_CLASS_MASK)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, in_class),
+        MIR_new_reg_op(mt->ctx, cls), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_CLASS_BITS)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_inline),
+        MIR_new_reg_op(mt->ctx, in_class)));
+
+    MIR_reg_t cold = jm_call_1(mt, "int2it", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, cold)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_inline);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ROTR, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, bits), MIR_new_int_op(mt->ctx, 63)));
+    jm_emit_label(mt, l_end);
+    return result;
+}
+
 // Box int64 constant -> Item
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value) {
     // If value is in the symbol collision range, promote to float
@@ -267,11 +300,12 @@ MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value) {
         return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
             MIR_new_reg_op(mt->ctx, d));
     }
-    // Inline i2it: result = ITEM_INT_TAG | (value & MASK56)
+    // The int encoding is a pure function of the value, so a constant folds
+    // completely — no tag/mask work survives into the generated code.
     MIR_reg_t r = jm_new_reg(mt, "boxi", MIR_T_I64);
-    uint64_t tagged = ITEM_INT_TAG | ((uint64_t)value & MASK56);
+    uint64_t boxed = lambda_int_box_double((double)value);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)tagged)));
+        MIR_new_int_op(mt->ctx, (int64_t)boxed)));
     return r;
 }
 
@@ -287,51 +321,37 @@ void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_
 // Box int64 register -> Item (runtime range check)
 // Avoids creating ints in the symbol collision range (< -JS_SYMBOL_BASE)
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
-    int64_t INT53_MAX_VAL = INT53_MAX;   // must mirror i2it, not the 56-bit payload width
-    int64_t INT53_MIN_VAL = INT53_MIN;
-    int64_t SYMBOL_LIMIT  = -(int64_t)JS_SYMBOL_BASE;  // values <= this are symbols
+    // JS keeps its own guard here: symbol Items are encoded as ints below
+    // -JS_SYMBOL_BASE, so an ordinary integer that lands in that range must
+    // become a float rather than alias a symbol. That is a *value* rule and is
+    // unaffected by how ints are encoded.
+    int64_t SYMBOL_LIMIT = -(int64_t)JS_SYMBOL_BASE;
 
     MIR_reg_t result = jm_new_reg(mt, "boxi", MIR_T_I64);
-    MIR_reg_t masked = jm_new_reg(mt, "mask", MIR_T_I64);
-    MIR_reg_t tagged = jm_new_reg(mt, "tag", MIR_T_I64);
-    MIR_reg_t le_max = jm_new_reg(mt, "le", MIR_T_I64);
-    MIR_reg_t ge_min = jm_new_reg(mt, "ge", MIR_T_I64);
-    MIR_reg_t gt_sym = jm_new_reg(mt, "gs", MIR_T_I64);  // > symbol limit
-    MIR_reg_t in_range = jm_new_reg(mt, "rng", MIR_T_I64);
-    MIR_reg_t in_range2 = jm_new_reg(mt, "rn2", MIR_T_I64);
+    MIR_reg_t gt_sym = jm_new_reg(mt, "gs", MIR_T_I64);
+    MIR_label_t l_int = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
 
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
-        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT53_MAX_VAL)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
-        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT53_MIN_VAL)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GT, MIR_new_reg_op(mt->ctx, gt_sym),
         MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, SYMBOL_LIMIT)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
-        MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range2),
-        MIR_new_reg_op(mt->ctx, in_range), MIR_new_reg_op(mt->ctx, gt_sym)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
-        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, (int64_t)MASK56)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_int),
+        MIR_new_reg_op(mt->ctx, gt_sym)));
 
-    MIR_label_t l_ok = jm_new_label(mt);
-    MIR_label_t l_end = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
-        MIR_new_reg_op(mt->ctx, in_range2)));
-    // out of int56 range or in symbol range: promote to float instead of returning error
-    MIR_reg_t d_ovf = jm_new_reg(mt, "i2d_ovf", MIR_T_D);
+    MIR_reg_t d_sym = jm_new_reg(mt, "i2d_sym", MIR_T_D);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-        MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
-    // Overflow promotion must share float Item encoding with ordinary doubles;
-    // bypassing jm_box_float would leave this hot JS path on the legacy box helper.
-    MIR_reg_t float_boxed = jm_box_float(mt, d_ovf);
+        MIR_new_reg_op(mt->ctx, d_sym), MIR_new_reg_op(mt->ctx, val)));
+    MIR_reg_t float_boxed = jm_box_float(mt, d_sym);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, float_boxed)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-    jm_emit_label(mt, l_ok);
+
+    jm_emit_label(mt, l_int);
+    MIR_reg_t as_double = jm_new_reg(mt, "boxid", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, as_double), MIR_new_reg_op(mt->ctx, val)));
+    MIR_reg_t int_boxed = jm_box_int_double(mt, as_double);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, tagged)));
+        MIR_new_reg_op(mt->ctx, int_boxed)));
     jm_emit_label(mt, l_end);
     return result;
 }

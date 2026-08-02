@@ -9,15 +9,15 @@ int64
 int64
 u8
 i8
-"=== int shift promotes to float past the compact band ==="
+"=== int shift stays int past the old compact band ==="
 4503599627370496
 int
 9007199254740992
-float
+int
 18014398509481984
-float
-4611686018427388000
-float
+int
+4611686018427387904
+int
 "=== i64 shift keeps the wide lane, no promotion ==="
 18014398509481984
 int64

@@ -35,14 +35,15 @@ Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
 bool is_callable(Item value);
 
-// Sentinel value for dense array holes. Uses non-double tag 0x9E (unused), so
-// it cannot collide with any valid JS value. Ordinary object deletes use
-// JSPD_DELETED shape bits instead of storing this raw value in map slots.
+// Sentinel value for dense array holes. Uses the reserved non-type tag
+// ITEM_SENTINEL_TAG, so it cannot collide with any valid JS value. Ordinary
+// object deletes use JSPD_DELETED shape bits instead of storing this raw value
+// in map slots.
 #define JS_DELETED_SENTINEL_VAL ITEM_JS_DELETED_SENTINEL
 
 // Sentinel value for iterator "done" (returned by js_iterator_step when exhausted).
-// Uses non-double tag 0x9F (unused) so it cannot collide with any valid JS value
-// including null, undefined, false, 0, or empty string.
+// Shares ITEM_SENTINEL_TAG with a distinct payload, so it cannot collide with any
+// valid JS value including null, undefined, false, 0, or empty string.
 #define JS_ITER_DONE_SENTINEL ITEM_JS_ITER_DONE_SENTINEL
 
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_DELETED_SENTINEL_VAL >> 56)),

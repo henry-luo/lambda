@@ -1,9 +1,9 @@
 "=== int overflow promotion ==="
 9007199254740992
-float
+int
 -9007199254740992
-float
+int
 18014398509481982
-float
+int
 9007199254740992
-float
+int

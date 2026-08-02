@@ -118,7 +118,7 @@ static uint64_t py_sleep_resume(uint64_t* frame, uint64_t /*sent*/,
 extern "C" Item py_asyncio_sleep(Item seconds) {
     double secs = 0.0;
     TypeId t = get_type_id(seconds);
-    if (t == LMD_TYPE_INT)   secs = (double)seconds.get_int56();
+    if (t == LMD_TYPE_INT)   secs = lambda_int_item_value(seconds);
     else if (t == LMD_TYPE_FLOAT) secs = seconds.get_double();
 
     // frame_size=2: slot 0 = state, slot 1 = seconds bits

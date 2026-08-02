@@ -108,6 +108,7 @@ typedef enum {
   REP4 (INSN_EL, MOD, MODS, UMOD, UMODS),                    /* Modulo */
   REP6 (INSN_EL, AND, ANDS, OR, ORS, XOR, XORS),             /* Logical */
   REP6 (INSN_EL, LSH, LSHS, RSH, RSHS, URSH, URSHS),         /* Right signed/unsigned shift */
+  INSN_EL (ROTR),                                            /* 64-bit rotate right */
   REP5 (INSN_EL, EQ, EQS, FEQ, DEQ, LDEQ),                   /* Equality */
   REP5 (INSN_EL, NE, NES, FNE, DNE, LDNE),                   /* Inequality */
   REP7 (INSN_EL, LT, LTS, ULT, ULTS, FLT, DLT, LDLT),        /* Less then */

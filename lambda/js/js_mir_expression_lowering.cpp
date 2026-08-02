@@ -9537,9 +9537,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     eval_spread_done = jm_new_label(mt);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                         MIR_new_label_op(mt->ctx, eval_spread_done), MIR_new_reg_op(mt->ctx, has_arg)));
-                    MIR_reg_t idx0 = jm_new_reg(mt, "eval_sp_idx", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, idx0),
-                        MIR_new_int_op(mt->ctx, 0), MIR_new_uint_op(mt->ctx, ITEM_INT_TAG)));
+                    MIR_reg_t idx0 = jm_box_int_const(mt, 0);
                     arg = jm_call_2(mt, "js_array_get", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx0));
@@ -11714,10 +11712,10 @@ MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_spread_end),
                     MIR_new_reg_op(mt->ctx, cmp)));
 
-                // Get element at index i (box the index first)
-                MIR_reg_t idx_boxed = jm_new_reg(mt, "sidx", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, idx_boxed),
-                    MIR_new_reg_op(mt->ctx, i_reg), MIR_new_uint_op(mt->ctx, ITEM_INT_TAG)));
+                // Get element at index i (box the index first). Must go through
+                // the funnel: an int Item carries rotated IEEE bits, so OR-ing
+                // the tag onto a raw index yields a different number entirely.
+                MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
                 MIR_reg_t src_elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));

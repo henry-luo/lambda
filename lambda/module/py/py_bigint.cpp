@@ -66,7 +66,7 @@ static mpd_t* to_mpd(Item x) {
     uint32_t status = 0;
     TypeId t = get_type_id(x);
     if (t == LMD_TYPE_INT) {
-        mpd_qset_ssize(m, (mpd_ssize_t)x.get_int56(), ctx, &status);
+        mpd_qset_ssize(m, (mpd_ssize_t)lambda_int_item_to_i64(x), ctx, &status);
     } else if (t == LMD_TYPE_DECIMAL) {
         Decimal* d = x.get_decimal();
         if (d && d->dec_val) {
@@ -313,7 +313,7 @@ Item py_bigint_abs(Item a) {
 
 Item py_bigint_lshift(Item a, Item n) {
     // a << n = a * 2^n
-    int64_t shift = (get_type_id(n) == LMD_TYPE_INT) ? n.get_int56() : 0;
+    int64_t shift = (get_type_id(n) == LMD_TYPE_INT) ? lambda_int_item_to_i64(n) : 0;
     if (shift < 0) {
         log_error("py-bigint: ValueError: negative shift count");
         return ItemNull;
@@ -341,7 +341,7 @@ Item py_bigint_lshift(Item a, Item n) {
 
 Item py_bigint_rshift(Item a, Item n) {
     // a >> n = floor(a / 2^n) — arithmetic shift
-    int64_t shift = (get_type_id(n) == LMD_TYPE_INT) ? n.get_int56() : 0;
+    int64_t shift = (get_type_id(n) == LMD_TYPE_INT) ? lambda_int_item_to_i64(n) : 0;
     if (shift < 0) {
         log_error("py-bigint: ValueError: negative shift count");
         return ItemNull;

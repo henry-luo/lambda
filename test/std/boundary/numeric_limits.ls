@@ -19,4 +19,4 @@ nan == nan
 
 // Very small floats
 1e-300
-1e+300
+1.0e+300

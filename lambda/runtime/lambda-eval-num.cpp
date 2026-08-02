@@ -41,7 +41,7 @@ static bool complex_component_from_item(Item item, double* out) {
     if (!out) return false;
     switch (get_type_id(item)) {
     case LMD_TYPE_INT:
-        *out = (double)item.get_int56();
+        *out = lambda_int_item_value(item);
         return true;
     case LMD_TYPE_FLOAT:
         *out = item.get_double();
@@ -231,23 +231,15 @@ static inline int64_t int64_from_bits(uint64_t raw) {
     return result;
 }
 
-// C16: int arithmetic is TOTAL — a result outside the compact band stays an
-// `int`, carried in a double cell, rather than promoting to float. The double
-// is the semantic carrier (correctly-rounded binary64), so the rounding here
-// is the specified behaviour above 2^53, not a representation accident.
+// C16: int arithmetic is TOTAL — a result of any magnitude stays an `int`
+// rather than promoting to float. Rounding above 2^53 is the specified
+// behaviour (correctly-rounded binary64), not a representation accident.
+//
+// The __int128 accumulator is kept because it makes the *in-band* case exact
+// without a second rounding, but the pack itself goes through the double, so
+// the interpreter and the JIT cannot disagree about where the boundary is.
 static inline Item pack_compact_int(__int128 value) {
-    if (value <= INT53_MAX && value >= INT53_MIN) {
-        return (Item){ .item = i2it((int64_t)value) };
-    }
-    // C16 TODO(A4): becomes `int2it((double)value)`. Blocked on the read-site
-    // audit — with this flipped, `numeric_fastpath_edges` prints the cell
-    // pointer (`[int, 11277501280]`). The print *visitor* is already carrier-
-    // aware, so the remaining reader is a second path (print_item / a
-    // formatter), not that one. Find it by flipping this line and diffing.
-    // C16 TODO(A2-lifetime): becomes `int2it((double)value)` once the carrier
-    // is GC-managed. See the plan — a number-stack cell cannot be stored in a
-    // container, so this must not be flipped as-is.
-    return push_d((double)value);
+    return (Item){ .item = lambda_int_box_double((double)value) };
 }
 
 // C16: `int div int` and `int % int` stay int, so a computed zero divisor
@@ -423,7 +415,7 @@ static bool sized_float_arithmetic(Item item_a, TypeId type_a, Item item_b, Type
 
 static int64_t runtime_integral_as_int64(Item item, LambdaNumericKind kind) {
     switch (kind) {
-    case LAMBDA_NUM_INT: return item.get_int56();
+    case LAMBDA_NUM_INT: return lambda_int_item_to_i64(item);
     case LAMBDA_NUM_I8: return item.get_i8();
     case LAMBDA_NUM_I16: return item.get_i16();
     case LAMBDA_NUM_I32: return item.get_i32();
@@ -542,8 +534,8 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         // generalized sized/decimal conversion after the classifier has fixed
         // their domain, or boxed numeric loops pay promotion overhead per item.
         if (common.result == LAMBDA_NUM_FLOAT) {
-            double left = int_a ? (double)item_a.get_int56() : item_a.get_double();
-            double right = int_b ? (double)item_b.get_int56() : item_b.get_double();
+            double left = int_a ? lambda_int_item_value(item_a) : item_a.get_double();
+            double right = int_b ? lambda_int_item_value(item_b) : item_b.get_double();
             double value;
             if (op == LAMBDA_NUM_OP_ADD) value = left + right;
             else if (op == LAMBDA_NUM_OP_SUB) value = left - right;
@@ -558,8 +550,8 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         }
         if (common.result != LAMBDA_NUM_INT) return false;
 
-        int64_t left = item_a.get_int56();
-        int64_t right = item_b.get_int56();
+        int64_t left = lambda_int_item_to_i64(item_a);
+        int64_t right = lambda_int_item_to_i64(item_b);
         if (op == LAMBDA_NUM_OP_ADD) {
             *result = pack_compact_int((__int128)left + (__int128)right);
         } else if (op == LAMBDA_NUM_OP_SUB) {
@@ -672,7 +664,7 @@ static bool read_bitwise_integer(Item item, BitwiseIntegerValue* out) {
     out->value.bits = 64;
     switch (type) {
     case LMD_TYPE_INT:
-        out->value.sval = item.get_int56();
+        out->value.sval = lambda_int_item_to_i64(item);
         out->value.raw = (uint64_t)out->value.sval;
         return true;
     case LMD_TYPE_INT64:
@@ -1189,7 +1181,7 @@ Item fn_abs(Item item) {
             (Item){.item = f16_to_item((float)value)};
     }
     if (type == LMD_TYPE_INT) {
-        int64_t val = item.get_int56();
+        int64_t val = lambda_int_item_to_i64(item);
         return (Item) { .item = i2it(val < 0 ? -val : val) };
     }
     else if (type == LMD_TYPE_INT64) {
@@ -1470,7 +1462,7 @@ Item fn_neg(Item item) {
         return value ? complex_new(-value->real, -value->imag) : ItemError;
     }
     else if (get_type_id(item) == LMD_TYPE_INT) {
-        int64_t val = item.get_int56();
+        int64_t val = lambda_int_item_to_i64(item);
         return (Item) { .item = i2it(-val) };
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
@@ -1517,8 +1509,11 @@ Item fn_neg(Item item) {
             if (t == LMD_TYPE_ARRAY_NUM) {
                 ArrayNum* arr = item.array_num;
                 ArrayNumElemType et = arr->get_elem_type();
-                if (et == ELEM_FLOAT64) { result->float_items[i] = -arr->float_items[i]; continue; }
-                if (et == ELEM_INT || et == ELEM_INT64) {
+                // C16: ELEM_INT joins ELEM_FLOAT64 as a double-backed lane.
+                if (et == ELEM_FLOAT64 || et == ELEM_INT) {
+                    result->float_items[i] = -arr->float_items[i]; continue;
+                }
+                if (et == ELEM_INT64) {
                     result->float_items[i] = -(double)arr->items[i]; continue;
                 }
                 // compact elements: fall through to generic via array_num_get
@@ -1530,7 +1525,7 @@ Item fn_neg(Item item) {
             }
             TypeId et = get_type_id(elem);
             if (et == LMD_TYPE_INT) {
-                result->float_items[i] = -(double)elem.get_int56();
+                result->float_items[i] = -lambda_int_item_value(elem);
             } else if (et == LMD_TYPE_INT64) {
                 result->float_items[i] = -(double)elem.get_int64();
             } else if (et == LMD_TYPE_UINT64) {
@@ -1664,7 +1659,7 @@ Item fn_int(Item item) {
 int64_t fn_int64(Item item) {
     // convert item to int64
     if (get_type_id(item) == LMD_TYPE_INT) {
-        return item.get_int56();
+        return lambda_int_item_to_i64(item);
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
         return item.get_int64();
@@ -1725,7 +1720,7 @@ Item fn_decimal(Item item) {
         return item;  // Already a decimal
     }
     else if (get_type_id(item) == LMD_TYPE_INT) {
-        return decimal_from_int64(item.get_int56());
+        return decimal_from_int64(lambda_int_item_to_i64(item));
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
         return decimal_from_int64(item.get_int64());
@@ -1772,7 +1767,7 @@ static int format_native_numeric_scalar(Item item, char* buffer, size_t capacity
     TypeId type = get_type_id(item);
     switch (type) {
     case LMD_TYPE_INT:
-        return snprintf(buffer, capacity, "%lld", (long long)item.get_int56());
+        return snprintf(buffer, capacity, "%lld", (long long)lambda_int_item_to_i64(item));
     case LMD_TYPE_INT64:
         return snprintf(buffer, capacity, "%" PRId64, item.get_int64());
     case LMD_TYPE_UINT64:
@@ -1940,7 +1935,7 @@ Item fn_float(Item item) {
         return item;  // Already a float
     }
     else if (get_type_id(item) == LMD_TYPE_INT) {
-        int64_t int_val = item.get_int56();
+        int64_t int_val = lambda_int_item_to_i64(item);
         return push_d((double)int_val);
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
@@ -2244,7 +2239,7 @@ extern "C" int64_t _barg(Item v) {
     uint8_t tag = get_type_id(v);
     switch (tag) {
     case LMD_TYPE_INT:
-        return v.get_int56();
+        return lambda_int_item_to_i64(v);
     case LMD_TYPE_INT64:
         return v.get_int64();
     case LMD_TYPE_FLOAT:

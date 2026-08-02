@@ -98,7 +98,7 @@ public:
         if constexpr (Tag == LMD_TYPE_BOOL) {
             return raw_.bool_val != 0;
         } else if constexpr (Tag == LMD_TYPE_INT) {
-            return raw_.get_int56();
+            return lambda_int_item_to_i64(raw_);
         } else if constexpr (Tag == LMD_TYPE_INT64) {
             return raw_.get_int64();
         } else if constexpr (Tag == LMD_TYPE_FLOAT) {

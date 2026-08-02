@@ -3645,7 +3645,7 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     // Store with correct type-aware unboxing (all shaped slots are 8 bytes).
     switch (value_type) {
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
@@ -6390,11 +6390,11 @@ static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* ent
 
     void* field_ptr = (char*)data + entry->byte_offset;
     if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-        *(double*)field_ptr = (double)value.get_int56();
+        *(double*)field_ptr = lambda_int_item_value(value);
         return true;
     }
     if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         return true;
     }
 
@@ -6409,7 +6409,7 @@ static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* ent
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
@@ -8225,11 +8225,11 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
     void* field_ptr = (char*)data + entry->byte_offset;
 
     if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-        *(double*)field_ptr = (double)value.get_int56();
+        *(double*)field_ptr = lambda_int_item_value(value);
         return true;
     }
     if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         return true;
     }
     if (field_type != value_type) return false;
@@ -8245,7 +8245,7 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
         *(bool*)field_ptr = value.bool_val;
         return true;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         return true;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

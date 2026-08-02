@@ -104,7 +104,7 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
     case LMD_TYPE_BOOL:
         return item.bool_val == pattern.bool_val;
     case LMD_TYPE_INT:
-        return item.get_int56() == pattern.get_int56();
+        return lambda_int_item_to_i64(item) == lambda_int_item_to_i64(pattern);
     case LMD_TYPE_INT64:
         return item.get_int64() == pattern.get_int64();
     case LMD_TYPE_UINT64:

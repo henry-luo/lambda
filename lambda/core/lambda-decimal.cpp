@@ -633,7 +633,7 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     if (!result) return NULL;
     
     if (type == LMD_TYPE_INT) {
-        mpd_set_ssize(result, item.get_int56(), ctx);
+        mpd_set_ssize(result, lambda_int_item_to_i64(item), ctx);
     }
     else if (type == LMD_TYPE_INT64) {
         mpd_set_ssize(result, item.get_int64(), ctx);

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "Tune4 M2: the closed integer caller set emits native subtraction, while an escaped callee keeps generic arithmetic for unseen float callers.",
+  "description": "Tune4 M2 / C16 B1: the closed integer caller set emits native subtraction, while an escaped callee keeps generic arithmetic for unseen float callers. C16 made int arithmetic total in binary64, so the native form is now `dsub` on the value's own double lane rather than an i64 `sub` behind a range check.",
   "checks": [
     {
       "in_func": "_closed_gap_#",
       "expect": [
-        "sub\tfi_sum_"
+        "dsub\tfi_res_"
       ],
       "forbid": [
         "call\tfn_sub_p, fn_sub"
@@ -14,7 +14,7 @@
     {
       "in_func": "_open_gap_#",
       "expect": [
-        "sub\tfi_sum_"
+        "dsub\tfi_res_"
       ]
     },
     {

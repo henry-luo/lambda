@@ -219,18 +219,34 @@ void print_double(StrBuf *strbuf, double num) {
     strbuf_append_str(strbuf, num_buf);
 }
 
-// A packed int lane stores C16 poison as its reserved sentinel, so a raw `%lld`
-// would print the sentinel's magnitude (2^54) instead of `int.nan`. Only the
-// `int` lane carries this encoding; ELEM_INT64 is the integer domain and keeps
-// its own spelling once ruling-13 poison exists.
-void print_packed_int_elem(StrBuf* strbuf, ArrayNumElemType et, int64_t raw) {
-    if (et == ELEM_INT && LAMBDA_INT_VALUE_IS_POISON(raw)) {
+// The one place `int` values are rendered. C16: poison prints in its own
+// parseable spellings (distinct from float's bare inf/nan, so int and float
+// output stay separable), and finite ints print as integers at every magnitude
+// with no exponent form (spec §4.6).
+void print_int_value(StrBuf* strbuf, double value) {
+    if (LAMBDA_INT_VALUE_IS_POISON(value)) {
         strbuf_append_str(strbuf,
-            LAMBDA_INT_VALUE_IS_INF(raw) ? "int.inf" :
-            LAMBDA_INT_VALUE_IS_NEG_INF(raw) ? "-int.inf" : "int.nan");
+            LAMBDA_INT_VALUE_IS_INF(value) ? "int.inf" :
+            LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-int.inf" : "int.nan");
         return;
     }
-    strbuf_append_format(strbuf, "%lld", raw);
+    if (value >= (double)INT53_MIN && value <= (double)INT53_MAX) {
+        strbuf_append_format(strbuf, "%" PRId64, (int64_t)value);
+    } else {
+        strbuf_append_format(strbuf, "%.0f", value);
+    }
+}
+
+// C16: the `int` lane is double-backed, so its poison IS the IEEE special and
+// needs no lane sentinel; it renders through the one int renderer. ELEM_INT64
+// is the integer domain and keeps its own int64 spelling.
+void print_packed_int_elem(StrBuf* strbuf, ArrayNumElemType et, const ArrayNum* arr,
+                           int64_t index) {
+    if (et == ELEM_INT) {
+        print_int_value(strbuf, arr->float_items[index]);
+        return;
+    }
+    strbuf_append_format(strbuf, "%lld", (long long)arr->items[index]);
 }
 
 static void print_complex(StrBuf* strbuf, Complex* value) {
@@ -346,7 +362,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         strbuf_append_str(strbuf, titem->bool_val ? "true" : "false");
         break;
     case LMD_TYPE_INT:
-        strbuf_append_format(strbuf, "%d", titem->int_val);
+        print_int_value(strbuf, titem->double_val);
         break;
     case LMD_TYPE_INT64:
         strbuf_append_format(strbuf, "%" PRId64, titem->long_val);
@@ -440,26 +456,10 @@ struct PrintItemVisitor {
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_INT> item) const {
-        Item raw = item.raw();
-        // C16: an out-of-band int is cell-carried, so the compact payload would
-        // be the cell *pointer*. Read the value through the carrier-aware
-        // accessor before anything else looks at it.
-        if (!(raw.item & ITEM_DBL_MASK) && raw._type_id == LMD_TYPE_INT_BIG) {
-            // Above 2^53 every representable value is integral, so shortest
-            // round-trip prints the exact integer without an exponent.
-            strbuf_append_format(strbuf, "%.0f", lambda_int_item_value(raw));
-            return;
-        }
-        int64_t value = raw.get_int56();
-        // C16: int poison prints in its own parseable spellings, distinct from
-        // float's bare `inf`/`nan`, so int and float output stay separable.
-        if (LAMBDA_INT_VALUE_IS_POISON(value)) {
-            strbuf_append_str(strbuf,
-                LAMBDA_INT_VALUE_IS_INF(value) ? "int.inf" :
-                LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-int.inf" : "int.nan");
-            return;
-        }
-        strbuf_append_format(strbuf, "%" PRId64, value);
+        // C16: an int is carried as its own IEEE bits, so the value view is a
+        // double at every magnitude. Poison must be classified before any
+        // integer conversion — (int64_t)inf is not a number.
+        print_int_value(strbuf, lambda_int_item_value(item.raw()));
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_INT64> item) const {
@@ -575,7 +575,7 @@ struct PrintItemVisitor {
         if (et == ELEM_FLOAT64) {
             print_double(sb, array->float_items[flat_idx]);
         } else if (et == ELEM_INT || et == ELEM_INT64) {
-            print_packed_int_elem(sb, et, array->items[flat_idx]);
+            print_packed_int_elem(sb, et, array, flat_idx);
         } else if (et == ELEM_UINT64) {
             // Printing an owner-backed lane must not consume transient number homes.
             strbuf_append_format(sb, "%" PRIu64, ((uint64_t*)array->data)[flat_idx]);
@@ -632,7 +632,7 @@ struct PrintItemVisitor {
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
-                print_packed_int_elem(strbuf, et, array->items[i]);
+                print_packed_int_elem(strbuf, et, array, i);
             }
         } else if (et == ELEM_UINT64) {
             // Printing an owner-backed lane must not consume transient number homes.
@@ -817,7 +817,7 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
-                print_packed_int_elem(strbuf, et, array->items[i]);
+                print_packed_int_elem(strbuf, et, array, i);
             }
         } else {
             // compact sized types
@@ -868,8 +868,6 @@ const char* format_type(Type *type) {
     case LMD_TYPE_BOOL:
         return "bool";
     case LMD_TYPE_INT:
-    // C16 out-of-band carrier: a representation of `int`, never its own type.
-    case LMD_TYPE_INT_BIG:
         return "int";
     case LMD_TYPE_INT64:
         return "int64";
