@@ -88,7 +88,9 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
 
     // For shrink-to-fit containers, use indefinite width (-1) so tracks size to content
     // rather than expanding to fill available space
-    float sizing_width = grid_layout->is_shrink_to_fit_width
+    bool intrinsic_width_constraint = grid_layout->is_min_content_width ||
+        grid_layout->is_max_content_width;
+    float sizing_width = (grid_layout->is_shrink_to_fit_width || intrinsic_width_constraint)
         ? -1.0f
         : static_cast<float>(grid_layout->content_width);
 
@@ -105,7 +107,9 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         sizing_width,
         static_cast<float>(grid_layout->content_height),
         &col_intrinsic_width,
-        &row_intrinsic_height
+        &row_intrinsic_height,
+        grid_layout->is_min_content_width,
+        grid_layout->is_max_content_width
     );
 
     // Store row intrinsic height for container height capping
@@ -122,11 +126,13 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
                  i, track->base_size, track->growth_limit, track->is_flexible());
     }
 
-    // For shrink-to-fit containers, update content_width based on resolved track sizes.
+    // Intrinsic-width grids and shrink-to-fit grids use the resolved track sum,
+    // not the provisional parent width used before their item styles were materialized.
     // When percentage tracks exist, the container's intrinsic width (first-pass) is used
     // as the upper bound: pct tracks may overflow the container, but the container size
     // is determined by the non-pct content (CSS Grid §12.5).
-    if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
+    if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
+         grid_layout->is_max_content_width) && grid_layout->computed_column_count > 0) {
         float total_column_width = 0;
         for (int i = 0; i < grid_layout->computed_column_count; i++) {
             total_column_width += (*grid_layout->computed_columns)[i].base_size;

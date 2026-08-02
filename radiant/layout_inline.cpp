@@ -4,6 +4,7 @@
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lib/strbuf.h"
+#include <float.h>
 #include <cstring>
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
@@ -240,7 +241,7 @@ static bool ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
-static void offset_ruby_annotation_tree(View* view, float offset_x, float offset_y) {
+void layout_offset_ruby_annotation_tree(View* view, float offset_x, float offset_y) {
     if (!view) return;
     view->x += offset_x;
     view->y += offset_y;
@@ -255,9 +256,21 @@ static void offset_ruby_annotation_tree(View* view, float offset_x, float offset
     if (!view->is_group()) return;
     View* child = lam::view_require_element(view)->first_placed_child();
     while (child) {
-        offset_ruby_annotation_tree(child, offset_x, offset_y);
+        layout_offset_ruby_annotation_tree(child, offset_x, offset_y);
         child = child->next();
     }
+}
+
+static bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim) {
+    for (const DomNode* node = ruby ? static_cast<const DomNode*>(ruby) : nullptr;
+         node; node = node->parent) {
+        if (!node->is_element()) continue;
+        const DomElement* element = node->as_element();
+        if (element->blk && (element->block()->text_box_trim & trim) != 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void stretch_simple_ruby_annotation_to_column(ViewSpan* annotation,
@@ -276,6 +289,83 @@ static void stretch_simple_ruby_annotation_to_column(ViewSpan* annotation,
     annotation->width = column_width;
 }
 
+static ViewText* simple_ruby_base_text(ViewSpan* ruby, ViewSpan* annotation) {
+    if (!ruby || !annotation) return nullptr;
+    View* base = ruby->first_placed_child();
+    if (!base || base->view_type != RDT_VIEW_TEXT || base->next() != annotation ||
+        annotation->next()) {
+        return nullptr;
+    }
+    return lam::view_require<RDT_VIEW_TEXT>(base);
+}
+
+static bool ruby_has_simple_text_pair(DomNode* first_child) {
+    if (!first_child || !first_child->is_text()) return false;
+    DomNode* annotation = first_child->next_sibling;
+    if (!ruby_annotation_node(annotation) || annotation->next_sibling) return false;
+    DomElement* annotation_element = annotation->as_element();
+    DomNode* annotation_text = annotation_element->first_child;
+    return annotation_text && annotation_text->is_text() && !annotation_text->next_sibling;
+}
+
+static bool layout_prepare_simple_ruby_column(ViewSpan* ruby,
+                                              bool has_simple_text_pair,
+                                              float base_start_x,
+                                              float base_width,
+                                              float annotation_width,
+                                              float preceding_space_width,
+                                              float* annotation_x,
+                                              float* inline_advance_extra) {
+    if (!ruby || !has_simple_text_pair || !annotation_x || !inline_advance_extra) {
+        return false;
+    }
+    float column_width = annotation_width;
+    if (column_width <= base_width + 0.01f) return false;
+
+    float extra_width = column_width - base_width;
+    float start_overhang = min(extra_width * 0.5f, max(0.0f, preceding_space_width));
+    float end_extension = extra_width - start_overhang;
+    DomElementExt* ext = ruby->ensure_ext();
+    if (!ext) return false;
+    ext->ruby_column_anchor_x = base_start_x;
+    ext->ruby_column_width = column_width;
+    ext->ruby_column_inline_advance = base_width + end_extension;
+    ext->ruby_column_start_overhang = start_overhang;
+    ext->has_simple_ruby_column_geometry = true;
+    *annotation_x = base_start_x - start_overhang;
+    *inline_advance_extra = end_extension;
+    return true;
+}
+
+void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby) {
+    if (!ruby || ruby->tag() != MARKUP_NAME_RUBY || !ruby->ext ||
+        !ruby->ext->has_simple_ruby_column_geometry) {
+        return;
+    }
+    View* annotation_view = ruby->first_placed_child();
+    if (!annotation_view || annotation_view->view_type != RDT_VIEW_TEXT) return;
+    annotation_view = annotation_view->next();
+    if (!annotation_view || annotation_view->view_type != RDT_VIEW_INLINE ||
+        annotation_view->tag() != MARKUP_NAME_RT) {
+        return;
+    }
+    ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(annotation_view);
+    ViewText* base = simple_ruby_base_text(ruby, annotation);
+    if (!base || !base->rect || base->rect->next) return;
+
+    DomElementExt* ext = ruby->ext;
+    float column_x = ext->ruby_column_anchor_x - ext->ruby_column_start_overhang;
+    // CSS Ruby §3.1.1 gives both levels the same column measure. Keep the
+    // ruby box at its base-level anchor so only permitted annotation overhang
+    // reaches into the preceding collapsible space.
+    base->x = column_x;
+    base->width = ext->ruby_column_width;
+    base->rect->x = column_x;
+    base->rect->width = ext->ruby_column_width;
+    ruby->x = ext->ruby_column_anchor_x;
+    ruby->width = ext->ruby_column_inline_advance;
+}
+
 static void merge_ruby_annotation_line_metrics(Linebox* base_line,
                                                 const Linebox* annotation_line) {
     if (!base_line || !annotation_line) return;
@@ -290,6 +380,44 @@ static void merge_ruby_annotation_line_metrics(Linebox* base_line,
         base_line->max_normal_line_height, annotation_line->max_normal_line_height);
     base_line->has_different_inline_font =
         base_line->has_different_inline_font || annotation_line->has_different_inline_font;
+}
+
+static void contribute_over_ruby_annotation_line_metrics(Linebox* base_line,
+                                                         const Linebox* base_line_before_annotation,
+                                                         const BlockContext* base_block,
+                                                         const ViewSpan* annotation) {
+    if (!base_line || !base_line_before_annotation || !base_block || !annotation) return;
+    if (!base_line_before_annotation->has_initial_letter) return;
+    // Interlinear ruby stacks outward from the base level, so an initial's
+    // originating line must include that full over-side extent regardless of sink.
+    float over_shift = max(0.0f, annotation->height - base_block->lead_y);
+    float required_ascender = base_line_before_annotation->max_ascender + over_shift -
+        base_line_before_annotation->initial_letter_origin_advance;
+    base_line->max_ascender = max(base_line->max_ascender, required_ascender);
+    base_line->ruby_annotation_over_shift = max(
+        base_line->ruby_annotation_over_shift, over_shift);
+}
+
+static void begin_ruby_annotation_inline_context(LayoutContext* lycon,
+                                                 const Linebox* base_line) {
+    if (!lycon || !base_line) return;
+    // Annotation levels are separate inline contexts; sharing the base cursor
+    // can wrap <rt> and commit the base line before ruby positioning is known.
+    line_init(lycon, base_line->left, FLT_MAX);
+}
+
+static void contribute_under_ruby_annotation_line_height(Linebox* base_line,
+                                                         const BlockContext* base_block,
+                                                         const ViewSpan* annotation) {
+    if (!base_line || !base_block || !annotation) return;
+    float annotation_bottom = annotation->y + annotation->height;
+    float annotation_line_height = annotation_bottom - base_block->advance_y -
+        base_block->lead_y;
+    if (annotation_line_height > 0.0f) {
+        // Under annotations extend the line's block-end ink without moving its baseline.
+        base_line->ruby_annotation_min_line_height = max(
+            base_line->ruby_annotation_min_line_height, annotation_line_height);
+    }
 }
 
 static void inline_text_line_range(View* view, ViewSpan* whitespace_context, bool* found,
@@ -932,6 +1060,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         span->width = content_width + left_edge + right_edge;
         span->height = final_max_y - final_min_y;
     }
+    layout_apply_simple_ruby_column_geometry(span);
 }
 
 static bool span_has_vertical_decoration_descendant(ViewSpan* span) {
@@ -1600,9 +1729,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float pa_line_height = lycon->block.line_height;
     bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
     InitialLetterInfo initial_letter = {};
-    bool is_raised_initial_letter = elmt->is_element() &&
-        layout_get_initial_letter_info(layout_inline_as_element(elmt), &initial_letter) &&
-        initial_letter.raised;
+    bool is_initial_letter = elmt->is_element() &&
+        layout_get_initial_letter_info(layout_inline_as_element(elmt), &initial_letter);
     // Check the element's specified_style for an explicit line-height or font shorthand
     // declaration. If neither is present, line-height is inherited and the parent's
     // resolved value is already correct in lycon->block.line_height — UNLESS the
@@ -1625,7 +1753,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // NOT be re-resolved against the child's font-size.
     bool font_size_changed = lycon->font.style && pa_font.style &&
         lycon->font.style->font_size != pa_font.style->font_size;
-    if (!is_raised_initial_letter && (has_own_line_height || font_size_changed)) {
+    if (!is_initial_letter && (has_own_line_height || font_size_changed)) {
         ViewBlock* block_api_span = layout_inline_unsafe_block_api_span(span);
         if (has_own_line_height) {
             setup_line_height(lycon, block_api_span);
@@ -1878,10 +2006,19 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.advance_x += inline_left_edge;
     bool is_ruby_container = display.inner == CSS_VALUE_RUBY;
     if (is_ruby_container) {
+        // This geometry is recomputed for every layout pass; a prior wider
+        // annotation must not affect a later base-sized ruby.
+        DomElementExt* ruby_ext = span->ensure_ext();
+        if (ruby_ext) ruby_ext->has_simple_ruby_column_geometry = false;
         // CSS Ruby §3: the base level participates in the parent's inline
         // formatting context, while annotation levels are positioned around it.
         // Treating <rt> as an ordinary child consumes its width and forces a
         // spurious line break before the following content.
+        float available_ruby_start_overhang = lycon->line.has_space
+            ? layout_measure_space_advance(lycon, lycon->font.font_handle,
+                                           lycon->font.style)
+            : 0.0f;
+        bool has_simple_ruby_pair = ruby_has_simple_text_pair(child);
         for (DomNode* base_child = child; base_child;
              base_child = base_child->next_sibling) {
             if (!ruby_annotation_node(base_child)) {
@@ -1894,6 +2031,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         compute_span_bounding_box(span, false, lycon->font.font_handle);
         float base_top_y = span->y;
 
+        CssEnum ruby_position = span->inl()->ruby_position;
+        float simple_ruby_inline_advance_extra = 0.0f;
         for (DomNode* annotation = child; annotation;
              annotation = annotation->next_sibling) {
             if (!ruby_annotation_node(annotation)) continue;
@@ -1903,6 +2042,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             FontBox saved_base_font = lycon->font;
             DomNode* saved_base_element = lycon->elmt;
 
+            begin_ruby_annotation_inline_context(lycon, &saved_base_line);
             layout_flow_node(lycon, annotation);
             Linebox annotation_line = lycon->line;
 
@@ -1914,8 +2054,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     annotation_span, column_width);
                 float annotation_x = base_start_x +
                     (column_width - annotation_span->width) / 2.0f;
-                float annotation_y = base_top_y - annotation_span->height;
-                offset_ruby_annotation_tree(
+                layout_prepare_simple_ruby_column(
+                    span, has_simple_ruby_pair, base_start_x, column_width,
+                    annotation_span->width, available_ruby_start_overhang, &annotation_x,
+                    &simple_ruby_inline_advance_extra);
+                // The implicit annotation container inherits from <ruby>; a
+                // direct <rt> declaration cannot reposition that container.
+                float annotation_y = ruby_position == CSS_VALUE_UNDER
+                    ? base_top_y + span->height
+                    : base_top_y - annotation_span->height;
+                layout_offset_ruby_annotation_tree(
                     static_cast<View*>(annotation_span),
                     annotation_x - annotation_span->x,
                     annotation_y - annotation_span->y);
@@ -1927,9 +2075,23 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line = saved_base_line;
             lycon->font = saved_base_font;
             lycon->elmt = saved_base_element;
+            lycon->line.advance_x += simple_ruby_inline_advance_extra;
             // CSS Ruby line spacing includes annotation ink, even though the
             // annotation does not advance the base-level inline cursor.
-            merge_ruby_annotation_line_metrics(&lycon->line, &annotation_line);
+            if (ruby_position == CSS_VALUE_UNDER) {
+                if (!ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_END)) {
+                    contribute_under_ruby_annotation_line_height(
+                        &lycon->line, &saved_base_block, annotation_span);
+                }
+                // trim-end excludes block-end ruby annotation ink from the line extent.
+            } else {
+                merge_ruby_annotation_line_metrics(&lycon->line, &annotation_line);
+                if (!ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_START)) {
+                    contribute_over_ruby_annotation_line_metrics(
+                        &lycon->line, &saved_base_line, &saved_base_block,
+                        annotation_span);
+                }
+            }
         }
     } else if (child) {
         do {

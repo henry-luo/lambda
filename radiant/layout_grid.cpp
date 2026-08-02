@@ -143,8 +143,10 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;
         grid->align_content = CSS_VALUE_START;
-        grid->justify_items = CSS_VALUE_STRETCH;
-        grid->align_items = CSS_VALUE_STRETCH;
+        // Keep the CSS initial normal value so aspect-ratio items can tell it
+        // apart from an explicitly requested stretch during self-alignment.
+        grid->justify_items = CSS_VALUE_NORMAL;
+        grid->align_items = CSS_VALUE_NORMAL;
         grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps
         grid->row_gap = 0;
@@ -303,8 +305,23 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
+    // An intrinsic width keyword constrains track sizing itself; treating its
+    // post-layout used width as definite incorrectly lets auto tracks consume free space.
+    bool contain_size_has_inline_fallback =
+        layout_block_has_size_containment_in_axis(container, true) &&
+        container->block()->contain_intrinsic_width >= 0.0f;
+    // Size containment resolves an intrinsic width keyword to its intrinsic-size
+    // fallback before grid sizing; tracks then use that definite available width.
+    grid_layout->is_min_content_width = !contain_size_has_inline_fallback &&
+        (lycon->available_space.is_width_min_content() ||
+         (container->blk && container->block()->given_width_type == CSS_VALUE_MIN_CONTENT));
+    grid_layout->is_max_content_width = !contain_size_has_inline_fallback &&
+        (lycon->available_space.is_width_max_content() ||
+         (container->blk && container->block()->given_width_type == CSS_VALUE_MAX_CONTENT));
     grid_layout->row_intrinsic_height = -1.0f;
-    log_debug("%s GRID: is_shrink_to_fit_width=%d", container->source_loc(), is_shrink_to_fit_width);
+    log_debug("%s GRID: shrink_to_fit=%d min_constraint=%d max_constraint=%d", container->source_loc(),
+              is_shrink_to_fit_width, grid_layout->is_min_content_width,
+              grid_layout->is_max_content_width);
 
     // Set container dimensions
     grid_layout->container_width = container->width;
@@ -639,15 +656,17 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("%s DEBUG: Phase 6 - Resolving track sizes", container->source_loc());
     resolve_track_sizes_enhanced(grid_layout, container);
 
-    // For shrink-to-fit containers, update container width based on resolved track sizes
-    if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
+    // An intrinsic width constraint is resolved by the track-sizing result, just like
+    // shrink-to-fit; retaining the provisional width makes auto tracks visibly too wide.
+    if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
+         grid_layout->is_max_content_width) && grid_layout->computed_column_count > 0) {
         float total_column_width = grid_layout->content_width;
 
         // Add padding and border back to get container width
         float container_width = total_column_width + container_box.pad_border_h;
 
         container->width = container_width;
-        grid_layout->container_width = (int)container->width; // INT_CAST_OK: grid container width
+        grid_layout->container_width = container->width;
     }
 
     // Phase 6: Position grid items

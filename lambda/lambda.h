@@ -19,6 +19,16 @@ typedef uint64_t size_t;
 #define false 0
 #endif
 
+// The build configuration exposes this as an environment-overridable LambdaJS
+// inline-cache definition. Keep standalone native users on the normal path.
+#ifndef LAMBDA_INLINE_CACHE
+#define LAMBDA_INLINE_CACHE 1
+#endif
+
+#if LAMBDA_INLINE_CACHE != 0 && LAMBDA_INLINE_CACHE != 1
+#error "LAMBDA_INLINE_CACHE must be 0 or 1"
+#endif
+
 #define null 0
 
 // C math function declarations (for native math optimization in transpiler)
@@ -1772,12 +1782,11 @@ typedef struct PropertyKeySpec {
     uint32_t reserved;
 } PropertyKeySpec;
 
-// Immutable BSS metadata for one sealed MIR module.  It describes code only;
-// mutable bindings and inline caches are allocated per EvalContext.
+// Immutable BSS metadata for one sealed MIR module. It describes code only;
+// mutable bindings are allocated per EvalContext.
 typedef struct LambdaModuleLayout {
     uint32_t module_id;
     uint32_t var_count;
-    uint32_t member_ic_count;
     uint32_t property_key_count;
     uint32_t property_key_bytes_size;
     uint32_t reserved;
@@ -1932,19 +1941,6 @@ extern "C" {
     Item fn_index(Item item, Item index);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
-    // Tune6 L2: per-call-site inline cache for `obj.field` on maps/objects/
-    // elements. Caches the receiver's TypeMap identity and the resolved
-    // ShapeEntry; the guard is the shape-pointer compare alone, because every
-    // Lambda writer that repacks or replaces a shape installs a *new* TypeMap
-    // (map_rebuild_for_type_change) while the in-place writers only retag an
-    // existing entry — and the hit path re-reads entry->type/byte_offset, so a
-    // retag is picked up rather than cached stale. Zero-initialised = empty.
-    //
-    typedef struct LambdaMemberIC {
-        void* shape;      // TypeMap* the entry belongs to (NULL = empty)
-        void* entry;      // ShapeEntry* for the cached key
-    } LambdaMemberIC;
-    Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic);
     // length function
     int64_t fn_len(Item item);
     Item fn_int(Item a);

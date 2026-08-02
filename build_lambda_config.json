@@ -69,7 +69,8 @@
     "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
-    "JS_TEST262_FAST_PATHS": "1"
+    "JS_TEST262_FAST_PATHS": "1",
+    "LAMBDA_INLINE_CACHE": "1"
   },
   "includes": [
     ".",

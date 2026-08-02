@@ -1231,9 +1231,11 @@ extern Item js_delete_property_strict(Item obj, Item key);
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
 extern Item js_property_get_str(Item object, const char* key, int key_len);
+#if LAMBDA_INLINE_CACHE
 extern Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
 extern Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
     int64_t strict, JsStoreIC* ic);
+#endif
 extern Item js_using_dispose(Item resource);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
 extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
@@ -1685,14 +1687,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
-    // Tune6 L2: arg 2 is the per-site LambdaMemberIC cell (script_pool-owned,
-    // not GC). Same effects as fn_member — a miss tail-calls straight into it.
-    {"fn_member_ic", FPTR(fn_member_ic),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER)}},
-
     // ========================================================================
     // Path functions
     // ========================================================================
@@ -1904,10 +1898,12 @@ JitImport jit_runtime_imports[] = {
     {"js_private_property_set", FPTR(js_private_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
+#if LAMBDA_INLINE_CACHE
     {"js_property_access_named_ic", FPTR(js_property_access_named_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"js_property_set_named_ic", FPTR(js_property_set_named_ic)},
+#endif
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},

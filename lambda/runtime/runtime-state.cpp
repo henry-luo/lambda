@@ -89,7 +89,7 @@ static bool lambda_module_state_link_property_keys(LambdaModuleState* state,
 }
 
 extern "C" bool lambda_module_state_prepare(uint32_t module_id,
-        uint32_t var_count, uint32_t member_ic_count) {
+        uint32_t var_count) {
     EvalContext* owner = context;
     if (!owner) return false;
 
@@ -109,8 +109,7 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
 
     LambdaModuleState* state = owner->module_states[module_id];
     if (state) {
-        if (state->var_count != var_count ||
-                state->member_ic_count != member_ic_count) {
+        if (state->var_count != var_count) {
             log_error("module-state: sealed layout changed for module %u", module_id);
             return false;
         }
@@ -126,7 +125,6 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     if (!state) return false;
     state->module_id = module_id;
     state->var_count = var_count;
-    state->member_ic_count = member_ic_count;
     if (var_count) {
         state->vars = (Item*)mem_calloc(var_count, sizeof(Item), MEM_CAT_EVAL);
         state->var_payloads = (uint64_t*)mem_calloc(var_count, sizeof(uint64_t), MEM_CAT_EVAL);
@@ -139,25 +137,13 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
         }
         state->vars_registered = true;
     }
-    if (member_ic_count) {
-        // LambdaMemberIC is two pointer-sized words. Keep this storage
-        // context-owned and fixed; generated code casts the slab to its ABI
-        // type and performs no cache publication or synchronization.
-        state->member_ics = mem_calloc(member_ic_count, 2 * sizeof(uint64_t), MEM_CAT_EVAL);
-        if (!state->member_ics) {
-            if (state->vars) heap_unregister_gc_root_range((uint64_t*)state->vars);
-            mem_free(state->vars);
-            mem_free(state);
-            return false;
-        }
-    }
     owner->module_states[module_id] = state;
     return true;
 }
 
 extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* layout) {
     if (!layout || !lambda_module_state_prepare(layout->module_id,
-            layout->var_count, layout->member_ic_count)) return false;
+            layout->var_count)) return false;
     EvalContext* owner = context;
     LambdaModuleState* state = owner->module_states[layout->module_id];
     if (!state || state->property_key_count == 0) {
@@ -172,7 +158,7 @@ extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* lay
 }
 
 extern "C" bool lambda_module_state_reserve(uint32_t var_count,
-        uint32_t member_ic_count, uint32_t* out_module_id) {
+        uint32_t* out_module_id) {
     EvalContext* owner = context;
     if (!owner || !out_module_id) return false;
     Runtime* runtime_owner = owner->runtime;
@@ -181,7 +167,7 @@ extern "C" bool lambda_module_state_reserve(uint32_t var_count,
         return false;
     }
     uint32_t module_id = runtime_owner->next_module_state_id++;
-    if (!lambda_module_state_prepare(module_id, var_count, member_ic_count)) return false;
+    if (!lambda_module_state_prepare(module_id, var_count)) return false;
     *out_module_id = module_id;
     return true;
 }
@@ -287,10 +273,6 @@ extern "C" void lambda_module_state_reset(void) {
             memset(state->vars, 0, state->var_count * sizeof(Item));
             memset(state->var_payloads, 0, state->var_count * sizeof(uint64_t));
         }
-        if (state->member_ics) {
-            memset(state->member_ics, 0,
-                state->member_ic_count * 2 * sizeof(uint64_t));
-        }
     }
 }
 
@@ -306,7 +288,6 @@ extern "C" void lambda_module_state_destroy(void) {
         }
         mem_free(state->vars);
         mem_free(state->var_payloads);
-        mem_free(state->member_ics);
         mem_free(state->property_keys);
         mem_free(state);
     }

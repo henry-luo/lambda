@@ -489,7 +489,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     if (is_row_axis &&
         (!item->blk || item->block()->given_height < 0.0f) &&
         item->display.inner != RDT_DISPLAY_REPLACED &&
-        !grid_item_has_in_flow_content(item)) {
+        !grid_item_has_in_flow_content(item) &&
+        layout_used_preferred_aspect_ratio(item) <= 0.0f) {
         BoxMetrics box = layout_box_metrics(item);
         sizes.min_content = box.pad_border_v;
         sizes.max_content = box.pad_border_v;
@@ -506,7 +507,19 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             // Height depends on width due to text wrapping
             float width = 200; // Default fallback
 
-            if (item->width > 0) {
+            bool has_definite_inline_size = item->blk &&
+                item->block()->given_width >= 0.0f &&
+                isnan(item->block()->given_width_percent) &&
+                item->block()->given_width_type != CSS_VALUE_AUTO &&
+                item->block()->given_width_type != CSS_VALUE_MIN_CONTENT &&
+                item->block()->given_width_type != CSS_VALUE_MAX_CONTENT &&
+                item->block()->given_width_type != CSS_VALUE_FIT_CONTENT;
+            if (has_definite_inline_size) {
+                // A definite item width wins over the stretched grid area; otherwise
+                // a ratio-dependent height would incorrectly inherit the track width.
+                width = layout_css_size_to_content_box(item->bound, layout_box_sizing(item),
+                                                       item->block()->given_width, true);
+            } else if (item->width > 0) {
                 // Item already has a width (e.g., from previous layout pass)
                 width = item->width;
             } else if (gi && lycon->grid_container) {
@@ -576,20 +589,15 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         // Use unified API to measure all sizes. Grid item percentage margins and
         // paddings resolve against the grid container inline size, so preserve that
         // parent width for any style re-resolution triggered during measurement.
-        BlockContext grid_parent_ctx = {};
-        BlockContext* saved_parent = lycon->block.parent;
         bool override_parent = is_row_axis && lycon->grid_container &&
                                lycon->grid_container->content_width > 0;
+        IntrinsicSizesBidirectional all_sizes;
         if (override_parent) {
-            if (saved_parent) {
-                grid_parent_ctx = *saved_parent;
-            }
-            grid_parent_ctx.content_width = lycon->grid_container->content_width;
-            lycon->block.parent = &grid_parent_ctx;
-        }
-        IntrinsicSizesBidirectional all_sizes = measure_intrinsic_sizes(lycon, item, available);
-        if (override_parent) {
-            lycon->block.parent = saved_parent;
+            PercentageContainingBlockWidthScope grid_parent_scope(
+                lycon, lycon->grid_container->content_width);
+            all_sizes = measure_intrinsic_sizes(lycon, item, available);
+        } else {
+            all_sizes = measure_intrinsic_sizes(lycon, item, available);
         }
 
         // Extract the axis we need
@@ -614,32 +622,13 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     layout_apply_positive_min_max_contribution(item, !is_row_axis,
         &sizes.min_content, &sizes.max_content);
 
-    // CSS Grid §6.4: if the item has aspect-ratio and no explicit height,
-    // use (effective_column_width / aspect_ratio) as the row contribution.
+    // CSS Grid §6.4: transfer the final column size only when both axes are
+    // auto; a definite inline size already determines the block contribution.
     if (is_row_axis && item->specified_style) {
         bool has_explicit_height = (item->blk && item->block_mut()->given_height > 0);
-        if (!has_explicit_height) {
-            float aspect_ratio = 0.0f;
-            CssDeclaration* aspect_decl = style_tree_get_declaration(
-                item->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-            if (aspect_decl && aspect_decl->value) {
-                if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                    aspect_ratio = (float)aspect_decl->value->data.number.value;
-                } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                           aspect_decl->value->data.list.count >= 2) {
-                    double numerator = 0, denominator = 0;
-                    bool got_num = false, got_den = false;
-                    for (int k = 0; k < aspect_decl->value->data.list.count && !got_den; k++) {
-                        CssValue* v = aspect_decl->value->data.list.values[k];
-                        if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
-                            if (!got_num) { numerator = v->data.number.value; got_num = true; }
-                            else          { denominator = v->data.number.value; got_den = true; }
-                        }
-                    }
-                    if (got_num && got_den && denominator > 0) aspect_ratio = (float)(numerator / denominator);
-                    else if (got_num) aspect_ratio = (float)numerator;
-                }
-            }
+        bool has_explicit_width = (item->blk && item->block_mut()->given_width > 0);
+        if (!has_explicit_width && !has_explicit_height) {
+            float aspect_ratio = layout_used_preferred_aspect_ratio(item);
             if (aspect_ratio > 0.0f) {
                 // Compute the effective track width (after column sizing)
                 float track_width = 0.0f;

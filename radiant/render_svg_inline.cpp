@@ -1012,7 +1012,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
 // ============================================================================
 
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
-    SvgIntrinsicSize size = {300, 150, 2.0f, false, false};  // HTML default
+    SvgIntrinsicSize size = {300, 150, 2.0f, false, false, false};  // HTML default
 
     if (!svg_element) return size;
 
@@ -1043,8 +1043,10 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     // calculate aspect ratio
     if (vb.has_viewbox && vb.width > 0 && vb.height > 0) {
         size.aspect_ratio = vb.width / vb.height;
-    } else if (size.height > 0) {
+        size.has_intrinsic_aspect_ratio = true;
+    } else if (size.has_intrinsic_width && size.has_intrinsic_height && size.height > 0) {
         size.aspect_ratio = size.width / size.height;
+        size.has_intrinsic_aspect_ratio = true;
     }
 
     return size;

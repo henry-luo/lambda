@@ -434,6 +434,13 @@ struct DomElementExt {
     float pending_element_scroll_y;
     const char** attribute_names_cache;
     int attribute_names_capacity;
+    // Layout-only ruby column geometry. This lives outside InlineProp because
+    // computed inline styles may be absent or canonicalized across elements.
+    float ruby_column_anchor_x;
+    float ruby_column_width;
+    float ruby_column_inline_advance;
+    float ruby_column_start_overhang;
+    bool has_simple_ruby_column_geometry;
 };
 
 /**
@@ -789,6 +796,11 @@ struct DomElement : DomNode {
         ext->layout_fragments = nullptr;
         ext->layout_fragment_count = 0;
         ext->custom_layout_paint = nullptr;
+        ext->ruby_column_anchor_x = 0.0f;
+        ext->ruby_column_width = 0.0f;
+        ext->ruby_column_inline_advance = 0.0f;
+        ext->ruby_column_start_overhang = 0.0f;
+        ext->has_simple_ruby_column_geometry = false;
     }
 
 };

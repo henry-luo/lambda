@@ -66,6 +66,64 @@ static bool form_control_has_specified_line_height(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT));
 }
 
+static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
+                                       FontProp* font, bool has_css_font) {
+    if (!font || font->font_size <= 0.0f) return 0.0f;
+
+    float line_height = 0.0f;
+    if (block && block->blk && block->block_mut()->line_height) {
+        const CssValue* value = block->block()->line_height;
+        if (value->type == CSS_VALUE_TYPE_NUMBER) {
+            line_height = value->data.number.value * font->font_size;
+        } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+        } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            line_height = (value->data.number.value / 100.0f) * font->font_size;
+        }
+    }
+    if (line_height > 0.0f) return line_height;
+
+    // Keep the same UA fallback used for intrinsic textarea sizing.
+    return has_css_font ? font->font_size * 1.2f : 15.0f;
+}
+
+static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
+                                      const char* value, float content_width) {
+    if (!lycon || !font || !value || !*value || content_width <= 0.0f) {
+        return 1;
+    }
+
+    FontBox font_box = {};
+    setup_font(lycon->ui_context, &font_box, font);
+    if (!font_box.font_handle) return 1;
+
+    int line_count = 1;
+    const char* line_start = value;
+    const char* cursor = value;
+    while (*cursor) {
+        if (*cursor == '\n') {
+            line_count++;
+            cursor++;
+            line_start = cursor;
+            continue;
+        }
+
+        const char* next = cursor + 1;
+        while ((*next & 0xC0) == 0x80) next++;
+        int candidate_len = (int)(next - line_start);  // INT_CAST_OK: font API takes byte length.
+        float candidate_width = font_measure_text(
+            font_box.font_handle, line_start, candidate_len).width;
+        if (cursor > line_start && candidate_width > content_width) {
+            // Keep this greedy visual-line break in lockstep with textarea paint:
+            // the overflowing glyph begins the next editable line.
+            line_count++;
+            line_start = cursor;
+        }
+        cursor = next;
+    }
+    return line_count;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                                  FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
@@ -108,10 +166,12 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     float calibrated_char_w = default_content_w / FormDefaults::TEXT_SIZE_CHARS;  // 7.25
 
     float content_w = 0;
-    if (size == FormDefaults::TEXT_SIZE_CHARS) {
-        // Chrome keeps the default text-control `size=20` visual width at the
-        // UA calibrated content width; author font metrics affect text drawing,
-        // but not this default intrinsic control width.
+    bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
+        !form_control_has_specified_font(block);
+    if (uses_ua_default_width) {
+        // Keep the UA calibration only when the control retains the UA font.
+        // With an author font, HTML's `size` is measured in that font's average
+        // character width, including the default value of 20.
         content_w = default_content_w;
     } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
@@ -149,6 +209,11 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
             content_w = content_w * font->font_size / ua_font_size;
         }
+    }
+    if (!uses_ua_default_width && !form->appearance_none) {
+        // Native text controls reserve an inline editing gutter inside the CSS
+        // content box; `appearance:none` removes that UA-only geometry.
+        content_w += FormDefaults::TEXT_SIZE_CONTENT_GUTTER_H;
     }
     form->intrinsic_width = content_w;
 
@@ -226,32 +291,8 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         float content_w = cols * char_w + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
 
-        // Height: rows × line-height
-        // Resolve line-height from the block's computed style (CSS 2.1 §10.8.1)
-        float line_ht = 0;
-        if (block && block->blk && block->block_mut()->line_height) {
-            const CssValue* lh = block->block()->line_height;
-            if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                // e.g. line-height: 1.5 → 1.5 × font-size
-                line_ht = lh->data.number.value * font_size;
-            } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                // e.g. line-height: 20px, or line-height: 1em (resolved to px by style)
-                line_ht = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-            } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // e.g. line-height: 120% → 1.2 × font-size
-                line_ht = (lh->data.number.value / 100.0f) * font_size;
-            }
-            // CSS_VALUE_NORMAL or unrecognized → fall through to default
-        }
-        if (line_ht <= 0) {
-            // 'normal' or no explicit line-height: approximate as font_size × 1.2
-            // For UA default monospace (13.333px), this gives ~16px; Chrome uses ~15px.
-            if (has_css_font) {
-                line_ht = font_size * 1.2f;
-            } else {
-                line_ht = 15.0f;  // Chrome UA default for 13.333px monospace
-            }
-        }
+        // Height: rows × the same used line-height that establishes editable baselines.
+        float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);
         float content_h = rows * line_ht;
         form->intrinsic_height = content_h * pr;
     } else {
@@ -328,6 +369,14 @@ float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arro
     return calculated > min_select_width ? calculated : min_select_width;
 }
 
+static float layout_select_listbox_row_height(const FormControlProp* form) {
+    // Empty native listboxes use the compact anonymous-option metric; real
+    // option rows use the 17px metric measured by their option layout.
+    return form && form->option_count == 0
+        ? FormDefaults::SELECT_EMPTY_LISTBOX_ROW_HEIGHT
+        : FormDefaults::SELECT_OPTION_ROW_HEIGHT;
+}
+
 /**
  * Calculate intrinsic size for a select element based on option text.
  * Measures the longest option text using font metrics to determine width.
@@ -398,12 +447,6 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
     bool is_listbox = form->multiple || form->select_size > 1;
     if (is_listbox) {
-        // Native listboxes include each option's inline padding and the select border.
-        float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
-            2.0f * FormDefaults::SELECT_BORDER;
-        float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
-        form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
-
         // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
         int visible_rows;
         if (form->select_size > 0) {
@@ -414,10 +457,21 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             visible_rows = 1;
         }
 
-        // Chrome listbox select: row_height = 17px, border = 1px all sides
-        // border-box height = visible_rows * row_height + top_border + bottom_border
-        const float row_height = 17.0f;
-        form->intrinsic_height = visible_rows * row_height + 2.0f;
+        float row_height = layout_select_listbox_row_height(form);
+        BoxMetrics box = layout_box_metrics(block);
+        if (form->option_count == 0) {
+            // With no option content, the native listbox contributes only its
+            // actual padding and border; it has no themed minimum width.
+            form->intrinsic_width = box.pad_border_h;
+            form->intrinsic_height = visible_rows * row_height + box.pad_border_v;
+        } else {
+            // Native listboxes include each option's inline padding and the select border.
+            float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
+                2.0f * FormDefaults::SELECT_BORDER;
+            float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
+            form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
+            form->intrinsic_height = visible_rows * row_height + 2.0f;
+        }
     } else {
         // Combo box mode
         // CSS `appearance: none` removes the native dropdown arrow; the page
@@ -475,8 +529,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     if (block->blk && block->block_mut()->given_width < 0) {
         block->blk->given_width = form->intrinsic_width;
     }
-    // Always update given_height to match computed intrinsic height (may differ from default)
-    if (block->blk) {
+    // A containment fallback is an already-resolved used height; native listbox
+    // measurement must not overwrite it with the control's automatic height.
+    if (block->blk && block->block_mut()->given_height < 0) {
         block->blk->given_height = form->intrinsic_height;
     }
 }
@@ -498,6 +553,15 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     FormControlProp* form = block->form;
     FontProp* font = block->font ? block->font : lycon->font.style;
     float pr = lycon->ui_context->pixel_ratio;
+
+    bool textarea_needs_baseline_set =
+        form->control_type == FORM_CONTROL_TEXTAREA &&
+        radiant::layout_uses_explicit_baseline_source(block);
+    if (textarea_needs_baseline_set) {
+        // Textarea children are its default value, not ordinary layout children.
+        // Materialize that value before deriving the editable line-baseline set.
+        tc_ensure_init(static_cast<DomElement*>(block));
+    }
 
     log_debug("[FORM] layout_form_control: type=%d, tag=%s",
               form->control_type, block->tag_name ? block->tag_name : "?");
@@ -627,8 +691,39 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // This ensures the form control's internal text baseline aligns correctly
         // with surrounding inline text, keeping line box height minimal.
         float font_ascender = (font && font->ascender > 0) ? font->ascender : (font ? font->font_size * 0.8f : 13.0f);
-        lycon->block.last_line_ascender = border_top + pad_top + font_ascender;
+        float select_baseline_offset = 0.0f;
+        if (is_single_line_select) {
+            float natural_line_height = FormDefaults::SELECT_HEIGHT - 2.0f;
+            // A definite select height centers its native line box; collapsed
+            // heights retain the baseline of the control's natural line box.
+            select_baseline_offset = max(0.0f,
+                (block->content_height - natural_line_height) * 0.5f);
+        }
+        lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
+            select_baseline_offset;
         lycon->block.last_line_max_ascender = lycon->block.last_line_ascender;
+
+        if (textarea_needs_baseline_set) {
+            bool has_css_font = form_control_has_specified_font(block) ||
+                (font && !font->font_size_from_medium);
+            float line_height = textarea_used_line_height(
+                lycon, block, font, has_css_font);
+            float font_descender = font && font->descender > 0.0f
+                ? font->descender : 0.0f;
+            float content_height = font_ascender + font_descender;
+            float first_baseline = border_top + pad_top + font_ascender +
+                (line_height - content_height) * 0.5f;
+            int visual_lines = textarea_visual_line_count(
+                lycon, font, form->current_value ? form->current_value : form->value,
+                block->content_width);
+            float last_baseline = first_baseline +
+                (float)(visual_lines - 1) * line_height;
+
+            // CSS Box Alignment clamps a scroll container's line baseline to
+            // its block-end border edge when editable content overflows.
+            form->first_text_baseline = min(first_baseline, block->height);
+            form->last_text_baseline = min(last_baseline, block->height);
+        }
     }
 
     log_debug("[FORM] layout complete: w=%.1f h=%.1f cw=%.1f ch=%.1f",
@@ -648,8 +743,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         float option_width = block->width - border_left - border_right - block->boundary()->padding.left - block->boundary()->padding.right;
         if (option_width < 0) option_width = 0;
 
-        // row_height matches Chrome's listbox option row (17px per CSS spec / Chrome UA)
-        const float row_height = 17.0f;
+        float row_height = layout_select_listbox_row_height(form);
         // hr margin-top per UA stylesheet: 0.5em (HTML spec §10 / Chrome UA)
         float fs = (font && font->font_size > 0) ? font->font_size : 13.333f;
         const float hr_margin_top = fs * 0.5f;

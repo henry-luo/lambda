@@ -553,6 +553,28 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
     return static_direction;
 }
 
+static bool static_position_parent_uses_right_block_start(ViewElement* parent) {
+    for (View* ancestor = parent; ancestor && ancestor->is_element();
+         ancestor = ancestor->parent) {
+        ViewBlock* block = lam::view_as_block(ancestor);
+        if (block && block->embed && block->embedp()->flex) {
+            WritingMode writing_mode = block->embedp()->flex->writing_mode;
+            if (writing_mode == WM_VERTICAL_RL) return true;
+            if (writing_mode == WM_VERTICAL_LR || writing_mode == WM_HORIZONTAL_TB) return false;
+        }
+
+        DomElement* element = ancestor->as_element();
+        CssDeclaration* declaration = element && element->specified_style
+            ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WRITING_MODE)
+            : nullptr;
+        if (declaration && declaration->value &&
+            declaration->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            return declaration->value->data.keyword == CSS_VALUE_VERTICAL_RL;
+        }
+    }
+    return false;
+}
+
 static bool positioned_element_is_replaced(ViewBlock* block) {
     if (!block) return false;
     bool is_form_control =
@@ -564,14 +586,17 @@ static bool positioned_element_is_replaced(ViewBlock* block) {
         is_form_control;
 }
 
-static bool positioned_height_is_auto(ViewBlock* block) {
-    if (!block || !block->specified_style) return true;
-    CssDeclaration* height_decl = style_tree_get_declaration(
-        block->specified_style, CSS_PROPERTY_HEIGHT);
-    // an absent declaration is the initial auto value; the style API returns it as raw text.
-    return !height_decl || !height_decl->value ||
-        (height_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-         height_decl->value->data.keyword == CSS_VALUE_AUTO);
+static bool positioned_axis_is_auto(ViewBlock* block, bool horizontal) {
+    if (!block || !block->is_element()) return true;
+
+    DomElement* element = block->as_element();
+    CssDeclaration* size_decl = layout_specified_physical_size_declaration(
+        element, horizontal);
+    // Logical size aliases do not populate a physical declaration. Select the
+    // cascade-winning alias so `block-size` is not mistaken for height:auto.
+    return !size_decl || !size_decl->value ||
+        (size_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+         size_decl->value->data.keyword == CSS_VALUE_AUTO);
 }
 
 static float positioned_inset_stretch_css_height(ViewBlock* block, float cb_height,
@@ -714,6 +739,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         (block->block()->given_width_type == CSS_VALUE_MAX_CONTENT ||
          block->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
          block->block()->given_width_type == CSS_VALUE_FIT_CONTENT);
+    bool is_stretch_width = block->blk &&
+        block->block()->given_width_type == CSS_VALUE_STRETCH;
 
     // CSS 2.1 §10.3.8 / §10.6.5: Absolutely positioned REPLACED elements
     // use intrinsic dimensions for auto width/height, not the constraint equation.
@@ -742,12 +769,15 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     bool has_auto_margin_left = block->bound && block->boundary_mut()->margin.left_type == CSS_VALUE_AUTO;
     bool has_auto_margin_right = block->bound && block->boundary_mut()->margin.right_type == CSS_VALUE_AUTO;
-    bool width_is_auto = block->blk && block->block_mut()->given_width_type == CSS_VALUE_AUTO;
+    bool width_is_auto = positioned_axis_is_auto(block, true);
     bool stretch_form_width = is_form_control_replaced && width_is_auto &&
         block->positionp()->has_left && block->positionp()->has_right && !is_intrinsic_width;
-    bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width && !width_is_auto);
+    bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width &&
+                      !width_is_auto && !is_stretch_width);
     ViewElement* parent = block->parent_view();
     TextDirection static_direction = get_static_position_direction(parent);
+    bool static_x_uses_right_block_start =
+        static_position_parent_uses_right_block_start(parent);
     bool was_inline = false;
     was_inline = was_specified_inline(lam::dom_require<DOM_NODE_ELEMENT>(block));
     float parent_to_cb_offset_x = 0;
@@ -758,8 +788,42 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         : 0.0f;
     float static_left = parent_to_cb_offset_x + static_line_x;
 
+    float stretch_constraint_left = block->positionp()->has_left
+        ? block->positionp()->left : 0.0f;
+    float stretch_constraint_right = block->positionp()->has_right
+        ? block->positionp()->right : 0.0f;
+    if (!block->positionp()->has_left && !block->positionp()->has_right) {
+        stretch_constraint_left = max(static_left - border_offset_x, 0.0f);
+    }
+    // stretch min/max in abspos uses the same remaining padding-box space as
+    // a preferred stretch size; resolving against the full box ignores insets.
+    layout_resolve_stretch_minmax_axis(block,
+        cb_width - stretch_constraint_left - stretch_constraint_right,
+        cb.has_definite_width, true);
+
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
-    if (has_width) {
+    if (is_stretch_width) {
+        float used_left = block->positionp()->has_left ? block->positionp()->left : 0.0f;
+        float used_right = block->positionp()->has_right ? block->positionp()->right : 0.0f;
+        if (!block->positionp()->has_left && !block->positionp()->has_right) {
+            // Static line coordinates are relative to the containing block's
+            // border box, while stretch-fit fills its padding-box area.
+            used_left = max(static_left - border_offset_x, 0.0f);
+        }
+        float available_margin_width = cb_width - used_left - used_right;
+        float stretch_border_width = layout_stretch_fit_border_box_size(
+            block, available_margin_width, true);
+        content_width = layout_uses_border_box(block)
+            ? stretch_border_width
+            : layout_content_width_from_border_box(block, stretch_border_width);
+        // Abspos stretch resolves after static insets are known, not as a
+        // 0px specified width during the generic CSS declaration pass.
+        lycon->block.given_width = content_width;
+        block->ensure_block(lycon);
+        block->blk->given_width = content_width;
+        log_debug("[ABS POS] stretch-fit width: available=%.1f border=%.1f content=%.1f",
+                  available_margin_width, stretch_border_width, content_width);
+    } else if (has_width) {
         content_width = lycon->block.given_width;
     } else if (block->positionp()->has_left && block->positionp()->has_right &&
                !is_intrinsic_width && (!is_replaced || stretch_form_width)) {
@@ -949,12 +1013,49 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
               lycon->block.given_height, block->positionp()->has_top, block->positionp()->has_bottom, cb_height);
-    bool height_is_auto = positioned_height_is_auto(block);
+    bool height_is_auto = positioned_axis_is_auto(block, false);
+    bool is_stretch_height = block->blk &&
+        block->block()->given_height_type == CSS_VALUE_STRETCH;
     bool stretch_form_height = is_form_control_replaced && height_is_auto &&
         block->positionp()->has_top && block->positionp()->has_bottom;
-    bool has_height = (lycon->block.given_height >= 0 && !height_is_auto);
+    bool has_height = (lycon->block.given_height >= 0 && !height_is_auto &&
+                       !is_stretch_height);
 
-    if (has_height) {
+    float stretch_constraint_top = block->positionp()->has_top
+        ? block->positionp()->top : 0.0f;
+    float stretch_constraint_bottom = block->positionp()->has_bottom
+        ? block->positionp()->bottom : 0.0f;
+    if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
+        stretch_constraint_top = max(parent_to_cb_offset_y +
+            (pa_block ? pa_block->advance_y : 0.0f) - border_offset_y, 0.0f);
+    }
+    layout_resolve_stretch_minmax_axis(block,
+        cb_height - stretch_constraint_top - stretch_constraint_bottom,
+        cb.has_definite_height, false);
+
+    if (is_stretch_height) {
+        float used_top = block->positionp()->has_top ? block->positionp()->top : 0.0f;
+        float used_bottom = block->positionp()->has_bottom ? block->positionp()->bottom : 0.0f;
+        if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
+            // Static block coordinates are relative to the containing block's
+            // border box, while stretch-fit fills its padding-box area.
+            used_top = max(parent_to_cb_offset_y +
+                (pa_block ? pa_block->advance_y : 0.0f) - border_offset_y, 0.0f);
+        }
+        float available_margin_height = cb_height - used_top - used_bottom;
+        float stretch_border_height = layout_stretch_fit_border_box_size(
+            block, available_margin_height, false);
+        content_height = layout_uses_border_box(block)
+            ? stretch_border_height
+            : layout_content_height_from_border_box(block, stretch_border_height);
+        // Abspos stretch resolves after static insets are known, not as a
+        // 0px specified height during the generic CSS declaration pass.
+        lycon->block.given_height = content_height;
+        block->ensure_block(lycon);
+        block->blk->given_height = content_height;
+        log_debug("[ABS POS] stretch-fit height: available=%.1f border=%.1f content=%.1f",
+                  available_margin_height, stretch_border_height, content_height);
+    } else if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
     } else if (layout_preferred_aspect_ratio(block) > 0.0f && content_width > 0.0f) {
@@ -1154,7 +1255,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
 
         bool is_form_control = child->form_control();
         if (child->position && child->positionp()->has_top && child->positionp()->has_bottom &&
-            positioned_height_is_auto(child) &&
+            positioned_axis_is_auto(child, false) &&
             (!positioned_element_is_replaced(child) || is_form_control)) {
             float margin_top = child->bound && child->boundary_mut()->margin.top_type != CSS_VALUE_AUTO
                 ? child->boundary()->margin.top : 0.0f;
@@ -1442,6 +1543,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // CSS 2.1 §10.3.7: Detect direction of the static-position containing block.
     // The direction determines whether the static position is for 'left' (LTR) or 'right' (RTL).
     TextDirection static_direction = get_static_position_direction(parent);
+    bool static_x_uses_right_block_start =
+        static_position_parent_uses_right_block_start(parent);
     log_debug("[STATIC POS] static-position direction: %s", static_direction == TD_RTL ? "RTL" : "LTR");
 
     if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
@@ -1726,14 +1829,17 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // set 'right' to the static position, then solve for 'left'.
     // The hypothetical box's right margin edge determines the static 'right' value.
     // For inline-level elements, account for float avoidance and text-align.
-    if (static_direction == TD_RTL && !block->positionp()->has_left && !block->positionp()->has_right) {
+    if ((static_direction == TD_RTL || static_x_uses_right_block_start) &&
+        !block->positionp()->has_left && !block->positionp()->has_right) {
         bool was_inline_rtl = false;
         if (elmt->is_element()) {
             DomElement* elem = elmt->as_element();
             was_inline_rtl = was_specified_inline(elem);
         }
-        // In RTL, the inline cursor starts at the right edge of the line.
-        // pa_line->advance_x tracks the LEFT cursor, not the right.
+        // In RTL and vertical-rl, the static physical x edge is the line's
+        // right edge; pa_line->advance_x tracks the left cursor instead.
+        // This preserves vertical-rl's right-to-left block progression when
+        // CSS Positioned resolves both physical horizontal insets as auto.
         float line_right = pa_line->right;
 
         // For inline-level elements, apply float avoidance + text-align
@@ -2140,6 +2246,27 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float final_y_bfc = current_y_bfc;
     int max_iterations = 100;  // Prevent infinite loops
 
+    bool float_is_inline_start =
+        (parent_ctx->direction != CSS_VALUE_RTL &&
+         block->positionp()->float_prop == CSS_VALUE_LEFT) ||
+        (parent_ctx->direction == CSS_VALUE_RTL &&
+         block->positionp()->float_prop == CSS_VALUE_RIGHT);
+    bool initial_letter_clearance_applied = false;
+    if (float_is_inline_start && parent_ctx->initial_letter_clears_later_start_floats &&
+        parent_ctx->line_number > parent_ctx->initial_letter_origin_line_number) {
+        float initial_margin_bottom_bfc = parent_y_in_bfc +
+            parent_ctx->initial_letter_margin_box_bottom;
+        if (final_y_bfc < initial_margin_bottom_bfc) {
+            // An in-flow initial has no FloatBox, so CSS Inline 3 §7.9.3's
+            // required clearance for later inline-start floats must be explicit.
+            final_y_bfc = initial_margin_bottom_bfc;
+            initial_letter_clearance_applied = true;
+        }
+    }
+    if (block->blk) {
+        block->block_mut()->initial_letter_float_clearance = initial_letter_clearance_applied;
+    }
+
     // CSS 2.1 §9.5.1: Calculate containing block edges in BFC coordinates
     float containing_block_left_bfc = parent_x_in_bfc + content_offset_x;
     float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
@@ -2401,8 +2528,7 @@ void adjust_line_for_floats(LayoutContext* lycon) {
     log_debug("Adjusting line for floats: local_y=%.1f, bfc_y=%.1f, height=%.1f, offset=(%.1f, %.1f)",
               lycon->block.advance_y, line_top_bfc, line_height, block_offset_x, block_offset_y);
 
-    // Query available space at current line position using BlockContext API
-    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_bfc, line_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_bfc, line_height, true);
 
     // If there's no float intrusion at this Y position, skip adjustment
     if (!space.has_left_float && !space.has_right_float) {

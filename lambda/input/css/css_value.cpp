@@ -484,6 +484,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"reverse", 7, CSS_VALUE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
     {"alternate", 9, CSS_VALUE_ALTERNATE, CSS_VALUE_GROUP_ANIMATION},
     {"alternate-reverse", 17, CSS_VALUE_ALTERNATE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
+    {"over", 4, CSS_VALUE_OVER, CSS_VALUE_GROUP_RUBY_POSITION},
+    {"under", 5, CSS_VALUE_UNDER, CSS_VALUE_GROUP_RUBY_POSITION},
     // Animation fill-mode keywords
     {"forwards", 8, CSS_VALUE_FORWARDS, CSS_VALUE_GROUP_ANIMATION},
     {"backwards", 9, CSS_VALUE_BACKWARDS, CSS_VALUE_GROUP_ANIMATION},
@@ -529,6 +531,14 @@ static int css_keyword_compare(const void *a, const void *b, void *udata) {
 // Returns the LXB_CSS_VALUE enum, or CSS_VALUE__UNDEF if not found
 CssEnum css_enum_by_name(const char* name) {
     if (!name) return CSS_VALUE__UNDEF;
+
+    // the legacy WebKit spelling is a CSS Sizing `stretch` alias; leaving it
+    // custom discards the sizing declaration before layout can resolve it.
+    static const char webkit_fill_available[] = "-webkit-fill-available";
+    if (str_icmp(name, strlen(name), webkit_fill_available,
+                 sizeof(webkit_fill_available) - 1) == 0) {
+        return CSS_VALUE_STRETCH;
+    }
 
     static HashMap* keyword_cache = NULL;
 

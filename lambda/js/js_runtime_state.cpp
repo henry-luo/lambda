@@ -700,7 +700,7 @@ extern "C" Item* js_ensure_active_module_vars(void) {
     }
     uint32_t module_id = 0;
     if (!context || !lambda_module_state_reserve(
-            JS_MAX_MODULE_VARS, 0, &module_id)) {
+            JS_MAX_MODULE_VARS, &module_id)) {
         log_error("js-module-vars: failed to reserve fallback module state");
         return NULL;
     }
@@ -888,7 +888,7 @@ extern "C" uint32_t js_alloc_module_state(uint32_t var_count) {
     uint32_t module_id = 0;
     if (var_count == 0) var_count = 1;
     if (!context || !lambda_module_state_reserve(
-            var_count, 0, &module_id)) return UINT32_MAX;
+            var_count, &module_id)) return UINT32_MAX;
     return module_id;
 }
 

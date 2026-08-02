@@ -207,6 +207,9 @@ static bool jm_is_proto_literal_key(JsAstNode* key) {
     return false;
 }
 
+// These runtime toggles are useful only in a build that includes the IC
+// lowering. The compile flag removes the lowering entirely for a clean POC.
+#if LAMBDA_INLINE_CACHE
 static bool jm_load_ic_enabled() {
     static int enabled = -1;
     if (enabled < 0) {
@@ -224,6 +227,7 @@ static bool jm_store_ic_enabled() {
     }
     return enabled != 0;
 }
+#endif
 
 static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
         JsClassEntry* ce, JsIdentifierNode* prop, int slot, JsMemberNode* mem) {
@@ -285,9 +289,11 @@ static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNo
     return interned->chars;
 }
 
+#if LAMBDA_INLINE_CACHE
 static const char* jm_profile_load_ic_label(JsMirTranspiler* mt, JsMemberNode* mem) {
     return jm_profile_property_set_label(mt, mem);
 }
+#endif
 
 static const char* jm_profile_store_ic_label(JsMirTranspiler* mt, JsMemberNode* mem) {
     return jm_profile_property_set_label(mt, mem);
@@ -1168,7 +1174,9 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
-        } else if (jm_store_ic_enabled() && ref->named_key && ref->named_key_len >= 0 &&
+        }
+#if LAMBDA_INLINE_CACHE
+        else if (jm_store_ic_enabled() && ref->named_key && ref->named_key_len >= 0 &&
                 mt->tp && mt->tp->ast_pool) {
             JsStoreIC* ic = (JsStoreIC*)pool_calloc(mt->tp->ast_pool, sizeof(JsStoreIC));
             if (ic) {
@@ -1196,7 +1204,9 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
             }
-        } else if (ref->strict) {
+        }
+#endif
+        else if (ref->strict) {
             // Tune8 §2.2: strict-mode setter goes through js_property_set_v
             // dispatcher so we don't need a separate js_property_set_strict
             // registry entry; the runtime branches once on the constant flag.
@@ -11590,6 +11600,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         return result;
     }
 
+#if LAMBDA_INLINE_CACHE
     if (jm_load_ic_enabled() &&
         !mem->computed &&
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -11616,6 +11627,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             }
         }
     }
+#endif
 
     MIR_reg_t key;
     if (mem->computed) {

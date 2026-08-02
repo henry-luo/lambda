@@ -3287,6 +3287,7 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
     return (Item){.map = m};
 }
 
+#if LAMBDA_INLINE_CACHE
 static bool js_shared_ctor_shape_enabled() {
     static int enabled = -1;
     if (enabled < 0) {
@@ -3295,6 +3296,7 @@ static bool js_shared_ctor_shape_enabled() {
     }
     return enabled != 0;
 }
+#endif
 
 extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_SHAPE);
@@ -3467,6 +3469,12 @@ static Item js_class_create_shaped_instance_object(Item class_item) {
 // Subsequent calls skip — the cache is already populated.
 extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
     const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
+#if !LAMBDA_INLINE_CACHE
+    // Preserve constructor semantics when an older MIR module imports this
+    // helper, but never publish or reuse a constructor shape in a no-IC build.
+    (void)shape_cache;
+    return js_constructor_create_object_shaped(callee, prop_names, prop_lens, count);
+#else
     if (shape_cache && *shape_cache && js_shared_ctor_shape_enabled()) {
         TypeMap* cached = (TypeMap*)*shape_cache;
         if (typemap_ptr_is_plausible(cached) && cached->is_shared_constructor_shape) {
@@ -3492,6 +3500,7 @@ extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
         log_debug("§7: shape cache populated at %p → TypeMap %p", (void*)shape_cache, m->type);
     }
     return obj;
+#endif
 }
 
 // P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
@@ -7876,6 +7885,7 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     return js_property_get(object, str_key);
 }
 
+#if LAMBDA_INLINE_CACHE
 static bool js_array_named_ic_enabled() {
     static int enabled = -1;
     if (enabled < 0) {
@@ -7933,6 +7943,7 @@ static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kin
     return receiver_kind == JS_NAMED_IC_RECEIVER_MAP && m->map_kind == MAP_KIND_PLAIN;
 }
 
+#if LAMBDA_INLINE_CACHE
 static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
         uint8_t receiver_kind, Item* out_value) {
     if (!m || !cached || !cached->shape || !cached->entry) return false;
@@ -8021,6 +8032,8 @@ static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name,
     if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
+#endif
+#endif
 
 static Item js_property_access_named_ic_slow(Item object, const char* name,
         int name_len, JsLoadIC* ic) {
@@ -8035,6 +8048,12 @@ static Item js_property_access_named_ic_slow(Item object, const char* name,
 
 extern "C" Item js_property_access_named_ic(Item object, const char* name,
         int64_t name_len64, JsLoadIC* ic) {
+#if !LAMBDA_INLINE_CACHE
+    if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
+        return js_property_access_named_ic_slow(object, name, 0, ic);
+    }
+    return js_property_access_named_ic_slow(object, name, (int)name_len64, ic);
+#else
     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_PROBE);
     js_profile_load_ic_site(ic ? ic->profile_label : NULL, JS_LOAD_IC_SITE_PROBE);
     if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
@@ -8121,8 +8140,10 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
     }
 
     return js_property_access_named_ic_slow(object, name, name_len, ic);
+#endif
 }
 
+#if LAMBDA_INLINE_CACHE
 static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
         int name_len, uint32_t* out_name_id) {
     if (!ic || !name || name_len < 0) return false;
@@ -8133,6 +8154,7 @@ static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
     if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
+#endif
 
 static Item js_property_set_named_ic_slow(Item object, const char* name,
         int name_len, Item value, int64_t strict, JsStoreIC* ic) {
@@ -8145,6 +8167,7 @@ static Item js_property_set_named_ic_slow(Item object, const char* name,
     return js_property_set_v(object, key, value, strict);
 }
 
+#if LAMBDA_INLINE_CACHE
 static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value,
         JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_TYPE;
@@ -8351,9 +8374,17 @@ static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
     js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MEGAMORPHIC);
 }
+#endif
 
 extern "C" Item js_property_set_named_ic(Item object, const char* name,
         int64_t name_len64, Item value, int64_t strict, JsStoreIC* ic) {
+#if !LAMBDA_INLINE_CACHE
+    if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
+        return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
+    }
+    return js_property_set_named_ic_slow(object, name, (int)name_len64,
+        value, strict, ic);
+#else
     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_PROBE);
     js_profile_store_ic_site(ic ? ic->profile_label : NULL, JS_STORE_IC_SITE_PROBE);
     if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
@@ -8421,6 +8452,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
         js_profile_store_ic_site(ic->profile_label, miss_reason);
     }
     return result;
+#endif
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.

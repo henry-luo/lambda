@@ -65,6 +65,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_SPECIAL_TYPE,        // _length, _percentage, _number, _integer, _angle
     CSS_VALUE_GROUP_SYSTEM_FONT,         // caption, icon, menu, message-box, small-caption, status-bar
     CSS_VALUE_GROUP_ANIMATION,           // animation timing, direction, fill-mode, play-state keywords
+    CSS_VALUE_GROUP_RUBY_POSITION,       // alternate, over, under, inter-character
     CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
     CSS_VALUE_GROUP_RADINT,              // Radiant specific values
 } CssEnumGroup;
@@ -545,6 +546,9 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_REVERSE,
     CSS_VALUE_ALTERNATE,
     CSS_VALUE_ALTERNATE_REVERSE,
+    // CSS Ruby positioning keywords (alternate is shared with animation direction)
+    CSS_VALUE_OVER,
+    CSS_VALUE_UNDER,
     // Animation fill-mode keywords (none and both already exist)
     CSS_VALUE_FORWARDS,
     CSS_VALUE_BACKWARDS,

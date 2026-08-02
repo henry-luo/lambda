@@ -17,12 +17,6 @@
 #include "runtime-state.h"
 #include "sys_func_registry.h"
 
-// Frozen C2MIR compatibility. MIR Direct never imports or reads this slot.
-#ifdef LAMBDA_C2MIR
-Context* _lambda_rt = NULL;
-#endif
-
-
 // POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
 // Set via JS_MIR_INTERP=1 environment variable
 int g_mir_interp_mode = 0;

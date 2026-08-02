@@ -631,6 +631,29 @@ inline void place_items_with_occupancy(
  * @param is_column_axis True if sizing columns, false if sizing rows
  * @return ContribArray of item contributions
  */
+inline float grid_item_minimum_contribution(
+    ViewBlock* item,
+    bool horizontal,
+    float min_content,
+    float max_content,
+    bool is_scroll_container)
+{
+    CssEnum min_keyword = layout_intrinsic_min_size_keyword(item, horizontal);
+    if (min_keyword == CSS_VALUE_MAX_CONTENT) return max_content;
+    if (min_keyword == CSS_VALUE_MIN_CONTENT || min_keyword == CSS_VALUE_FIT_CONTENT) {
+        return min_content;
+    }
+
+    float explicit_min = layout_explicit_min_axis_or(item, horizontal, -1.0f);
+    if (explicit_min >= 0.0f) {
+        // An explicit zero replaces the automatic grid-item minimum; otherwise
+        // `min-width:0` incorrectly grows an auto track to min-content.
+        return layout_css_size_to_border_box(
+            item ? item->bound : nullptr, layout_box_sizing(item), explicit_min, horizontal);
+    }
+    return is_scroll_container ? 0.0f : min_content;
+}
+
 inline ContribArray collect_item_contributions(
     GridContainerLayout* grid_layout,
     ViewBlock** items,
@@ -649,6 +672,7 @@ inline ContribArray collect_item_contributions(
 
         GridItemContribution contrib = {};
         contrib.item = item;
+        float margin_contribution = 0.0f;
 
         // Get item's placement (1-based line numbers from GridItemProp)
         if (is_column_axis) {
@@ -698,14 +722,14 @@ inline ContribArray collect_item_contributions(
                 bool right_is_pct    = (item->boundary()->margin.right_type == CSS_VALUE__PERCENTAGE);
                 float ml = (left_is_auto  || left_is_pct)  ? 0.0f : item->boundary()->margin.left;
                 float mr = (right_is_auto || right_is_pct) ? 0.0f : item->boundary()->margin.right;
-                contrib.min_content_contribution += ml + mr;
-                contrib.max_content_contribution += ml + mr;
+                margin_contribution = ml + mr;
+                contrib.min_content_contribution += margin_contribution;
+                contrib.max_content_contribution += margin_contribution;
             }
 
             // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // inline axis have automatic minimum size = 0. The min-content contribution
-            // (actual text content) is preserved for Phase 2 (content-based minimums) and
-            // Phase 5 (growth limits). Only Phase 1 uses the automatic minimum (= 0).
+            // inline axis may have a zero automatic minimum, while an author-provided
+            // min-width remains part of the item's minimum contribution.
             if (item->scroller && item->scroll()->overflow_x != CSS_VALUE_VISIBLE) {
                 contrib.is_scroll_container = true;
             }
@@ -744,17 +768,24 @@ inline ContribArray collect_item_contributions(
                 float mb = bot_is_auto ? 0.0f :
                            (bot_is_pct && !inline_is_definite) ? 0.0f :
                            item->boundary()->margin.bottom;
-                contrib.min_content_contribution += mt + mb;
-                contrib.max_content_contribution += mt + mb;
+                margin_contribution = mt + mb;
+                contrib.min_content_contribution += margin_contribution;
+                contrib.max_content_contribution += margin_contribution;
             }
 
             // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
-            // block axis have automatic minimum size = 0. Preserve the real min-content for
-            // Phase 2; only Phase 1 uses the automatic minimum (= 0) via is_scroll_container.
+            // block axis may have a zero automatic minimum, while an author-provided
+            // min-height remains part of the item's minimum contribution.
             if (item->scroller && item->scroll()->overflow_y != CSS_VALUE_VISIBLE) {
                 contrib.is_scroll_container = true;
             }
         }
+
+        contrib.minimum_contribution = grid_item_minimum_contribution(
+            item, is_column_axis,
+            contrib.min_content_contribution - margin_contribution,
+            contrib.max_content_contribution - margin_contribution,
+            contrib.is_scroll_container) + margin_contribution;
 
         // Only add if the contribution is meaningful
         if (contrib.track_span > 0 &&
@@ -790,7 +821,9 @@ inline void run_enhanced_track_sizing(
     float container_width,
     float container_height,
     float* out_col_intrinsic_width = nullptr,
-    float* out_row_intrinsic_height = nullptr)
+    float* out_row_intrinsic_height = nullptr,
+    bool column_min_content_constraint = false,
+    bool column_max_content_constraint = false)
 {
     if (!grid_layout) return;
 
@@ -944,12 +977,15 @@ inline void run_enhanced_track_sizing(
         if (!col_contributions.empty()) {
             log_debug("[GRID COL] %zu contributions", col_contributions.size());
             for (size_t ci = 0; ci < col_contributions.size(); ci++)
-                log_debug("[GRID COL] contrib[%zu]: track=%zu span=%zu min=%.1f max=%.1f scroll=%d",
+            log_debug("[GRID COL] contrib[%zu]: track=%zu span=%zu min=%.1f max=%.1f minimum=%.1f scroll=%d",
                          ci, col_contributions[ci].track_start, (size_t)col_contributions[ci].track_span,
                          col_contributions[ci].min_content_contribution,
                          col_contributions[ci].max_content_contribution,
+                         col_contributions[ci].minimum_contribution,
                          col_contributions[ci].is_scroll_container);
-            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap, col_available);
+            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap, col_available,
+                                          column_min_content_constraint,
+                                          column_max_content_constraint);
         }
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
@@ -957,7 +993,8 @@ inline void run_enhanced_track_sizing(
                      _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.6 Maximize Tracks
-        maximize_tracks(col_tracks, col_available, col_available);
+        maximize_tracks(col_tracks, col_available, col_available,
+                        column_min_content_constraint);
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
             log_debug("  DBG post-maximize col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
@@ -966,7 +1003,7 @@ inline void run_enhanced_track_sizing(
         float fr_intrinsic_total = 0.0f;
         expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available,
                                col_contributions, effective_col_gap,
-                               &fr_intrinsic_total);
+                               &fr_intrinsic_total, column_min_content_constraint);
         // For indefinite containers: the intrinsic total from Pass 1 determines the
         // container width, even though Pass 2 may redistribute tracks differently.
         if (fr_intrinsic_total > 0.0f && out_col_intrinsic_width) {
@@ -1035,14 +1072,18 @@ inline void run_enhanced_track_sizing(
             // Re-run all phases with pct tracks now definite and resolved gap
             initialize_track_sizes(col_tracks, col_available2);
             if (!col_contributions.empty()) {
-                resolve_intrinsic_track_sizes(col_tracks, col_contributions, resolved_col_gap, col_available);
+                resolve_intrinsic_track_sizes(col_tracks, col_contributions, resolved_col_gap, col_available,
+                                              column_min_content_constraint,
+                                              column_max_content_constraint);
             }
             // For shrink-to-fit containers: use indefinite semantics for maximize
             // so that only finite-gl tracks grow to their gl (no free-space distribution).
             float max_avail = (container_width < 0) ? -1.0f : col_available2;
-            maximize_tracks(col_tracks, max_avail, max_avail);
+            maximize_tracks(col_tracks, max_avail, max_avail,
+                            column_min_content_constraint);
             expand_flexible_tracks(col_tracks, 0.0f, col_available2, col_available2,
-                                   col_contributions, resolved_col_gap);
+                                   col_contributions, resolved_col_gap, nullptr,
+                                   column_min_content_constraint);
             // For shrink-to-fit: no stretching (container size = content, no free space)
             if (container_width >= 0)
                 stretch_auto_tracks(col_tracks, 0.0f, col_available2);

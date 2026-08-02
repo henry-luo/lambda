@@ -107,5 +107,42 @@ untyped-Lambda IC question reopen.
 
 ---
 
+## LambdaJS implementation note — guarded named-property inline caches
+
+LambdaJS uses bounded, mutable **cache cells** beside otherwise immutable MIR;
+it does not patch generated instructions. For the general compiled
+non-computed named-member paths (`obj.field` and `obj.field = value`), lowering
+allocates one `JsLoadIC` or `JsStoreIC` per site and passes its address, the
+interned field name, and its length to `js_property_access_named_ic` or
+`js_property_set_named_ic`.
+
+Each cache entry records the receiver kind, the exact `TypeMap*` shape, its
+`ShapeEntry*`, and the field byte offset. A cache starts empty, becomes
+monomorphic after its first eligible receiver, holds up to four shapes in its
+polymorphic state, and becomes megamorphic thereafter. On a hit, the helper
+checks the receiver kind and exact shape pointer, then reads or writes the
+cached slot directly. This replaces a property-key conversion/lookup and the
+ordinary descriptor/prototype/exotic dispatch with a small, predictable guard
+plus an offset access.
+
+The fast path is intentionally narrow: it caches only descriptor-free,
+non-deleted own data properties on plain maps (and eligible array companion
+maps). Accessors, inherited and builtin properties, Proxies and other exotic
+objects, computed/private names, and incompatible stores fall back to the
+ordinary JavaScript `[[Get]]`/`[[Set]]` path. Stores first run that ordinary
+path on a miss and are cached only if the resulting own slot can safely accept
+the value type. This is guard-based rather than invalidation-based: structural
+changes give the receiver a new `TypeMap*`, while descriptor changes move it
+off the plain-map fast path, so stale entries cannot be used.
+
+Constructor shape caching complements the per-site ICs by sharing a canonical
+`TypeMap` among same-layout instances, allowing their exact-shape guards to
+hit. Prototype-method call ICs are not implemented; inherited method lookup
+remains on the normal dispatch path. The implementation lives in
+`lambda/js/js_mir_expression_lowering.cpp`, `lambda/js/js_runtime.{h,cpp}`,
+and uses the `TypeMap`/`ShapeEntry` layout in `lambda/lambda-data.hpp`.
+
+---
+
 *Future compilation-strategy ADRs (tiering, AOT/sealed-module boundaries,
 lane interactions) land here as LC2+.*

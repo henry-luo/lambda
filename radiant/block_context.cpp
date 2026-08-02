@@ -50,8 +50,19 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->given_width = -1;
     ctx->given_height = -1;
     ctx->initial_letter_exclusion_width = 0.0f;
+    ctx->initial_letter_exclusion_right = 0.0f;
     ctx->initial_letter_exclusion_lines = 0;
+    ctx->initial_letter_exclusion_bottom = 0.0f;
+    ctx->initial_letter_margin_box_left = 0.0f;
+    ctx->initial_letter_margin_box_right = 0.0f;
+    ctx->initial_letter_margin_box_top = 0.0f;
+    ctx->initial_letter_margin_box_bottom = 0.0f;
+    ctx->initial_letter_border_box_bottom = 0.0f;
+    ctx->initial_letter_origin_line_number = -1;
+    ctx->initial_letter_clears_later_start_floats = false;
+    ctx->initial_letter_exclusion_requires_intersection = false;
     ctx->initial_letter_origin_offset_applied = false;
+    ctx->initial_letter_continuation_cleared = false;
 
     // Initialize BFC hierarchy
     ctx->parent = nullptr;
@@ -104,6 +115,8 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->left_float_count = 0;
     ctx->right_float_count = 0;
     ctx->lowest_float_bottom = 0;
+    ctx->initial_letters = nullptr;
+    ctx->initial_letters_tail = nullptr;
 
     ctx->pool = pool;
 
@@ -119,6 +132,36 @@ void block_context_reset_floats(BlockContext* ctx) {
     ctx->left_float_count = 0;
     ctx->right_float_count = 0;
     ctx->lowest_float_bottom = 0;
+}
+
+void block_context_reset_initial_letters(BlockContext* ctx) {
+    ctx->initial_letters = nullptr;
+    ctx->initial_letters_tail = nullptr;
+}
+
+void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
+                                      float left, float top, float right, float bottom,
+                                      CssEnum direction, bool source_is_short) {
+    if (!ctx || !element || right <= left || bottom <= top) return;
+
+    InitialLetterBox* box = (InitialLetterBox*)pool_calloc(ctx->pool, sizeof(InitialLetterBox));
+    if (!box) return;
+
+    box->element = element;
+    box->margin_box_left = left;
+    box->margin_box_top = top;
+    box->margin_box_right = right;
+    box->margin_box_bottom = bottom;
+    box->direction = direction;
+    box->source_is_short = source_is_short;
+    box->next = nullptr;
+
+    if (!ctx->initial_letters) {
+        ctx->initial_letters = ctx->initial_letters_tail = box;
+    } else {
+        ctx->initial_letters_tail->next = box;
+        ctx->initial_letters_tail = box;
+    }
 }
 
 void block_context_recompute_lowest_float_bottom(BlockContext* ctx) {
@@ -300,6 +343,8 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
 
     box->element = float_elem;
     box->float_side = side;
+    box->initial_letter_clearance = float_elem->blk &&
+        float_elem->block()->initial_letter_float_clearance;
     box->next = nullptr;
 
     // Get margins
@@ -373,7 +418,8 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
 // Float Space Queries
 // ============================================================================
 
-FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height) {
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
+                                              bool line_query) {
     FloatAvailableSpace space;
     space.left = ctx->float_left_edge;
     space.right = ctx->float_right_edge;
@@ -393,7 +439,9 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
 
     // Check left floats - find rightmost intrusion
     for (FloatBox* fb = ctx->left_floats; fb; fb = fb->next) {
-        if (float_intersects_y_range(fb, y_top, y_bottom)) {
+        bool intersects = float_intersects_y_range(fb, y_top, y_bottom) &&
+            !(line_query && fb->initial_letter_clearance && fb->margin_box_top > y_top);
+        if (intersects) {
             if (fb->margin_box_right > space.left) {
                 space.left = fb->margin_box_right;
                 space.has_left_float = true;
@@ -403,7 +451,9 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
 
     // Check right floats - find leftmost intrusion
     for (FloatBox* fb = ctx->right_floats; fb; fb = fb->next) {
-        if (float_intersects_y_range(fb, y_top, y_bottom)) {
+        bool intersects = float_intersects_y_range(fb, y_top, y_bottom) &&
+            !(line_query && fb->initial_letter_clearance && fb->margin_box_top > y_top);
+        if (intersects) {
             if (fb->margin_box_left < space.right) {
                 space.right = fb->margin_box_left;
                 space.has_right_float = true;

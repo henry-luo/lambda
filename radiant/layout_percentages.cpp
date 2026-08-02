@@ -208,6 +208,112 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
     return content_size >= 0.0f ? content_size : 0.0f;
 }
 
+bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
+    DomElement* element = block ? block->as_element() : nullptr;
+    CssDeclaration* declaration = layout_specified_physical_size_declaration(element, horizontal);
+    if (!declaration || !declaration->value) return true;
+    if (declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum value = declaration->value->data.keyword;
+    return value == CSS_VALUE_AUTO || value == CSS_VALUE_INITIAL ||
+        value == CSS_VALUE_UNSET || value == CSS_VALUE_REVERT;
+}
+
+bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
+    if (!block || !block->blk) return true;
+    float given_size = horizontal ? block->block()->given_width : block->block()->given_height;
+    CssEnum given_size_type = horizontal
+        ? block->block()->given_width_type : block->block()->given_height_type;
+    if (given_size < 0.0f || given_size_type == CSS_VALUE_AUTO) return true;
+
+    const CssDeclaration* specified_size = block->is_element()
+        ? layout_specified_physical_size_declaration(block->as_element(), horizontal) : nullptr;
+    if (specified_size && specified_size->value) {
+        return layout_css_size_is_automatic(block, horizontal);
+    }
+
+    const char* html_size = block->get_attribute(horizontal ? "width" : "height");
+    // An aspect ratio supplies a used size for an otherwise auto box; it must
+    // not become an authored specified-size suggestion during flex sizing.
+    return !html_size || !html_size[0];
+}
+
+bool layout_block_has_automatic_height(ViewBlock* block) {
+    return layout_block_has_automatic_size(block, false);
+}
+
+WritingMode layout_block_writing_mode(ViewBlock* block) {
+    return block && block->embed && block->embedp()->flex
+        ? block->embedp()->flex->writing_mode : WM_HORIZONTAL_TB;
+}
+
+bool layout_block_inline_axis_is_vertical(ViewBlock* block) {
+    WritingMode writing_mode = layout_block_writing_mode(block);
+    return writing_mode == WM_VERTICAL_LR ||
+        writing_mode == WM_VERTICAL_RL;
+}
+
+bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal) {
+    if (!block || !block->blk) return false;
+    if (block->block()->contain_size || block->block()->content_visibility_hidden) return true;
+    if (!block->block()->contain_inline_size) return false;
+
+    bool inline_axis_is_vertical = layout_block_inline_axis_is_vertical(block);
+    // Inline-size containment applies size containment only to the logical
+    // inline axis, which is physical height in vertical writing modes.
+    return horizontal != inline_axis_is_vertical;
+}
+
+float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal) {
+    if (!block) return 0.0f;
+
+    if (block->form && block->block()->content_visibility_hidden &&
+        block->form->control_type == FORM_CONTROL_SELECT) {
+        bool is_listbox = block->form->multiple || block->has_attribute("multiple") ||
+            block->form->select_size > 1;
+        if (horizontal) {
+            if (is_listbox) return 0.0f;
+            float empty_combo_border_width = FormDefaults::SELECT_HEIGHT + 3.0f;
+            return empty_combo_border_width - 2.0f * FormDefaults::SELECT_BORDER;
+        }
+        if (!is_listbox) {
+            return FormDefaults::SELECT_HEIGHT - 2.0f * FormDefaults::SELECT_BORDER;
+        }
+        int visible_rows = block->form->select_size > 0 ? block->form->select_size
+            : (block->form->multiple ? 4 : 1);
+        // Hidden selects retain their native control chrome, but option text and
+        // rows are skipped; the listbox uses its anonymous empty-row metric.
+        return visible_rows * FormDefaults::SELECT_EMPTY_LISTBOX_ROW_HEIGHT;
+    }
+
+    bool inline_axis_is_vertical = layout_block_inline_axis_is_vertical(block);
+    if (horizontal == inline_axis_is_vertical) return 0.0f;
+
+    // A fixed multicol track remains after containment removes descendants;
+    // it is formatting structure in the logical inline axis, not content.
+    return multicol_empty_intrinsic_inline_size(block);
+}
+
+float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal) {
+    if (!block || !block->scroller || !block->scroll()->scrollbar_gutter_stable) {
+        return 0.0f;
+    }
+
+    bool inline_axis_is_vertical = layout_block_inline_axis_is_vertical(block);
+    if (horizontal == inline_axis_is_vertical) return 0.0f;
+
+    CssEnum block_axis_overflow = inline_axis_is_vertical
+        ? block->scroll()->overflow_x : block->scroll()->overflow_y;
+    bool block_axis_is_scrollable = block_axis_overflow == CSS_VALUE_AUTO ||
+        block_axis_overflow == CSS_VALUE_SCROLL || block_axis_overflow == CSS_VALUE_HIDDEN;
+    if (!block_axis_is_scrollable) return 0.0f;
+
+    // Classic scrollbar width is a UA layout metric; stable gutters reserve it
+    // even when no scrollbar is currently painted (CSS Overflow 3 §5.2).
+    constexpr float CLASSIC_SCROLLBAR_GUTTER_SIZE = 15.0f;
+    float gutter_count = block->scroll()->scrollbar_gutter_both_edges ? 2.0f : 1.0f;
+    return CLASSIC_SCROLLBAR_GUTTER_SIZE * gutter_count;
+}
+
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base) {
     if (!block || inline_base <= 0.0f) return -1.0f;
     float content_width = inline_base;

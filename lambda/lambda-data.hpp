@@ -81,19 +81,16 @@ class Input;
 
 // One sealed MIR module is instantiated separately in every EvalContext.  The
 // generated code may retain only the module id/slot constants; the mutable
-// binding and inline-cache storage is reached through this context-owned slab.
-// `member_ics` never moves after publication because compiled Lambda code
-// addresses it directly. JS direct eval may grow `vars`; its MIR lowering
-// reloads that pointer from the active context for every module-slot access.
+// binding storage is reached through this context-owned slab. JS direct eval
+// may grow `vars`; its MIR lowering reloads that pointer from the active
+// context for every module-slot access.
 typedef struct LambdaModuleState {
     Item* vars;
     uint64_t* var_payloads;
-    void* member_ics;
     PropertyKeyRef* property_keys;
     void* consts;
     void* type_list;
     uint32_t var_count;
-    uint32_t member_ic_count;
     uint32_t property_key_count;
     uint32_t module_id;
     bool vars_registered;
@@ -489,8 +486,8 @@ static inline uint32_t typemap_shape_entry_key_hash(ShapeEntry* entry) {
 
 static inline bool typemap_ptr_is_plausible(void* p) {
     uintptr_t addr = (uintptr_t)p;
-    // stale inline caches can retain tagged/scalar debris; TypeMap pointers
-    // are aligned heap allocations, never low-page or odd addresses.
+    // Map metadata can be corrupted into tagged/scalar debris; TypeMap
+    // pointers are aligned heap allocations, never low-page or odd addresses.
     return p && addr >= 0x10000ULL &&
         (addr & (sizeof(void*) - 1)) == 0 &&
         addr <= 0x0000FFFFFFFFFFFFULL;

@@ -198,8 +198,21 @@ struct TextIntrinsicWidths {
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
-float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width);
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
+                                   bool ignore_definite_block_size = false);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
+
+bool layout_element_inline_axis_is_vertical(DomElement* element);
+CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
+                                                            bool horizontal);
+CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
+                                                                   bool horizontal,
+                                                                   bool minimum);
+CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
+CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
+CssEnum layout_intrinsic_max_size_keyword(ViewBlock* block, bool horizontal);
+float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
+                                            float max_size, float available_outer_size);
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
@@ -223,7 +236,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     float available_width,
                                     float line_height,
                                     CssEnum text_transform = CSS_VALUE_NONE,
-                                    CssEnum font_variant = CSS_VALUE_NONE);
+                                    CssEnum font_variant = CSS_VALUE_NONE,
+                                    bool preserve_forced_line_breaks = false);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
@@ -285,7 +299,10 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 float layout_preferred_aspect_ratio(ViewBlock* block);
+float layout_used_preferred_aspect_ratio(ViewBlock* block);
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
+bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
+CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
 
 namespace radiant {
 
@@ -526,6 +543,12 @@ float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizin
 float layout_floor_border_box_width(ViewBlock* block, float border_width);
 float layout_floor_border_box_height(ViewBlock* block, float border_height);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margin_box_size,
+                                         bool horizontal);
+float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_box_size,
+                                       bool horizontal);
+void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin_box_size,
+                                        bool available_size_is_definite, bool horizontal);
 
 static inline CssEnum layout_box_sizing(ViewBlock* block) {
     return (block && block->blk) ? block->block()->box_sizing : CSS_VALUE_CONTENT_BOX;
@@ -538,6 +561,9 @@ static inline bool layout_uses_border_box(ViewBlock* block) {
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
+float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspect_ratio,
+                                                   float* content_width, float* content_height);
 float layout_clamp_min_max_width(ViewBlock* block, float width);
 float layout_clamp_min_max_height(ViewBlock* block, float height);
 
@@ -934,6 +960,51 @@ bool alignment_is_stretch(int32_t alignment);
 int32_t resolve_align_self(int32_t align_self, int32_t align_items);
 int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items);
 
+// CSS Inline 3: auto selects an inline-block's last baseline, while all other
+// inline-level boxes use their first baseline.
+inline bool layout_prefers_last_baseline(const ViewBlock* block,
+                                         bool auto_prefers_last) {
+    if (!block || !block->blk) return auto_prefers_last;
+    CssEnum baseline_source = block->block()->baseline_source;
+    if (baseline_source == CSS_VALUE_FIRST) return false;
+    if (baseline_source == CSS_VALUE_LAST) return true;
+    return auto_prefers_last;
+}
+
+inline float layout_select_cached_baseline(const ViewBlock* block,
+                                           float first_baseline,
+                                           float last_baseline,
+                                           bool auto_prefers_last,
+                                           float fallback_baseline) {
+    float selected = layout_prefers_last_baseline(block, auto_prefers_last) ?
+        last_baseline : first_baseline;
+    return selected > 0.0f ? selected : fallback_baseline;
+}
+
+inline float layout_inline_baseline_for_source(const ViewBlock* block,
+                                               float last_baseline) {
+    float first_baseline = block && block->blk ?
+        block->block()->first_line_baseline : 0.0f;
+    return layout_select_cached_baseline(
+        block, first_baseline, 0.0f, true, last_baseline);
+}
+
+inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
+    if (!block || !block->blk) return false;
+    CssEnum baseline_source = block->block()->baseline_source;
+    return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
+}
+
+// Form controls own editable line boxes without exposing child ViewText nodes.
+// Select their baseline set directly so explicit baseline-source does not fall
+// back to the generic replaced-element border-edge baseline.
+inline float layout_form_control_baseline_for_source(const ViewBlock* block) {
+    if (!block || !block->form) return 0.0f;
+    return layout_select_cached_baseline(
+        block, block->form->first_text_baseline,
+        block->form->last_text_baseline, true, 0.0f);
+}
+
 float compute_font_baseline_ascender(
     ::LayoutContext* lycon,
     FontProp* font,
@@ -942,6 +1013,11 @@ float compute_font_baseline_ascender(
 );
 
 float compute_element_first_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+);
+float compute_element_last_baseline(
     ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
@@ -958,6 +1034,16 @@ float compute_view_first_text_baseline(
     FirstBaselineRowCallback row_baseline
 );
 
+// Return the last descendant text baseline relative to `parent`. Multicol
+// fragmentation uses this after child boxes have moved to their final columns.
+float compute_view_last_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table
+);
+
 } // namespace radiant
 
 // ============================================================================
@@ -965,6 +1051,11 @@ float compute_view_first_text_baseline(
 // ============================================================================
 
 CssEnum get_white_space_value(DomNode* node);
+inline bool white_space_preserves_space_advance(CssEnum white_space) {
+    return white_space == CSS_VALUE_PRE ||
+        white_space == CSS_VALUE_PRE_WRAP ||
+        white_space == CSS_VALUE_BREAK_SPACES;
+}
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 
 // ============================================================================
@@ -1127,6 +1218,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 
 bool is_multicol_container(ViewBlock* block);
 float multicol_normal_gap_size(ViewBlock* block);
+float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
@@ -1163,8 +1255,21 @@ typedef struct FloatBox {
     float x, y, width, height;
 
     CssEnum float_side;         // CSS_VALUE_LEFT or CSS_VALUE_RIGHT
+    bool initial_letter_clearance; // float was lowered below a sunk initial letter
     struct FloatBox* next;      // Linked list for multiple floats
 } FloatBox;
+
+// tier-3: layout-transient, valid within pass
+typedef struct InitialLetterBox {
+    ViewBlock* element;         // block containing the initial letter
+    float margin_box_top;
+    float margin_box_bottom;
+    float margin_box_left;
+    float margin_box_right;
+    CssEnum direction;
+    bool source_is_short;
+    struct InitialLetterBox* next;
+} InitialLetterBox;
 
 /**
  * FloatAvailableSpace - Result of space query at a given Y coordinate
@@ -1234,8 +1339,21 @@ typedef struct BlockContext {
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
     float initial_letter_exclusion_width;
+    float initial_letter_exclusion_right;
     int initial_letter_exclusion_lines;
+    float initial_letter_exclusion_bottom;
+    float initial_letter_margin_box_left;
+    float initial_letter_margin_box_right;
+    float initial_letter_margin_box_top;
+    float initial_letter_margin_box_bottom;
+    float initial_letter_border_box_bottom;
+    int initial_letter_origin_line_number;
+    bool initial_letter_clears_later_start_floats;
+    bool initial_letter_exclusion_requires_intersection;
     bool initial_letter_origin_offset_applied;
+    bool initial_letter_continuation_cleared;
+    float initial_letter_trimmed_start_candidate;
+    float initial_letter_trimmed_start_contribution;
 
     // -webkit-line-clamp support
     int line_number;            // Current line number (1-based, incremented by line_break)
@@ -1276,6 +1394,11 @@ typedef struct BlockContext {
     int left_float_count;
     int right_float_count;
     float lowest_float_bottom;  // Optimization: track lowest float edge
+
+    // CSS Inline 3 §7.9.2: Initial letters that extend below a short block
+    // continue their exclusion in later blocks in the same BFC.
+    InitialLetterBox* initial_letters;
+    InitialLetterBox* initial_letters_tail;
 
     // Content area bounds (for float calculations)
     float float_left_edge;      // Left edge of content area (usually 0)
@@ -1336,6 +1459,11 @@ typedef struct Linebox {
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
+    float ruby_annotation_min_line_height; // block-side ruby annotation extent outside the base line
+    float ruby_annotation_over_shift; // extra block-start space required by ruby annotations
+    float initial_letter_origin_advance; // raised-cap displacement already applied to this line
+    bool has_initial_letter; // line contains an initial whose origin line may need ruby metrics
+    bool has_drop_initial_letter; // line contains a drop initial whose base level can be raised
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
@@ -1494,6 +1622,10 @@ typedef struct FlexContainerLayout : FlexProp {
     // and flex-grow should NOT distribute additional space
     bool main_axis_is_indefinite;
 
+    // A min-size can enlarge the used flex container without making its
+    // automatic main size a definite percentage basis for descendants.
+    bool main_axis_available_size_is_definite;
+
     // CSS Flexbox §9.4: Whether container has a definite cross size
     // True if container has explicit CSS height (row flex) or width (column flex)
     // False for auto-size containers that derive cross size from content
@@ -1505,6 +1637,9 @@ typedef struct FlexContainerLayout : FlexProp {
     // pass-local flex state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } FlexContainerLayout;
+
+bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* flex_layout);
+bool flex_item_has_content_flex_basis(ViewElement* item);
 
 // ============================================================================
 // Layout Axis Helpers
@@ -1918,6 +2053,8 @@ typedef struct GridContainerLayout : GridProp {
     float content_height;
     bool has_explicit_height;
     bool is_shrink_to_fit_width;
+    bool is_min_content_width;
+    bool is_max_content_width;
     float row_intrinsic_height;
     struct LayoutContext* lycon;
     bool auto_fit_columns[64];
@@ -2063,6 +2200,14 @@ bool layout_apply_deferred_percentage(float percent, float percentage_base, floa
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
 float layout_block_given_content_size(ViewBlock* block, bool horizontal);
 float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal);
+bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
+bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
+bool layout_block_has_automatic_height(ViewBlock* block);
+WritingMode layout_block_writing_mode(ViewBlock* block);
+bool layout_block_inline_axis_is_vertical(ViewBlock* block);
+bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal);
+float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal);
+float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 
@@ -2206,6 +2351,14 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
  */
 void block_context_reset_floats(BlockContext* ctx);
 
+// Clears the initial-letter continuations when entering a nested BFC.
+void block_context_reset_initial_letters(BlockContext* ctx);
+
+// Registers an initial letter's used margin box in BFC coordinates.
+void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
+                                      float left, float top, float right, float bottom,
+                                      CssEnum direction, bool source_is_short);
+
 /**
  * Check if an element establishes a new BFC
  * Per CSS 2.2 Section 9.4.1
@@ -2229,9 +2382,12 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
  * @param ctx The block context
  * @param y Y coordinate relative to content area
  * @param height Height of the line/element being placed
+ * @param line_query Exclude a specially lowered initial-letter float from a
+ *                   line that already originated above the float.
  * @return Available space bounds adjusted for floats
  */
-FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height);
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
+                                              bool line_query = false);
 
 /**
  * Find the lowest Y where a given width is available
@@ -2432,6 +2588,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
+void layout_offset_ruby_annotation_tree(View* view, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
@@ -2478,6 +2635,7 @@ void layout_setup_block_font_metrics(LayoutContext* lycon);
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
+void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
@@ -2554,6 +2712,31 @@ struct BlockContextScope {
     // Non-copyable
     BlockContextScope(const BlockContextScope&) = delete;
     BlockContextScope& operator=(const BlockContextScope&) = delete;
+};
+
+/**
+ * Scoped percentage containing block for nested style or intrinsic queries.
+ *
+ * Style resolution persists used percentage values in the view, so a nested
+ * query must expose its real containing block rather than an ancestor context.
+ */
+// tier-3: layout-transient, valid within pass
+struct PercentageContainingBlockWidthScope {
+    LayoutContext* lycon;
+    BlockContext* saved_parent;
+    BlockContext containing_block;
+
+    PercentageContainingBlockWidthScope(LayoutContext* l, float content_width)
+        : lycon(l), saved_parent(l->block.parent), containing_block{} {
+        if (saved_parent) containing_block = *saved_parent;
+        containing_block.content_width = content_width;
+        lycon->block.parent = &containing_block;
+    }
+    ~PercentageContainingBlockWidthScope() {
+        lycon->block.parent = saved_parent;
+    }
+    PercentageContainingBlockWidthScope(const PercentageContainingBlockWidthScope&) = delete;
+    PercentageContainingBlockWidthScope& operator=(const PercentageContainingBlockWidthScope&) = delete;
 };
 
 /**

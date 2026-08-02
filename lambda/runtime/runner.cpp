@@ -1578,7 +1578,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     EvalContext* ctx = runner->context;
     if (!ctx) return nullptr;
 
-    // Establish the script's context-owned global and IC slabs.
+    // Establish the script's context-owned global binding slab.
     if (runner->script->jit_context) {
         if (!prepare_context_module_state((void*)runner->script->jit_context,
                 runner->script->const_list ? runner->script->const_list->data : nullptr,
