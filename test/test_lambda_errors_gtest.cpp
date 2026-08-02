@@ -172,7 +172,7 @@ TEST(NumericBoundaryAdmissionTest, ExactScalarConversionsPreserveTargetTags) {
 
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(3.0), &TYPE_INT, &converted));
     EXPECT_EQ(get_type_id(converted), LMD_TYPE_INT);
-    EXPECT_EQ(converted.get_int56(), 3);
+    EXPECT_EQ(lambda_int_item_to_i64(converted), 3);
     EXPECT_FALSE(lambda_numeric_boundary_admit(push_d(3.5), &TYPE_INT, &converted));
 
     struct SignedBoundaryCase {

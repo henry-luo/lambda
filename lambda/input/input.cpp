@@ -100,7 +100,7 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT: {
-        int64_t int_val = value.get_int56();
+        int64_t int_val = lambda_int_item_to_i64(value);
         *(int64_t*)field_ptr = int_val;
         break;
     }
@@ -158,7 +158,8 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         case LMD_TYPE_BOOL:
             titem.bool_val = item.bool_val;  break;
         case LMD_TYPE_INT:
-            titem.int_val = item.int_val;  break;
+            // C16: carry the numeric value; an int Item payload is not its value.
+            titem.double_val = lambda_int_item_value(item);  break;
         case LMD_TYPE_INT64:
             titem.long_val = item.get_int64();  break;
         case LMD_TYPE_UINT64:
@@ -614,7 +615,7 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.get_int56();
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

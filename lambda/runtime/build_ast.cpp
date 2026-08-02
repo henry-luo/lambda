@@ -1004,7 +1004,7 @@ static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
     Item item;
     if (!ast_static_literal_item(tp, node, &item)) return false;
     switch (get_type_id(item)) {
-    case LMD_TYPE_INT: return item.get_int56() == 0;
+    case LMD_TYPE_INT: return lambda_int_item_to_i64(item) == 0;
     case LMD_TYPE_INT64: return item.get_int64() == 0;
     case LMD_TYPE_UINT64: return item.get_uint64() == 0;
     case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return item.get_double() == 0.0;
@@ -1063,7 +1063,7 @@ static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* o
     TypeId type_id = get_type_id(item);
     int64_t value = 0;
     if (type_id == LMD_TYPE_INT) {
-        value = item.get_int56();
+        value = lambda_int_item_to_i64(item);
     } else if (type_id == LMD_TYPE_INT64) {
         value = item.get_int64();
     } else if (type_id == LMD_TYPE_UINT64) {

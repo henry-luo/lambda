@@ -3254,9 +3254,9 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
                 MIR_new_reg_op(mt->ctx, i_reg), MIR_new_reg_op(mt->ctx, src_len)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
                 MIR_new_reg_op(mt->ctx, cmp)));
-            MIR_reg_t idx_boxed = jm_new_reg(mt, "spaidx", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, idx_boxed),
-                MIR_new_reg_op(mt->ctx, i_reg), MIR_new_uint_op(mt->ctx, ITEM_INT_TAG)));
+            // Box through the funnel: an int Item is not a tagged payload, so
+            // OR-ing the tag onto a raw index no longer produces that index.
+            MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
             MIR_reg_t elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));

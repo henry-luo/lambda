@@ -88,7 +88,7 @@ static inline String* item_as_pdf_name(Item it) {
 static inline int item_as_int(Item it, int dflt) {
     TypeId t = get_type_id(it);
     if (t == LMD_TYPE_INT) {
-        return (int)it.get_int56();
+        return (int)lambda_int_item_to_i64(it);
     }
     if (t == LMD_TYPE_FLOAT) {
         // PDF object references are stored as numeric Items; self-tagged

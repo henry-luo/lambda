@@ -9,13 +9,13 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function.",
       "budgets": {
         "default": {
-          "module_insns": 207,
+          "module_insns": 229,
           "functions": {
             "_twice_#": {
-              "insns": 80
+              "insns": 84
             },
             "main": {
-              "insns": 54
+              "insns": 63
             }
           },
           "frames": [
@@ -47,10 +47,10 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation and its reviewed Phase 3 clean-return firewall.",
       "budgets": {
         "default": {
-          "module_insns": 154,
+          "module_insns": 158,
           "functions": {
             "_accumulate_#": {
-              "insns": 109
+              "insns": 113
             },
             "main": {
               "insns": 45
@@ -111,10 +111,10 @@
       "description": "JS call-result binding: watches js_main's root-store traffic and the conservative exception-extraction safepoints.",
       "budgets": {
         "default": {
-          "module_insns": 172,
+          "module_insns": 175,
           "functions": {
             "js_main": {
-              "insns": 107
+              "insns": 110
             }
           },
           "frames": [
@@ -124,7 +124,7 @@
               "root_stores": 13,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 15
+              "safepoints": 18
             }
           ]
         }
@@ -137,20 +137,20 @@
       "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including conservative exception-extraction safepoints.",
       "budgets": {
         "default": {
-          "module_insns": 345,
+          "module_insns": 350,
           "functions": {
             "js_main": {
-              "insns": 75
+              "insns": 80
             }
           },
           "frames": [
             {
               "name": "js_main",
               "roots": 2,
-              "root_stores": 6,
+              "root_stores": 8,
               "scalar_homes": 2,
               "number_scratch": 0,
-              "safepoints": 9
+              "safepoints": 12
             },
             {
               "name": "_js_anon1_#",
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 1839
+          "module_insns": 2100
         }
       }
     },
@@ -194,7 +194,7 @@
       "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots in each generated root frame.",
       "budgets": {
         "default": {
-          "module_insns": 2929
+          "module_insns": 2959
         }
       }
     },
@@ -205,7 +205,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots in each generated root frame.",
       "budgets": {
         "default": {
-          "module_insns": 4251
+          "module_insns": 4406
         }
       }
     },
@@ -216,7 +216,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested and throwing fixed argument-root extents.",
       "budgets": {
         "default": {
-          "module_insns": 4544
+          "module_insns": 4668
         }
       }
     },
@@ -227,7 +227,7 @@
       "description": "Stage-1 nested COW relinking: 149 finalized instructions on the reviewed register/root-slot path, with no heap path-array construction.",
       "budgets": {
         "default": {
-          "module_insns": 146
+          "module_insns": 164
         }
       }
     },
@@ -238,7 +238,7 @@
       "description": "Typed numeric-array load guards plus the in-place procedure-parameter write guard, including reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 464,
+          "module_insns": 491,
           "functions": {
             "_guarded_load_#": {
               "insns": 96
@@ -275,13 +275,13 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 453,
+          "module_insns": 461,
           "functions": {
             "_closed_gap_#": {
-              "insns": 76
+              "insns": 80
             },
             "_open_gap_#": {
-              "insns": 76
+              "insns": 80
             }
           },
           "frames": [
@@ -315,7 +315,7 @@
           "module_insns": 6821,
           "functions": {
             "js_main": {
-              "insns": 3854
+              "insns": 3869
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 12

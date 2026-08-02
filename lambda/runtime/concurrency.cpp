@@ -278,7 +278,7 @@ static bool task_read_milliseconds(Item item, int64_t* out) {
     // Inline int56 values store payload bits in the Item itself; only INT64
     // carries a pointer that is valid for get_int64().
     if (type_id == LMD_TYPE_INT) {
-        *out = item.get_int56();
+        *out = lambda_int_item_to_i64(item);
         return true;
     }
     if (type_id == LMD_TYPE_INT64) {

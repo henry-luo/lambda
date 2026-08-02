@@ -338,7 +338,7 @@ static HashMap* rdb_build_pk_index_for(Item table_array, const char* pk_col_name
         int64_t pk_val;
         TypeId tid = get_type_id(pk_item);
         if (tid == LMD_TYPE_INT) {
-            pk_val = pk_item.get_int56();
+            pk_val = lambda_int_item_to_i64(pk_item);
         } else if (tid == LMD_TYPE_INT64) {
             pk_val = *(int64_t*)pk_item.item;
         } else {
@@ -391,7 +391,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
         int64_t fk_val;
         TypeId tid = get_type_id(fk_item);
         if (tid == LMD_TYPE_INT) {
-            fk_val = fk_item.get_int56();
+            fk_val = lambda_int_item_to_i64(fk_item);
         } else if (tid == LMD_TYPE_INT64) {
             fk_val = *(int64_t*)fk_item.item;
         } else {
@@ -451,7 +451,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
             int64_t pk_val;
             TypeId tid = get_type_id(pk_item);
             if (tid == LMD_TYPE_INT) {
-                pk_val = pk_item.get_int56();
+                pk_val = lambda_int_item_to_i64(pk_item);
             } else if (tid == LMD_TYPE_INT64) {
                 pk_val = *(int64_t*)pk_item.item;
             } else {

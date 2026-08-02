@@ -121,11 +121,12 @@ typedef struct Item {
         if (this->item & ITEM_DBL_MASK) {
             return LMD_TYPE_FLOAT;
         }
+        // Inline int: the `100` octant. Bits 62-61 are already known clear, so
+        // the sign bit alone separates it from the tag space below it.
+        if (LAMBDA_ITEM_IS_INLINE_INT(this->item)) {
+            return LMD_TYPE_INT;
+        }
         if (this->_type_id) {
-            // C16: the out-of-band int carrier is a representation, not a type,
-            // so it reports `int` just as a cell-carried double reports `float`.
-            // Callers that need the carrier must test `_type_id` directly.
-            if (this->_type_id == LMD_TYPE_INT_BIG) return LMD_TYPE_INT;
             return this->_type_id;
         }
         // container types store TypeId at address pointed to by item
@@ -223,15 +224,6 @@ typedef struct Item {
         return ((Symbol*)this->symbol_ptr)->len;
     }
 
-    // get int56 value sign-extended to int64
-    inline int64_t get_int56() const {
-        uint64_t raw = item & 0x00FFFFFFFFFFFFFFULL;
-        // sign extend from bit 55
-        if (raw & 0x0080000000000000ULL) {
-            return (int64_t)(raw | 0xFF00000000000000ULL);  // ITEM_TAG_LITERAL_OK: int56 sign extension mask, not an Item tag.
-        }
-        return (int64_t)raw;
-    }
 } Item;
 
 static_assert(sizeof(Item) == sizeof(uint64_t), "C++ Item must remain one word");
@@ -282,10 +274,9 @@ inline ConstItem Item::to_const() const {
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
 static inline bool lambda_item_uses_scalar_home(Item item) {
-    // C16's out-of-band int carrier is cell-backed, so it must rehome with the
-    // other scalars or it dangles when its frame dies. It is tested on the raw
-    // tag because `type_id()` deliberately normalizes it to LMD_TYPE_INT.
-    if (!(item.item & ITEM_DBL_MASK) && item._type_id == LMD_TYPE_INT_BIG) return true;
+    // C16: `int` is NOT here. An int Item carries its own rotated IEEE bits at
+    // every magnitude, so it never points at frame-scoped storage. The scalar
+    // home protocol covers exactly int64, uint64 and cell-backed (tiny) floats.
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
     return (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
@@ -293,15 +284,19 @@ static inline bool lambda_item_uses_scalar_home(Item item) {
         item.item != ITEM_FLOAT_N0;
 }
 
-// The value of an `int` Item as a double — the C16 canonical numeric view,
-// covering both the compact payload and the out-of-band cell. Poison payloads
-// come back as their sentinel magnitudes, so callers that care must classify
-// with LAMBDA_INT_VALUE_IS_POISON before converting.
+// The two canonical ways to read an `int` Item. Every consumer goes through one
+// of them, so the boxed representation is changeable in one place: `_value` is
+// the C16 numeric view (int arithmetic is total in binary64, so this one stays
+// exact at every magnitude), `_to_i64` is for index/count/i64-storage consumers,
+// whose values are in-band by construction. Poison payloads come back as their
+// sentinel magnitudes, so callers that care must classify with
+// LAMBDA_INT_VALUE_IS_POISON first.
 static inline double lambda_int_item_value(Item item) {
-    if (!(item.item & ITEM_DBL_MASK) && item._type_id == LMD_TYPE_INT_BIG) {
-        return *(const double*)(uintptr_t)(item.item & 0x00FFFFFFFFFFFFFFULL);
-    }
-    return (double)item.get_int56();
+    return lambda_int_unbox_double(item.item);
+}
+
+static inline int64_t lambda_int_item_to_i64(Item item) {
+    return (int64_t)lambda_int_unbox_double(item.item);
 }
 
 // Compatibility aggregate: the native root/GC helpers are provided by rt.

@@ -127,9 +127,7 @@ static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
 static const uint64_t ITEM_JS_UNDEF_VAL = (uint64_t)LMD_TYPE_UNDEFINED << 56;
 static const uint64_t ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
-static const uint64_t ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
-static const uint64_t MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
 static const int JS_MIR_TDZ_CLOSURE_CAPTURE_MAX = 512;

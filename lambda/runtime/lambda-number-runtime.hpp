@@ -55,7 +55,7 @@ static inline uint8_t lambda_numeric_runtime_part(
     switch (kind) {
     case LAMBDA_NUM_INT:
         part->kind = LAMBDA_NUM_PART_SIGNED;
-        part->signed_value = item.get_int56();
+        part->signed_value = lambda_int_item_to_i64(item);
         return 1;
     case LAMBDA_NUM_I8:
         part->kind = LAMBDA_NUM_PART_SIGNED;

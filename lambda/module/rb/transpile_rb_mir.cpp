@@ -55,9 +55,7 @@ static const uint64_t RB_ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
 static const uint64_t RB_ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
 static const uint64_t RB_ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t RB_ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
-static const uint64_t RB_ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
 static const uint64_t RB_STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
-static const uint64_t RB_MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 // ============================================================================
 // Structures
@@ -310,10 +308,11 @@ static MIR_reg_t rm_emit_null(RbMirTranspiler* mt) {
 }
 
 static MIR_reg_t rm_box_int_const(RbMirTranspiler* mt, int64_t value) {
+    // C16: the int encoding is a pure function of the value, so a constant
+    // folds completely. Tag-OR is wrong now — an int Item is not a payload.
     MIR_reg_t r = rm_new_reg(mt, "boxi", MIR_T_I64);
-    uint64_t tagged = RB_ITEM_INT_TAG | ((uint64_t)value & RB_MASK56);
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, r),
-        MIR_new_int_op(mt->em.ctx, (int64_t)tagged)));
+        MIR_new_int_op(mt->em.ctx, (int64_t)lambda_int_box_double((double)value))));
     return r;
 }
 
@@ -453,8 +452,6 @@ static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
     int64_t INT53_MIN_VAL = INT53_MIN;
 
     MIR_reg_t result = rm_new_reg(mt, "boxi", MIR_T_I64);
-    MIR_reg_t masked = rm_new_reg(mt, "mask", MIR_T_I64);
-    MIR_reg_t tagged = rm_new_reg(mt, "tag", MIR_T_I64);
     MIR_reg_t le_max = rm_new_reg(mt, "le", MIR_T_I64);
     MIR_reg_t ge_min = rm_new_reg(mt, "ge", MIR_T_I64);
     MIR_reg_t in_range = rm_new_reg(mt, "rng", MIR_T_I64);
@@ -465,10 +462,6 @@ static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
         MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, INT53_MIN_VAL)));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, in_range),
         MIR_new_reg_op(mt->em.ctx, le_max), MIR_new_reg_op(mt->em.ctx, ge_min)));
-    rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_AND, MIR_new_reg_op(mt->em.ctx, masked),
-        MIR_new_reg_op(mt->em.ctx, val), MIR_new_int_op(mt->em.ctx, (int64_t)RB_MASK56)));
-    rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_OR, MIR_new_reg_op(mt->em.ctx, tagged),
-        MIR_new_int_op(mt->em.ctx, (int64_t)RB_ITEM_INT_TAG), MIR_new_reg_op(mt->em.ctx, masked)));
 
     MIR_label_t l_ok = rm_new_label(mt);
     MIR_label_t l_end = rm_new_label(mt);
@@ -484,8 +477,11 @@ static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
         MIR_new_reg_op(mt->em.ctx, float_boxed)));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
     rm_emit_label(mt, l_ok);
+    // C16: an int Item carries rotated IEEE bits — produce it via the encoder.
+    MIR_reg_t int_boxed = rm_call_1(mt, "int2it_i64", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, val));
     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_reg_op(mt->em.ctx, tagged)));
+        MIR_new_reg_op(mt->em.ctx, int_boxed)));
     rm_emit_label(mt, l_end);
     return result;
 }

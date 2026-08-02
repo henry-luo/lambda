@@ -248,7 +248,11 @@ void init_typetype() {
     EmptyObject.type_id = LMD_TYPE_OBJECT;  EmptyObject.type_index = -1;
 }
 
-TypeInfo type_info[LMD_CONTAINER_HEAP_START + 1];
+// Indexed by an Item's tag byte, so it must span the whole legal tag range
+// (0x00-0x1F per the tag-space partition), not just the assigned TypeIds:
+// internal sentinels ride reserved tags above LMD_TYPE_COUNT and still reach
+// per-tag lookups through map storage.
+TypeInfo type_info[LAMBDA_TAG_SPACE_SIZE];
 
 void init_type_info() {
     type_info[LMD_TYPE_RAW_POINTER] = {sizeof(void*), "pointer", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
@@ -283,6 +287,11 @@ void init_type_info() {
     type_info[LMD_TYPE_NUM_SIZED] = {sizeof(uint64_t), "num_sized", &TYPE_NUM_SIZED, (Type*)&LIT_TYPE_INT};  // inline packed
     type_info[LMD_TYPE_UINT64] = {sizeof(uint64_t), "u64", &TYPE_UINT64, (Type*)&LIT_TYPE_U64};
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
+    // Reserved tags carry no value type; give them a valid row so a sentinel
+    // reaching a per-tag lookup reads a defined entry instead of past the end.
+    for (size_t i = LMD_CONTAINER_HEAP_START + 1; i < LAMBDA_TAG_SPACE_SIZE; i++) {
+        type_info[i] = {0, "reserved", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
+    }
 }
 
 struct Initializer {
@@ -315,13 +324,13 @@ Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size) {
 
 extern "C" {
 
-// Old it2l - redirects to get_int56() for int type
+// Old it2l - redirects to the canonical int accessor for int type
 // Note: The main it2l function is defined below it2i
 
 double it2d(Item itm) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
-        return (double)itm.get_int56();
+        return lambda_int_item_value(itm);
     }
     else if (type_id == LMD_TYPE_INT64) {
         return (double)itm.get_int64();
@@ -355,7 +364,7 @@ bool it2b(Item itm) {
         return false;  // errors are falsy
     }
     else if (type_id == LMD_TYPE_INT) {
-        return itm.get_int56() != 0;
+        return lambda_int_item_to_i64(itm) != 0;
     }
     else if (is_float_type_id(type_id)) {
         // Lambda truthiness treats every number as truthy; inline floats must not
@@ -373,7 +382,7 @@ bool it2b(Item itm) {
 int64_t it2i(Item itm) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
-        return itm.get_int56();
+        return lambda_int_item_to_i64(itm);
     }
     else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
@@ -414,7 +423,7 @@ void _store_f64(double* dst, double val) { *dst = val; }
 int64_t it2l(Item itm) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
-        return itm.get_int56();
+        return lambda_int_item_to_i64(itm);
     }
     else if (type_id == LMD_TYPE_INT64) {
         return itm.get_int64();
@@ -449,7 +458,7 @@ DateTime* it2k(Item itm) {
 uint64_t it2u(Item itm) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_UINT64) return itm.get_uint64();
-    if (type_id == LMD_TYPE_INT) return (uint64_t)itm.get_int56();
+    if (type_id == LMD_TYPE_INT) return (uint64_t)lambda_int_item_to_i64(itm);
     if (type_id == LMD_TYPE_INT64) return (uint64_t)itm.get_int64();
     if (type_id == LMD_TYPE_NUM_SIZED) return (uint64_t)itm.get_num_sized_as_int64();
     if (is_float_type_id(type_id)) return (uint64_t)itm.get_double();
@@ -632,7 +641,7 @@ Item scalar_storage_read(Item item, bool immortal) {
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0 || offset >= array->length) return ItemNull;
     switch (array->get_elem_type()) {
-        case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
+        case ELEM_INT:     return (Item){.item = lambda_int_box_double(array->float_items[offset])};
         case ELEM_INT64:
 #ifdef LAMBDA_IO_STATIC_VALUES
             return {.item = l2it(&array->items[offset])};
@@ -712,7 +721,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 } else if (item_type == LMD_TYPE_BOOL) {
                     val = item.bool_val ? 1 : 0;
                 } else {
-                    val = item.get_int56();
+                    val = lambda_int_item_to_i64(item);
                 }
                 *(int64_t*)field_ptr = val;
                 break;
@@ -731,7 +740,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 TypeId item_type = get_type_id(item);
                 double val;
                 if (item_type == LMD_TYPE_INT) {
-                    val = (double)item.get_int56();
+                    val = lambda_int_item_value(item);
                 } else if (item_type == LMD_TYPE_INT64) {
                     val = (double)item.get_int64();
                 } else if (item_type == LMD_TYPE_UINT64) {
@@ -815,7 +824,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_BOOL:
                     titem.bool_val = item.bool_val;  break;
                 case LMD_TYPE_INT:
-                    titem.int_val = item.int_val;  break;
+                    // C16: carry the numeric value; an int Item payload is not its value.
+                    titem.double_val = lambda_int_item_value(item);  break;
                 case LMD_TYPE_INT64:
                     titem.long_val = item.get_int64();  break;
                 case LMD_TYPE_UINT64:
@@ -909,7 +919,10 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_BOOL:
         return {.item = b2it(titem->bool_val)};
     case LMD_TYPE_INT:
-        return {.item = i2it(titem->int_val)};
+        // stored as the numeric value (see the ANY field store), not a payload.
+        // Encode inline rather than calling `int2it`: core must not depend on
+        // the runtime library, and the encoder is header-only for that reason.
+        return (Item){.item = lambda_int_box_double(titem->double_val)};
     case LMD_TYPE_INT64:
         // TypedItem owns wide-scalar payloads alongside the tag, so Items may
         // borrow that stable field directly instead of consuming a number home.

@@ -485,7 +485,7 @@ Item array_num_read_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0) return ItemNull;
     if (!array_num_resolve_data(array, false) && array->length > 0) return ItemNull;
     switch (array->get_elem_type()) {
-        case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
+        case ELEM_INT:     return (Item){.item = lambda_int_box_double(array->float_items[offset])};
         case ELEM_INT64:   return box_int64_value(array->items[offset]);
         case ELEM_FLOAT64:   return push_d(array->float_items[offset]);
         case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
@@ -509,6 +509,9 @@ double array_num_read_double(ArrayNum* arr, int64_t offset) {
     if (!array_num_resolve_data(arr, false) && arr->length > 0) return 0.0;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
+        // C16: the `int` lane is double-backed — an int is a float64-representable
+        // integer, and only a double lane can also hold int.inf/int.nan.
+        return arr->float_items[offset];
     case ELEM_INT64:
         return (double)arr->items[offset];
     case ELEM_FLOAT64:
@@ -706,11 +709,11 @@ ArrayNum* array_int_new(int64_t length) {
 }
 
 ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(int64_t))) {
+    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(double))) {
         va_list args;
         va_start(args, count);
         for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);
+            arr->float_items[i] = (double)va_arg(args, int64_t);
         }
         va_end(args);
     }
@@ -726,8 +729,7 @@ Item array_int_get(ArrayNum *array, int64_t index) {
         log_debug("array_int_get: index out of bounds: %lld", (long long)index);
         return ItemNull;  // return null instead of error
     }
-    int64_t val = array->items[index];
-    Item item = (Item){.item = i2it(val)};
+    Item item = (Item){.item = lambda_int_box_double(array->float_items[index])};
     return item;
 }
 
@@ -844,7 +846,8 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
         return;
     }
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
-    arr->items[index] = value;
+    // C16: the int lane is double-backed, so the native i64 converts on store.
+    arr->float_items[index] = (double)value;
     if (index >= arr->length) {
         arr->length = index + 1;
     }
@@ -877,7 +880,7 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
             dval = (double)(value.get_uint64());
             break;
         case LMD_TYPE_INT:
-            dval = (double)(value.get_int56());
+            dval = lambda_int_item_value(value);
             break;
         default:
             return;  // Unsupported type, do nothing
@@ -947,6 +950,8 @@ void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
+        arr->float_items[index] = (double)value;
+        break;
     case ELEM_INT64:
         arr->items[index] = value;
         break;
@@ -1121,7 +1126,8 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
-        arr->items[index] = item_to_int_value(value);
+        // Poison rides through as the IEEE special it denotes; no lane sentinel.
+        arr->float_items[index] = item_to_float_value(value);
         break;
     case ELEM_INT64:
         arr->items[index] = item_to_int_value(value);
@@ -3023,7 +3029,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             for (int64_t i = 0; i < length; i++) {
                 // compact ArrayNum lanes do not live in items[]; widen through
                 // Item access so sized numeric payloads are decoded first.
-                typed->items[i] = item_to_int_value(array_num_get(src, i));
+                // C16: the int lane is double-backed.
+                typed->float_items[i] = item_to_float_value(array_num_get(src, i));
             }
             return typed;
         }
@@ -3070,7 +3077,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 }
                 // boxed sized numerics carry their value in NUM_SIZED payload bits,
                 // not the compact-int slot; decode before widening to int[].
-                typed->items[i] = item_to_int_value(items[i]);
+                // C16: the int lane is double-backed.
+                typed->float_items[i] = item_to_float_value(items[i]);
             }
             return typed;
         }

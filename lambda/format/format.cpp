@@ -55,7 +55,7 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_INT) {
-        int64_t val = item.get_int56();
+        int64_t val = lambda_int_item_to_i64(item);
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
         stringbuf_append_str(sb, num_buf);

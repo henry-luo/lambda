@@ -1397,7 +1397,7 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
         return;
     }
     if (type_id == LMD_TYPE_INT) {
-        snprintf(buffer, capacity, "int %lld", (long long)item.get_int56());
+        snprintf(buffer, capacity, "int %lld", (long long)lambda_int_item_to_i64(item));
         return;
     }
     if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
@@ -2932,7 +2932,7 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_INT: {
         char buf[32];
-        int64_t int_val = itm.get_int56();
+        int64_t int_val = lambda_int_item_to_i64(itm);
         snprintf(buf, sizeof(buf), "%lld", (long long)int_val);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
@@ -6080,10 +6080,10 @@ static void convert_specialized_to_generic(Array* arr) {
             }
             arr->extra = extra_count;
         } else {
-            // ELEM_INT: int56 values pack directly into Item
-            int64_t* old_items = num_arr->items;
+            // ELEM_INT is double-backed; box each element through the encoder.
+            double* old_items = num_arr->float_items;
             for (int64_t i = 0; i < len; i++) {
-                new_items[i] = {.item = i2it(old_items[i])};
+                new_items[i] = {.item = lambda_int_box_double(old_items[i])};
             }
         }
     } else {
@@ -6149,7 +6149,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             if (val_type == LMD_TYPE_FLOAT) {
                 num_arr->float_items[index] = value.get_double();
             } else if (val_type == LMD_TYPE_INT) {
-                num_arr->float_items[index] = (double)value.get_int56();
+                num_arr->float_items[index] = lambda_int_item_value(value);
             } else if (val_type == LMD_TYPE_INT64) {
                 num_arr->float_items[index] = (double)value.get_int64();
             } else if (val_type == LMD_TYPE_UINT64) {
@@ -6162,7 +6162,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             if (val_type == LMD_TYPE_INT64) {
                 num_arr->items[index] = value.get_int64();
             } else if (val_type == LMD_TYPE_INT) {
-                num_arr->items[index] = (int64_t)value.get_int56();
+                num_arr->items[index] = (int64_t)lambda_int_item_to_i64(value);
             } else {
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
@@ -6171,7 +6171,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             if (val_type == LMD_TYPE_UINT64) {
                 ((uint64_t*)num_arr->data)[index] = value.get_uint64();
             } else if (val_type == LMD_TYPE_INT) {
-                ((uint64_t*)num_arr->data)[index] = (uint64_t)value.get_int56();
+                ((uint64_t*)num_arr->data)[index] = (uint64_t)lambda_int_item_to_i64(value);
             } else {
                 // Preserve the old elements as owner-backed u64 Items before
                 // widening an inferred typed array to a heterogeneous array.
@@ -6181,11 +6181,12 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         } else {
             // ELEM_INT
             if (val_type == LMD_TYPE_INT) {
-                num_arr->items[index] = (int64_t)value.get_int56();
+                // Whole domain fits, poison included — no widening needed.
+                num_arr->float_items[index] = lambda_int_item_value(value);
             } else if (val_type == LMD_TYPE_INT64) {
                 int64_t lval = value.get_int64();
                 if (lval >= INT53_MIN && lval <= INT53_MAX) {
-                    num_arr->items[index] = lval;
+                    num_arr->float_items[index] = (double)lval;
                 } else {
                     convert_specialized_to_generic(arr);
                     array_set(arr, index, value);
@@ -6237,7 +6238,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
     case LMD_TYPE_UNDEFINED:  *(bool*)field_ptr = false; break;
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
-    case LMD_TYPE_INT:   *(int64_t*)field_ptr = value.get_int56(); break;
+    case LMD_TYPE_INT:   *(int64_t*)field_ptr = lambda_int_item_to_i64(value); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
     case LMD_TYPE_UINT64: *(uint64_t*)field_ptr = value.get_uint64(); break;
     case LMD_TYPE_FLOAT:
@@ -6276,7 +6277,10 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.bool_val = value.bool_val;
             break;
         case LMD_TYPE_INT:
-            titem.int_val = value.int_val;
+            // C16: an int Item's payload is not its value, so the union's
+            // integer view would store rotated bits. Carry the numeric value,
+            // which is exact for the whole domain and for poison.
+            titem.double_val = lambda_int_item_value(value);
             break;
         case LMD_TYPE_INT64:
             titem.long_val = value.get_int64();
@@ -7863,7 +7867,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
 
             // FLOAT field + INT value → widen int to double (lossless, no reshape)
             if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-                *(double*)field_ptr = (double)value.get_int56();
+                *(double*)field_ptr = lambda_int_item_value(value);
                 return;
             }
 
