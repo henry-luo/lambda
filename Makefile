@@ -1823,6 +1823,49 @@ LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-imag
 LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only
 LAYOUT_BASELINE_RESULTS = temp/_layout_baseline_results.txt
 
+# Keep the layout-only and full Radiant reports on the same aggregation and
+# rendering path so their suite totals cannot drift apart.
+define DEFINE_TEST_DURATION_FORMATTER
+format_duration() { \
+	seconds="$$1"; \
+	if [ "$$seconds" -ge 3600 ]; then \
+		printf "%dh%dm%ds" $$((seconds / 3600)) $$(((seconds % 3600) / 60)) $$((seconds % 60)); \
+	elif [ "$$seconds" -ge 60 ]; then \
+		printf "%dm%ds" $$((seconds / 60)) $$((seconds % 60)); \
+	else \
+		printf "%ds" "$$seconds"; \
+	fi; \
+	};
+endef
+
+define COLLECT_LAYOUT_BASELINE_RESULTS
+layout_results=$$(cat $(LAYOUT_BASELINE_RESULTS)); \
+while IFS='|' read -r suite s_status s_passed s_partial s_failed s_skipped s_elapsed; do \
+	layout_total_passed=$$((layout_total_passed + s_passed)); \
+	layout_total_partial=$$((layout_total_partial + s_partial)); \
+	layout_total_failed=$$((layout_total_failed + s_failed)); \
+	layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
+	if [ "$$s_status" = "❌ FAIL" ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
+done < $(LAYOUT_BASELINE_RESULTS); \
+rm -f $(LAYOUT_BASELINE_RESULTS); \
+if [ $$layout_run_exit -ne 0 ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi;
+endef
+
+define PRINT_LAYOUT_BASELINE_SUITE_RESULTS
+if [ -n "$$layout_results" ]; then \
+	suite_count=$$(printf "%s\n" "$$layout_results" | wc -l | tr -d ' '); \
+	suite_idx=0; \
+	printf "%s\n" "$$layout_results" | while IFS='|' read -r sname sstatus spassed spartial sfailed sskipped selapsed; do \
+		suite_idx=$$((suite_idx + 1)); \
+		if [ $$suite_idx -eq $$suite_count ]; then \
+			printf "   │   └── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
+		else \
+			printf "   │   ├── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
+		fi; \
+	done; \
+fi;
+endef
+
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
@@ -1890,16 +1933,7 @@ run-radiant-baseline:
 	layout_elapsed=0; \
 	layout_overall_status="✅ PASS"; \
 	mkdir -p temp; \
-	format_duration() { \
-		seconds="$$1"; \
-		if [ "$$seconds" -ge 3600 ]; then \
-			printf "%dh%dm%ds" $$((seconds / 3600)) $$(((seconds % 3600) / 60)) $$((seconds % 60)); \
-		elif [ "$$seconds" -ge 60 ]; then \
-			printf "%dm%ds" $$((seconds / 60)) $$((seconds % 60)); \
-		else \
-			printf "%ds" "$$seconds"; \
-		fi; \
-	}; \
+	$(DEFINE_TEST_DURATION_FORMATTER) \
 	run_logged() { \
 		log_file="$$1"; shift; \
 		rm -f "$$log_file"; \
@@ -1919,17 +1953,7 @@ run-radiant-baseline:
 	layout_start=$$(date +%s); \
 	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
 	layout_elapsed=$$(($$(date +%s) - layout_start)); \
-	layout_results=$$(cat $(LAYOUT_BASELINE_RESULTS)); \
-	while IFS='|' read -r suite s_status s_passed s_partial s_failed s_skipped s_elapsed; do \
-		layout_total_passed=$$((layout_total_passed + s_passed)); \
-		layout_total_partial=$$((layout_total_partial + s_partial)); \
-		layout_total_failed=$$((layout_total_failed + s_failed)); \
-		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
-		if [ "$$s_status" = "❌ FAIL" ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
-	done < $(LAYOUT_BASELINE_RESULTS); \
-	rm -f $(LAYOUT_BASELINE_RESULTS); \
-	if [ $$layout_run_exit -ne 0 ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
-	\
+	$(COLLECT_LAYOUT_BASELINE_RESULTS) \
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "📦 Layout Page Suite Regression:"; \
@@ -2103,18 +2127,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
 	echo "   ├── Layout Baseline     $$layout_overall_status  ($$(format_duration "$$layout_elapsed"), $$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
-	if [ -n "$$layout_results" ]; then \
-		suite_count=$$(printf "%s\n" "$$layout_results" | wc -l | tr -d ' '); \
-		suite_idx=0; \
-		printf "%s\n" "$$layout_results" | while IFS='|' read -r sname sstatus spassed spartial sfailed sskipped selapsed; do \
-			suite_idx=$$((suite_idx + 1)); \
-			if [ $$suite_idx -eq $$suite_count ]; then \
-				printf "   │   └── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
-			else \
-				printf "   │   ├── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
-			fi; \
-		done; \
-	fi; \
+	$(PRINT_LAYOUT_BASELINE_SUITE_RESULTS) \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$(format_duration "$$snapshot_elapsed"), $$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$(format_duration "$$ui_elapsed"), $$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── DOM UI Integration  $$dom_ui_status  ($$(format_duration "$$dom_ui_elapsed"), $$dom_ui_passed passed, $$dom_ui_failed failed) (dom-ui-run)"; \
@@ -2141,20 +2154,72 @@ run-radiant-baseline:
 	rm -f $(LAYOUT_BASELINE_RESULTS); \
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
+# Keep the runner's suite records through the page snapshot so the final
+# layout-only report cannot lose the results it needs to aggregate.
 test-layout-baseline: build-test
-	@echo "Running Radiant layout BASELINE test suite..."
-	@echo "=============================================================="
-	@layout_exit=0; \
-	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_exit=$$?; \
-	rm -f $(LAYOUT_BASELINE_RESULTS); \
-	if [ $$layout_exit -ne 0 ]; then exit $$layout_exit; fi
-	@if [ -f test/layout/snapshot/page.json ]; then \
+	@any_failed=0; \
+	layout_total_passed=0; layout_total_partial=0; layout_total_failed=0; layout_total_skipped=0; \
+	layout_elapsed=0; layout_overall_status="✅ PASS"; \
+	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; snapshot_elapsed=0; \
+	mkdir -p temp; \
+	$(DEFINE_TEST_DURATION_FORMATTER) \
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🧪 LAYOUT BASELINE TEST SUITE"; \
+	echo "=============================================================="; \
+	layout_run_exit=0; \
+	layout_start=$$(date +%s); \
+	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
+	layout_elapsed=$$(($$(date +%s) - layout_start)); \
+	$(COLLECT_LAYOUT_BASELINE_RESULTS) \
+	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
-		echo "Running page suite snapshot regression check..."; \
-		echo "=============================================================="; \
-		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/layout_suite_snapshot.js --check page; \
-	fi
+		echo "📦 Layout Page Suite Regression:"; \
+		snapshot_exit=0; \
+		snapshot_start=$$(date +%s); \
+		snapshot_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
+		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
+		echo "$$snapshot_output" | tail -5; \
+		snapshot_passed=$$(echo "$$snapshot_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		snapshot_passed=$${snapshot_passed:-0}; \
+		if echo "$$snapshot_output" | grep -q "REGRESSION\|regression detected" || [ $$snapshot_exit -ne 0 ]; then \
+			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+		elif echo "$$snapshot_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
+			snapshot_status="✅ PASS"; \
+		else \
+			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+		fi; \
+	fi; \
+	\
+	total_passed=$$((layout_total_passed + snapshot_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed)); \
+	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🏁 LAYOUT BASELINE TEST RESULTS BREAKDOWN"; \
+	echo "=============================================================="; \
+	echo ""; \
+	echo "📊 Test Results by Suite:"; \
+	echo "   ├── Layout Baseline     $$layout_overall_status  ($$(format_duration "$$layout_elapsed"), $$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
+	$(PRINT_LAYOUT_BASELINE_SUITE_RESULTS) \
+	echo "   └── Layout Page Suite   $$snapshot_status  ($$(format_duration "$$snapshot_elapsed"), $$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
+	echo ""; \
+	echo "📊 Overall Results:"; \
+	echo "   Total Tests: $$total_tests"; \
+	echo "   ✅ Passed:   $$total_passed"; \
+	if [ $$layout_total_partial -gt 0 ]; then \
+		echo "   ⚠️  Partially Passing: $$layout_total_partial"; \
+	fi; \
+	if [ $$total_failed -gt 0 ]; then \
+		echo "   ❌ Failed:   $$total_failed"; \
+	fi; \
+	if [ $$layout_total_skipped -gt 0 ]; then \
+		echo "   ⏭️  Skipped:  $$layout_total_skipped"; \
+	fi; \
+	echo "=============================================================="; \
+	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-ui-automation: build-test
 	@echo "Running UI Automation test suite..."
