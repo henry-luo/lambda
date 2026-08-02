@@ -454,11 +454,8 @@ TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
     int member_calls = 0;
     char line[512];
     while (fgets(line, sizeof(line), f)) {
-        // Tune6 L2: static-name member sites lower to fn_member_ic (the
-        // per-call-site inline cache); computed keys still lower to fn_member.
-        // Both must receive the raw container Item, so match either.
-        if (strstr(line, "call\tfn_member_p, fn_member,") ||
-            strstr(line, "call\tfn_member_ic_p, fn_member_ic,")) {
+        // Member sites use fn_member and must receive the raw container Item.
+        if (strstr(line, "call\tfn_member_p, fn_member,")) {
             member_calls++;
             for (int i = 0; i < 12; i++) {
                 const char* prev = window[(line_index + i) % 12];

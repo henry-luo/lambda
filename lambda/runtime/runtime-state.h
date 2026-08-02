@@ -29,13 +29,11 @@ extern bool g_dry_run;
 
 // Context-module state is established before a sealed MIR module is entered.
 // These lifecycle calls may allocate/register roots; generated code never
-// calls them from a repeated variable or inline-cache path.
+// calls them from a repeated variable path.
 struct LambdaModuleState;
-bool lambda_module_state_prepare(uint32_t module_id, uint32_t var_count,
-                                 uint32_t member_ic_count);
+bool lambda_module_state_prepare(uint32_t module_id, uint32_t var_count);
 bool lambda_module_state_prepare_layout(const struct LambdaModuleLayout* layout);
-bool lambda_module_state_reserve(uint32_t var_count, uint32_t member_ic_count,
-                                 uint32_t* out_module_id);
+bool lambda_module_state_reserve(uint32_t var_count, uint32_t* out_module_id);
 bool lambda_active_js_module_state_ensure_vars(uint32_t required_var_count);
 bool lambda_module_state_bind_static(uint32_t module_id, void* consts,
                                      void* type_list);

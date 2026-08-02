@@ -424,12 +424,14 @@ typedef struct SharedModuleStressCase {
     Script* script;
 } SharedModuleStressCase;
 
+// mark.type reaches a string-annotated chart helper; Lambda single-quoted
+// literals are symbols and must not be used for this fixture's mark names.
 static const char* kSharedModuleStressChartBar =
     "import vega: lambda.package.chart.vega\n"
     "import chart: lambda.package.chart.chart\n"
     "let spec = vega.convert({width: 120, height: 80, data: {values: "
     "[{category: 'A', amount: 2}, {category: 'B', amount: 5}]}, mark: "
-    "{type: 'bar'}, encoding: {x: {field: 'category', type: 'nominal'}, "
+    "{type: \"bar\"}, encoding: {x: {field: 'category', type: 'nominal'}, "
     "y: {field: 'amount', type: 'quantitative'}}})\n"
     "len(format(chart.render_spec(spec), 'xml'))\n";
 
@@ -437,7 +439,7 @@ static const char* kSharedModuleStressChartLine =
     "import vega: lambda.package.chart.vega\n"
     "import chart: lambda.package.chart.chart\n"
     "let spec = vega.convert({width: 120, height: 80, data: {values: "
-    "[{x: 0, y: 3}, {x: 1, y: 7}, {x: 2, y: 4}]}, mark: {type: 'line'}, "
+    "[{x: 0, y: 3}, {x: 1, y: 7}, {x: 2, y: 4}]}, mark: {type: \"line\"}, "
     "encoding: {x: {field: 'x', type: 'quantitative'}, y: {field: 'y', "
     "type: 'quantitative'}}})\n"
     "len(format(chart.render_spec(spec), 'xml'))\n";
@@ -496,7 +498,6 @@ typedef struct SharedModuleStressWorker {
     uint64_t started_ms;
     uint64_t stopped_ms;
     uintptr_t module_state_address;
-    uintptr_t module_member_ics_address;
     TypeId failed_result_type;
     int failed_error_code;
     bool module_uses_shared_consts;
@@ -573,7 +574,6 @@ static void shared_module_stress_record_module_state(SharedModuleStressWorker* w
         LambdaModuleState* state = worker->eval.module_states[i];
         if (!state || state->consts != test_case->script->const_list->data) continue;
         worker->module_state_address = (uintptr_t)state;
-        worker->module_member_ics_address = (uintptr_t)state->member_ics;
         worker->module_uses_shared_consts = true;
         return;
     }
@@ -867,11 +867,6 @@ TEST_F(RuntimeGlobalsConcurrency, ModuleStateSlabsArePrivateToEachEvalContext) {
     for (int i = 0; i < worker_count; i++) {
         for (int j = i + 1; j < worker_count; j++) {
             EXPECT_NE(workers[i].module_state_address, workers[j].module_state_address);
-            if (workers[i].module_member_ics_address &&
-                    workers[j].module_member_ics_address) {
-                EXPECT_NE(workers[i].module_member_ics_address,
-                    workers[j].module_member_ics_address);
-            }
         }
     }
 }

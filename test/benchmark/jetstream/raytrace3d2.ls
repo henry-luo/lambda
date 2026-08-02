@@ -9,7 +9,7 @@
 // instead of a borrow, so every triangle/light read in the intersect loops deep-
 // copies its map — this file did not finish in 120 s with those annotations and
 // runs in ~85 ms without them. The types stay on PARAMETERS, which are borrows
-// and are worth ~2x here. Field reads go through fn_member_ic either way: the
+// and are worth ~2x here. Field reads go through fn_member either way: the
 // Phase 3 direct-offset path is disabled in transpile-mir.cpp.
 type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map, reflection: float}
 type Scene = {triangles: array, lights: array, ambient: array, background: array, n_lights: int, n_triangles: int}

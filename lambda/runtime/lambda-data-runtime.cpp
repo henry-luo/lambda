@@ -2317,54 +2317,6 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                           typemap_name_hash(key, key_len), is_found);
 }
 
-// A shape is cacheable only when a plain last-writer-wins scan over its named
-// entries is equivalent to the full map_get_for_owner walk. Any unnamed entry
-// means a spread/nested map that the slow path recurses into and that can
-// shadow a later field, so those shapes are never cached.
-static bool member_ic_shape_is_cacheable(TypeMap* shape) {
-    if (!shape) return false;
-    FOR_EACH_MAP_FIELD(shape, field) {
-        if (!field->name) return false;
-    }
-    return true;
-}
-
-// Deliberately plain MAP only. LMD_TYPE_OBJECT reads through _map_get (which
-// uses _map_read_field, not the owner-aware variant) and falls back to a method
-// table on miss; LMD_TYPE_ELEMENT goes through elmt_get. Caching either here
-// would have to reproduce a second read path, so they keep the fn_member route
-// — this cache is exactly equivalent to map_get and nothing else.
-extern "C" Item fn_member_ic(Item item, Item key, LambdaMemberIC* ic) {
-    if (ic && get_type_id(item) == LMD_TYPE_MAP) {
-        Map* m = item.map;
-        if (m && m->type && m->data) {
-            TypeMap* shape = (TypeMap*)m->type;
-            if ((void*)shape == ic->shape && ic->entry) {
-                // Hit. Read through the same helper the slow path uses so an
-                // in-place retag of this entry is observed, not cached over.
-                return map_read_field_for_owner((Container*)m,
-                    (ShapeEntry*)ic->entry, m->data);
-            }
-            // Miss: resolve through the canonical last-writer-wins lookup and
-            // install only if this shape's semantics reduce to that lookup.
-            if (is_text_type_id(key._type_id)) {
-                const char* key_str = (const char*)key.get_chars();
-                if (key_str && member_ic_shape_is_cacheable(shape)) {
-                    int key_len = (int)strlen(key_str);  // INT_CAST_OK: map key length
-                    ShapeEntry* found = typemap_shape_lookup_last_by_hash(shape,
-                        key_str, key_len, typemap_name_hash(key_str, key_len));
-                    if (found) {
-                        ic->shape = (void*)shape;
-                        ic->entry = (void*)found;
-                        return map_read_field_for_owner((Container*)m, found, m->data);
-                    }
-                }
-            }
-        }
-    }
-    return fn_member(item, key);
-}
-
 Item map_get(Map* map, Item key) {
     if (!map || !key.item) { return ItemNull;}
     bool is_found;

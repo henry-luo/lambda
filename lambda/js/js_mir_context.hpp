@@ -528,10 +528,17 @@ struct JsMirTranspiler {
 };
 
 static inline void** jm_alloc_shape_cache_slot(JsMirTranspiler* mt) {
+#if !LAMBDA_INLINE_CACHE
+    // Shape-cache pointers are embedded in MIR; without ICs no generated site
+    // may acquire one, so all paths select their non-cached lowering.
+    (void)mt;
+    return NULL;
+#else
     if (!mt || !mt->tp || !mt->tp->ast_pool) return NULL;
     // compiled MIR embeds this slot address; ast_pool is retained with any
     // MIR context whose generated code can outlive the current compile pass.
     return (void**)pool_calloc(mt->tp->ast_pool, sizeof(void*));
+#endif
 }
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {

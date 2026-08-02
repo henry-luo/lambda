@@ -184,9 +184,7 @@ struct MirTranspiler {
     // and slab sizes; every mutable value lives under EvalContext::module_states.
     MIR_item_t module_layout_bss;
     MIR_reg_t module_state_reg;
-    MIR_reg_t member_ic_base_reg;
     uint32_t global_var_slot_count;
-    uint32_t member_ic_count;
     ArrayList* property_keys;
 
     // Type-list pointer register: holds this module's type_list ArrayList* so that
@@ -2793,25 +2791,7 @@ static MIR_reg_t emit_module_state(MirTranspiler* mt) {
     // A branch may be the first emitted user of the slab. Materialize the
     // cached register at the entry label so every control-flow path defines it.
     mt->module_state_reg = emit_module_state_load_after(mt, mt->em.frame.anchor);
-    mt->member_ic_base_reg = new_reg(mt, "member_ic_base", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, mt->member_ic_base_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, member_ics),
-            mt->module_state_reg, 0, 1)));
     return mt->module_state_reg;
-}
-
-static MIR_reg_t emit_member_ic_base(MirTranspiler* mt) {
-    // MIR's call lowering may reuse ordinary virtual-register storage across
-    // a long function.  Reacquire this owner-thread slab immediately at the
-    // IC site so a cached base cannot survive an intervening runtime call.
-    MIR_reg_t state = emit_module_state_load(mt);
-    MIR_reg_t base = new_reg(mt, "member_ic_base", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, base),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, member_ics),
-            state, 0, 1)));
-    return base;
 }
 
 static uint32_t module_property_key_index(MirTranspiler* mt, NameRef name) {
@@ -9124,37 +9104,12 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     int field_root = create_gc_root_slot(mt, boxed_field);
     boxed_obj = load_gc_root_slot(mt, obj_root, "member_obj");
     boxed_field = load_gc_root_slot(mt, field_root, "member_key");
-    // Tune6 L2: static-name member sites get a per-site inline cache cell, so a
-    // repeat read on the same shape skips fn_member's type dispatch and the
-    // shape-chain scan. Computed keys keep the plain call — one cell can only
-    // stand for one key.
-    // Site ids are immutable module metadata.  The actual cells live in the
-    // context-owned fixed slab selected at the probe, so repeated accesses use
-    // ordinary owner-thread memory with no epoch, lock, or atomic.
-    int member_ic_site = -1;
-    if (field->node_type == AST_NODE_IDENT) {
-        member_ic_site = (int)mt->member_ic_count++;
-    }
-    MIR_reg_t member_ic = 0;
-    if (member_ic_site >= 0) {
-        // Only static-name member probes load the context-owned IC slab, so
-        // functions that neither access globals nor ICs keep zero state cost.
-        MIR_reg_t member_ic_base = emit_member_ic_base(mt);
-        member_ic = new_reg(mt, "member_ic", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-            MIR_new_reg_op(mt->ctx, member_ic),
-            MIR_new_reg_op(mt->ctx, member_ic_base),
-            MIR_new_int_op(mt->ctx, (int64_t)member_ic_site *
-                (int64_t)sizeof(LambdaMemberIC))));
-    }
-    MIR_reg_t result = member_ic_site >= 0
-        ? emit_call_3(mt, "fn_member_ic", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, member_ic))
-        : emit_call_2(mt, "fn_member", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
+    // Lambda MIR deliberately keeps member access on fn_member. LambdaJS owns
+    // the inline-cache optimization; this path preserves generic map, object,
+    // and element member semantics without a second core lookup mechanism.
+    MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field));
     int result_root = create_gc_root_slot(mt, result);
     result = load_gc_root_slot(mt, result_root, "member_res");
 
@@ -15511,7 +15466,6 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
 
     // Free strdup copies
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
@@ -15745,7 +15699,6 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts;
     em_frame_dispose(&mt->em);
     em_frame_restore(&mt->em, saved_frame);
@@ -16025,7 +15978,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->region_capability_reg = region_producer
         ? MIR_reg(mt->ctx, "_region", func) : 0;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
 
     // Free our strdup copies (MIR made its own)
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
@@ -16648,7 +16600,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->region_producer_call = saved_region_producer_call;
@@ -17611,7 +17562,6 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->em.func_item = func_item;
     mt->em.func = func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     raw_free(runtime_name_copy);
     raw_free(param_name_copy);
 
@@ -17725,7 +17675,6 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -17788,7 +17737,6 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->em.func_item = func_item;
     mt->em.func = func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     raw_free(runtime_name_copy);
     raw_free(param_name_copy);
     raw_free(event_name_copy);
@@ -17909,7 +17857,6 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
     mt->module_state_reg = 0;
-    mt->member_ic_base_reg = 0;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
@@ -18133,10 +18080,10 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 // AST root transpilation
 // ============================================================================
 
-uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                           ArrayList* type_list, ArrayList* const_list,
-                           Pool* script_pool, NamePool* name_pool,
-                           ArrayList** out_property_keys) {
+void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
+                       ArrayList* type_list, ArrayList* const_list,
+                       Pool* script_pool, NamePool* name_pool,
+                       ArrayList** out_property_keys) {
     log_notice("transpile AST to MIR (direct)");
 
     MirTranspiler mt;
@@ -18177,7 +18124,7 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
 
     // MIR may relocate its BSS item table while new BSS entries are added.
     // Create every global-reference BSS first, then retain these module BSS
-    // handles for generated code; otherwise a member IC can load metadata
+    // handles for generated code; otherwise generated code can load metadata
     // through a stale MIR item after the compiler has released its tables.
     mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
     mt.em.consts_bss = mt.consts_bss;
@@ -18203,7 +18150,6 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
     mt.em.func_item = main_item;
     mt.em.func = main_func;
     mt.module_state_reg = 0;
-    mt.member_ic_base_reg = 0;
 
     // Get the runtime parameter register
     MIR_reg_t runtime_reg = MIR_reg(ctx, "runtime", main_func);
@@ -18404,7 +18350,6 @@ uint32_t transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* sou
     hashmap_free(mt.callsite_info);
     if (out_property_keys) *out_property_keys = mt.property_keys;
     else if (mt.property_keys) arraylist_free(mt.property_keys);
-    return mt.member_ic_count;
 }
 
 // ============================================================================
@@ -18605,7 +18550,7 @@ static bool finalize_module_property_key_specs(MIR_context_t ctx,
 }
 
 static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
-        uint32_t member_ic_count, ArrayList* property_keys) {
+        ArrayList* property_keys) {
     if (!ctx || !script) return;
     uint32_t slot = 0;
     LambdaModuleLayout* layout = NULL;
@@ -18630,7 +18575,6 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     }
     layout->module_id = script->module_state_id;
     layout->var_count = slot;
-    layout->member_ic_count = member_ic_count;
     layout->reserved = 0;
     if (!finalize_module_property_key_specs(ctx, layout, property_keys)) {
         log_error("module-key-link: failed to seal property keys for '%s'",
@@ -18714,8 +18658,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     ArrayList* property_keys = NULL;
-    uint32_t member_ic_count = transpile_mir_ast(ctx, ast_root, tp->source,
-        tp->type_list, tp->const_list, tp->pool, tp->name_pool, &property_keys);
+    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
+        tp->pool, tp->name_pool, &property_keys);
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
 #ifdef _WIN32
@@ -18755,7 +18699,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                   script_path ? script_path : "<unknown>");
     }
 
-    finalize_context_module_layout(ctx, script, member_ic_count, property_keys);
+    finalize_context_module_layout(ctx, script, property_keys);
     if (property_keys) arraylist_free(property_keys);
 
     // Register view/edit templates: walk AST, look up compiled body functions,
@@ -19086,7 +19030,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
                         }
                         lambda_recovery_frame_end(module_frame);
                         // An abandoned initializer may have registered roots or
-                        // IC entries, so a local handler must not resume it.
+                        // mutated module bindings, so a local handler must not resume it.
                         lambda_module_state_reset();
                         if (!lambda_recovery_frame_raise_fault(reason, prior_error_code)) {
                             result = runner.context->result =
