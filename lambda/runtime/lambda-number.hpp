@@ -35,9 +35,13 @@ typedef enum LambdaNumericOpFamily {
     LAMBDA_NUM_OP_SHIFT,
 } LambdaNumericOpFamily;
 
+// C16 retired LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT: `int` no longer leaves its
+// domain on overflow, because the domain is the float64-representable integers
+// and its arithmetic is total. An int result therefore carries the same IEEE
+// rule a float does — correctly rounded, saturating to the domain's own
+// infinities at the extremes.
 typedef enum LambdaNumericOverflow {
     LAMBDA_NUM_OVERFLOW_EXACT = 0,
-    LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT,
     LAMBDA_NUM_OVERFLOW_SIZED_WRAP,
     LAMBDA_NUM_OVERFLOW_IEEE,
 } LambdaNumericOverflow;
@@ -180,8 +184,7 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         // error, never `error()` — is unchanged.
         decision.result = op == LAMBDA_NUM_OP_TRUE_DIV &&
             joined == LAMBDA_NUM_INT ? LAMBDA_NUM_FLOAT : joined;
-        decision.overflow = decision.result == LAMBDA_NUM_INT ?
-            LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT : LAMBDA_NUM_OVERFLOW_IEEE;
+        decision.overflow = LAMBDA_NUM_OVERFLOW_IEEE;
         return decision;
     }
 
@@ -203,7 +206,7 @@ static inline LambdaNumericDecision lambda_numeric_classify(
         decision.result = decision.left_domain;
         decision.overflow = lambda_numeric_is_sized_integer(left) ?
             LAMBDA_NUM_OVERFLOW_SIZED_WRAP :
-            value_domain == LAMBDA_NUM_INT ? LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT :
+            value_domain == LAMBDA_NUM_INT ? LAMBDA_NUM_OVERFLOW_IEEE :
             LAMBDA_NUM_OVERFLOW_EXACT;
         return decision;
     }
@@ -278,10 +281,9 @@ static inline LambdaNumericDecision lambda_numeric_classify(
     }
 
     decision.valid = 1;
-    decision.overflow = decision.result == LAMBDA_NUM_INT ?
-        LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT :
-        decision.result == LAMBDA_NUM_FLOAT ? LAMBDA_NUM_OVERFLOW_IEEE :
-        LAMBDA_NUM_OVERFLOW_EXACT;
+    decision.overflow = (decision.result == LAMBDA_NUM_INT ||
+                         decision.result == LAMBDA_NUM_FLOAT) ?
+        LAMBDA_NUM_OVERFLOW_IEEE : LAMBDA_NUM_OVERFLOW_EXACT;
     return decision;
 }
 

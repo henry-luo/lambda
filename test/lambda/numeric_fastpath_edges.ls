@@ -59,15 +59,15 @@ show(0.5 < 0.25)
 show(-0.0 == 0.0)
 show(-0.0 < 0.0)
 show(0.1 + 0.2 == 0.3)
-show(1e308 > 1e307)
+show(1.0e308 > 1.0e307)
 
 "=== M1: float vs float, any-typed ==="
 all_ops(0.5, 0.25)
 all_ops(0.25, 0.5)
 all_ops(0.5, 0.5)
 all_ops(-0.0, 0.0)
-all_ops(1e308, 1e307)
-all_ops(-1e308, -1e307)
+all_ops(1.0e308, 1.0e307)
+all_ops(-1.0e308, -1.0e307)
 
 "=== M1: exactness above 2^53 — must NOT round through double ==="
 all_ops(9007199254740992.0, 9007199254740993i64)

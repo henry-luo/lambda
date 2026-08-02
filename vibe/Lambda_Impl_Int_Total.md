@@ -47,9 +47,45 @@ as rotated IEEE bits at every magnitude; `2147483647 * 2147483647` stays `int` (
 | **MIR budgets** | Re-baselined, 22 values across 12 probes, after first slimming `emit_box_int` twice: folding the A5 guard into the class predicate, then replacing the cold-path runtime call with an inline closed-form sentinel map — which removed the added **safepoint and scalar home** the call had introduced into every function that boxes an int. Measured against master by stashing: the six `js_*` probes' numbers are **identical** on master, so that growth is entirely pre-existing and none of it is attributable to this work; the six `lambda_*` probes plus the `scalar_home_donation` fixture are this work's, from the rotation sequence replacing mask/or. Expect Phase B (B1) to shrink these materially and require another re-baseline. |
 | **gates** | `test/lambda/int_total_c16.ls` + golden pins the plan's §4 properties end to end: totality at the band edge, the O1 repro, poison in all four forms, poison through a container, **per-lane poison in a packed `int[]`** (only expressible because of D1), a sparse-band value round-tripping through a list *and* a map field, and `type()` separating int from float at every magnitude. The C++ representation suite gained the values past the old band (2⁵³, 2⁵⁴, 2⁶²) that the retired encoding could not hold at all. |
 
-**Remaining:** Phase B (B1 flexint deletion — the main perf event), Phase C (lexer/literals),
-Phase E (boundaries/lattice), Phase F (range-proven i64 lanes + re-measure). Two Radiant
-`puppertino` failures are pre-existing on master (verified by stash) and unrelated.
+**Phases B, C, E and F all landed 2026-08-02. Baseline `3717/3717`; MIR ratchet 15/15.**
+
+| Item | What landed |
+|---|---|
+| **B1 — flexint dual lane deleted** | `int ⊕ int` is now one `DADD`/`DSUB`/`DMUL`. The range check, the branch and both boxing arms are gone, because C16 left no boundary to test. The `I2D` on each operand is exact **by construction** — any `int` that fits an i64 lane is a float64-representable integer, that being the definition of the domain — so only the arithmetic rounds, once, exactly as the interpreter's pack path does. Emission shrank sharply where int arithmetic lives: `_twice_#` 84→58, `_closed_gap_#`/`_open_gap_#` 80→57, `_accumulate_#` 113→90, one js_script probe −243. Budgets tightened to lock it in. |
+| **B1 — shift band test deleted** | The shift builtin still promoted past 2⁵³. Removed: scaling by a power of two moves the exponent and leaves the mantissa alone, so a valid `int` shifts to a valid `int` at any magnitude. `bitwise_lane_preservation` now also prints the exact value (2⁶² as `4611686018427387904`, not the lossy float rendering). |
+| **B3 — overflow class retired** | `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` deleted; an int result carries the IEEE rule a float does. The field was write-only, so this is a classification correction plus the comments that cited it. |
+| **C1 — lexer split by exponent sign** | `positive_exponent_part` / `negative_exponent_part` in `grammar.js`; an integer-spelled mantissa with a non-negative exponent joins `integer` (`10e1` is int 100) and a negative exponent stays float (`10e-1`). The `n`/`m` suffix and imaginary rules take the new token too. Both int-literal *value* parsers had to learn the exponent as well (`build_ast.cpp` via a new shared `lambda_parse_int_literal`, and the JIT's `parse_int_literal`) — strtoll stops at the `e`. |
+| **C2 — band diagnostic** | Already present and now load-bearing: `1e16` is a compile error. Its consequence is real migration — `1e308` is *lexically an integer* and must be spelled `1.0e308` when a float is meant. Applied to `numeric_fastpath_edges`, `vector_performance` and `std/boundary/numeric_limits`. |
+| **E1 — admission by integrality** | `contract_numeric_admit_signed` gained a dedicated `int` arm. It no longer routes through int64 (which cannot even hold the domain) nor gates on ±(2⁵³−1): any finite integral value admits at any magnitude. |
+| **E2 — poison admission** | A shared infinity re-tags into int's own (ruling 14 — same value), a foreign nan rejects like `3.5`. Pinned in `test_lambda_errors_gtest`, whose pre-C16 assertions that both were refused are now the C16 rule with the reasoning recorded. |
+| **E3 — `is` lattice** | Verified already conformant: `5 is int64` is false, `i32 ⊑ int ⊑ integer` holds, `int ⊑ float` is definitional. No change needed. |
+| **E4 — elision int→float arm** | **Does not apply, and must not be added.** Its premise was that both carriers are doubles so admission is a pure retag — true for the β and erasure designs, false for rotation: an int Item is `rotl(bits,1)` and a float Item is raw bits, so the boundary genuinely converts (and sentinels are a table lookup). §3 T-A1's original "Proven ≠ redundant" reasoning stands unchanged. |
+| **F1 — range-proven i64 lane** | For a native-int consumer of ADD/SUB the i64 result is used directly when it lands within ±(2⁵³−1), where it is both exact and representable and therefore identical to the double answer; otherwise the already-computed double result is narrowed. This is the design's range-proven lane discharged at run time rather than statically. |
+| **F2 — re-measure** | Release build, AWFY suite, median of 3, measured against a stashed pre-C16 build of the same tree. |
+
+**F2 numbers (AWFY, exec_ms, MIR engine).** Geometric mean **+0.5%** — the correctness work is
+performance-neutral overall. Recovered by F1: `permute` 1.63→1.62 (was 1.69 before F1),
+`towers` 4.21→4.35 (was 4.53). Improved: `sieve` −3%, `nbody` −3%, `json` −2%, `cd` −2%,
+`havlak` −2%. **Open regression: `mandelbrot` 81.3→87.9 (+8%), stable across re-runs and not
+recovered by F1** — it is float-dominated, so the cause is not int arithmetic itself and wants
+its own profile before more lane work. Two further F1 opportunities remain unexplored: MUL has
+no cheap exactness proof and always takes the double narrowing, and D1 gated the i64 SIMD
+kernels for `ELEM_INT` vector arithmetic to `ELEM_INT64`, leaving the int lane on the
+representation-neutral path.
+
+**Also fixed en route (pre-existing, unrelated to C16):** five vendored tree-sitter grammars
+(`bash`, `javascript`, `latex-math`, `ruby`, `typescript`) shipped a `parser.c` generated for an
+older tree-sitter alongside a newer `src/tree_sitter/parser.h` that no longer declares
+`TSFieldMapSlice`. It was invisible only because their `.a` artifacts predated the drift; the
+first clean rebuild (`make release`, already failing on master for this reason) removed them and
+neither release nor debug could build. Synced each to the compatible header, so a clean build
+works again.
+
+**Remaining:** the `mandelbrot` profile above; the two F1 opportunities; and one C16-completeness
+gap — **a declared-`int` native i64 lane cannot carry poison**, so `int.inf` admitted at such a
+boundary degrades on unbox. The boundary itself is correct (E2); the lane is not, and the
+design's answer is the default double lane (§2). Two Radiant `puppertino` failures are
+pre-existing on master (verified by stash) and unrelated.
 
 **Supersedes:** the 2026-08-01 revision of this file (compact+cell carrier plan) and
 `Lambda_Impl_Int_C16.md`.

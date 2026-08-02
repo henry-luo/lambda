@@ -9,10 +9,10 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function.",
       "budgets": {
         "default": {
-          "module_insns": 229,
+          "module_insns": 203,
           "functions": {
             "_twice_#": {
-              "insns": 84
+              "insns": 58
             },
             "main": {
               "insns": 63
@@ -47,10 +47,10 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation and its reviewed Phase 3 clean-return firewall.",
       "budgets": {
         "default": {
-          "module_insns": 158,
+          "module_insns": 135,
           "functions": {
             "_accumulate_#": {
-              "insns": 113
+              "insns": 90
             },
             "main": {
               "insns": 45
@@ -85,10 +85,10 @@
       "description": "Boundary i64/u64 boxing cost through the number-stack boxers.",
       "budgets": {
         "default": {
-          "module_insns": 78,
+          "module_insns": 77,
           "functions": {
             "main": {
-              "insns": 78
+              "insns": 77
             }
           },
           "frames": [
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 2100
+          "module_insns": 2099
         }
       }
     },
@@ -183,7 +183,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only.",
       "budgets": {
         "default": {
-          "module_insns": 1186
+          "module_insns": 1185
         }
       }
     },
@@ -275,13 +275,13 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 461,
+          "module_insns": 415,
           "functions": {
             "_closed_gap_#": {
-              "insns": 80
+              "insns": 57
             },
             "_open_gap_#": {
-              "insns": 80
+              "insns": 57
             }
           },
           "frames": [
@@ -312,13 +312,13 @@
       "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case also resolves class-owned unique PropertyKeyRefs instead of encoding private identity in a spelling.",
       "budgets": {
         "darwin-debug": {
-          "module_insns": 6821,
+          "module_insns": 6578,
           "functions": {
             "js_main": {
               "insns": 3869
             },
             "Tune6ExactCollection_m128_128": {
-              "insns": 12
+              "insns": 10
             }
           },
           "frames": [

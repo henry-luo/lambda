@@ -162,7 +162,7 @@ min_vec + max_vec
 [1.0, 2.0] + [1e-15, 2e-15]
 
 // Near-zero values
-[1e-308, 1e-307] * [1e308, 1e307]
+[1e-308, 1e-307] * [1.0e308, 1.0e307]
 
 "=== Vector Truthiness ==="
 

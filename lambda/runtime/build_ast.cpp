@@ -12,6 +12,37 @@
 #include "../../lib/datetime.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include <errno.h>
+#include <stdlib.h>
+
+// C16 ruling 9: an unsuffixed literal's type is LEXICAL. An integer-spelled
+// mantissa with a non-negative exponent names an integer (`10e1` is int 100);
+// the grammar tokenizes it as SYM_INT, so the exponent has to be applied here
+// because strtoll stops at the 'e'. Returns false when the value leaves the
+// ingestion band (ruling 6) — that is what makes `1e16` a compile error rather
+// than a silently-promoted float.
+static bool lambda_parse_int_literal(const char* text, int64_t* out) {
+    char* endptr = NULL;
+    errno = 0;
+    int64_t mantissa = strtoll(text, &endptr, 0);
+    if (errno == ERANGE) return false;
+    bool is_hex = text[0] == '0' && (text[1] == 'x' || text[1] == 'X');
+    if (!is_hex && endptr && (*endptr == 'e' || *endptr == 'E')) {
+        const char* exp = endptr + 1;
+        if (*exp == '+') exp++;
+        errno = 0;
+        long power = strtol(exp, NULL, 10);
+        if (errno == ERANGE || power < 0 || power > 18) return false;
+        __int128 scaled = mantissa;
+        for (long i = 0; i < power; i++) {
+            scaled *= 10;
+            if (scaled > (__int128)INT53_MAX || scaled < (__int128)INT53_MIN) return false;
+        }
+        mantissa = (int64_t)scaled;
+    }
+    *out = mantissa;
+    return mantissa >= INT53_MIN && mantissa <= INT53_MAX;
+}
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
 #include "../../lib/arraylist.h"
@@ -898,7 +929,8 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
         char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
-        int64_t value = strtoll(num_str, NULL, 0);
+        int64_t value = 0;
+        lambda_parse_int_literal(num_str, &value);
         mem_free(num_str);
         out->item = i2it(value);
         return true;
@@ -4346,13 +4378,12 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
 
-        char* endptr;
-        errno = 0;
-        int64_t value = strtoll(num_str, &endptr, 0);
+        int64_t value = 0;
+        bool in_band = lambda_parse_int_literal(num_str, &value);
         mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        if (errno == ERANGE || value < INT53_MIN || value > INT53_MAX) {
+        if (!in_band) {
             record_semantic_error(tp, child, ERR_INVALID_NUMBER,
                 "integer literal is outside compact int range; use an explicit suffix or decimal literal");
             ast_node->type = &TYPE_ERROR;
@@ -10292,13 +10323,12 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
 
-        char* endptr;
-        int64_t value = strtoll(num_str, &endptr, 0);
+        int64_t value = 0;
+        bool in_band = lambda_parse_int_literal(num_str, &value);
         mem_free(num_str);
 
         log_debug("SYM_INT: parsed value %lld, checking range", value);
-        // Check if the value fits in 56-bit signed integer range
-        if (INT53_MIN <= value && value <= INT53_MAX) {
+        if (in_band) {
             log_debug("Using LIT_INT for value %lld", value);
             i_node->type = &LIT_INT;
         }

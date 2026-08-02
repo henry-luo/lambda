@@ -56,12 +56,22 @@
     },
     "nqueens": {
       "category": "backtrack",
-      "mir": 6.655,
+      "mir": 6.043,
       "c2mir": 6.595,
       "lambdajs": 3.878417,
       "quickjs": 9.733,
       "nodejs": 1.800417,
-      "python": 3.494
+      "python": 3.494,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "fft": {
       "category": "numeric",
@@ -94,129 +104,269 @@
   "awfy": {
     "sieve": {
       "category": "micro",
-      "mir": 0.052,
+      "mir": 0.306,
       "c2mir": 0.052,
       "lambdajs": 0.473667,
       "quickjs": 0.602,
       "nodejs": 0.381375,
-      "python": 1763.242
+      "python": 1763.242,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "permute": {
       "category": "micro",
-      "mir": 0.064,
+      "mir": 1.625,
       "c2mir": 0.068,
       "lambdajs": 38.173125,
       "quickjs": 1.6,
       "nodejs": 0.834625,
-      "python": 2112.672
+      "python": 2112.672,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "queens": {
       "category": "micro",
-      "mir": 0.146,
+      "mir": 0.553,
       "c2mir": 0.138,
       "lambdajs": 24.879417,
       "quickjs": 1.087,
       "nodejs": 0.64575,
-      "python": 1142.995
+      "python": 1142.995,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "towers": {
       "category": "micro",
-      "mir": 0.216,
+      "mir": 4.349,
       "c2mir": 0.112,
       "lambdajs": 70.622833,
       "quickjs": 2.349,
       "nodejs": 1.126167,
-      "python": 1112.589
+      "python": 1112.589,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "bounce": {
       "category": "micro",
-      "mir": 0.194,
+      "mir": 2.518,
       "c2mir": 0.139,
       "lambdajs": 10.404375,
       "quickjs": 0.96,
       "nodejs": 0.569542,
-      "python": 1389.051
+      "python": 1389.051,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "list": {
       "category": "micro",
-      "mir": 0.023,
+      "mir": 1.263,
       "c2mir": 0.621,
       "lambdajs": 11.8205,
       "quickjs": 0.921,
       "nodejs": 0.493333,
-      "python": 976.12
+      "python": 976.12,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "storage": {
       "category": "micro",
-      "mir": 0.194,
+      "mir": 1.541,
       "c2mir": 0.317,
       "lambdajs": 29.787834,
       "quickjs": 2.691,
       "nodejs": 0.654125,
-      "python": 1273.902
+      "python": 1273.902,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "mandelbrot": {
       "category": "compute",
-      "mir": 31.61,
+      "mir": 87.874,
       "c2mir": 54.51,
       "lambdajs": 1484.810125,
       "quickjs": 888.468,
       "nodejs": 32.283,
-      "python": 740.552
+      "python": 740.552,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "nbody": {
       "category": "compute",
-      "mir": 46.865,
+      "mir": 16.906,
       "c2mir": 84.204,
       "lambdajs": 421.763291,
       "quickjs": 166.959,
       "nodejs": 5.553625,
-      "python": 135.031
+      "python": 135.031,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "richards": {
       "category": "macro",
-      "mir": 252.576,
+      "mir": 243.907,
       "c2mir": 218.783,
       "lambdajs": 5478.616375,
       "quickjs": 194.481,
       "nodejs": 48.913125,
-      "python": 168.444
+      "python": 168.444,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "json": {
       "category": "macro",
-      "mir": 1.5,
+      "mir": 106.778,
       "c2mir": 2.15,
       "lambdajs": 75.493334,
       "quickjs": 11.669,
       "nodejs": 2.72925,
-      "python": 7.14
+      "python": 7.14,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "deltablue": {
       "category": "macro",
-      "mir": 64.108,
+      "mir": 103.395,
       "c2mir": 78.054,
       "lambdajs": 4118.395542,
       "quickjs": 113.121,
       "nodejs": 12.954167,
-      "python": 67.862
+      "python": 67.862,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "havlak": {
       "category": "macro",
-      "mir": 60.929,
+      "mir": 56.03,
       "c2mir": 81.75,
       "lambdajs": null,
       "quickjs": 4085.097,
       "nodejs": 103.434125,
-      "python": 2107.405
+      "python": 2107.405,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "cd": {
       "category": "macro",
-      "mir": 219.944,
+      "mir": 837.052,
       "c2mir": 358.352,
       "lambdajs": null,
       "quickjs": 1062.803,
       "nodejs": 37.291208,
-      "python": null
+      "python": null,
+      "_status": {
+        "mir": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     }
   },
   "beng": {
@@ -255,24 +405,6 @@
       "quickjs": null,
       "nodejs": 5.071875,
       "python": 3.876
-    },
-    "mandelbrot": {
-      "category": "numeric",
-      "mir": 142.474,
-      "c2mir": 238.313,
-      "lambdajs": 170.961584,
-      "quickjs": 697.866,
-      "nodejs": 14.982916,
-      "python": 1368.435
-    },
-    "nbody": {
-      "category": "numeric",
-      "mir": 47.089,
-      "c2mir": 84.822,
-      "lambdajs": 1143.304042,
-      "quickjs": 154.905,
-      "nodejs": 7.516416,
-      "python": 171.722
     },
     "pidigits": {
       "category": "bignum",
@@ -449,15 +581,6 @@
       "nodejs": 5.877708,
       "python": 111.932
     },
-    "primes": {
-      "category": "iterative",
-      "mir": 7.162,
-      "c2mir": 9.69,
-      "lambdajs": 15.404,
-      "quickjs": 97.374,
-      "nodejs": 4.395917,
-      "python": 121.115
-    },
     "puzzle": {
       "category": "search",
       "mir": 3.756,
@@ -487,15 +610,6 @@
     }
   },
   "jetstream": {
-    "nbody": {
-      "category": "numeric",
-      "mir": 47.158,
-      "c2mir": 84.928,
-      "lambdajs": 867.971,
-      "quickjs": null,
-      "nodejs": 5.704,
-      "python": 146.127
-    },
     "cube3d": {
       "category": "3d",
       "mir": 23.524,
@@ -514,15 +628,6 @@
       "nodejs": 14.288,
       "python": 1837.1
     },
-    "richards": {
-      "category": "macro",
-      "mir": 259.38,
-      "c2mir": 244.978,
-      "lambdajs": 3775.967,
-      "quickjs": null,
-      "nodejs": 8.337,
-      "python": 225.104
-    },
     "splay": {
       "category": "data",
       "mir": 164.758,
@@ -531,15 +636,6 @@
       "quickjs": 198.7,
       "nodejs": 19.629,
       "python": 326.1
-    },
-    "deltablue": {
-      "category": "macro",
-      "mir": 17.399,
-      "c2mir": 18.004,
-      "lambdajs": 4748.273,
-      "quickjs": null,
-      "nodejs": 9.838,
-      "python": 18.075
     },
     "hashmap": {
       "category": "data",
@@ -568,5 +664,52 @@
       "nodejs": 18.584,
       "python": 144.1
     }
+  },
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-08-02T20:13:49",
+    "command": "run_benchmarks.py -e mir --bench towers,mandelbrot,permute,sieve,queens,bounce",
+    "engines": [
+      "mir"
+    ],
+    "runs": 3,
+    "timeout_s": 120,
+    "suite_cooldown_seconds": 10,
+    "results_output": "test/benchmark/benchmark_results_v3.json",
+    "fresh": false,
+    "suite_filters": [],
+    "bench_filters": [
+      "towers",
+      "mandelbrot",
+      "permute",
+      "sieve",
+      "queens",
+      "bounce"
+    ],
+    "canonical_duplicate_suites": {
+      "mandelbrot": "awfy",
+      "nbody": "awfy",
+      "richards": "awfy",
+      "deltablue": "awfy",
+      "primes": "kostya"
+    },
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 20501656,
+    "lambda_archive": null,
+    "lambda_archive_size_bytes": null,
+    "lambda_archive_sha256": null,
+    "test262_baseline": {
+      "status": "not_run"
+    },
+    "lambda_commit": "fd01fe57d450b3ccf3d43937cb8b78ecde64d1db",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "not_recorded",
+    "log_dir": null,
+    "typed_variants": false,
+    "finished_at": "2026-08-02T20:14:01"
   }
 }

@@ -21,10 +21,18 @@ const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
 const hex_integer_literal = seq('0', choice('x', 'X'), /[0-9a-fA-F]+/);
 const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), decimal_digits);
+// C16 ruling 9: an unsuffixed literal's type is LEXICAL, not value-dependent.
+// An integer-spelled mantissa with a non-negative exponent names an integer
+// (`10e1` is int 100), while a negative exponent names a fraction and stays
+// float (`10e-1`). So the exponent is split by sign here rather than in the
+// AST builder, which is what makes the token itself carry the type.
+const positive_exponent_part = seq(choice('e', 'E'), optional('+'), decimal_digits);
+const negative_exponent_part = seq(choice('e', 'E'), '-', decimal_digits);
+const integer_exponent_literal = seq(integer_literal, positive_exponent_part);
 const float_literal = choice(
   seq(integer_literal, '.', decimal_digits, optional(exponent_part)),
   seq('.', decimal_digits, optional(exponent_part)),
-  seq(integer_literal, exponent_part),
+  seq(integer_literal, negative_exponent_part),
 );
 const decimal_literal = choice(
   seq(integer_literal, '.', decimal_digits),
@@ -254,9 +262,9 @@ module.exports = grammar({
 
     // Keep the imaginary suffix in one token so `4j` cannot be parsed as an
     // integer followed by an identifier.  Signs remain unary operators.
-    imaginary: _ => token(seq(choice(float_literal, integer_literal, 'inf', 'nan'), 'j')),
+    imaginary: _ => token(seq(choice(float_literal, integer_exponent_literal, integer_literal, 'inf', 'nan'), 'j')),
 
-    integer: _ => token(choice(hex_integer_literal, integer_literal)),
+    integer: _ => token(choice(hex_integer_literal, integer_exponent_literal, integer_literal)),
 
     float: _ => token(float_literal),
 
@@ -265,7 +273,7 @@ module.exports = grammar({
     // (e.g. 1.5n) reaches the AST builder and gets a targeted error
     // pointing at 'm', instead of an opaque parse error.
     decimal: $ => token(seq(
-      choice(float_literal, decimal_literal, integer_literal),
+      choice(float_literal, decimal_literal, integer_exponent_literal, integer_literal),
       choice('n', 'm')
     )),
 

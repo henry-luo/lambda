@@ -284,7 +284,9 @@ TEST(LambdaNumericClassifier, SizedLaneAndSemanticDomainAnchors) {
         LAMBDA_NUM_OP_ADD, LAMBDA_NUM_U8, LAMBDA_NUM_INT);
     EXPECT_EQ(decision.left_domain, LAMBDA_NUM_INT);
     EXPECT_EQ(decision.result, LAMBDA_NUM_INT);
-    EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT);
+    // C16 B3: `int` no longer leaves its domain on overflow, so its result
+    // carries the same IEEE rule a float does rather than a promotion rule.
+    EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_IEEE);
 
     decision = lambda_numeric_classify(
         LAMBDA_NUM_OP_ADD, LAMBDA_NUM_U64, LAMBDA_NUM_INT);

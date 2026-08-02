@@ -1,11 +1,15 @@
-// Bitwise ops preserve their operand's integer lane, and an int shift that
-// leaves the compact band promotes to float (the int domain's documented
-// overflow rule) rather than erroring.
+// Bitwise ops preserve their operand's integer lane, and an int shift stays
+// `int` at every magnitude.
 //
-// Before 2026-07-29 the inlined JIT path range-checked against the 56-bit
-// payload width instead of i2it's +/-(2^53-1), so shl(1,54) minted a compact
-// int holding a value the C path rejects; after that bound was corrected it
-// errored instead of promoting. Both are covered here.
+// C16 retired overflow promotion: there is no band for a shift to leave. That
+// is also sound for shifts specifically — scaling by a power of two moves the
+// exponent and leaves the mantissa alone, so a valid `int` shifts to a valid
+// `int`. The values below print exactly for the same reason; before C16 they
+// promoted to float and rendered lossily (2^62 as 4611686018427388000).
+//
+// History: before 2026-07-29 the inlined JIT path range-checked against the
+// 56-bit payload width instead of +/-(2^53-1), so shl(1,54) minted a compact
+// int holding a value the C path rejected.
 
 "=== lane preserved by operand type ==="
 type(band(12, 10))
@@ -19,7 +23,7 @@ type(shl(1i64, 54))
 type(band(12u8, 10u8))
 type(band(12i8, 10i8))
 
-"=== int shift promotes to float past the compact band ==="
+"=== int shift stays int past the old compact band ==="
 shl(1, 52)
 type(shl(1, 52))
 shl(1, 53)
