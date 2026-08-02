@@ -1396,13 +1396,6 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect);
 static bool text_has_visible_rect(ViewText* text);
 
-static bool text_white_space_preserves_space_advance(ViewText* text) {
-    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
-    return white_space == CSS_VALUE_PRE ||
-        white_space == CSS_VALUE_PRE_WRAP ||
-        white_space == CSS_VALUE_BREAK_SPACES;
-}
-
 static bool text_white_space_preserves_segment_break(ViewText* text) {
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     return white_space == CSS_VALUE_PRE ||
@@ -1523,7 +1516,8 @@ static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
 
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // If text combination is disabled, just print this single text node
-    if (!g_combine_text_nodes || text_white_space_preserves_space_advance(first_text)) {
+    if (!g_combine_text_nodes || white_space_preserves_space_advance(
+            get_white_space_value(static_cast<DomNode*>(first_text)))) {
         print_text_rects_json(first_text, buf, indent, false);
         return static_cast<View*>(first_text);  // Return this text node only
     }

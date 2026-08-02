@@ -1821,7 +1821,9 @@ LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-imag
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.
 LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only
-LAYOUT_BASELINE_RESULTS = temp/_layout_baseline_results.txt
+# Layout categories clear temp/ before each batch; keep aggregate records outside
+# that workspace so a later suite cannot erase an earlier suite's result.
+LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt
 
 # Keep the layout-only and full Radiant reports on the same aggregation and
 # rendering path so their suite totals cannot drift apart.
@@ -1869,7 +1871,7 @@ endef
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
-	@mkdir -p temp; \
+	@mkdir -p test_output; \
 	> $(LAYOUT_BASELINE_RESULTS); \
 	any_failed=0; \
 	echo ""; \
@@ -1877,7 +1879,7 @@ run-layout-baseline-suites:
 	for suite in $(LAYOUT_BASELINE_SUITES); do \
 		echo ""; \
 		echo "  ▸ $$suite:"; \
-		layout_log="temp/_layout_baseline_$${suite}.log"; \
+		layout_log="test_output/_layout_baseline_$${suite}.log"; \
 		rm -f "$$layout_log"; \
 		layout_exit=0; \
 		s_start=$$(date +%s); \

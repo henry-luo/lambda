@@ -857,18 +857,12 @@ static bool text_node_is_ascii_whitespace(DomNode* node) {
     return true;
 }
 
-static bool intrinsic_white_space_preserves_space_advance(CssEnum white_space) {
-    return white_space == CSS_VALUE_PRE ||
-           white_space == CSS_VALUE_PRE_WRAP ||
-           white_space == CSS_VALUE_BREAK_SPACES;
-}
-
 static bool text_node_has_intrinsic_table_content(DomNode* node) {
     if (!node || !node->is_text()) return false;
     const char* text = (const char*)node->text_data();
     if (!text || !*text) return false;
     if (!text_node_is_ascii_whitespace(node)) return true;
-    return intrinsic_white_space_preserves_space_advance(get_white_space_value(node));
+    return white_space_preserves_space_advance(get_white_space_value(node));
 }
 
 static DomNode* previous_non_whitespace_sibling(DomNode* node) {
@@ -1984,7 +1978,7 @@ static bool intrinsic_element_is_replaced(DomElement* element) {
 }
 
 static bool intrinsic_white_space_collapses_space_advance(CssEnum white_space) {
-    return !intrinsic_white_space_preserves_space_advance(white_space);
+    return !white_space_preserves_space_advance(white_space);
 }
 
 static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
@@ -2010,7 +2004,7 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
         if (!text_node_is_ascii_whitespace(node)) return true;
-        return intrinsic_white_space_preserves_space_advance(get_white_space_value(node));
+        return white_space_preserves_space_advance(get_white_space_value(node));
     }
     if (!node->is_element()) return false;
 

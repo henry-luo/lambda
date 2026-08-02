@@ -66,6 +66,64 @@ static bool form_control_has_specified_line_height(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT));
 }
 
+static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
+                                       FontProp* font, bool has_css_font) {
+    if (!font || font->font_size <= 0.0f) return 0.0f;
+
+    float line_height = 0.0f;
+    if (block && block->blk && block->block_mut()->line_height) {
+        const CssValue* value = block->block()->line_height;
+        if (value->type == CSS_VALUE_TYPE_NUMBER) {
+            line_height = value->data.number.value * font->font_size;
+        } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+        } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            line_height = (value->data.number.value / 100.0f) * font->font_size;
+        }
+    }
+    if (line_height > 0.0f) return line_height;
+
+    // Keep the same UA fallback used for intrinsic textarea sizing.
+    return has_css_font ? font->font_size * 1.2f : 15.0f;
+}
+
+static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
+                                      const char* value, float content_width) {
+    if (!lycon || !font || !value || !*value || content_width <= 0.0f) {
+        return 1;
+    }
+
+    FontBox font_box = {};
+    setup_font(lycon->ui_context, &font_box, font);
+    if (!font_box.font_handle) return 1;
+
+    int line_count = 1;
+    const char* line_start = value;
+    const char* cursor = value;
+    while (*cursor) {
+        if (*cursor == '\n') {
+            line_count++;
+            cursor++;
+            line_start = cursor;
+            continue;
+        }
+
+        const char* next = cursor + 1;
+        while ((*next & 0xC0) == 0x80) next++;
+        int candidate_len = (int)(next - line_start);  // INT_CAST_OK: font API takes byte length.
+        float candidate_width = font_measure_text(
+            font_box.font_handle, line_start, candidate_len).width;
+        if (cursor > line_start && candidate_width > content_width) {
+            // Keep this greedy visual-line break in lockstep with textarea paint:
+            // the overflowing glyph begins the next editable line.
+            line_count++;
+            line_start = cursor;
+        }
+        cursor = next;
+    }
+    return line_count;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                                  FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
@@ -233,32 +291,8 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         float content_w = cols * char_w + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
 
-        // Height: rows × line-height
-        // Resolve line-height from the block's computed style (CSS 2.1 §10.8.1)
-        float line_ht = 0;
-        if (block && block->blk && block->block_mut()->line_height) {
-            const CssValue* lh = block->block()->line_height;
-            if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                // e.g. line-height: 1.5 → 1.5 × font-size
-                line_ht = lh->data.number.value * font_size;
-            } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                // e.g. line-height: 20px, or line-height: 1em (resolved to px by style)
-                line_ht = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-            } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // e.g. line-height: 120% → 1.2 × font-size
-                line_ht = (lh->data.number.value / 100.0f) * font_size;
-            }
-            // CSS_VALUE_NORMAL or unrecognized → fall through to default
-        }
-        if (line_ht <= 0) {
-            // 'normal' or no explicit line-height: approximate as font_size × 1.2
-            // For UA default monospace (13.333px), this gives ~16px; Chrome uses ~15px.
-            if (has_css_font) {
-                line_ht = font_size * 1.2f;
-            } else {
-                line_ht = 15.0f;  // Chrome UA default for 13.333px monospace
-            }
-        }
+        // Height: rows × the same used line-height that establishes editable baselines.
+        float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);
         float content_h = rows * line_ht;
         form->intrinsic_height = content_h * pr;
     } else {
@@ -520,6 +554,15 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     FontProp* font = block->font ? block->font : lycon->font.style;
     float pr = lycon->ui_context->pixel_ratio;
 
+    bool textarea_needs_baseline_set =
+        form->control_type == FORM_CONTROL_TEXTAREA &&
+        radiant::layout_uses_explicit_baseline_source(block);
+    if (textarea_needs_baseline_set) {
+        // Textarea children are its default value, not ordinary layout children.
+        // Materialize that value before deriving the editable line-baseline set.
+        tc_ensure_init(static_cast<DomElement*>(block));
+    }
+
     log_debug("[FORM] layout_form_control: type=%d, tag=%s",
               form->control_type, block->tag_name ? block->tag_name : "?");
 
@@ -659,6 +702,28 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
             select_baseline_offset;
         lycon->block.last_line_max_ascender = lycon->block.last_line_ascender;
+
+        if (textarea_needs_baseline_set) {
+            bool has_css_font = form_control_has_specified_font(block) ||
+                (font && !font->font_size_from_medium);
+            float line_height = textarea_used_line_height(
+                lycon, block, font, has_css_font);
+            float font_descender = font && font->descender > 0.0f
+                ? font->descender : 0.0f;
+            float content_height = font_ascender + font_descender;
+            float first_baseline = border_top + pad_top + font_ascender +
+                (line_height - content_height) * 0.5f;
+            int visual_lines = textarea_visual_line_count(
+                lycon, font, form->current_value ? form->current_value : form->value,
+                block->content_width);
+            float last_baseline = first_baseline +
+                (float)(visual_lines - 1) * line_height;
+
+            // CSS Box Alignment clamps a scroll container's line baseline to
+            // its block-end border edge when editable content overflows.
+            form->first_text_baseline = min(first_baseline, block->height);
+            form->last_text_baseline = min(last_baseline, block->height);
+        }
     }
 
     log_debug("[FORM] layout complete: w=%.1f h=%.1f cw=%.1f ch=%.1f",

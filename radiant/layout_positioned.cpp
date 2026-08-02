@@ -2246,6 +2246,27 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float final_y_bfc = current_y_bfc;
     int max_iterations = 100;  // Prevent infinite loops
 
+    bool float_is_inline_start =
+        (parent_ctx->direction != CSS_VALUE_RTL &&
+         block->positionp()->float_prop == CSS_VALUE_LEFT) ||
+        (parent_ctx->direction == CSS_VALUE_RTL &&
+         block->positionp()->float_prop == CSS_VALUE_RIGHT);
+    bool initial_letter_clearance_applied = false;
+    if (float_is_inline_start && parent_ctx->initial_letter_clears_later_start_floats &&
+        parent_ctx->line_number > parent_ctx->initial_letter_origin_line_number) {
+        float initial_margin_bottom_bfc = parent_y_in_bfc +
+            parent_ctx->initial_letter_margin_box_bottom;
+        if (final_y_bfc < initial_margin_bottom_bfc) {
+            // An in-flow initial has no FloatBox, so CSS Inline 3 §7.9.3's
+            // required clearance for later inline-start floats must be explicit.
+            final_y_bfc = initial_margin_bottom_bfc;
+            initial_letter_clearance_applied = true;
+        }
+    }
+    if (block->blk) {
+        block->block_mut()->initial_letter_float_clearance = initial_letter_clearance_applied;
+    }
+
     // CSS 2.1 §9.5.1: Calculate containing block edges in BFC coordinates
     float containing_block_left_bfc = parent_x_in_bfc + content_offset_x;
     float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
@@ -2507,8 +2528,7 @@ void adjust_line_for_floats(LayoutContext* lycon) {
     log_debug("Adjusting line for floats: local_y=%.1f, bfc_y=%.1f, height=%.1f, offset=(%.1f, %.1f)",
               lycon->block.advance_y, line_top_bfc, line_height, block_offset_x, block_offset_y);
 
-    // Query available space at current line position using BlockContext API
-    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_bfc, line_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_bfc, line_height, true);
 
     // If there's no float intrusion at this Y position, skip adjustment
     if (!space.has_left_float && !space.has_right_float) {

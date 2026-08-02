@@ -248,24 +248,34 @@ float compute_font_baseline_ascender(
     return fallback_ascender;
 }
 
-float compute_element_first_baseline(
+static float compute_element_baseline(
     ::LayoutContext* lycon,
     ViewBlock* element,
-    bool is_row_direction
+    bool is_row_direction,
+    bool prefer_last
 ) {
     if (!element) return -1.0f;
     (void)lycon;
     (void)is_row_direction;
 
-    // CSS 2.1 §10.8.1: use the first in-flow child baseline when one exists.
+    if (prefer_last && element->blk &&
+        element->block()->last_line_baseline > 0.0f) {
+        return element->block()->last_line_baseline;
+    }
+
+    float last_child_baseline = -1.0f;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         ViewBlock* child_block = lam::unsafe_view_block_element_storage(child->as_element());
-        float child_baseline = compute_element_first_baseline(lycon, child_block, is_row_direction);
+        float child_baseline = compute_element_baseline(
+            lycon, child_block, is_row_direction, prefer_last);
         if (child_baseline >= 0) {
-            return child_block->y + child_baseline;
+            float result = child_block->y + child_baseline;
+            if (!prefer_last) return result;
+            last_child_baseline = result;
         }
     }
+    if (last_child_baseline >= 0.0f) return last_child_baseline;
 
     bool has_text_content = false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -283,6 +293,22 @@ float compute_element_first_baseline(
 
     // No child with baseline: synthesize from the bottom border edge.
     return element->height;
+}
+
+float compute_element_first_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+) {
+    return compute_element_baseline(lycon, element, is_row_direction, false);
+}
+
+float compute_element_last_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+) {
+    return compute_element_baseline(lycon, element, is_row_direction, true);
 }
 
 float compute_view_first_text_baseline(
@@ -338,6 +364,48 @@ float compute_view_first_text_baseline(
                 if (result >= 0) return result;
             }
         }
+    }
+    return -1.0f;
+}
+
+float compute_view_last_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table
+) {
+    if (!parent || !parent->is_element()) return -1.0f;
+
+    View* child = static_cast<View*>(
+        lam::view_require_element(parent)->last_child);
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            float fallback_ascent = text->font ? text->font->font_size * 0.8f : 0.0f;
+            float ascent = compute_font_baseline_ascender(
+                lycon, text->font, use_normal_line_height, fallback_ascent);
+            return cumulative_y + child->y + ascent;
+        }
+
+        bool is_table_structure = (child->view_type == RDT_VIEW_TABLE ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                                   child->view_type == RDT_VIEW_TABLE_ROW ||
+                                   child->view_type == RDT_VIEW_TABLE_CELL);
+        bool is_block_like = (child->view_type == RDT_VIEW_BLOCK ||
+                              child->view_type == RDT_VIEW_INLINE ||
+                              child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                              child->view_type == RDT_VIEW_LIST_ITEM);
+        if (!is_table_structure && is_block_like) {
+            bool parent_is_table = parent->view_type == RDT_VIEW_TABLE;
+            if (!skip_block_children_of_table || !parent_is_table) {
+                float result = compute_view_last_text_baseline(
+                    lycon, child, cumulative_y + child->y,
+                    use_normal_line_height, skip_block_children_of_table);
+                if (result >= 0.0f) return result;
+            }
+        }
+        child = child->prev_sibling;
     }
     return -1.0f;
 }

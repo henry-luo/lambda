@@ -478,8 +478,7 @@ static bool parent_preserves_inter_element_whitespace(DomNode* text_node) {
     DomElement* parent_elem = text_node->parent->as_element();
     if (!parent_elem->blk || parent_elem->block()->white_space == 0) return false;
     CssEnum ws = parent_elem->block()->white_space;
-    return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
-        ws == CSS_VALUE_BREAK_SPACES;
+    return white_space_preserves_space_advance(ws);
 }
 
 /**
@@ -1637,16 +1636,40 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text_view = lam::view_require_text(view);
         InitialLetterInfo initial_letter = {};
-        bool is_raised_initial = layout_get_text_initial_letter_info(
-            static_cast<DomNode*>(text_view), &initial_letter) && initial_letter.raised;
+        bool is_initial_letter = layout_get_text_initial_letter_info(
+            static_cast<DomNode*>(text_view), &initial_letter);
         TextRect* rect = text_view->rect;
         while (rect) {
             if (rect->line_number != lycon->block.line_number) {
                 rect = rect->next;
                 continue;
             }
-            if (is_raised_initial) {
-                // Raised initials align to their over edge, not the normal text baseline.
+            if (is_initial_letter) {
+                if (!initial_letter.raised && lycon->line.ruby_annotation_over_shift > 0.0f) {
+                    // An over annotation raises the line's base level; drop initials share it.
+                    rect->y = lycon->block.advance_y + lycon->block.lead_y +
+                        lycon->line.ruby_annotation_over_shift;
+                    // The later line reset must use the final base level, not the
+                    // first-letter position captured before ruby line alignment.
+                    lycon->block.initial_letter_exclusion_bottom = max(
+                        lycon->block.initial_letter_exclusion_bottom, rect->y +
+                        (ceilf(initial_letter.size) + 1.0f) * lycon->block.line_height);
+                } else if (initial_letter.raised &&
+                           lycon->line.ruby_annotation_over_shift > 0.0f) {
+                    FontProp* block_font = lycon->block.block_container_font;
+                    float base_ascender = block_font && block_font->font_handle
+                        ? font_get_rendering_ascender(block_font->font_handle) : 0.0f;
+                    if (base_ascender <= 0.0f) base_ascender = lycon->block.init_ascender;
+                    // CSS Inline 3 §7.6.1 aligns a raised initial to the finalized
+                    // origin line; its cap overhang remains relative to the base text.
+                    float cap_overhang = max(0.0f, initial_letter.size - 1.0f) *
+                        lycon->block.line_height;
+                    rect->y = lycon->block.advance_y + baseline_pos - base_ascender -
+                        cap_overhang;
+                    lycon->block.initial_letter_exclusion_bottom = max(
+                        lycon->block.initial_letter_exclusion_bottom, rect->y + rect->height);
+                }
+                // Initial letters use their initial-letter alignment, not vertical-align.
                 rect = rect->next;
                 continue;
             }
@@ -1699,6 +1722,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             } else {
                 item_baseline = item_height;
             }
+        } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
+                   radiant::layout_uses_explicit_baseline_source(block)) {
+            float control_baseline = radiant::layout_form_control_baseline_for_source(block);
+            item_baseline = control_baseline > 0.0f
+                ? (block->bound ? block->boundary()->margin.top : 0.0f) + control_baseline
+                : block->height + (block->bound ? block->boundary()->margin.top : 0.0f);
         } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
             item_baseline = block->height +
                 (block->bound ? block->boundary()->margin.top : 0);
@@ -1707,10 +1736,25 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         bool is_inline_grid = block->display.outer == CSS_VALUE_INLINE_BLOCK &&
             block->display.inner == CSS_VALUE_GRID;
-        if (is_inline_grid && block->blk &&
-            block->block()->first_line_baseline > 0.0f) {
-            item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                block->block()->first_line_baseline;
+        bool is_inline_flex = block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+            block->display.inner == CSS_VALUE_FLEX;
+        if (is_inline_grid && block->blk) {
+            float grid_baseline = radiant::layout_select_cached_baseline(
+                block, block->block()->first_line_baseline,
+                block->block()->last_line_baseline, false, 0.0f);
+            if (grid_baseline > 0.0f) {
+                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                    grid_baseline;
+            }
+        } else if (is_inline_flex && block->embed && block->embedp()->flex) {
+            float flex_baseline = radiant::layout_select_cached_baseline(
+                block, block->embedp()->flex->first_baseline,
+                block->embedp()->flex->last_baseline, false, 0.0f);
+            if (flex_baseline > 0.0f) {
+                BoxMetrics box = layout_box_metrics(block);
+                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                    box.border.top + box.padding.top + flex_baseline;
+            }
         } else if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
@@ -1719,10 +1763,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             bool overflow_visible = !block->scroller ||
                 (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
                  block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
-            if (!is_replaced_elem && overflow_visible) {
+            if (!is_replaced_elem &&
+                (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) {
                 // Combo selects expose a synthesized internal text baseline from the first pass.
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    block->block()->last_line_max_ascender;
+                    radiant::layout_inline_baseline_for_source(
+                        block, block->block()->last_line_max_ascender);
             }
         }
         CssEnum align = block->in_line && block->inl()->vertical_align ?
@@ -1736,7 +1782,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // Recompute line_height with updated max_ascender
             line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
         }
-        float align_baseline_pos = block->display.inner == RDT_DISPLAY_REPLACED ?
+        bool textarea_uses_content_baseline =
+            block->tag() == MARKUP_NAME_TEXTAREA &&
+            radiant::layout_uses_explicit_baseline_source(block) &&
+            radiant::layout_form_control_baseline_for_source(block) > 0.0f;
+        float align_baseline_pos = block->display.inner == RDT_DISPLAY_REPLACED &&
+            !textarea_uses_content_baseline ?
             replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, align_baseline_pos, item_baseline, valign_offset);
@@ -1869,6 +1920,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                          span->y, span->height, content_area);
             }
             // Else: text-only content — compute_span_bounding_box result is correct
+        }
+        if (span->tag() == MARKUP_NAME_RUBY &&
+            span->inl()->ruby_position != CSS_VALUE_UNDER) {
+            for (View* child = span->first_child; child; child = child->next()) {
+                if (child->view_type != RDT_VIEW_INLINE || child->tag() != MARKUP_NAME_RT) {
+                    continue;
+                }
+                ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);
+                float target_y = span->y - annotation->height;
+                layout_offset_ruby_annotation_tree(child, 0.0f, target_y - annotation->y);
+            }
         }
     }
     else {
@@ -3123,6 +3185,18 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float collapsed_root_content_extent = 0.0f;
         bool has_root_content_extent = false;
         bool all_root_children_self_collapsing = true;
+        for (InitialLetterBox* box = lycon->block.initial_letters; box; box = box->next) {
+            if (box->source_is_short) {
+                // A short source paragraph has no in-flow line box covering the
+                // cap, so its margin-box overflow remains part of the root extent.
+                root_content_extent = max(root_content_extent, box->margin_box_bottom);
+            }
+        }
+        if (lycon->block.initial_letter_trimmed_start_contribution > 0.0f) {
+            // Trim-start changes the visual box, but a raised initial's margin
+            // box still contributes to the root's auto block-size.
+            root_content_extent += lycon->block.initial_letter_trimmed_start_contribution;
+        }
         View* root_child = html->first_placed_child();
         while (root_child) {
             if (root_child->is_block()) {

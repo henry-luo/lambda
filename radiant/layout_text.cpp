@@ -1403,7 +1403,8 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
         current_y_local, offset_y, current_y_bfc);
 
     // Query available space at this Y using BlockContext API (in BFC coordinates)
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height,
+        query_height <= 0.0f);
 
     // Convert from BFC coordinates to local coordinates
     float local_space_left = space.left - offset_x;
@@ -1584,10 +1585,53 @@ static void reset_line_parent_font(LayoutContext* lycon) {
     lycon->line.parent_font_handle = lycon->font.font_handle;
 }
 
+static void apply_bfc_initial_letter_exclusions(LayoutContext* lycon, BlockContext* bfc) {
+    if (!lycon || !bfc || !bfc->initial_letters) return;
+
+    float line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : 1.0f;
+    float line_top_bfc = lycon->block.bfc_offset_y + lycon->block.advance_y;
+    float line_bottom_bfc = line_top_bfc + line_height;
+    bool constrains_line = false;
+
+    for (InitialLetterBox* box = bfc->initial_letters; box; box = box->next) {
+        if (box->margin_box_bottom <= line_top_bfc || box->margin_box_top >= line_bottom_bfc) {
+            continue;
+        }
+        if (box->direction == CSS_VALUE_RTL) {
+            float local_right = box->margin_box_left - lycon->block.bfc_offset_x;
+            if (local_right < lycon->line.effective_right) {
+                lycon->line.effective_right = max(local_right, lycon->line.effective_left);
+                constrains_line = true;
+            }
+        } else {
+            float local_left = box->margin_box_right - lycon->block.bfc_offset_x;
+            if (local_left > lycon->line.effective_left) {
+                lycon->line.effective_left = min(local_left, lycon->line.effective_right);
+                constrains_line = true;
+            }
+        }
+    }
+
+    if (constrains_line) {
+        // A continuing initial letter constrains a later line like a float, so
+        // all inline placement must use the narrowed effective line bounds.
+        lycon->line.has_float_intrusion = true;
+        if (lycon->line.advance_x < lycon->line.effective_left &&
+            lycon->line.advance_x >= lycon->line.left) {
+            lycon->line.advance_x = lycon->line.effective_left;
+        }
+    }
+}
+
 void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.max_css_baseline_ascender = 0;
+    lycon->line.ruby_annotation_min_line_height = 0;
+    lycon->line.ruby_annotation_over_shift = 0;
+    lycon->line.initial_letter_origin_advance = 0;
+    lycon->line.has_initial_letter = false;
+    lycon->line.has_drop_initial_letter = false;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_kind = BRK_TEXT;
     lycon->line.last_non_shy_space = NULL;  lycon->line.last_non_shy_space_pos = 0;
@@ -1654,21 +1698,33 @@ void line_reset(LayoutContext* lycon) {
     if (bfc) {
         // Use unified line adjustment via BlockContext
         adjust_line_for_floats(lycon);
+        apply_bfc_initial_letter_exclusions(lycon, bfc);
         log_debug("DEBUG: Used BlockContext %p for line adjustment", (void*)bfc);
     }
 
-    if (lycon->block.initial_letter_exclusion_lines > 0 &&
-        lycon->block.initial_letter_exclusion_width > 0.0f) {
+    float line_content_top = lycon->block.advance_y + lycon->block.lead_y;
+    bool count_exclusion = lycon->block.initial_letter_exclusion_lines > 0;
+    bool geometry_exclusion = line_content_top <
+        lycon->block.initial_letter_exclusion_bottom - 0.01f;
+    bool shortens_line = lycon->block.initial_letter_exclusion_requires_intersection
+        ? count_exclusion && geometry_exclusion
+        : count_exclusion || geometry_exclusion;
+    if (lycon->block.initial_letter_exclusion_width > 0.0f && shortens_line) {
         // The initial letter is in-flow, but its margin box still shortens each
-        // impacted following line just as the CSS Inline initial-letter exclusion does.
+        // following line whose content area still intersects its block-size.
         if (lycon->block.direction == CSS_VALUE_RTL) {
             lycon->line.effective_right -= lycon->block.initial_letter_exclusion_width;
         } else {
-            lycon->line.effective_left += lycon->block.initial_letter_exclusion_width;
+            // Preserve the initial's static edge after an earlier float recedes,
+            // while a later float can still extend the combined exclusion farther.
+            float float_adjusted_exclusion = lycon->line.effective_left +
+                lycon->block.initial_letter_exclusion_width;
+            lycon->line.effective_left = max(float_adjusted_exclusion,
+                lycon->block.initial_letter_exclusion_right);
             lycon->line.advance_x = max(lycon->line.advance_x, lycon->line.effective_left);
         }
-        lycon->block.initial_letter_exclusion_lines--;
     }
+    if (count_exclusion) lycon->block.initial_letter_exclusion_lines--;
 
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     // Apply text-indent AFTER float adjustment so indent is additive with float offsets
@@ -2233,6 +2289,10 @@ void line_break(LayoutContext* lycon) {
         }
     }
 
+    if (lycon->line.ruby_annotation_min_line_height > used_line_height) {
+        used_line_height = lycon->line.ruby_annotation_min_line_height;
+    }
+
     if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
         // The quirks inline-only block rule removes the container's minimum strut;
         // retain the actual descendant font and atomic-inline extents.
@@ -2745,6 +2805,87 @@ static bool initial_letter_block_trims_start_edge(const DomNode* text_node,
          TEXT_BOX_TRIM_START) != 0;
 }
 
+typedef struct InitialLetterBoxInsets {
+    float top;
+    float right;
+    float bottom;
+    float left;
+} InitialLetterBoxInsets;
+
+static InitialLetterBoxInsets initial_letter_box_insets(ViewText* text) {
+    InitialLetterBoxInsets insets = {};
+    ViewElement* pseudo = text ? text->parent_view() : NULL;
+    if (!pseudo || !pseudo->bound) return insets;
+
+    insets.top = pseudo->boundary()->margin.top;
+    insets.right = pseudo->boundary()->margin.right;
+    insets.bottom = pseudo->boundary()->margin.bottom;
+    insets.left = pseudo->boundary()->margin.left;
+    if (pseudo->boundary()->border) {
+        insets.top += pseudo->boundary()->border->width.top;
+        insets.right += pseudo->boundary()->border->width.right;
+        insets.bottom += pseudo->boundary()->border->width.bottom;
+        insets.left += pseudo->boundary()->border->width.left;
+    }
+    insets.top += max(pseudo->boundary()->padding.top, 0.0f);
+    insets.right += max(pseudo->boundary()->padding.right, 0.0f);
+    insets.bottom += max(pseudo->boundary()->padding.bottom, 0.0f);
+    insets.left += max(pseudo->boundary()->padding.left, 0.0f);
+    return insets;
+}
+
+static float initial_letter_used_content_height(const LayoutContext* lycon,
+                                                const TextRect* rect) {
+    float height = lycon && lycon->font.font_handle ?
+        font_get_cell_height(lycon->font.font_handle) : 0.0f;
+    return height > 0.0f ? height : (rect ? rect->height : 0.0f);
+}
+
+static void initial_letter_avoid_bfc_floats(LayoutContext* lycon, TextRect* rect,
+                                            const InitialLetterBoxInsets& insets) {
+    if (!lycon || !rect) return;
+
+    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+    if (!bfc || (bfc->left_float_count == 0 && bfc->right_float_count == 0)) return;
+
+    float margin_box_height = initial_letter_used_content_height(lycon, rect) +
+        insets.top + insets.bottom;
+    if (margin_box_height <= 0.0f) return;
+    float bfc_y = lycon->block.bfc_offset_y + rect->y - insets.top;
+    FloatAvailableSpace space = block_context_space_at_y(bfc, bfc_y, margin_box_height);
+    float local_left = space.left - lycon->block.bfc_offset_x;
+    float local_right = space.right - lycon->block.bfc_offset_x;
+    float margin_box_left = rect->x - insets.left;
+    float margin_box_width = rect->width + insets.left + insets.right;
+
+    if (lycon->block.direction != CSS_VALUE_RTL && space.has_left_float) {
+        float shifted_left = max(margin_box_left, local_left);
+        if (shifted_left > margin_box_left &&
+            shifted_left + margin_box_width <= local_right) {
+            // Initial letters are in-flow, but their full margin box cannot overlap
+            // BFC floats; the origin-line query alone misses floats lower in the cap.
+            float shift = shifted_left - margin_box_left;
+            lycon->line.advance_x += shift;
+            rect->x += shift;
+        }
+    } else if (lycon->block.direction == CSS_VALUE_RTL && space.has_right_float) {
+        float shifted_left = min(margin_box_left, local_right - margin_box_width);
+        if (shifted_left < margin_box_left && shifted_left >= local_left) {
+            float shift = margin_box_left - shifted_left;
+            lycon->line.advance_x -= shift;
+            rect->x -= shift;
+        }
+    }
+}
+
+static float initial_letter_inherited_text_indent(LayoutContext* lycon,
+                                                  ViewText* text) {
+    if (!lycon || !text || !text->parent_view()) return 0.0f;
+    // The synthetic pseudo stores only its declared style. Its inherited indent
+    // is therefore the already-resolved value of the originating line context.
+    return lycon->block.text_indent;
+}
+
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
     if (text_length <= 0) {
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
@@ -2754,8 +2895,22 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
     InitialLetterInfo initial_letter = {};
-    bool is_raised_initial_letter = layout_get_text_initial_letter_info(
-        static_cast<DomNode*>(text), &initial_letter) && initial_letter.raised;
+    bool is_initial_letter = layout_get_text_initial_letter_info(
+        static_cast<DomNode*>(text), &initial_letter);
+    bool is_raised_initial_letter = is_initial_letter && initial_letter.raised;
+    InitialLetterBoxInsets initial_insets = is_initial_letter ?
+        initial_letter_box_insets(text) : InitialLetterBoxInsets{};
+    if (is_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
+        // Initial-letter alignment anchors the outer box, so its block-start
+        // decoration insets the glyph without changing its used font size.
+        rect->y += initial_insets.top;
+    }
+    if (is_initial_letter) {
+        lycon->line.has_initial_letter = true;
+    }
+    if (is_initial_letter && !is_raised_initial_letter) {
+        lycon->line.has_drop_initial_letter = true;
+    }
     if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(text);
     ViewElement* text_parent = text->parent_view();
     if (!lycon->line.has_direct_block_text && text_parent && text_parent->is_block() &&
@@ -2764,7 +2919,21 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         // inline box contains text rather than only collapsed whitespace.
         lycon->line.has_direct_block_text = true;
     }
+    if (is_initial_letter && !lycon->block.initial_letter_origin_offset_applied &&
+        lycon->block.direction != CSS_VALUE_RTL) {
+        float inherited_indent = initial_letter_inherited_text_indent(lycon, text);
+        if (inherited_indent != 0.0f) {
+            // A generated initial keeps its inherited first-line indent in addition
+            // to the originating line's indent; record that shift before deriving
+            // its exclusion, otherwise later lines start at the stale cap edge.
+            rect->x += inherited_indent;
+            lycon->line.advance_x += inherited_indent;
+        }
+    }
     lycon->line.advance_x += text_width;
+    if (is_initial_letter && lycon->font.font_handle) {
+        initial_letter_avoid_bfc_floats(lycon, rect, initial_insets);
+    }
     // CSS 2.1 §16.6.1: Commit trailing space info for cross-node line break trimming.
     // When new text content is output, the previous trailing space is no longer at
     // the end of the line — clear it. Then save any trailing space from this rect.
@@ -2784,23 +2953,75 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     // inline left edges (margin+border+padding) have been consumed.
     lycon->line.inline_start_edge_pending = 0;
 
-    if (is_raised_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
-        // Initial letters do not enlarge their originating line box. Shift the
-        // following inline flow down by the cap overhang so the glyph stays within
-        // the containing block without disturbing ruby or other line participants.
-        float overhang = max(0.0f, initial_letter.size - 1.0f) * lycon->block.line_height;
-        if (!initial_letter_block_trims_start_edge(static_cast<DomNode*>(text), lycon)) {
-            lycon->block.advance_y += overhang;
+    if (is_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
+        if (is_raised_initial_letter) {
+            // Initial letters do not enlarge their originating line box. Shift the
+            // following inline flow down by the cap overhang so the glyph stays within
+            // the containing block without disturbing ruby or other line participants.
+            float overhang = max(0.0f, initial_letter.size - 1.0f) * lycon->block.line_height;
+            if (!initial_letter_block_trims_start_edge(static_cast<DomNode*>(text), lycon)) {
+                lycon->block.advance_y += overhang;
+                // Ruby metrics are relative to the displaced origin line, so do
+                // not add this raised-cap offset a second time to its ascender.
+                lycon->line.initial_letter_origin_advance = overhang;
+            } else {
+                // Preserve the cap's containing-size contribution through the
+                // parent flow even when no ordinary half-leading is trim-eligible.
+                lycon->block.initial_letter_trimmed_start_candidate = max(
+                    lycon->block.initial_letter_trimmed_start_candidate, overhang);
+            }
+            int following_lines = (int)ceilf(initial_letter.size - initial_letter.sink) - 1; // INT_CAST_OK: discrete initial-letter line count
+            if (following_lines > 0) {
+                lycon->block.initial_letter_exclusion_lines = max(
+                    lycon->block.initial_letter_exclusion_lines, following_lines);
+            }
+            // A tall ruby annotation can push the next visual line below a
+            // raised initial's glyph, so its discrete slot must still intersect
+            // the physical initial-letter extent before shortening that line.
+            lycon->block.initial_letter_exclusion_bottom = max(
+                lycon->block.initial_letter_exclusion_bottom, rect->y + rect->height);
+            lycon->block.initial_letter_exclusion_requires_intersection = true;
+        }
+        else if (initial_letter.sink > 1.0f && initial_letter.sink < initial_letter.size) {
+            // CSS Inline 3 §7.6.1: a sunken initial starts following inline
+            // content at its sink line; treating it as a drop cap loses this offset.
+            lycon->block.advance_y += (initial_letter.sink - 1.0f) *
+                lycon->block.line_height;
+        }
+        float margin_box_left = rect->x - initial_insets.left;
+        float margin_box_right = rect->x + rect->width + initial_insets.right;
+        float margin_box_top = rect->y - initial_insets.top;
+        float margin_box_bottom = rect->y +
+            initial_letter_used_content_height(lycon, rect) + initial_insets.bottom;
+        // CSS Inline 3 §7.5.2 wraps later lines around the initial's margin
+        // box; recording only its glyph bounds loses author-specified spacing.
+        lycon->block.initial_letter_exclusion_width = max(
+            lycon->block.initial_letter_exclusion_width,
+            margin_box_right - margin_box_left);
+        lycon->block.initial_letter_exclusion_right = margin_box_right;
+        lycon->block.initial_letter_margin_box_left = margin_box_left;
+        lycon->block.initial_letter_margin_box_right = margin_box_right;
+        lycon->block.initial_letter_margin_box_top = margin_box_top;
+        lycon->block.initial_letter_margin_box_bottom = max(
+            lycon->block.initial_letter_margin_box_bottom, margin_box_bottom);
+        ViewElement* pseudo = text->parent_view();
+        float block_end_margin = pseudo && pseudo->bound ?
+            pseudo->boundary()->margin.bottom : 0.0f;
+        lycon->block.initial_letter_border_box_bottom = max(
+            lycon->block.initial_letter_border_box_bottom,
+            margin_box_bottom - block_end_margin);
+        lycon->block.initial_letter_origin_line_number = lycon->block.line_number;
+        lycon->block.initial_letter_clears_later_start_floats =
+            !is_raised_initial_letter && initial_letter.sink > 1.0f;
+        if (!is_raised_initial_letter) {
+            // Keep the cap's line-grid cutoff, then extend it by block-end
+            // decoration so a margin changes wrapping without an extra normal line.
+            lycon->block.initial_letter_exclusion_bottom = max(
+                lycon->block.initial_letter_exclusion_bottom, rect->y +
+                (ceilf(initial_letter.size) + 1.0f) * lycon->block.line_height +
+                initial_insets.bottom);
         }
         lycon->block.initial_letter_origin_offset_applied = true;
-
-        int following_lines = (int)ceilf(initial_letter.size - initial_letter.sink) - 1; // INT_CAST_OK: discrete initial-letter line count
-        if (following_lines > 0) {
-            lycon->block.initial_letter_exclusion_width = max(
-                lycon->block.initial_letter_exclusion_width, rect->width);
-            lycon->block.initial_letter_exclusion_lines = max(
-                lycon->block.initial_letter_exclusion_lines, following_lines);
-        }
     }
 
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
@@ -2815,7 +3036,9 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             font_get_content_area_split(lycon->font.font_handle, &ascender, &descender);
         }
     }
-    if (!is_raised_initial_letter && (ascender > 0 || descender > 0)) {
+    // CSS Inline 3 §7.5/§7.6: an initial letter occupies inline space but
+    // its requested line span must not enlarge its originating line box.
+    if (!is_initial_letter && (ascender > 0 || descender > 0)) {
         float half_leading = 0.0f;
         float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal) {
@@ -3017,6 +3240,29 @@ static void discard_uncommitted_text_rect(ViewText* text, TextRect* rect) {
     TextRect* prev = text->rect;
     while (prev && prev->next != rect) prev = prev->next;
     if (prev) prev->next = nullptr;
+}
+
+static bool clear_initial_letter_continuation(LayoutContext* lycon) {
+    if (!lycon || lycon->block.initial_letter_continuation_cleared) return false;
+
+    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+    if (!bfc || !bfc->initial_letters) return false;
+
+    float origin_y_bfc = lycon->block.bfc_offset_y + lycon->block.advance_y;
+    float clear_y_bfc = origin_y_bfc;
+    for (InitialLetterBox* box = bfc->initial_letters; box; box = box->next) {
+        if (box->direction == lycon->block.direction &&
+            origin_y_bfc < box->margin_box_bottom) {
+            clear_y_bfc = max(clear_y_bfc, box->margin_box_bottom);
+        }
+    }
+    if (clear_y_bfc <= origin_y_bfc) return false;
+
+    // CSS Inline 3 §7.9.2 clears a following initial at the previous initial's
+    // used margin-box end, rather than at its DOM range (computed-font) bounds.
+    lycon->block.advance_y = clear_y_bfc - lycon->block.bfc_offset_y;
+    lycon->block.initial_letter_continuation_cleared = true;
+    return true;
 }
 
 // Non-space glyphs terminate all trailing and hanging-space accounting from
@@ -3270,6 +3516,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool is_rect_initial = layout_get_text_initial_letter_info(
         text_node, &rect_initial_letter);
     bool is_raised_rect_initial = is_rect_initial && rect_initial_letter.raised;
+    if (is_rect_initial && clear_initial_letter_continuation(lycon)) {
+        discard_uncommitted_text_rect(text_view, rect);
+        line_reset(lycon);
+        goto LAYOUT_TEXT;
+    }
     if (is_rect_initial && text_view->font &&
         text_view->font->initial_letter_computed_font_size > 0.0f &&
         text_view->font->font_size > 0.0f) {
@@ -3283,9 +3534,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // CSS half-leading model: text is centered within the line box
     // When line-height < font height, half_leading can be negative (text extends above line box)
     // Use backend font_height for half-leading calculation (consistent with lead_y calculation)
-    if (is_raised_rect_initial) {
+    if (is_rect_initial) {
         rect->y = lycon->block.advance_y + lycon->block.lead_y;
-        if (initial_letter_block_trims_start_edge(text_node, lycon)) {
+        if (is_raised_rect_initial &&
+            initial_letter_block_trims_start_edge(text_node, lycon)) {
             // trim-start makes the overhang part of the trimmed first-line area,
             // so the initial rises without moving the following inline content.
             rect->y -= max(0.0f, rect_initial_letter.size - 1.0f) *

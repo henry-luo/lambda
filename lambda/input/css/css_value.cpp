@@ -484,6 +484,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"reverse", 7, CSS_VALUE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
     {"alternate", 9, CSS_VALUE_ALTERNATE, CSS_VALUE_GROUP_ANIMATION},
     {"alternate-reverse", 17, CSS_VALUE_ALTERNATE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
+    {"over", 4, CSS_VALUE_OVER, CSS_VALUE_GROUP_RUBY_POSITION},
+    {"under", 5, CSS_VALUE_UNDER, CSS_VALUE_GROUP_RUBY_POSITION},
     // Animation fill-mode keywords
     {"forwards", 8, CSS_VALUE_FORWARDS, CSS_VALUE_GROUP_ANIMATION},
     {"backwards", 9, CSS_VALUE_BACKWARDS, CSS_VALUE_GROUP_ANIMATION},

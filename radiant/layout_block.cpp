@@ -1747,7 +1747,12 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 
     int text_len = (int)strlen((const char*)text_data); // INT_CAST_OK: string length
 
-    // Skip leading whitespace to find content start
+    CssEnum white_space = get_white_space_value(text_node);
+    bool preserves_space_advance = white_space_preserves_space_advance(white_space);
+
+    // Skip leading whitespace to find the first typographic letter. Preserved
+    // tabs and spaces remain in the first-letter box so their advance still
+    // precedes the initial letter on the first formatted line.
     const unsigned char* p = text_data;
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
     if (!*p) return;
@@ -1807,16 +1812,18 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
         fl_elem, elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER));
 
     // Create text content for the first-letter pseudo-element
-    char* fl_text = (char*)pool_calloc(pool, boundary + 1);
+    int preserved_prefix = preserves_space_advance ? ws_offset : 0;
+    int first_letter_length = preserved_prefix + boundary;
+    char* fl_text = (char*)pool_calloc(pool, first_letter_length + 1);
     if (!fl_text) return;
-    memcpy(fl_text, p, boundary);
-    fl_text[boundary] = '\0';
+    memcpy(fl_text, preserves_space_advance ? text_data : p, first_letter_length);
+    fl_text[first_letter_length] = '\0';
 
     DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
     fl_text_node->parent = fl_elem;
     fl_text_node->text = fl_text;
-    fl_text_node->length = boundary;
+    fl_text_node->length = first_letter_length;
 
     fl_elem->first_child = fl_text_node;
 
@@ -3275,8 +3282,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->blk->line_clamp_last_line_ascender = lycon->block.line_clamp_last_line_ascender;
         block->blk->line_clamp_last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
         block->blk->line_clamp_last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
-        // Persist first line baseline for flex baseline alignment (CSS Flexbox §9.4)
+        // Persist both baseline sets after the line context is finalized.
         block->blk->first_line_baseline = lycon->block.first_line_ascender;
+        block->blk->last_line_baseline = lycon->block.last_line_ascender;
     }
     float end_trim_limit = -1.0f;
     if (lycon->block.saved_clear_y >= 0.0f) {
@@ -3293,6 +3301,18 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         lycon->block.advance_y -= text_box_trim_amount;
         recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
         log_debug("%s finalizing block, display=%d, given wd:%f", block->source_loc(), display, lycon->block.given_width);
+    }
+    if (lycon->block.initial_letter_trimmed_start_candidate > 0.0f) {
+        // CSS Inline 3 §7.9.1 keeps a raised initial's margin-box
+        // contribution even when Ahem gives trim-start no half-leading to remove.
+        lycon->block.initial_letter_trimmed_start_contribution +=
+            lycon->block.initial_letter_trimmed_start_candidate;
+    }
+    if (lycon->block.initial_letter_trimmed_start_contribution > 0.0f) {
+        // A default-style ancestor still carries this in-flow contribution to
+        // its parent; without a BlockProp it was lost before root auto-sizing.
+        block->ensure_block(lycon)->initial_letter_trimmed_start_contribution =
+            lycon->block.initial_letter_trimmed_start_contribution;
     }
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
         // CSS 2.1 §10.3.9: inline-block auto width uses the shrink-to-fit
@@ -4157,6 +4177,52 @@ static CssEnum get_element_float_value(DomElement* elem) {
     return layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
 }
 
+// HTML Rendering §15.3.12 promotes the first eligible legend into the
+// fieldset's rendered-legend slot; later DOM siblings remain content-box input.
+static DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset) {
+    if (!fieldset || !fieldset->is_element() ||
+        fieldset->tag() != MARKUP_NAME_FIELDSET) {
+        return nullptr;
+    }
+
+    for (DomNode* child = fieldset->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* candidate = child->as_element();
+        if (candidate->tag() != MARKUP_NAME_LEGEND ||
+            get_element_float_value(candidate) != CSS_VALUE_NONE) {
+            continue;
+        }
+        CssEnum position = candidate->position
+            ? candidate->positionp()->position
+            : layout_specified_keyword(candidate, CSS_PROPERTY_POSITION,
+                                       CSS_VALUE_STATIC);
+        if (position != CSS_VALUE_ABSOLUTE && position != CSS_VALUE_FIXED) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}
+
+// Keep source links intact for DOM output, but iterate the rendered legend ahead
+// of the anonymous fieldset content box required by HTML Rendering §15.3.12.
+static DomNode* fieldset_next_flow_child(ViewBlock* fieldset, DomNode* current,
+                                         DomElement* rendered_legend) {
+    if (!fieldset || !current || !rendered_legend) return nullptr;
+
+    if (current == static_cast<DomNode*>(rendered_legend)) {
+        for (DomNode* child = fieldset->first_child; child; child = child->next_sibling) {
+            if (child != current) return child;
+        }
+        return nullptr;
+    }
+
+    DomNode* next = current->next_sibling;
+    if (next == static_cast<DomNode*>(rendered_legend)) {
+        next = next->next_sibling;
+    }
+    return next;
+}
+
 /**
  * Pre-scan inline siblings for floats and layout them first
  * This ensures floats are positioned before inline content that follows them in DOM order
@@ -4666,6 +4732,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     finalize_block_flow(lycon, block, block->display.outer);
                     return;
                 } else {
+                    DomElement* rendered_legend = find_fieldset_rendered_legend(block);
+                    if (rendered_legend) {
+                        // The rendered legend is the first box even when its DOM node
+                        // follows content; normal flow then lays out the content box.
+                        child = static_cast<DomNode*>(rendered_legend);
+                    }
+
                     // Pre-scan and layout floats BEFORE laying out inline content
                     // This ensures floats are positioned and affect line bounds correctly
                     prescan_and_layout_floats(lycon, child, block);
@@ -4733,7 +4806,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         }
                         // Phase 16: save height contribution for future incremental passes
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
-                        child = child->next_sibling;
+                        child = rendered_legend
+                            ? fieldset_next_flow_child(block, child, rendered_legend)
+                            : child->next_sibling;
                     } while (child);
                     // handle last line
                     if (!lycon->line.is_line_start) {
@@ -4914,8 +4989,21 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // Initialize is_first_line to true when starting a new block
     lycon->block.is_first_line = true;
     lycon->block.initial_letter_exclusion_width = 0.0f;
+    lycon->block.initial_letter_exclusion_right = 0.0f;
     lycon->block.initial_letter_exclusion_lines = 0;
+    lycon->block.initial_letter_exclusion_bottom = 0.0f;
+    lycon->block.initial_letter_margin_box_left = 0.0f;
+    lycon->block.initial_letter_margin_box_right = 0.0f;
+    lycon->block.initial_letter_margin_box_top = 0.0f;
+    lycon->block.initial_letter_margin_box_bottom = 0.0f;
+    lycon->block.initial_letter_border_box_bottom = 0.0f;
+    lycon->block.initial_letter_origin_line_number = -1;
+    lycon->block.initial_letter_clears_later_start_floats = false;
+    lycon->block.initial_letter_exclusion_requires_intersection = false;
     lycon->block.initial_letter_origin_offset_applied = false;
+    lycon->block.initial_letter_continuation_cleared = false;
+    lycon->block.initial_letter_trimmed_start_candidate = 0.0f;
+    lycon->block.initial_letter_trimmed_start_contribution = 0.0f;
 
     // -webkit-line-clamp support: initialize line tracking
     lycon->block.line_number = 0;
@@ -5488,6 +5576,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     if (block->blk) {
         block->blk->bfc_float_avoidance_shift_y = 0.0f;
+        block->blk->initial_letter_float_clearance = false;
     }
 
     block->x = pa_line->left;  block->y = pa_block->advance_y;
@@ -5828,6 +5917,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         lycon->block.establishing_element = block;
         // Reset float lists for new BFC (children won't see parent's floats)
         block_context_reset_floats(&lycon->block);
+        block_context_reset_initial_letters(&lycon->block);
         log_debug("[BlockContext] Block %s establishes new BFC", block->source_loc());
     } else {
         // Clear is_bfc_root so we don't inherit it from parent
@@ -7306,31 +7396,35 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
 
-    // HTML rendering spec §15.5.12: Fieldset legend positioning.
-    // The first legend child of a fieldset is positioned at the block-start border edge
-    // (overlapping the top border), not inside the content area. All subsequent siblings
-    // shift up by the border-top width since the legend replaces the border gap.
+    // HTML Rendering §15.3.12: A fieldset's rendered legend is centered over
+    // its block-start border. Flow fieldsets also have one content box after it.
     if (block->is_element() && block->tag() == MARKUP_NAME_FIELDSET && block->first_child) {
+        bool is_flow_fieldset = block->display.inner == CSS_VALUE_FLOW ||
+            block->display.inner == CSS_VALUE_FLOW_ROOT;
         float border_top = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top : 0;
         float padding_top = block->bound ? block->boundary()->padding.top : 0;
         float legend_shift = border_top + padding_top;
 
         if (legend_shift > 0) {
-            // Find the first legend child
-            ViewBlock* first_legend = nullptr;
-            for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-                if (child->is_element() && child->as_element()->tag() == MARKUP_NAME_LEGEND) {
-                    first_legend = lam::view_require_block(static_cast<View*>(child->as_element()));
-                    break;
-                }
-            }
+            DomElement* rendered_legend = find_fieldset_rendered_legend(block);
+            ViewBlock* first_legend = rendered_legend
+                ? lam::view_require_block(static_cast<View*>(rendered_legend)) : nullptr;
             if (first_legend && first_legend->view_type) {
                 // Shift legend up to the border-box top edge
                 first_legend->y -= legend_shift;
-                // Shift all subsequent siblings up by border_top (content bypasses the border gap)
-                for (DomNode* sib = first_legend->next_sibling; sib; sib = sib->next_sibling) {
-                    if (sib->is_element() && sib->as_element()->view_type) {
-                        sib->as_element()->y -= border_top;
+                // A flow fieldset's anonymous content box contains every non-legend
+                // child; legacy non-flow paths retain their source-following adjustment.
+                bool passed_legend = false;
+                for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+                    if (child == static_cast<DomNode*>(rendered_legend)) {
+                        passed_legend = true;
+                        continue;
+                    }
+                    if (!is_flow_fieldset && !passed_legend) continue;
+                    if (child->is_element() && child->as_element()->view_type) {
+                        child->as_element()->y -= border_top;
+                    } else if (child->is_text() && child->view_type) {
+                        shift_text_rects_y(static_cast<View*>(child), -border_top);
                     }
                 }
                 // Reduce fieldset height by border_top
@@ -7981,24 +8075,29 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             content_last_line_ascender = lycon->block.last_line_ascender;
         }
 
+        content_last_line_ascender = radiant::layout_inline_baseline_for_source(
+            block, content_last_line_ascender);
+
         bool is_inline_grid = display.outer == CSS_VALUE_INLINE_BLOCK &&
             display.inner == CSS_VALUE_GRID;
-        if (is_inline_grid && block->blk &&
-            block->block()->first_line_baseline > 0.0f) {
-            // Grid layout stores the first-row baseline because inline-grid's
-            // baseline source is first-baseline, unlike an inline-block's last line.
-            content_last_line_ascender = block->block()->first_line_baseline;
+        if (is_inline_grid && block->blk) {
+            content_last_line_ascender = radiant::layout_select_cached_baseline(
+                block, block->block()->first_line_baseline,
+                block->block()->last_line_baseline, false,
+                content_last_line_ascender);
         }
 
         bool is_inline_flex = display.outer == CSS_VALUE_INLINE_BLOCK &&
             display.inner == CSS_VALUE_FLEX;
-        if (is_inline_flex && block->embed && block->embedp()->flex &&
-            block->embedp()->flex->first_baseline > 0.0f) {
-            // An inline-flex baseline comes from its first flex line, not its
-            // bottom edge; otherwise the parent strut adds spurious descent.
-            BoxMetrics box = layout_box_metrics(block);
-            content_last_line_ascender = box.border.top + box.padding.top +
-                block->embedp()->flex->first_baseline;
+        if (is_inline_flex && block->embed && block->embedp()->flex) {
+            float flex_baseline = radiant::layout_select_cached_baseline(
+                block, block->embedp()->flex->first_baseline,
+                block->embedp()->flex->last_baseline, false, 0.0f);
+            if (flex_baseline > 0.0f) {
+                BoxMetrics box = layout_box_metrics(block);
+                content_last_line_ascender = box.border.top + box.padding.top +
+                    flex_baseline;
+            }
         }
 
         // <button> elements go through normal child layout (not layout_form_control),
@@ -8027,10 +8126,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             is_select_listbox);
         bool is_broken_alt_image = block->tag() == MARKUP_NAME_IMG &&
             block->embed && block->embedp()->broken_alt_fallback;
+        bool textarea_uses_explicit_baseline_source =
+            block->tag() == MARKUP_NAME_TEXTAREA &&
+            radiant::layout_uses_explicit_baseline_source(block) &&
+            radiant::layout_form_control_baseline_for_source(block) > 0.0f;
+        if (textarea_uses_explicit_baseline_source) {
+            content_last_line_ascender =
+                radiant::layout_form_control_baseline_for_source(block);
+            content_has_line_boxes = true;
+        }
         if (is_broken_alt_image) {
             is_replaced = false;
         }
-        if (is_replaced) {
+        if (is_replaced && !textarea_uses_explicit_baseline_source) {
             content_has_line_boxes = false;
         }
         log_debug("%s inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d, is_replaced=%d, block_height=%.1f", elmt->source_loc(),
@@ -8044,13 +8152,36 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         log_debug("%s flow block in parent context, block->y before restoration: %.2f, display.outer=%d, display.inner=%d, block->display.outer=%d", elmt->source_loc(),
             block->y, display.outer, display.inner, block->display.outer);
+        BlockContext* child_bfc = block_context_find_bfc(&lycon->block);
+        float initial_margin_bottom_bfc = lycon->block.bfc_offset_y +
+            lycon->block.initial_letter_margin_box_bottom;
+        float initial_border_bottom_bfc = lycon->block.bfc_offset_y +
+            lycon->block.initial_letter_border_box_bottom;
+        float block_bottom_bfc = lycon->block.bfc_offset_y + block->height;
+        if (child_bfc && lycon->block.initial_letter_margin_box_bottom > 0.0f &&
+            initial_margin_bottom_bfc > block_bottom_bfc + 0.01f) {
+            // Keep margin overflow for following blocks, but only source content
+            // shorter than the border box contributes that overflow to the root.
+            bool source_is_short = initial_border_bottom_bfc > block_bottom_bfc + 0.01f;
+            block_context_add_initial_letter(child_bfc, block,
+                lycon->block.bfc_offset_x + lycon->block.initial_letter_margin_box_left,
+                lycon->block.bfc_offset_y + lycon->block.initial_letter_margin_box_top,
+                lycon->block.bfc_offset_x + lycon->block.initial_letter_margin_box_right,
+                initial_margin_bottom_bfc, lycon->block.direction, source_is_short);
+        }
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+
+        bool is_float_element = block->position && element_has_float(block);
+        if (!is_float_element && !layout_block_is_out_of_flow_positioned(block) &&
+            block->blk) {
+            lycon->block.initial_letter_trimmed_start_contribution +=
+                block->block()->initial_letter_trimmed_start_contribution;
+        }
 
         // flow the block in parent context
         // CSS 2.1 §9.7: Floats are blockified — a floated element that was
         // originally inline-block should NOT be positioned as inline-block.
         // The float positioning in finalize_block already set the correct x/y.
-        bool is_float_element = block->position && element_has_float(block);
         if (is_inline_atomic && !is_float_element) {
             if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(block);
 
@@ -8230,12 +8361,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (is_inline_table && table_baseline >= 0) {
                     // Inline-table with first-row baseline found
                     item_baseline = (block->bound ? block->boundary()->margin.top : 0) + table_baseline;
+                } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
+                           textarea_uses_explicit_baseline_source) {
+                    // Explicit baseline-source selects the textarea's editable
+                    // line-baseline set instead of its replaced-box fallback.
+                    item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                        content_last_line_ascender;
                 } else if (block->tag() == MARKUP_NAME_TEXTAREA) {
                     // Textarea is a scrollable text control whose inline baseline
                     // matches the bottom border edge in browsers; margin-bottom
                     // contributes below the baseline, not above it.
                     item_baseline = block->height + (block->bound ? block->boundary()->margin.top : 0);
-                } else if (content_has_line_boxes && overflow_visible) {
+                } else if (content_has_line_boxes &&
+                           (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) {
                     // Baseline from top of margin-box = margin.top + content_baseline
                     item_baseline = (block->bound ? block->boundary()->margin.top : 0) + content_last_line_ascender;
                 } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
@@ -8469,7 +8607,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
                      block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
 
-                bool uses_content_baseline = (content_has_line_boxes && overflow_visible) ||
+                bool uses_content_baseline =
+                    (content_has_line_boxes &&
+                     (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) ||
                     (is_inline_table && table_baseline >= 0);
 
                 float effective_baseline = content_last_line_ascender;
@@ -9109,6 +9249,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // Only the last in-flow child with line boxes matters — subsequent
             // children with content_last_line_ascender > 0 naturally overwrite.
             if (!is_float && content_last_line_ascender > 0) {
+                // Preserve the first child baseline so baseline-source:first does
+                // not incorrectly fall back to the descendant's last baseline.
+                if (lycon->block.first_line_ascender == 0 && block->blk &&
+                    block->block()->first_line_baseline > 0) {
+                    lycon->block.first_line_ascender = block->y +
+                        block->block()->first_line_baseline;
+                }
                 lycon->block.last_line_ascender = block->y + content_last_line_ascender;
             }
 

@@ -50,6 +50,47 @@ static bool has_flex_item_prop(ViewElement* item) {
     return item && item->flex_item();
 }
 
+static bool flex_line_has_baseline_child(FlexLineInfo* line,
+                                         FlexContainerLayout* flex_layout) {
+    if (!line || !flex_layout) return false;
+    if (flex_layout->align_items == ALIGN_BASELINE) return true;
+    for (int i = 0; i < line->item_count; i++) {
+        ViewElement* item = lam::view_as_element(line->items[i]);
+        if (has_flex_item_prop(item) &&
+            (int)item->fi->align_self == ALIGN_BASELINE) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static float flex_container_line_baseline(ViewBlock* container,
+                                          FlexContainerLayout* flex_layout,
+                                          FlexLineInfo* line,
+                                          bool prefer_last) {
+    if (!container || !flex_layout || !line || line->item_count <= 0) return 0.0f;
+
+    if (is_main_axis_horizontal(flex_layout)) {
+        if (flex_line_has_baseline_child(line, flex_layout)) {
+            return line->cross_position +
+                find_max_baseline(line, flex_layout->align_items);
+        }
+        int item_index = prefer_last ? line->item_count - 1 : 0;
+        ViewElement* item = lam::view_as_element(line->items[item_index]);
+        return item ? line->cross_position + calculate_item_baseline(item) : 0.0f;
+    }
+
+    int item_index = prefer_last ? line->item_count - 1 : 0;
+    ViewElement* item = lam::view_as_element(line->items[item_index]);
+    if (!item) return 0.0f;
+    BoxMetrics box = layout_box_metrics(container);
+    // Flex item coordinates include the container's border/padding, while this
+    // cache is relative to its content box. Without removing that origin, the
+    // last baseline gets the border/padding added a second time by inline layout.
+    return item->y - box.border.top - box.padding.top +
+        calculate_item_baseline(item);
+}
+
 bool flex_item_has_content_flex_basis(ViewElement* item) {
     return item && item->fi && item->fi->flex_basis_is_content;
 }
@@ -1850,48 +1891,30 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    // Phase 9.5: Store the first flex-line baseline for this container's
-    // baseline set, including the display-only case allocated by the layout entry.
+    // Phase 9.5: Store both flex-container baseline sets after final item layout.
+    if (container->embed && container->embedp()->flex) {
+        FlexProp* flex_prop = container->embedp()->flex;
+        flex_prop->first_baseline = 0.0f;
+        flex_prop->last_baseline = 0.0f;
+        flex_prop->has_baseline_child = false;
+    }
     if (line_count > 0 && container->embed && container->embedp()->flex) {
         FlexLineInfo* first_line = &flex_layout->lines[0];
-
-        // Check if first line has baseline-aligned items (via align-self:baseline or container align-items:baseline)
-        bool has_baseline_child = (flex_layout->align_items == ALIGN_BASELINE);
-        if (!has_baseline_child) {
-            for (int i = 0; i < first_line->item_count; i++) {
-                ViewElement* item = lam::view_as_element(first_line->items[i]);
-                if (has_flex_item_prop(item) && (int)item->fi->align_self == ALIGN_BASELINE) {
-                    has_baseline_child = true;
-                    break;
-                }
-            }
-        }
-
-        // Compute the first flex-line baseline for this container's own baseline set.
-        // This is distinct from which items participate in `align-items: baseline`:
-        // inline-flex still exposes its first item's baseline with stretch alignment.
-        float computed_first_baseline = 0.0f;
-        if (has_baseline_child && is_main_axis_horizontal(flex_layout)) {
-            computed_first_baseline = find_max_baseline(first_line, flex_layout->align_items);
-        } else if (is_main_axis_horizontal(flex_layout) && first_line->item_count > 0) {
-            ViewElement* first_item = lam::view_as_element(first_line->items[0]);
-            if (first_item) {
-                computed_first_baseline = first_line->cross_position +
-                    calculate_item_baseline(first_item);
-            }
-        } else if (first_line->item_count > 0) {
-            ViewElement* first_item = lam::view_as_element(first_line->items[0]);
-            if (first_item) {
-                // For a column flexbox cross_size is horizontal; using it as a
-                // vertical baseline incorrectly aligns nested columns at their top.
-                computed_first_baseline = calculate_item_baseline(first_item);
-            }
-        }
+        FlexLineInfo* last_line = &flex_layout->lines[line_count - 1];
+        bool has_baseline_child = flex_line_has_baseline_child(first_line, flex_layout);
+        float computed_first_baseline = flex_container_line_baseline(
+            container, flex_layout, first_line, false);
+        float computed_last_baseline = flex_container_line_baseline(
+            container, flex_layout, last_line, true);
         first_line->baseline = computed_first_baseline;
         container->embedp()->flex->first_baseline = computed_first_baseline;
+        // CSS Flexbox §8.5 distinguishes the endmost item/line baseline.
+        // Reusing the first cache made baseline-source:last select the wrong item.
+        container->embedp()->flex->last_baseline = computed_last_baseline;
         container->embedp()->flex->has_baseline_child = has_baseline_child;
-        log_debug("%s Phase 9.5: Stored first_baseline=%.1f, has_baseline_child=%d", container->source_loc(),
-                  computed_first_baseline, has_baseline_child);
+        log_debug("%s Phase 9.5: stored first_baseline=%.1f last_baseline=%.1f has_baseline_child=%d",
+                  container->source_loc(), computed_first_baseline,
+                  computed_last_baseline, has_baseline_child);
     }
 
     // Note: wrap-reverse item positioning is now handled in align_items_cross_axis

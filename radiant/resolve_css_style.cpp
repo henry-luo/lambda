@@ -5021,16 +5021,16 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
     return true;
 }
 
-static void apply_raised_initial_letter_used_font_size(DomElement* dom_elem,
-                                                       LayoutContext* lycon,
-                                                       const FontBox& parent_font) {
+static void apply_initial_letter_used_font_size(DomElement* dom_elem,
+                                                LayoutContext* lycon,
+                                                const FontBox& parent_font) {
     if (!dom_elem || !lycon || !dom_elem->tag_name ||
         strcmp(dom_elem->tag_name, "::first-letter") != 0) {
         return;
     }
 
     InitialLetterInfo initial = {};
-    if (!layout_get_initial_letter_info(dom_elem, &initial) || !initial.raised ||
+    if (!layout_get_initial_letter_info(dom_elem, &initial) ||
         !parent_font.style || !parent_font.font_handle ||
         lycon->block.line_height <= 0.0f) {
         return;
@@ -5059,8 +5059,8 @@ static void apply_raised_initial_letter_used_font_size(DomElement* dom_elem,
     float used_size = target_cap_height / initial_cap_ratio;
     if (used_size <= 0.0f || isnan(used_size)) return;
 
-    // Initial-letter font-size stays computed for em values, but glyph sizing is
-    // derived from the containing line's cap-height and line-height.
+    // Initial letters ignore specified font-size and use their requested line span.
+    // Preserve the computed size for em units while using the derived glyph size.
     span->font->initial_letter_computed_font_size = computed_size;
     span->font->font_size = used_size;
     span->font->font_size_from_medium = false;
@@ -5209,6 +5209,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_LIST_STYLE_POSITION,
         CSS_PROPERTY_LIST_STYLE_TYPE,
         CSS_PROPERTY_LIST_STYLE,
+        CSS_PROPERTY_RUBY_POSITION,
     };
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 
@@ -5761,7 +5762,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
-    apply_raised_initial_letter_used_font_size(dom_elem, lycon, parent_font);
+    apply_initial_letter_used_font_size(dom_elem, lycon, parent_font);
     resolve_placeholder_pseudo_style(dom_elem, lycon);
 }
 
@@ -6956,6 +6957,31 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
 
+        case CSS_PROPERTY_RUBY_POSITION: {
+            span->ensure_inline(lycon);
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) break;
+
+            CssEnum ruby_position = value->data.keyword;
+            if (ruby_position == CSS_VALUE_INHERIT || ruby_position == CSS_VALUE_UNSET) {
+                DomElement* parent = dom_parent_element(
+                    lam::dom_require<DOM_NODE_ELEMENT>(lycon->view));
+                span->in_line->ruby_position = parent && parent->in_line
+                    ? parent->inl()->ruby_position : CSS_VALUE_ALTERNATE;
+            } else if (ruby_position == CSS_VALUE_INITIAL) {
+                span->in_line->ruby_position = CSS_VALUE_ALTERNATE;
+            } else if (ruby_position == CSS_VALUE_ALTERNATE ||
+                       ruby_position == CSS_VALUE_OVER ||
+                       ruby_position == CSS_VALUE_UNDER ||
+                       ruby_position == CSS_VALUE_INTER_CHARACTER) {
+                span->in_line->ruby_position = ruby_position;
+            } else {
+                break;
+            }
+            const CssEnumInfo* info = css_enum_info(span->inl()->ruby_position);
+            log_debug("[CSS] ruby-position: %s", css_enum_name_or_unknown(info));
+            break;
+        }
+
         case CSS_PROPERTY_CURSOR: {
             span->ensure_inline(lycon);
 
@@ -7294,6 +7320,18 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 block->blk->text_box_over_edge = (v0->type == CSS_VALUE_TYPE_KEYWORD) ? v0->data.keyword : CSS_VALUE_TEXT;
                 block->blk->text_box_under_edge = (v1->type == CSS_VALUE_TYPE_KEYWORD) ? v1->data.keyword : CSS_VALUE_TEXT;
                 log_debug("[CSS] text-box-edge (2-val): over=%d, under=%d", block->block()->text_box_over_edge, block->block()->text_box_under_edge);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BASELINE_SOURCE: {
+            if (!block) break;
+            ensure_span_block(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_AUTO ||
+                 value->data.keyword == CSS_VALUE_FIRST ||
+                 value->data.keyword == CSS_VALUE_LAST)) {
+                block->blk->baseline_source = value->data.keyword;
             }
             break;
         }

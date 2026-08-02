@@ -960,6 +960,51 @@ bool alignment_is_stretch(int32_t alignment);
 int32_t resolve_align_self(int32_t align_self, int32_t align_items);
 int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items);
 
+// CSS Inline 3: auto selects an inline-block's last baseline, while all other
+// inline-level boxes use their first baseline.
+inline bool layout_prefers_last_baseline(const ViewBlock* block,
+                                         bool auto_prefers_last) {
+    if (!block || !block->blk) return auto_prefers_last;
+    CssEnum baseline_source = block->block()->baseline_source;
+    if (baseline_source == CSS_VALUE_FIRST) return false;
+    if (baseline_source == CSS_VALUE_LAST) return true;
+    return auto_prefers_last;
+}
+
+inline float layout_select_cached_baseline(const ViewBlock* block,
+                                           float first_baseline,
+                                           float last_baseline,
+                                           bool auto_prefers_last,
+                                           float fallback_baseline) {
+    float selected = layout_prefers_last_baseline(block, auto_prefers_last) ?
+        last_baseline : first_baseline;
+    return selected > 0.0f ? selected : fallback_baseline;
+}
+
+inline float layout_inline_baseline_for_source(const ViewBlock* block,
+                                               float last_baseline) {
+    float first_baseline = block && block->blk ?
+        block->block()->first_line_baseline : 0.0f;
+    return layout_select_cached_baseline(
+        block, first_baseline, 0.0f, true, last_baseline);
+}
+
+inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
+    if (!block || !block->blk) return false;
+    CssEnum baseline_source = block->block()->baseline_source;
+    return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
+}
+
+// Form controls own editable line boxes without exposing child ViewText nodes.
+// Select their baseline set directly so explicit baseline-source does not fall
+// back to the generic replaced-element border-edge baseline.
+inline float layout_form_control_baseline_for_source(const ViewBlock* block) {
+    if (!block || !block->form) return 0.0f;
+    return layout_select_cached_baseline(
+        block, block->form->first_text_baseline,
+        block->form->last_text_baseline, true, 0.0f);
+}
+
 float compute_font_baseline_ascender(
     ::LayoutContext* lycon,
     FontProp* font,
@@ -968,6 +1013,11 @@ float compute_font_baseline_ascender(
 );
 
 float compute_element_first_baseline(
+    ::LayoutContext* lycon,
+    ViewBlock* element,
+    bool is_row_direction
+);
+float compute_element_last_baseline(
     ::LayoutContext* lycon,
     ViewBlock* element,
     bool is_row_direction
@@ -984,6 +1034,16 @@ float compute_view_first_text_baseline(
     FirstBaselineRowCallback row_baseline
 );
 
+// Return the last descendant text baseline relative to `parent`. Multicol
+// fragmentation uses this after child boxes have moved to their final columns.
+float compute_view_last_text_baseline(
+    ::LayoutContext* lycon,
+    View* parent,
+    float cumulative_y,
+    bool use_normal_line_height,
+    bool skip_block_children_of_table
+);
+
 } // namespace radiant
 
 // ============================================================================
@@ -991,6 +1051,11 @@ float compute_view_first_text_baseline(
 // ============================================================================
 
 CssEnum get_white_space_value(DomNode* node);
+inline bool white_space_preserves_space_advance(CssEnum white_space) {
+    return white_space == CSS_VALUE_PRE ||
+        white_space == CSS_VALUE_PRE_WRAP ||
+        white_space == CSS_VALUE_BREAK_SPACES;
+}
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 
 // ============================================================================
@@ -1190,8 +1255,21 @@ typedef struct FloatBox {
     float x, y, width, height;
 
     CssEnum float_side;         // CSS_VALUE_LEFT or CSS_VALUE_RIGHT
+    bool initial_letter_clearance; // float was lowered below a sunk initial letter
     struct FloatBox* next;      // Linked list for multiple floats
 } FloatBox;
+
+// tier-3: layout-transient, valid within pass
+typedef struct InitialLetterBox {
+    ViewBlock* element;         // block containing the initial letter
+    float margin_box_top;
+    float margin_box_bottom;
+    float margin_box_left;
+    float margin_box_right;
+    CssEnum direction;
+    bool source_is_short;
+    struct InitialLetterBox* next;
+} InitialLetterBox;
 
 /**
  * FloatAvailableSpace - Result of space query at a given Y coordinate
@@ -1261,8 +1339,21 @@ typedef struct BlockContext {
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
     float initial_letter_exclusion_width;
+    float initial_letter_exclusion_right;
     int initial_letter_exclusion_lines;
+    float initial_letter_exclusion_bottom;
+    float initial_letter_margin_box_left;
+    float initial_letter_margin_box_right;
+    float initial_letter_margin_box_top;
+    float initial_letter_margin_box_bottom;
+    float initial_letter_border_box_bottom;
+    int initial_letter_origin_line_number;
+    bool initial_letter_clears_later_start_floats;
+    bool initial_letter_exclusion_requires_intersection;
     bool initial_letter_origin_offset_applied;
+    bool initial_letter_continuation_cleared;
+    float initial_letter_trimmed_start_candidate;
+    float initial_letter_trimmed_start_contribution;
 
     // -webkit-line-clamp support
     int line_number;            // Current line number (1-based, incremented by line_break)
@@ -1303,6 +1394,11 @@ typedef struct BlockContext {
     int left_float_count;
     int right_float_count;
     float lowest_float_bottom;  // Optimization: track lowest float edge
+
+    // CSS Inline 3 §7.9.2: Initial letters that extend below a short block
+    // continue their exclusion in later blocks in the same BFC.
+    InitialLetterBox* initial_letters;
+    InitialLetterBox* initial_letters_tail;
 
     // Content area bounds (for float calculations)
     float float_left_edge;      // Left edge of content area (usually 0)
@@ -1363,6 +1459,11 @@ typedef struct Linebox {
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
+    float ruby_annotation_min_line_height; // block-side ruby annotation extent outside the base line
+    float ruby_annotation_over_shift; // extra block-start space required by ruby annotations
+    float initial_letter_origin_advance; // raised-cap displacement already applied to this line
+    bool has_initial_letter; // line contains an initial whose origin line may need ruby metrics
+    bool has_drop_initial_letter; // line contains a drop initial whose base level can be raised
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
@@ -2250,6 +2351,14 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
  */
 void block_context_reset_floats(BlockContext* ctx);
 
+// Clears the initial-letter continuations when entering a nested BFC.
+void block_context_reset_initial_letters(BlockContext* ctx);
+
+// Registers an initial letter's used margin box in BFC coordinates.
+void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
+                                      float left, float top, float right, float bottom,
+                                      CssEnum direction, bool source_is_short);
+
 /**
  * Check if an element establishes a new BFC
  * Per CSS 2.2 Section 9.4.1
@@ -2273,9 +2382,12 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
  * @param ctx The block context
  * @param y Y coordinate relative to content area
  * @param height Height of the line/element being placed
+ * @param line_query Exclude a specially lowered initial-letter float from a
+ *                   line that already originated above the float.
  * @return Available space bounds adjusted for floats
  */
-FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height);
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
+                                              bool line_query = false);
 
 /**
  * Find the lowest Y where a given width is available
@@ -2476,6 +2588,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
+void layout_offset_ruby_annotation_tree(View* view, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
@@ -2522,6 +2635,7 @@ void layout_setup_block_font_metrics(LayoutContext* lycon);
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
+void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);

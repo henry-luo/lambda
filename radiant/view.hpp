@@ -640,6 +640,7 @@ struct InlineProp {
     Color svg_fill_color;
     Color svg_stroke_color;
     CssEnum vertical_align;
+    CssEnum ruby_position;
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
@@ -1175,8 +1176,12 @@ typedef struct BlockProp {
     uint8_t text_box_trim_applied; // bitmask of start/end trim actually applied during layout
     float text_box_trim_start_amount;
     float text_box_trim_end_amount;
+    // Raised initial margin boxes still affect root auto-height when trim-start
+    // removes their visual line advance.
+    float initial_letter_trimmed_start_contribution;
     CssEnum text_box_over_edge;  // CSS Inline 3 text-box-edge over metric (CSS_VALUE_TEXT, CSS_VALUE_CAP, CSS_VALUE_EX, etc.)
     CssEnum text_box_under_edge; // CSS Inline 3 text-box-edge under metric (CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, etc.)
+    CssEnum baseline_source;  // CSS Inline 3 baseline-source: auto, first, or last
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     CssEnum given_height_type;
@@ -1199,10 +1204,13 @@ typedef struct BlockProp {
     float last_line_max_descender;
     // Baseline positions (distance from border-box top to baseline).
     // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
-    float first_line_baseline;  // first line box baseline (for flex baseline)
+    float first_line_baseline;  // first baseline set
+    float last_line_baseline;   // last baseline set
     // Transient layout state: nonzero when BFC float avoidance shifted this block down.
     // Inline placement uses it to discard stale line cursors from floats above.
     float bfc_float_avoidance_shift_y;
+    // Transient layout state: this float was lowered below a sunk initial letter.
+    bool initial_letter_float_clearance;
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
     bool line_clamp_inherited; // transient: this block is consuming an ancestor clamp
@@ -1311,9 +1319,10 @@ typedef struct FlexProp {
     bool column_gap_is_percent;   // true if column_gap is a percentage
     WritingMode writing_mode;
     TextDirection text_direction;
-    // First baseline of this flex container (computed after layout)
-    // Used when this container participates in parent's baseline alignment
+    // Baseline sets of this flex container (computed after layout).
+    // Used when this container participates in parent's baseline alignment.
     float first_baseline;
+    float last_baseline;
     bool has_baseline_child;       // true if first line has baseline-aligned items
 } FlexProp;
 
@@ -2103,6 +2112,12 @@ struct FormControlProp {
     // Computed intrinsic dimensions (in physical pixels)
     float intrinsic_width;
     float intrinsic_height;
+
+    // CSS Inline 3 baseline set for the control's editable line boxes.
+    // These are local border-box offsets and are distinct from the generic
+    // replaced-element fallback at the bottom border edge.
+    float first_text_baseline;
+    float last_text_baseline;
 
     // Computed ::placeholder pseudo-element rendering style.
     FontProp* placeholder_font;

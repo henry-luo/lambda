@@ -4470,12 +4470,6 @@ static bool is_abspos_or_fixed(DomElement* elem) {
     return position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED;
 }
 
-static bool table_white_space_preserves_space_advance(CssEnum white_space) {
-    return white_space == CSS_VALUE_PRE ||
-           white_space == CSS_VALUE_PRE_WRAP ||
-           white_space == CSS_VALUE_BREAK_SPACES;
-}
-
 static bool table_text_node_has_non_whitespace_content(DomNode* node) {
     if (!node || !node->is_text()) return false;
 
@@ -4498,7 +4492,7 @@ static bool table_text_node_has_preserved_whitespace_content(DomNode* node) {
     if (!text || !*text) return false;
     if (table_text_node_has_non_whitespace_content(node)) return false;
 
-    return table_white_space_preserves_space_advance(get_white_space_value(node));
+    return white_space_preserves_space_advance(get_white_space_value(node));
 }
 
 static bool table_anonymous_run_allows_preserved_whitespace(ArrayList* run) {

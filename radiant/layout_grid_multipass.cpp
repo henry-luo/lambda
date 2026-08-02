@@ -127,49 +127,81 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
     return child_extent + box.pad_border_v;
 }
 
-static void grid_store_inline_first_baseline(LayoutContext* lycon,
-                                             GridContainerLayout* grid_layout,
-                                             ViewBlock* grid_container) {
+static int grid_inline_baseline_track(GridContainerLayout* grid_layout,
+                                      bool prefer_last) {
+    int baseline_track = 0;
+    for (int i = 0; i < grid_layout->item_count; i++) {
+        GridItemProp* grid_item = grid_item_prop(grid_layout->grid_items[i]);
+        if (!grid_item) continue;
+        int item_track = prefer_last ? grid_item->computed_grid_row_end - 1
+                                     : grid_item->computed_grid_row_start;
+        if (item_track <= 0) continue;
+        if (baseline_track == 0 ||
+            (prefer_last ? item_track > baseline_track : item_track < baseline_track)) {
+            baseline_track = item_track;
+        }
+    }
+    return baseline_track;
+}
+
+static void grid_store_inline_baseline(LayoutContext* lycon,
+                                       GridContainerLayout* grid_layout,
+                                       ViewBlock* grid_container,
+                                       bool prefer_last) {
+    int baseline_track = grid_inline_baseline_track(grid_layout, prefer_last);
+    if (baseline_track == 0) return;
+
+    for (int i = 0; i < grid_layout->item_count; i++) {
+        ViewBlock* item = grid_layout->grid_items[i];
+        GridItemProp* grid_item = grid_item_prop(item);
+        if (!item || !grid_item) continue;
+        int item_track = prefer_last ? grid_item->computed_grid_row_end - 1
+                                     : grid_item->computed_grid_row_start;
+        if (item_track != baseline_track) continue;
+
+        float item_baseline = -1.0f;
+        if (item->blk) {
+            item_baseline = prefer_last ? item->block()->last_line_baseline
+                                        : item->block()->first_line_baseline;
+        }
+        if (item_baseline <= 0.0f) {
+            item_baseline = prefer_last ?
+                radiant::compute_element_last_baseline(lycon, item, true) :
+                radiant::compute_element_first_baseline(lycon, item, true);
+        }
+        if (item_baseline >= 0.0f) {
+            float grid_baseline = item->y + item_baseline;
+            if (prefer_last) {
+                // The last set comes from an item ending in the block-end-most row;
+                // using the first-row cache ignores baseline-source:last.
+                grid_container->blk->last_line_baseline = grid_baseline;
+                // finalize_block_flow runs after grid layout and persists its active
+                // context; without this, it overwrites the grid's last baseline.
+                lycon->block.last_line_ascender = grid_baseline;
+            } else {
+                grid_container->blk->first_line_baseline = grid_baseline;
+                // The enclosing block finalizer owns the persistent BlockProp state,
+                // so publish the baseline through its active flow context as well.
+                lycon->block.first_line_ascender = grid_baseline;
+            }
+            return;
+        }
+    }
+}
+
+static void grid_store_inline_baselines(LayoutContext* lycon,
+                                        GridContainerLayout* grid_layout,
+                                        ViewBlock* grid_container) {
     if (!lycon || !grid_layout || !grid_container || !grid_container->blk ||
         grid_container->display.outer != CSS_VALUE_INLINE_BLOCK ||
         grid_container->display.inner != CSS_VALUE_GRID) {
         return;
     }
 
-    int first_row = 0;
-    for (int i = 0; i < grid_layout->item_count; i++) {
-        GridItemProp* grid_item = grid_item_prop(grid_layout->grid_items[i]);
-        if (!grid_item) continue;
-        int row_start = grid_item->computed_grid_row_start;
-        if (row_start > 0 && (first_row == 0 || row_start < first_row)) {
-            first_row = row_start;
-        }
-    }
-
-    if (first_row == 0) return;
-
-    for (int i = 0; i < grid_layout->item_count; i++) {
-        ViewBlock* item = grid_layout->grid_items[i];
-        GridItemProp* grid_item = grid_item_prop(item);
-        if (!item || !grid_item || grid_item->computed_grid_row_start != first_row) {
-            continue;
-        }
-
-        float item_baseline = item->blk ? item->block()->first_line_baseline : -1.0f;
-        if (item_baseline <= 0.0f) {
-            item_baseline = radiant::compute_element_first_baseline(lycon, item, true);
-        }
-        if (item_baseline >= 0.0f) {
-            // Inline-grid uses its first row's first available item baseline;
-            // treating its laid-out tracks as an empty inline-block adds a strut below it.
-            float grid_baseline = item->y + item_baseline;
-            grid_container->blk->first_line_baseline = grid_baseline;
-            // The enclosing block finalizer owns the persistent BlockProp state,
-            // so publish the baseline through its active flow context as well.
-            lycon->block.first_line_ascender = grid_baseline;
-            return;
-        }
-    }
+    grid_container->blk->first_line_baseline = 0.0f;
+    grid_container->blk->last_line_baseline = 0.0f;
+    grid_store_inline_baseline(lycon, grid_layout, grid_container, false);
+    grid_store_inline_baseline(lycon, grid_layout, grid_container, true);
 }
 
 // ============================================================================
@@ -375,7 +407,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
 
-    grid_store_inline_first_baseline(lycon, lycon->grid_container, grid_container);
+    grid_store_inline_baselines(lycon, lycon->grid_container, grid_container);
 
     // Apply relative positioning offsets (position:relative + top/left/bottom/right)
     // Must be done AFTER final alignment so offsets are relative to the aligned position
@@ -1063,10 +1095,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         }
     }
 
-    if (grid_item->blk && lycon->block.first_line_ascender > 0.0f) {
-        // Grid item layout bypasses finalize_block_flow, so retain its first
-        // in-flow line baseline for the inline-grid container baseline.
+    if (grid_item->blk) {
+        // Grid item layout bypasses finalize_block_flow, so retain both
+        // in-flow baseline sets for the inline-grid container.
         grid_item->blk->first_line_baseline = lycon->block.first_line_ascender;
+        grid_item->blk->last_line_baseline = lycon->block.last_line_ascender;
     }
 
     // Restore parent context
