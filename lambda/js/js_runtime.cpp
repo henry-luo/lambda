@@ -14,6 +14,7 @@
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../runtime/lambda-error.h"
+#include "../runtime/lambda-root-frame.hpp"
 #include "../core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -2220,17 +2221,9 @@ static bool js_init_class_instance_field(Item callee, Item object, Item field_ke
     return true;
 }
 
-static void js_init_class_instance_fields_inner(Item callee, Item object, int depth) {
-    if (depth > 32) return;
+static void js_init_class_instance_fields_inner(Item callee, Item object) {
     if (get_type_id(callee) != LMD_TYPE_MAP) return;
     if (!js_can_host_private_slots(object)) return;
-
-    bool super_found = false;
-    Item super_class = js_map_get_fast(callee.map, "__super_class__", 15, &super_found);
-    if (super_found && get_type_id(super_class) == LMD_TYPE_MAP) {
-        js_init_class_instance_fields_inner(super_class, object, depth + 1);
-        if (js_check_exception()) return;
-    }
 
     bool keys_found = false;
     Item field_keys = js_map_get_fast(callee.map, "__if_keys__", 11, &keys_found);
@@ -2294,7 +2287,24 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
     }
 }
 
+static bool js_deferred_instance_field_class_contains(Item callee) {
+    Item current = js_deferred_instance_field_class;
+    while (get_type_id(current) == LMD_TYPE_MAP) {
+        if (current.item == callee.item) return true;
+        bool super_found = false;
+        current = js_map_get_fast(current.map, "__super_class__", 15, &super_found);
+        if (!super_found) break;
+    }
+    return false;
+}
+
 extern "C" void js_init_class_instance_fields(Item callee, Item object) {
+    if (js_deferred_instance_field_class_contains(callee)) {
+        // A compiler-known default-derived construct emits every default
+        // class's source initializers after runtime super-dispatch. Metadata
+        // cannot reproduce expression values or private-field timing.
+        return;
+    }
     bool saved_private_init = js_private_field_initializing;
     bool saved_define = js_private_define_active;
     js_private_field_initializing = true;
@@ -2302,7 +2312,10 @@ extern "C" void js_init_class_instance_fields(Item callee, Item object) {
     // values, no initializer expressions), so the define-bypass can cover the
     // whole walk — the brand check would otherwise reject adding the fields.
     js_private_define_active = true;
-    js_init_class_instance_fields_inner(callee, object, 0);
+    // Each [[Construct]] initializes only its own class fields; its parent
+    // already did so while executing super(). Rewalking parents duplicates
+    // private brands when a derived class is constructed dynamically.
+    js_init_class_instance_fields_inner(callee, object);
     js_private_field_initializing = saved_private_init;
     js_private_define_active = saved_define;
 }
@@ -2506,7 +2519,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
+                Item result = js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // DataView
@@ -2516,37 +2530,42 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item buf = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item dvlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_dataview_new(buf, off, dvlen);
+                Item result = js_dataview_new(buf, off, dvlen);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Map
             if (nl == 3 && strncmp(n, "Map", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc > 0 && args) return js_map_collection_new_from(args[0]);
-                return js_map_collection_new();
+                Item result = (argc > 0 && args) ? js_map_collection_new_from(args[0]) :
+                    js_map_collection_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Set
             if (nl == 3 && strncmp(n, "Set", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc > 0 && args) return js_set_collection_new_from(args[0]);
-                return js_set_collection_new();
+                Item result = (argc > 0 && args) ? js_set_collection_new_from(args[0]) :
+                    js_set_collection_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // WeakMap
             if (nl == 7 && strncmp(n, "WeakMap", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                return js_weakmap_new();
+                Item result = js_weakmap_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // WeakSet
             if (nl == 7 && strncmp(n, "WeakSet", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                return js_weakset_new();
+                Item result = js_weakset_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // WeakRef
@@ -2648,7 +2667,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                     extern Item js_error_set_cause(Item error, Item options);
                     js_error_set_cause(err_obj, eff_args[1]);
                 }
-                return err_obj;
+                return js_apply_constructed_builtin_prototype(err_obj, callee, effective_new_target);
             }
             // AggregateError(errors, message)
             if (nl == 14 && strncmp(n, "AggregateError", 14) == 0) {
@@ -2656,7 +2675,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item errors = (argc > 0 && args) ? args[0] : js_array_new(0);
                 Item msg = (argc > 1 && args) ? args[1] : make_js_undefined();
-                return js_new_aggregate_error(errors, msg);
+                Item result = js_new_aggregate_error(errors, msg);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Array
@@ -2750,6 +2770,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         TypeId rt = get_type_id(result);
         if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
             rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+            if (fn->name && fn->name->len == 8 && strncmp(fn->name->chars, "Function", 8) == 0) {
+                // Function's constructor returns a fresh function object; it
+                // still uses the derived new.target's .prototype.
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+            }
             return result;
         }
         return obj;
@@ -2858,12 +2883,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 if (js_check_exception()) return ItemNull;
                 TypeId rtt = get_type_id(result_root.get());
                 if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
-                    // The parent construct allocated for the forwarded new.target.
-                    // Keep that most-derived constructor visible to base bodies:
-                    // `this.constructor` feeds inherited static getters.
-                    Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                    js_property_set(result_root.get(), constructor_key, new_target_root.get());
-                    js_mark_non_enumerable(result_root.get(), constructor_key);
+                    // The parent construct already chose the forwarded
+                    // new.target prototype. Defining an own `constructor`
+                    // here is observable through a Proxy returned by super().
                     js_init_class_instance_fields(callee_root.get(), result_root.get());
                 }
                 return result_root.get();
@@ -2969,6 +2991,20 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         js_throw_value(js_new_error_with_name(tn, msg));
         return ItemNull;
     }
+}
+
+extern "C" Item js_new_from_class_object_defer_own_fields(Item callee,
+        Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> callee_root(roots, callee);
+    Rooted<Item> saved_target_root(roots, js_deferred_instance_field_class);
+    // The ordinary runtime construct path must still perform inherited
+    // [[Construct]], but a compiler-known derived class owns expression field
+    // initialization. Keep that target rooted while runtime dispatch runs.
+    js_deferred_instance_field_class = callee_root.get();
+    Item result = js_new_from_class_object(callee_root.get(), args, argc);
+    js_deferred_instance_field_class = saved_target_root.get();
+    return result;
 }
 
 static Item js_typed_array_species_constructor_property(Item exemplar) {
@@ -9788,6 +9824,40 @@ static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
         typename JsMirMakeCallArgSequence<Count>::Type());
 }
 
+static Item* js_root_span_items(RootSpan& span) {
+    static_assert(sizeof(Item) == sizeof(uint64_t),
+        "JS adapter Item roots must match side-root cells");
+    static_assert(alignof(Item) == alignof(uint64_t),
+        "JS adapter Item roots must match side-root alignment");
+    return (Item*)(void*)span.words();
+}
+
+// Keep source actuals separate from wrapper operands: `arguments` must retain
+// every original actual even when rest lowering replaces the final ABI operand.
+struct JsCallAdapterSpan {
+    Item* actual_items;
+    int actual_count;
+    Item* invoke_items;
+    int invoke_count;
+    RootSpan owned_roots;
+
+    JsCallAdapterSpan(Item* actual, int actual_argc, int required_argc,
+            bool needs_owned_span)
+        : actual_items(actual), actual_count(actual_argc), invoke_items(actual),
+          invoke_count(required_argc),
+          owned_roots(needs_owned_span ? (size_t)required_argc : 0) {
+        if (needs_owned_span) invoke_items = js_root_span_items(owned_roots);
+    }
+};
+
+static int js_invoke_formal_count(const JsFunction* fn) {
+    return fn->param_count < 0 ? -fn->param_count : fn->param_count;
+}
+
+static bool js_invoke_needs_adapter(const JsFunction* fn, int arg_count) {
+    return fn->param_count < 0 || arg_count < js_invoke_formal_count(fn);
+}
+
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
@@ -9908,11 +9978,6 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         return ItemNull;
     }
 
-    // Store pending args so js_build_arguments_object() can access them.
-    // Called at function entry before any nested calls, so no save/restore needed.
-    js_pending_call_args = args;
-    js_pending_call_argc = arg_count;
-
     typedef Item (*P0)();
     typedef Item (*P1)(Item);
     typedef Item (*P2)(Item, Item);
@@ -9948,54 +10013,47 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     typedef Item (*P15H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
     typedef Item (*P16H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
 
-    // Pad missing arguments with undefined to match declared param count
-    Item padded_args[JS_MIR_CONTEXT_CALL_MAX_ARITY];
-    Item undef = make_js_undefined();
-    int effective_count = arg_count;
-    Item* effective_args = args;
-
     // Rest params: negative param_count signals last param is ...rest
-    // Collect excess args into a JS array for the rest parameter
     bool has_rest = (fn->param_count < 0);
-    int real_param_count = has_rest ? -fn->param_count : fn->param_count;
-    if (real_param_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
-        // The rest array occupies one declared operand, so reject unsupported
-        // arities before its slot can overrun the fixed dispatch buffer.
-        log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI",
-            real_param_count);
+    int real_param_count = js_invoke_formal_count(fn);
+    int dispatch_limit = (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)
+        ? JS_MIR_CONTEXT_CALL_MAX_ARITY : (fn->env ? 15 : 16);
+    if (real_param_count > dispatch_limit) {
+        log_error("js-invoke-fn: wrapper arity %d exceeds dispatch ABI %d",
+            real_param_count, dispatch_limit);
         return ItemError;
     }
 
+    bool needs_adapter = js_invoke_needs_adapter(fn, arg_count);
+    int effective_count = real_param_count;
+    JsCallAdapterSpan adapter(args, arg_count, effective_count, needs_adapter);
+    if (needs_adapter && !adapter.invoke_items) return ItemError;
+
     if (has_rest) {
         int regular_count = real_param_count - 1;  // params before rest
-        effective_count = real_param_count;
-        // Copy regular args, then build rest array from remaining
-        for (int i = 0; i < regular_count &&
-                i < JS_MIR_CONTEXT_CALL_MAX_ARITY; i++) {
-            padded_args[i] = (i < arg_count && args) ? args[i] : undef;
+        for (int i = 0; i < regular_count; i++) {
+            adapter.invoke_items[i] = (i < arg_count && args) ? args[i]
+                : make_js_undefined();
         }
-        // Build rest array from args[regular_count..arg_count-1]
+        // Store the rest array in its root slot before pushes can allocate.
+        adapter.invoke_items[regular_count] = js_array_new(0);
         int rest_len = (arg_count > regular_count) ? (arg_count - regular_count) : 0;
-        Item rest_arr = js_array_new(0);
         for (int i = 0; i < rest_len; i++) {
-            js_array_push(rest_arr, args[regular_count + i]);
+            js_array_push(adapter.invoke_items[regular_count],
+                args[regular_count + i]);
         }
-        padded_args[regular_count] = rest_arr;
-        effective_args = padded_args;
     } else if (arg_count < fn->param_count) {
-        effective_count = fn->param_count;
-        if (effective_count > JS_MIR_CONTEXT_CALL_MAX_ARITY) {
-            log_error("js-invoke-fn: compiled wrapper arity %d exceeds dispatch ABI", effective_count);
-            return ItemError;
-        }
         for (int i = 0; i < effective_count; i++) {
-            padded_args[i] = (i < arg_count && args) ? args[i] : undef;
+            adapter.invoke_items[i] = (i < arg_count && args) ? args[i]
+                : make_js_undefined();
         }
-        effective_args = padded_args;
-    } else if (arg_count > fn->param_count && fn->param_count >= 0) {
-        // Clamp to declared param count — excess args accessible via arguments object
-        effective_count = fn->param_count;
     }
+
+    // The source span stays immutable for `arguments`; only the wrapper sees
+    // the rooted adapter span after padding or rest transformation.
+    js_pending_call_args = adapter.actual_items;
+    js_pending_call_argc = adapter.actual_count;
+    Item* effective_args = adapter.invoke_items;
 
     js_invoke_trace_call(fn, arg_count, effective_count);
 
@@ -10233,18 +10291,52 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     }
 }
 
-static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
+static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
     bool legacy_async = (fn->flags & JS_FUNC_FLAG_ASYNC) &&
         !(fn->flags & JS_FUNC_FLAG_GENERATOR);
-    if (!legacy_async) return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
+    if (!legacy_async) {
+        return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
+    }
 
     // no-await async functions lower to a direct Promise.resolve return, so the
     // call wrapper must provide the async-function Promise resource up front.
-    Item async_promise = js_promise_async_function_start();
+    RootFrame async_roots(1);
+    Rooted<Item> async_promise_root(async_roots, js_promise_async_function_start());
+    // Adapter construction can allocate a rest array; keep the promise exact
+    // until the async-finishing helper has taken ownership of it.
     Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
     int64_t had_exception = js_check_exception() ? 1 : 0;
-    return js_promise_async_function_finish(async_promise, result, had_exception);
+    return js_promise_async_function_finish(async_promise_root.get(), result, had_exception);
+}
+
+static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
+        uint64_t* scalar_result_home, bool args_prerooted) {
+    if (!js_invoke_needs_adapter(fn, arg_count)) {
+        return js_invoke_fn_raw_or_async(fn, args, arg_count, scalar_result_home);
+    }
+
+    // Only an adapter can allocate before the wrapper begins. Preserve the
+    // ordinary call path's original argument span so `arguments` and eval keep
+    // their established call-boundary behavior for arity-compatible calls.
+    RootFrame invoke_roots(1);
+    Rooted<Item> fn_root(invoke_roots, (Item){.function = (Function*)fn});
+    RootSpan source_roots(args_prerooted ? 0 : (size_t)arg_count);
+    Item* source_args = args;
+    if (!args_prerooted && arg_count > 0) {
+        source_args = js_root_span_items(source_roots);
+        if (!source_args) return ItemError;
+        for (int i = 0; i < arg_count; i++) {
+            source_args[i] = args ? args[i] : ItemNull;
+        }
+    }
+    fn = (JsFunction*)fn_root.get().function;
+    return js_invoke_fn_raw_or_async(fn, source_args, arg_count, scalar_result_home);
+}
+
+static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
+        uint64_t* scalar_result_home) {
+    return js_invoke_fn_with_source(fn, args, arg_count, scalar_result_home, false);
 }
 
 // Call a JavaScript function stored as an Item
@@ -14641,7 +14733,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
     bool pushed_vm_stack_source = !common_lane && js_function_push_vm_stack_source(fn);
-    Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
+    Item result = js_invoke_fn_with_source(fn, args, arg_count, invoke_result_home,
+        args_prerooted);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = saved_private_home_class_root.get();
     js_current_private_home_class_index = prev_private_home_class_index;

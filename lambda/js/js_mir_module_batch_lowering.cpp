@@ -4501,6 +4501,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
+                if (ce->name && ce->name->len == super_id->name->len &&
+                    strncmp(ce->name->chars, super_id->name->chars, ce->name->len) == 0) {
+                    // ClassDefinitionEvaluation evaluates heritage before its
+                    // inner class-name binding is initialized. This is a TDZ
+                    // read even when an outer var has the same spelling.
+                    ce->has_self_extends = true;
+                    continue;
+                }
                 // A minified nested function can reuse a class name as a local
                 // alias. Resolve `extends` through the parser's lexical binding
                 // before consulting spelling-only class metadata.
@@ -8180,6 +8188,24 @@ void* jm_compile_js_worker(void* arg) {
 // Pre-compile all JS import dependencies in parallel, then execute serially.
 // Called from transpile_js_to_mir() after heap/context setup.
 // Returns the number of modules successfully precompiled and executed.
+static bool jm_module_tree_contains_await(TSNode node) {
+    TSTreeCursor cursor = ts_tree_cursor_new(node);
+    while (true) {
+        if (strcmp(ts_node_type(ts_tree_cursor_current_node(&cursor)),
+                "await_expression") == 0) {
+            ts_tree_cursor_delete(&cursor);
+            return true;
+        }
+        if (ts_tree_cursor_goto_first_child(&cursor)) continue;
+        while (!ts_tree_cursor_goto_next_sibling(&cursor)) {
+            if (!ts_tree_cursor_goto_parent(&cursor)) {
+                ts_tree_cursor_delete(&cursor);
+                return false;
+            }
+        }
+    }
+}
+
 int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename) {
     if (!filename) return 0;
 
@@ -8202,12 +8228,23 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
 
     // discover all imports recursively
     jm_discover_js_imports_recursive(parser, 0, &nodes, &count, &capacity, path_map);
+    bool graph_contains_await = false;
+    for (int i = 1; i < count && !graph_contains_await; i++) {
+        if (!nodes[i].source) continue;
+        TSTree* module_tree = ts_parser_parse_string(parser, NULL,
+            nodes[i].source, strlen(nodes[i].source));
+        if (!module_tree) continue;
+        graph_contains_await = jm_module_tree_contains_await(
+            ts_tree_root_node(module_tree));
+        ts_tree_delete(module_tree);
+    }
     ts_parser_delete(parser);
     hashmap_free(path_map);
 
     int import_count = count - 1;
-    if (import_count < 2) {
-        // not enough modules to justify parallelism — let serial jm_load_imports handle it
+    if (import_count < 2 || graph_contains_await) {
+        // TLA graph evaluation has an order-sensitive async-parent protocol;
+        // the parallel path bypasses that protocol before executing its nodes.
         for (int i = 0; i < count; i++) {
             mem_free(nodes[i].path);
             mem_free(nodes[i].source);

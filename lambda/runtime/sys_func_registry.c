@@ -1989,6 +1989,7 @@ JitImport jit_runtime_imports[] = {
     {"js_readable_stream_new", FPTR(js_readable_stream_new)},
     {"js_writable_stream_new", FPTR(js_writable_stream_new)},
     {"js_new_from_class_object", FPTR(js_new_from_class_object)},
+    {"js_new_from_class_object_defer_own_fields", FPTR(js_new_from_class_object_defer_own_fields)},
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
     {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
