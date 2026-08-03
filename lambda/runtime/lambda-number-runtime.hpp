@@ -54,8 +54,13 @@ static inline uint8_t lambda_numeric_runtime_part(
     LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
     switch (kind) {
     case LAMBDA_NUM_INT:
-        part->kind = LAMBDA_NUM_PART_SIGNED;
-        part->signed_value = lambda_int_item_to_i64(item);
+        // C16/G0: `int`'s one native representation IS the IEEE double, so it
+        // lowers to a FLOAT part. Lowering it to a SIGNED part via an i64
+        // conversion destroyed nan-ness and clamped above 2^63 -- which is why
+        // `nan == nan` came out true for an int-typed nan, and why the guard
+        // below could not see it.
+        part->kind = LAMBDA_NUM_PART_FLOAT;
+        part->float_value = lambda_int_item_value(item);
         return 1;
     case LAMBDA_NUM_I8:
         part->kind = LAMBDA_NUM_PART_SIGNED;
@@ -181,17 +186,6 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
     result.valid = 1;
 
     if (decimal_item_is_nan(left) || decimal_item_is_nan(right)) {
-        result.unordered = 1;
-        return result;
-    }
-
-    // Formal semantics 5: every nan is unequal to everything, itself included.
-    // `int.nan` needs its own guard beside decimal's because an `int` lowers to
-    // a SIGNED runtime part (via lambda_int_item_to_i64), which discards
-    // nan-ness -- so the isnan(float_value) checks below never see it. Without
-    // this, two int.nans compared bitwise-identical sentinels and came out
-    // EQUAL, the one break in reflexivity that the spec requires.
-    if (LAMBDA_ITEM_IS_INT_NAN(left.item) || LAMBDA_ITEM_IS_INT_NAN(right.item)) {
         result.unordered = 1;
         return result;
     }

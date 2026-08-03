@@ -377,12 +377,31 @@ sentinels vacate the octant first (§3.8).
 An int Item is never a pointer at any magnitude. `item_to_ptr`/the marker return NULL for the
 `100` octant and the `INT` byte unconditionally — the SG7 early-out extends to int for free.
 
-### 3.5 Poison
+### 3.5 Poison — merged with `float`, **no int sentinels**
 
-The three poisons are sentinels; `int.inf` unboxes to `+∞`, so ruling 13/14 identities hold
-bit-exactly (`int.inf == inf` via value comparison; nans unshared). The
-`LAMBDA_INT_VALUE_IS_POISON`-family macros over 2⁵⁴-based payloads are replaced by
-small-payload compares. Poison printing/parsing (spec §4.6) is unchanged.
+`inf`, `-inf` and `nan` are stored as the **ordinary inline IEEE bits**, the same Item `float`
+produces. `lambda_int_box_double` passes an IEEE special straight through; `lambda_int_unbox_double`
+tests `ITEM_DBL_MASK` **before** the inline-int sign test (`-inf` has bit 63 set and would
+otherwise be misread as a rotated int). Three sentinels remain in the `000` octant — `0`, `1`,
+`-1` — so `ITEM_INT_SENTINEL_MAX` is 2.
+
+**History — the retired sentinel rows.** C16 originally gave `int` its own poison at tags 3–5
+(`ITEM_INT_INF`, `ITEM_INT_NEG_INF`, `ITEM_INT_NAN`), spelled `int.inf` / `int.nan`, so that
+`int` arithmetic closed inside `int`. It was retired because a hand-rolled poison must be
+recognized at every site that lowers an int to a machine integer — 45 in the core, 423 more in
+LambdaJS — and each such site silently destroys nan-ness. That cost three real defects before
+the merge (`int.nan == int.nan` returning true, boxed arithmetic computing in `int64`,
+`decimal.inf == inf` going false). With hardware IEEE values the property holds at all of them
+for free.
+
+**The surface/decoder seam.** `type(nan)` is `int` (spec §4) but `get_type_id()` returns
+`LMD_TYPE_FLOAT`, because poison is *physically* a double and `get_type_id` is the decoder
+dispatch. The surface rule is applied in exactly two functions — `fn_type()` and
+`item_static_type_for_is()` — via `lambda_item_is_merged_poison()`. Putting it in `get_type_id`
+instead routes nan into every integer-lowering path: the 423 LambdaJS sites include
+`js_is_symbol()`, where a nan read as an integer compares against the symbol base and a `NaN`
+becomes a `Symbol`. Guest languages map their IEEE double type to Lambda `float`, so
+`typeof NaN` stays `"number"` in JS with no JS-side changes at all.
 
 ### 3.6 What this deletes (and what it exits)
 

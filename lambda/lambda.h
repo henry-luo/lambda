@@ -1327,13 +1327,13 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #define ITEM_INT_ZERO     (ITEM_INT | UINT64_C(0))
 #define ITEM_INT_ONE      (ITEM_INT | UINT64_C(1))
 #define ITEM_INT_NEG_ONE  (ITEM_INT | UINT64_C(2))
-// C16 int poison: `int` closes its arithmetic with its own inf/nan rather than
-// leaving the domain (spec §4.1/§4.7), so `7 div 0` is `int.inf`, not float
-// `inf` and not `error()`.
-#define ITEM_INT_INF      (ITEM_INT | UINT64_C(3))
-#define ITEM_INT_NEG_INF  (ITEM_INT | UINT64_C(4))
-#define ITEM_INT_NAN      (ITEM_INT | UINT64_C(5))
-#define ITEM_INT_SENTINEL_MAX  UINT64_C(5)
+// History: C16 first gave `int` its OWN poison sentinels here (ITEM_INT_INF /
+// _NEG_INF / _NAN, tags 3-5) so `7 div 0` stayed inside int. That was retired
+// when inf/nan merged into one representation shared with float: the sentinels
+// forced every int -> machine-integer lowering to special-case them, and the
+// count of such sites (45 in the core, 423 more in LambdaJS) made the carve-out
+// cost far more than it bought. Poison is now the ordinary inline IEEE bits.
+#define ITEM_INT_SENTINEL_MAX  UINT64_C(2)
 
 // An int Item is inline iff it sits in the `100` octant. Bits 62-61 are clear
 // there (it is not a double), so after the double test the sign bit alone
@@ -1346,6 +1346,23 @@ static inline uint64_t lambda_rotr64(uint64_t v, unsigned n) {
 }
 
 // Box a double known to be an integral value (or int poison) as an `int` Item.
+// An IEEE special: exponent all ones, so inf (mantissa 0) or nan. These are
+// the values `int` and `float` SHARE -- one representation, stored inline as
+// raw bits in the float octants, never relocated into a sentinel.
+#define LAMBDA_ITEM_IS_IEEE_SPECIAL(b) \
+    (((b) & UINT64_C(0x7FF0000000000000)) == UINT64_C(0x7FF0000000000000))
+
+// The merged poison values (inf, -inf, nan) are the ones `int` and `float`
+// share. They are PHYSICALLY doubles, so get_type_id() must keep reporting
+// FLOAT -- it is the decoder dispatch, and every site that reads an Item
+// relies on it to pick the right lane. The C16 ruling that `type(nan) == int`
+// is a SURFACE claim, applied in fn_type()/item_static_type_for_is() only.
+// Conflating the two routes nan into integer decoders (LambdaJS alone has 423
+// such sites, e.g. js_is_symbol()'s `it2i(v) <= -JS_SYMBOL_BASE`).
+static inline bool lambda_item_is_merged_poison(uint64_t bits) {
+    return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
+}
+
 static inline uint64_t lambda_int_box_double(double value) {
     uint64_t bits;
     __builtin_memcpy(&bits, &value, sizeof(bits));
@@ -1355,9 +1372,14 @@ static inline uint64_t lambda_int_box_double(double value) {
     if (value == 0.0) return ITEM_INT_ZERO;      // both signed zeros: int has one 0
     if (value == 1.0) return ITEM_INT_ONE;
     if (value == -1.0) return ITEM_INT_NEG_ONE;
-    if (value != value) return ITEM_INT_NAN;
-    if (bits == UINT64_C(0x7FF0000000000000)) return ITEM_INT_INF;
-    if (bits == UINT64_C(0xFFF0000000000000)) return ITEM_INT_NEG_INF;
+    // `int` and `float` share one poison representation: the ordinary inline
+    // IEEE bits (formal semantics 4). No int-specific sentinel, so the 45 sites
+    // that lower an int Item to a machine integer can no longer silently
+    // destroy nan-ness -- comparisons come out unordered and isnan works, from
+    // the hardware. inf/nan need no relocation because their exponent is 2047,
+    // whose top three bits are `111`: the raw bits already sit in the
+    // inline-float octants.
+    if (LAMBDA_ITEM_IS_IEEE_SPECIAL(bits)) return bits;
     // |v| >= 2^257 -- beyond what the int octant can tag. Formal semantics 4.9:
     // an int result that cannot be carried as an int SATURATES to +/-int.inf,
     // keeping the sign, exactly as IEEE overflows a double to +/-inf rather
@@ -1366,7 +1388,8 @@ static inline uint64_t lambda_int_box_double(double value) {
     // growing; saturating closes int arithmetic in int at every magnitude.
     // Note `int` therefore saturates far earlier than `float` (2^257 vs
     // ~2^1024) -- an encoding property, not a domain one.
-    return value > 0.0 ? ITEM_INT_INF : ITEM_INT_NEG_INF;
+    return value > 0.0 ? UINT64_C(0x7FF0000000000000)
+                       : UINT64_C(0xFFF0000000000000);
 }
 
 // The value of an int Item as a double. Poison comes back as the IEEE special
@@ -1374,37 +1397,34 @@ static inline uint64_t lambda_int_box_double(double value) {
 static inline double lambda_int_unbox_double(uint64_t item_bits) {
     double result;
     uint64_t bits;
+    // ORDER MATTERS. LAMBDA_ITEM_IS_INLINE_INT is a bare sign test whose
+    // contract is that bits 62-61 are ALREADY known clear, so the double test
+    // has to come first. `-inf` (0xFFF0...) has the sign bit set, so testing
+    // for an inline int first misread it as a rotated int and returned garbage
+    // -- while `+inf` (0x7FF0...) fell through correctly, which is exactly the
+    // asymmetry that surfaced: `1 div 0` was right and `-1 div 0` was not.
+    if (item_bits & ITEM_DBL_MASK) {  // shared inf/nan, stored as raw IEEE bits
+        __builtin_memcpy(&result, &item_bits, sizeof(result));
+        return result;
+    }
     if (LAMBDA_ITEM_IS_INLINE_INT(item_bits)) {
         bits = lambda_rotr64(item_bits, 1);
         __builtin_memcpy(&result, &bits, sizeof(result));
         return result;
     }
-    if (item_bits & ITEM_DBL_MASK) {  // drifted magnitude >= 2^257
-        __builtin_memcpy(&result, &item_bits, sizeof(result));
-        return result;
-    }
+    // Only three sentinels remain: 0 and +/-1, whose exponents (0 and 1023) fall
+    // outside the `100` octant so rotation cannot tag them. inf and nan are not
+    // among them -- they return through the DBL_MASK arm above as raw bits.
     switch (item_bits & ~ITEM_HIGH_BYTE_MASK) {
-    case 0:  return 0.0;
     case 1:  return 1.0;
     case 2:  return -1.0;
-    case 3:  bits = UINT64_C(0x7FF0000000000000); break;   // +inf
-    case 4:  bits = UINT64_C(0xFFF0000000000000); break;   // -inf
-    default: bits = UINT64_C(0x7FF8000000000000); break;   // quiet nan
+    default: return 0.0;
     }
-    __builtin_memcpy(&result, &bits, sizeof(result));
-    return result;
 }
 
-// Classify an int Item's poison without materializing a double.
-#define LAMBDA_ITEM_INT_IS_POISON(b) \
-    (!LAMBDA_ITEM_IS_INLINE_INT(b) && !((b) & ITEM_DBL_MASK) && \
-     ((b) & ~ITEM_HIGH_BYTE_MASK) >= UINT64_C(3) && \
-     ((b) & ~ITEM_HIGH_BYTE_MASK) <= ITEM_INT_SENTINEL_MAX)
-
-// Is this Item exactly the `int.nan` sentinel? Needed by the numeric
-// comparison, which must break reflexivity for every nan (formal semantics 5)
-// but lowers an `int` to a SIGNED part that no longer carries nan-ness.
-#define LAMBDA_ITEM_IS_INT_NAN(b)  ((b) == ITEM_INT_NAN)
+// (The retired int-poison classifiers lived here. With one shared inf/nan
+// representation, "is this poison?" is lambda_item_is_merged_poison() and
+// nan-ness survives every unbox, so no sentinel-aware predicate is needed.)
 
 // Classify an int *value* held as a double. Kept as the value-side spelling of
 // the same question so numeric code can ask before it re-boxes.

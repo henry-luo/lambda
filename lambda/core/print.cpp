@@ -225,9 +225,11 @@ void print_double(StrBuf *strbuf, double num) {
 // with no exponent form (spec §4.6).
 void print_int_value(StrBuf* strbuf, double value) {
     if (LAMBDA_INT_VALUE_IS_POISON(value)) {
+        // One spelling: `int` and `float` share these values, so there is no
+        // `int.`-prefixed form to print (formal semantics 4).
         strbuf_append_str(strbuf,
-            LAMBDA_INT_VALUE_IS_INF(value) ? "int.inf" :
-            LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-int.inf" : "int.nan");
+            LAMBDA_INT_VALUE_IS_INF(value) ? "inf" :
+            LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-inf" : "nan");
         return;
     }
     if (value >= (double)INT53_MIN && value <= (double)INT53_MAX) {

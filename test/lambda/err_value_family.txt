@@ -1,0 +1,13 @@
+'-- text and name conversions propagate; they do not render the error --'
+error
+error
+error
+'-- membership propagates: `in` searches one level, so `false` would mislead --'
+error
+error
+'-- len is a value function too (8.1: iterating an error yields an error) --'
+error
+'-- but the truthy family still participates: these are the discharge surfaces --'
+["F", true, "dflt", false]
+'-- and containment is not propagation: an error inside a collection is data --'
+3

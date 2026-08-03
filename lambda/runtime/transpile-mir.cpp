@@ -4846,6 +4846,7 @@ static bool sysfunc_params_reject_error(SysFuncInfo* info) {
     switch (info->fn) {
     case SYSFUNC_LEN:
     case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF: case SYSFUNC_ORD:
+    case SYSFUNC_STRING: case SYSFUNC_SYMBOL: case SYSFUNC_NAME:
         return true;
     default:
         return false;

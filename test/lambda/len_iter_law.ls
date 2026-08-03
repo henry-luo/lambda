@@ -37,3 +37,10 @@ let bound_for = for (x in [2, 3]) x
 len([1, bound_for, 4])
 let bound_spread = *spliced
 len([1, bound_spread, 4])
+
+"-- 4.8: an int range needs a successor, so its bounds are band-limited --"
+// consecutive integers exist only to 2^53; these are all in band
+len(1 to 5)
+len(9007199254740989 to 9007199254740991)     // the 2^53-1 edge
+// beyond it the request stops denoting a sequence and is refused; a larger
+// sequence is written `1n to N` over `integer`, exact at every magnitude.

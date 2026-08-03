@@ -189,6 +189,26 @@ and `isnan` works — from the hardware, at every one of those sites, for free.
 Retiring one narrowing guard buys back an invariant that could otherwise be
 dropped in 45 places.
 
+*Where the `int` classification applies.* `type(nan)` being `int` is a claim
+about the **surface** — what `type()` and `is` report to a Lambda program. It is
+deliberately **not** a claim about the internal tag an implementation reads to
+decide how to decode an `Item`: poison is physically a double, and the decoder
+must say so, or every integer-lowering path receives a nan it was never written
+to expect. Conflating the two is not a small error. LambdaJS alone has 423 sites
+that test for an int tag and then lower through an int conversion — including
+`js_is_symbol()`, where a nan misread as an integer compares against the symbol
+base and a `NaN` becomes a `Symbol`. The seam belongs at `type()`/`is`, which
+are two functions, not at the decoder, which is thousands of call sites.
+
+*The `float` mapping for guest languages.* A guest whose numeric type is IEEE
+double maps that type to Lambda **`float`**, not to `int` and not to the
+abstract `number` supertype. JavaScript has exactly one numeric type, so
+`typeof NaN` is `"number"` and `typeof 1` is `"number"`: the int tag a guest
+uses for integral values is a representation fast path with no surface meaning.
+Lambda saying `type(nan)` is `int` while JS says `"number"` is not a
+contradiction — the two languages classify the same shared value under their own
+type systems, which is exactly what the shared representation is for.
+
 *History — `int.inf` / `int.nan`, C16 original through 2026-08-03.* The retired
 design gave **each of four** poison-bearing domains its own pair, spelled
 `int.inf` / `-int.inf` / `int.nan`, `integer.inf` / `integer.nan`,
@@ -943,14 +963,13 @@ map — an error stored *inside* a collection is an ordinary element, and
 `len([1, err, 3])` is 3. Propagation concerns an error *being* the operand, not
 one being reachable from it.
 
-*Implementation status (2026-08-03).* The type family conforms. The truthy
-family conforms (`if`, `not`, `or`, `==` all behave as above; `err ^ { … }` is
-specified but not yet parsed). `index_of`, `last_index_of` and `ord` conform via
-the `any \ error` parameter boundary of §7.7. The rest of the value family does
-**not**: `string(err)` returns the string `"<error>"`, `symbol(err)` /
-`name(err)` return `null` — neither participation nor propagation — and
-`err in x` / `err at x` return `false`, which is exactly the misleading answer
-this section rules out.
+*Implementation status (2026-08-03).* All three families conform. The value
+family propagates through two mechanisms: `len`, `index_of`, `last_index_of`,
+`ord`, `string`, `symbol` and `name` declare `any \ error` parameters, so an
+error is rejected at the call boundary and skips (§7.7); `in` and `at` return
+`BOOL_ERROR` directly, since `Bool` already carries an error state. The one
+form still outstanding is `err ^ { … }`, which is specified here but not yet
+parsed.
 
 ### 7.7 Broad input, in-domain results: the sys func return contract
 

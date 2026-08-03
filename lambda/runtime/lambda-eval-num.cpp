@@ -251,11 +251,15 @@ static double runtime_number_division_result(double left, double right,
 static inline Item int_integral_division(double left, double right,
         LambdaNumericOpFamily op) {
     if (right == 0.0) {
-        if (left == 0.0) return (Item){ .item = ITEM_INT_NAN };
+        // `int` and `float` share one poison, so these are the ordinary IEEE
+        // values -- produced by the arithmetic itself rather than named.
+        if (left == 0.0) return (Item){ .item = lambda_int_box_double(0.0 / 0.0) };
         // `%` by zero is undefined rather than unbounded, so it is nan for
         // every dividend; only `div` carries the dividend's sign to infinity.
-        if (op == LAMBDA_NUM_OP_MOD) return (Item){ .item = ITEM_INT_NAN };
-        return (Item){ .item = left > 0.0 ? ITEM_INT_INF : ITEM_INT_NEG_INF };
+        if (op == LAMBDA_NUM_OP_MOD) {
+            return (Item){ .item = lambda_int_box_double(0.0 / 0.0) };
+        }
+        return (Item){ .item = lambda_int_box_double(left / 0.0) };
     }
     // fmod is exact in IEEE, so `left - rem` is exactly divisible by `right`
     // and the quotient below involves no rounding: this is the *exact*

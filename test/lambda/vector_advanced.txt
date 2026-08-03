@@ -52,8 +52,8 @@
 "=== Error Cases ==="
 [inf, inf, inf]
 [3, inf, 5]
-[int.nan, int.nan, int.nan]
-[0, int.nan]
+[nan, nan, nan]
+[0, nan]
 "=== Vector Comparisons ==="
 true
 false

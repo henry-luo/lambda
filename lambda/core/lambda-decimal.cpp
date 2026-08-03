@@ -171,8 +171,15 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {
     // Complex is numeric in Lambda but has no scalar decimal canonicalization.
     if (type == LMD_TYPE_COMPLEX || !IS_NUMERIC_ID(type)) return false;
 
-    if (type == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
+    if (type == LMD_TYPE_FLOAT || type == LMD_TYPE_INT) {
+        // `int` and `float` share `inf`/`nan` and one native form, so the
+        // canonical string -- which is what hashing is built on -- must treat
+        // them identically. Omitting int here gave an int-typed `inf` a
+        // different hash from `decimal.inf` while `==` called them equal, so a
+        // map keyed by both grew two entries: hashing has to respect equality
+        // (P9).
+        double val = type == LMD_TYPE_INT ? lambda_int_item_value(item)
+                                          : item.get_double();
         if (isnan(val)) return false;
         if (isinf(val)) {
             snprintf(out, out_size, "%sinf", val < 0 ? "-" : "");
@@ -633,7 +640,21 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     if (!result) return NULL;
     
     if (type == LMD_TYPE_INT) {
-        mpd_set_ssize(result, lambda_int_item_to_i64(item), ctx);
+        // C16/G0: `int`'s native form is the IEEE double, and it shares `inf`
+        // and `nan` with `float`. An i64 conversion cannot carry either, nor a
+        // magnitude past 2^63 -- it turned `decimal.inf == inf` false, breaking
+        // the rule that same-signed infinities are one value across every
+        // poison-bearing domain. Route through the same shortest-string path
+        // `float` uses, which mpd parses including the specials.
+        double val = lambda_int_item_value(item);
+        char str_buf[64];
+        lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
+        uint32_t status = 0;
+        mpd_qset_string(result, str_buf, ctx, &status);
+        if (status != 0) {
+            mpd_del(result);
+            return NULL;
+        }
     }
     else if (type == LMD_TYPE_INT64) {
         mpd_set_ssize(result, item.get_int64(), ctx);

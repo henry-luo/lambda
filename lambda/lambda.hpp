@@ -119,6 +119,10 @@ typedef struct Item {
         // Inline double Items must be recognized before interpreting the word
         // as either a high-byte tag or a raw container header.
         if (this->item & ITEM_DBL_MASK) {
+            // `inf` and `nan` are ONE value shared by `int` and `float` (formal
+            // semantics 4), physically a double. This is the DECODER dispatch,
+            // so it reports what the bits are; the C16 surface rule that
+            // `type(nan)` is `int` lives in fn_type()/item_static_type_for_is().
             return LMD_TYPE_FLOAT;
         }
         // Inline int: the `100` octant. Bits 62-61 are already known clear, so

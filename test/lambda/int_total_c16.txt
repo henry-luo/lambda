@@ -1,8 +1,8 @@
 [[int, 18014398509481982], [int, 18014398509481982]]
 [[int, 4611686014132420608]]
-[[int, int.inf], [int, -int.inf], [int, int.nan], [int, int.nan]]
-[[int.inf, -int.inf, int.nan]]
-[[int.inf, int.nan, int.inf]]
+[[int, inf], [int, -inf], [int, nan], [int, nan]]
+[[inf, -inf, nan]]
+[[inf, nan, inf]]
 [[int, 36028797018963964], [36028797018963964], {
     v: 36028797018963964
   }]

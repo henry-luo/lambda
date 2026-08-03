@@ -234,10 +234,12 @@ TEST(NumericBoundaryAdmissionTest, ExactScalarConversionsPreserveTargetTags) {
     // rejected exactly like 3.5. Before C16 both were refused by a band check.
     EXPECT_FALSE(lambda_numeric_boundary_admit(push_d(NAN), &TYPE_INT, &converted));
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(INFINITY), &TYPE_INT, &converted));
-    EXPECT_EQ(get_type_id(converted), LMD_TYPE_INT);
-    EXPECT_EQ(converted.item, ITEM_INT_INF);
+    // Admitted inf keeps the shared representation rather than re-tagging into
+    // an int-only sentinel, so the Item is the plain inline IEEE bits.
+    EXPECT_TRUE(lambda_item_is_merged_poison(converted.item));
+    EXPECT_EQ(lambda_int_item_value(converted), INFINITY);
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(-INFINITY), &TYPE_INT, &converted));
-    EXPECT_EQ(converted.item, ITEM_INT_NEG_INF);
+    EXPECT_EQ(lambda_int_item_value(converted), -INFINITY);
 
     // E1: membership is integrality, not the retired +/-(2^53-1) band, so a
     // value past it admits when it is a float64-representable integer.

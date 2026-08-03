@@ -42,8 +42,8 @@
 [decimal, 3]
 [decimal, 1]
 [float, 1.5]
-[float, inf]
-[float, -inf]
+[int, inf]
+[int, -inf]
 "=== int overflow ==="
 [int, 9007199254740992]
 [int, 9007199254740992]

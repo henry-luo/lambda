@@ -29,3 +29,6 @@
 4
 3
 3
+"-- 4.8: an int range needs a successor, so its bounds are band-limited --"
+5
+3

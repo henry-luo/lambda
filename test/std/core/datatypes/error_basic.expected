@@ -4,6 +4,6 @@ true
 0
 42
 error
-int.nan
+nan
 10
 true

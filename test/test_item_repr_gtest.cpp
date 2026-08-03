@@ -429,14 +429,26 @@ TEST(ItemRepresentation, IntItemsNeverCollideWithInternalSentinels) {
     }
 }
 
-TEST(ItemRepresentation, IntPoisonIsDistinctAndClassifies) {
-    Item inf = {.item = ITEM_INT_INF};
-    Item neg_inf = {.item = ITEM_INT_NEG_INF};
-    Item nan_item = {.item = ITEM_INT_NAN};
+TEST(ItemRepresentation, IntPoisonIsSharedWithFloatAndClassifies) {
+    // `int` and `float` share ONE representation for inf/nan: the ordinary
+    // inline IEEE bits, not an int-tagged sentinel. So boxing the poison as an
+    // int and boxing it as a float must land on the identical Item.
+    Item inf = {.item = lambda_int_box_double(INFINITY)};
+    Item neg_inf = {.item = lambda_int_box_double(-INFINITY)};
+    Item nan_item = {.item = lambda_int_box_double(NAN)};
+
+    auto raw_bits = [](double d) { uint64_t b; memcpy(&b, &d, sizeof(b)); return b; };
+    EXPECT_EQ(inf.item, raw_bits(INFINITY));
+    EXPECT_EQ(neg_inf.item, raw_bits(-INFINITY));
+    EXPECT_EQ(nan_item.item, raw_bits(NAN));
 
     for (Item poison : {inf, neg_inf, nan_item}) {
-        EXPECT_EQ(get_type_id(poison), LMD_TYPE_INT);
-        EXPECT_EQ(poison.item & ITEM_DBL_MASK, UINT64_C(0));
+        EXPECT_TRUE(lambda_item_is_merged_poison(poison.item));
+        // Physically a double, so the DECODER reports float; `type()` surfaces
+        // int separately (fn_type), which is what keeps integer-lowering sites
+        // from ever receiving one.
+        EXPECT_EQ(get_type_id(poison), LMD_TYPE_FLOAT);
+        EXPECT_NE(poison.item & ITEM_DBL_MASK, UINT64_C(0));
         // Poison must never alias a finite value.
         for (int64_t value : kIntRoundTripValues) {
             EXPECT_NE(poison.item, i2it(value)) << "aliases " << value;
@@ -445,6 +457,12 @@ TEST(ItemRepresentation, IntPoisonIsDistinctAndClassifies) {
     EXPECT_NE(inf.item, neg_inf.item);
     EXPECT_NE(inf.item, nan_item.item);
     EXPECT_NE(neg_inf.item, nan_item.item);
+
+    // Unboxing through the int lane preserves nan-ness -- the property the
+    // retired sentinel could not hold.
+    EXPECT_TRUE(std::isnan(lambda_int_unbox_double(nan_item.item)));
+    EXPECT_EQ(lambda_int_unbox_double(inf.item), INFINITY);
+    EXPECT_EQ(lambda_int_unbox_double(neg_inf.item), -INFINITY);
 }
 
 TEST(ItemRepresentation, IntStoresIntoContainerWithoutBorrowedStorage) {

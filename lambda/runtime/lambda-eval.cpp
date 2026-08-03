@@ -615,6 +615,23 @@ Range* fn_to(Item item_a, Item item_b) {
     int64_t end = 0;
     if (lambda_item_to_int64_exact(item_a, &start) &&
             lambda_item_to_int64_exact(item_b, &end)) {
+        // Formal semantics 4.8: an `int` range requires its bounds within
+        // +/-(2^53 - 1). A range is a sequence of CONSECUTIVE integers, so it
+        // needs a well-defined successor -- x + 1 must differ from x -- which
+        // in binary64 holds precisely to 2^53. Above it the spacing exceeds 1,
+        // consecutive integers no longer all exist, and the request stops
+        // denoting a sequence: at 2^70 the spacing is 2^18, so `big to big + 2`
+        // silently yielded a one-element range. Refuse rather than guess; a
+        // larger sequence is written `1n to N` over `integer`, which is exact
+        // at every magnitude. This is also what keeps start/end/length proven
+        // i64 (plan item G3), so `Range` needs no widening.
+        if (start < INT53_MIN || start > INT53_MAX ||
+                end < INT53_MIN || end > INT53_MAX) {
+            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+                "int range bound outside +/-(2^53 - 1); use an `integer` range "
+                "(`1n to N`) for larger sequences");
+            return NULL;
+        }
         if (start > end) {
             // return empty range instead of NULL
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
@@ -1260,6 +1277,10 @@ static bool numeric_type_subsumes(Type* actual, Type* target) {
 
 static Type* item_static_type_for_is(Item item, Type* scratch) {
     TypeId type_id = get_type_id(item);
+    // C16 surface rule, same as fn_type(): the shared poison reports as `int`,
+    // so `nan is int` holds. `nan is float` still holds too, via int <= float
+    // in numeric_type_subsumes().
+    if (lambda_item_is_merged_poison(item.item)) type_id = LMD_TYPE_INT;
     if (type_id == LMD_TYPE_TYPE) {
         TypeType* tt = (TypeType*)item.type;
         return tt ? tt->type : NULL;
@@ -1598,6 +1619,12 @@ Bool fn_is_nan(Item a) {
     if (is_float_type_id(tid)) {
         double val = a.get_double();
         return __builtin_isnan(val) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    // `int` and `float` share one nan (formal semantics 4), and a shared value
+    // types as its narrowest -- so a nan reports `int` and would miss the float
+    // arm above. Its native form is the same double either way.
+    if (tid == LMD_TYPE_INT) {
+        return __builtin_isnan(lambda_int_item_value(a)) ? BOOL_TRUE : BOOL_FALSE;
     }
     if (tid == LMD_TYPE_DECIMAL) return decimal_item_is_nan(a) ? BOOL_TRUE : BOOL_FALSE;
     return BOOL_FALSE;  // non-float values are never NaN
@@ -2243,9 +2270,18 @@ int total_cmp(Item a_item, Item b_item) {
     TypeId b_tid = get_type_id(b_item);
     if (rank_a == 3) {
         LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
-        // Preserve total_cmp's established equivalence for unordered NaNs while
-        // keeping full-width integer ordering exact.
-        return comparison.valid && !comparison.unordered ? comparison.order : 0;
+        if (comparison.valid && !comparison.unordered) return comparison.order;
+        // A nan is unordered against every number, so the ORDER has to place it
+        // by fiat or it is not an order at all: answering 0 made the relation
+        // intransitive (1 == nan and nan == 3, yet 1 != 3), and a sort over an
+        // array containing one then returned whatever its traversal happened to
+        // produce. Nans sort after all numbers, as IEEE's own totalOrder does,
+        // and are equivalent among themselves. Section 6's order is total; this
+        // is where that is made true for poison.
+        bool a_nan = fn_is_nan(a_item) == BOOL_TRUE;
+        bool b_nan = fn_is_nan(b_item) == BOOL_TRUE;
+        if (a_nan != b_nan) return a_nan ? 1 : -1;
+        return 0;
     }
     if (a_tid == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();
@@ -2648,6 +2684,18 @@ static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) 
 }
 
 Bool fn_in(Item a_item, Item b_item) {
+    // Formal semantics 7.6: the membership operators are value computations, so
+    // an error operand propagates. `in` searches ONE level, so an error nested
+    // deeper is invisible to it -- answering `false` would read as "this data is
+    // error-free" when it may not be, which is worse than no answer. (An error
+    // cannot be found by search anyway: `in` matches by equality and
+    // `error == error` is false by 5.1, so the participating reading would have
+    // answered a confident false in every case.) Asking whether data contains an
+    // error anywhere needs a deep check, not this operator.
+    if (get_type_id(a_item) == LMD_TYPE_ERROR ||
+            get_type_id(b_item) == LMD_TYPE_ERROR) {
+        return BOOL_ERROR;
+    }
     if (b_item._type_id) { // b is scalar
         if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
             String *str_a = a_item.get_safe_string();
@@ -2748,10 +2796,6 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-static bool item_to_possession_index(Item item, int64_t* out) {
-    return lambda_item_to_int64_exact(item, out) != 0;
-}
-
 static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
     TypeId key_type = get_type_id(key_item);
     if (!is_text_type_id(key_type)) return false;
@@ -2775,13 +2819,31 @@ static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
 }
 
 Bool fn_at(Item a_item, Item b_item) {
+    // Formal semantics 7.6: the membership operators are value computations, so
+    // an error operand propagates. `in` searches ONE level, so an error nested
+    // deeper is invisible to it -- answering `false` would read as "this data is
+    // error-free" when it may not be, which is worse than no answer. (An error
+    // cannot be found by search anyway: `in` matches by equality and
+    // `error == error` is false by 5.1, so the participating reading would have
+    // answered a confident false in every case.) Asking whether data contains an
+    // error anywhere needs a deep check, not this operator.
+    if (get_type_id(a_item) == LMD_TYPE_ERROR ||
+            get_type_id(b_item) == LMD_TYPE_ERROR) {
+        return BOOL_ERROR;
+    }
     TypeId b_type = get_type_id(b_item);
     if (b_type == LMD_TYPE_ARRAY || b_type == LMD_TYPE_ARRAY_NUM ||
         b_type == LMD_TYPE_RANGE) {
-        int64_t idx = 0;
-        if (!item_to_possession_index(a_item, &idx)) return BOOL_FALSE;
-        // possession is bounds-based; negative indices are absent even though writes may diagnose separately.
-        return (idx >= 0 && idx < fn_len(b_item)) ? BOOL_TRUE : BOOL_FALSE;
+        // Formal semantics 8.0.1: `at` tests NAME presence, and a name is a
+        // symbol key only -- an integer key is a key but not a name. Arrays key
+        // their items by index, so they have no names and `1 at xs` is false.
+        // This is what makes `at` worth having: it is the only way to range
+        // over just the *named* members, which is meaningful on an element,
+        // where `for (k at e)` gives the attributes without the children.
+        // Admitting indices here would delete that capability. Iteration always
+        // agreed (`for (k at xs)` yields nothing); membership was the outlier.
+        // An index bound is written explicitly: `i < len(xs)`.
+        return BOOL_FALSE;
     }
     if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
         return shape_has_named_key((TypeMap*)b_item.map->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
@@ -3076,6 +3138,10 @@ Type* fn_type(Item item) {
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     TypeId resolved_type = get_type_id(item);
+    // C16 surface rule: the poison values `int` and `float` share report as the
+    // narrower domain, the same convention that makes `type(1)` be `int`. Only
+    // the surface answer moves -- the decoder still sees them as doubles.
+    if (lambda_item_is_merged_poison(item.item)) resolved_type = LMD_TYPE_INT;
     if (resolved_type == LMD_TYPE_OBJECT && item.object && item.object->type) {
         // preserve nominal object metadata so name(type(obj)) can report the declared type.
         type->type = (Type*)item.object->type;
