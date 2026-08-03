@@ -1358,8 +1358,15 @@ static inline uint64_t lambda_int_box_double(double value) {
     if (value != value) return ITEM_INT_NAN;
     if (bits == UINT64_C(0x7FF0000000000000)) return ITEM_INT_INF;
     if (bits == UINT64_C(0xFFF0000000000000)) return ITEM_INT_NEG_INF;
-    // |v| >= 2^257: keep the raw inline-float encoding (documented drift).
-    return bits;
+    // |v| >= 2^257 -- beyond what the int octant can tag. Formal semantics 4.9:
+    // an int result that cannot be carried as an int SATURATES to +/-int.inf,
+    // keeping the sign, exactly as IEEE overflows a double to +/-inf rather
+    // than to nan. Returning the raw bits here instead let the value keep its
+    // magnitude but lose its tag, so an `int` silently became a `float` just by
+    // growing; saturating closes int arithmetic in int at every magnitude.
+    // Note `int` therefore saturates far earlier than `float` (2^257 vs
+    // ~2^1024) -- an encoding property, not a domain one.
+    return value > 0.0 ? ITEM_INT_INF : ITEM_INT_NEG_INF;
 }
 
 // The value of an int Item as a double. Poison comes back as the IEEE special
@@ -1393,6 +1400,11 @@ static inline double lambda_int_unbox_double(uint64_t item_bits) {
     (!LAMBDA_ITEM_IS_INLINE_INT(b) && !((b) & ITEM_DBL_MASK) && \
      ((b) & ~ITEM_HIGH_BYTE_MASK) >= UINT64_C(3) && \
      ((b) & ~ITEM_HIGH_BYTE_MASK) <= ITEM_INT_SENTINEL_MAX)
+
+// Is this Item exactly the `int.nan` sentinel? Needed by the numeric
+// comparison, which must break reflexivity for every nan (formal semantics 5)
+// but lowers an `int` to a SIGNED part that no longer carries nan-ness.
+#define LAMBDA_ITEM_IS_INT_NAN(b)  ((b) == ITEM_INT_NAN)
 
 // Classify an int *value* held as a double. Kept as the value-side spelling of
 // the same question so numeric code can ask before it re-boxes.
@@ -1823,7 +1835,7 @@ extern "C" {
     ArrayNum* array_float_new(int64_t length);
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
-    void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
+    void array_int_set(ArrayNum *arr, int64_t index, double value);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
     Item array_num_read_item(ArrayNum *arr, int64_t index);
     double array_num_read_double(ArrayNum *arr, int64_t index);
@@ -1942,7 +1954,7 @@ extern "C" {
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     // length function
-    int64_t fn_len(Item item);
+    double fn_len(Item item);
     Item fn_int(Item a);
     int64_t fn_int64(Item a);
     Item fn_float(Item a);
@@ -2117,10 +2129,12 @@ extern "C" {
     int64_t fn_idiv_i(int64_t a, int64_t b);   // handles div-by-zero (returns INT64_ERROR)
 
     // Collection length — type-specialized native variants
-    int64_t fn_len_l(List* list);       // list length
-    int64_t fn_len_a(Array* arr);       // array length
-    int64_t fn_len_s(String* str);      // string length (UTF-8 aware)
-    int64_t fn_len_e(Element* elmt);    // element children count
+    // G0: these return a Lambda `int`, so they return int's one native
+    // representation. Their receivers are raw pointers, so none can fail.
+    double fn_len_l(List* list);       // list length
+    double fn_len_a(Array* arr);       // array length
+    double fn_len_s(String* str);      // string length (UTF-8 aware)
+    double fn_len_e(Element* elmt);    // element children count
 
     // Boolean operations
     Bool fn_not_u(Bool x);
@@ -2266,8 +2280,8 @@ extern "C" {
     Bool fn_starts_with_str(String* str, String* prefix);   // native String* variant
     Bool fn_ends_with(Item str, Item suffix);
     Bool fn_ends_with_str(String* str, String* suffix);     // native String* variant
-    int64_t fn_index_of(Item str, Item sub);
-    int64_t fn_last_index_of(Item str, Item sub);
+    double fn_index_of(Item str, Item sub);
+    double fn_last_index_of(Item str, Item sub);
     Item fn_trim(Item str);
     Item fn_trim_start(Item str);
     Item fn_trim_end(Item str);
@@ -2304,8 +2318,8 @@ extern "C" {
     Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
     Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
-    int64_t fn_ord(Item str);           // ord(str) - Unicode code point, semantically Lambda int
-    int64_t fn_ord_str(String* str);    // native String* variant, semantically Lambda int
+    double fn_ord(Item str);           // ord(str) - Unicode code point, semantically Lambda int
+    double fn_ord_str(String* str);    // native String* variant, semantically Lambda int
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);

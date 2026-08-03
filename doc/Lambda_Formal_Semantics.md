@@ -146,19 +146,63 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
 
 ## 4. Numerics
 
-**The poison symmetry (C16).** The organizing principle of this section:
-**every unbounded numeric domain is closed and total with its own poison;
-infinities are one value wherever poison exists; nans are always private;
-classification flows up, checks only guard the way down.** Concretely: `float`,
-`int`, `integer`, and `decimal` each close their arithmetic with their own
-`inf`/`nan` pair (`int.inf`/`int.nan`, `integer.inf`/`integer.nan`,
-`decimal.inf`/`decimal.nan`, and float's bare `inf`/`nan`); same-signed
-infinities are a single value across all four; every nan is unequal to
-everything, itself included, and belongs to its origin domain alone; a value —
-poison included — is a member of every superdomain on the `⊑` chain, so
-widening never checks, while narrowing boundaries verify domain membership
-(§11.4). Only the sized machine ints stand outside the symmetry: bounded,
-wrapping, poison-free.
+**The poison symmetry (C16, revised 2026-08-03).** The organizing principle of
+this section: **every unbounded numeric domain is closed and total with its own
+poison; classification flows up, checks only guard the way down.** Concretely:
+`float`, `int`, `integer`, and `decimal` each close their arithmetic with an
+`inf`/`nan` pair; every nan is unequal to everything, itself included; a value —
+poison included — is a member of every superdomain on the `⊑` chain, so widening
+never checks, while narrowing boundaries verify domain membership (§11.4). Only
+the sized machine ints stand outside the symmetry: bounded, wrapping,
+poison-free.
+
+**`int` and `float` share one poison, spelled `inf` and `nan`.** They are the
+ordinary IEEE values, stored inline exactly as `float` stores them — there is no
+separate `int` representation and no `int.inf`/`int.nan` syntax. `decimal`
+(which also carries `integer`) keeps its own, spelled `decimal.inf` /
+`decimal.nan`. So there are **two** poison identities, not four.
+
+Consequences, all deliberate:
+
+| | |
+|---|---|
+| `type(nan)`, `type(inf)` | **`int`** — a value shared across domains types as its narrowest, the same convention that makes `type(1)` be `int` |
+| `nan is int` | **true** |
+| `nan is float` | true — unchanged; `int ⊑ float`, so anything accepting `float` still accepts it |
+| `type(1.0 + nan)` | **`int`** — a float computation's poison types as int; sound under the lattice, visible only through `type()` |
+| `let x: int = <float nan>` | **admitted** |
+
+That last row is the one thing traded. An earlier revision made poison classify
+strictly upward — `int.nan is float` true but `nan is int` false — so a foreign
+nan was rejected when narrowing into `int`. With one representation there is no
+foreign nan to reject, and that guard is retired.
+
+*Why the trade is worth it.* A hand-rolled `int` poison has to be recognized
+everywhere a number is handled: 45 call sites convert an int Item to `int64_t`,
+and **each silently destroys nan-ness** — a sentinel goes in, an ordinary
+integer comes out, with nothing to mark the loss. That is not hypothetical: it
+produced `int.nan == int.nan` returning *true* (the numeric comparison lowered
+the operand through one of those conversions, so its `isnan` guard never saw
+it), and the same root caused boxed int arithmetic to compute in `int64`. With
+the IEEE values inline, comparisons come out unordered, arithmetic propagates,
+and `isnan` works — from the hardware, at every one of those sites, for free.
+Retiring one narrowing guard buys back an invariant that could otherwise be
+dropped in 45 places.
+
+*History — `int.inf` / `int.nan`, C16 original through 2026-08-03.* The retired
+design gave **each of four** poison-bearing domains its own pair, spelled
+`int.inf` / `-int.inf` / `int.nan`, `integer.inf` / `integer.nan`,
+`decimal.inf` / `decimal.nan`, alongside float's bare `inf` / `nan`. Its
+organizing rules were: *same-signed infinities are one value across all four*,
+but *nans are always private* — each belonging to its origin domain alone — and
+*classification flows strictly upward*, so `int.nan is float` was true while
+`nan is int` was false, which is what let a narrowing boundary reject a foreign
+nan. Representationally `int`'s three poisons were **sentinel patterns on the
+`LMD_TYPE_INT` tag byte** (payloads 3, 4, 5), because the rotation encoding maps
+a double's bits into an octant that IEEE's own `inf`/`nan` fall outside of.
+Retired because the sentinel had to be re-recognized at every site that touches
+a number, which it was not; the `int.inf`/`int.nan` spellings no longer parse or
+print.
 
 **Where poison comes from — interior versus ingress (C17).** Poison arises
 *only inside number math*: a computed zero divisor, saturation at the
@@ -167,7 +211,7 @@ number math, so the result stays in number rather than leaving for the error
 channel. Failure at the numeric world's *boundaries* is the opposite —
 parsing, casting, narrowing admission, and validation report `error()`, because
 there a non-number is being asked to become a number, or a number is being
-asked to fit a domain it does not belong to. So `1 div 0` is `int.inf` while
+asked to fit a domain it does not belong to. So `1 div 0` is `inf` while
 `int("abc")` is an `error` — the same distinction that makes `int(s) or 0` the
 working default idiom and `a div b or 0` not one. The line is derived from
 where a value came from, not from a list of exceptions. [C14c, C17]
@@ -178,30 +222,30 @@ where a value came from, not from a list of exceptions. [C14c, C17]
   C3**: the integers exactly representable in IEEE binary64 — every integer in
   the contiguous band **±(2⁵³ − 1)** (JavaScript's safe-integer bound) plus the
   sparse representable integers beyond it — extended by the closure points
-  `int.inf`, `-int.inf`, and `int.nan` (the int domain's own poison, parallel
-  to `decimal.inf`/`decimal.nan`). `int` is a **distinct runtime type, not a
-  hint erased into float**: `type()`, printing, `is`, and the validator keep
-  the int/float distinction, and float contact still yields float (§4.3).
+  `inf`, `-inf`, and `nan`, which `int` **shares with `float`** as the ordinary
+  IEEE values (see the poison symmetry above; there is no `int.inf`/`int.nan`
+  spelling). `int` is otherwise a **distinct runtime type, not a hint erased
+  into float**: `type()`, printing, `is`, and the validator keep the int/float
+  distinction for ordinary values, and float contact still yields float (§4.3).
   Arithmetic (`+`, `-`, `*`, `div`, `%`) is correctly-rounded binary64
   arithmetic, **closed and total over the domain**: exact within the contiguous
-  band, correctly rounded above it, saturating to `int.inf`/`int.nan` at the
-  float-range extremes. **There is no overflow promotion — int arithmetic never
-  changes type.** Negation and `abs` are total (the domain is symmetric).
-  Poison behaves as elsewhere: `int.nan is int` → true (§5.1's "unequal, not
-  untypeable"); the same-signed infinities are **one value across the four
-  poison-bearing domains** (`int.inf == inf == integer.inf == decimal.inf`),
-  while nans are **never shared, per IEEE** — every nan (`nan`, `int.nan`,
-  `integer.nan`, `decimal.nan`) is unequal to everything including itself.
-  Classification runs *up* the `⊑` chain — `int.nan is float` → true, just as
-  `nan is float` — but never down: `nan is int` → false, and a foreign nan
-  rejects at narrowing boundaries (§11.4). The `is` lattice is total over full
-  domains, poison included: **`i32 ⊑ int ⊑ integer`** (and onward to
+  band, correctly rounded above it, saturating to `±inf` where the value can no
+  longer be carried as an int (§4.9). **There is no overflow promotion — int
+  arithmetic never changes type.** Negation and `abs` are total (the domain is
+  symmetric). Poison behaves as elsewhere: `nan is int` → true (§5.1's
+  "unequal, not untypeable"), and every nan is unequal to everything including
+  itself. Same-signed infinities are **one value across every poison-bearing
+  domain** (`inf == decimal.inf`). Classification runs *up* the `⊑` chain —
+  `nan is float` → true — and, since `int` and `float` now share one poison
+  representation, `nan is int` is true as well; the narrowing rejection of a
+  foreign nan retires with the distinction it guarded. The `is` lattice is
+  total over full domains, poison included: **`i32 ⊑ int ⊑ integer`** (and onward to
   `decimal`), `int ⊑ float` definitionally; **`int ∥ int64`** — sparse int
   values exceed the int64 range, and odd int64 values above 2⁵³ are not int.
 - **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
   **wraps** (two's complement); constant/literal overflow is a **compile
   error**; division by zero yields the entered domain's poison per C14c/C16
-  (`i8 div 0` → `int.inf`, `i64 div 0` → `integer.inf` — a deliberate
+  (`i8 div 0` → `inf`, `i64 div 0` → `integer.inf` — a deliberate
   divergence from Go's panic; number math stays in number). Ordinary machine
   arithmetic wraps; `div` and `%` leave the machine lane under §4.7 rather
   than applying a machine `MinInt div -1` rule.
@@ -228,15 +272,28 @@ needs). [C3 (historical), C16]
 
 - **Which unsuffixed spellings are `int` is lexical, never value-selected**
   (the same rule as the `n` suffix): a numeric literal is `int` iff it has
-  **no decimal point and no negative exponent**. `10e1` is `int` 100 despite
-  the e-notation; `10.`, `10.0`, `10.e1`, and `10e-1` are `float`. (C16)
+  **no decimal point and no exponent**. `10`, `0x1F` are `int`; `10.`, `10.0`,
+  `10.e1`, `10e1` and `10e-1` are `float`. (C16, revised)
+  - An **exponent makes the literal a float**, matching every language that
+    distinguishes the two — C, C++, Java, C#, Python, Go, Rust, Swift, Kotlin,
+    Ruby, PHP, Lua and Scheme all type `1e2` as floating-point, and none admits
+    an exponent in an integer literal. An earlier revision of C16 split the
+    exponent by sign so `10e1` was `int`; that made `1e16` and `1e100`
+    **compile errors** while the identical `1.0e16` compiled, a distinction no
+    other language draws and one that forced a `.0` on ordinary magnitudes.
+  - Conceding the convention costs nothing here, which is why it is conceded:
+    `int` is the float64-representable integers, a **subset** of float admitted
+    by membership (§4.1), so `let n: int = 1e2` still binds 100 as an `int`,
+    and `xs[1e0]` still indexes. Only `type(1e2)` changes, from `int` to
+    `float` — and it now agrees with Python and Go.
 - An unsuffixed `int`-form literal outside the contiguous band **±(2⁵³ − 1)**
   is a **compile error** — never a silent conversion, and **even where the
   value is sparsely representable** (`18014398509481984` = 2⁵⁴ errors although
   it is a valid `int` value): a literal of that magnitude expresses
   `i64`/`integer` intent, and admitting only the contiguous band keeps the
-  rule teachable (C16). The two rules compose: `1e16` is a compile error —
-  spell `1.0e16` (float) or `1e16n` (`integer`). Suffixes (`i64`, `u64`, sized
+  rule teachable (C16). The band applies to the **integer spelling only**: a
+  literal with an exponent is a float and has no band, so `1e16` and `1e100`
+  are ordinary float literals. Suffixes (`i64`, `u64`, sized
   numeric suffixes, `n`, `m`, float form) express intent explicitly. The suffix alone names the type: `n` is `integer`
   always (`1n`, `1e3n`), `m` is `decimal` always (`100m`, `1.5m`, `1.5e-2m`).
   A fractional or negative-exponent spelling with `n` (`1.0n`, `1e-3n`) is a
@@ -364,11 +421,10 @@ so `0m * decimal.inf` is `decimal.nan`, never an error or process fault. [C8.5a,
 Finite `int` values print as integers at every magnitude — no decimal point, no
 exponent form (`18014398509481982`, not `1.80144e+16`) — keeping int and float
 output visibly distinct, which data emission relies on. Int poison follows the
-decimal pattern: the parseable spellings `int.inf`, `-int.inf`, and `int.nan`,
-distinct from float's bare `inf`/`nan`, participating in int arithmetic as int
-poison (`1 div 0 + 1` is `int.inf`). `integer` poison prints likewise:
-`integer.inf`, `-integer.inf`, `integer.nan` (`1n div 0n + 1n` is
-`integer.inf`). [C14c, C16]
+float pattern: the parseable spellings are `inf`, `-inf` and `nan` — the same
+ones `float` uses, since `int` and `float` share one poison representation
+(§4). There is no `int.`-prefixed spelling to parse or print; `integer` and
+`decimal` keep their own prefixed spellings.
 
 ### 4.7 Division and modulo
 
@@ -387,8 +443,8 @@ Division by zero never raises, at any width or tier:
 - `div` and `%` are integer *operations* and **stay in their operand domain —
   C16 (2026-08-01), revising C14c's result-typing arm while keeping its
   substance**: `int div int → int` and `int % int → int`; a computed zero
-  divisor yields the int domain's own poison — `7 div 0 → int.inf`,
-  `0 div 0 → int.nan` — exactly as float division yields `inf`/`nan` and
+  divisor yields the int domain's poison — `7 div 0 → inf`,
+  `0 div 0 → nan` — the same values float division yields, and
   decimal division yields `decimal.inf`/`decimal.nan`. The `integer` domain
   closes the same way: `integer div integer → integer` with
   `integer.inf`/`integer.nan` on a computed zero divisor, and sized
@@ -401,7 +457,7 @@ Division by zero never raises, at any width or tier:
   — and the `or`-rescue does not apply (poison is truthy): guard the divisor
   or test `is nan`.
 - Vectorized integer division follows the scalar rule: the result stays an
-  int-family array with per-lane `int.inf`/`int.nan` at offending lanes —
+  int-family array with per-lane `inf`/`nan` at offending lanes —
   representable and type-stable, so C14b's whole-op single-`error` remains
   retired. The pre-mask idiom (`b eq 0`) remains available for salvage but is
   no longer required. Decimal-domain division by zero likewise yields
@@ -412,6 +468,73 @@ Division by zero never raises, at any width or tier:
 `div` truncates toward zero; `%` takes the dividend's sign (C convention;
 contrast Python's flooring — relevant when modeling guest languages).
 [A2, C3, C14b (historical), C14c, C16]
+
+### 4.8 `int` ranges are band-limited; use `integer` beyond
+
+An `int` range `a to b` requires its bounds to lie within **±(2⁵³ − 1)**;
+outside that, it is an **out-of-range error**. A range over larger values is
+written with `integer` bounds — `1n to N`.
+
+*Rationale.* This is not a conservative approximation of what `int` can hold —
+it is exactly where a range of ints is **meaningful**. A range is a sequence of
+consecutive integers, so it needs a well-defined successor: `x + 1` must differ
+from `x`. In binary64 that holds precisely up to 2⁵³. Above it the spacing
+between representable values exceeds 1, so consecutive integers no longer all
+exist, and "the range from `a` to `b`" stops denoting a sequence at all.
+
+The failure is silent rather than loud, which is what makes the rule worth
+stating. At 2⁷⁰ the spacing is 2¹⁸, so:
+
+```
+let big = 4503599627370496 * 262144   // 2^70, a perfectly valid `int`
+big + 2 == big                        // true -- 2 is below the spacing
+len(big to big + 2)                   // 1, not 3
+```
+
+Nothing here is a bug: every step is correct binary64 arithmetic, and `len`
+correctly reports a one-element range. That is the point — an out-of-range
+error at the range boundary converts an answer that is *quietly wrong for the
+user's intent* into one the language refuses to guess at.
+
+`int` keeps its full domain elsewhere; only ranges are band-limited, because
+only ranges depend on successor. Where genuinely large sequences are wanted,
+`integer` is exact at every magnitude and `1n to N` says so. [C16, 2026-08-03]
+
+### 4.9 `int` overflow saturates to `±inf`, following IEEE
+
+An `int` operation whose result cannot be carried as an `int` returns
+**`±inf`**, keeping the sign. `nan` is *not* used for overflow.
+
+*Rationale — this is IEEE's own distinction, not a new rule.* Binary64 already
+separates the two cases, and Lambda's float arithmetic inherits it:
+
+| | |
+|---|---|
+| `1.0e308 * 10.0` | `inf` — **overflow** |
+| `-1.0e308 * 10.0` | `-inf` — sign preserved |
+| `0.0 * inf` | `nan` — **invalid**, no value exists |
+| `inf - inf` | `nan` — invalid |
+
+Overflow has a definite sign and direction: the answer is larger than anything
+representable, which `inf` states exactly. `nan` means *no answer exists*, and
+using it for overflow would throw away the sign and make a merely-too-large
+value unordered with everything — when in truth it is greater than every finite
+value. `int` follows the same split: saturation gives `±inf`, while the
+indeterminate forms (`0 * inf`, `inf - inf`) give `nan`.
+
+**`int` saturates earlier than `float`, and that is an encoding property, not a
+domain one.** A `float` overflows only past ≈1.8 × 10³⁰⁸ (2¹⁰²⁴); an `int` Item
+can carry magnitudes below **2²⁵⁷** (≈2.3 × 10⁷⁷), because that is the range the
+tagging scheme reserves for the int lane (`Lambda_Type_Int_Boxing.md` §2.10). So
+the same product may be a finite `float` and an `inf`. The two domains close
+at different points; both close.
+
+*Consequence: `int` arithmetic is closed in `int`.* `int * int` is an `int` at
+every magnitude — a value, or `±inf`, or `nan`, never something else.
+This supersedes the encoding's one accepted wart: results at or above 2²⁵⁷ used
+to leave the int lane and read back as `float`, so an `int` could silently
+become a `float` by growing. It now saturates instead, and the type is stable
+under arithmetic. [C16, 2026-08-03]
 
 ---
 
@@ -427,8 +550,8 @@ contrast Python's flooring — relevant when modeling guest languages).
   (§5.3).
 - **Two designed poison carve-outs**: `nan` and `error` values never equal
   anything, including themselves. These are the only exceptions to
-  reflexivity. `nan` means the whole family — float `nan`, `int.nan`,
-  `integer.nan`, `decimal.nan` — nans are never shared across or within
+  reflexivity. `nan` means the whole family — the `nan` shared by `int` and
+  `float`, plus `integer.nan` and `decimal.nan` — nans are never shared across or within
   representations (IEEE); same-signed infinities, by contrast, are one value
   across `float`, `int`, `integer`, and `decimal` (C16). **Poison is unequal, not untypeable**: classification is a
   different relation — `err is error` → true, `nan is float` → true, and
@@ -719,6 +842,170 @@ is `NULL`, yet `SUM` skips), a standard criticism. Skipping silently changes
 `avg`'s denominator; R and Julia force acknowledgment for the same reason.
 [C5.3]
 
+### 7.6 What an error participates in
+
+An error is **not an ordinary value**. Unlike JavaScript, where an exception
+object is just an object once caught, a Lambda error is a failure that has not
+yet been discharged: it must reach a handler, and every computation it passes
+through must carry it there rather than absorb it into a plausible answer.
+
+Operations on an error fall into exactly three families.
+
+**1. Type family — participates.** Asking what something *is* must work on an
+error, or errors could never be detected.
+
+| form | result |
+|---|---|
+| `err is error` | `true` — the detection primitive |
+| `type(err)` | `error` |
+| `match (err) { … }` | dispatches on the error arm |
+
+**2. Truthy family — participates.** An error has a definite truth value
+(false), and every form below is that truth value being read. These are the
+discharge and defaulting surfaces: they exist to *handle* the error, so
+absorbing it is their job.
+
+| form | result |
+|---|---|
+| `if (err)` | falsy |
+| `not err` | `true` |
+| `err or default` | `default` |
+| `err == err` | a `bool` |
+| `err ^ { … }` | the handler's value |
+
+**3. Value family — returns a soft error, with one named exemption.**
+Everything else. Any operation whose result is a *value computed from* the error
+propagates instead, including the text and name conversions:
+
+| form | result |
+|---|---|
+| `string(err)`, `symbol(err)`, `name(err)` | `error` |
+| `len(err)` | `error` |
+| `err + 1`, `err < 1`, `err ++ "x"` | `error` |
+| `int(err)`, `float(err)`, `bool(err)` | `error` |
+| `err in x`, `err at x` | `error` |
+| `contains(err, "x")`, and every other value function | `error` |
+
+**`err in x` deserves its own note, because a `bool` answer looks safe.** The
+membership operators are value computations and propagate like the rest — but
+the reason is sharper than category. `in` searches **one level**, so an error
+nested deeper in the structure is invisible to it. A `false` result would then
+read as *"this data is error-free"* when it may not be, and that is a worse
+outcome than no answer at all. Returning the error says the honest thing: this
+question was not answered.
+
+(An error also cannot be found by search in the first place: `in` matches by
+equality, and `error == error` is false by §5. So the participating reading
+would have returned a confident `false` in every case, including the one where
+the error is sitting right there in the container.)
+
+*Deferred.* Asking "does this data contain an error anywhere?" is a real
+question and needs a real answer — a deep check, most likely alongside
+type/schema validation, in the shape of a `valid(item)` sys func. That is future
+design; what this section fixes is that `in` must not be mistaken for it.
+
+The one exemption:
+
+- **`print(err)` participates.** It is a debugging and inspection function: its
+  purpose is to show you what a value is, which for an error is the one thing
+  you most need to see. It also *emits* rather than returning a value that can
+  flow onward, which is the whole distinction from `string(err)`.
+
+**`len(err)` is an error, and that is what keeps §8.1's law intact** rather than
+breaking it. The law says `len(x)` is the number of iterations `for (i in x)`
+performs. `for (x in null)` yields nothing — null is *empty content* — so
+`len(null)` is 0. `for (x in err)` yields an **error**, because the content is
+an error, not because it is empty. So `len(err)` is an error too, and the two
+sides still agree. Answering 0 would have put a failed computation on the same
+branch as an empty collection, which is the swallow this section exists to
+prevent.
+
+*`len` is still total over what it accepts.* Its parameter is `any \ error`
+(§7.7), so an error never reaches the function body — it is rejected at the call
+boundary and skips. The C result therefore still needs no error channel, which
+is what makes the retired `INT64_ERROR` sentinel unnecessary as well as wrong.
+
+*Rationale.* The families are separated by one question: **can the result be
+mistaken for a successful computation?** A type answer and a truth value cannot
+— they are about the error itself and they announce it. A converted value can:
+`string(err)` yielding `"<error>"` puts a failure into a string that flows
+onward as ordinary text, and nothing downstream can tell it from a real one.
+Converting an error to text is therefore written explicitly — `err or "error"`,
+or the handler form — so the swallow is visible at the point it happens.
+
+The exemption bar is deliberately high. `print` and `len` clear it because one
+is inspection and the other is load-bearing for iteration; the remaining value
+functions carry no comparable obligation, so none of them earns a ruling of its
+own and all of them propagate.
+
+**Containment is not participation.** `[err]` is an array and `{k: err}` is a
+map — an error stored *inside* a collection is an ordinary element, and
+`len([1, err, 3])` is 3. Propagation concerns an error *being* the operand, not
+one being reachable from it.
+
+*Implementation status (2026-08-03).* The type family conforms. The truthy
+family conforms (`if`, `not`, `or`, `==` all behave as above; `err ^ { … }` is
+specified but not yet parsed). `index_of`, `last_index_of` and `ord` conform via
+the `any \ error` parameter boundary of §7.7. The rest of the value family does
+**not**: `string(err)` returns the string `"<error>"`, `symbol(err)` /
+`name(err)` return `null` — neither participation nor propagation — and
+`err in x` / `err at x` return `false`, which is exactly the misleading answer
+this section rules out.
+
+### 7.7 Broad input, in-domain results: the sys func return contract
+
+Lambda's sys funcs **take input broadly** — they accept `any` and decide what to
+do — rather than rejecting at the signature. That leaves the question of what a
+value function returns when it is handed something it cannot process. Three
+contracts are available, using `ord` as the worked example:
+
+| | contract | on a non-string |
+|---|---|---|
+| **1** | `ord(x: string) -> int` | rejected at the boundary; the call does not type-check |
+| **2** | `ord(x) -> int \| error` | accepted, returns an `error` |
+| **3** | `ord(x) -> int` | accepted, returns `-1` |
+
+**The ruling is option 3**, and the reason is the same test §7.6 uses
+everywhere: *can the result be mistaken for a successful computation?*
+
+`-1` **cannot**. Code points are non-negative, so `-1` lies outside `ord`'s
+result domain entirely and no valid input can produce it. That makes it
+self-announcing, which is exactly what `INT64_ERROR` was not — `INT64_MAX` is a
+perfectly ordinary `int`, indistinguishable from a real answer, which is why
+that convention had to be retired. A value outside the domain is not a sentinel
+in the bad sense; it is the absence of an answer, stated in the result type.
+
+This is the same shape `index_of` and `last_index_of` already have, where `-1`
+means "not found" and sits outside the valid index range. So the convention is
+one rule, not a per-function habit: **broad input, and a result drawn from
+outside the success domain when there is no answer.**
+
+*Why not option 1.* Rejecting at the signature contradicts the broad-input
+convention, and buys little: the caller of an untyped `fn f(s) => ord(s)` gains
+no safety, only a boundary error at a different place.
+
+*Why not option 2.* `int | error` is *viral through untyped code*. An untyped
+`fn f(s) => ord(s)` infers `int | error`, every caller inherits it, and nothing
+is gained at run time. Option 2 remains correct and necessary for any function
+that has **no out-of-domain value to return**; it is the fallback, not the
+default.
+
+*Where the error goes instead.* These functions declare their parameters as
+`any \ error` (§7.6), so an error argument is rejected at the **call
+boundary**: the parameter never enters the function, the call's result is that
+error, and it *skips* to the end of the closest enclosing safe boundary [TE-5,
+§11.4]. That is the ordinary soft-error path — nothing is raised, and nothing is
+swallowed. The `-1` results below are for inputs that are perfectly valid and
+simply have no answer, which is a different question from an input that is
+already a failure.
+
+*Consequence for `ord` specifically.* Today `ord` returns `0` for a non-string
+**and** for `""` **and** for the NUL character — three different situations
+collapsed onto one value that is a legitimate answer (U+0000 is a real code
+point). Adopting option 3 means `-1` for the non-string case, and `""` should
+join it: an empty string has no first character, so it has no ordinal, and `0`
+is the wrong answer for the same reason it is wrong for `42`. [2026-08-03]
+
 ---
 
 ## 8. Membership and Iteration: the `in`/`at` Axis
@@ -730,10 +1017,9 @@ and membership:
 |---|---|---|
 | iteration | `for (x in coll)` | `for (k at m)` |
 | membership | `x in coll` | `k at m` |
-| on elements | children | attributes |
+| on elements | attribute values, then children | attribute keys |
 
-`i at arr` tests index possession (`0 ≤ i < len`) — the checked-write pre-check
-idiom. Operand order is uniform: member left, container right.
+Operand order is uniform: member left, container right.
 
 *Rationale.* An element is both a map and a list, so any container operator
 must mean one thing across the duality (P7) — `in` stays value-membership
@@ -741,6 +1027,259 @@ everywhere, and key-membership gets its own operator. Reusing `at` makes the
 membership pair *be* the iteration pair (self-teaching, no new keyword), and a
 keyword operator is shadow-proof where a method (`m.has(k)`) could be shadowed
 by wild data. [C5.3a]
+
+*Note on the element row.* `for (x in elem)` yields the attribute **values**
+followed by the children, and `for (k at elem)` yields the attribute keys. An
+earlier revision of this table said `in` meant children alone; the
+implementation has always included attributes, and §8.1's length law depends on
+which is correct, so the table now states what `in` actually ranges over.
+
+### 8.0 The key space: every item is keyed
+
+Containers do not each invent their own addressing. **Every item in every
+container has a key**, and the kinds of key form one space:
+
+| container | keys its items by |
+|---|---|
+| map | symbols |
+| array, list, range | integers — the index |
+| element | **both** — attributes by symbol, children by index |
+
+Access is one notation over that space: `item.1` reads by index, `item.name`
+reads by name. And iteration exposes the key alongside the value, uniformly:
+
+```
+[for (k, v in [10, 20, 30]) k]   // [0, 1, 2]      -- integer keys
+[for (k, v in [10, 20, 30]) v]   // [10, 20, 30]
+[for (k, v in {a: 1, b: 2}) k]   // ['a', 'b']     -- symbol keys
+[for (k, v in {a: 1, b: 2}) v]   // [1, 2]
+```
+
+*Rationale — why array items are keyed rather than merely ordered.* The
+`for (k, v in c)` form must work over any container, and it is only useful if
+`k` is meaningful in each. If array items had no keys, `k` would be `null` for
+every array element and the form would be dead weight exactly where the index
+is most wanted. Giving arrays integer keys makes one loop shape serve arrays,
+maps and elements alike, and makes an element's dual nature a *composition* of
+the two key kinds rather than a special case.
+
+### 8.0.1 Named keys: what `at` ranges over
+
+`in` tests **value** presence. `at` tests **name** presence — and a name is a
+**symbol key only**. An integer key is a key, but it is not a *name*.
+
+| `x` | `for … in x` | `for … at x` |
+|---|---|---|
+| `{a: 1, b: 2}` | the values | `'a'`, `'b'` |
+| `<e a:1, b:2; "text">` | attr values, then children | `'a'`, `'b'` |
+| `[10, 20, 30]` | the elements | **nothing** |
+| `"str"`, `1 to 3` | chars / values | nothing |
+
+So `1 at [10, 20, 30]` is **false**: index 1 is a key of that array, but not a
+name, and `at` asks about names.
+
+*Rationale.* `at` could have been defined over the whole key space, which would
+have made `1 at arr` true. It is deliberately narrower, because the narrower
+reading is the one that buys something: **there would otherwise be no way to
+range over just the named members of a collection.** That operation is exactly
+what `at` exists to provide, and it is only meaningful on an element — the one
+container holding both key kinds — where `for (k at e)` gives the attributes
+without the children. Widening `at` to integers would delete the capability and
+leave nothing in its place, while narrowing costs only a spelling: an index
+bound is `i < len(arr)`, which needs no operator.
+
+*Implementation status (2026-08-03).* Iteration conforms — `for (k at arr)`
+correctly yields nothing. Membership does **not**: `1 at [10, 20, 30]` returns
+`true` and `5 at [10, 20, 30]` returns `false`, i.e. it is still testing index
+possession over the whole key space. That is the defect, and it is the sole
+reason the two `at` forms currently disagree. Note that an earlier revision of
+this section advertised `i at arr` as the checked-write pre-check idiom; under
+this ruling that idiom loses its operator and is written as an explicit bound.
+
+### 8.1 `len`: iterable length
+
+**Prior art: Python.** `len()` is the `Sized` protocol — a container or
+pseudo-container (`str`, `bytes`) answers via `__len__`, and everything else is
+a `TypeError`: `len(None)`, `len(5)`, `len(3.14)` and `len(True)` all raise, as
+does `len(generator)` even though a generator is perfectly iterable. Two details
+of that design matter here. Python **enforces** that `__len__` returns a
+non-negative machine int — a negative is a `ValueError`, an oversized one an
+`OverflowError`, a float a `TypeError` — so there is no room in the return type
+to smuggle a failure; failure travels out of band as an exception. And because
+`len` is thereby partial, Python provides a **separate** query,
+`operator.length_hint()`, for the "give me a size for something that isn't
+Sized" case.
+
+**Lambda evolves over it with a single law:**
+
+> `len(x)` is the number of iterations `for (i in x)` performs.
+
+Length and iteration are two views of one concept, so there is nothing to
+memorize per type and nothing to reconcile between them. Everything below is a
+consequence, not a separate rule:
+
+| `x` | `len(x)` | because `for (i in x)` yields |
+|---|---|---|
+| `"str"` | 3 | its characters |
+| `[1, 2, 3]` | 3 | its elements |
+| `[[1,2], [3]]` | **2** | its elements — **shallow**, one level only |
+| `1 to 3` | 3 | the range's values |
+| `{a: 1, b: 2}` | 2 | the map's values, one per entry |
+| `{a: null, b: 2}` | 2 | a null *value* is still an entry |
+| `null` | 0 | nothing; absence is the empty sequence |
+| `err` | **`error`** | an error, not nothing — the content is a failure, not an absence (§7.6) |
+| `<e a:1, b:2; "text">` | **3** | attribute values, then children |
+
+The `null` and `err` rows are the law doing real work rather than being
+restated. Both are "not a collection", but they are not the same answer:
+iterating `null` yields **nothing**, so its length is 0, while iterating an
+error yields **an error**, so its length is an error. Collapsing the second onto
+0 would have made a failed computation indistinguishable from an empty one.
+
+Two consequences worth stating outright, because both have been implemented
+wrongly at some point:
+
+- **`len` is shallow.** `len([[1,2],[3]])` is 2, not 3. A deep leaf count is a
+  different function; the law forbids conflating them, because the shallow count
+  is what indexing needs (`xs[len(xs) - 1]`, `while (i < len(xs))`).
+- **`len(element)` = `len(attrs) + len(children)`.** An element is a map and a
+  list at once (P7), so its length is the sum of both facets — the same
+  sequence `for … in` walks.
+
+**Where Lambda parts company with Python.** Python raises for scalars; Lambda
+answers by the law, so `len(null)` is 0 because iterating null yields nothing.
+Whether a *non-null scalar* iterates once (`len(5) == 1`) or not at all
+(`len(5) == 0`) is still open: `for (i in 5)` currently yields nothing while
+`5 |> ~` yields one item, and the law requires those to agree before `len(5)`
+can be settled.
+
+**Lazy sequences and streams.** The surveyed functional languages are unanimous
+that length over lazy data is an **eager synchronization point** that forces the
+structure, and none returns an infinity: Haskell's `length` diverges on an
+infinite list, as do Clojure's `count`, Scala's `LazyList.length`, F#'s
+`Seq.length` and Java's `Stream.count()`. Equally unanimous is that each then
+adds a **separate, non-forcing** size query — Clojure `bounded-count`, Scala
+`knownSize`, Rust `size_hint` / `ExactSizeIterator`, Python `length_hint` —
+because forcing is not always acceptable and those languages have no value to
+denote "unbounded".
+
+Lambda splits the case instead, because C16 gives it a value those languages
+lack:
+
+| the sequence | `len` | |
+|---|---|---|
+| lazy but **forceable** | the actual size, a normal `int` | forcing is the synchronization point, and it is what makes the count knowable |
+| **not forceable** — unknown, or truly infinite (a generator) | **`inf`** | the honest answer; Lambda has no `int.unknown`, and `inf` is the one value that cannot be mistaken for a size |
+
+`len` therefore stays total and never needs the separate hint query those other
+languages had to add.
+
+**The consequence is that `for` must reject an infinite length.** By this
+section's law, `for (i in s)` runs `len(s)` times, so a `for` over a stream of
+length `inf` would not terminate. Where that length is **statically
+inferable**, the `for` is a **compile error** — the loop is provably
+non-terminating, and diagnosing it at compile time is strictly better than
+hanging at run time. (Haskell, Clojure and Java all hang here instead; Lambda
+can do better precisely because the infinitude is a *value* in the type rather
+than a runtime accident.)
+
+The supported way to consume an unbounded stream is therefore **recursion with
+an explicit termination condition in the function** — the condition is what
+bounds the computation, and writing it is what makes the bound reviewable.
+`for` is for sequences whose extent is known; recursion is for sequences whose
+extent is decided by the consumer.
+
+### 8.2 Projections: `keys`, `values`, `names`
+
+Three projections fall out of the two axes, and each is defined by the
+comprehension it abbreviates rather than by an implementation:
+
+| projection | definition | yields |
+|---|---|---|
+| `keys(c)` | `for (k, v in c) k` | every key — integers for arrays, symbols for maps, both for elements |
+| `values(c)` | `for (k, v in c) v` | every value, in the same order |
+| `names(c)` | `for (k at c) k` | the **named** keys only — symbols (§8.0.1) |
+
+`keys` and `values` range over the `in` axis, so they are total over the
+container: every item contributes exactly one key and one value. `names` ranges
+over the `at` axis, so it sees only the subset that has names. Measured:
+
+```
+[for (k, v in [10, 20, 30]) k]        // [0, 1, 2]        keys: indices
+[for (k, v in {a: 1, b: 2}) k]        // ['a', 'b']       keys: symbols
+[for (k, v in <e a:1, b:2; "t">) k]   // ['a', 'b', 0]    keys: BOTH kinds, composed
+[for (k, v in <e a:1, b:2; "t">) v]   // [1, 2, "t"]      values match, in order
+[for (k at <e a:1, b:2; "t">) k]      // ['a', 'b']       names: attributes only
+```
+
+The element row is the whole key-space design made visible: its keys are the
+attribute symbols followed by the child indices, and nothing about that is a
+special case — it is simply what a container holding both key kinds looks like.
+
+**This closes §8's length question without a new primitive.** `len(keys(c))`
+equals `len(c)` always, since there is one key per item, so `keys` adds no new
+measure. `len(names(c))` *is* the `at`-axis length — the count that differs from
+`len` for arrays (0 vs the element count) and for elements (attributes vs
+attributes plus children).
+
+*Not implemented, deliberately.* All three are short comprehensions in the
+surface language already, so none earns a built-in. They are defined here so the
+projections have names to be reasoned and written about — the same reason
+`count` is defined in §8.3 without being implemented. Add one only when a call
+site needs it often enough to pay for itself.
+
+*Gap.* The paired form on the `at` axis, `for (k, v at c)`, does not parse —
+only the single-variable `for (k at c)` exists. So `names` is expressible but
+"named members with their values" is not directly; whether the paired form
+should exist is open.
+
+### 8.3 Two lengths: content and self
+
+Lambda asks two different length questions, and conflating them is what made
+the earlier candidate law fail:
+
+| question | function | meaning |
+|---|---|---|
+| **length of content** | `len(x)` | how many items `x` holds — its iteration count (§8.1) |
+| **length of self** | `count(x)` | how many items `x` *is*, as a member of a container |
+
+`len` looks inside; `count` looks at the thing itself. That is why `null` and
+`err` have `len` 0 — neither bears content — while each is still one thing, so
+`count` is 1. The two are independent measures, not two spellings of one.
+
+With both named, shallowness becomes an identity rather than a caveat:
+
+> `len(container)` = Σ `count(item)` over its items.
+
+The superficially similar `len(container)` = Σ `len(item)` does **not** hold and
+must not: it would force `len` into a deep leaf count, so `len([[1,2],[3]])`
+would be 3 rather than 2, and the shallow count is the one indexing needs
+(`xs[len(xs) - 1]`, `while (i < len(xs))`). Writing the law with `count` states
+exactly what `len` does — every item contributes one, whatever it is.
+
+**`count(x)` is 1 for every value `x`, with no exception.** Scalars, `null`,
+errors, arrays, maps, elements, ranges and streams alike: a value is one item.
+
+Two constructs *appear* to violate this and do not, because neither is a value:
+
+```
+len([1, for (x in [2, 3]) x, 4])   // 4 -- the for-expression splices
+len([1, *xs, 4])                    // 4 -- the spread splices
+```
+
+Both **splice at the construction site**, contributing their elements to the
+enclosing content. Binding proves the multiplicity is not in the value:
+`let xs = for (x in [2, 3]) x` and `let z = *xs` each bind an ordinary array,
+and `len([1, xs, 4])` is 3. Splicing happens *before* the result becomes an
+item; by the time `count` applies, there is one value.
+
+*Not implemented, deliberately.* Since `count` is constantly 1, calling it would
+be a no-op, and a function that always returns 1 earns no place in the surface
+language on its own. It is defined here for two reasons: the shallowness law
+above needs a name for the quantity it sums, and any future value type that is
+*inherently* several — a genuine multi-value, as opposed to today's syntactic
+splices — would break `count(x) = 1` and should be recognized as doing so.
+Implement it when either becomes load-bearing.
 
 ---
 
@@ -1184,10 +1723,11 @@ section distills its semantic decisions; several are captured nowhere else.
   `int 3`); an inexact one fails with the error. Poison follows the same
   membership rule (C16): same-signed infinities are one value across
   float/int/integer/decimal, so `inf` passes an `int` boundary re-tagged as
-  `int.inf`; classification runs up the `⊑` chain, so *widening* admits
-  poison without any check (`int.nan` flows into a `float` or `integer`
-  position and remains `int.nan`); at *narrowing* boundaries a foreign nan is
-  rejected exactly like `3.5` (`nan` is not `int.nan` — nans are never
+  `inf`; classification runs up the `⊑` chain, so *widening* admits poison
+  without any check (`nan` flows into a `float` or `integer` position and
+  remains `nan`); at *narrowing* boundaries a foreign nan is rejected exactly
+  like `3.5` — though `int` and `float` now share one nan, so only `integer`
+  and `decimal` nans are foreign to `int` (nans are never
   shared); sized-int boundaries admit no poison at all. Static positions
   reject the whole class (`let x: int = 3.5` *and* `3.0` are compile errors);
   `is`/`match` stay type-directional (`3.0 is int` is false). [TE-5, TE-6,

@@ -2270,7 +2270,8 @@ static bool _array_companion_set_int_slot(Item collection, const char* name,
         entry->byte_offset + (int64_t)sizeof(int64_t) > (int64_t)props->data_cap) {
         return false;
     }
-    *(int64_t*)((char*)props->data + entry->byte_offset) = value;
+    // C16/G0: an `int` shape field stores int's one native form, the IEEE double.
+    *(double*)((char*)props->data + entry->byte_offset) = (double)value;
     return true;
 }
 

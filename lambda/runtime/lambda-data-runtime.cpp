@@ -837,7 +837,8 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
     }
 }
 
-void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
+// G0: the value arrives in `int`'s one native lane, the double.
+void array_int_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;
     }
@@ -846,8 +847,7 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
         return;
     }
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
-    // C16: the int lane is double-backed, so the native i64 converts on store.
-    arr->float_items[index] = (double)value;
+    arr->float_items[index] = value;
     if (index >= arr->length) {
         arr->length = index + 1;
     }
@@ -2171,7 +2171,11 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_UNDEFINED:
         return {.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     case LMD_TYPE_INT:
-        return {.item = i2it(*(int64_t*)field_ptr)};
+        // C16/G0: `int` has one native representation, the IEEE double, so a
+        // declared int field stores one. The int64_t carrier clamped every
+        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
+        // the map layout is unchanged.
+        return {.item = lambda_int_box_double(*(double*)field_ptr)};
     case LMD_TYPE_INT64:
         return box_int64_value(*(int64_t*)field_ptr);
     case LMD_TYPE_UINT64:

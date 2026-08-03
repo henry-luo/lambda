@@ -583,8 +583,8 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     mp = rooted_map.get();
     *(String**)((char*)mp->data + e_value->byte_offset) = val_str;
 
-    // store index field (int64)
-    *(int64_t*)((char*)mp->data + e_index->byte_offset) = index;
+    // C16/G0: an `int` field stores int's one native form, the IEEE double.
+    *(double*)((char*)mp->data + e_index->byte_offset) = (double)index;
 
     return mp;
 }

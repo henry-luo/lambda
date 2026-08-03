@@ -502,7 +502,8 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);  // write full int64 to preserve 56-bit value
+        // C16/G0: an `int` field stores int's one native form, the IEEE double.
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

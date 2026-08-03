@@ -3609,7 +3609,7 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     // Store with correct type-aware unboxing (all shaped slots are 8 bytes).
     switch (value_type) {
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
@@ -3734,7 +3734,7 @@ static double js_get_slot_number(Item object, int64_t byte_offset) {
     ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
     if (entry && entry->type) {
         TypeId tid = entry->type->type_id;
-        if (tid == LMD_TYPE_INT) return (double)(*(int64_t*)field_ptr);
+        if (tid == LMD_TYPE_INT) return *(double*)field_ptr;
         if (tid == LMD_TYPE_FLOAT) return *(double*)field_ptr;
     }
     // Constructor field inference is speculative: a later method can replace
@@ -3790,7 +3790,8 @@ extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
         LMD_TYPE_INT);
     map_ctor_initialize_offset(m, entry->byte_offset);
     m = (Map*)object.map;
-    *(int64_t*)((char*)m->data + byte_offset) = value;
+    // C16/G0: an `int` shape field stores int's one native form, the IEEE double.
+    *(double*)((char*)m->data + byte_offset) = (double)value;
     // Update ShapeEntry type to INT if currently NULL (first write).
     if (entry && entry->type) {
         if (entry->type->type_id != LMD_TYPE_INT) {
@@ -6358,7 +6359,7 @@ static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* ent
         return true;
     }
     if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         return true;
     }
 
@@ -6373,7 +6374,7 @@ static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* ent
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
@@ -8193,7 +8194,7 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
         return true;
     }
     if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         return true;
     }
     if (field_type != value_type) return false;
@@ -8209,7 +8210,7 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
         *(bool*)field_ptr = value.bool_val;
         return true;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         return true;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

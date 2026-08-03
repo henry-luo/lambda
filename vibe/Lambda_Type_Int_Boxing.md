@@ -10,10 +10,11 @@
   Implementation notes worth keeping with the design:
   - Only **rotate-right** was added to MIR: aarch64 has no rotate-left, and `rotl(b,1)` is
     `rotr(b,63)`, so one instruction covers boxing and unboxing.
-  - Sentinel payloads: `0`→0, `+1`→1, `−1`→2, `int.inf`→3, `−int.inf`→4, `int.nan`→5. The
-    first two are **bit-identical to the retired compact encoding**, which is deliberate (the
-    two hottest values keep their representation) and which also masked the JS emitter bug
-    during the cutover: indices 0 and 1 aliased correctly while ≥2 diverged.
+  - Sentinel payloads: `0`→0, `+1`→1, `−1`→2 — **three, not six** (revised 2026-08-03:
+    `inf`/`−inf`/`nan` are the inline IEEE values, shared with `float`). The first two are
+    **bit-identical to the retired compact encoding**, which is deliberate (the two hottest
+    values keep their representation) and which also masked the JS emitter bug during the
+    cutover: indices 0 and 1 aliased correctly while ≥2 diverged.
   - From a *native i64* the cold path is closed and call-free: drift needs 2^257 and poison
     needs a non-finite, so the only misses are `0`, `±1` and the legacy `INT64_ERROR`
     sentinel — a 3-value map, `val + 3*(val<0)`.
@@ -35,6 +36,19 @@
   (the float precedent, including the canonical-encoding rule this doc restates).
 
 ## 0. Summary
+
+> **RULING 2026-08-02 (user), normative and superseding: `int` has exactly ONE native
+> representation — the IEEE double.**
+>
+> An earlier draft of this design sanctioned an `i64` native lane "when range-proven ≤ 2⁵³".
+> **That sanction is withdrawn.** A range proof is no longer a licence to represent an `int` as
+> an `i64`, however sound the proof. The boxed side of this document is unaffected — the
+> rotation encoding below *is* the one boxed representation — and the ruling extends the same
+> single-representation discipline to the register file, shaped map fields, and every other
+> carrier. The migration is `Lambda_Impl_Int_Total.md` Phase G, whose G0 states the rule and its
+> two non-exceptions (a C helper may *return* `int64_t`; machine quantities that are not typed
+> `int` are not int lanes).
+
 
 Flex `int` gets the same deal float got in double-boxing v3: **the Item is the value**. Every
 int with `2 ≤ |v| < 2²⁵⁷` is stored inline in the free `100` octant as its own IEEE bits
@@ -254,17 +268,46 @@ case — zero, ±1, poison, residue — in one sign-blind test):
 | `0` | `ITEM_INT \| 0` | **bit-identical to today's compact 0** |
 | `+1` | `ITEM_INT \| 1` | **bit-identical to today's compact +1** |
 | `−1` | `ITEM_INT \| 2` | changes (compact −1 was sign-extended all-ones) |
-| `int.inf` | `ITEM_INT \| 3` | replaces the 2⁵⁴-based poison payloads |
-| `−int.inf` | `ITEM_INT \| 4` | |
-| `int.nan` | `ITEM_INT \| 5` | |
-| `\|v\| ≥ 2²⁵⁷`, integral | raw double bits (inline float encoding) | **β-drift**: reflection reports `float`; spec footnote |
+| `inf`, `−inf`, `nan` | **raw IEEE bits — inline, exactly as `float` stores them** | **REVISED 2026-08-03**: no int-specific sentinel. See below. |
+| `\|v\| ≥ 2²⁵⁷`, integral | `inf` / `−inf` by sign | **REVISED 2026-08-03**: saturates (`Lambda_Formal_Semantics.md` §4.9); the earlier β-drift to raw float bits is retired |
 
 Worked examples: `2.0 → 0x8000000000000000`; `3.0 (0x4008…) → 0x8010…`;
 `−2.0 (0xC000…) → 0x8000…0001`; `1.0 (0x3FF0…)` fails the class (`011` prefix) → sentinel.
 
 **Canonical-encoding rule (restating the double-boxing rule):** every int value has exactly
-one Item encoding — rotated in-band bits, one of the six sentinels, or (≥2²⁵⁷) the raw float
-bits. Mixed producers are forbidden.
+one Item encoding — rotated in-band bits, one of the three sentinels (`0`, `±1`), or the
+inline IEEE bits for `inf`/`−inf`/`nan`. Mixed producers are forbidden.
+
+**Why `inf` and `nan` are not sentinels (2026-08-03).** `int` and `float` share one poison
+representation, so the box path stores the ordinary IEEE bit patterns and everything that
+already understands a double understands them: comparisons come out unordered, arithmetic
+propagates, `isnan` works. The three sentinels this removes were not free — a hand-rolled nan
+has to be recognized at every site that handles a number, and **45 call sites convert an int
+Item to `int64_t`, each silently destroying nan-ness**. That is what made `int.nan == int.nan`
+return *true* (the numeric comparison lowered its operand through one of those conversions, so
+its `isnan` guard never saw it). `0` and `±1` must stay sentinels regardless: their exponents
+(0 and 1023) put them in the `000`/`011` octants, so rotation cannot tag them, and storing
+int 1 as raw `0x3FF0…` would make it bit-identical to float `1.0`.
+
+`inf` and `nan` need no sentinel for the mirror-image reason: their exponent is 2047, whose
+top three bits are `111`, so their raw bits already sit in the inline-float octants. They are
+the one family the rotation scheme did not need to relocate — the earlier design relocated
+them anyway, and that was the mistake.
+
+**History — the retired sentinel rows.** Until 2026-08-03 the map carried three more, and
+`int` had its own poison values spelled `int.inf` / `-int.inf` / `int.nan`:
+
+| value | encoding | note |
+|---|---|---|
+| `int.inf` | `ITEM_INT \| 3` | replaced the earlier 2⁵⁴-based poison payloads |
+| `−int.inf` | `ITEM_INT \| 4` | |
+| `int.nan` | `ITEM_INT \| 5` | |
+| `\|v\| ≥ 2²⁵⁷`, integral | raw double bits | **β-drift**: reflection reported `float`; carried as a spec footnote |
+
+Six sentinels rather than three, and a fourth region whose values kept their magnitude but
+lost their tag. Both are gone: the poison rows because `int` and `float` now share one
+representation, and the drift row because §4.9 saturates instead
+(`Lambda_Formal_Semantics.md` §4 records the semantic side of both).
 
 #### 3.1.1 The residue never returns to `000`
 
@@ -289,15 +332,25 @@ Consequences, in the order they matter:
 - **No allocation, still exact.** The residue is the one family that would otherwise have
   needed a cell; keeping raw bits is what makes §3.6's "int exits the wide-scalar world" hold
   at *every* magnitude rather than merely below 2²⁵⁷.
+- **SUPERSEDED 2026-08-03 — this drift no longer occurs.** `Lambda_Formal_Semantics.md` §4.9
+  rules that an `int` result which cannot be carried as an `int` **saturates to `±int.inf`**,
+  following IEEE's overflow convention. So 2²⁵⁷ is now the point where `int` arithmetic
+  *closes*, not where it silently changes type, and `int` arithmetic is closed in `int` at
+  every magnitude. The paragraph below is retained to record what the encoding alone would
+  have done, and why saturation was worth adding on top of it.
 - **Value round-trips, tag does not.** `unbox(box(v)) == v` bit-exactly, but the Item's static
   type is lost across the boundary. Any code that recovers a TypeId from a *word* (reflection,
   print, `is`, serialization) must accept `float` here; code that carries the static type
   alongside the word is unaffected.
 - **GC is unaffected either way** — §3.4's early-out covers the `100` octant and the `INT`
   byte, and a float-octant word was never a pointer to begin with.
-- **Reachability.** Only ~257 deliberate doublings (or a literal past the ingestion band) get
-  there; no arithmetic on realistic data crosses 10⁷⁷ by accident, which is why this was
-  accepted as a footnote rather than paid for with a cell.
+- **Reachability.** Only ~257 deliberate doublings get there; no arithmetic on realistic data
+  crosses 10⁷⁷ by accident, which is why this was accepted as a footnote rather than paid for
+  with a cell. **A literal can no longer reach it at all** (2026-08-03): the revised literal
+  rule makes any exponent spelling a *float*, so the integer spelling is capped at the
+  ingestion band ±(2⁵³−1) and `1e300` is a float literal rather than an out-of-band int. The
+  earlier rule admitted `1e300` as an integer spelling, which is why this bullet used to name
+  a literal as a second route into the drift region.
 
 ### 3.2 Operation sequences
 
@@ -306,7 +359,7 @@ box(v):     class check (and+cmp) → rotl 1                      ; slow path: p
 unbox(item): bit-63 test (in-band vs sentinel, given known int)
              in-band  → rotr 1 → movq                            ; 2 ops + transfer
              sentinel → payload ≤ 5 decode (one cmp + small table/cmov chain)
-unbox→i64:  unbox→double + cvttsd2si                             ; index consumers; F1 native lanes avoid it
+unbox→i64:  unbox→double + cvttsd2si                             ; only for machine quantities (offsets, counts), never to represent an `int`
 ```
 
 The sentinel screen mirrors float's `double_ptr <= 1` trick (`Item::get_double`): payloads
@@ -385,10 +438,23 @@ but loses unbox (3 uops vs 1) — the hotter direction; hence the patch is what 
 
 ## 5. Relation to C16 and open items
 
-**Semantics untouched.** `type()`/`is`/print behavior, poison spellings, the `is`-lattice, and
-literal rules are exactly C16-as-ruled; goldens do not churn. The single new observable:
-reflection reports `float` for integral values `≥ 2²⁵⁷` (§3.1.1 drift) — one spec footnote,
-unreachable except by ~257 deliberate doublings.
+**Semantics untouched by the encoding.** `type()`/`is`/print behavior, poison spellings and
+the `is`-lattice are exactly C16-as-ruled; goldens do not churn. The one new observable the
+encoding introduced — reflection reporting `float` for integral values `≥ 2²⁵⁷` (§3.1.1
+drift) — has since been **removed by ruling**: `Lambda_Formal_Semantics.md` §4.9 saturates
+such results to `±int.inf`, so an `int` cannot become a `float` by growing. The encoding's
+2²⁵⁷ boundary is now where `int` overflows rather than where it changes type, which is also
+why `int` saturates earlier than `float` (2²⁵⁷ vs ≈2¹⁰²⁴) — an encoding property, not a
+domain one.
+
+**Literal rules revised separately (2026-08-03), not by this encoding.** An exponent now makes
+a literal a *float* — `type(1e2)` is `float`, matching C, Python, Java, Go, Rust, Swift, Ruby
+and Lua, none of which admits an exponent in an integer literal. The earlier sign-split rule
+(`10e1` int, `10e-1` float) made `1e16` and `1e100` fail to parse while the identical `1.0e16`
+compiled. Nothing in this document depends on which spellings are `int`: the encoding acts on
+*values*, and C16 makes `int` a subset of float admitted by membership, so `let n: int = 1e2`
+still boxes 100 through the rotation exactly as `let n: int = 100` does. See
+`Lambda_Formal_Semantics.md` §4.2 and `Lambda_Impl_Int_Total.md` C2.
 
 Open items:
 

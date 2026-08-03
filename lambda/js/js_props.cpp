@@ -692,7 +692,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

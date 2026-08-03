@@ -259,7 +259,7 @@ void init_type_info() {
     type_info[LMD_TYPE_NULL] = {sizeof(void*), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};  // pointer-sized for NULL↔container transitions
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
-    type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value
+    type_info[LMD_TYPE_INT] = {sizeof(double), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // C16: int's native form is the IEEE double
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
@@ -713,17 +713,22 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_INT: {
-                // handle type coercion: float → int, bool → int
+                // C16/G0: `int` has one native representation, the IEEE double,
+                // so a declared int field stores one -- and `val` must be that
+                // double all the way through. Holding it in an int64_t here
+                // truncated before the store, so a 2^70 field still read back
+                // as 2^63 even once the field itself was a double. Same width,
+                // so the map layout is unchanged.
                 TypeId item_type = get_type_id(item);
-                int64_t val;
+                double val;
                 if (is_float_type_id(item_type)) {
-                    val = (int64_t)item.get_double();
+                    val = item.get_double();          // float -> int coercion
                 } else if (item_type == LMD_TYPE_BOOL) {
-                    val = item.bool_val ? 1 : 0;
+                    val = item.bool_val ? 1.0 : 0.0;  // bool -> int coercion
                 } else {
-                    val = lambda_int_item_to_i64(item);
+                    val = lambda_int_item_value(item);
                 }
-                *(int64_t*)field_ptr = val;
+                *(double*)field_ptr = val;
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -993,7 +998,11 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result.bool_val = *(bool*)field_ptr;
         break;
     case LMD_TYPE_INT:
-        result = {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
+        // C16/G0: `int` has one native representation, the IEEE double, so a
+        // declared int field stores one. The int64_t carrier clamped every
+        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
+        // the map layout is unchanged.
+        result = {.item = lambda_int_box_double(*(double*)field_ptr)};
         break;
     case LMD_TYPE_INT64:
         // The map field is the persistent scalar owner; preserve its payload

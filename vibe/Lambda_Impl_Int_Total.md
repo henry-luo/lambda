@@ -55,12 +55,12 @@ as rotated IEEE bits at every magnitude; `2147483647 * 2147483647` stays `int` (
 | **B1 — shift band test deleted** | The shift builtin still promoted past 2⁵³. Removed: scaling by a power of two moves the exponent and leaves the mantissa alone, so a valid `int` shifts to a valid `int` at any magnitude. `bitwise_lane_preservation` now also prints the exact value (2⁶² as `4611686018427387904`, not the lossy float rendering). |
 | **B3 — overflow class retired** | `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` deleted; an int result carries the IEEE rule a float does. The field was write-only, so this is a classification correction plus the comments that cited it. |
 | **C1 — lexer split by exponent sign** | `positive_exponent_part` / `negative_exponent_part` in `grammar.js`; an integer-spelled mantissa with a non-negative exponent joins `integer` (`10e1` is int 100) and a negative exponent stays float (`10e-1`). The `n`/`m` suffix and imaginary rules take the new token too. Both int-literal *value* parsers had to learn the exponent as well (`build_ast.cpp` via a new shared `lambda_parse_int_literal`, and the JIT's `parse_int_literal`) — strtoll stops at the `e`. |
-| **C2 — band diagnostic** | Already present and now load-bearing: `1e16` is a compile error. Its consequence is real migration — `1e308` is *lexically an integer* and must be spelled `1.0e308` when a float is meant. Applied to `numeric_fastpath_edges`, `vector_performance` and `std/boundary/numeric_limits`. |
+| **C2 — band diagnostic** ⚠ **REVISED 2026-08-03** | Originally: `1e16` is a compile error, forcing `1.0e308` where a float is meant. **That rule is withdrawn.** An exponent now makes a literal a float, as in C, Python, Java, Go, Rust, Swift, Ruby and Lua — none of which admits an exponent in an integer literal, and all of which type `1e2` as floating-point. The old split made `1e16`/`1e100` fail to parse while the identical `1.0e16` parsed, a distinction no other language draws. It costs nothing to concede: `int` is a **subset** of float admitted by membership, so `let n: int = 1e2` still binds an `int` and `xs[1e0]` still indexes; only `type(1e2)` changes, to `float`. The band now applies to the integer spelling alone. The `.0` migration it forced on `numeric_fastpath_edges`, `vector_performance` and `std/boundary/numeric_limits` is no longer required (those spellings remain valid floats). |
 | **E1 — admission by integrality** | `contract_numeric_admit_signed` gained a dedicated `int` arm. It no longer routes through int64 (which cannot even hold the domain) nor gates on ±(2⁵³−1): any finite integral value admits at any magnitude. |
 | **E2 — poison admission** | A shared infinity re-tags into int's own (ruling 14 — same value), a foreign nan rejects like `3.5`. Pinned in `test_lambda_errors_gtest`, whose pre-C16 assertions that both were refused are now the C16 rule with the reasoning recorded. |
 | **E3 — `is` lattice** | Verified already conformant: `5 is int64` is false, `i32 ⊑ int ⊑ integer` holds, `int ⊑ float` is definitional. No change needed. |
 | **E4 — elision int→float arm** | **Does not apply, and must not be added.** Its premise was that both carriers are doubles so admission is a pure retag — true for the β and erasure designs, false for rotation: an int Item is `rotl(bits,1)` and a float Item is raw bits, so the boundary genuinely converts (and sentinels are a table lookup). §3 T-A1's original "Proven ≠ redundant" reasoning stands unchanged. |
-| **F1 — range-proven i64 lane** | For a native-int consumer of ADD/SUB the i64 result is used directly when it lands within ±(2⁵³−1), where it is both exact and representable and therefore identical to the double answer; otherwise the already-computed double result is narrowed. This is the design's range-proven lane discharged at run time rather than statically. |
+| **F1 — range-proven i64 lane** ⚠ **SUPERSEDED BY G0** | For a native-int consumer of ADD/SUB the i64 result is used directly when it lands within ±(2⁵³−1), where it is exact and therefore identical to the double answer; otherwise the double result is narrowed. This was the design's range-proven lane, discharged at run time. **The G0 ruling withdraws that sanction, so F1 is to be deleted by Phase G, not preserved** — with the native lane already a double there is nothing for it to optimize, and it is itself an int-in-an-i64. It stays in the tree only until G1 lands. |
 | **F2 — re-measure** | Release build, AWFY suite, median of 3, measured against a stashed pre-C16 build of the same tree. |
 
 **F2 numbers (AWFY, exec_ms, MIR engine).** Geometric mean **+0.5%** — the correctness work is
@@ -176,7 +176,7 @@ Phase P (prerequisites: MIR rotate, sentinel relocation, asserts)
                             ├── Phase C (frontend: lexer, literals, printing)   [independent of R*/B — can run any time]
                             ├── Phase D (storage: ELEM_INT double lane, map int fields)
                             └── Phase E (boundaries: admission, lattice, elision)
-                                    └── Phase F (perf: range-proven i64 lanes, re-measure)
+                                    └── Phase F (perf: re-measure)  →  Phase G (one native repr: double)
 ```
 
 ### Phase P — prerequisites (each independently landable now)
@@ -316,6 +316,378 @@ Phase P (prerequisites: MIR rotate, sentinel relocation, asserts)
   ([type_contract.hpp:31](../lambda/runtime/type_contract.hpp:31)) gains the int→float arm.
   Guard the trap: float→int remains a narrowing with its check.
 
+### Phase G — one native representation: retire every legacy int64 carrier
+
+**Goal (user, 2026-08-02): there is exactly ONE native representation for `int`, the IEEE
+double.** Phases A–F made the *boxed* Item single-representation; the register file, the
+shaped-field layout and several ancillary carriers still hold ints as `int64_t`. That
+disagreement between int's semantic carrier (double) and its physical carriers (i64) is the
+same duality C16 set out to delete, just moved from the Item to everything around it.
+
+It is also a single root cause with three visible symptoms, all currently open: poison cannot
+ride a declared-`int` parameter, E4's elision cannot be enabled, and int arithmetic pays
+conversions at every lane edge (the `towers`/`permute` shape that F1 only partly recovered).
+
+#### G0. THE RULE — one native representation, no exceptions
+
+**Every native representation of `int` is the IEEE double. There is no second one.**
+
+This **supersedes** the design's earlier §2 sanction of "an `i64` lane when range-proven"
+(user ruling, 2026-08-02). That sanction is withdrawn: a range proof is no longer a licence to
+represent an `int` as an `i64`, however sound the proof. Phases A–F removed int's dual
+*boxed* representation; Phase G removes its dual *native* representation, and the rule is the
+same one that made the boxed side tractable — one value, one encoding.
+
+The rule reaches the **C signatures too** (user ruling, tightened 2026-08-02). An earlier
+draft of this section let a C helper keep an `int64_t` return and convert at the boundary; that
+is withdrawn, because it is exactly the split that made the surface feel arbitrary — some sys
+funcs returning `i64`, some returning `int`, with nothing but history deciding which.
+
+**The rule that removes the inconsistency: a sys func's C return type mirrors its declared
+Lambda return type.** Not a case-by-case judgement — a mapping:
+
+| declared Lambda type | C return type |
+|---|---|
+| `int` | `double` |
+| `int64` | `int64_t` |
+
+After that, `fn_int64` returning `int64_t` is not an inconsistency to explain away; it is the
+rule, because its Lambda type *is* `int64`.
+
+Concretely, of the 11 `C_RET_INT64` rows in `sys_func_registry.c`, **ten convert and one
+stays**:
+
+- convert to `double` (declared `&TYPE_INT`): `fn_len`, `fn_index_of`, `fn_last_index_of`,
+  `fn_ord`;
+- convert (declared `&TYPE_ANY`, self-describing, must not mint an i64-flavoured int):
+  `fn_band`, `fn_bor`, `fn_bxor`, `fn_bnot`, `fn_shl`, `fn_shr` (and `fn_ushr`);
+- stays `int64_t`: `fn_int64`, declared `&TYPE_INT64`.
+
+`ord()` needs no special case: a code point in a double is exact (user, point 2).
+
+**This forces the `INT64_ERROR` retirement rather than merely enabling it.** The sentinel is
+`INT64_MAX`, which has no meaning once the return is a `double`, so the shim A5 had to add
+inside `emit_box_int` cannot survive the signature change — the failure signal must become a
+real one. That is a benefit: it removes the last compatibility shim from the boxing path.
+
+**Scope, stated so the rule is not over-applied (user clarification, 2026-08-02).** This rule
+governs the representation of *Lambda `int` values*. It says nothing about the implementation
+language's own integers. Lambda, LambdaJS and Radiant remain free to use `int`, `int32_t`,
+`int64_t`, `size_t` and friends throughout their internal C/C++ — for lengths, indices, loop
+variables, offsets, capacities, counters — wherever those quantities are **not visible to the
+user as Lambda values**. Radiant's layout loops, the GC's object indices, a parser's byte
+cursor: none of these are `int` lanes and none of them change.
+
+So the test is *typing and visibility*, not *range*: if the language hands the value to a user
+program as an `int`, its native form is a double. An `i64` holding something the user sees as
+an `int` is a defect, and no range argument excuses it. An `i64` counting bytes inside a layout
+pass is just C.
+
+#### G0.2 Why `i64` was never the answer to the range worry
+
+Worth recording, because it is the argument that settles the trade rather than merely accepting
+it (user, 2026-08-02): **when range is genuinely the concern, `i64` is not future-proof
+either.** It moves the ceiling from 2⁵³ to 2⁶³ and stops. Both are finite; the choice between
+them is a choice of which finite ceiling, not a choice between bounded and unbounded.
+
+Lambda already has the unbounded answer, and it is a *type*, not a lane: `integer`
+(mpdec-backed, arbitrary precision). So the future direction for a genuinely unbounded count is
+**`fn_length() -> integer`** alongside `len() -> int`, not a wider machine word behind `len()`.
+That keeps `int` cheap and exact where the ceiling is irrelevant, and puts the unbounded case
+in the type that actually delivers it.
+
+#### G0.1 The two costs, accepted with eyes open
+
+The user has accepted both; they are recorded here so nobody later mistakes them for
+oversights and reintroduces an i64 lane to "fix" them.
+
+**Range.** `int` as a double is exact only to 2⁵³. For the converted sys funcs this is not
+reachable — a length, an index and a code point are all bounded far below it — so the cost is
+theoretical there. Where it is real is user arithmetic above 2⁵³, and that is already C16's
+specified rounding, not a new limitation.
+
+**A double loop counter.** Not ideal, and accepted. Worth separating the two halves of the
+cost, because only one of them is real: the increment and compare themselves are `DADD`/`DLE`,
+which cost what `ADD`/`LE` cost on any modern core. The real cost is at *indexed uses*, where
+`a[i]` needs a `cvttsd2si` per access.
+
+That second half is recoverable **without** an exemption, by classic strength reduction: keep
+the loop's induction variable a double (it is an `int`), and maintain a parallel machine offset
+incremented by the element size. The offset is address arithmetic — a machine quantity, not an
+`int` — so it is permitted by the rule above, and it removes the per-access conversion
+entirely. This is the mitigation Phase G should reach for if the loop cost measures badly,
+instead of re-opening the lane question.
+
+#### G1. `type_to_mir`: the JIT native lane — IN PROGRESS (2026-08-03), tree is RED
+
+`type_to_mir` returns `MIR_T_D` for `LMD_TYPE_INT` and `lambda_value_rep` returns
+`VALUE_REP_F64`. Every script in `test/lambda/`, `test/lambda/graph/` and
+`test/benchmark/jetstream/` generates valid MIR — zero operand-mode errors, and zero
+crashers. The suite stands at **3622 / 3717** against a green HEAD, so **95 regressions
+remain**.
+
+##### The contract, and how to find every site that breaks it
+
+`transpile_expr` returns a value in its node's **native lane**; the caller boxes. After G0
+that lane is `MIR_T_D` for `int` as well as `float`. A site that hard-codes "int means i64"
+is therefore a **producer bug to fix**, not a place to coerce at — coercing there only moves
+the wrong assumption downstream.
+
+Finding them one MIR crash at a time does not converge. Assert the contract instead:
+
+```c
+static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
+    MIR_reg_t out = transpile_expr_impl(mt, node);
+    TypeId tid = get_effective_type(mt, node);
+    if ((tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) &&
+            MIR_reg_type(mt->ctx, out, mt->em.func) != MIR_T_D)
+        log_error("node_type=%d tid=%d returned non-double reg=%s", ...);
+    return out;
+}
+```
+
+Three companion probes finish the picture, and all four are worth reinstating rather than
+re-deriving: a check in `emit_insn` that every D-domain instruction's register sources are
+doubles; a `__LINE__`-carrying wrapper on `emit_machine_index` that reports **double
+narrowing** (its own `midx` output arriving back as input); and the same on `emit_box_int`.
+Run them **per script** — `log.txt` rotates, so a bulk run's zero count is not evidence.
+
+##### Producer bugs found and fixed
+
+| site | what was wrong |
+|---|---|
+| `transpile_for`, both the outer and nested index bindings | `set_var(name, counter, MIR_T_I64, LMD_TYPE_INT)` bound the raw machine counter as the user-visible `int`. The counter stays i64 (G0 exception 1); the **binding** is now a separate `MIR_T_D` register fed by `I2D`. |
+| `AST_NODE_LAST_INDEX` | returned a boxed Item for a node typed `int`. Now returns the double. |
+| `AST_NODE_CURRENT_INDEX` (`~#`) | `pipe_index_reg` **already holds an Item** — an array pipe boxes its counter, a map pipe stores the *key*, which is not a number. Boxing again (I2D over tagged bits, then the int encoder) produced the encoding as a value. Passes through. |
+| `get_effective_type`, early `elem_type` return | promised the element type for an array subscript. Its own comment already warned this "makes the consumer box an already-boxed Item" — true for `int` now, because an out-of-range read joins in `ItemNull` and the double lane cannot hold it. Returns ANY for an int element. |
+| `get_effective_type`, `ARRAY` + int index | a comment stated the type is ANY; no `return` implemented it, so the node kept its AST element type. |
+| `emit_index_value` | narrowed to a machine index, so every consumer narrowed an already-narrowed value. Now returns **int's** lane (unboxing an ANY-typed index expression, which a nested `a[b[i]]` legitimately produces), and narrowing happens once, at the consumer. |
+| `emit_checked_index_load` slow arm, the `pidx` join loop | narrowed a value that was already machine. |
+
+##### Tolerance guards: added during bring-up, now all deleted
+
+Three guards absorbed contract violations instead of fixing them, and all three are gone:
+`emit_box_int` passing an `i64` through, `emit_box` overriding the declared rep from the
+register class, and `emit_machine_index` early-returning on a non-double. With them removed
+the corpus is still clean, which is the actual proof that the producers are right. **Do not
+reintroduce them** — a violation must surface as a MIR error.
+
+What legitimately remains are *conversions*, used where a value genuinely arrives in another
+lane (an ANY-typed operand, a branch join, a machine quantity crossing into an `int`):
+`emit_scalar_native_lane` (any lane → the shared double), `emit_machine_index` (double →
+range-guarded machine i64, G0 exception 1 only), `emit_machine_count` (expression → machine
+i64 for container offsets/limits), and `emit_box_machine_int`.
+
+##### Two semantic repairs the flip forced
+
+1. *`float → int` is not statically refutable.* C16 makes `int` the float64-representable
+   integers — a **subset** of float — and admission a membership test. `((n + 2) / 3) * 4` is
+   typed float because `/` is, yet every value it produces there is an int.
+   `static_boundary_relation` now defers the whole numeric tower
+   (`boundary_numeric_admission_is_dynamic`), exactly as it already did for
+   `TYPE_NUMBER`/`TYPE_INTEGER`. The `var x: int = <float>` store arm followed: it used to
+   truncate inside a loop and widen the variable to ANY outside one, both artifacts of the
+   i64 lane; it is now a plain move in the shared lane.
+2. *An out-of-bounds read must yield `ItemNull`, which a double register cannot hold.* The
+   retired i64 lane smuggled the null's bits through a "native int" register — type-unsound
+   but functional. `emit_checked_index_load` downgrades
+   `MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE` to the boxed kind when the OOB answer is null,
+   and `get_effective_type` reports ANY to match. This costs the native fast path on
+   int-array reads; proving in-bounds to recover it is future work.
+
+Also deduplicated: the sysfunc C return convention was decided in **two** drifted places,
+now `sysfunc_c_ret_type_id` / `sysfunc_c_ret_mir_type`.
+
+##### Result: 3716 / 3717
+
+From 95 regressions to **1**. What closed the bulk of it was not more lane
+plumbing but two findings:
+
+1. **86 of the 95 were never executed.** `test_lambda_gtest` runs procedural
+   scripts through `lambda.exe run`, and one crasher takes its whole batch down
+   — `proc/cow_alias.ls` passed a raw double where `array_set_cow`'s `int64_t`
+   index parameter goes, and the batch process died there, silently costing
+   every `proc/` and `conc/` script after it. **The MIR sweep had missed them
+   entirely**: procedural scripts only compile `main()` under `run`, so
+   `./lambda.exe <file>` never exercised them. Sweep proc/conc with `run`.
+2. **The literal convention** (below) plus the producer fixes cleared the rest.
+
+Producer bugs fixed in this round: the COW setter index; `AST_NODE_RETURN_STAM`
+typed as its returned expression rather than ANY (its register is unreachable
+filler); `INDEX_ASSIGN_STAM`/`MEMBER_ASSIGN_STAM` inheriting their RHS type when
+their emitters return an assignment-result Item; `emit_function_return` not
+boxing a double handed to an Item-returning frame; and the `var x = 42; x = 3.14`
+widening, which must still widen to ANY for an **inferred** var while an
+**annotated** `var x: int` keeps its type and admits by membership.
+
+One defect this work introduced and then fixed: `emit_function_return` ran
+`it2d` over an **error Item** when the frame returned a double, turning the
+error into NaN. The real cause was that `function_return_may_defer` considered
+interior declaration boundaries but not **parameter** boundaries — so
+`fn f(v: int) int` kept the native double return lane even though its parameter
+check can fail. `function_params_may_check_boundary` now gives such functions
+the error lane.
+
+##### The one remaining failure is the owed A5 work
+
+`error_propagation` expects `type(len(err))` and `type(index_of(err, …))` to be
+`error`; both return `int`. `fn_len` reports failure as `INT64_ERROR`
+(`= INT64_MAX`), a convention that worked only because the retired compact
+encoder rejected that value *by accident of its range check*. A double lane
+cannot reject it — `9223372036854775807` is a perfectly good `int` under C16, so
+the error is silently absorbed.
+
+This is the sentinel retirement A5 already flagged as owed, and it needs an ABI
+decision rather than a patch: an int-returning sys func whose C result is a raw
+double has **no channel** for an error. The options are (a) a callsite argument
+check that propagates the error before the call, which makes the node's type
+`int | error` rather than `int`; or (b) an error channel alongside the double
+return, as `RETURN_LANE_ERROR` already does for user functions. The test is
+correct as written and should stay failing until one is chosen.
+
+
+#### G1 (original plan text)
+
+`type_to_mir` ([transpile-mir.cpp:383](../lambda/runtime/transpile-mir.cpp:383)) returns
+`MIR_T_I64` for `int`; it must return `MIR_T_D`. This is an **ABI change**, not a local edit:
+`type_to_mir` feeds MIR function prototypes, so every generated function's int parameters and
+returns change register class, including the boxed `_b` wrappers and cross-module calls.
+
+Scope measured 2026-08-02: 25 `type_to_mir` call sites, ~150 `LMD_TYPE_INT` sites in
+`transpile-mir.cpp`, 20 `mir_is_native_scalar_value_type` consumers.
+
+Sequence it like the R0/R1 cutover, which worked: centralize every "int is an i64 register"
+assumption behind a helper with **zero behavior change**, then flip `type_to_mir` behind a
+transition flag, then delete the flag. The zero-golden-churn gate applies again — this is a
+representation change with no semantic content. The emitter sweep that bit hardest during R1 is
+already done.
+
+#### G2. Shaped map/element/object fields — UNPROVEN
+
+A declared `int` field still stores `int64_t`:
+`_map_read_field` reads `i2it(*(int64_t*)field_ptr)`
+([lambda-data-runtime.cpp:2173](../lambda/runtime/lambda-data-runtime.cpp:2173)), and the layout
+comes from `type_info[LMD_TYPE_INT] = {sizeof(int64_t), ...}`
+([lambda-data.cpp:262](../lambda/core/lambda-data.cpp:262)) — whose comment still says "64-bit
+to store 56-bit value". Same width, so no layout churn; the change is the field's *type* and
+every read/write pair, plus the JIT's shaped-field access emission (int fields become `MIR_T_D`
+moves, which also removes a convert on load).
+
+Note this is a **different carrier** from `TypedItem`, which R1 already converted: `TypedItem`
+backs `ANY` fields, `type_info` backs declared ones.
+
+`int[]` (`ELEM_INT`) is already double — D1 did it.
+
+#### G3. `Range` — **RULED 2026-08-03**: band-limited, no struct change
+
+An `int` range is limited to bounds within ±(2⁵³ − 1); outside that it is an
+out-of-range error, and `1n to N` (an `integer` range) is the spelling for
+larger sequences. See `Lambda_Formal_Semantics.md` §4.8.
+
+This is the plan's option (b), and it closes G3 **without touching `Range`**:
+with the bounds band-limited, `start`, `end` and `length` are all proven i64 and
+stay as they are. The remaining work is the boundary check itself, plus the
+error.
+
+The reason it is the right ruling rather than the convenient one: a range needs
+a well-defined successor (`x + 1` distinct from `x`), which in binary64 holds
+exactly to 2⁵³. Above it the failure is *silent* — at 2⁷⁰ the spacing is 2¹⁸,
+so `big + 2 == big` and `len(big to big + 2)` is 1. Every step there is correct
+arithmetic; the band check is what stops the language from answering a question
+the user did not mean to ask.
+
+Original framing, retained for the record:
+
+#### G3 (superseded framing) — DECISION REQUIRED, currently UNPROVEN
+
+`struct Range { int64_t start, end, length; }`
+([lambda.h:801](../lambda/lambda.h:801)). A range is an int-domain object: `1 to n` yields int
+elements, and iteration boxes `i2it(range->start + i)`. With `int` now reaching 2²⁵⁷, `start`
+and `end` are unproven i64s.
+
+But `length` is an iteration count, and a double `length` would be strange for the loop
+machinery. The honest options are (a) `start`/`end` become double while `length` stays a proven
+i64 with "an iterable range is bounded by memory" as the named invariant, or (b) ranges are
+*defined* to be band-limited, making all three proven. **This is a semantic decision, not a
+mechanical one, and should be ruled before the code moves.**
+
+#### G4. Const pool and AST literal storage
+
+Int literals are appended to the module const pool as `int64_t`
+(`arraylist_append(tp->const_list, &item_type->int64_val)`,
+[build_ast.cpp:3870](../lambda/runtime/build_ast.cpp:3870)). C2 keeps literals inside
+±(2⁵³−1), so the *values* are safe — but under G0 that is no longer the point: this is storage
+for a value the language calls an `int`, so it becomes a double like every other. Being in band
+means the conversion is exact and the migration is mechanical, not that the `i64` may stay.
+Confirm the const-pool *read* side boxes through the encoder rather than reconstructing a
+payload.
+
+#### G5. `LambdaNumericRuntimePart.signed_value` — UNPROVEN
+
+`part->signed_value = lambda_int_item_to_i64(item)` for `LAMBDA_NUM_INT`
+([lambda-number-runtime.hpp:51](../lambda/runtime/lambda-number-runtime.hpp:51)). This is the
+decode struct behind comparison and arithmetic classification, so an int above 2⁶³ truncates
+*before* any comparison happens. It already has a `float_value` member; `int` should decode into
+it, with the part kind reporting the int domain.
+
+#### G6. Guest-language transpilers — UNPROVEN
+
+JS, Ruby and Python each carry their own int lane assumptions (45 / 40 / 25 `LMD_TYPE_INT`
+sites). R1 fixed their *boxing*; their native lanes are untouched. Their range checks are guest
+semantics and must survive — JS symbol encoding below `-JS_SYMBOL_BASE`, Python/Ruby bigint
+promotion — so this is "change the lane, keep the guest rule", exactly as the R1 boxing fix was.
+
+#### G7. E4 becomes available — the payoff
+
+With int and float both `MIR_T_D`, an `int → float` boundary in native code is a **no-op**, so
+`lambda_boundary_is_redundant` ([build_ast.cpp:1366](../lambda/runtime/build_ast.cpp:1366)) may
+finally return true for it. Two constraints the arm must respect, or it will corrupt values:
+
+- The **boxed** path still converts (int is `rotl(bits,1)`, float is raw bits), so the elision
+  is conditioned on the *lane*, not on the type pair alone.
+- `float → int` remains a narrowing and keeps its check. E4 is one-directional.
+
+Phase E recorded that E4 does **not** apply today for exactly this reason; G7 is the change that
+makes the recorded premise true rather than aspirational.
+
+#### G8. Sysfunc C signatures — convert ten, keep one
+
+Apply the G0 mapping: `C_RET_INT64` → `C_RET_DOUBLE` for every row whose declared Lambda type
+is `int` or `ANY`, leaving `fn_int64` alone. Ten functions change signature
+(`fn_len`, `fn_index_of`, `fn_last_index_of`, `fn_ord`, `fn_band`, `fn_bor`, `fn_bxor`,
+`fn_bnot`, `fn_shl`, `fn_shr`/`fn_ushr`); the registry's `C_RET_*` tag, the emitted call's
+return register class, and each function body change together.
+
+Retire `INT64_ERROR` in the same pass — it cannot ride a `double` return, so this is forced,
+not optional. Each converted function needs a real failure channel; the natural one is the
+boxed `Item` return that most of the registry already uses (`C_RET_ITEM`), which also lets the
+error carry a payload instead of a magic magnitude. With the sentinel gone, delete the A5 guard
+from `emit_box_int` — its whole purpose was to keep that magnitude meaning "error".
+
+**Out-of-range is a soft error, not poison** (user ruling, 2026-08-02). When a length cannot be
+represented as an `int`, `len()` returns a **soft out-of-range error** under TE-15
+(`Lambda_Design_Type_Enforcement.md`), which skips to the closest safe boundary. It must not
+return `int.inf` or `int.nan`: the spec's own "interior vs ingress" line (§4, extracted during
+the C17 debate) puts poison strictly *inside* number math, while `error()` marks
+parsing/casting/admission boundaries — and a count that will not fit its declared result type is
+an admission failure, not an arithmetic one.
+
+Note this path is unreachable for today's collections: 2⁵³ elements exceeds any addressable
+array by orders of magnitude. It exists for the cases that motivate `fn_length()` above —
+lazy, virtual or streamed collections whose count is not bounded by memory — so build the
+error path now and let it stay cold.
+
+#### G9. Gates
+
+- Zero golden churn through G1/G2/G5/G6 — they are representation-only.
+- The C16 completeness case that is currently failing becomes a test: `fn f(x: int)` called with
+  `int.inf` must round-trip, which no i64 lane can do.
+- Re-run the AWFY comparison. G1 should recover the `towers`/`permute` conversion cost and let
+  F1 revert from load-bearing default to the optimization it was designed to be.
+- **Profile `mandelbrot` first** (open from F2: +8%, stable, float-dominated, not recovered by
+  F1). If its cause is unrelated to the int lane, G1 will not fix it, and that is worth knowing
+  before touching ~250 sites.
+
 ### Phase F — performance
 
 - **F1. Range-proven `i64` lanes** for loop counters and indices (extends the landed native
@@ -338,7 +710,7 @@ Phase P (prerequisites: MIR rotate, sentinel relocation, asserts)
 | **A2** — unwired consumers | Subsumed: with `double` the default native carrier, unboxed *is* the lane. |
 | **M1/A1** — boundary elision | Amplified: honest `int ⊕ int : int` types (C4) + the E4 int→float retag arm — now literally `rotr`. |
 | **M3/A3 + D2** — native/scalar returns | Payoff grows: pure-int bodies are provably non-raising **and** their returns are self-contained words (no scalar-home threading ever) — more functions qualify for native returns with no error lane. Implement after this plan. |
-| **B1 (tuning)** — native counted `for` | Made sound: the i64 induction variable is a range-proven lane (F1). |
+| **B1 (tuning)** — native counted `for` | ⚠ Its i64 induction variable is an int-typed value in an i64, which **G0 forbids**. Phase G must move it to a double lane; if that costs measurably, the answer is a better loop lowering, not an exemption. |
 | **M7/C1/C2** — typed arrays | `ELEM_INT` lane decision now **ruled** (D1 = double lane); the `i2it → ITEM_ERROR` read hole closes structurally. |
 | **O1** — INT53 divergence | **Closed** at R1.1 (`i2it` total). |
 | "Don't add declared types to benchmark sources" | Keep until F2 re-measures. |

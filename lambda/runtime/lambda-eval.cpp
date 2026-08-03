@@ -2931,11 +2931,14 @@ String* fn_string(Item itm) {
         }
     }
     case LMD_TYPE_INT: {
-        char buf[32];
-        int64_t int_val = lambda_int_item_to_i64(itm);
-        snprintf(buf, sizeof(buf), "%lld", (long long)int_val);
-        int len = strlen(buf);
-        return heap_strcpy(buf, len);
+        // THE int renderer -- covers the whole C16 domain and the poison. The
+        // i64 conversion this replaced clamped every value above 2^63, so
+        // `string(2^70)` returned INT64_MAX while printing it was correct.
+        StrBuf* sb = strbuf_new_cap(40);
+        print_int_value(sb, lambda_int_item_value(itm));
+        String* result = heap_strcpy(sb->str, (int64_t)sb->length);
+        strbuf_free(sb);
+        return result;
     }
     case LMD_TYPE_COMPLEX: {
         RootFrame roots(1);
@@ -4005,7 +4008,7 @@ Item fn_member(Item item, Item key) {
 }
 
 // length of an item's content, relates to indexed access, i.e. item[index]
-int64_t fn_len(Item item) {
+double fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
     switch (type_id) {
@@ -4018,12 +4021,16 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_ARRAY_NUM:
         size = array_num_iter_count(item.array_num);
         break;
-    case LMD_TYPE_MAP: {
-        size = 0;
-        break;
-    }
+    case LMD_TYPE_MAP:
     case LMD_TYPE_OBJECT: {
-        size = 0;
+        // A map is iterable in Lambda exactly like an array -- `for (v in m)`
+        // walks its entries -- so its length is that entry count. Both arms
+        // were hardcoded to 0, which made `len(m)` disagree with the loop that
+        // ranges over the same map, and made a populated map compare equal to
+        // an empty one through `len`. OBJECT extends MAP and shares the shape.
+        Map* map = item.map;
+        TypeMap* map_type = map ? (TypeMap*)map->type : NULL;
+        size = map_type ? map_type->length : 0;
         break;
     }
     case LMD_TYPE_VMAP: {
@@ -4068,7 +4075,11 @@ int64_t fn_len(Item item) {
             Item resolved = path_resolve_for_iteration(path_val);
             // result is now cached in path_val->result
             if (resolved.item == ItemError.item) {
-                return INT64_ERROR;
+                // 7.6: `len` is total -- an unresolvable path iterates zero
+                // times. Returning INT64_ERROR here leaked the sentinel out of
+                // the one function the spec guarantees never fails.
+                size = 0;
+                break;
             }
         }
         // Get length from cached result
@@ -4081,7 +4092,17 @@ int64_t fn_len(Item item) {
         break;
     }
     case LMD_TYPE_ERROR:
-        return INT64_ERROR;
+        // Formal semantics 7.6: `len` is a value function, so an error
+        // propagates -- iterating an error yields an error, not nothing, which
+        // is what distinguishes it from `len(null)` = 0. The parameter is
+        // `any \ error` (7.7), so an error is rejected at the call boundary and
+        // never reaches this body; the arm is a defensive floor. It answers 0
+        // rather than the retired INT64_ERROR sentinel, which a double lane
+        // cannot reject (INT64_MAX is an ordinary int under C16) and which once
+        // reached callers as a real length -- `err |> ~` took it as an
+        // iteration bound and attempted repeated 2 GB allocations.
+        size = 0;
+        break;
     default: // NULL and scalar types
         size = 0;
         break;
@@ -4093,7 +4114,7 @@ int64_t fn_len(Item item) {
 // Used when compile-time type is known. The transpiler must unbox Items to raw
 // pointers before calling these (emit_unbox_container strips tag bits).
 
-extern "C" int64_t fn_len_l(List* list) {
+extern "C" double fn_len_l(List* list) {
     if (!list) return 0;
     // Runtime check: nested numeric literals may have been auto-promoted from
     // List/Array to N-D ArrayNum (the JIT dispatched based on static type).
@@ -4103,7 +4124,7 @@ extern "C" int64_t fn_len_l(List* list) {
     return list->length;
 }
 
-extern "C" int64_t fn_len_a(Array* arr) {
+extern "C" double fn_len_a(Array* arr) {
     if (!arr) return 0;
     // Runtime check: static type may say Array but actual could be ArrayNum
     // (e.g. nested literals auto-promoted to N-D). For N-D ArrayNum, return
@@ -4114,12 +4135,12 @@ extern "C" int64_t fn_len_a(Array* arr) {
     return arr->length;
 }
 
-extern "C" int64_t fn_len_s(String* str) {
+extern "C" double fn_len_s(String* str) {
     if (!str) return 0;
     return str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str->chars, str->len);
 }
 
-extern "C" int64_t fn_len_e(Element* elmt) {
+extern "C" double fn_len_e(Element* elmt) {
     if (!elmt) return 0;
     return elmt->length;
 }
@@ -4391,10 +4412,16 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
 // Also works on lists: index_of(list, item) finds first matching element
-int64_t fn_index_of(Item str_item, Item sub_item) {
-    // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
+double fn_index_of(Item str_item, Item sub_item) {
+    // Formal semantics 7.7: these parameters are `any - error`, so an error
+    // argument is rejected at the CALL BOUNDARY and never reaches this body --
+    // which is what lets the return type stay a plain `int` instead of going
+    // viral as `int | error`. The arm remains as a defensive floor and answers
+    // -1 ("not found"), never the old INT64_ERROR: that sentinel only ever
+    // surfaced as an error because the retired compact encoder's range check
+    // rejected it, and a double lane cannot -- INT64_MAX is an ordinary int.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
-        return INT64_ERROR;
+        return -1;
     }
     TypeId coll_type = get_type_id(str_item);
 
@@ -4464,10 +4491,16 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
 
 // last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
 // Also works on lists: last_index_of(list, item) finds last matching element
-int64_t fn_last_index_of(Item str_item, Item sub_item) {
-    // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
+double fn_last_index_of(Item str_item, Item sub_item) {
+    // Formal semantics 7.7: these parameters are `any - error`, so an error
+    // argument is rejected at the CALL BOUNDARY and never reaches this body --
+    // which is what lets the return type stay a plain `int` instead of going
+    // viral as `int | error`. The arm remains as a defensive floor and answers
+    // -1 ("not found"), never the old INT64_ERROR: that sentinel only ever
+    // surfaced as an error because the retired compact encoder's range check
+    // rejected it, and a double lane cannot -- INT64_MAX is an ordinary int.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
-        return INT64_ERROR;
+        return -1;
     }
     TypeId coll_type = get_type_id(str_item);
 
@@ -5130,33 +5163,43 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
 // ord(str) - return Unicode code point of first character
 // ord native: String* in, int64_t ABI out; registry exposes compact Lambda int
-int64_t fn_ord_str(String* str) {
-    if (!str || str->len == 0) return 0;
+double fn_ord_str(String* str) {
+    // The typed fast path for fn_ord, so it must answer identically: -1 where
+    // there is no ordinal (7.7). 0 is U+0000, a real character, so it cannot
+    // stand for "no answer" in either variant.
+    if (!str || str->len == 0) return -1;
     uint32_t codepoint = 0;
     int decoded = str_utf8_decode(str->chars, str->len, &codepoint);
-    if (decoded <= 0) return 0;
+    if (decoded <= 0) return -1;
     return (int64_t)codepoint;
 }
 
-int64_t fn_ord(Item str_item) {
+double fn_ord(Item str_item) {
     TypeId type = get_type_id(str_item);
 
+    // Formal semantics 7.7: broad input, and a result drawn from OUTSIDE the
+    // success domain when there is no answer. Code points are non-negative, so
+    // -1 cannot collide with a real answer -- unlike the 0 these arms used to
+    // return, which is U+0000, a legitimate character. That 0 collapsed three
+    // different situations (non-string, empty string, actual NUL) onto one
+    // valid-looking value.
     if (!is_text_type_id(type)) {
         log_debug("fn_ord: argument must be a string or symbol, got type %d", type);
-        return 0;
+        return -1;
     }
 
     const char* chars = str_item.get_chars();
     uint32_t byte_len = str_item.get_len();
 
+    // an empty string has no first character, so it has no ordinal
     if (!chars || byte_len == 0) {
-        return 0;
+        return -1;
     }
 
     uint32_t codepoint = 0;
     int decoded = str_utf8_decode(chars, byte_len, &codepoint);
     if (decoded <= 0) {
-        return 0; // invalid UTF-8
+        return -1; // invalid UTF-8
     }
     return (int64_t)codepoint;
 }
@@ -6238,7 +6281,11 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
     case LMD_TYPE_UNDEFINED:  *(bool*)field_ptr = false; break;
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
-    case LMD_TYPE_INT:   *(int64_t*)field_ptr = lambda_int_item_to_i64(value); break;
+    // C16/G0: a declared int field stores int's one native form, the IEEE
+    // double. This is the write path member assignment takes (`m.f = v` ->
+    // map_set_cow -> fn_map_set -> here), so leaving it on int64_t made a
+    // field readable but not writable at full range.
+    case LMD_TYPE_INT:   *(double*)field_ptr = lambda_int_item_value(value); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
     case LMD_TYPE_UINT64: *(uint64_t*)field_ptr = value.get_uint64(); break;
     case LMD_TYPE_FLOAT:

@@ -41,3 +41,10 @@
 {t: "rt ord-chr", r: ord(chr(65))}
 
 "ALL TESTS COMPLETE"
+
+// 7.7: broad input, and a result from OUTSIDE the success domain when there is
+// no answer. Code points are non-negative, so -1 cannot collide with a real
+// one -- unlike 0, which is U+0000 and used to stand for all of these at once.
+{t: "ord non-string", r: ord(42)}
+{t: "ord null", r: ord(null)}
+{t: "ord container", r: ord([1, 2])}

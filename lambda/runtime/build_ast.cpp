@@ -15,31 +15,16 @@
 #include <errno.h>
 #include <stdlib.h>
 
-// C16 ruling 9: an unsuffixed literal's type is LEXICAL. An integer-spelled
-// mantissa with a non-negative exponent names an integer (`10e1` is int 100);
-// the grammar tokenizes it as SYM_INT, so the exponent has to be applied here
-// because strtoll stops at the 'e'. Returns false when the value leaves the
-// ingestion band (ruling 6) — that is what makes `1e16` a compile error rather
-// than a silently-promoted float.
+// C16 ruling 9 (revised): an unsuffixed literal's type is LEXICAL, and an
+// exponent makes it a float -- so an integer token is now only digits or hex,
+// and the exponent scaling this used to perform is gone with the grammar rule
+// that produced `10e1` as SYM_INT. Returns false when the value leaves the
+// ingestion band (ruling 6).
 static bool lambda_parse_int_literal(const char* text, int64_t* out) {
     char* endptr = NULL;
     errno = 0;
     int64_t mantissa = strtoll(text, &endptr, 0);
     if (errno == ERANGE) return false;
-    bool is_hex = text[0] == '0' && (text[1] == 'x' || text[1] == 'X');
-    if (!is_hex && endptr && (*endptr == 'e' || *endptr == 'E')) {
-        const char* exp = endptr + 1;
-        if (*exp == '+') exp++;
-        errno = 0;
-        long power = strtol(exp, NULL, 10);
-        if (errno == ERANGE || power < 0 || power > 18) return false;
-        __int128 scaled = mantissa;
-        for (long i = 0; i < power; i++) {
-            scaled *= 10;
-            if (scaled > (__int128)INT53_MAX || scaled < (__int128)INT53_MIN) return false;
-        }
-        mantissa = (int64_t)scaled;
-    }
     *out = mantissa;
     return mantissa >= INT53_MIN && mantissa <= INT53_MAX;
 }
@@ -1274,6 +1259,33 @@ static bool boundary_type_is_extended(const Type* type, TypeKind kind) {
 // This is the static half of an annotated boundary.  It intentionally treats
 // `any` and an unproven map shape as deferred rather than silently accepting
 // them: the MIR/runtime boundary supplies the corresponding dynamic check.
+// C16: within the numeric tower admission is decided by MEMBERSHIP, not by the
+// static type. `int` is the float64-representable integers -- a subset of
+// float, a superset of i32 -- so a value typed float can still be an int
+// (`(a + 2) / 3 * 4` is typed float because `/` is, yet every value it produces
+// there is one), and a value typed int can still be an i32. Neither direction
+// is statically refutable, so the established runtime boundary owns the check
+// and its soft out-of-range error. Widenings that ARE provable fall through to
+// types_compatible_with_full and stay PROVEN.
+bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id) {
+    if (source_id == target_id) return false;
+    switch (target_id) {
+    case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: case LMD_TYPE_NUM_SIZED:
+        break;
+    default:
+        return false;
+    }
+    switch (source_id) {
+    case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_FLOAT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target) {
     source = boundary_unwrap_type(source);
     target = boundary_unwrap_type(target);
@@ -1301,6 +1313,17 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
         // Abstract numeric success sets describe several concrete Item carriers.
         // They cannot reject a narrower destination statically; its established
         // runtime boundary owns the exact conversion/check instead.
+        return STATIC_BOUNDARY_DEFERRED;
+    }
+    // C16: `int` is the float64-representable integers, so it is a SUBSET of
+    // float rather than a disjoint carrier, and admission into it is decided by
+    // membership -- is this float integral and in band -- not by the static
+    // type. `(a + 2) / 3 * 4` is typed float because `/` is, yet every value it
+    // can produce here is an int. Only the runtime boundary can tell, so a
+    // float source against an int target defers exactly like the abstract
+    // numeric sets above. (int -> float stays PROVEN below: every int, poison
+    // included, is a float.)
+    if (boundary_numeric_admission_is_dynamic(source->type_id, target->type_id)) {
         return STATIC_BOUNDARY_DEFERRED;
     }
 

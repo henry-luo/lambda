@@ -55,10 +55,13 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_INT) {
-        int64_t val = lambda_int_item_to_i64(item);
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
-        stringbuf_append_str(sb, num_buf);
+        // Route through THE int renderer rather than an i64 conversion, which
+        // clamped every value above 2^63 -- `string(2^70)` came back as
+        // INT64_MAX while printing the same value was correct.
+        StrBuf* tmp = strbuf_new_cap(40);
+        print_int_value(tmp, lambda_int_item_value(item));
+        stringbuf_append_str(sb, tmp->str);
+        strbuf_free(tmp);
     } else if (type == LMD_TYPE_INT64) {
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%" PRId64, item.get_int64());

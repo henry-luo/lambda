@@ -1,0 +1,6 @@
+'-- absence is empty, so len is 0 --'
+0
+'-- containment is not propagation: an error INSIDE a collection is one item --'
+3
+'-- ordinary lengths are unaffected --'
+[3, 3, 2]

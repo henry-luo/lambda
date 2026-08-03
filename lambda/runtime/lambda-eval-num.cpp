@@ -242,23 +242,54 @@ static inline Item pack_compact_int(__int128 value) {
     return (Item){ .item = lambda_int_box_double((double)value) };
 }
 
+static double runtime_number_division_result(double left, double right,
+        LambdaNumericOpFamily op);
+
 // C16: `int div int` and `int % int` stay int, so a computed zero divisor
 // yields the int domain's own poison instead of leaving for float. Truncation
 // toward zero and the dividend-signed remainder are C14c's, unchanged.
-static inline Item int_integral_division(int64_t left, int64_t right,
+static inline Item int_integral_division(double left, double right,
         LambdaNumericOpFamily op) {
-    if (right == 0) {
-        if (left == 0) return (Item){ .item = ITEM_INT_NAN };
+    if (right == 0.0) {
+        if (left == 0.0) return (Item){ .item = ITEM_INT_NAN };
         // `%` by zero is undefined rather than unbounded, so it is nan for
         // every dividend; only `div` carries the dividend's sign to infinity.
         if (op == LAMBDA_NUM_OP_MOD) return (Item){ .item = ITEM_INT_NAN };
-        return (Item){ .item = left > 0 ? ITEM_INT_INF : ITEM_INT_NEG_INF };
+        return (Item){ .item = left > 0.0 ? ITEM_INT_INF : ITEM_INT_NEG_INF };
     }
-    // Operands are compact, so |result| <= |left| and the quotient cannot
-    // leave the band. The symmetric domain has no MinInt, so there is no
-    // INT64_MIN / -1 trap to guard.
-    int64_t value = op == LAMBDA_NUM_OP_MOD ? left % right : left / right;
-    return (Item){ .item = i2it(value) };
+    // fmod is exact in IEEE, so `left - rem` is exactly divisible by `right`
+    // and the quotient below involves no rounding: this is the *exact*
+    // truncated quotient, not an approximation of one. Computing it as
+    // trunc(left / right) instead would round the division first and could
+    // land a hair over an integer boundary.
+    double rem = fmod(left, right);
+    double value = op == LAMBDA_NUM_OP_MOD ? rem : (left - rem) / right;
+    return (Item){ .item = lambda_int_box_double(value) };
+}
+
+// C16/G0: `int` is the float64-representable integers and its ONE native
+// representation is the IEEE double, so int arithmetic computes in binary64.
+// Reading the operands as int64_t clamped every value above 2^63 -- `2^70 * 2`
+// came back as 2^64 -- and the __int128 widening could not rescue it, because
+// the operands were already truncated on the way in. Both the fast-path and
+// general int arms call this so the two cannot drift.
+static inline bool int_binary_arithmetic_double(double left, double right,
+        LambdaNumericOpFamily op, Item* result) {
+    switch (op) {
+    case LAMBDA_NUM_OP_ADD:
+        *result = (Item){ .item = lambda_int_box_double(left + right) }; return true;
+    case LAMBDA_NUM_OP_SUB:
+        *result = (Item){ .item = lambda_int_box_double(left - right) }; return true;
+    case LAMBDA_NUM_OP_MUL:
+        *result = (Item){ .item = lambda_int_box_double(left * right) }; return true;
+    case LAMBDA_NUM_OP_IDIV:
+    case LAMBDA_NUM_OP_MOD:
+        *result = int_integral_division(left, right, op); return true;
+    case LAMBDA_NUM_OP_TRUE_DIV:
+        *result = push_d(runtime_number_division_result(left, right, op)); return true;
+    default:
+        return false;
+    }
 }
 
 static bool read_sized_integer(Item item, TypeId type, SizedIntegerValue* out) {
@@ -550,23 +581,8 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
         }
         if (common.result != LAMBDA_NUM_INT) return false;
 
-        int64_t left = lambda_int_item_to_i64(item_a);
-        int64_t right = lambda_int_item_to_i64(item_b);
-        if (op == LAMBDA_NUM_OP_ADD) {
-            *result = pack_compact_int((__int128)left + (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_SUB) {
-            *result = pack_compact_int((__int128)left - (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_MUL) {
-            *result = pack_compact_int((__int128)left * (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
-            *result = int_integral_division(left, right, op);
-        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
-            *result = push_d(runtime_number_division_result((double)left,
-                (double)right, op));
-        } else {
-            return false;
-        }
-        return true;
+        return int_binary_arithmetic_double(lambda_int_item_value(item_a),
+            lambda_int_item_value(item_b), op, result);
     }
 
     LambdaNumericKind kind_a = lambda_numeric_kind_from_item_type(item_a, type_a);
@@ -597,23 +613,9 @@ static bool apply_classified_numeric(Item item_a, TypeId type_a,
     }
 
     if (decision.result == LAMBDA_NUM_INT) {
-        int64_t left = runtime_integral_as_int64(item_a, kind_a);
-        int64_t right = runtime_integral_as_int64(item_b, kind_b);
-        if (op == LAMBDA_NUM_OP_ADD) {
-            *result = pack_compact_int((__int128)left + (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_SUB) {
-            *result = pack_compact_int((__int128)left - (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_MUL) {
-            *result = pack_compact_int((__int128)left * (__int128)right);
-        } else if (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD) {
-            *result = int_integral_division(left, right, op);
-        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
-            *result = push_d(runtime_number_division_result((double)left,
-                (double)right, op));
-        } else {
-            return false;
-        }
-        return true;
+        return int_binary_arithmetic_double(
+            runtime_numeric_as_double(item_a, kind_a),
+            runtime_numeric_as_double(item_b, kind_b), op, result);
     }
 
     if (decision.result == LAMBDA_NUM_FLOAT) {
@@ -1766,8 +1768,17 @@ Item fn_decimal(Item item) {
 static int format_native_numeric_scalar(Item item, char* buffer, size_t capacity) {
     TypeId type = get_type_id(item);
     switch (type) {
-    case LMD_TYPE_INT:
-        return snprintf(buffer, capacity, "%lld", (long long)lambda_int_item_to_i64(item));
+    case LMD_TYPE_INT: {
+        // C16: the int domain reaches past 2^63, so an i64 conversion clamps --
+        // `string(2^70)` came back as INT64_MAX. Render from the native double:
+        // exact below 2^53, and %.0f prints a double's exact integer value above
+        // it. (Poison cannot reach here; callers screen it first.)
+        double v = lambda_int_item_value(item);
+        if (v >= (double)INT53_MIN && v <= (double)INT53_MAX) {
+            return snprintf(buffer, capacity, "%lld", (long long)v);
+        }
+        return snprintf(buffer, capacity, "%.0f", v);
+    }
     case LMD_TYPE_INT64:
         return snprintf(buffer, capacity, "%" PRId64, item.get_int64());
     case LMD_TYPE_UINT64:

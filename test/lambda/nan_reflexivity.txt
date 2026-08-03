@@ -1,0 +1,10 @@
+"-- nan is never equal to itself --"
+false
+false
+false
+false
+"-- but inf IS equal to itself, and signed infinities stay distinct --"
+true
+false
+"-- and poison still orders --"
+[true, true, true]

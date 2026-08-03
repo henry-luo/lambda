@@ -37,7 +37,7 @@
 }
 {
   t: "ord empty",
-  r: 0
+  r: -1
 }
 {
   t: "chr 65",
@@ -80,3 +80,15 @@
   r: 65
 }
 "ALL TESTS COMPLETE"
+{
+  t: "ord non-string",
+  r: -1
+}
+{
+  t: "ord null",
+  r: -1
+}
+{
+  t: "ord container",
+  r: -1
+}

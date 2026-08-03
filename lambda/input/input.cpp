@@ -100,8 +100,11 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT: {
-        int64_t int_val = lambda_int_item_to_i64(value);
-        *(int64_t*)field_ptr = int_val;
+        // C16/G0: `int` has one native representation, the IEEE double, so a
+        // declared int field stores one. The int64_t carrier clamped every
+        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
+        // the map layout is unchanged.
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     }
     case LMD_TYPE_INT64:
@@ -615,7 +618,7 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        *(double*)field_ptr = lambda_int_item_value(value);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

@@ -274,7 +274,7 @@ SysFuncInfo sys_func_defs[] = {
     // Type/conversion functions — all method-eligible
     // ========================================================================
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
+     C_RET_DOUBLE, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
 
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
      C_RET_TYPE_PTR, C_ARG_ITEM, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
@@ -564,10 +564,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_BOOL, C_ARG_ITEM, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
 
     {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
+     C_RET_DOUBLE, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
+     C_RET_DOUBLE, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0},
@@ -610,7 +610,7 @@ SysFuncInfo sys_func_defs[] = {
 
     // Unicode code points fit in compact Lambda int; keep the C ABI as int64_t.
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
+     C_RET_DOUBLE, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
 
     {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},

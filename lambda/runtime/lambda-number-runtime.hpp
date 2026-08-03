@@ -185,6 +185,17 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
         return result;
     }
 
+    // Formal semantics 5: every nan is unequal to everything, itself included.
+    // `int.nan` needs its own guard beside decimal's because an `int` lowers to
+    // a SIGNED runtime part (via lambda_int_item_to_i64), which discards
+    // nan-ness -- so the isnan(float_value) checks below never see it. Without
+    // this, two int.nans compared bitwise-identical sentinels and came out
+    // EQUAL, the one break in reflexivity that the spec requires.
+    if (LAMBDA_ITEM_IS_INT_NAN(left.item) || LAMBDA_ITEM_IS_INT_NAN(right.item)) {
+        result.unordered = 1;
+        return result;
+    }
+
     if (left_simple && left_part.kind == LAMBDA_NUM_PART_FLOAT &&
         isnan(left_part.float_value)) {
         result.unordered = 1;

@@ -30,6 +30,15 @@ enum StaticBoundaryResult {
 // change the representation.
 bool lambda_boundary_is_redundant(Type* source, Type* target);
 
+// C16: within the numeric tower, admission is decided by MEMBERSHIP at run time
+// rather than by the static type -- `int` is the float64-representable
+// integers, a subset of float and a superset of i32, so neither direction is
+// statically refutable. Both the static relation (which DEFERS these pairs) and
+// the MIR declaration boundary (which must therefore emit the runtime check)
+// read this one predicate, so a pair cannot be deferred by one and skipped by
+// the other.
+bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id);
+
 bool lambda_type_accepts_error(Type* type);
 bool lambda_type_accepts_null(Type* type);
 bool lambda_type_has_proven_error(Type* type);

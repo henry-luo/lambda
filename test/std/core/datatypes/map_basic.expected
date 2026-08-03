@@ -12,7 +12,7 @@ true
 "Alice"
 30
 0
-0
+3
 {
   outer: {
     inner: 42

@@ -6,16 +6,16 @@
       "name": "lambda_scalar_home_donation",
       "script": "test/mir/lambda/scalar_home_donation.ls",
       "language": "lambda",
-      "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function.",
+      "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function. C16/G1 re-baseline: `int` moved to the IEEE-double native lane. Instruction counts fell across most probes; the growth recorded here is the cost of the out-of-bounds fix -- an int-element array load now delivers a BOXED result because a double register cannot hold the ItemNull an out-of-range read must yield.",
       "budgets": {
         "default": {
-          "module_insns": 203,
+          "module_insns": 190,
           "functions": {
             "_twice_#": {
-              "insns": 58
+              "insns": 56
             },
             "main": {
-              "insns": 63
+              "insns": 58
             }
           },
           "frames": [
@@ -34,7 +34,7 @@
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 4
+              "safepoints": 5
             }
           ]
         }
@@ -47,13 +47,13 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation and its reviewed Phase 3 clean-return firewall.",
       "budgets": {
         "default": {
-          "module_insns": 135,
+          "module_insns": 131,
           "functions": {
             "_accumulate_#": {
-              "insns": 90
+              "insns": 88
             },
             "main": {
-              "insns": 45
+              "insns": 43
             }
           },
           "frames": [
@@ -68,7 +68,7 @@
             },
             {
               "name": "main",
-              "roots": 2,
+              "roots": 1,
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 2099
+          "module_insns": 1999
         }
       }
     },
@@ -180,10 +180,10 @@
       "name": "lambda_corpus_array_float",
       "script": "test/lambda/array_float.ls",
       "language": "lambda",
-      "description": "Picked corpus script (array-heavy), whole-module total only.",
+      "description": "Picked corpus script (array-heavy), whole-module total only. C16/G1 re-baseline: `int` moved to the IEEE-double native lane. Instruction counts fell across most probes; the growth recorded here is the cost of the out-of-bounds fix -- an int-element array load now delivers a BOXED result because a double register cannot hold the ItemNull an out-of-range read must yield.",
       "budgets": {
         "default": {
-          "module_insns": 1185
+          "module_insns": 1213
         }
       }
     },
@@ -227,7 +227,7 @@
       "description": "Stage-1 nested COW relinking: 149 finalized instructions on the reviewed register/root-slot path, with no heap path-array construction.",
       "budgets": {
         "default": {
-          "module_insns": 164
+          "module_insns": 160
         }
       }
     },
@@ -235,16 +235,16 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "Typed numeric-array load guards plus the in-place procedure-parameter write guard, including reviewed Phase 3 return-firewall growth.",
+      "description": "Typed numeric-array load guards plus the in-place procedure-parameter write guard, including reviewed Phase 3 return-firewall growth. C16/G1 re-baseline: `int` moved to the IEEE-double native lane. Instruction counts fell across most probes; the growth recorded here is the cost of the out-of-bounds fix -- an int-element array load now delivers a BOXED result because a double register cannot hold the ItemNull an out-of-range read must yield.",
       "budgets": {
         "default": {
-          "module_insns": 491,
+          "module_insns": 502,
           "functions": {
             "_guarded_load_#": {
-              "insns": 96
+              "insns": 103
             },
             "_guarded_store_#": {
-              "insns": 151
+              "insns": 167
             }
           },
           "frames": [
@@ -258,7 +258,7 @@
             },
             {
               "name": "_guarded_store_#",
-              "roots": 6,
+              "roots": 7,
               "root_stores": 0,
               "scalar_homes": 2,
               "number_scratch": 0,
@@ -275,13 +275,13 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth.",
       "budgets": {
         "default": {
-          "module_insns": 415,
+          "module_insns": 403,
           "functions": {
             "_closed_gap_#": {
-              "insns": 57
+              "insns": 55
             },
             "_open_gap_#": {
-              "insns": 57
+              "insns": 55
             }
           },
           "frames": [

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "Caller-donated scalar home: the deferred int64 argument is boxed and adopted before its number watermark is restored, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21).",
+  "description": "The caller now saves a number base twice: `twice`'s parameter is an `int` in the double lane, so the int64 argument converts at the callsite. C16/G0: the `int` parameter is in int's one native lane, the IEEE double, so it appears as `d:` rather than `i64:`; the int64 scalar-home donation this fixture checks is unchanged. Caller-donated scalar home: the deferred int64 argument is boxed and adopted before its number watermark is restored, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21).",
   "checks": [
     {
       "in_func": "_twice_#",
       "expect": [
-        ":\tfunc\ti64, p:runtime, i64:_a, p:_scalar_home"
+        ":\tfunc\ti64, p:runtime, d:_a, p:_scalar_home"
       ]
     },
     {
@@ -18,7 +18,7 @@
       ],
       "count": {
         "call\tbox_int64_result_or_error_p": 1,
-        "mov\tcall_number_base_": 1
+        "mov\tcall_number_base_": 2
       },
       "expect": [
         ", scalar_home_",
