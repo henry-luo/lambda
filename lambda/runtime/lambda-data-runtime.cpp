@@ -2568,6 +2568,12 @@ Item elmt_get(Element* elmt, Item key) {
     return ItemNull;
 }
 
+static Item item_at_empty_string() {
+    // string indexing defines an out-of-range read as a real empty string, not absence.
+    String* empty = heap_strcpy("", 0);
+    return empty ? (Item){.item = s2it(empty)} : ItemError;
+}
+
 Item item_at(Item data, int64_t index) {
     if (!data.item) { return ItemNull; }
 
@@ -2595,7 +2601,9 @@ Item item_at(Item data, int64_t index) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
-        if (index < 0) { return ItemNull; }
+        if (index < 0) {
+            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+        }
         bool is_ascii = true;
         if (type_id == LMD_TYPE_STRING) {
             String* str = data.get_safe_string();
@@ -2605,7 +2613,9 @@ Item item_at(Item data, int64_t index) {
 
         // ASCII fast-path: byte index == char index, O(1)
         if (is_ascii) {
-            if ((uint32_t)index >= byte_len) { return ItemNull; }
+            if ((uint32_t)index >= byte_len) {
+                return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+            }
             if (type_id == LMD_TYPE_SYMBOL) {
                 Symbol* ch_sym = heap_create_symbol(chars + index, 1);
                 return {.item = y2it(ch_sym)};
@@ -2621,11 +2631,15 @@ Item item_at(Item data, int64_t index) {
         // UTF-8 path: combined bounds check + char-to-byte in a single pass
         // str_utf8_char_to_byte returns STR_NPOS if index is out of range
         size_t byte_offset = str_utf8_char_to_byte(chars, byte_len, (size_t)index);
-        if (byte_offset == STR_NPOS) { return ItemNull; }
+        if (byte_offset == STR_NPOS) {
+            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+        }
         // get the UTF-8 character length (1-4 bytes)
         size_t ch_len = str_utf8_char_len((unsigned char)chars[byte_offset]);
         if (ch_len == 0) ch_len = 1; // fallback for invalid UTF-8
-        if (byte_offset + ch_len > byte_len) { return ItemNull; }
+        if (byte_offset + ch_len > byte_len) {
+            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+        }
         // return a single character string/symbol
         if (type_id == LMD_TYPE_SYMBOL) {
             Symbol* ch_sym = heap_create_symbol(chars + byte_offset, ch_len);
