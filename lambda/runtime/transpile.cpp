@@ -1,9 +1,9 @@
 #include "transpiler.hpp"
 #include "safety_analyzer.hpp"
 #include "re2_wrapper.hpp"
-#include "../lib/log.h"
-#include "../lib/hashmap.h"
-#include "../lib/memtrack.h"
+#include "../../lib/log.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/memtrack.h"
 
 extern Type TYPE_ANY, TYPE_INT, TYPE_FLOAT, TYPE_BOOL;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);

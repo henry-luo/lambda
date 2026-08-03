@@ -378,6 +378,12 @@ else
 endif
 	@echo "✅ MIR built: $(MIR_LIB)"
 
+# Remove MIR build outputs, leaving the vendored source untouched.
+clean-mir:
+	@echo "Cleaning MIR build outputs in $(MIR_BUILD_DIR)..."
+	@rm -f $(MIR_BUILD_DIR)/libmir.a $(MIR_BUILD_DIR)/*.o $(MIR_BUILD_DIR)/*.d \
+		$(MIR_BUILD_DIR)/c2mir/*.o $(MIR_BUILD_DIR)/c2mir/*.d
+
 # Verify the vendored source still matches upstream + patches/. Clones pristine
 # upstream at MIR_UPSTREAM_COMMIT, applies every patch, and diffs the result
 # against lambda/mir. Run after editing lambda/mir or a MIR patch by hand.
@@ -517,7 +523,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir verify-mir-patches \
+	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
@@ -538,7 +544,9 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
-	@echo "  build-mir     - Build MIR JIT library (clone, patch, compile)"
+	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
+	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
+	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
 	@echo "  build-jube    - Build the standard host plus hosted Python and a compatibility link"
 	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -703,7 +711,7 @@ $(LAMBDA_EXE): build
 
 
 # Debug build
-debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
+debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call toolchain_verify)
@@ -735,7 +743,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -757,7 +765,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -773,7 +781,7 @@ build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs
 
 # Keep regular debug free of profiler hooks so its runtime cost reflects only
 # debugging and sanitizer instrumentation; use this target to collect JS profiles.
-build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_profile version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
@@ -1421,6 +1429,7 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -rf build_temp/re2-noabsl/cmake_build
+	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
 
 distclean: clean-all clean-grammar clean-test
@@ -3027,7 +3036,7 @@ tidy-printf:
 		echo "Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make tidy-printf FILE='include/mir-bitmap.h' DRY_RUN=1"; \
+		echo "  make tidy-printf FILE='lambda/mir/mir-bitmap.h' DRY_RUN=1"; \
 		echo "  make tidy-printf FILE='lambda/runtime/lambda-eval.cpp' BACKUP=1"; \
 		echo "  make tidy-printf FILE='lambda/*.cpp' DRY_RUN=1"; \
 		echo "  make tidy-printf FILE='lib/*.c' BACKUP=1"; \

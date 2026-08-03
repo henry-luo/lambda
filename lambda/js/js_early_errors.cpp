@@ -16,9 +16,9 @@
 #include "js_ast.hpp"
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
-#include "../lib/log.h"
-#include "../lib/hashmap.h"
-#include "../lib/utf.h"
+#include "../../lib/log.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
 

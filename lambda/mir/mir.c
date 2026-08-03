@@ -220,6 +220,7 @@ static const struct insn_desc insn_descs[] = {
   {MIR_RSHS, "rshs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
   {MIR_URSH, "ursh", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
   {MIR_URSHS, "urshs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+  {MIR_ROTR, "rotr", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
   {MIR_EQ, "eq", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
   {MIR_EQS, "eqs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
   {MIR_FEQ, "feq", {MIR_OP_INT | OUT_FLAG, MIR_OP_FLOAT, MIR_OP_FLOAT, MIR_OP_BOUND}},
@@ -3878,7 +3879,8 @@ static MIR_insn_t func_alloca_features (MIR_context_t ctx, MIR_func_t func, int 
   if (non_top_alloca_p != NULL) *non_top_alloca_p = FALSE;
   for (insn = DLIST_HEAD (MIR_insn_t, func->insns); insn != NULL;
        insn = DLIST_NEXT (MIR_insn_t, insn)) {
-    if (insn->code == MIR_LABEL && set_top_alloca_p) set_top_alloca_p = FALSE;
+    if ((insn->code == MIR_LABEL || MIR_any_branch_code_p (insn->code)) && set_top_alloca_p)
+      set_top_alloca_p = FALSE;
     if (insn->code != MIR_ALLOCA) {
       if (top_alloca == NULL || *top_alloca_used_p) continue;
       alloca_reg = top_alloca->ops[0].u.reg;

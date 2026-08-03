@@ -983,6 +983,10 @@ static void target_machinize (gen_ctx_t gen_ctx) {
       }
       break;
     }
+    case MIR_ROTR:
+      /* A constant rotate keeps its imm8 form; only a dynamic count needs cl. */
+      if (insn->ops[2].mode == MIR_OP_INT || insn->ops[2].mode == MIR_OP_UINT) break;
+      /* fall through */
     case MIR_LSH:
     case MIR_RSH:
     case MIR_URSH:
@@ -1742,6 +1746,7 @@ static struct pattern patterns[] = {
   LDOP (MIR_LDADD, "DE C1") LDOP (MIR_LDSUB, "DE E9") /* long double adds/subs */
   LDOP (MIR_LDMUL, "DE C9") LDOP (MIR_LDDIV, "DE F9") /* long double muls/divs */
 
+  SHOP (MIR_ROTR, "D3 /1", "C1 /1")                                 /* ror r,cl / ror r,imm8 */
   SHOP (MIR_LSH, "D3 /4", "C1 /4") SHOP (MIR_RSH, "D3 /7", "C1 /7") /* arithm shifts */
   SHOP (MIR_URSH, "D3 /5", "C1 /5")                                 /* logical shifts */
 

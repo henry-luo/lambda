@@ -708,6 +708,15 @@ static ALWAYS_INLINE int64_t get_mem_addr (MIR_val_t *bp, code_t c) { return bp[
     r = get_3uops (bp, ops, &p1, &p2); \
     *r = p1 op p2;                     \
   } while (0)
+/* Rotate right by p2 mod 64.  The mask makes a zero count well defined: a bare
+   `p1 << (64 - p2)` would be UB at p2 == 0.  */
+#define ROTR64()                                          \
+  do {                                                    \
+    uint64_t *r, p1, p2;                                  \
+    r = get_3uops (bp, ops, &p1, &p2);                    \
+    p2 &= 63;                                             \
+    *r = p2 == 0 ? p1 : (p1 >> p2) | (p1 << (64 - p2));   \
+  } while (0)
 #define UIOP3S(op)                      \
   do {                                  \
     uint64_t *r;                        \
@@ -1000,6 +1009,7 @@ static void OPTIMIZE eval (MIR_context_t ctx, func_desc_t func_desc, MIR_val_t *
     REP8 (LAB_EL, MIR_UDIVS, MIR_FDIV, MIR_DDIV, MIR_LDDIV, MIR_MOD, MIR_MODS, MIR_UMOD, MIR_UMODS);
     REP8 (LAB_EL, MIR_AND, MIR_ANDS, MIR_OR, MIR_ORS, MIR_XOR, MIR_XORS, MIR_LSH, MIR_LSHS);
     REP8 (LAB_EL, MIR_RSH, MIR_RSHS, MIR_URSH, MIR_URSHS, MIR_EQ, MIR_EQS, MIR_FEQ, MIR_DEQ);
+    LAB_EL (MIR_ROTR);
     REP8 (LAB_EL, MIR_LDEQ, MIR_NE, MIR_NES, MIR_FNE, MIR_DNE, MIR_LDNE, MIR_LT, MIR_LTS);
     REP8 (LAB_EL, MIR_ULT, MIR_ULTS, MIR_FLT, MIR_DLT, MIR_LDLT, MIR_LE, MIR_LES, MIR_ULE);
     REP8 (LAB_EL, MIR_ULES, MIR_FLE, MIR_DLE, MIR_LDLE, MIR_GT, MIR_GTS, MIR_UGT, MIR_UGTS);
@@ -1327,6 +1337,7 @@ common_addr:;
   SCASE (MIR_RSHS, 3, IOP3S (>>));
   SCASE (MIR_URSH, 3, UIOP3 (>>));
   SCASE (MIR_URSHS, 3, UIOP3S (>>));
+  SCASE (MIR_ROTR, 3, ROTR64 ());
 
   SCASE (MIR_EQ, 3, ICMP (==));
   SCASE (MIR_EQS, 3, ICMPS (==));

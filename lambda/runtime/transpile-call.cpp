@@ -10,7 +10,7 @@
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "safety_analyzer.hpp"
-#include "../lib/log.h"
+#include "../../lib/log.h"
 
 // Shared functions defined in transpile.cpp
 extern Type TYPE_ANY, TYPE_INT;

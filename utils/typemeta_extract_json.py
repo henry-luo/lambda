@@ -10,7 +10,7 @@ Usage:
     python3 typemeta_extract_json.py lambda/lambda.h -o generated/typemeta_defs.c
 
     # With include paths
-    python3 typemeta_extract_json.py lambda/lambda.h -I. -Iinclude -o generated/typemeta_defs.c
+    python3 typemeta_extract_json.py lambda/lambda.h -I. -Ilambda/mir -o generated/typemeta_defs.c
 
     # Filter types with regex
     python3 typemeta_extract_json.py lambda/lambda.h --filter "String|List|Map" -o typemeta.c

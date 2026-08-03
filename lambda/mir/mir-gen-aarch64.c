@@ -1247,6 +1247,7 @@ struct pattern {
      M = 1st or 2nd operand is (8-,16-,32-,64-bit) mem with base, scaled imm12 disp [10..21]
      S - immr[16..21]  for right shift SR/Sr
      SL, Sl - immr[16..21] and imms[10..15] for left shift SL/Sl
+     SO - imms[10..15] from a 0..63 constant rotate count (extr/ror)
 
      Z[0-3] -- n-th 16-bit immediate[5..20] from Z[0-3] and its shift [21..22]
      N[0-3] -- n-th 16-bit immediate[5..20] from N[0-3] and its shift [21..22]
@@ -1704,6 +1705,11 @@ static const struct pattern patterns[] = {
   {MIR_DNEG, "r r", "1e614000:fffffc00 vd0 vn1"}, /* fneg Dd,Dn */
   // ldneg is a builtin
 
+  /* aarch64 has no rotate-left, so MIR only defines rotate-right: rorv for a
+     dynamic count, and extr Rd,Rn,Rn,#imm (the ror alias) for a constant one. */
+  {MIR_ROTR, "r r SO", "93c00000:ffe00000 rd0 rn1 rm1 SO"}, /* ror Rd,Rn,#imms */
+  {MIR_ROTR, "r r r", "9ac02c00:ffe0fc00 rd0 rn1 rm2"},    /* ror Rd,Rn,Rm */
+
   {MIR_LSH, "r r r", "9ac02000:ffe0fc00 rd0 rn1 rm2"},  /* lsl Rd,Rn,Rm */
   {MIR_LSHS, "r r r", "1ac02000:ffe0fc00 rd0 rn1 rm2"}, /* lsl Wd,Wn,Wm */
   {MIR_LSH, "r r SL", "d3400000:ffc00000 rd0 rn1 SL"},  /* ubfm Rd,Rn,immr,imms */
@@ -2044,7 +2050,9 @@ static int pattern_match_p (gen_ctx_t gen_ctx, const struct pattern *pat, MIR_in
       if (op.mode != MIR_OP_INT && op.mode != MIR_OP_UINT) return FALSE;
       gen_assert (op.mode != MIR_OP_INT || op.u.i >= 0);
       ch = *++p;
-      if (ch == 'r' || ch == 'R') {
+      if (ch == 'O') { /* constant rotate count for extr */
+        if (op.u.i < 0 || op.u.i > 63) return FALSE;
+      } else if (ch == 'r' || ch == 'R') {
         if ((op.mode == MIR_OP_UINT && op.u.i < 0) || rshift_const (op.u.i, ch == 'r') < 0)
           return FALSE;
       } else {
@@ -2268,13 +2276,16 @@ static void out_insn (gen_ctx_t gen_ctx, MIR_insn_t insn, const char *replacemen
         gen_assert (disp < (1 << 12));
         break;
       }
-      case 'S': { /* S, SL, Sl */
+      case 'S': { /* S, SL, Sl, SO */
         int flag;
 
         op = insn->ops[2];
         gen_assert (op.mode == MIR_OP_INT || op.mode == MIR_OP_UINT);
         ch = *++p;
-        if (ch == 'L' || ch == 'l') {
+        if (ch == 'O') {
+          gen_assert (op.u.i >= 0 && op.u.i <= 63);
+          imms = (int) op.u.i;
+        } else if (ch == 'L' || ch == 'l') {
           flag = lshift_const_p (op.u.i, ch == 'l', &immr, &imms);
           gen_assert (flag);
         } else {

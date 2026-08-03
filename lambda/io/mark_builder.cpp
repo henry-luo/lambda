@@ -30,11 +30,11 @@
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
 #include "../../lib/strbuf.h"
-#include "../lib/stringbuf.h"
-#include "../lib/arraylist.h"
-#include "../lib/hashmap.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
+#include "../../lib/stringbuf.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include <cstring>
 #include <cassert>
 #include <new>
