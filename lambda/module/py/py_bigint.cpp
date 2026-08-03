@@ -144,7 +144,7 @@ Item py_bigint_from_cstr(const char* s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Normalization: promote back to int56 when possible
+// Normalization: promote back to a Lambda int when possible
 // ─────────────────────────────────────────────────────────────────────
 
 Item py_bigint_normalize(Item x) {
@@ -152,7 +152,7 @@ Item py_bigint_normalize(Item x) {
     Decimal* d = x.get_decimal();
     if (!d || !d->dec_val) return x;
     mpd_context_t* ctx = bigint_ctx();
-    // check if integer part fits in int56
+    // check if the integer part fits int's literal band (+/-(2^53-1))
     uint32_t status = 0;
     mpd_ssize_t v = mpd_qget_ssize(d->dec_val, &status);
     if (status == 0 && v >= (mpd_ssize_t)INT53_MIN && v <= (mpd_ssize_t)INT53_MAX) {

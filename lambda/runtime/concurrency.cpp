@@ -275,7 +275,7 @@ static Item task_error(LambdaErrorCode code, const char* message) {
 
 static bool task_read_milliseconds(Item item, int64_t* out) {
     TypeId type_id = get_type_id(item);
-    // Inline int56 values store payload bits in the Item itself; only INT64
+    // Inline int values store their payload in the Item itself; only INT64
     // carries a pointer that is valid for get_int64().
     if (type_id == LMD_TYPE_INT) {
         *out = lambda_int_item_to_i64(item);

@@ -10355,8 +10355,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
             log_debug("Using LIT_INT for value %lld", value);
             i_node->type = &LIT_INT;
         }
-        else { // promote to float for values outside int56 range
-            log_debug("Using float for value %lld (outside int56 range)", value);
+        else { // promote to float outside int's literal band (spec 4.2: +/-(2^53-1))
+            log_debug("Using float for value %lld (outside int literal band)", value);
             i_node->type = build_lit_float(tp, expr_node);
         }
         return (AstNode*)i_node;

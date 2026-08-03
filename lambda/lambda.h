@@ -239,7 +239,7 @@ typedef uint8_t NumSizedType;
 // ============================================================================
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
-    ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
+    ELEM_INT   = 0x00,   // 8 bytes  — double lane (C16/D1; was int56-as-int64)
     ELEM_FLOAT64 = 0x10, // 8 bytes  — canonical double lane (was ARRAY_FLOAT)
     ELEM_FLOAT = ELEM_FLOAT64, // source compatibility alias; not a distinct representation
 
@@ -624,7 +624,7 @@ typedef struct Range Range;
 typedef struct List List;
 typedef struct List Array;
 typedef struct ArrayNum ArrayNum;
-typedef ArrayNum ArrayInt;    // compat alias: int56 arrays (elem_type == ELEM_INT)
+typedef ArrayNum ArrayInt;    // compat alias: `int` arrays, double lane (elem_type == ELEM_INT)
 typedef ArrayNum ArrayInt64;  // compat alias: int64 arrays (elem_type == ELEM_INT64)
 typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT64)
 typedef struct Map Map;
@@ -1588,7 +1588,7 @@ static inline LambdaError* it2err(Item item) {
 // ============================================================================
 
 typedef struct RetBool   { bool         value; LambdaError* err; } RetBool;
-typedef struct RetInt56  { int64_t      value; LambdaError* err; } RetInt56;   // Lambda int (56-bit inline)
+typedef struct RetInt56  { int64_t      value; LambdaError* err; } RetInt56;   // Lambda int (name predates C16)
 typedef struct RetInt64  { int64_t      value; LambdaError* err; } RetInt64;   // int64 (heap-allocated)
 typedef struct RetFloat  { double       value; LambdaError* err; } RetFloat;
 typedef struct RetString { String*      value; LambdaError* err; } RetString;

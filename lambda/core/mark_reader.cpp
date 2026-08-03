@@ -439,7 +439,7 @@ ArrayReader ArrayReader::fromItem(Item item) {
 
 // ----------------------------------------------------------------------------
 // Typed-array (ArrayNum) traversal helpers — guideline G2 (no allocation):
-// leaf scalars pack inline (sized/bool/int56) or, for 8-byte float/int64/uint64,
+// leaf scalars pack inline (sized/bool/int) or, for 8-byte float/int64/uint64,
 // the Item points directly into the live data buffer (valid under G3, the
 // static-tree assumption).  The 13-way elem_type dispatch lives only here.
 // ----------------------------------------------------------------------------

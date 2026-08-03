@@ -10839,7 +10839,7 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     bool is_int_type = jm_typed_array_is_int(ta_type);
 
     if (is_int_type) {
-        // JS Number values are boxed FLOAT Items; raw int56 unboxing would
+        // JS Number values are boxed FLOAT Items; raw int unboxing would
         // store the float payload pointer bits into integer typed-array lanes.
         MIR_reg_t native_val = jm_ensure_native_int(mt, val_boxed, LMD_TYPE_ANY);
 

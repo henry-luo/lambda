@@ -419,7 +419,7 @@ int64_t it2i(Item itm) {
 void _store_i64(int64_t* dst, int64_t val) { *dst = val; }
 void _store_f64(double* dst, double val) { *dst = val; }
 
-// extract int56 as int64 (full precision)
+// extract an integer Item as int64 (full precision)
 int64_t it2l(Item itm) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
