@@ -559,6 +559,8 @@ String *str_repeat(String *str, int64_t times) {
 
 // Unicode string normalization function
 Item fn_normalize(Item str_item, Item type_item) {
+    // an error mode must not be mistaken for an omitted mode and silently default to NFC
+    GUARD_ERROR2(str_item, type_item);
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
     if (str_item._type_id != LMD_TYPE_STRING) {
         log_debug("normalize: first argument must be a string, got type: %s", get_type_name(str_item._type_id));
@@ -3080,7 +3082,8 @@ String* fn_string(Item itm) {
         return &STR_NULL;
     }
     case LMD_TYPE_ERROR:
-        return &STR_ERROR;  // static error string — never NULL, prevents crash in callers
+        // pointer-returning ABI cannot carry ItemError; never render an error as ordinary text.
+        return nullptr;
     default:
         // for other types
         log_error("fn_string unhandled type: %s", get_type_name(itm._type_id));
@@ -4989,7 +4992,8 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
 
 // split(str, sep) - split string by separator, returns list of strings
 Item fn_split(Item str_item, Item sep_item) {
-    GUARD_ERROR1(str_item);
+    // every split operand participates in dispatch, so no error may fall through to null or whitespace handling
+    GUARD_ERROR2(str_item, sep_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
@@ -5125,7 +5129,7 @@ Item fn_split(Item str_item, Item sep_item) {
 // split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
 // split(arr, n, axis) - typed array split into n equal parts along axis
 Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
-    GUARD_ERROR1(str_item);
+    GUARD_ERROR3(str_item, sep_item, keep_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
     TypeId keep_type = get_type_id(keep_item);

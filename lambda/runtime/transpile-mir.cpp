@@ -4888,6 +4888,8 @@ static bool sysfunc_params_reject_error(SysFuncInfo* info) {
     case SYSFUNC_LEN:
     case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF: case SYSFUNC_ORD:
     case SYSFUNC_STRING: case SYSFUNC_SYMBOL: case SYSFUNC_NAME:
+    // typed string results must reject input errors before POST_PROCESS_UNBOX
+    case SYSFUNC_NORMALIZE: case SYSFUNC_NORMALIZE2:
         return true;
     default:
         return false;
