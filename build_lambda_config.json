@@ -140,8 +140,8 @@
     {
       "name": "mir",
       "version": "1.0.0",
-      "include": "mac-deps/mir",
-      "lib": "mac-deps/mir/libmir.a",
+      "include": "lambda/mir",
+      "lib": "lambda/mir/libmir.a",
       "link": "static"
     },
     {
@@ -1099,8 +1099,8 @@
         },
         {
           "name": "mir",
-          "include": "win-native-deps/include",
-          "lib": "win-native-deps/lib/libmir.a",
+          "include": "lambda/mir",
+          "lib": "lambda/mir/libmir.a",
           "link": "static"
         },
         {
@@ -1510,8 +1510,8 @@
         },
         {
           "name": "mir",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmir.a",
+          "include": "lambda/mir",
+          "lib": "lambda/mir/libmir.a",
           "link": "static"
         },
         {

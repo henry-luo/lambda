@@ -1,0 +1,164 @@
+Add MIR_ROTR: a 64-bit rotate-right instruction.
+
+Lambda's inline double-boxing path (transpile-mir.cpp emit_box_double and the
+LambdaJS twin in js_mir_calls_boxing_types.cpp) needs a rotate to move the
+double's sign bit into the tag position without a call.  Both emit
+`ROTR bits, 63` -- rotate left by one expressed as rotate right by 63 -- so the
+constant-count form is the hot one; the dynamic-count form is provided for
+completeness.
+
+Rotate-LEFT is deliberately absent: aarch64 has no rotate-left, and every
+rotate-left by n is a rotate-right by 64-n, so a single right-rotate opcode
+covers both directions without a per-target lowering.
+
+  mir.h             new INSN_EL (ROTR) opcode, placed after the shift group
+  mir.c             matching insn_descs entry ("rotr", 3 int operands)
+  mir-interp.c      ROTR64 macro + dispatch label + SCASE.  The count is masked
+                    to 0..63 so a zero count is well defined (a bare
+                    `p1 << (64 - p2)` would be UB at p2 == 0)
+  mir-gen-x86_64.c  ror r,cl (D3 /1) and ror r,imm8 (C1 /1); target_machinize
+                    only forces the count into cl for a dynamic count, so a
+                    constant keeps its imm8 form
+  mir-gen-aarch64.c rorv Rd,Rn,Rm for a dynamic count and extr Rd,Rn,Rn,#imms
+                    (the ror alias) for a constant one, via a new 'SO' operand
+                    kind holding a 0..63 constant rotate count
+
+Applies to upstream vnmakarov/mir at 99c65079038f3ba9242ef646f308c266cfd7a8e5.
+
+diff --git a/mir.h b/mir.h
+index 4c10441f1..123a40682 100644
+--- a/mir.h
++++ b/mir.h
+@@ -108,6 +108,7 @@ typedef enum {
+   REP4 (INSN_EL, MOD, MODS, UMOD, UMODS),                    /* Modulo */
+   REP6 (INSN_EL, AND, ANDS, OR, ORS, XOR, XORS),             /* Logical */
+   REP6 (INSN_EL, LSH, LSHS, RSH, RSHS, URSH, URSHS),         /* Right signed/unsigned shift */
++  INSN_EL (ROTR),                                            /* 64-bit rotate right */
+   REP5 (INSN_EL, EQ, EQS, FEQ, DEQ, LDEQ),                   /* Equality */
+   REP5 (INSN_EL, NE, NES, FNE, DNE, LDNE),                   /* Inequality */
+   REP7 (INSN_EL, LT, LTS, ULT, ULTS, FLT, DLT, LDLT),        /* Less then */
+diff --git a/mir.c b/mir.c
+index 5ba1261b3..019d14e6b 100644
+--- a/mir.c
++++ b/mir.c
+@@ -220,6 +220,7 @@ static const struct insn_desc insn_descs[] = {
+   {MIR_RSHS, "rshs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+   {MIR_URSH, "ursh", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+   {MIR_URSHS, "urshs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
++  {MIR_ROTR, "rotr", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+   {MIR_EQ, "eq", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+   {MIR_EQS, "eqs", {MIR_OP_INT | OUT_FLAG, MIR_OP_INT, MIR_OP_INT, MIR_OP_BOUND}},
+   {MIR_FEQ, "feq", {MIR_OP_INT | OUT_FLAG, MIR_OP_FLOAT, MIR_OP_FLOAT, MIR_OP_BOUND}},
+diff --git a/mir-interp.c b/mir-interp.c
+index 0020643ab..05b4ff087 100644
+--- a/mir-interp.c
++++ b/mir-interp.c
+@@ -708,6 +708,15 @@ static ALWAYS_INLINE int64_t get_mem_addr (MIR_val_t *bp, code_t c) { return bp[
+     r = get_3uops (bp, ops, &p1, &p2); \
+     *r = p1 op p2;                     \
+   } while (0)
++/* Rotate right by p2 mod 64.  The mask makes a zero count well defined: a bare
++   `p1 << (64 - p2)` would be UB at p2 == 0.  */
++#define ROTR64()                                          \
++  do {                                                    \
++    uint64_t *r, p1, p2;                                  \
++    r = get_3uops (bp, ops, &p1, &p2);                    \
++    p2 &= 63;                                             \
++    *r = p2 == 0 ? p1 : (p1 >> p2) | (p1 << (64 - p2));   \
++  } while (0)
+ #define UIOP3S(op)                      \
+   do {                                  \
+     uint64_t *r;                        \
+@@ -1000,6 +1009,7 @@ static void OPTIMIZE eval (MIR_context_t ctx, func_desc_t func_desc, MIR_val_t *
+     REP8 (LAB_EL, MIR_UDIVS, MIR_FDIV, MIR_DDIV, MIR_LDDIV, MIR_MOD, MIR_MODS, MIR_UMOD, MIR_UMODS);
+     REP8 (LAB_EL, MIR_AND, MIR_ANDS, MIR_OR, MIR_ORS, MIR_XOR, MIR_XORS, MIR_LSH, MIR_LSHS);
+     REP8 (LAB_EL, MIR_RSH, MIR_RSHS, MIR_URSH, MIR_URSHS, MIR_EQ, MIR_EQS, MIR_FEQ, MIR_DEQ);
++    LAB_EL (MIR_ROTR);
+     REP8 (LAB_EL, MIR_LDEQ, MIR_NE, MIR_NES, MIR_FNE, MIR_DNE, MIR_LDNE, MIR_LT, MIR_LTS);
+     REP8 (LAB_EL, MIR_ULT, MIR_ULTS, MIR_FLT, MIR_DLT, MIR_LDLT, MIR_LE, MIR_LES, MIR_ULE);
+     REP8 (LAB_EL, MIR_ULES, MIR_FLE, MIR_DLE, MIR_LDLE, MIR_GT, MIR_GTS, MIR_UGT, MIR_UGTS);
+@@ -1327,6 +1337,7 @@ common_addr:;
+   SCASE (MIR_RSHS, 3, IOP3S (>>));
+   SCASE (MIR_URSH, 3, UIOP3 (>>));
+   SCASE (MIR_URSHS, 3, UIOP3S (>>));
++  SCASE (MIR_ROTR, 3, ROTR64 ());
+ 
+   SCASE (MIR_EQ, 3, ICMP (==));
+   SCASE (MIR_EQS, 3, ICMPS (==));
+diff --git a/mir-gen-x86_64.c b/mir-gen-x86_64.c
+index 9eefd8a9a..38888f752 100644
+--- a/mir-gen-x86_64.c
++++ b/mir-gen-x86_64.c
+@@ -983,6 +983,10 @@ static void target_machinize (gen_ctx_t gen_ctx) {
+       }
+       break;
+     }
++    case MIR_ROTR:
++      /* A constant rotate keeps its imm8 form; only a dynamic count needs cl. */
++      if (insn->ops[2].mode == MIR_OP_INT || insn->ops[2].mode == MIR_OP_UINT) break;
++      /* fall through */
+     case MIR_LSH:
+     case MIR_RSH:
+     case MIR_URSH:
+@@ -1742,6 +1746,7 @@ static struct pattern patterns[] = {
+   LDOP (MIR_LDADD, "DE C1") LDOP (MIR_LDSUB, "DE E9") /* long double adds/subs */
+   LDOP (MIR_LDMUL, "DE C9") LDOP (MIR_LDDIV, "DE F9") /* long double muls/divs */
+ 
++  SHOP (MIR_ROTR, "D3 /1", "C1 /1")                                 /* ror r,cl / ror r,imm8 */
+   SHOP (MIR_LSH, "D3 /4", "C1 /4") SHOP (MIR_RSH, "D3 /7", "C1 /7") /* arithm shifts */
+   SHOP (MIR_URSH, "D3 /5", "C1 /5")                                 /* logical shifts */
+ 
+diff --git a/mir-gen-aarch64.c b/mir-gen-aarch64.c
+index 4dc6c08de..3d08a7ab1 100644
+--- a/mir-gen-aarch64.c
++++ b/mir-gen-aarch64.c
+@@ -1247,6 +1247,7 @@ struct pattern {
+      M = 1st or 2nd operand is (8-,16-,32-,64-bit) mem with base, scaled imm12 disp [10..21]
+      S - immr[16..21]  for right shift SR/Sr
+      SL, Sl - immr[16..21] and imms[10..15] for left shift SL/Sl
++     SO - imms[10..15] from a 0..63 constant rotate count (extr/ror)
+ 
+      Z[0-3] -- n-th 16-bit immediate[5..20] from Z[0-3] and its shift [21..22]
+      N[0-3] -- n-th 16-bit immediate[5..20] from N[0-3] and its shift [21..22]
+@@ -1704,6 +1705,11 @@ static const struct pattern patterns[] = {
+   {MIR_DNEG, "r r", "1e614000:fffffc00 vd0 vn1"}, /* fneg Dd,Dn */
+   // ldneg is a builtin
+ 
++  /* aarch64 has no rotate-left, so MIR only defines rotate-right: rorv for a
++     dynamic count, and extr Rd,Rn,Rn,#imm (the ror alias) for a constant one. */
++  {MIR_ROTR, "r r SO", "93c00000:ffe00000 rd0 rn1 rm1 SO"}, /* ror Rd,Rn,#imms */
++  {MIR_ROTR, "r r r", "9ac02c00:ffe0fc00 rd0 rn1 rm2"},    /* ror Rd,Rn,Rm */
++
+   {MIR_LSH, "r r r", "9ac02000:ffe0fc00 rd0 rn1 rm2"},  /* lsl Rd,Rn,Rm */
+   {MIR_LSHS, "r r r", "1ac02000:ffe0fc00 rd0 rn1 rm2"}, /* lsl Wd,Wn,Wm */
+   {MIR_LSH, "r r SL", "d3400000:ffc00000 rd0 rn1 SL"},  /* ubfm Rd,Rn,immr,imms */
+@@ -2044,7 +2050,9 @@ static int pattern_match_p (gen_ctx_t gen_ctx, const struct pattern *pat, MIR_in
+       if (op.mode != MIR_OP_INT && op.mode != MIR_OP_UINT) return FALSE;
+       gen_assert (op.mode != MIR_OP_INT || op.u.i >= 0);
+       ch = *++p;
+-      if (ch == 'r' || ch == 'R') {
++      if (ch == 'O') { /* constant rotate count for extr */
++        if (op.u.i < 0 || op.u.i > 63) return FALSE;
++      } else if (ch == 'r' || ch == 'R') {
+         if ((op.mode == MIR_OP_UINT && op.u.i < 0) || rshift_const (op.u.i, ch == 'r') < 0)
+           return FALSE;
+       } else {
+@@ -2268,13 +2276,16 @@ static void out_insn (gen_ctx_t gen_ctx, MIR_insn_t insn, const char *replacemen
+         gen_assert (disp < (1 << 12));
+         break;
+       }
+-      case 'S': { /* S, SL, Sl */
++      case 'S': { /* S, SL, Sl, SO */
+         int flag;
+ 
+         op = insn->ops[2];
+         gen_assert (op.mode == MIR_OP_INT || op.mode == MIR_OP_UINT);
+         ch = *++p;
+-        if (ch == 'L' || ch == 'l') {
++        if (ch == 'O') {
++          gen_assert (op.u.i >= 0 && op.u.i <= 63);
++          imms = (int) op.u.i;
++        } else if (ch == 'L' || ch == 'l') {
+           flag = lshift_const_p (op.u.i, ch == 'l', &immr, &imms);
+           gen_assert (flag);
+         } else {

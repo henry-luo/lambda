@@ -214,18 +214,19 @@ TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
-# MIR JIT library (platform-specific paths match build_lambda_config.json)
-ifeq ($(OS),Darwin)
-    MIR_LIB = mac-deps/mir/libmir.a
-    MIR_BUILD_DIR = mac-deps/mir
-else ifeq ($(IS_MSYS2),yes)
-    MIR_LIB = win-native-deps/lib/libmir.a
-    MIR_BUILD_DIR = build_temp/mir
-else
-    MIR_LIB = /usr/local/lib/libmir.a
-    MIR_BUILD_DIR = build_temp/mir
-endif
-MIR_PATCH = patches/mir-alloca-branch-fix.patch
+# MIR JIT library. The source is vendored in-tree at lambda/mir (see
+# lambda/mir/VENDOR.md) and built in place, so the path is the same on every
+# platform and matches build_lambda_config.json. The patches under patches/
+# are ALREADY APPLIED to the vendored source — they are kept as the record of
+# our delta vs upstream, for re-syncing to a newer MIR, not applied at build
+# time (that would dirty tracked files on every build).
+MIR_BUILD_DIR = lambda/mir
+MIR_LIB = $(MIR_BUILD_DIR)/libmir.a
+# Upstream vnmakarov/mir commit the vendored source was taken from. Pinned so
+# GNUmakefile's `git log -1` does not resolve to the Lambda repo's HEAD, which
+# would rebuild all of MIR on every Lambda commit.
+MIR_UPSTREAM_COMMIT = 99c65079038f3ba9242ef646f308c266cfd7a8e5
+MIR_SOURCES = $(wildcard $(MIR_BUILD_DIR)/mir*.c $(MIR_BUILD_DIR)/mir*.h $(MIR_BUILD_DIR)/c2mir/*.c $(MIR_BUILD_DIR)/c2mir/*.h)
 
 # JavaScript scanner dependencies
 JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
@@ -364,40 +365,45 @@ $(RE2_LIB):
 		ninja -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
-# Build MIR JIT library (clone, patch, compile)
-$(MIR_LIB): $(MIR_PATCH)
-	@echo "Building MIR library..."
-	@if [ ! -d "$(MIR_BUILD_DIR)" ]; then \
-		echo "Cloning MIR repository..."; \
-		mkdir -p $(dir $(MIR_BUILD_DIR)); \
-		git clone https://github.com/vnmakarov/mir.git $(MIR_BUILD_DIR); \
-	fi
-	@if [ -f "$(MIR_PATCH)" ]; then \
-		echo "Applying MIR patch $(MIR_PATCH)..."; \
-		if git -C "$(MIR_BUILD_DIR)" apply --reverse --check "$(CURDIR)/$(MIR_PATCH)" >/dev/null 2>&1; then \
-			echo "  MIR patch already applied — skipping."; \
-		elif git -C "$(MIR_BUILD_DIR)" apply --check "$(CURDIR)/$(MIR_PATCH)" >/dev/null 2>&1; then \
-			git -C "$(MIR_BUILD_DIR)" apply "$(CURDIR)/$(MIR_PATCH)" && echo "  MIR patch applied."; \
-		else \
-			echo "ERROR: $(MIR_PATCH) does not apply cleanly and is not already applied;" >&2; \
-			echo "       MIR would be built WITHOUT the patch. Aborting." >&2; \
-			exit 1; \
-		fi; \
-	fi
+# Build MIR JIT library from the vendored source at lambda/mir.
+# Only the libmir.a target is built (mir.o + mir-gen.o + c2mir.o); MIR's own
+# executables (c2m, m2b, b2m, mir-bin-run) are not part of the vendored subset.
+$(MIR_LIB): $(MIR_SOURCES)
+	@echo "Building MIR library from vendored source ($(MIR_BUILD_DIR))..."
 ifeq ($(IS_MSYS2),yes)
-	@cd $(MIR_BUILD_DIR) && CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \
-		CFLAGS="-O2 -DNDEBUG -fPIC" make libmir.a
-	@mkdir -p win-native-deps/lib && cp $(MIR_BUILD_DIR)/libmir.a win-native-deps/lib/
+	@$(MAKE) -C $(MIR_BUILD_DIR) libmir.a CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \
+		CFLAGS="-O2 -DNDEBUG -fPIC" GITCOMMIT=$(MIR_UPSTREAM_COMMIT)
 else
-	@$(MAKE) -C $(MIR_BUILD_DIR) -j$(JOBS)
-endif
-ifeq ($(OS),Linux)
-	@echo "Installing MIR to system location (requires sudo)..."
-	@sudo mkdir -p /usr/local/lib /usr/local/include
-	@sudo cp $(MIR_BUILD_DIR)/libmir.a /usr/local/lib/
-	@sudo cp $(MIR_BUILD_DIR)/mir.h /usr/local/include/ 2>/dev/null || true
+	@$(MAKE) -C $(MIR_BUILD_DIR) libmir.a -j$(JOBS) GITCOMMIT=$(MIR_UPSTREAM_COMMIT)
 endif
 	@echo "✅ MIR built: $(MIR_LIB)"
+
+# Verify the vendored source still matches upstream + patches/. Clones pristine
+# upstream at MIR_UPSTREAM_COMMIT, applies every patch, and diffs the result
+# against lambda/mir. Run after editing lambda/mir or a MIR patch by hand.
+verify-mir-patches:
+	@set -e; \
+	work=build_temp/mir-verify; \
+	rm -rf $$work; mkdir -p $$work; \
+	echo "Fetching pristine MIR $(MIR_UPSTREAM_COMMIT)..."; \
+	git -c advice.detachedHead=false clone -q https://github.com/vnmakarov/mir.git $$work/upstream; \
+	git -C $$work/upstream -c advice.detachedHead=false checkout -q $(MIR_UPSTREAM_COMMIT); \
+	for p in patches/mir-*.patch; do \
+		echo "  applying $$p"; \
+		git -C $$work/upstream apply "$(CURDIR)/$$p" || { echo "ERROR: $$p does not apply to upstream" >&2; exit 1; }; \
+	done; \
+	fail=0; \
+	for f in $$(cd $(MIR_BUILD_DIR) && find . -name '*.c' -o -name '*.h'); do \
+		if ! diff -q "$$work/upstream/$$f" "$(MIR_BUILD_DIR)/$$f" >/dev/null 2>&1; then \
+			echo "DIFFERS: $$f"; fail=1; \
+		fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then \
+		echo "ERROR: lambda/mir does not equal upstream + patches/. Either regenerate the" >&2; \
+		echo "       patch for your change or re-vendor from upstream." >&2; \
+		exit 1; \
+	fi; \
+	echo "✅ lambda/mir == upstream $(MIR_UPSTREAM_COMMIT) + patches/mir-*.patch"
 
 build-mir: $(MIR_LIB)
 
@@ -511,7 +517,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
+	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir verify-mir-patches \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
