@@ -306,7 +306,6 @@ install_premake5_manually() {
 echo ""
 echo "🔧 Building dependencies from source..."
 echo "Note: This script will check for parallel directories first:"
-echo "  • ../mir (for MIR JIT compiler)"
 echo "  • ../utf8proc (for Unicode normalization)"
 echo "If parallel directories are not found, dependencies will be downloaded."
 echo "Note: Tree-sitter libraries are managed directly under lambda/ directory."
@@ -777,85 +776,9 @@ build_minimal_static_libcurl() {
     return 1
 }
 
-# Build MIR (JIT compiler)
-if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
-    echo "Building MIR for Windows native..."
-
-    # Check for parallel directory first (preferred)
-    MIR_SRC=""
-    if [ -d "../mir" ]; then
-        echo "Using parallel mir directory..."
-        MIR_SRC="../mir"
-    elif [ -d "$DEPS_DIR/src/mir" ]; then
-        echo "Using previously downloaded mir..."
-        MIR_SRC="$DEPS_DIR/src/mir"
-    else
-        # Download MIR if needed
-        mkdir -p "$DEPS_DIR/src"
-        cd "$DEPS_DIR/src"
-        echo "Cloning MIR repository..."
-        git clone https://github.com/vnmakarov/mir.git || {
-            echo "Warning: Could not clone MIR repository"
-            cd - > /dev/null
-        }
-        cd - > /dev/null
-        if [ -d "$DEPS_DIR/src/mir" ]; then
-            MIR_SRC="$DEPS_DIR/src/mir"
-        fi
-    fi
-
-    if [ -n "$MIR_SRC" ] && [ -d "$MIR_SRC" ]; then
-        echo "Building MIR from: $MIR_SRC"
-        cd "$MIR_SRC"
-
-        # Apply MIR alloca-branch fix patch
-        PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
-        if [ -f "$PATCH_FILE" ]; then
-            echo "Applying MIR patches..."
-            git apply "$PATCH_FILE" 2>/dev/null || {
-                git apply --check "$PATCH_FILE" 2>/dev/null && true || {
-                    echo "  (patch already applied or skipped)"
-                }
-            }
-        fi
-
-        # Clean previous builds
-        make clean 2>/dev/null || true
-
-        # Build MIR for native Windows (static library only, skip shared lib which
-        # requires -soname not supported by LLD on Windows)
-        echo "Building MIR..."
-
-        # Always use CLANG64 tools since we installed them
-        CC="/clang64/bin/clang.exe" \
-        AR="/clang64/bin/llvm-ar.exe" \
-        CFLAGS="-O2 -DNDEBUG -fPIC" \
-        make libmir.a
-
-        # Copy built libraries and headers
-        if [ -f "libmir.a" ]; then
-            mkdir -p "$SCRIPT_DIR/$DEPS_DIR/lib"
-            cp libmir.a "$SCRIPT_DIR/$DEPS_DIR/lib/"
-            echo "✅ MIR built successfully"
-        else
-            echo "⚠️  MIR build may have issues"
-        fi
-
-        # Copy headers
-        mkdir -p "$SCRIPT_DIR/$DEPS_DIR/include"
-        HEADER_DIR="$SCRIPT_DIR/$DEPS_DIR/include"
-
-        for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h mir-alloc.h mir-bitmap.h mir-code-alloc.h; do
-            if [ -f "$header" ]; then
-                cp "$header" "$HEADER_DIR/"
-            fi
-        done
-
-        cd - > /dev/null
-    fi
-else
-    echo "✅ MIR already built for Windows native"
-fi
+# MIR is no longer set up here: the source is vendored in-tree at lambda/mir
+# (upstream + patches/mir-*.patch already applied) and built by `make build-mir`,
+# which the main build targets depend on. See lambda/mir/VENDOR.md.
 
 # Build utf8proc (Unicode normalization library)
 if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
@@ -1240,7 +1163,6 @@ echo "  📦 Tree-sitter library (building from source - see verification below)
 echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
 echo "  📦 Tree-sitter-javascript (building from source - see verification below)"
 echo "  📦 Tree-sitter-latex (building from source - see verification below)"
-echo "  📦 MIR (building from source - see verification below)"
 echo "  📦 utf8proc (building from source - see verification below)"
 echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
 echo "  📦 ThorVG (building from source - vector graphics for SVG rendering)"
@@ -1272,13 +1194,6 @@ if [ -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
     echo "✅ Tree-sitter-latex library available"
 else
     echo "⚠️  Tree-sitter-latex library missing"
-fi
-
-# Check MIR
-if [ -f "$DEPS_DIR/lib/libmir.a" ]; then
-    echo "✅ MIR library available"
-else
-    echo "⚠️  MIR library missing"
 fi
 
 # Check utf8proc

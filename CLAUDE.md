@@ -19,6 +19,7 @@ These rules MUST be followed. Violations are considered errors.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
 14. **The legacy C2MIR path is FROZEN.** and new runtime/ABI/design work do NOT need C2MIR support.
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
+16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), Tree-sitter (`lambda/tree-sitter*/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern.
 
 | DON'T | DO |
 |-------|-----|
@@ -32,6 +33,7 @@ These rules MUST be followed. Violations are considered errors.
 | Copy a `static` helper into another file | Promote it to the module header, then call it |
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
 | Modify `transpile.cpp` or extend `--c2mir` | Evolve only MIR Direct (`transpile-mir.cpp`) |
+| Edit `lambda/mir/`, `lambda/tree-sitter*/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
 
 ## Project Overview
 

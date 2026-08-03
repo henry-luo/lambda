@@ -296,57 +296,9 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build MIR for Mac (local to project, no sudo required)
-build_mir_for_mac() {
-    echo "Building MIR for Mac (local install to mac-deps/mir)..."
-    cd "$SCRIPT_DIR"
-
-    # Check if already built locally
-    if [ -f "mac-deps/mir/libmir.a" ] && [ -f "mac-deps/mir/mir.h" ] && [ -f "mac-deps/mir/mir-dlist.h" ]; then
-        echo "✅ MIR already built in mac-deps/mir"
-        return 0
-    fi
-
-    mkdir -p mac-deps
-
-    if [ ! -d "mac-deps/mir" ]; then
-        echo "Cloning MIR repository..."
-        cd mac-deps
-        git clone https://github.com/vnmakarov/mir.git || {
-            echo "Warning: Could not clone MIR repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-
-    cd "mac-deps/mir" || {
-        echo "Error: Could not enter mac-deps/mir directory"
-        return 1
-    }
-
-    # Apply MIR alloca-branch fix patch
-    PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
-    if [ -f "$PATCH_FILE" ]; then
-        echo "Applying MIR patches..."
-        git apply "$PATCH_FILE" 2>/dev/null || {
-            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
-                echo "  (patch already applied or skipped)"
-            }
-        }
-    fi
-
-    echo "Building MIR..."
-    if make -j$(sysctl -n hw.ncpu); then
-        echo "✅ MIR built successfully in mac-deps/mir"
-        cd - > /dev/null
-        return 0
-    fi
-
-    echo "❌ MIR build failed"
-    cd - > /dev/null
-    return 1
-}
+# MIR is no longer set up here: the source is vendored in-tree at lambda/mir
+# (upstream + patches/mir-*.patch already applied) and built by `make build-mir`,
+# which the main build targets depend on. See lambda/mir/VENDOR.md.
 
 # Function to build rpmalloc for Mac
 build_rpmalloc_for_mac() {
@@ -1145,19 +1097,6 @@ else
     fi
 fi
 
-# Build MIR for Mac (Lambda dependency)
-echo "Setting up MIR..."
-if [ -f "mac-deps/mir/libmir.a" ] && [ -f "mac-deps/mir/mir.h" ]; then
-    echo "MIR already available in mac-deps/mir"
-else
-    if ! build_mir_for_mac; then
-        echo "Warning: MIR build failed"
-        exit 1
-    else
-        echo "MIR built successfully"
-    fi
-fi
-
 # Build rpmalloc for Mac (Lambda dependency)
 echo "Setting up rpmalloc..."
 
@@ -1418,7 +1357,7 @@ else
     echo "- Homebrew not available for dependency checks"
 fi
 
-echo "- MIR: $([ -f "mac-deps/mir/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- MIR: vendored at lambda/mir (built by 'make build-mir')"
 echo "- rpmalloc: $([ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"

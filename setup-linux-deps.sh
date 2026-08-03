@@ -875,129 +875,9 @@ build_utf8proc_for_linux() {
     return 1
 }
 
-# Function to build MIR for Linux
-build_mir_for_linux() {
-    echo "Building MIR for Linux..."
-
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] || [ -f "$SYSTEM_PREFIX/lib/libmir.so" ]; then
-        echo "MIR already installed in system location"
-        return 0
-    fi
-
-    # Create build_temp directory if it doesn't exist
-    mkdir -p "build_temp"
-
-    # Build from source
-    if [ ! -d "build_temp/mir" ]; then
-        cd build_temp
-        echo "Cloning MIR repository..."
-        git clone https://github.com/vnmakarov/mir.git || {
-            echo "Warning: Could not clone MIR repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-
-    cd "build_temp/mir"
-
-    # Apply MIR alloca-branch fix patch
-    PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
-    if [ -f "$PATCH_FILE" ]; then
-        echo "Applying MIR patches..."
-        git apply "$PATCH_FILE" 2>/dev/null || {
-            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
-                echo "  (patch already applied or skipped)"
-            }
-        }
-    fi
-
-    # Check if GNUmakefile exists (MIR uses GNUmakefile, not Makefile)
-    if [ ! -f "GNUmakefile" ]; then
-        echo "Warning: GNUmakefile not found in MIR directory"
-        cd - > /dev/null
-        return 1
-    fi
-
-    echo "Building MIR..."
-    if make -j$(nproc); then
-        echo "Installing MIR to system location (requires sudo)..."
-        # Create directories if they don't exist
-        sudo mkdir -p "$SYSTEM_PREFIX/lib"
-        sudo mkdir -p "$SYSTEM_PREFIX/include"
-
-        # Copy library (try different names)
-        if [ -f "libmir.a" ]; then
-            sudo cp libmir.a "$SYSTEM_PREFIX/lib/"
-        elif [ -f "mir.a" ]; then
-            sudo cp mir.a "$SYSTEM_PREFIX/lib/libmir.a"
-        else
-            echo "Warning: MIR library not found"
-            find . -name "*.a" -name "*mir*" | head -5
-        fi
-
-        # Copy headers (more comprehensive approach)
-        if [ -f "mir.h" ]; then
-            sudo cp mir.h "$SYSTEM_PREFIX/include/"
-            echo "✅ mir.h copied to $SYSTEM_PREFIX/include/"
-        else
-            echo "Warning: mir.h not found"
-            find . -name "mir.h" | head -5
-        fi
-
-        # Copy c2mir.h specifically (critical for compilation)
-        C2MIR_PATH=$(find . -name "c2mir.h" | head -1)
-        if [ -n "$C2MIR_PATH" ] && [ -f "$C2MIR_PATH" ]; then
-            sudo cp "$C2MIR_PATH" "$SYSTEM_PREFIX/include/"
-            echo "✅ c2mir.h copied from $C2MIR_PATH to $SYSTEM_PREFIX/include/"
-        else
-            echo "Warning: c2mir.h not found in MIR build directory"
-            # Fallback: check if c2mir.h exists in project include directory
-            if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
-                sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
-                echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
-            else
-                echo "Warning: c2mir.h not found in project include/ either"
-                find . -name "c2mir.h" | head -5
-            fi
-        fi
-
-        # Copy all MIR-related headers
-        for header in mir-*.h; do
-            if [ -f "$header" ]; then
-                sudo cp "$header" "$SYSTEM_PREFIX/include/"
-                echo "✅ $header copied to $SYSTEM_PREFIX/include/"
-            fi
-        done
-
-        # Update library cache
-        sudo ldconfig
-
-        # Verify the build
-        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
-            echo "✅ MIR built successfully"
-            cd - > /dev/null
-            return 0
-        elif [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
-            echo "⚠️ MIR library and mir.h built but c2mir.h header missing"
-            cd - > /dev/null
-            return 1
-        elif [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-            echo "⚠️ MIR library built but header files missing"
-            cd - > /dev/null
-            return 1
-        else
-            echo "❌ MIR library not found after build"
-            cd - > /dev/null
-            return 1
-        fi
-    fi
-
-    echo "❌ MIR build failed"
-    cd - > /dev/null
-    return 1
-}
+# MIR is no longer set up here: the source is vendored in-tree at lambda/mir
+# (upstream + patches/mir-*.patch already applied) and built by `make build-mir`,
+# which the main build targets depend on. See lambda/mir/VENDOR.md.
 
 # Helper: returns 0 if the archive contains ELF objects, 1 if not (e.g. Mach-O from macOS)
 is_elf_archive() {
@@ -1255,59 +1135,6 @@ else
 fi
 
 
-# Build MIR for Linux
-if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
-    echo "MIR already available"
-else
-    if ! build_mir_for_linux; then
-        echo "Warning: MIR build failed"
-    else
-        echo "MIR built successfully"
-    fi
-fi
-
-# Verify MIR header installation (but don't exit on failure)
-echo "Verifying MIR header installation..."
-if [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
-    echo "✅ mir.h and c2mir.h found at $SYSTEM_PREFIX/include/"
-elif [ -f "/usr/include/mir.h" ] && [ -f "/usr/include/c2mir.h" ]; then
-    echo "✅ mir.h and c2mir.h found at /usr/include/"
-elif [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
-    echo "⚠️ mir.h found but c2mir.h missing at $SYSTEM_PREFIX/include/"
-    # Try to copy c2mir.h from project include directory as fallback
-    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
-        echo "Copying c2mir.h from project include/ directory..."
-        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
-        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
-    else
-        echo "Warning: c2mir.h not found in project include/ directory either"
-    fi
-elif [ -f "/usr/include/mir.h" ]; then
-    echo "⚠️ mir.h found but c2mir.h missing at /usr/include/"
-    # Try to copy c2mir.h from project include directory as fallback
-    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
-        echo "Copying c2mir.h from project include/ directory..."
-        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
-        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
-    else
-        echo "Warning: c2mir.h not found in project include/ directory either"
-    fi
-else
-    echo "⚠️ MIR headers not found - MIR may need to be built during compilation"
-    echo "Searching for MIR headers..."
-    find /usr -name "mir.h" 2>/dev/null || echo "No mir.h files found"
-    find "$SYSTEM_PREFIX" -name "mir.h" 2>/dev/null || echo "No mir.h files found in $SYSTEM_PREFIX"
-    find /usr -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found"
-    find "$SYSTEM_PREFIX" -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found in $SYSTEM_PREFIX"
-    # Try to copy c2mir.h from project include directory as fallback
-    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
-        echo "Copying c2mir.h from project include/ directory..."
-        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
-        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
-    else
-        echo "Warning: c2mir.h not found in project include/ directory either"
-    fi
-fi
 
 
 # Build rpmalloc for Linux (memory pool allocator)
@@ -1511,7 +1338,7 @@ else
 fi
 
 # Check system locations and apt packages
-echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- MIR: vendored at lambda/mir (built by 'make build-mir')"
 if [ -f "$SYSTEM_PREFIX/lib/libcurl.so" ] && [ -x "$SYSTEM_PREFIX/bin/curl-config" ] && ! "$SYSTEM_PREFIX/bin/curl-config" --features 2>/dev/null | grep -qw PSL; then
     CURL_STATUS="✓ Built without PSL"
 else
