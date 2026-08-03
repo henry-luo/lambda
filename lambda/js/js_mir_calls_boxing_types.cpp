@@ -1615,6 +1615,24 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 return r;
             }
         }
+        if (lit->literal_type == JS_LITERAL_BOOLEAN) {
+            // Native conditional joins use numeric lanes for inferred boolean
+            // returns; unboxing the boxed Item here turned both arms into 0.
+            if (target_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t r = jm_new_reg(mt, "dbool", MIR_T_D);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_double_op(mt->ctx,
+                        lit->value.boolean_value ? 1.0 : 0.0)));
+                return r;
+            }
+            MIR_reg_t r = jm_new_reg(mt, "ibool", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx,
+                    lit->value.boolean_value ? 1 : 0)));
+            return r;
+        }
     }
 
     // Identifiers: use native register directly if variable is typed

@@ -1870,6 +1870,7 @@ void js_reset_heap_bound_runtime_state() {
     js_cached_object_proto = NULL;
     js_resolving_object_proto = false;
     js_private_field_initializing = false;
+    js_deferred_instance_field_class = ItemNull;
     js_input = NULL;
 }
 

@@ -2243,6 +2243,17 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     mt->current_class = saved_current_class;
 }
 
+static void jm_emit_default_derived_instance_field_chain(JsMirTranspiler* mt,
+        JsClassEntry* ce, MIR_reg_t obj, JsClassEntry* target, MIR_reg_t target_cls) {
+    if (!mt || !ce) return;
+    if (ce->superclass) {
+        jm_emit_default_derived_instance_field_chain(mt, ce->superclass, obj, target, target_cls);
+    }
+    if (ce->constructor) return;
+    MIR_reg_t cls_obj = ce == target ? target_cls : jm_emit_class_object_for_entry(mt, ce);
+    jm_emit_own_instance_fields_on_object(mt, ce, obj, cls_obj, true);
+}
+
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf) {
     if (!mt || !sf) return;
     if (sf->computed && sf->key_expr) {
@@ -3209,15 +3220,20 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             // A default derived constructor must dispatch through the class
             // object's [[Construct]] path. Rebuilding an ancestor body here
             // loses that body's HomeObject, so its nested super() resolves
-            // against whichever outer class call happened to be active.
+            // against whichever outer class call happened to be active. Its
+            // own field expressions are not runtime metadata, so defer those
+            // declarations and emit their source-level initializers below.
             MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             jm_call_void_1(mt, "js_set_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
-            return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+            MIR_reg_t result = jm_call_3(mt, "js_new_from_class_object_defer_own_fields", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            jm_emit_exc_propagate_check(mt);
+            jm_emit_default_derived_instance_field_chain(mt, ce, result, ce, cls_for_nt);
+            return result;
         }
         // Create new object — use pre-shaped allocation when constructor has this.prop assigns
         // so that P3 (js_set_shaped_slot) and P4 (js_get_shaped_slot) can use slot-indexed access.

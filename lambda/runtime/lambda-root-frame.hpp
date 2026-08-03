@@ -33,6 +33,32 @@ public:
     RootFrame& operator=(const RootFrame&) = delete;
 };
 
+// A contiguous exact-root region for ABI adapters.  Unlike RootFrame's
+// take_slot interface, callers use this only when a callee requires an Item*
+// span whose lifetime is bounded by one native activation.
+class RootSpan {
+    LambdaRootFrame frame_;
+
+public:
+    explicit RootSpan(size_t slot_count) : frame_{} {
+        if (slot_count == 0) return;
+        if (eval_context_tls_runtime() &&
+                !lambda_root_frame_begin(&frame_, slot_count)) {
+            lambda_root_frame_overflow_error();
+        }
+    }
+
+    ~RootSpan() { lambda_root_frame_end(&frame_); }
+
+    bool valid() const { return frame_.active; }
+    size_t size() const { return frame_.slot_count; }
+    uint64_t* words() { return frame_.slots; }
+    const uint64_t* words() const { return frame_.slots; }
+
+    RootSpan(const RootSpan&) = delete;
+    RootSpan& operator=(const RootSpan&) = delete;
+};
+
 template <typename T>
 class Rooted {
     uint64_t* slot_;

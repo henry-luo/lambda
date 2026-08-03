@@ -144,5 +144,194 @@ and uses the `TypeMap`/`ShapeEntry` layout in `lambda/lambda-data.hpp`.
 
 ---
 
+## Function-call flows — compiler staging versus generated runtime execution
+
+Compiler-local argument buffers do not exist after JIT compilation. This
+section distinguishes those lowering-time structures from the root-frame
+slots, registers, and ABI operands used by the generated code at runtime.
+
+### Core Lambda
+
+**Transpiling a statically resolved local call.** For `f(a, b)`, when `f` is
+known to the MIR Direct compiler, `transpile_call_raw` first maps source
+expressions to parameter positions (including named arguments and defaults)
+in `resolved_args`. It evaluates each argument, records its MIR operand and
+type in `arg_ops`/`arg_vars`, and assigns every boxed, GC-capable value an
+`arg_root_slots` entry. Immediately before emitting the call, it reloads those
+rooted values into `call_ops`; native scalar operands need no GC root.
+
+`resolved_args`, `arg_ops`, `arg_vars`, `arg_root_slots`, and `call_ops` are
+C++ lowering buffers only. They do not describe a runtime array ABI. The
+current local-call staging arrays have 16 entries; that is an implementation
+limit/bug boundary, not a MIR limit, and calls beyond it must be rejected or
+lowered through dynamically sized staging before they are supported.
+
+**Runtime execution of that direct call.** The emitted MIR runs inside the
+caller's precise root frame, evaluates arguments, writes boxed ones to their
+side-root slots, reloads them into registers, then makes a direct JIT call to
+the known target. The physical call is `Context*`, followed by the source
+arguments and, when its result contract needs it, a trailing caller-owned
+scalar-result home. The callee has no `Function*` lookup or arity switch on
+this path.
+
+**First-class/dynamic core-Lambda call.** If the callee is a runtime function
+value (for example `callback(a, b)`), lowering instead calls the `fn_call*`
+runtime dispatcher. It receives a `Function*` plus values, validates the
+signature, and chooses a native function-pointer cast. That dispatcher is a
+separate ABI: it supports eight ordinary physical arguments, or seven user
+arguments for a closure because the captured environment occupies one slot.
+Variadic functions package surplus actual arguments in a `List`, so the
+surplus is not itself constrained by that physical-arity switch.
+
+### LambdaJS
+
+**Transpiling a JS call or construction.** Every `CALL_EXPRESSION` and
+`NEW_EXPRESSION` opens a `JsMirArgStackScope`. On the ordinary, non-suspending
+path, `jm_build_args_array` evaluates each argument and writes its boxed
+`Item` into a lexically assigned suffix of the generated function's precise
+side-root frame. Nested calls use higher slots and sibling calls reuse slots;
+the call helper can prove that this exact span is rooted and select the
+`js_call_function_prerooted_args_into` path. Generator/async calls whose
+arguments can suspend instead spill to their persistent environment and copy
+to an allocated argument array after resumption.
+
+This is the completed JS call-argument-stack merge: it replaced
+`js_args_stack` with a root-frame suffix. It does **not** use the number
+stack, which holds unscanned raw wide-scalar payloads and cannot hold general
+boxed JS `Item` values.
+
+**Root-frame comparison.** Both implementations use precise `Item` slots in
+the same per-`Context` GC root side stack, but their call ABIs require
+different layouts:
+
+- **Core Lambda** roots only GC-capable boxed values; native scalar arguments
+  stay in registers. Its direct-call ABI passes arguments as individual
+  registers. Argument roots are ordinary root-frame slots and do not form a
+  required `Item* + argc` argument-array interface.
+- **LambdaJS** arguments are boxed `Item` values and its generic call ABI
+  needs a contiguous `Item* args` plus `argc`. It therefore reserves a
+  contiguous suffix for each lexically active call, passes its address, clears
+  it when that call expression completes, and reuses it for sibling calls.
+
+**Call-ABI comparison.** A direct core-Lambda call passes individual ABI
+operands: `Context*`, `arg0`, `arg1`, …, and, when required, a trailing
+`scalar_result_home`. A generic LambdaJS call instead crosses its dynamic
+boundary as a contiguous `Item* args` plus `int argc`. Once the JS runtime
+dispatcher has received that span, it invokes the selected compiled wrapper
+through its fixed context ABI, so that wrapper ultimately receives individual
+formal operands. `Item* + argc` is therefore the dynamic JS call boundary,
+not the wrapper's final calling convention.
+
+A direct JS wrapper call is possible only as an optimization when the compiler
+can prove the target and preserve all dynamic call semantics. Core Lambda can
+use that path much more often because its statically resolved calls have a
+simpler, fixed language ABI.
+
+**Runtime execution of a JS call.** The JS runtime receives an `Item* args`
+and `argc`, resolves/calls the `JsFunction`, and retains the complete actual
+argument span for `arguments` and rest-parameter semantics. Generated JS
+functions use the context ABI and a dispatch table for up to 32 declared
+physical formal slots. Rest parameters materialize an array from surplus
+actual arguments, so actual argument count is not bounded by 32 except by
+ordinary integer and memory limits. A function declaring more than 32
+physical formals is currently rejected by the compiled context-ABI dispatcher;
+the legacy non-context dispatcher has a separate 16-slot boundary.
+
+**Native non-context JS callbacks.** The 16-slot non-context dispatcher is
+still live, but it is not the ABI used by ordinary source functions compiled
+by LambdaJS. JS MIR lowering creates those functions with `js_new_*_mir` and
+finalizes them with `JS_FUNC_FLAG_MIR_CONTEXT_ABI`, selecting the `Context*`
+wrapper ABI above. The non-context dispatcher serves C++ host callbacks
+created through `js_new_function`, `js_new_closure`, or
+`js_new_method_function` without the `_mir` suffix, including runtime-library
+functions and Jube/native-interface trampolines. Those callbacks do not take
+`Context*`; adding it would shift every operand. Its `P0` … `P16`
+function-pointer family accepts at most 16 user operands for an ordinary
+callback, or 15 for a closure because its captured-environment operand uses
+the first slot. It is therefore a native-adapter ABI boundary, not a general
+LambdaJS source-call limit.
+
+### Dynamic adapter spans
+
+The former `padded_args[32]` marshalling buffer has been retired. The adapter
+applies only to calls that cross the LambdaJS dynamic `Item* args + argc`
+boundary. A statically proven direct JS wrapper call continues to pass
+individual ABI operands and needs no adapter.
+
+The implementation separates two spans for every adapted dynamic invocation:
+
+- the immutable **source-actual span** and original `argc`, retained for
+  `arguments` and for the source-level call semantics;
+- the **invoke-adapter span**, the contiguous operands supplied to the selected
+  wrapper after missing-formal padding and/or rest-parameter transformation.
+
+When source actuals already have the wrapper shape, the adapter borrows the
+caller's active argument-suffix span directly. A generic native caller first
+copies source actuals into the generic dispatcher's exact root suffix, then
+borrows that suffix when the shape already matches. Missing-formal and rest
+calls get a dispatcher-owned exact-sized span of side-root-frame slots. In
+particular, a rest call keeps its original span intact for `arguments` and uses
+a distinct adapter span for its fixed operands plus the materialized rest
+array.
+
+The active generated suffix has only its source-actual extent; the dispatcher
+never assumes an adjacent slot belongs to it. Therefore this implementation
+does not reserve a speculative caller tail for a runtime-resolved dynamic
+target. A future tail optimization requires lowering to prove a named,
+call-owned exact extent; otherwise an adapted call stays on the exact owned
+span path.
+
+Adapter spans are precise GC roots and are destroyed in LIFO order with the
+dispatcher/callee frames. They are dynamically sized to the exact invocation;
+the design has no `Item[N]`, `MAX_ARGS`, or speculative per-call root
+reservation. The existing 32-formal context-wrapper and 16/15-formal native
+callback boundaries remain checked dispatch-ABI limits, not adapter-storage
+capacities. The complete implementation plan is
+`vibe/Lambda_Impl_JS_Dynamic_Arg.md`.
+
+### Fixed call-related arrays and limits
+
+The codebase also contains fixed C/C++ arrays in call paths. They are not one
+uniform language arity limit; their significance depends on whether the array
+is temporary compiler staging, a checked ABI boundary, optional specialization
+metadata, or a deliberately bounded API adapter.
+
+**Core Lambda.** The direct-local-call lowering arrays (`resolved_args`,
+`arg_ops`, `arg_vars`, `arg_root_slots`, and `call_ops`) each have 16 entries.
+This is the unsafe compiler-staging limit described above, rather than a MIR
+direct-call ABI limit. The system-function variadic fallback also uses a
+16-entry `arg_ops` staging array, so it must not silently discard actuals past
+that boundary. Native-function parameter/type-specialization records use
+16-entry metadata arrays, and MIR function-argument bookkeeping records up to
+32 register arguments; these are compiler analysis/tracking limits, not the
+dynamic `Function*` call ABI. Separately, context-ABI imported runtime helpers
+have an explicit eight-argument boundary, as does the dynamic `fn_call*`
+physical dispatcher (seven user arguments when a closure environment occupies
+one operand).
+
+**LambdaJS.** The ordinary generic JS call path has no corresponding
+16-element argument-array cap: its rooted argument suffix and `Item* + argc`
+boundary scale with the actual count. The compiled context-wrapper dispatcher
+checks a 32-declared-formal ABI limit but no longer allocates a 32-entry
+marshalling array; an adapted invocation reserves only its exact formal count.
+The legacy non-context function-pointer path has the separate 16/15
+native-callback limit described above. JS native
+typed-specialization metadata is limited to 16 parameters, but larger
+functions remain supported through the fully boxed path. In contrast,
+16-entry formal-name tables used for
+`arguments` aliasing and duplicate-formal checks can affect those semantics
+beyond the recorded formals and should be made scalable if large-formal JS
+functions are to be fully supported.
+
+Some runtime adapters intentionally bound *forwarded* callback arguments:
+diagnostic-channel helpers cap them at 16 (or 15 in one tracing callback
+shape), and timer/immediate handles retain up to eight extra callback
+arguments. These are API-specific forwarding limits, not limits on a normal
+JS function call. Likewise, many small arrays such as `Item args[2]` are
+fixed-arity calls to known internal helpers and do not constrain general
+calling.
+
+---
+
 *Future compilation-strategy ADRs (tiering, AOT/sealed-module boundaries,
 lane interactions) land here as LC2+.*
