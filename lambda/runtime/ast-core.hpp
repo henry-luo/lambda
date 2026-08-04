@@ -12,6 +12,7 @@ typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
 typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
+typedef struct _ArrayList ArrayList;
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -601,10 +602,6 @@ typedef struct FnCapture {
     struct FnCapture* next;
 } FnCapture;
 
-enum {
-    FN_PARAM_MAX_ALIASES = 8,
-};
-
 typedef struct FnParamEvidence {
     int evidence;
     int int_evidence;
@@ -612,8 +609,10 @@ typedef struct FnParamEvidence {
     int string_evidence;
     int other_evidence;
     int name_count;
-    char names[FN_PARAM_MAX_ALIASES][64];
-    int name_lens[FN_PARAM_MAX_ALIASES];
+    // String* entries contain the parameter binding followed by any aliases.
+    // The list is compiler-owned scratch state, so inference has no fixed
+    // alias count or source-name width.
+    ArrayList* names;
     bool used_as_container;
     bool compared_with_non_numeric;
     bool param_reassigned;

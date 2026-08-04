@@ -5,7 +5,6 @@
     {
       "in_func": "_guarded_load_#",
       "expect_seq": [
-        { "pattern": "call\tit2d_p, it2d" },
         { "pattern": "and\t{{r}}, {{r}}, 72057594037927935" },
         { "pattern": "mov\t{{r}}, u8:({{r}})" },
         { "pattern": "eq\t{{r}}, {{r}}, 18" },
@@ -24,7 +23,6 @@
       ],
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
-        { "pattern": "call\tit2d_p, it2d" },
         { "pattern": "call\tlambda_module_const_at_p" },
         { "pattern": "call\tfn_array_set_p, fn_array_set" }
       ]

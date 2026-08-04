@@ -1690,34 +1690,6 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     // Eval completion: Let V = undefined (spec §14.7.3.2)
     jm_eval_cptn_reset(mt);
 
-    // --- P4h: Hoist array metadata before while loop ---
-    JsMirVarEntry* p4h_hoisted_vars[16];
-    int p4h_hoisted_count = 0;
-    if (wh->body) {
-        char arr_names[16][64];
-        bool arr_unsafe[17] = {false};
-        int arr_count = 0;
-        jm_scan_subscript_arrays(wh->test, arr_names, arr_unsafe, &arr_count, 16);
-        jm_scan_subscript_arrays(wh->body, arr_names, arr_unsafe, &arr_count, 16);
-
-        for (int ai = 0; ai < arr_count && p4h_hoisted_count < 16; ai++) {
-            if (arr_unsafe[ai]) continue;
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%s", arr_names[ai]);
-            JsMirVarEntry* var = jm_find_var(mt, vname);
-            if (!var) continue;
-            if (var->in_scope_env) continue;
-            if (var->hoisted_data_reg) continue;
-
-            if (var->typed_array_type >= 0) {
-                // A typed-array descriptor caches handle-derived geometry/data;
-                // resize, detach, transfer, or COW inside the loop changes its
-                // generation, so each access must resolve instead of hoisting.
-                continue;
-            }
-        }
-    }
-
     jm_emit_label(mt, l_test);
 
     // Reload scope-env variables so the loop condition sees values updated by
@@ -1749,12 +1721,6 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     jm_emit_loop_backedge_frame_reload(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
     jm_emit_label(mt, l_end);
-
-    // P4h: clear hoisted array metadata
-    for (int hi = 0; hi < p4h_hoisted_count; hi++) {
-        p4h_hoisted_vars[hi]->hoisted_data_reg = 0;
-        p4h_hoisted_vars[hi]->hoisted_len_reg = 0;
-    }
 
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -1955,38 +1921,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         }
     }
 
-    // --- P4h: Hoist array metadata (data pointer + length) before the loop ---
-    // Scan the loop body for subscript array accesses (arr[idx]), then hoist
-    // the data pointer and length loads for typed arrays and regular arrays.
-    // This avoids reloading them from memory every iteration.
-    JsMirVarEntry* p4h_hoisted_vars[16];
-    int p4h_hoisted_count = 0;
-    if (for_node->body) {
-        char arr_names[16][64];
-        bool arr_unsafe[17] = {false};
-        int arr_count = 0;
-        // also scan test and update since they may reference arrays
-        jm_scan_subscript_arrays(for_node->test, arr_names, arr_unsafe, &arr_count, 16);
-        jm_scan_subscript_arrays(for_node->update, arr_names, arr_unsafe, &arr_count, 16);
-        jm_scan_subscript_arrays(for_node->body, arr_names, arr_unsafe, &arr_count, 16);
-
-        for (int ai = 0; ai < arr_count && p4h_hoisted_count < 16; ai++) {
-            if (arr_unsafe[ai]) continue; // variable is reassigned in loop body
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%s", arr_names[ai]);
-            JsMirVarEntry* var = jm_find_var(mt, vname);
-            if (!var) continue;
-            if (var->in_scope_env) continue; // captured by closure — reloaded each iteration
-            if (var->hoisted_data_reg) continue; // already hoisted by outer loop
-
-            if (var->typed_array_type >= 0) {
-                // Handle-backed data may change generation during the loop;
-                // per-access resolution is the required invalidation guard.
-                continue;
-            }
-        }
-    }
-
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_update = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -2079,12 +2013,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     jm_emit_loop_backedge_frame_reload(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
     jm_emit_label(mt, l_end);
-
-    // P4h: clear hoisted array metadata set by this loop
-    for (int hi = 0; hi < p4h_hoisted_count; hi++) {
-        p4h_hoisted_vars[hi]->hoisted_data_reg = 0;
-        p4h_hoisted_vars[hi]->hoisted_len_reg = 0;
-    }
 
     if (init_is_var && for_var_init_name[0]) {
         JsMirVarEntry* init_var = jm_find_var(mt, for_var_init_name);

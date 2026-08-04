@@ -416,8 +416,6 @@ void jm_collect_var_fields_walk(JsAstNode* node, const char* varname, int varlen
                                        char fields[][64], int* count, int max_fields);
 JsClassEntry* jm_match_class_from_fields(JsMirTranspiler* mt,
                                                   char fields[][64], int field_count);
-void jm_scan_subscript_arrays(JsAstNode* node, char names[][64], bool unsafe[],
-                                      int* count, int max_names);
 int jm_detect_typed_array_new(JsAstNode* rhs);
 int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len);
 TypeId jm_detect_ctor_field_type(JsAstNode* rhs);

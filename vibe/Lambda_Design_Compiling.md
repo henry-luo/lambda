@@ -237,19 +237,15 @@ ordinary integer and memory limits. A function declaring more than 32
 physical formals is currently rejected by the compiled context-ABI dispatcher;
 the legacy non-context dispatcher has a separate 16-slot boundary.
 
-**Native non-context JS callbacks.** The 16-slot non-context dispatcher is
-still live, but it is not the ABI used by ordinary source functions compiled
-by LambdaJS. JS MIR lowering creates those functions with `js_new_*_mir` and
-finalizes them with `JS_FUNC_FLAG_MIR_CONTEXT_ABI`, selecting the `Context*`
-wrapper ABI above. The non-context dispatcher serves C++ host callbacks
-created through `js_new_function`, `js_new_closure`, or
-`js_new_method_function` without the `_mir` suffix, including runtime-library
-functions and Jube/native-interface trampolines. Those callbacks do not take
-`Context*`; adding it would shift every operand. Its `P0` … `P16`
-function-pointer family accepts at most 16 user operands for an ordinary
-callback, or 15 for a closure because its captured-environment operand uses
-the first slot. It is therefore a native-adapter ABI boundary, not a general
-LambdaJS source-call limit.
+**Native non-context JS callbacks.** The old 16-slot non-context function
+pointer path remains as compatibility code, but it is not the ABI used by
+ordinary source functions compiled by LambdaJS. JS MIR lowering creates those
+functions with `js_new_*_mir` and finalizes them with
+`JS_FUNC_FLAG_MIR_CONTEXT_ABI`, selecting the `Context*` wrapper ABI above.
+Native host callbacks created through `js_new_function`, `js_new_closure`, or
+`js_new_method_function` are normalized through the shared Item-only hosted
+dispatcher. The retained non-context switch is therefore a wrapper/legacy
+compatibility boundary, not a general LambdaJS source-call limit.
 
 ### Dynamic adapter spans
 
@@ -301,10 +297,11 @@ metadata, or a deliberately bounded API adapter.
 This is the unsafe compiler-staging limit described above, rather than a MIR
 direct-call ABI limit. The system-function variadic fallback also uses a
 16-entry `arg_ops` staging array, so it must not silently discard actuals past
-that boundary. Native-function parameter/type-specialization records use
-16-entry metadata arrays, and MIR function-argument bookkeeping records up to
-32 register arguments; these are compiler analysis/tracking limits, not the
-dynamic `Function*` call ABI. Separately, context-ABI imported runtime helpers
+that boundary. Core source-analysis records use the intentional 16-slot
+`LAMBDA_MAX_FUNCTION_ARGS` limit, while JS formal metadata is dynamically
+sized. MIR function-argument bookkeeping records up to 32 register arguments;
+these are compiler analysis/tracking limits, not the dynamic `Function*` call
+ABI. Separately, context-ABI imported runtime helpers
 have an explicit eight-argument boundary, as does the dynamic `fn_call*`
 physical dispatcher (seven user arguments when a closure environment occupies
 one operand).
@@ -314,14 +311,10 @@ one operand).
 boundary scale with the actual count. The compiled context-wrapper dispatcher
 checks a 32-declared-formal ABI limit but no longer allocates a 32-entry
 marshalling array; an adapted invocation reserves only its exact formal count.
-The legacy non-context function-pointer path has the separate 16/15
-native-callback limit described above. JS native
-typed-specialization metadata is limited to 16 parameters, but larger
-functions remain supported through the fully boxed path. In contrast,
-16-entry formal-name tables used for
-`arguments` aliasing and duplicate-formal checks can affect those semantics
-beyond the recorded formals and should be made scalable if large-formal JS
-functions are to be fully supported.
+The retained legacy non-context function-pointer path has the separate
+16/15 compatibility limit described above. It is not a JS source-formal
+limit: JS parameter metadata and `arguments`/duplicate-formal bookkeeping are
+derived from the AST and dynamically sized.
 
 Some runtime adapters intentionally bound *forwarded* callback arguments:
 diagnostic-channel helpers cap them at 16 (or 15 in one tracing callback

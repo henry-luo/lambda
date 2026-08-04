@@ -39,8 +39,9 @@ policy. The general compilation and root-frame model remains documented in
   `RootSpan`; function/receiver state is rooted separately. The dispatcher
   materializes a second exact span only when optional/rest adaptation changes
   the operands. The hosted-native path borrows that source or adapter span
-  directly; it does not copy the effective arguments again. The old native
-  `physical_args[]` marshal buffer is retired from the active runtime.
+  directly; it does not copy the effective arguments again. This describes the
+  JS dynamic path; Core's legacy public-wrapper `fn_call_into` path still has
+  its separate fixed `physical_args[8]` marshalling ABI.
 - The sole native arity dispatcher supports 0 through 16 boxed Item operands.
   It checks entry kind, source signature, `var` parameters, context ownership,
   scalar-home metadata, and argument count before casting `ptr`.
@@ -56,7 +57,7 @@ policy. The general compilation and root-frame model remains documented in
 | Statically known call | Individual fixed ABI operands; native specialization is allowed | Individual wrapper operands when the target and semantics are proven |
 | Dynamic call boundary | Boxed `Item` operands dispatched through the shared 0–16 hosted/native thunk family | Contiguous `Item* args, int argc`, followed by JS adaptation and, for native targets, the same shared 0–16 thunk family |
 | Dynamic call of an unboxed/foreign entry | Rejected by explicit `FunctionEntryAbi` before the function pointer is cast | Not applicable to the JS generic boundary |
-| Argument adaptation storage | Exact precise-root spans; no native `physical_args[]` owner | Exact borrowed or owned adapter span; no `padded_args[]` |
+| Argument adaptation storage | Exact precise-root spans for dynamic dispatch; the public-wrapper compatibility path still uses its fixed 8-slot ABI marshal | Exact borrowed or owned adapter span; no `padded_args[]` |
 
 ## Unified parameter metadata (implemented)
 
@@ -181,12 +182,13 @@ optimization, or interop boundaries.
   `Item* args + argc` is dynamically sized and may contain more than 32 actuals
   when JS semantics permit it (for example, through rest handling).
 - **Shared hosted native callbacks:** Core Lambda, LambdaJS, and other hosted
-  languages must all use the shared 0–16 Item-in/Item-out dispatcher. The
-  active JS non-context `P0`...`P16` family has been retired; Core
-  `HOST_ADAPTER` calls and JS native callbacks now route through the common
-  helper. A hidden environment is normalized as an explicit Item by the
-  runtime-owned adapter/trampoline. This limit applies only when a call enters
-  a native hosted pointer, not to ordinary JS-to-JS source calls.
+  languages must all use the shared 0–16 Item-in/Item-out dispatcher. The JS
+  wrapper-specific `P0`...`P16` switches remain for compiled wrapper ABIs;
+  they are not a second hosted-native Item ABI. Core `HOST_ADAPTER` calls and
+  JS native callbacks route through the common helper. A hidden environment is
+  normalized as an explicit Item by the runtime-owned adapter/trampoline. This
+  limit applies only when a call enters a native hosted pointer, not to
+  ordinary JS-to-JS source calls.
 - **Core-to-JS export bridge:** the current bridge publishes only
   `js_call_export_0_into` through `js_call_export_8_into`. A Core-to-JS
   direct-symbol call with more than eight operands therefore remains an
@@ -203,22 +205,19 @@ optimization, or interop boundaries.
 - **JS constructor-shape inference:** constructor property metadata has 16
   slots. Discovering a 17th property disables this optimization; it does not
   limit the object's actual property count.
-- **JS P6/type-inference scratch state:** the migration removes the fixed
-  parameter/evidence/alias tables and uses AST-owned parameter records or
-  dynamically sized Lambda containers. Return inference still has at most 32
-  local-name slots (`local_names[32][128]`); that is an analysis-name limit,
-  not a JS call limit.
-- **Shared inference alias evidence:** `FnParamEvidence` keeps eight
-  64-character alias-name slots for the legacy evidence walker. This can
-  discard additional aliases during inference, but it does not cap JS formal
-  parameters or runtime calls; widening it is a separate analysis cleanup.
+- **JS P6/type-inference scratch state:** parameter records, evidence, aliases,
+  and return-inference names are AST-owned or dynamically sized. The former
+  `local_names[32][128]` table and the former eight-entry, 64-byte
+  `FnParamEvidence` alias table are retired; they no longer cap inference or
+  source names.
 - **MIR argument-register bookkeeping:**
   `MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS` is 32. It bounds emitter-side
   recording of incoming argument registers only; it is not a runtime ABI
   ceiling.
-- **Frozen legacy C transpiler:** the old named-argument reorder path keeps a
-  `MAX_PARAMS` 32-entry array. This applies to the legacy C transpiler path,
-  not MIR Direct.
+- **P4h loop-name scan:** the former `arr_names[16][64]` scanner and its
+  associated fixed hoisting state were dead scaffolding (the hoisted count was
+  never populated), so they were removed. Any future loop hoisting must retain
+  AST `String*` names or use a dynamically sized Lambda container.
 - **Closure analysis trackers:** JS closure read-back and TDZ trackers each
   have a 512-entry capacity, and tracked names are copied into 128-byte slots.
   The tracker clamps or reports overflow; this is not a limit on JS formal
@@ -248,9 +247,10 @@ buffer.
 
 The active JS implementation no longer contains a fixed `padded_args[]`,
 `arguments_param_names[16][128]`, or JS `physical_args[]` argument marshal
-buffer. Any old Core `physical_args[8]` occurrence is inside retired `#if 0`
-code and is not an execution-time limit. Adapter spans are exact-sized rooted
-spans.
+buffer. Core's `fn_call_into` compatibility path still contains
+`physical_args[8]`; that is the public MIR-wrapper ABI boundary, not the
+generic Core dynamic-call span. Adapter spans on the dynamic paths are
+exact-sized rooted spans.
 
 ## Why the runtimes differ
 
@@ -729,8 +729,9 @@ a runtime `argc`:
 It must live in one Lambda-owned runtime module. Core Lambda and LambdaJS
 provide thin language-specific façades that validate their own function
 objects, construct/borrow precise root spans, and then call this shared
-helper. No JS `P0`…`P16` implementation and no Core `HOST_ADAPTER` façade may
-own a second hosted-Item switch. Core's separate boxed Lambda ABI still has
+helper. JS wrapper-ABI `P0`…`P16` switches may remain for their generated
+`Context*`/result-home signatures, but they are not another hosted-Item
+switch. Core's separate boxed Lambda ABI still has
 its `Context*`/result-home operands and therefore remains an ABI-specific
 dispatcher rather than being cast through the hosted Item-only helper.
 
@@ -825,10 +826,10 @@ Core has no LambdaJS-style contiguous argument suffix, and the current
 future explicitly prerooted Core API may add borrowing, but the dispatcher
 must never infer it from pointer location or nearby side-root cells.
 
-This retires `physical_args[8]` as both capacity and temporary GC ownership.
-There is still a deliberate language maximum, but storage remains exact for
-the invocation; the maximum is not implemented as an unrooted `Item[MAX]`
-buffer.
+The JS dynamic path has no fixed `Item[MAX]` adapter buffer. Core's public
+`fn_call_into` compatibility path still marshals optional/rest wrapper calls
+through `physical_args[8]`; retiring that separate 8-slot wrapper ABI remains
+follow-up work and must not be confused with the dynamic-span design.
 
 All normal, error, raised-error, and allocation-failure exits restore side-root
 watermarks exactly. The function object, source list, adapter values, rest
@@ -941,19 +942,21 @@ Required boundary behavior:
    publisher and consumer to the named fields.
 3. Make the public variadic wrapper accept its rest slot as boxed `Item` and
    convert it to `List*` only inside the wrapper.
-4. Introduce the always-owned exact Core source/adapter-span helper and remove
-   `physical_args[8]`.
+4. Keep the exact Core source/adapter-span helper as the dynamic-call storage
+   authority. The separate public-wrapper `physical_args[8]` compatibility ABI
+   is still an open cleanup item; removing it requires changing that wrapper
+   ABI, not merely changing dynamic argument storage.
 5. Implement one shared `Item`-in/`Item`-out 0..16 hosted callback family,
    including the canonical index-sequence generator, typed invoker, and count
    switch. Route Core dynamic hosted calls and LambdaJS native-host calls
    through it. Keep Core's `Context*`/scalar-home boxed ABI on its own
    validated path; it is not a hosted callback and must not be reinterpreted
    as an Item-only function pointer.
-6. Move JS `P0`...`P16` and Core `HOST_ADAPTER` callbacks behind the shared
-   hosted helper. Reject unresolved dynamic named arguments and dynamic
-   `var`/`inout` signatures at the language façades. Delete displaced switches
-   and literal 7/8 limits while keeping direct MIR calls on their specialized
-   path.
+6. Route JS native-host and Core `HOST_ADAPTER` callbacks behind the shared
+   hosted helper. Retain the generated JS wrapper switches for their distinct
+   context/public ABIs. Reject unresolved dynamic named arguments and dynamic
+   `var`/`inout` signatures at the language façades. Keep direct MIR calls on
+   their specialized path.
 7. Add boundary, entry-kind rejection, forced-GC, default/rest, closure,
    procedure-mode, result-home, module, and cross-platform tests.
 8. Completed: Core Lambda and LambdaJS parameter metadata now use shared
