@@ -1,0 +1,21 @@
+function
+1 -1 0
+[]
+[[0,"same"]]
+[[0,"ab"],[1,"X"],[0,"c"]]
+[[0,"a"],[-1,"b"],[0,"c"]]
+[[0,"a"],[-1,"b"],[1,"x"],[0,"c"]]
+[[0,"hello "],[1,"brave "],[0,"world"]]
+[[0,"line "],[-1,"one"],[1,"1"],[0,"\nline two"]]
+[[0,"ab"],[1,"X"],[0,"c"]]
+[[-1,"hello"],[1,"goodbye"]]
+[[0,"The c"],[-1," "],[0,"at came."]]
+[[0,"A"],[-1,"😀"],[1,"\ud83d\ude03"],[0,"B"]]
+[[0,"function greet(name) {\n  const message = \"H"],[-1,"ello"],[1,"i"],[0,", \" + name;\n  return message;\n}\n"]]
+[[0,"const items = [1, 2, 3];\nconst total = items.reduce(sum, 0);\n"],[1,"console.log(total);\n"]]
+[[0,"for (var i = 0; i < items.length; i++) {\n  process(items[i]);\n"],[-1,"  log(i);\n"],[0,"}\n"]]
+[[0,"if (enabled) {\r\n  start();\r\n  "],[-1,"ren"],[1,"up"],[0,"d"],[1,"at"],[0,"e"],[-1,"r"],[0,"();\r\n}\r\n"]]
+[[1,"import { parse } from \"compiler\";\n\nexport function build(source) {\n  return parse(source);\n}\n"]]
+MULTILINE_SOURCE_CASES_OK
+ADVANCED_CASES_OK
+FAST_DIFF_DONE
