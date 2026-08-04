@@ -1,6 +1,17 @@
 # Lambda Int Boxing — Inline Ints in the `100` Octant via Sign-Bit Rotation
 
-- **Status:** **IMPLEMENTED 2026-08-02** — the **sign-bit rotation scheme (§2.10)** is live,
+> **SUPERSEDED AS INT DESIGN (2026-08-04).** The **v5 int53-total** design —
+> [`Lambda_Semantics_Int_Type.md`](Lambda_Semantics_Int_Type.md) — retires the
+> double-carrier `int` this document encodes: under v5 the native lane returns to
+> i64 and the boxed encoding is being re-decided (that doc §5.4; candidate (a)
+> revives 56-bit ALU packing, candidate (b) keeps this rotation form). This
+> document remains the **v4 record** and stays accurate for the implemented tree
+> until the v5 migration lands. Note: the rotation encoding is **int-only** — inline
+> floats are raw self-tagged bits (`lambda_float_ptr_to_item`), not rotated — so under
+> §5.4's packing option the scheme retires entirely; the vendored `MIR_ROTR` patch
+> merely becomes unused (kept, harmless).
+
+- **Status:** **IMPLEMENTED 2026-08-02** (v4; see superseded banner above) — the **sign-bit rotation scheme (§2.10)** is live,
   on the **rotate-insn patch to the vendored MIR (§4)**, which landed as `MIR_ROTR`. The **β
   exponent re-bias scheme (§2.5)** remains the recorded no-patch fallback and was not needed.
   Baseline `3717/3717`. The phase plan and its landing record live in
