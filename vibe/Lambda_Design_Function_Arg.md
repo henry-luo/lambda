@@ -35,9 +35,12 @@ policy. The general compilation and root-frame model remains documented in
   bit-fields. MIR Direct publishes every Core first-class function through its
   `_b` wrapper and marks it as a boxed function or procedure; raw direct JIT
   entries are not dynamically callable.
-- The dispatcher roots `[function, source actuals...]` in a `RootSpan`, then
-  materializes a second exact span only for optional/rest adaptation. The old
-  native `physical_args[]` marshal buffer is retired from the active runtime.
+- Each JS call entry normalizes non-prerooted actuals into one exact source
+  `RootSpan`; function/receiver state is rooted separately. The dispatcher
+  materializes a second exact span only when optional/rest adaptation changes
+  the operands. The hosted-native path borrows that source or adapter span
+  directly; it does not copy the effective arguments again. The old native
+  `physical_args[]` marshal buffer is retired from the active runtime.
 - The sole native arity dispatcher supports 0 through 16 boxed Item operands.
   It checks entry kind, source signature, `var` parameters, context ownership,
   scalar-home metadata, and argument count before casting `ptr`.
@@ -338,7 +341,8 @@ only the wrapper operands.
 
 - A non-rest call with enough actuals borrows the required prefix of the
   caller's active rooted argument suffix. A native caller is first copied into
-  the generic dispatcher's exact rooted source span.
+  the call entry's exact rooted source span (the generic and specialized
+  entries use the same rule).
 - Missing-formal padding, every rest transformation, and any source whose
   ownership is not proven use a new exact `RootSpan`. Missing operands become
   JS `undefined`; the rest array is installed in its adapter root before an
@@ -360,7 +364,8 @@ actual list.
 Before any allocating operation:
 
 - the function, receiver, and saved call state are precisely rooted;
-- non-prerooted native actuals are copied into an exact source root span; and
+- non-prerooted native actuals are copied into an exact source root span at
+  the call boundary; and
 - no GC-capable adapter value depends solely on a native C++ local or array.
 
 `js_pending_call_args` and `js_pending_call_argc` always describe the immutable

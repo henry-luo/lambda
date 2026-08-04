@@ -10232,20 +10232,9 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             native_count, LAMBDA_MAX_FUNCTION_ARGS);
         return ItemError;
     }
-    // The ordinary JS call frame roots its source arguments, but its borrowed
-    // pointer may still point at native-stack storage.  Give the hosted
-    // callback an exact contiguous span so a callback-triggered collection
-    // cannot invalidate the operands before the typed thunk loads them.
-    RootSpan hosted_roots((size_t)effective_count);
-    Item* native_args = effective_args;
-    if (effective_count > 0) {
-        native_args = js_root_span_items(hosted_roots);
-        if (!native_args) return ItemError;
-        for (int i = 0; i < effective_count; i++) native_args[i] = effective_args[i];
-    }
     Item env_item = (Item){.item = (uint64_t)(uintptr_t)fn->env};
     return lambda_hosted_item_invoke_by_count((void*)fn->func_ptr,
-        native_args, effective_count, fn->env != NULL, env_item);
+        effective_args, effective_count, fn->env != NULL, env_item);
 }
 
 static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
@@ -10269,16 +10258,11 @@ static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
 
 static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home, bool args_prerooted) {
-    if (!js_invoke_needs_adapter(fn, arg_count)) {
-        return js_invoke_fn_raw_or_async(fn, args, arg_count, scalar_result_home);
-    }
-
-    // Only an adapter can allocate before the wrapper begins. Preserve the
-    // ordinary call path's original argument span so `arguments` and eval keep
-    // their established call-boundary behavior for arity-compatible calls.
-    RootFrame invoke_roots(1);
-    Rooted<Item> fn_root(invoke_roots, (Item){.function = (Function*)fn});
-    RootSpan source_roots(args_prerooted ? 0 : (size_t)arg_count);
+    // Establish one exact source span for every non-prerooted entry. The
+    // wrapper, native callback, and `arguments` view must all borrow this same
+    // storage; per-item roots do not make the incoming Item* range movable.
+    RootSpan source_roots((args_prerooted || arg_count <= 0)
+        ? 0 : (size_t)arg_count);
     Item* source_args = args;
     if (!args_prerooted && arg_count > 0) {
         source_args = js_root_span_items(source_roots);
@@ -10287,8 +10271,19 @@ static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
             source_args[i] = args ? args[i] : ItemNull;
         }
     }
+    if (!js_invoke_needs_adapter(fn, arg_count)) {
+        return js_invoke_fn_raw_or_async(fn, source_args, arg_count,
+            scalar_result_home);
+    }
+
+    // Only the adapter can allocate before the wrapper begins. Root the
+    // function while default/rest lowering runs, and keep the source span
+    // immutable so `arguments` and eval retain the original actuals.
+    RootFrame invoke_roots(1);
+    Rooted<Item> fn_root(invoke_roots, (Item){.function = (Function*)fn});
     fn = (JsFunction*)fn_root.get().function;
-    return js_invoke_fn_raw_or_async(fn, source_args, arg_count, scalar_result_home);
+    return js_invoke_fn_raw_or_async(fn, source_args, arg_count,
+        scalar_result_home);
 }
 
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
@@ -14152,7 +14147,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_throw_range_error("Maximum call stack size exceeded");
         return ItemNull;
     }
-    int rooted_argc = !args_prerooted && args && arg_count > 0 ? arg_count : 0;
     if (args_prerooted && arg_count > 0 &&
         !lambda_side_root_contains_span(args, (size_t)arg_count)) {
         // Only the MIR frame-scope import may select this path; containment is
@@ -14160,7 +14154,22 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         log_error("js-call-prerooted: argument span is outside the live side-root range");
         return ItemError;
     }
-    RootFrame call_roots((size_t)(5 + rooted_argc));
+    // Normalize native callers at the call boundary. This makes the original
+    // `args` pointer itself an exact contiguous root span instead of merely
+    // keeping copies of its individual Items in unrelated root slots.
+    RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
+        ? (size_t)arg_count : 0);
+    if (!args_prerooted && arg_count > 0) {
+        Item* source_args = args;
+        Item* rooted_args = js_root_span_items(call_arg_roots);
+        if (!rooted_args) return ItemError;
+        for (int i = 0; i < arg_count; i++) {
+            rooted_args[i] = source_args ? source_args[i] : ItemNull;
+        }
+        args = rooted_args;
+        args_prerooted = true;
+    }
+    RootFrame call_roots(5);
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     // A nested call may collect before this dispatcher restores its caller
@@ -14170,12 +14179,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     Rooted<Item> saved_new_target_root(call_roots, js_new_target);
     Rooted<Item> saved_private_home_class_root(call_roots,
         js_current_private_home_class);
-    uint64_t** arg_roots = rooted_argc > 0
-        ? LAMBDA_ALLOCA(rooted_argc, uint64_t*) : NULL;
-    for (int i = 0; i < rooted_argc; i++) {
-        arg_roots[i] = call_roots.take_slot();
-        if (arg_roots[i]) *arg_roots[i] = args[i].item;
-    }
     // Calls can allocate while resolving proxies, binding `this`, or invoking
     // callbacks; native locals are invisible to precise GC during that work.
     func_item = func_root.get();
@@ -14872,12 +14875,19 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
         return ItemNull;
     }
 
-    // Callee and receiver are native locals across a body that may collect.
-    // Arguments arriving from a generated frame are already rooted there; the
-    // body still receives the caller's own array, exactly as the generic path
-    // does — these slots only keep the values reachable.
-    int rooted_argc = (!args_prerooted && N > 0) ? N : 0;
-    RootFrame call_roots((size_t)(5 + rooted_argc));
+    // Keep the specialized lane's source pointer under the same exact-root
+    // contract as the generic lane; individual root copies do not relocate
+    // the array that the compiled body receives.
+    RootSpan call_arg_roots((!args_prerooted && N > 0) ? (size_t)N : 0);
+    if (!args_prerooted && N > 0) {
+        Item* source_args = args;
+        Item* rooted_args = js_root_span_items(call_arg_roots);
+        if (!rooted_args) return ItemError;
+        for (int i = 0; i < N; i++) rooted_args[i] = source_args[i];
+        args = rooted_args;
+        args_prerooted = true;
+    }
+    RootFrame call_roots(5);
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     // The specialized lane shares the generic lane's nested-call invariant:
@@ -14886,10 +14896,6 @@ static Item js_call_entry_ordinary(Item func_item, Item this_val, Item* args,
     Rooted<Item> saved_new_target_root(call_roots, js_new_target);
     Rooted<Item> saved_private_home_class_root(call_roots,
         js_current_private_home_class);
-    for (int i = 0; i < rooted_argc; i++) {
-        uint64_t* slot = call_roots.take_slot();
-        if (slot) *slot = args[i].item;
-    }
     func_item = func_root.get();
     this_val = this_root.get();
 
