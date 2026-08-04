@@ -18,4 +18,5 @@ function
 [[1,"import { parse } from \"compiler\";\n\nexport function build(source) {\n  return parse(source);\n}\n"]]
 MULTILINE_SOURCE_CASES_OK
 ADVANCED_CASES_OK
+OFFICIAL_FAST_DIFF_TESTS_OK
 FAST_DIFF_DONE

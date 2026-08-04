@@ -1199,6 +1199,8 @@ function assert_valid_diff(old_text, new_text, diffs, label) {
   var rebuilt_old = "";
   var rebuilt_new = "";
   var previous_op = null;
+  var inserts_since_last_equality = 0;
+  var deletes_since_last_equality = 0;
 
   for (var i = 0; i < diffs.length; i++) {
     var tuple = diffs[i];
@@ -1222,9 +1224,26 @@ function assert_valid_diff(old_text, new_text, diffs, label) {
     var last_code = text.charCodeAt(text.length - 1);
     if ((first_code >= 0xdc00 && first_code <= 0xdfff) ||
         (last_code >= 0xd800 && last_code <= 0xdbff)) {
-      throw new Error(label + ": tuple splits a surrogate pair");
+      throw new Error(label + ": tuple splits a surrogate pair " + JSON.stringify(diffs));
     }
 
+    if (op === fast_diff.EQUAL) {
+      inserts_since_last_equality = 0;
+      deletes_since_last_equality = 0;
+    } else if (op === fast_diff.DELETE) {
+      if (deletes_since_last_equality) {
+        throw new Error(label + ": multiple deletes between equalities");
+      }
+      if (inserts_since_last_equality) {
+        throw new Error(label + ": delete follows insert");
+      }
+      deletes_since_last_equality++;
+    } else {
+      if (inserts_since_last_equality) {
+        throw new Error(label + ": multiple inserts between equalities");
+      }
+      inserts_since_last_equality++;
+    }
     if (op === fast_diff.EQUAL || op === fast_diff.DELETE) {
       if (!same_utf16_text(
         old_text.substring(old_pos, old_pos + text.length),
@@ -1253,6 +1272,18 @@ function verify_diff(old_text, new_text, cursor_pos, cleanup, label) {
   var result = fast_diff(old_text, new_text, cursor_pos, cleanup);
   assert_valid_diff(old_text, new_text, result, label);
   return result;
+}
+
+function assert_same_diff(actual, expected, label) {
+  if (actual.length !== expected.length) {
+    throw new Error(label + ": unexpected tuple count");
+  }
+  for (var i = 0; i < actual.length; i++) {
+    if (actual[i][0] !== expected[i][0] ||
+        !same_utf16_text(actual[i][1], expected[i][1])) {
+      throw new Error(label + ": unexpected diff " + JSON.stringify(actual));
+    }
+  }
 }
 
 function expect_diff(old_text, new_text, cursor_pos, cleanup, expected, label) {
@@ -1496,4 +1527,355 @@ for (var source_index = 0; source_index < complex_source_cases.length; source_in
 
 console.log("MULTILINE_SOURCE_CASES_OK");
 console.log("ADVANCED_CASES_OK");
+
+// === Tests 15-20: ported from the upstream fast-diff test.js ===
+function parse_fast_diff_spec(spec) {
+  var tuples = [];
+  if (!spec) {
+    return tuples;
+  }
+  var start = 0;
+  while (start < spec.length) {
+    var symbol = spec.charAt(start);
+    var end = start + 1;
+    while (end < spec.length && "+-=".indexOf(spec.charAt(end)) === -1) {
+      end++;
+    }
+    var operation = symbol === "+"
+      ? fast_diff.INSERT
+      : symbol === "-"
+      ? fast_diff.DELETE
+      : fast_diff.EQUAL;
+    tuples.push([operation, spec.substring(start + 1, end)]);
+    start = end;
+  }
+  return tuples;
+}
+
+function assert_fast_diff_case(old_text, new_text, cursor_pos, cleanup, expected, label) {
+  var actual = fast_diff(old_text, new_text, cursor_pos, cleanup);
+  assert_valid_diff(old_text, new_text, actual, label);
+  assert_same_diff(actual, expected, label);
+}
+
+function prepend_fast_diff_tuple(tuples, text) {
+  if (tuples.length > 0 && tuples[0][0] === fast_diff.EQUAL) {
+    return [[fast_diff.EQUAL, text + tuples[0][1]]].concat(tuples.slice(1));
+  }
+  return [[fast_diff.EQUAL, text]].concat(tuples);
+}
+
+function append_fast_diff_tuple(tuples, text) {
+  var last_tuple = tuples[tuples.length - 1];
+  if (last_tuple && last_tuple[0] === fast_diff.EQUAL) {
+    return tuples.slice(0, -1).concat([
+      [fast_diff.EQUAL, last_tuple[1] + text],
+    ]);
+  }
+  return tuples.concat([[fast_diff.EQUAL, text]]);
+}
+
+function shift_fast_diff_cursor(cursor_info, amount) {
+  if (typeof cursor_info === "number") {
+    return cursor_info + amount;
+  }
+  return {
+    oldRange: {
+      index: cursor_info.oldRange.index + amount,
+      length: cursor_info.oldRange.length,
+    },
+    newRange: {
+      index: cursor_info.newRange.index + amount,
+      length: cursor_info.newRange.length,
+    },
+  };
+}
+
+function run_fast_diff_cursor_case(data, case_index) {
+  var old_text = data[0];
+  var new_text = data[2];
+  var old_range = typeof data[1] === "number"
+    ? { index: data[1], length: 0 }
+    : { index: data[1][0], length: data[1][1] - data[1][0] };
+  var new_range = typeof data[3] === "number"
+    ? { index: data[3], length: 0 }
+    : data[3] === null
+    ? null
+    : { index: data[3][0], length: data[3][1] - data[3][0] };
+  if (new_range === null && typeof data[1] !== "number") {
+    throw new Error("invalid upstream cursor test " + case_index);
+  }
+  var cursor_info = new_range === null
+    ? data[1]
+    : { oldRange: old_range, newRange: new_range };
+  var expected = parse_fast_diff_spec(data[4]);
+
+  assert_fast_diff_case(
+    old_text,
+    new_text,
+    cursor_info,
+    false,
+    expected,
+    "upstream-cursor-" + case_index
+  );
+  assert_fast_diff_case(
+    "x" + old_text,
+    "x" + new_text,
+    shift_fast_diff_cursor(cursor_info, 1),
+    false,
+    prepend_fast_diff_tuple(expected, "x"),
+    "upstream-cursor-prepend-" + case_index
+  );
+  assert_fast_diff_case(
+    old_text + "x",
+    new_text + "x",
+    cursor_info,
+    false,
+    append_fast_diff_tuple(expected, "x"),
+    "upstream-cursor-append-" + case_index
+  );
+  assert_fast_diff_case(
+    old_text,
+    new_text,
+    cursor_info,
+    true,
+    expected,
+    "upstream-cursor-cleanup-" + case_index
+  );
+  assert_fast_diff_case(
+    "x" + old_text,
+    "x" + new_text,
+    shift_fast_diff_cursor(cursor_info, 1),
+    true,
+    prepend_fast_diff_tuple(expected, "x"),
+    "upstream-cursor-cleanup-prepend-" + case_index
+  );
+  assert_fast_diff_case(
+    old_text + "x",
+    new_text + "x",
+    cursor_info,
+    true,
+    append_fast_diff_tuple(expected, "x"),
+    "upstream-cursor-cleanup-append-" + case_index
+  );
+}
+
+// tests/test.js regression cases
+var upstream_fast_diff_regressions = [
+  ["GAATAAAAAAAGATTAACAT", "AAAAACTTGTAATTAACAAC"],
+  ["🔘🤘🔗🔗", "🔗🤗🤗__🤗🤘🤘🤗🔗🤘🔗"],
+  ["🔗🤗🤗__🤗🤘🤘🤗🔗🤘🔗", "🤗🤘🔘"],
+  ["🤘🤘🔘🔘_🔘🔗🤘🤗🤗__🔗🤘", "🤘🔘🤘🔗🤘🤘🔗🤗🤘🔘🔘"],
+  [
+    "🤗🤘🤗🔘🤘🔘🤗_🤗🔗🤘🤗_🤘🔗🤗🤘🔗🤘🤘🤘🔗🤗🔗🔗🔗🤗_🤘🔗🤗🤗🔘🤗🤗🤘🤗",
+    "_🤗🤘_🤘🤘🔘🤗🔘🤘_🔘🤗🔗🔘🔗🤘🔗🤘🤗🔗🔗🔗🤘🔘_🤗🤘🤘🤘__🤘_🔘🤘🤘_🔗🤘🔘",
+  ],
+  ["🔗🤘🤗🔘🔘🤗", "🤘🤘🤘🤗🔘🔗🔗"],
+  ["🔘_🔗🔗🔗🤗🔗", "🤘🤗🔗🤗_🤘🔘_"],
+];
+for (var regression_index = 0;
+     regression_index < upstream_fast_diff_regressions.length;
+     regression_index++) {
+  verify_diff(
+    upstream_fast_diff_regressions[regression_index][0],
+    upstream_fast_diff_regressions[regression_index][1],
+    null,
+    false,
+    "upstream-regression-" + regression_index
+  );
+}
+
+// tests/test.js cursor cases
+var upstream_fast_diff_cursor_cases = [
+  ["", 0, "", null, ""],
+  ["", 0, "a", null, "+a"],
+  ["a", 0, "aa", null, "+a=a"],
+  ["a", 1, "aa", null, "=a+a"],
+  ["aa", 0, "aaa", null, "+a=aa"],
+  ["aa", 1, "aaa", null, "=a+a=a"],
+  ["aa", 2, "aaa", null, "=aa+a"],
+  ["aaa", 0, "aaaa", null, "+a=aaa"],
+  ["aaa", 1, "aaaa", null, "=a+a=aa"],
+  ["aaa", 2, "aaaa", null, "=aa+a=a"],
+  ["aaa", 3, "aaaa", null, "=aaa+a"],
+  ["a", 0, "", null, "-a"],
+  ["a", 1, "", null, "-a"],
+  ["aa", 0, "a", null, "-a=a"],
+  ["aa", 1, "a", null, "-a=a"],
+  ["aa", 2, "a", null, "=a-a"],
+  ["aaa", 0, "aa", null, "-a=aa"],
+  ["aaa", 1, "aa", null, "-a=aa"],
+  ["aaa", 2, "aa", null, "=a-a=a"],
+  ["aaa", 3, "aa", null, "=aa-a"],
+  ["", 0, "", 0, ""],
+  ["", 0, "a", 1, "+a"],
+  ["a", 0, "aa", 1, "+a=a"],
+  ["a", 1, "aa", 2, "=a+a"],
+  ["aa", 0, "aaa", 1, "+a=aa"],
+  ["aa", 1, "aaa", 2, "=a+a=a"],
+  ["aa", 2, "aaa", 3, "=aa+a"],
+  ["aaa", 0, "aaaa", 1, "+a=aaa"],
+  ["aaa", 1, "aaaa", 2, "=a+a=aa"],
+  ["aaa", 2, "aaaa", 3, "=aa+a=a"],
+  ["aaa", 3, "aaaa", 4, "=aaa+a"],
+  ["a", 1, "", 0, "-a"],
+  ["aa", 1, "a", 0, "-a=a"],
+  ["aa", 2, "a", 1, "=a-a"],
+  ["aaa", 1, "aa", 0, "-a=aa"],
+  ["aaa", 2, "aa", 1, "=a-a=a"],
+  ["aaa", 3, "aa", 2, "=aa-a"],
+  ["a", 1, "", 0, "-a"],
+  ["aa", 1, "a", 0, "-a=a"],
+  ["aa", 2, "a", 1, "=a-a"],
+  ["aaa", 1, "aa", 0, "-a=aa"],
+  ["aaa", 2, "aa", 1, "=a-a=a"],
+  ["aaa", 3, "aa", 2, "=aa-a"],
+  ["aaa", 3, "aa", 0, "=aa-a"],
+  ["12345", [1, 2], "15", 1, "=1-234=5"],
+  ["12345", [1, 2], "a545", 1, "-123+a5=45"],
+  ["a", 0, "", 0, "-a"],
+  ["aa", 0, "a", 0, "-a=a"],
+  ["aa", 1, "a", 1, "=a-a"],
+  ["aaa", 0, "aa", 0, "-a=aa"],
+  ["aaa", 1, "aa", 1, "=a-a=a"],
+  ["aaa", 2, "aa", 2, "=aa-a"],
+  ["bob", 0, "bobob", null, "+bo=bob"],
+  ["bob", 1, "bobob", null, "=b+ob=ob"],
+  ["bob", 2, "bobob", null, "=bo+bo=b"],
+  ["bob", 3, "bobob", null, "=bob+ob"],
+  ["bob", 0, "bobob", 2, "+bo=bob"],
+  ["bob", 1, "bobob", 3, "=b+ob=ob"],
+  ["bob", 2, "bobob", 4, "=bo+bo=b"],
+  ["bob", 3, "bobob", 5, "=bob+ob"],
+  ["bobob", 2, "bob", null, "-bo=bob"],
+  ["bobob", 3, "bob", null, "=b-ob=ob"],
+  ["bobob", 4, "bob", null, "=bo-bo=b"],
+  ["bobob", 5, "bob", null, "=bob-ob"],
+  ["bobob", 2, "bob", 0, "-bo=bob"],
+  ["bobob", 3, "bob", 1, "=b-ob=ob"],
+  ["bobob", 4, "bob", 2, "=bo-bo=b"],
+  ["bobob", 5, "bob", 3, "=bob-ob"],
+  ["bob", 1, "b", null, "=b-ob"],
+  ["hello", [0, 5], "h", 1, "-hello+h"],
+  ["yay", [0, 3], "y", 1, "-yay+y"],
+  ["bobob", [1, 4], "bob", 2, "=b-obo+o=b"],
+];
+for (var cursor_case_index = 0;
+     cursor_case_index < upstream_fast_diff_cursor_cases.length;
+     cursor_case_index++) {
+  run_fast_diff_cursor_case(
+    upstream_fast_diff_cursor_cases[cursor_case_index],
+    cursor_case_index
+  );
+}
+
+// tests/test.js emoji cases
+var upstream_fast_diff_emoji_cases = [
+  ["🐶", "🐯", "-🐶+🐯"],
+  ["👨🏽", "👩🏽", "-👨+👩=🏽"],
+  ["👩🏼", "👩🏽", "=👩-🏼+🏽"],
+  ["🍏🍎", "🍎", "-🍏=🍎"],
+  ["🍎", "🍏🍎", "+🍏=🍎"],
+];
+for (var emoji_case_index = 0;
+     emoji_case_index < upstream_fast_diff_emoji_cases.length;
+     emoji_case_index++) {
+  var emoji_case = upstream_fast_diff_emoji_cases[emoji_case_index];
+  var emoji_expected = parse_fast_diff_spec(emoji_case[2]);
+  assert_fast_diff_case(
+    emoji_case[0],
+    emoji_case[1],
+    null,
+    false,
+    emoji_expected,
+    "upstream-emoji-" + emoji_case_index
+  );
+  assert_fast_diff_case(
+    "x" + emoji_case[0],
+    "x" + emoji_case[1],
+    null,
+    false,
+    prepend_fast_diff_tuple(emoji_expected, "x"),
+    "upstream-emoji-prepend-" + emoji_case_index
+  );
+  assert_fast_diff_case(
+    emoji_case[0] + "x",
+    emoji_case[1] + "x",
+    null,
+    false,
+    append_fast_diff_tuple(emoji_expected, "x"),
+    "upstream-emoji-append-" + emoji_case_index
+  );
+}
+
+// tests/test.js semantic cleanup cases
+var upstream_fast_diff_cleanup_cases = [
+  ["The came", "The cat came"],
+  ["The cat came", "The came"],
+  ["111xxxabc", "111defxxx"],
+  ["111xxxabcd", "111defxxx"],
+];
+for (var cleanup_case_index = 0;
+     cleanup_case_index < upstream_fast_diff_cleanup_cases.length;
+     cleanup_case_index++) {
+  verify_diff(
+    upstream_fast_diff_cleanup_cases[cleanup_case_index][0],
+    upstream_fast_diff_cleanup_cases[cleanup_case_index][1],
+    null,
+    true,
+    "upstream-cleanup-" + cleanup_case_index
+  );
+}
+
+// tests/test.js fuzz tests, made deterministic and bounded for the LJS suite.
+var upstream_fast_diff_seed = 24681357;
+function next_upstream_fast_diff_random() {
+  upstream_fast_diff_seed =
+    (upstream_fast_diff_seed * 48271) % 2147483647;
+  return upstream_fast_diff_seed / 2147483647;
+}
+function make_upstream_fast_diff_text(length) {
+  var alphabet = "GATTACA";
+  var result = "";
+  for (var i = 0; i < length; i++) {
+    result += alphabet.charAt(
+      Math.floor(next_upstream_fast_diff_random() * alphabet.length)
+    );
+  }
+  return result;
+}
+var upstream_fast_diff_iterations = 128;
+var upstream_fast_diff_strings = [];
+for (var string_index = 0;
+     string_index <= upstream_fast_diff_iterations;
+     string_index++) {
+  upstream_fast_diff_strings.push(make_upstream_fast_diff_text(100));
+}
+for (var fuzz_case_index = 0;
+     fuzz_case_index < upstream_fast_diff_iterations;
+     fuzz_case_index++) {
+  verify_diff(
+    upstream_fast_diff_strings[fuzz_case_index],
+    upstream_fast_diff_strings[fuzz_case_index + 1],
+    null,
+    false,
+    "upstream-fuzz-" + fuzz_case_index
+  );
+}
+for (var cursor_fuzz_index = 0;
+     cursor_fuzz_index < upstream_fast_diff_iterations;
+     cursor_fuzz_index++) {
+  var fuzz_old_text = upstream_fast_diff_strings[cursor_fuzz_index];
+  var fuzz_cursor = Math.floor(
+    next_upstream_fast_diff_random() * fuzz_old_text.length + 1
+  );
+  verify_diff(
+    fuzz_old_text,
+    upstream_fast_diff_strings[cursor_fuzz_index + 1],
+    fuzz_cursor,
+    false,
+    "upstream-fuzz-cursor-" + cursor_fuzz_index
+  );
+}
+console.log("OFFICIAL_FAST_DIFF_TESTS_OK");
 console.log("FAST_DIFF_DONE");
