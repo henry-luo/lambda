@@ -220,7 +220,6 @@ PyTranspiler* py_transpiler_create(void* host_execution) {
     tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "py.ast");
     tp->ast_arena = mem_arena_create(NULL, tp->ast_pool, MEM_ROLE_AST, "py.ast.arena");
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
-    tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
 
     // initialize Tree-sitter parser
@@ -258,9 +257,6 @@ void py_transpiler_destroy(PyTranspiler* tp) {
     }
     if (tp->ast_pool) {
         pool_destroy(tp->ast_pool);
-    }
-    if (tp->code_buf) {
-        strbuf_free(tp->code_buf);
     }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);

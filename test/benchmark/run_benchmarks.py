@@ -9,7 +9,7 @@ Consolidates: run_all_benchmarks.py, run_all_benchmarks_v3.py, run_js_benchmarks
 Modes:
   time      Measure execution time (default)
   memory    Measure peak resident set size (RSS)
-  mir-vs-c  Compare MIR Direct vs C2MIR transpiler
+  mir-vs-c  Compare MIR Direct vs native C2MIR reference ports
 
 Usage examples:
   python3 test/benchmark/run_benchmarks.py                          # Run ALL time benchmarks
@@ -20,7 +20,7 @@ Usage examples:
   python3 test/benchmark/run_benchmarks.py -b deltablue -n 5        # 5 runs per engine
   python3 test/benchmark/run_benchmarks.py -e mir,nodejs            # MIR + Node.js only
   python3 test/benchmark/run_benchmarks.py -m memory                # Peak RSS measurement
-  python3 test/benchmark/run_benchmarks.py -m mir-vs-c              # MIR Direct vs C2MIR
+  python3 test/benchmark/run_benchmarks.py -m mir-vs-c              # MIR Direct vs native C2MIR ports
   python3 test/benchmark/run_benchmarks.py -m mir-vs-c --typed      # Include typed R7RS variants
   python3 test/benchmark/run_benchmarks.py --list                   # List all benchmarks
   python3 test/benchmark/run_benchmarks.py --dry-run -b nbody       # Show what would run
@@ -1440,7 +1440,7 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
 
 
 # ============================================================
-# MIR-VS-C mode — MIR Direct vs C2MIR transpiler comparison
+# MIR-VS-C mode — MIR Direct vs native C2MIR reference-port comparison
 # ============================================================
 
 def mirc_run_benchmark(cmd, num_runs, timeout_s):
@@ -1478,7 +1478,7 @@ def med_us(times):
 
 
 def run_mirc_mode(benchmarks, num_runs, timeout_s, no_save, include_typed):
-    """Execute MIR-VS-C mode: compare MIR Direct vs C2MIR transpiler."""
+    """Execute MIR-VS-C mode against standalone native C2MIR ports."""
     timeout_s = max(timeout_s, 300)  # MIR-vs-C can be slow
 
     # Collect benchmark phases: list of (label, suite, name, category, script)
@@ -1517,7 +1517,7 @@ def run_mirc_mode(benchmarks, num_runs, timeout_s, no_save, include_typed):
         print("No benchmarks to run in MIR-vs-C mode.")
         return
 
-    print(f"\033[1mMIR Direct vs C2MIR Transpiler Benchmark Comparison\033[0m")
+    print(f"\033[1mMIR Direct vs Native C2MIR Benchmark Comparison\033[0m")
     print("=" * 80)
     print(f"  Benchmarks : {len(phases_c2mir)}")
     print(f"  Runs each  : {num_runs}")
@@ -1533,7 +1533,8 @@ def run_mirc_mode(benchmarks, num_runs, timeout_s, no_save, include_typed):
             label_groups[label] = []
         label_groups[label].append((suite, name, category, script))
 
-    # Run C2MIR phase
+    # Run the standalone C2MIR reference-port phase.  The Lambda frontend no
+    # longer accepts --c2mir; benchmark C sources are compiled by MIR's own c2m.
     c2mir_results = {}  # key = (label, name) -> median_us
     for label, items in label_groups.items():
         print(f"\033[1m{label.upper()} — C2MIR ({num_runs} runs)\033[0m")
@@ -1543,7 +1544,12 @@ def run_mirc_mode(benchmarks, num_runs, timeout_s, no_save, include_typed):
                 print(f"  {name:14s} SKIPPED (not found: {script})")
                 continue
             print(f"  {name:14s}", end="", flush=True)
-            times = mirc_run_benchmark(f"{LAMBDA_EXE} run --c2mir {script}", num_runs, timeout_s)
+            cmd, status = c2mir_command(suite, name)
+            if cmd is None:
+                c2mir_results[(label, name)] = 0
+                print(f"  SKIPPED ({status})")
+                continue
+            times = mirc_run_benchmark(cmd, num_runs, timeout_s)
             m = med_us(times)
             c2mir_results[(label, name)] = m
             print(f"  median={fmt_us(m):>10s}")
@@ -1571,7 +1577,7 @@ def run_mirc_mode(benchmarks, num_runs, timeout_s, no_save, include_typed):
 
     for label, items in label_groups.items():
         print(f"\033[1m{label.upper()} RESULTS\033[0m")
-        print(f"{'Benchmark':14s} {'Category':10s} {'C2MIR':>12s} {'MIR Direct':>12s} {'MIR/C':>8s}")
+        print(f"{'Benchmark':14s} {'Category':10s} {'C2MIR port':>12s} {'MIR Direct':>12s} {'MIR/C':>8s}")
         print(f"{'-' * 14} {'-' * 10} {'-' * 12} {'-' * 12} {'-' * 8}")
 
         group_ratios = []
@@ -1649,7 +1655,7 @@ def main():
 Modes:
   time      Measure execution time across all engines (default)
   memory    Measure peak resident set size (RSS) via /usr/bin/time
-  mir-vs-c  Compare MIR Direct vs C2MIR transpiler (wall-clock μs)
+  mir-vs-c  Compare MIR Direct vs native C2MIR ports (wall-clock μs)
 
 Examples:
   %(prog)s                                 Run ALL time benchmarks
@@ -1724,7 +1730,7 @@ Examples:
 
     # Engine handling
     if mode == "mir-vs-c":
-        engines = ["mir", "c2mir"]  # Only these two are relevant
+        engines = ["mir", "c2mir"]  # Only these two reference engines are relevant
     elif args.engines:
         engines = [e.strip().lower() for e in args.engines.split(",")]
         for eng in engines:
