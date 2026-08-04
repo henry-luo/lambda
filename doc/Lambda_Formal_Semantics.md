@@ -146,83 +146,18 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
 
 ## 4. Numerics
 
-**The poison symmetry (C16, revised 2026-08-03).** The organizing principle of
-this section: **every unbounded numeric domain is closed and total with its own
-poison; classification flows up, checks only guard the way down.** Concretely:
-`float`, `int`, `integer`, and `decimal` each close their arithmetic with an
-`inf`/`nan` pair; every nan is unequal to everything, itself included; a value —
-poison included — is a member of every superdomain on the `⊑` chain, so widening
-never checks, while narrowing boundaries verify domain membership (§11.4). Only
-the sized machine ints stand outside the symmetry: bounded, wrapping,
-poison-free.
+**The poison symmetry (C16).** The organizing principle of this section: **every
+unbounded numeric domain is closed and total with its own poison; classification
+flows up, checks only guard the way down.** `float`, `int`, `integer`, and
+`decimal` each close their arithmetic with an `inf`/`nan` pair; every nan is
+unequal to everything, itself included. Only the sized machine ints stand
+outside the symmetry: bounded, wrapping, poison-free.
 
-**`int` and `float` share one poison, spelled `inf` and `nan`.** They are the
-ordinary IEEE values, stored inline exactly as `float` stores them — there is no
-separate `int` representation and no `int.inf`/`int.nan` syntax. `decimal`
-(which also carries `integer`) keeps its own, spelled `decimal.inf` /
-`decimal.nan`. So there are **two** poison identities, not four.
-
-Consequences, all deliberate:
-
-| | |
-|---|---|
-| `type(nan)`, `type(inf)` | **`int`** — a value shared across domains types as its narrowest, the same convention that makes `type(1)` be `int` |
-| `nan is int` | **true** |
-| `nan is float` | true — unchanged; `int ⊑ float`, so anything accepting `float` still accepts it |
-| `type(1.0 + nan)` | **`int`** — a float computation's poison types as int; sound under the lattice, visible only through `type()` |
-| `let x: int = <float nan>` | **admitted** |
-
-That last row is the one thing traded. An earlier revision made poison classify
-strictly upward — `int.nan is float` true but `nan is int` false — so a foreign
-nan was rejected when narrowing into `int`. With one representation there is no
-foreign nan to reject, and that guard is retired.
-
-*Why the trade is worth it.* A hand-rolled `int` poison has to be recognized
-everywhere a number is handled: 45 call sites convert an int Item to `int64_t`,
-and **each silently destroys nan-ness** — a sentinel goes in, an ordinary
-integer comes out, with nothing to mark the loss. That is not hypothetical: it
-produced `int.nan == int.nan` returning *true* (the numeric comparison lowered
-the operand through one of those conversions, so its `isnan` guard never saw
-it), and the same root caused boxed int arithmetic to compute in `int64`. With
-the IEEE values inline, comparisons come out unordered, arithmetic propagates,
-and `isnan` works — from the hardware, at every one of those sites, for free.
-Retiring one narrowing guard buys back an invariant that could otherwise be
-dropped in 45 places.
-
-*Where the `int` classification applies.* `type(nan)` being `int` is a claim
-about the **surface** — what `type()` and `is` report to a Lambda program. It is
-deliberately **not** a claim about the internal tag an implementation reads to
-decide how to decode an `Item`: poison is physically a double, and the decoder
-must say so, or every integer-lowering path receives a nan it was never written
-to expect. Conflating the two is not a small error. LambdaJS alone has 423 sites
-that test for an int tag and then lower through an int conversion — including
-`js_is_symbol()`, where a nan misread as an integer compares against the symbol
-base and a `NaN` becomes a `Symbol`. The seam belongs at `type()`/`is`, which
-are two functions, not at the decoder, which is thousands of call sites.
-
-*The `float` mapping for guest languages.* A guest whose numeric type is IEEE
-double maps that type to Lambda **`float`**, not to `int` and not to the
-abstract `number` supertype. JavaScript has exactly one numeric type, so
-`typeof NaN` is `"number"` and `typeof 1` is `"number"`: the int tag a guest
-uses for integral values is a representation fast path with no surface meaning.
-Lambda saying `type(nan)` is `int` while JS says `"number"` is not a
-contradiction — the two languages classify the same shared value under their own
-type systems, which is exactly what the shared representation is for.
-
-*History — `int.inf` / `int.nan`, C16 original through 2026-08-03.* The retired
-design gave **each of four** poison-bearing domains its own pair, spelled
-`int.inf` / `-int.inf` / `int.nan`, `integer.inf` / `integer.nan`,
-`decimal.inf` / `decimal.nan`, alongside float's bare `inf` / `nan`. Its
-organizing rules were: *same-signed infinities are one value across all four*,
-but *nans are always private* — each belonging to its origin domain alone — and
-*classification flows strictly upward*, so `int.nan is float` was true while
-`nan is int` was false, which is what let a narrowing boundary reject a foreign
-nan. Representationally `int`'s three poisons were **sentinel patterns on the
-`LMD_TYPE_INT` tag byte** (payloads 3, 4, 5), because the rotation encoding maps
-a double's bits into an octant that IEEE's own `inf`/`nan` fall outside of.
-Retired because the sentinel had to be re-recognized at every site that touches
-a number, which it was not; the `int.inf`/`int.nan` spellings no longer parse or
-print.
+> **The int-specific treatment has moved.** The full poison-symmetry section —
+> the `int`/`float` inf/nan merge and its consequence table, the surface/decoder
+> seam, the guest-language `float` mapping, and the `int.inf`/`int.nan` history —
+> is maintained in [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.1, now the authority on the `int` type (its
+> v1–v5 design history and the active v5 design).
 
 **Where poison comes from — interior versus ingress (C17).** Poison arises
 *only inside number math*: a computed zero divisor, saturation at the
@@ -238,92 +173,20 @@ where a value came from, not from a list of exceptions. [C14c, C17]
 
 ### 4.1 The two-tier integer model
 
-- **Flex `int`** — **C16 (2026-08-01), superseding this tier's promotion arm of
-  C3**: the integers exactly representable in IEEE binary64 — every integer in
-  the contiguous band **±(2⁵³ − 1)** (JavaScript's safe-integer bound) plus the
-  sparse representable integers beyond it — extended by the closure points
-  `inf`, `-inf`, and `nan`, which `int` **shares with `float`** as the ordinary
-  IEEE values (see the poison symmetry above; there is no `int.inf`/`int.nan`
-  spelling). `int` is otherwise a **distinct runtime type, not a hint erased
-  into float**: `type()`, printing, `is`, and the validator keep the int/float
-  distinction for ordinary values, and float contact still yields float (§4.3).
-  Arithmetic (`+`, `-`, `*`, `div`, `%`) is correctly-rounded binary64
-  arithmetic, **closed and total over the domain**: exact within the contiguous
-  band, correctly rounded above it, saturating to `±inf` where the value can no
-  longer be carried as an int (§4.9). **There is no overflow promotion — int
-  arithmetic never changes type.** Negation and `abs` are total (the domain is
-  symmetric). Poison behaves as elsewhere: `nan is int` → true (§5.1's
-  "unequal, not untypeable"), and every nan is unequal to everything including
-  itself. Same-signed infinities are **one value across every poison-bearing
-  domain** (`inf == decimal.inf`). Classification runs *up* the `⊑` chain —
-  `nan is float` → true — and, since `int` and `float` now share one poison
-  representation, `nan is int` is true as well; the narrowing rejection of a
-  foreign nan retires with the distinction it guarded. The `is` lattice is
-  total over full domains, poison included: **`i32 ⊑ int ⊑ integer`** (and onward to
-  `decimal`), `int ⊑ float` definitionally; **`int ∥ int64`** — sparse int
-  values exceed the int64 range, and odd int64 values above 2⁵³ are not int.
-- **Machine ints** (`i8`…`i64`, `u8`…`u64`): Go-aligned — runtime overflow
-  **wraps** (two's complement); constant/literal overflow is a **compile
-  error**; division by zero yields the entered domain's poison per C14c/C16
-  (`i8 div 0` → `inf`, `i64 div 0` → `integer.inf` — a deliberate
-  divergence from Go's panic; number math stays in number). Ordinary machine
-  arithmetic wraps; `div` and `%` leave the machine lane under §4.7 rather
-  than applying a machine `MinInt div -1` rule.
-
-*Rationale.* `int ⊂ float64` is definitional, not an embedding theorem: an int
-*is* a binary64 value that happens to be integral, so the JIT holds ints in
-double registers with zero observable difference (P6) and LambdaJS's numeric
-model coincides with Lambda's. Totality is the point: `int ⊕ int : int` is a
-*true* statement of inference rather than an approximation with a runtime
-escape; an `int` annotation can never introduce a runtime failure into all-int
-arithmetic (annotations stay monotone); and TE-15's containment edges retreat
-to genuine casts and parses. The deliberate cost is precision, not domain:
-computed results above 2⁵³ may round silently. The guideline that pays for it:
-values that must be exact *and* may exceed the band belong in `i64`, `integer`,
-or `decimal` — and §4.2 routes parsed data there already, so inexactness can
-enter computed values only, never ingested ones. Rejected alternatives: the
-historical 53-bit band with float promotion (made every declared-int boundary
-a deferred runtime check and int arithmetic untypable as int); automatic
-overflow into `integer` (C3's original rejection stands); erasing int into
-float entirely (loses the type/format/validator distinctions data processing
-needs). [C3 (historical), C16]
+> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.2 (the v4 record; the v5 design is §3/§5 of that doc).
+> In brief: flex **`int`** is a distinct runtime type, closed and total under
+> arithmetic, with `i32 ⊑ int ⊑ integer` and `int ∥ int64`; **machine ints**
+> (`i8`…`u64`) are Go-aligned — runtime overflow wraps, literal overflow is a
+> compile error, division by zero yields the entered domain's poison per §4.7.
 
 ### 4.2 Literals are strict; data always fits
 
-- **Which unsuffixed spellings are `int` is lexical, never value-selected**
-  (the same rule as the `n` suffix): a numeric literal is `int` iff it has
-  **no decimal point and no exponent**. `10`, `0x1F` are `int`; `10.`, `10.0`,
-  `10.e1`, `10e1` and `10e-1` are `float`. (C16, revised)
-  - An **exponent makes the literal a float**, matching every language that
-    distinguishes the two — C, C++, Java, C#, Python, Go, Rust, Swift, Kotlin,
-    Ruby, PHP, Lua and Scheme all type `1e2` as floating-point, and none admits
-    an exponent in an integer literal. An earlier revision of C16 split the
-    exponent by sign so `10e1` was `int`; that made `1e16` and `1e100`
-    **compile errors** while the identical `1.0e16` compiled, a distinction no
-    other language draws and one that forced a `.0` on ordinary magnitudes.
-  - Conceding the convention costs nothing here, which is why it is conceded:
-    `int` is the float64-representable integers, a **subset** of float admitted
-    by membership (§4.1), so `let n: int = 1e2` still binds 100 as an `int`,
-    and `xs[1e0]` still indexes. Only `type(1e2)` changes, from `int` to
-    `float` — and it now agrees with Python and Go.
-- An unsuffixed `int`-form literal outside the contiguous band **±(2⁵³ − 1)**
-  is a **compile error** — never a silent conversion, and **even where the
-  value is sparsely representable** (`18014398509481984` = 2⁵⁴ errors although
-  it is a valid `int` value): a literal of that magnitude expresses
-  `i64`/`integer` intent, and admitting only the contiguous band keeps the
-  rule teachable (C16). The band applies to the **integer spelling only**: a
-  literal with an exponent is a float and has no band, so `1e16` and `1e100`
-  are ordinary float literals. Suffixes (`i64`, `u64`, sized
-  numeric suffixes, `n`, `m`, float form) express intent explicitly. The suffix alone names the type: `n` is `integer`
-  always (`1n`, `1e3n`), `m` is `decimal` always (`100m`, `1.5m`, `1.5e-2m`).
-  A fractional or negative-exponent spelling with `n` (`1.0n`, `1e-3n`) is a
-  **compile error** naming `m` — `n` requires an integer-valued spelling.
-- **Data cannot be rejected**: input parsers place integer tokens in the
-  smallest exact home — `int` iff within ±(2⁵³ − 1), else `int64`, else
-  `decimal` — never silently in float. The `int` home is the contiguous band,
-  not the sparse representability test: ingestion stays deterministic, and
-  large exact values (64-bit IDs, epoch nanoseconds) keep exact carriers.
-  [C3, C13, C16]
+> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.3. In brief: a numeric literal is `int` iff it has no
+> decimal point and no exponent (`1e2` is float); an unsuffixed int-form literal
+> outside ±(2⁵³ − 1) is a compile error; suffixes (`n`, `m`, sized) name types
+> explicitly; input parsers place integer tokens in the smallest exact home
+> (`int`, else `int64`, else `decimal`) — data is never rejected and never
+> silently placed in float.
 
 ### 4.3 Mixed-operation promotion lattice
 
@@ -491,70 +354,17 @@ contrast Python's flooring — relevant when modeling guest languages).
 
 ### 4.8 `int` ranges are band-limited; use `integer` beyond
 
-An `int` range `a to b` requires its bounds to lie within **±(2⁵³ − 1)**;
-outside that, it is an **out-of-range error**. A range over larger values is
-written with `integer` bounds — `1n to N`.
-
-*Rationale.* This is not a conservative approximation of what `int` can hold —
-it is exactly where a range of ints is **meaningful**. A range is a sequence of
-consecutive integers, so it needs a well-defined successor: `x + 1` must differ
-from `x`. In binary64 that holds precisely up to 2⁵³. Above it the spacing
-between representable values exceeds 1, so consecutive integers no longer all
-exist, and "the range from `a` to `b`" stops denoting a sequence at all.
-
-The failure is silent rather than loud, which is what makes the rule worth
-stating. At 2⁷⁰ the spacing is 2¹⁸, so:
-
-```
-let big = 4503599627370496 * 262144   // 2^70, a perfectly valid `int`
-big + 2 == big                        // true -- 2 is below the spacing
-len(big to big + 2)                   // 1, not 3
-```
-
-Nothing here is a bug: every step is correct binary64 arithmetic, and `len`
-correctly reports a one-element range. That is the point — an out-of-range
-error at the range boundary converts an answer that is *quietly wrong for the
-user's intent* into one the language refuses to guess at.
-
-`int` keeps its full domain elsewhere; only ranges are band-limited, because
-only ranges depend on successor. Where genuinely large sequences are wanted,
-`integer` is exact at every magnitude and `1n to N` says so. [C16, 2026-08-03]
+> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.4. In brief: an `int` range `a to b` requires bounds
+> within ±(2⁵³ − 1) — beyond that spacing exceeds 1, successor is undefined, and
+> the range is an out-of-range error; write `1n to N` with `integer` bounds
+> instead.
 
 ### 4.9 `int` overflow saturates to `±inf`, following IEEE
 
-An `int` operation whose result cannot be carried as an `int` returns
-**`±inf`**, keeping the sign. `nan` is *not* used for overflow.
-
-*Rationale — this is IEEE's own distinction, not a new rule.* Binary64 already
-separates the two cases, and Lambda's float arithmetic inherits it:
-
-| | |
-|---|---|
-| `1.0e308 * 10.0` | `inf` — **overflow** |
-| `-1.0e308 * 10.0` | `-inf` — sign preserved |
-| `0.0 * inf` | `nan` — **invalid**, no value exists |
-| `inf - inf` | `nan` — invalid |
-
-Overflow has a definite sign and direction: the answer is larger than anything
-representable, which `inf` states exactly. `nan` means *no answer exists*, and
-using it for overflow would throw away the sign and make a merely-too-large
-value unordered with everything — when in truth it is greater than every finite
-value. `int` follows the same split: saturation gives `±inf`, while the
-indeterminate forms (`0 * inf`, `inf - inf`) give `nan`.
-
-**`int` saturates earlier than `float`, and that is an encoding property, not a
-domain one.** A `float` overflows only past ≈1.8 × 10³⁰⁸ (2¹⁰²⁴); an `int` Item
-can carry magnitudes below **2²⁵⁷** (≈2.3 × 10⁷⁷), because that is the range the
-tagging scheme reserves for the int lane (`Lambda_Type_Int_Boxing.md` §2.10). So
-the same product may be a finite `float` and an `inf`. The two domains close
-at different points; both close.
-
-*Consequence: `int` arithmetic is closed in `int`.* `int * int` is an `int` at
-every magnitude — a value, or `±inf`, or `nan`, never something else.
-This supersedes the encoding's one accepted wart: results at or above 2²⁵⁷ used
-to leave the int lane and read back as `float`, so an `int` could silently
-become a `float` by growing. It now saturates instead, and the type is stable
-under arithmetic. [C16, 2026-08-03]
+> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.5. In brief: an `int` result that cannot be carried as
+> an `int` returns sign-preserving `±inf` (never `nan`, which is reserved for
+> indeterminate forms like `0 * inf` and `inf - inf`); `int` arithmetic is
+> closed in `int` at every magnitude.
 
 ---
 
