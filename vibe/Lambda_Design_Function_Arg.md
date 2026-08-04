@@ -15,6 +15,11 @@
   one shared, dynamically sized parameter-type/representation model. This is
   a compiler metadata migration and does not change either language's call
   semantics or argument limits.
+- **Unified hosted native ABI:** implemented for Core Lambda and LambdaJS.
+  Core dynamic hosted calls and JS native-host calls use one shared
+  Item-in/Item-out C++ function-pointer dispatcher. The shared dispatcher has
+  one fixed arity ceiling, `LAMBDA_MAX_FUNCTION_ARGS` (16), for every hosted
+  language. JS-specific call semantics remain above this ABI boundary.
 
 This document consolidates the implemented LambdaJS design from
 `Lambda_Impl_JS_Dynamic_Arg.md` and defines the corresponding Core Lambda
@@ -43,10 +48,10 @@ policy. The general compilation and root-frame model remains documented in
 
 | Concern | Core Lambda | LambdaJS |
 |---|---|---|
-| Source actual-argument count | At most `LAMBDA_MAX_FUNCTION_ARGS` (16) | Dynamic `Item* + argc` span has no fixed capacity |
-| Declared function parameters | At most 16 physical user slots | Context wrapper: 32 formals; native non-context wrapper: 16, or 15 with an environment |
+| Source actual-argument count | At most `LAMBDA_MAX_FUNCTION_ARGS` (16) | JS-to-JS `Item* + argc` span has no fixed capacity; a native hosted target is limited to the shared 16-Item ABI |
+| Declared function parameters | At most 16 physical user slots | JS source formals remain dynamically represented; internal context wrappers may have 32 physical formals, while hosted native callbacks accept at most 16 explicit Item operands |
 | Statically known call | Individual fixed ABI operands; native specialization is allowed | Individual wrapper operands when the target and semantics are proven |
-| Dynamic call boundary | Boxed `Item` operands dispatched through one arity-checked C++ thunk family | Contiguous `Item* args, int argc`, followed by wrapper adaptation |
+| Dynamic call boundary | Boxed `Item` operands dispatched through the shared 0–16 hosted/native thunk family | Contiguous `Item* args, int argc`, followed by JS adaptation and, for native targets, the same shared 0–16 thunk family |
 | Dynamic call of an unboxed/foreign entry | Rejected by explicit `FunctionEntryAbi` before the function pointer is cast | Not applicable to the JS generic boundary |
 | Argument adaptation storage | Exact precise-root spans; no native `physical_args[]` owner | Exact borrowed or owned adapter span; no `padded_args[]` |
 
@@ -54,8 +59,11 @@ policy. The general compilation and root-frame model remains documented in
 
 `TypeId` is already the common semantic type used by Core Lambda and
 LambdaJS. There must not be a second JS-only parameter-type vocabulary or a
-JS replacement for `LAMBDA_MAX_FUNCTION_ARGS`; that constant remains a Core
-Lambda language/ABI rule only.
+second native-call limit. `LAMBDA_MAX_FUNCTION_ARGS` is the shared 16-slot
+native C/C++ calling limit for Core Lambda, LambdaJS, and any other hosted
+language. It is a Core Lambda source-language limit as well. JavaScript's
+generic JS-to-JS `Item* + argc` boundary remains dynamically sized; the shared
+limit applies when that boundary ends at a native hosted function pointer.
 
 ### Shared records
 
@@ -157,9 +165,10 @@ parameter.
 
 ## Remaining fixed implementation limits
 
-The Core Lambda ceiling of `LAMBDA_MAX_FUNCTION_ARGS` is intentional language
-design and is not repeated here as a migration target. The following limits are
-still hard-coded implementation, optimization, or interop boundaries.
+`LAMBDA_MAX_FUNCTION_ARGS` (16) is an intentional language ceiling for Core
+Lambda and the shared native hosted ABI. It is not a JS generic `Item* + argc`
+source-span ceiling. The following limits are still hard-coded implementation,
+optimization, or interop boundaries.
 
 ### Runtime ABI boundaries
 
@@ -168,12 +177,13 @@ still hard-coded implementation, optimization, or interop boundaries.
   C++ wrapper dispatcher. This does not cap the generic JS source-actual span:
   `Item* args + argc` is dynamically sized and may contain more than 32 actuals
   when JS semantics permit it (for example, through rest handling).
-- **LambdaJS legacy native callbacks:** the non-context `P0`...`P16`
-  function-pointer family accepts at most 16 Item operands, or 15 user
-  operands when a closure environment occupies one operand. This applies to
-  host callbacks created through the non-MIR `js_new_function`/
-  `js_new_closure`/
-  `js_new_method_function` path, not ordinary generated JS source functions.
+- **Shared hosted native callbacks:** Core Lambda, LambdaJS, and other hosted
+  languages must all use the shared 0–16 Item-in/Item-out dispatcher. The
+  active JS non-context `P0`...`P16` family has been retired; Core
+  `HOST_ADAPTER` calls and JS native callbacks now route through the common
+  helper. A hidden environment is normalized as an explicit Item by the
+  runtime-owned adapter/trampoline. This limit applies only when a call enters
+  a native hosted pointer, not to ordinary JS-to-JS source calls.
 - **Core-to-JS export bridge:** the current bridge publishes only
   `js_call_export_0_into` through `js_call_export_8_into`. A Core-to-JS
   direct-symbol call with more than eight operands therefore remains an
@@ -183,9 +193,10 @@ still hard-coded implementation, optimization, or interop boundaries.
 ### Compiler and optimization metadata
 
 - **JS native specialization metadata:** the unified parameter records are
-  dynamically sized by the actual formal count. No JS formal-count
-  limit is introduced by Core Lambda's `LAMBDA_MAX_FUNCTION_ARGS`; unsupported
-  native shapes may still select the boxed JS entry.
+  dynamically sized by the actual formal count. The shared 16-Item ceiling is
+  enforced at the native hosted boundary; it does not cap JS source formals or
+  generic JS `Item* + argc` calls. Unsupported native shapes must select a
+  boxed/adapted JS entry or report the native-ABI limit before a pointer call.
 - **JS constructor-shape inference:** constructor property metadata has 16
   slots. Discovering a 17th property disables this optimization; it does not
   limit the object's actual property count.
@@ -245,6 +256,11 @@ known while compiling the call. They cannot make an ordinary native call whose
 number of register/stack operands is discovered from `argc` at runtime. Doing
 that requires a generic array ABI, an interpreter/libffi-style bridge, or a
 precompiled family of fixed signatures.
+
+The hosted native ABI deliberately chooses the last option: one shared family
+of fixed `Item` signatures from zero through 16, selected by one C++ switch.
+This is why Core Lambda dynamic calls and LambdaJS native-host calls can share
+the dispatcher even though their language-level argument semantics differ.
 
 ## Internal MIR register names
 
@@ -358,12 +374,15 @@ representable `argc`, address space, and successful exact root reservation.
 The following are separate fixed-wrapper ABI limits:
 
 - compiled context-ABI wrapper: 32 declared physical formals;
-- native non-context callback: 16 user operands, or 15 when a captured
-  environment occupies the first native operand.
+- shared hosted native callback: 16 explicit Item operands. Captured host state
+  is normalized as an explicit Item prefix when an adapter needs to pass it,
+  so it consumes one of those 16 operands rather than forming a hidden ABI.
 
 These numbers validate a selected native wrapper. They are not argument-array
 sizes and do not constrain the generic JS `Item* + argc` source span. Direct,
-statically proven wrapper calls remain outside the adapter path.
+statically proven JS wrapper calls remain outside the hosted adapter path. The
+32-formal context wrapper is an internal JS MIR ABI, not an alternate hosted
+native callback ABI.
 
 ## Core Lambda language contract
 
@@ -397,13 +416,17 @@ The maximum applies to both:
 
 The rest marker is represented separately in the current AST, but it consumes
 one physical user slot. Consequently, a variadic function may have at most 15
-fixed parameters plus its rest collector. Hidden ABI operands do not count:
+fixed parameters plus its rest collector. Non-Item ABI operands do not count:
 
 - `Context*`;
-- closure environment;
 - method receiver when represented as a hidden operand;
 - region capability; and
 - scalar-result home.
+
+A hosted adapter's captured environment is different: it is normalized as an
+explicit `Item` prefix and therefore consumes one of the shared native
+dispatcher's 16 Item operands. This native count is checked separately from
+Core Lambda's 16 source-user-slot rule.
 
 Compiler staging must distinguish user slots from total native operands.
 Buffers that also contain hidden operands are exact-sized or use a derived
@@ -602,7 +625,9 @@ Publication rules are fail-closed:
   Item-compatible; their hidden environment is described separately;
 - raw typed/native-specialized entries publish `LAMBDA_DIRECT_ONLY`;
 - foreign-language functions and heterogeneous native functions publish
-  `FOREIGN` or `HOST_ADAPTER` and do not enter the Core dispatcher;
+  `FOREIGN` or `HOST_ADAPTER`; `HOST_ADAPTER` entries enter the shared hosted
+  Item dispatcher after their adapter has normalized the callback prototype,
+  while `FOREIGN` entries remain outside it;
 - builtin identity objects remain non-callable through the generic Core
   dispatcher; and
 - generic `to_fn*`/`to_closure*` constructors require an explicit entry kind or
@@ -616,9 +641,10 @@ boxed entry kind does not permit those other fields to be omitted.
 
 Every Core publication site must be migrated: local first-class references,
 function expressions, closures, module namespace exports, bound object
-methods, task-root closures, and Jube adapters that deliberately implement the
-Core boxed protocol. Python and other language-owned constructors publish
-their own non-Core kind and keep their language dispatcher.
+methods, task-root closures, and Jube adapters. A Jube or other host adapter
+publishes `HOST_ADAPTER` only after it provides the shared Item-only callback
+trampoline. Python and other language-owned constructors publish their own
+non-Core kind, but their native callback path uses the same shared dispatcher.
 
 The compiler may retain both addresses: static calls use the optimized raw
 entry, while a first-class `Function` publishes the boxed entry. `entry_abi`
@@ -648,11 +674,85 @@ though both carriers happen to be 64 bits on current targets. Hidden
 `Context*`, environment/self, and scalar-home operands keep their explicitly
 typed native representations.
 
-## One Core dynamic dispatcher
+## Shared hosted native Item ABI
+
+The native callback path used by hosted functions is one cross-runtime ABI. It
+is shared by:
+
+1. a Core Lambda dynamic call whose target is a hosted/native function;
+2. a native host calling into a Core Lambda function; and
+3. a native host calling into a LambdaJS function.
+
+Future hosted languages use the same ABI instead of adding another
+language-specific `P0`/`P1`/`P2` switch family.
+
+The canonical callback has only Item operands and an Item result:
+
+```text
+N = 0:  Item (*)(void)
+N = 1:  Item (*)(Item)
+N = 2:  Item (*)(Item, Item)
+...
+N = 16: Item (*)(Item, ..., Item)
+```
+
+These are fixed C/C++ prototypes, one for each count from zero through 16, not
+a C varargs function. The dispatcher selects the prototype after checking the runtime count. Every
+operand visible to this ABI is an `Item`, and the return carrier is always
+`Item`.
+
+The shared ABI has no implicit `Context*`, scalar-result home, `void*` closure
+environment, JS `this`, `arguments`, or rest collector. A runtime establishes
+its root frame/context before the callback and handles language state around
+it. Host state is held by a runtime-owned adapter/trampoline; if state must be
+passed as an argument, the adapter makes it an explicit `Item`, and that Item
+counts toward the 16-operand limit. Existing callbacks with hidden `void*` or
+environment operands must be wrapped, never cast to one of these prototypes.
+
+`LAMBDA_MAX_FUNCTION_ARGS` is therefore the one native hosted-call limit for
+Core Lambda, LambdaJS, and every other hosted language. A language may retain a
+larger non-native argument span (for example, JS `Item* + argc` calls between
+JS functions), but it must reject or adapt a call before entering a hosted
+native pointer when the count exceeds 16.
+
+The shared hosted implementation owns both pieces that C cannot express from
+a runtime `argc`:
+
+- the index-sequence/type expansion for `Item` operands; and
+- the single 0–16 count switch that selects the typed function pointer.
+
+It must live in one Lambda-owned runtime module. Core Lambda and LambdaJS
+provide thin language-specific façades that validate their own function
+objects, construct/borrow precise root spans, and then call this shared
+helper. No JS `P0`…`P16` implementation and no Core `HOST_ADAPTER` façade may
+own a second hosted-Item switch. Core's separate boxed Lambda ABI still has
+its `Context*`/result-home operands and therefore remains an ABI-specific
+dispatcher rather than being cast through the hosted Item-only helper.
+
+### Hosted dispatch flow
+
+```text
+Core dynamic call or JS/native-host entry
+  -> language-specific target/this/rest/error handling
+  -> exact rooted Item span
+  -> validate 0 <= argc <= LAMBDA_MAX_FUNCTION_ARGS
+  -> shared 0–16 Item callback dispatcher
+  -> Item result
+```
+
+The shared dispatcher does not decide whether a call is a JS constructor,
+whether `this` is observable, how rest values are collected, or how an error
+is represented. Those decisions remain in the calling language. It only
+performs the native Item-to-Item invocation after the language has produced
+the final span.
+
+## Core and JS dynamic dispatch façades
 
 ### Public entry flow
 
-All current entry points become thin façades over one internal authority:
+Core entry points become thin façades over one internal authority, and a JS
+entry point reaches that authority whenever its selected target is a hosted
+native callback:
 
 ```text
 fn_call / fn_call_into / fn_call0..3 / callback helpers
@@ -660,26 +760,31 @@ fn_call / fn_call_into / fn_call0..3 / callback helpers
   -> validate language MAX and semantic arity
   -> establish exact source roots
   -> reuse the source span or build an exact invoke-adapter span
-  -> select context/env/return-home/return-carrier ABI
-  -> invoke the one fixed-arity thunk family
+  -> classify Core boxed ABI versus shared hosted Item ABI
+  -> invoke the selected fixed-arity thunk family
   -> normalize the result and restore roots
 ```
 
 The runtime must not retain separate 0..8 switches in `fn_call`, context
 switches in `fn_call_into`, non-context switches, and another group in each
-specialized helper. One dispatcher translation unit owns all native
-function-pointer casts.
+specialized helper. One dispatcher module owns the shared 0–16 Item callback
+casts. Core's boxed Lambda ABI may retain its hidden context/result-home
+adapter, but it uses the same index-sequence and arity-selection machinery;
+it is not a second JS or host-callback switch.
 
-This centralization is scoped to Core Lambda. LambdaJS and Python retain their
-language-specific generic dispatchers. A Jube/native adapter participates only
-when it deliberately publishes a Core boxed entry kind.
+LambdaJS and other hosted languages retain their language-specific generic
+dispatchers for target selection, `this`, rest/default handling, and errors.
+When the selected target is native, those dispatchers must finish at the
+shared hosted Item ABI. A Jube/native adapter is therefore a hosted callback
+adapter, not a separate arity ABI.
 
 The unavoidable signatures for arities 0 through 16 should be generated from
-one canonical arity list. A shared thunk template or generated X-macro family
-may inject the orthogonal hidden operands (`Context*`, environment, and result
-home), but there is only one runtime arity selection and one maintained list
-of supported arities. Public helpers prepare their input and call this
-authority; they contain no function-pointer switch.
+one canonical arity list. The shared hosted family has only Item operands and
+an Item result. The same index sequence may be reused by the Core boxed
+adapter for its orthogonal hidden operands (`Context*` and result home), but
+those operands are not part of the hosted ABI. There is one runtime arity
+selection and one maintained list of supported arities. Public helpers prepare
+their input and call this authority; they contain no function-pointer switch.
 
 The dispatcher receives an explicit invocation mode. Ordinary mode accepts
 only boxed functions. Task/procedure mode accepts only boxed procedures and
@@ -819,10 +924,12 @@ Required boundary behavior:
 | Error consistency | Centralize error construction and stack capture so every façade returns the same error kind and message for the same failure. |
 | C2MIR | The legacy C2MIR path is frozen. This implementation applies to MIR Direct; C2MIR receives no new ABI work. |
 
-## Implementation outline for Core Lambda
+## Implementation outline for shared native argument dispatch
 
-1. Add `LAMBDA_MAX_FUNCTION_ARGS` and central semantic validation. Replace
-   silent `i < 16` truncation with checked invariants derived from the constant.
+1. Define `LAMBDA_MAX_FUNCTION_ARGS = 16` in the shared Lambda ABI header and
+   use it for Core Lambda's source contract plus every hosted native callback
+   path. Replace silent `i < 16` truncation with checked invariants derived
+   from the constant.
 2. Replace the existing `Function.flags` byte plus alignment padding with the
    explicit `entry_abi` field and 32-bit flags/bit-fields union. Remove
    `FN_FLAG_*` masks, preserve pointer offsets, and migrate every Function
@@ -831,19 +938,25 @@ Required boundary behavior:
    convert it to `List*` only inside the wrapper.
 4. Introduce the always-owned exact Core source/adapter-span helper and remove
    `physical_args[8]`.
-5. Implement the single 0..16 boxed function-pointer thunk family and route
-   `fn_call*`, `fn_call*_into`, concurrency callbacks, vector callbacks, and
-   other Core dynamic users through it with explicit ordinary/task mode.
-6. Reject unresolved dynamic named arguments and dynamic `var`/inout
-   signatures. Delete the displaced switches and literal 7/8 limits while
-   keeping direct MIR calls on their specialized path.
+5. Implement one shared `Item`-in/`Item`-out 0..16 hosted callback family,
+   including the canonical index-sequence generator, typed invoker, and count
+   switch. Route Core dynamic hosted calls and LambdaJS native-host calls
+   through it. Keep Core's `Context*`/scalar-home boxed ABI on its own
+   validated path; it is not a hosted callback and must not be reinterpreted
+   as an Item-only function pointer.
+6. Move JS `P0`...`P16` and Core `HOST_ADAPTER` callbacks behind the shared
+   hosted helper. Reject unresolved dynamic named arguments and dynamic
+   `var`/`inout` signatures at the language façades. Delete displaced switches
+   and literal 7/8 limits while keeping direct MIR calls on their specialized
+   path.
 7. Add boundary, entry-kind rejection, forced-GC, default/rest, closure,
    procedure-mode, result-home, module, and cross-platform tests.
 8. Completed: Core Lambda and LambdaJS parameter metadata now use shared
    dynamic `FnParamTypeInfo`/`FnParamAnalysis` records. Core's duplicate
    `param_types[]`/`param_mir[]`, JS `JsFuncCollected::param_types[16]`, and
-   fixed JS variant parameter-analysis arrays are retired without changing the
-   Core-only `LAMBDA_MAX_FUNCTION_ARGS` rule.
+   fixed JS variant parameter-analysis arrays are retired. The 16-slot rule is
+   shared by native hosted calls; JS generic JS-to-JS calls remain dynamically
+   spanned.
 
 ## Acceptance criteria
 
@@ -851,10 +964,14 @@ Required boundary behavior:
   with a precise diagnostic; 16 succeeds when its other semantics are valid.
 - A runtime-created or spread-expanded Core call with 17 actuals returns
   `ERR_FUNCTION_ARGUMENT_LIMIT` without invoking the pointer.
+- A JS call with more than 16 generic JS actuals may remain on the JS
+  `Item* + argc` path, but a call that reaches a hosted native pointer rejects
+  before dispatch unless its final Item span is at most 16.
 - A dynamic call to an unboxed/direct-only Core entry returns
   `ERR_UNSUPPORTED_DYNAMIC_ABI` before any function-pointer cast.
-- Unknown, foreign, host-only, and wrong invocation-mode entry kinds are
-  rejected before any function-pointer cast.
+- Unknown, foreign, and wrong invocation-mode entry kinds are rejected before
+  any function-pointer cast. A `HOST_ADAPTER` entry is accepted only after it
+  exposes the shared Item-only hosted callback ABI.
 - `Function` contains explicit `entry_abi` and named flag bit-fields, has no
   explicit padding-storage convention, and preserves the existing pointer
   offsets. Runtime code uses direct fields rather than `FN_FLAG_*` masks.
@@ -863,12 +980,14 @@ Required boundary behavior:
 - A public variadic wrapper receives its rest collector as boxed `Item` and
   converts it internally; the central user-operand thunk remains uniformly
   Item-typed.
-- Closure environment and context/result-home operands do not reduce the 16
-  user-slot contract.
+- Core source-user slots remain independent of non-Item context/result-home
+  operands. A hosted adapter that passes captured state as an explicit Item
+  prefix counts that prefix in the shared 16-operand native limit.
 - Optional/rest adaptation has no native `physical_args[]` buffer and survives
   forced GC at every argument/default/rest allocation point.
-- Exactly one Core runtime component owns the C++ function-pointer arity
-  dispatch; all public and callback entry points delegate to it.
+- Exactly one Lambda-owned runtime component owns the shared C++
+  function-pointer arity dispatch; Core Lambda, LambdaJS, and other hosted
+  callback entry points delegate to it.
 - Unresolved dynamic named calls and dynamic `var`/inout calls fail closed;
   statically resolved named calls and ordinary direct calls remain supported.
 - LambdaJS retains its exact adapter-span behavior and supports source actual
@@ -876,8 +995,9 @@ Required boundary behavior:
 - Cross-language dynamic calls remain rejected or routed through existing
   explicitly supported bridges until the deferred interop design is
   implemented.
-- Core and JS parameter inference use shared dynamically sized metadata;
-  there is no `JS_MIR_TYPED_PARAM_LIMIT`, and Core's 16-slot rule is not
-  applied to JS.
+- Core and JS parameter inference use shared dynamically sized metadata; there
+  is no `JS_MIR_TYPED_PARAM_LIMIT`. Core's 16-slot source rule and the shared
+  16-slot native hosted ABI are distinct from JS's unbounded generic source
+  span.
 - AOT compatibility and `entry_abi` versioning remain outside this
   implementation.

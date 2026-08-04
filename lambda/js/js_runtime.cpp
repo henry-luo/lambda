@@ -15,6 +15,7 @@
 #include "../jube/jube_interface.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-root-frame.hpp"
+#include "../runtime/hosted-call-dispatch.hpp"
 #include "../core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -9979,23 +9980,6 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         return ItemNull;
     }
 
-    typedef Item (*P0)();
-    typedef Item (*P1)(Item);
-    typedef Item (*P2)(Item, Item);
-    typedef Item (*P3)(Item, Item, Item);
-    typedef Item (*P4)(Item, Item, Item, Item);
-    typedef Item (*P5)(Item, Item, Item, Item, Item);
-    typedef Item (*P6)(Item, Item, Item, Item, Item, Item);
-    typedef Item (*P7)(Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P8)(Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P9)(Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P10)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P11)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P12)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P13)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P14)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P15)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
-    typedef Item (*P16)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
     typedef Item (*P0H)(uint64_t*);
     typedef Item (*P1H)(Item, uint64_t*);
     typedef Item (*P2H)(Item, Item, uint64_t*);
@@ -10018,7 +10002,8 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     bool has_rest = (fn->param_count < 0);
     int real_param_count = js_invoke_formal_count(fn);
     int dispatch_limit = (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)
-        ? JS_MIR_CONTEXT_CALL_MAX_ARITY : (fn->env ? 15 : 16);
+        ? JS_MIR_CONTEXT_CALL_MAX_ARITY
+        : LAMBDA_MAX_FUNCTION_ARGS - (fn->env ? 1 : 0);
     if (real_param_count > dispatch_limit) {
         log_error("js-invoke-fn: wrapper arity %d exceeds dispatch ABI %d",
             real_param_count, dispatch_limit);
@@ -10240,56 +10225,27 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         }
     }
 
-    if (fn->env) {
-        // Closure: prepend env pointer as first argument
-        Item env_item;
-        env_item.item = (uint64_t)fn->env;
-        if (!fn->func_ptr) return make_js_undefined(); // stub function
-        switch (effective_count) {
-            case 0: return ((P1)fn->func_ptr)(env_item);
-            case 1: return ((P2)fn->func_ptr)(env_item, effective_args[0]);
-            case 2: return ((P3)fn->func_ptr)(env_item, effective_args[0], effective_args[1]);
-            case 3: return ((P4)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2]);
-            case 4: return ((P5)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3]);
-            case 5: return ((P6)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
-            case 6: return ((P7)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
-            case 7: return ((P8)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
-            case 8: return ((P9)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7]);
-            case 9: return ((P10)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8]);
-            case 10: return ((P11)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9]);
-            case 11: return ((P12)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10]);
-            case 12: return ((P13)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11]);
-            case 13: return ((P14)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12]);
-            case 14: return ((P15)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13]);
-            case 15: return ((P16)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14]);
-            default:
-                log_error("js_invoke_fn: too many args for closure (%d)", effective_count);
-                return ItemNull;
-        }
-    } else {
-        if (!fn->func_ptr) return make_js_undefined(); // stub function
-        switch (effective_count) {
-            case 0: return ((P0)fn->func_ptr)();
-            case 1: return ((P1)fn->func_ptr)(effective_args[0]);
-            case 2: return ((P2)fn->func_ptr)(effective_args[0], effective_args[1]);
-            case 3: return ((P3)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2]);
-            case 4: return ((P4)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3]);
-            case 5: return ((P5)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
-            case 6: return ((P6)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
-            case 7: return ((P7)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
-            case 8: return ((P8)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7]);
-            case 9: return ((P9)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8]);
-            case 10: return ((P10)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9]);
-            case 11: return ((P11)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10]);
-            case 12: return ((P12)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11]);
-            case 13: return ((P13)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12]);
-            case 14: return ((P14)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13]);
-            case 15: return ((P15)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14]);
-            default:
-                log_error("js_invoke_fn: too many args (%d)", effective_count);
-                return ItemNull;
-        }
+    if (!fn->func_ptr) return make_js_undefined(); // stub function
+    int native_count = effective_count + (fn->env ? 1 : 0);
+    if (native_count > LAMBDA_MAX_FUNCTION_ARGS) {
+        log_error("js_invoke_fn: hosted callback arity %d exceeds native ABI limit %d",
+            native_count, LAMBDA_MAX_FUNCTION_ARGS);
+        return ItemError;
     }
+    // The ordinary JS call frame roots its source arguments, but its borrowed
+    // pointer may still point at native-stack storage.  Give the hosted
+    // callback an exact contiguous span so a callback-triggered collection
+    // cannot invalidate the operands before the typed thunk loads them.
+    RootSpan hosted_roots((size_t)effective_count);
+    Item* native_args = effective_args;
+    if (effective_count > 0) {
+        native_args = js_root_span_items(hosted_roots);
+        if (!native_args) return ItemError;
+        for (int i = 0; i < effective_count; i++) native_args[i] = effective_args[i];
+    }
+    Item env_item = (Item){.item = (uint64_t)(uintptr_t)fn->env};
+    return lambda_hosted_item_invoke_by_count((void*)fn->func_ptr,
+        native_args, effective_count, fn->env != NULL, env_item);
 }
 
 static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,

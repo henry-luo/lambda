@@ -295,39 +295,41 @@ static Item jube_lambda_method_invoke(Item env_item, Item* args, int argc) {
     return out;
 }
 
-static Item jube_lambda_method_tramp_0(void* env) {
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, NULL, 0);
+// Keep the captured environment Item-typed: the shared hosted dispatcher
+// rejects the old incompatible void* closure-prefix prototype.
+static Item jube_lambda_method_tramp_0(Item env) {
+    return jube_lambda_method_invoke(env, NULL, 0);
 }
-static Item jube_lambda_method_tramp_1(void* env, Item a0) {
+static Item jube_lambda_method_tramp_1(Item env, Item a0) {
     Item args[] = {a0};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 1);
+    return jube_lambda_method_invoke(env, args, 1);
 }
-static Item jube_lambda_method_tramp_2(void* env, Item a0, Item a1) {
+static Item jube_lambda_method_tramp_2(Item env, Item a0, Item a1) {
     Item args[] = {a0, a1};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 2);
+    return jube_lambda_method_invoke(env, args, 2);
 }
-static Item jube_lambda_method_tramp_3(void* env, Item a0, Item a1, Item a2) {
+static Item jube_lambda_method_tramp_3(Item env, Item a0, Item a1, Item a2) {
     Item args[] = {a0, a1, a2};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 3);
+    return jube_lambda_method_invoke(env, args, 3);
 }
-static Item jube_lambda_method_tramp_4(void* env, Item a0, Item a1, Item a2, Item a3) {
+static Item jube_lambda_method_tramp_4(Item env, Item a0, Item a1, Item a2, Item a3) {
     Item args[] = {a0, a1, a2, a3};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 4);
+    return jube_lambda_method_invoke(env, args, 4);
 }
-static Item jube_lambda_method_tramp_5(void* env, Item a0, Item a1, Item a2, Item a3,
+static Item jube_lambda_method_tramp_5(Item env, Item a0, Item a1, Item a2, Item a3,
                                        Item a4) {
     Item args[] = {a0, a1, a2, a3, a4};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 5);
+    return jube_lambda_method_invoke(env, args, 5);
 }
-static Item jube_lambda_method_tramp_6(void* env, Item a0, Item a1, Item a2, Item a3,
+static Item jube_lambda_method_tramp_6(Item env, Item a0, Item a1, Item a2, Item a3,
                                        Item a4, Item a5) {
     Item args[] = {a0, a1, a2, a3, a4, a5};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 6);
+    return jube_lambda_method_invoke(env, args, 6);
 }
-static Item jube_lambda_method_tramp_7(void* env, Item a0, Item a1, Item a2, Item a3,
+static Item jube_lambda_method_tramp_7(Item env, Item a0, Item a1, Item a2, Item a3,
                                        Item a4, Item a5, Item a6) {
     Item args[] = {a0, a1, a2, a3, a4, a5, a6};
-    return jube_lambda_method_invoke((Item){.item = (uint64_t)(uintptr_t)env}, args, 7);
+    return jube_lambda_method_invoke(env, args, 7);
 }
 
 static void* const s_jube_lambda_method_tramps[8] = {

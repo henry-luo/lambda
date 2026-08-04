@@ -8,6 +8,7 @@
 #include "recovery_frame.h"
 #include "type_contract.hpp"
 #include "concurrency.h"
+#include "hosted-call-dispatch.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -1224,6 +1225,11 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     if (physical > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, physical, "formal slot");
     }
+    if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER && fn->closure_env &&
+            physical >= LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, physical + 1,
+            "hosted native argument");
+    }
     if (actual < required || (!variadic && actual > fixed)) {
         char detail[192];
         snprintf(detail, sizeof(detail), "function '%s' expects %d%s argument%s, got %d",
@@ -1241,36 +1247,28 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     return ItemNull;
 }
 
-template <int... indices>
-struct LambdaDynamicIndexSequence {};
-
-template <int count, int... indices>
-struct LambdaDynamicMakeIndexSequence
-    : LambdaDynamicMakeIndexSequence<count - 1, count - 1, indices...> {};
-
-template <int... indices>
-struct LambdaDynamicMakeIndexSequence<0, indices...> {
-    typedef LambdaDynamicIndexSequence<indices...> Type;
-};
-
-template <int>
-using LambdaDynamicItem = Item;
+static Item lambda_dynamic_invoke_host_adapter(Function* fn, const Item* args,
+        int count, const char* caller) {
+    // hosted callbacks use the shared Item-only ABI.  A legacy closure
+    // environment is normalized as the first explicit Item so Core and JS do
+    // not cast the same callback through different hidden-prefix prototypes.
+    int native_count = count + (fn->closure_env ? 1 : 0);
+    if (native_count > LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, native_count,
+            "hosted native argument");
+    }
+    Item env_item = (Item){.item = (uint64_t)(uintptr_t)fn->closure_env};
+    return lambda_hosted_item_invoke_by_count((void*)fn->ptr,
+        args, count, fn->closure_env != NULL, env_item);
+}
 
 template <typename IndexSequence>
 struct LambdaDynamicNativeInvoker;
 
 template <int... indices>
-struct LambdaDynamicNativeInvoker<LambdaDynamicIndexSequence<indices...>> {
+struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
     static Item invoke(Function* fn, const Item* args, uint64_t* result_home,
             const char* caller) {
-        if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER) {
-            if (fn->closure_env) {
-                return ((Item (*)(void*, LambdaDynamicItem<indices>...))fn->ptr)(
-                    fn->closure_env, args[indices]...);
-            }
-            return ((Item (*)(LambdaDynamicItem<indices>...))fn->ptr)(args[indices]...);
-        }
-
         if (!fn->requires_scalar_result_home || !fn->requires_runtime_context) {
             // A published Core entry must retain both hidden operands. This
             // blocks raw/native bodies from being reinterpreted as boxed calls.
@@ -1291,11 +1289,11 @@ struct LambdaDynamicNativeInvoker<LambdaDynamicIndexSequence<indices...>> {
                 "boxed Lambda entry belongs to a different runtime context");
         }
         if (fn->closure_env) {
-            return ((Item (*)(Context*, void*, LambdaDynamicItem<indices>...,
+            return ((Item (*)(Context*, void*, LambdaHostedItem<indices>...,
                 uint64_t*))fn->ptr)(runtime, fn->closure_env, args[indices]...,
                     result_home);
         }
-        return ((Item (*)(Context*, LambdaDynamicItem<indices>..., uint64_t*))fn->ptr)(
+        return ((Item (*)(Context*, LambdaHostedItem<indices>..., uint64_t*))fn->ptr)(
             runtime, args[indices]..., result_home);
     }
 };
@@ -1303,13 +1301,17 @@ struct LambdaDynamicNativeInvoker<LambdaDynamicIndexSequence<indices...>> {
 template <int count>
 static Item lambda_dynamic_invoke_native(Function* fn, const Item* args,
         uint64_t* result_home, const char* caller) {
-    typedef typename LambdaDynamicMakeIndexSequence<count>::Type Indices;
+    typedef typename LambdaHostedMakeIndexSequence<count>::Type Indices;
     return LambdaDynamicNativeInvoker<Indices>::invoke(fn, args, result_home, caller);
 }
 
 static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
         int count, uint64_t* result_home, const char* caller) {
-    // This is the sole Core Lambda C++ function-pointer arity dispatch.
+    if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER) {
+        return lambda_dynamic_invoke_host_adapter(fn, args, count, caller);
+    }
+    // This is the Core boxed ABI dispatch; hosted native callbacks use the
+    // shared Item-only switch in hosted-call-dispatch.hpp above.
     switch (count) {
     case 0: return lambda_dynamic_invoke_native<0>(fn, args, result_home, caller);
     case 1: return lambda_dynamic_invoke_native<1>(fn, args, result_home, caller);
