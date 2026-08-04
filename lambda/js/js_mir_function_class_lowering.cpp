@@ -764,13 +764,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         !jm_function_has_duplicate_param_names(fn) &&
         !(fn->is_arrow && fn->body &&
           fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
-        param_count > 0 && param_count <= 16 &&
+        param_count > 0 &&
         (fc->native_return_kind == NATIVE_RETURN_INT ||
          fc->native_return_kind == NATIVE_RETURN_FLOAT)) {
         bool has_native_param = false;
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
-            TypeId param_type = fc->param_types[i];
+            TypeId param_type = jm_param_type(fc, i);
             if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
                 has_native_param = true;
                 continue;
@@ -798,7 +798,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         for (int i = 0; i < param_count; i++) {
             n_param_names[i + 1] = LAMBDA_ALLOCA(128, char);
             jm_get_param_name(param_node, i, n_param_names[i + 1], 128);
-            MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+            MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
             n_params[i + 1] = {mtype, n_param_names[i + 1], 0};
             param_node = param_node ? param_node->next : NULL;
         }
@@ -865,8 +865,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 char vname[128];
                 jm_get_param_name(param_node, i, vname, sizeof(vname));
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, native_func);
-                MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                jm_set_var(mt, vname, preg, mtype, fc->param_types[i]);
+                MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                jm_set_var(mt, vname, preg, mtype, jm_param_type(fc, i));
             }
             param_node = param_node ? param_node->next : NULL;
         }
@@ -2565,9 +2565,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
 
-            if (fc->param_types[i] != LMD_TYPE_ANY) {
+            if (jm_param_type(fc, i) != LMD_TYPE_ANY) {
                 MIR_reg_t exact = jm_emit_exact_native_shape_test(mt, preg,
-                    fc->param_types[i]);
+                    jm_param_type(fc, i));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
                     MIR_new_reg_op(mt->ctx, inferred_guard),
                     MIR_new_reg_op(mt->ctx, inferred_guard),
@@ -2586,9 +2586,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_get_param_name(param_node, i, vname, sizeof(vname));
             MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
 
-            if (fc->param_types[i] == LMD_TYPE_FLOAT) {
+            if (jm_param_type(fc, i) == LMD_TYPE_FLOAT) {
                 native_args[i] = jm_emit_unbox_float(mt, preg);
-            } else if (fc->param_types[i] == LMD_TYPE_INT) {
+            } else if (jm_param_type(fc, i) == LMD_TYPE_INT) {
                 native_args[i] = jm_emit_unbox_int(mt, preg);
             } else {
                 native_args[i] = preg;

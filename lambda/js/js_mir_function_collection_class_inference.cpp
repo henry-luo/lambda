@@ -164,7 +164,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
                     JsAstNode* arg = call->arguments;
                     bool ok = true;
                     for (int p = 0; p < me->fc->param_count && ok; p++) {
-                        TypeId expected = me->fc->param_types[p];
+                        TypeId expected = jm_param_type(me->fc, p);
                         TypeId actual   = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
                         if (expected == LMD_TYPE_INT) {
                             if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) ok = false;
@@ -214,7 +214,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
     // Check if all argument types at this call site match the inferred param types
     JsAstNode* arg = call->arguments;
     for (int i = 0; i < fc->param_count; i++) {
-        TypeId expected = fc->param_types[i];
+        TypeId expected = jm_param_type(fc, i);
         TypeId actual = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
         if (expected == LMD_TYPE_INT) {
             if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) return NULL;
@@ -2274,8 +2274,22 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     int pc = jm_count_params(fn);
     fc->param_count = pc;
     fc->formal_length = jm_formal_length(fn);
-    for (int i = 0; i < JS_MIR_TYPED_PARAM_LIMIT; i++) {
-        fc->param_types[i] = LMD_TYPE_ANY;
+    if (fc->analysis.param_types) {
+        mem_free(fc->analysis.param_types);
+        fc->analysis.param_types = NULL;
+    }
+    fc->analysis.param_count = pc;
+    if (pc > 0) {
+        fc->analysis.param_types = (FnParamTypeInfo*)mem_calloc((size_t)pc,
+            sizeof(FnParamTypeInfo), MEM_CAT_JS_RUNTIME);
+        if (!fc->analysis.param_types) {
+            fc->analysis.param_count = 0;
+            log_error("js-mir: parameter metadata allocation failed for %d formals", pc);
+            return;
+        }
+        for (int i = 0; i < pc; i++) {
+            jm_set_param_type(fc, i, LMD_TYPE_ANY);
+        }
     }
 
     // detect rest params (...rest as last parameter)
@@ -2312,13 +2326,6 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     if (pc == 0) return;
-    if (pc > JS_MIR_TYPED_PARAM_LIMIT) {
-        // Native type metadata has sixteen slots, while the boxed ABI accepts
-        // arbitrary arity. Leave high-arity functions boxed rather than let a
-        // later inference pass read past this fixed specialization record.
-        return;
-    }
-
     // Phase 3.4: Check for TS type annotations on parameters first
     // If ALL params have annotations, use them. Otherwise fall through to body-scan.
     bool use_annotations = false;
@@ -2350,22 +2357,22 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                             // fallback: resolve via ts_resolve_type
                             tid = LMD_TYPE_ANY;
                         }
-                        fc->param_types[i] = tid;
+                        jm_set_param_type(fc, i, tid);
                     } else {
-                        fc->param_types[i] = LMD_TYPE_ANY;
+                        jm_set_param_type(fc, i, LMD_TYPE_ANY);
                     }
                 } else if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
-                    fc->param_types[i] = LMD_TYPE_ANY;
+                    jm_set_param_type(fc, i, LMD_TYPE_ANY);
                 } else {
                     // not a TsParameterNode — use body-scan for this param
-                    fc->param_types[i] = LMD_TYPE_ANY;
+                    jm_set_param_type(fc, i, LMD_TYPE_ANY);
                 }
             }
             log_debug("js-mir P3.4: annotation-based param types for %s: [%s%s%s%s]",
                 fn->name ? fn->name->chars : "(anon)",
-                pc > 0 ? (fc->param_types[0] == LMD_TYPE_INT ? "INT" : fc->param_types[0] == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
-                pc > 1 ? (fc->param_types[1] == LMD_TYPE_INT ? ",INT" : fc->param_types[1] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-                pc > 2 ? (fc->param_types[2] == LMD_TYPE_INT ? ",INT" : fc->param_types[2] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 0 ? (jm_param_type(fc, 0) == LMD_TYPE_INT ? "INT" : jm_param_type(fc, 0) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
+                pc > 1 ? (jm_param_type(fc, 1) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 1) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 2 ? (jm_param_type(fc, 2) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 2) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
                 pc > 3 ? ",..." : "");
         }
     }
@@ -2374,7 +2381,16 @@ void jm_infer_param_types(JsFuncCollected* fc) {
 
     // Keep formal bindings as AST-owned names; copying them into fixed C
     // buffers made inference sensitive to source-name length.
-    const String* param_bindings[JS_MIR_TYPED_PARAM_LIMIT] = {};
+    const String** param_bindings = (const String**)mem_calloc((size_t)pc,
+        sizeof(*param_bindings), MEM_CAT_JS_RUNTIME);
+    FnParamEvidence* evidence = (FnParamEvidence*)mem_calloc((size_t)pc,
+        sizeof(*evidence), MEM_CAT_JS_RUNTIME);
+    if (!param_bindings || !evidence) {
+        if (param_bindings) mem_free(param_bindings);
+        if (evidence) mem_free(evidence);
+        log_error("js-mir: inference scratch allocation failed for %d formals", pc);
+        return;
+    }
     JsAstNode* p = fn->params;
     for (int i = 0; i < pc && p; i++, p = p->next) {
         param_bindings[i] = jm_param_binding_name(p);
@@ -2382,9 +2398,11 @@ void jm_infer_param_types(JsFuncCollected* fc) {
 
     if (jm_expr_has_bigint_literal(fn->body)) {
         for (int i = 0; i < pc; i++) {
-            fc->param_types[i] = LMD_TYPE_ANY;
+            jm_set_param_type(fc, i, LMD_TYPE_ANY);
         }
         log_debug("js-mir P4: boxed params for %s because body uses BigInt literals", fc->name);
+        mem_free(param_bindings);
+        mem_free(evidence);
         return;
     }
 
@@ -2395,7 +2413,6 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // Accumulate evidence
-    FnParamEvidence evidence[JS_MIR_TYPED_PARAM_LIMIT] = {};
     jm_infer_walk(fn->body, param_bindings, evidence, pc,
                   self_name[0] ? self_name : NULL);
 
@@ -2404,18 +2421,20 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     // (e.g., x >= 0, x * 3 + 1) flows back to the original parameter.
     {
         // Scan top-level statements of function body for `let/var/const x = param`
-        const String* alias_bindings[JS_MIR_TYPED_PARAM_LIMIT] = {};
-        int alias_map[JS_MIR_TYPED_PARAM_LIMIT];  // alias_map[i] = param index that alias i maps to
+        const String** alias_bindings = (const String**)mem_calloc((size_t)pc,
+            sizeof(*alias_bindings), MEM_CAT_JS_RUNTIME);
+        int* alias_map = (int*)mem_calloc((size_t)pc, sizeof(*alias_map),
+            MEM_CAT_JS_RUNTIME);  // alias_map[i] = param index that alias i maps to
         int alias_count = 0;
         JsBlockNode* body_blk = (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT)
             ? (JsBlockNode*)fn->body : NULL;
         if (body_blk) {
             JsAstNode* stmt = body_blk->statements;
-            while (stmt && alias_count < JS_MIR_TYPED_PARAM_LIMIT) {
+            while (stmt && alias_count < pc) {
                 if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
                     JsAstNode* decl = vd->declarations;
-                    while (decl && alias_count < JS_MIR_TYPED_PARAM_LIMIT) {
+                    while (decl && alias_count < pc) {
                         if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
                             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
                             if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -2439,21 +2458,27 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                 stmt = stmt->next;
             }
         }
-        if (alias_count > 0) {
-            FnParamEvidence alias_evidence[JS_MIR_TYPED_PARAM_LIMIT] = {};
-            jm_infer_walk(fn->body, alias_bindings, alias_evidence, alias_count,
-                          self_name[0] ? self_name : NULL);
-            // Merge alias evidence back to original params
-            for (int ai = 0; ai < alias_count; ai++) {
-                int pi = alias_map[ai];
-                evidence[pi].int_evidence += alias_evidence[ai].int_evidence;
-                evidence[pi].float_evidence += alias_evidence[ai].float_evidence;
-                evidence[pi].string_evidence += alias_evidence[ai].string_evidence;
-                if (alias_evidence[ai].used_as_container) evidence[pi].used_as_container = true;
-                if (alias_evidence[ai].compared_with_non_numeric) evidence[pi].compared_with_non_numeric = true;
+        if (alias_count > 0 && alias_bindings && alias_map) {
+            FnParamEvidence* alias_evidence = (FnParamEvidence*)mem_calloc(
+                (size_t)alias_count, sizeof(*alias_evidence), MEM_CAT_JS_RUNTIME);
+            if (alias_evidence) {
+                jm_infer_walk(fn->body, alias_bindings, alias_evidence, alias_count,
+                              self_name[0] ? self_name : NULL);
+                // merge alias evidence back to original params
+                for (int ai = 0; ai < alias_count; ai++) {
+                    int pi = alias_map[ai];
+                    evidence[pi].int_evidence += alias_evidence[ai].int_evidence;
+                    evidence[pi].float_evidence += alias_evidence[ai].float_evidence;
+                    evidence[pi].string_evidence += alias_evidence[ai].string_evidence;
+                    if (alias_evidence[ai].used_as_container) evidence[pi].used_as_container = true;
+                    if (alias_evidence[ai].compared_with_non_numeric) evidence[pi].compared_with_non_numeric = true;
+                }
+                mem_free(alias_evidence);
             }
             log_debug("js-mir P6: alias tracking for %s: %d aliases found", fc->name, alias_count);
         }
+        if (alias_bindings) mem_free(alias_bindings);
+        if (alias_map) mem_free(alias_map);
     }
 
     // Resolve numeric evidence to FLOAT because JS Number uses binary64 even
@@ -2464,27 +2489,29 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             // parameter used as arr[i] object — must remain boxed Item (not unboxed as int/float)
             // OR: parameter compared with undefined/null/boolean — native unboxing would
             // lose the type distinction (e.g., undefined → 0 looks the same as actual 0)
-            fc->param_types[i] = LMD_TYPE_ANY;
+            jm_set_param_type(fc, i, LMD_TYPE_ANY);
         } else if (evidence[i].param_reassigned) {
             // parameter is reassigned (e = expr) — the initial call-site value may be
             // a different type (e.g., string passed to IIFE, reassigned via parseInt).
             // Native version assumes param starts as inferred type, which is unsafe.
-            fc->param_types[i] = LMD_TYPE_ANY;
+            jm_set_param_type(fc, i, LMD_TYPE_ANY);
         } else if (evidence[i].float_evidence > 0) {
-            fc->param_types[i] = LMD_TYPE_FLOAT;
+            jm_set_param_type(fc, i, LMD_TYPE_FLOAT);
         } else if (evidence[i].int_evidence > 0 && evidence[i].string_evidence == 0) {
-            fc->param_types[i] = LMD_TYPE_FLOAT;
+            jm_set_param_type(fc, i, LMD_TYPE_FLOAT);
         } else {
-            fc->param_types[i] = LMD_TYPE_ANY;
+            jm_set_param_type(fc, i, LMD_TYPE_ANY);
         }
     }
 
     log_debug("js-mir P4: inferred param types for %s: [%s%s%s%s]",
         fc->name,
-        pc > 0 ? (fc->param_types[0] == LMD_TYPE_INT ? "INT" : fc->param_types[0] == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
-        pc > 1 ? (fc->param_types[1] == LMD_TYPE_INT ? ",INT" : fc->param_types[1] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-        pc > 2 ? (fc->param_types[2] == LMD_TYPE_INT ? ",INT" : fc->param_types[2] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+        pc > 0 ? (jm_param_type(fc, 0) == LMD_TYPE_INT ? "INT" : jm_param_type(fc, 0) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
+        pc > 1 ? (jm_param_type(fc, 1) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 1) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+        pc > 2 ? (jm_param_type(fc, 2) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 2) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
         pc > 3 ? ",..." : "");
+    mem_free(param_bindings);
+    mem_free(evidence);
 }
 
 // check if a + expression chain contains an operand known to produce a string

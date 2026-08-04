@@ -560,7 +560,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
 void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
                               P4bCtorEvidence* evidence);
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               FnParamEvidence evidence[][16]);
+                               FnParamEvidence** evidence);
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);

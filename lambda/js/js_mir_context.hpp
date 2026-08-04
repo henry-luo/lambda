@@ -44,10 +44,6 @@ struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 typedef MirRootBinding JsMirRootBinding;
 typedef MirEnvBinding JsMirEnvBinding;
 
-// Native parameter specialization and its analysis records have a fixed ABI
-// shape. Functions with more parameters still use the fully boxed JS path.
-enum { JS_MIR_TYPED_PARAM_LIMIT = 16 };
-
 // Native bodies state their ABI result independently of the JS-inferred
 // return type. BOXED/VOID remain unavailable until their complete lowering and
 // direct-call contracts exist; treating either as an integer changes JS.
@@ -189,8 +185,8 @@ struct JsFuncCollected {
     int immediate_parent_env_link_slot;
     bool closure_env_has_parent_link; // copied closure env carries direct parent scope_env for mixed loop captures
     int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
-    // Phase 4: Type inference results
-    TypeId param_types[JS_MIR_TYPED_PARAM_LIMIT]; // native-specialization parameter types
+    // phase 4: type inference results. Per-formal type records live in the
+    // shared FnAnalysis metadata and are sized from the JS AST parameter list.
     TypeId return_type;             // inferred return type
     ScalarReturnClass boxed_return_scalar_class; // caller-home need for boxed body
     int param_count;                // cached param count
@@ -232,11 +228,30 @@ struct JsFuncCollected {
     int ctor_super_name_len;
     bool func_ctor_shape_composed;
     bool func_ctor_shape_compose_failed;
-    // Immutable physical-operand facts consumed by the common direct-call API.
-    FnParamAnalysis public_param_analysis[17];
-    FnParamAnalysis body_param_analysis[17];
-    FnParamAnalysis native_param_analysis[16];
 };
+
+static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
+    if (!fc || index < 0 || index >= fc->analysis.param_count ||
+            !fc->analysis.param_types) return NULL;
+    return &fc->analysis.param_types[index];
+}
+
+static inline const FnParamTypeInfo* jm_param_info_const(const JsFuncCollected* fc,
+        int index) {
+    if (!fc || index < 0 || index >= fc->analysis.param_count ||
+            !fc->analysis.param_types) return NULL;
+    return &fc->analysis.param_types[index];
+}
+
+static inline TypeId jm_param_type(const JsFuncCollected* fc, int index) {
+    const FnParamTypeInfo* info = jm_param_info_const(fc, index);
+    return info ? info->semantic_type : LMD_TYPE_ANY;
+}
+
+static inline void jm_set_param_type(JsFuncCollected* fc, int index, TypeId type) {
+    FnParamTypeInfo* info = jm_param_info(fc, index);
+    if (info) info->semantic_type = type;
+}
 
 // Free dynamically allocated scope_env_names for all func_entries
 static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_count) {
@@ -248,6 +263,11 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
         if (func_entries[i].captures) {
             mem_free(func_entries[i].captures);
             func_entries[i].captures = NULL;
+        }
+        if (func_entries[i].analysis.param_types) {
+            mem_free(func_entries[i].analysis.param_types);
+            func_entries[i].analysis.param_types = NULL;
+            func_entries[i].analysis.param_count = 0;
         }
         // shape cache slots are pool-owned because generated MIR embeds their addresses.
         func_entries[i].ctor_shape_cache_ptr = NULL;

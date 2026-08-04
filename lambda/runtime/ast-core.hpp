@@ -726,6 +726,14 @@ typedef struct FnReturnAnalysis {
     FnErrorLane error_lane;
     uint8_t scalar_home_lane_mask;
 } FnReturnAnalysis;
+typedef struct FnParamTypeInfo {
+    TypeId semantic_type;
+    uint32_t flags;
+} FnParamTypeInfo;
+enum {
+    FN_PARAM_FLAG_DECLARED = 1u << 0,
+    FN_PARAM_FLAG_INFERRED_SPECIALIZATION = 1u << 1,
+};
 typedef struct FnParamAnalysis {
     TypeId semantic_type;
     ValueRep canonical_rep;
@@ -761,6 +769,8 @@ typedef struct FnVariantAnalysis {
 typedef struct FnAnalysis {
     FnCapture* captures;
     FnParamEvidence* evidence;
+    FnParamTypeInfo* param_types;
+    int param_count;
     int capture_count;
     int evidence_count;
     bool may_await;
