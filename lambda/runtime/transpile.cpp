@@ -1302,7 +1302,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         // Regular function without captures - use to_fn_named for stack traces
                         bool use_boxed = needs_fn_call_wrapper(fn_node);
                         if (use_boxed) {
-                            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+                            // legacy C2MIR wrapper returns RetItem.
                             strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
                             write_fn_name_ex(tp->code_buf, fn_node,
                                 (AstImportNode*)ident_node->entry->import, "_b");
@@ -1326,7 +1326,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         }
                         strbuf_append_char(tp->code_buf, ')');
                         if (use_boxed) {
-                            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+                            strbuf_append_str(tp->code_buf, "; _fn->returns_ret_item = 1; _fn; })");
                         }
                     }
                 }
@@ -7284,7 +7284,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         // regular function without captures - use to_fn_named for stack traces
         bool use_boxed = needs_fn_call_wrapper(fn_node);
         if (use_boxed) {
-            // _b wrapper returns RetItem — set FN_FLAG_BOXED_RET on the Function
+            // legacy C2MIR wrapper returns RetItem.
             strbuf_append_str(tp->code_buf, "({ Function* _fn = to_fn_named(");
             write_fn_name_ex(tp->code_buf, fn_node, NULL, "_b");
         } else {
@@ -7306,7 +7306,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         }
         strbuf_append_char(tp->code_buf, ')');
         if (use_boxed) {
-            strbuf_append_str(tp->code_buf, "; _fn->flags = FN_FLAG_BOXED_RET; _fn; })");
+            strbuf_append_str(tp->code_buf, "; _fn->returns_ret_item = 1; _fn; })");
         }
     }
 }

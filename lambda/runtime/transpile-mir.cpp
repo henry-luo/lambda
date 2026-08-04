@@ -314,13 +314,13 @@ HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 // that have a dual native+boxed version (Phase 4 optimization).
 struct NativeFuncInfo {
     char name[128];           // mangled function name (native version)
-    TypeId param_types[16];   // resolved (declared or inferred) TypeId per param
-    MIR_type_t param_mir[16]; // MIR type per param
+    TypeId param_types[LAMBDA_MAX_FUNCTION_ARGS];   // resolved (declared or inferred) TypeId per param
+    MIR_type_t param_mir[LAMBDA_MAX_FUNCTION_ARGS]; // MIR type per param
     // Keep source authority separate from the chosen physical carrier. A
     // native param inferred from callers needs an exact entry guard; a
     // declared native param instead relies on its checked boundary.
-    bool param_is_declared[16];
-    bool param_is_inferred_specialization[16];
+    bool param_is_declared[LAMBDA_MAX_FUNCTION_ARGS];
+    bool param_is_inferred_specialization[LAMBDA_MAX_FUNCTION_ARGS];
     int param_count;          // number of user params (excluding _env_ptr, _self, _vargs)
     TypeId return_type;       // resolved return TypeId (LMD_TYPE_ANY if unknown)
     MIR_type_t return_mir;    // MIR return type
@@ -347,7 +347,7 @@ HASHMAP_DEFINE_STRKEY(global_var, struct GlobalVarEntry, name)
 // Keyed by AstFuncNode pointer (stable across the compilation).
 struct InferCacheEntry {
     AstFuncNode* fn;
-    TypeId param_types[16];
+    TypeId param_types[LAMBDA_MAX_FUNCTION_ARGS];
     int param_count;
 };
 HASHMAP_DEFINE_PTRKEY(infer_cache, struct InferCacheEntry, fn)
@@ -363,16 +363,16 @@ struct CallSiteEntry {
     int param_count;
     // joined static type per argument position. LMD_TYPE_ERROR is the "no call
     // site seen yet" sentinel; LMD_TYPE_ANY means unknown or conflicting.
-    TypeId arg_types[16];
+    TypeId arg_types[LAMBDA_MAX_FUNCTION_ARGS];
     // One candidate exact shape among known call sites. A deferred Item does
     // not erase a concrete candidate, because it can enter the boxed slow
     // lane; two different concrete shapes do erase it.
-    TypeId specialization_types[16];
+    TypeId specialization_types[LAMBDA_MAX_FUNCTION_ARGS];
     // the name is referenced somewhere other than direct-callee position (or is
     // reachable from outside the unit), so unseen callers are possible
     bool escaped;
     bool has_call;
-    TypeId resolved[16];   // param types from the last resolution round
+    TypeId resolved[LAMBDA_MAX_FUNCTION_ARGS];   // param types from the last resolution round
 };
 HASHMAP_DEFINE_PTRKEY(callsite_info, struct CallSiteEntry, fn)
 
@@ -1621,36 +1621,14 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     nfi->needs_boxed_entry = nfi->needs_boxed_entry || !closed;
 }
 
-// A boxed entry is only an implementation companion for dynamic reachability.
-// Direct, closed call graphs can use the one generated body without inventing
-// an otherwise-observable ABI symbol; `main` and task roots are host entries.
+// Every Core Lambda definition publishes one boxed companion. Direct calls
+// still target the optimized raw entry, while first-class values never expose
+// a native/unboxed ABI to the dynamic dispatcher.
 static bool mir_function_needs_boxed_entry(MirTranspiler* mt,
         AstFuncNode* fn_node) {
-    if (!fn_node) return true;
-    AstNode* fn_as = (AstNode*)fn_node;
-    TypeFunc* fn_type = fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)fn_as->type : NULL;
-    bool is_main = fn_as->node_type == AST_NODE_PROC && fn_node->name &&
-        fn_node->name->len == 4 &&
-        memcmp(fn_node->name->chars, "main", 4) == 0;
-    if (is_main || (fn_type && fn_type->is_public) ||
-            (fn_node->analysis && (fn_node->analysis->needs_task_context ||
-                fn_node->analysis->may_await))) {
-        return true;
-    }
-
-    StrBuf* name_buf = strbuf_new_cap(64);
-    write_fn_name(name_buf, fn_node, NULL);
-    NativeFuncInfo* nfi = find_native_func_info(mt, name_buf->str);
-    strbuf_free(name_buf);
-    if (nfi && nfi->needs_boxed_entry) return true;
-
-    CallSiteEntry key;
-    memset(&key, 0, sizeof(key));
-    key.fn = fn_node;
-    CallSiteEntry* callers = mt && mt->callsite_info
-        ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
-    return callers && callers->escaped;
+    (void)mt;
+    (void)fn_node;
+    return true;
 }
 
 static bool mir_is_native_scalar_value_type(TypeId tid) {
@@ -3839,6 +3817,13 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
+                if (use_wrapper) {
+                    emit_call_void_1(mt,
+                        fn_node->node_type == AST_NODE_PROC
+                            ? "lambda_function_mark_lambda_boxed_procedure"
+                            : "lambda_function_mark_lambda_boxed_function",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                }
                 mir_attach_function_type(mt, fn_obj, fn_node);
                 strbuf_free(fn_import_name);
                 return fn_obj;
@@ -3950,6 +3935,11 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                         emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                        emit_call_void_1(mt,
+                            fn_node->node_type == AST_NODE_PROC
+                                ? "lambda_function_mark_lambda_boxed_procedure"
+                                : "lambda_function_mark_lambda_boxed_function",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     }
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
@@ -3973,6 +3963,11 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                         emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                        emit_call_void_1(mt,
+                            fn_node->node_type == AST_NODE_PROC
+                                ? "lambda_function_mark_lambda_boxed_procedure"
+                                : "lambda_function_mark_lambda_boxed_function",
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     }
                     mir_attach_function_type(mt, fn_obj, fn_node);
@@ -10939,9 +10934,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // Fallback for more args: use vararg call
         {
             arg = call_node->argument;
-            MIR_op_t arg_ops[16];
+            MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
             int ai = 0;
-            while (arg && ai < 16) {
+            while (arg && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 MIR_reg_t boxed = transpile_box_item(mt, arg);
                 arg_ops[ai++] = MIR_new_reg_op(mt->ctx, boxed);
                 arg = arg->next;
@@ -11015,7 +11010,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             while (arg) { arg_count++; arg = arg->next; }
 
             // Build resolved_args with named arg reordering if needed
-            AstNode* resolved_args[16] = {0};
+            AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
             bool has_named_args = false;
             arg = call_node->argument;
             while (arg) {
@@ -11035,21 +11030,21 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                             if (param->name && named_arg->name &&
                                 param->name->len == named_arg->name->len &&
                                 memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
-                                if (param_idx < 16) resolved_args[param_idx] = named_arg->as;
+                                if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
                                 break;
                             }
                             param_idx++;
                             param = (AstNamedNode*)((AstNode*)param)->next;
                         }
                     } else {
-                        while (positional_idx < 16 && resolved_args[positional_idx]) positional_idx++;
-                        if (positional_idx < 16) resolved_args[positional_idx++] = arg;
+                        while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
+                        if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
                     }
                     arg = arg->next;
                 }
             } else {
                 arg = call_node->argument;
-                for (int i = 0; i < arg_count && i < 16; i++) {
+                for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                     resolved_args[i] = arg;
                     arg = arg->next;
                 }
@@ -11063,12 +11058,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
 
             // Box all args to Items
-            MIR_op_t arg_ops[17];
-            MIR_var_t arg_vars[17];
-            int arg_root_slots[17];
-            for (int i = 0; i < 17; i++) arg_root_slots[i] = -1;
+            MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_var_t arg_vars[LAMBDA_MAX_FUNCTION_ARGS];
+            int arg_root_slots[LAMBDA_MAX_FUNCTION_ARGS];
+            for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) arg_root_slots[i] = -1;
             int ai = 0;
-            for (int i = 0; i < expected_params && i < 16; i++) {
+            for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 if (resolved_args[i]) {
                     MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
                     arg_root_slots[i] = create_gc_root_slot(mt, val);
@@ -11087,7 +11082,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Handle variadic args
             bool call_is_variadic = call_fn_type && call_fn_type->is_variadic;
-            if (call_is_variadic && ai < 16) {
+            if (call_is_variadic && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 int extra_count = arg_count - expected_params;
                 if (extra_count < 0) extra_count = 0;
                 MIR_reg_t vargs_reg;
@@ -11099,7 +11094,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 } else {
                     vargs_reg = emit_call_0(mt, "list", MIR_T_I64);
                     int vargs_root = create_gc_root_slot(mt, vargs_reg);
-                    for (int i = expected_params; i < arg_count && i < 16; i++) {
+                    for (int i = expected_params; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                         if (resolved_args[i]) {
                             MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
                             int val_root = create_gc_root_slot(mt, val);
@@ -11134,7 +11129,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
 
             MIR_reg_t result;
             if (needs_context_abi) {
-                if (ai > 8) {
+                int import_abi_limit = use_js_export_bridge ? 8 : LAMBDA_MAX_FUNCTION_ARGS;
+                if (ai > import_abi_limit) {
                     log_error("mir: imported context ABI call has unsupported argument count %d", ai);
                     abort();
                 }
@@ -11162,7 +11158,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
 
                 // The C trampoline reads TLS, then forwards the hidden context
                 // only to the compiled `_b` wrapper.
-                MIR_var_t tramp_vars[18];
+                MIR_var_t tramp_vars[LAMBDA_MAX_FUNCTION_ARGS + 2];
                 tramp_vars[0] = {MIR_T_P, "fp", 0};
                 for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
                 tramp_vars[1 + ai] = {MIR_T_P, "home", 0};
@@ -11171,7 +11167,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_T_I64, 2 + ai, tramp_vars, 1);
 
                 int nops = 3 + 2 + ai;  // proto + import + result + fp + args + home
-                MIR_op_t ops[21];
+                MIR_op_t ops[LAMBDA_MAX_FUNCTION_ARGS + 5];
                 ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
                 result = new_reg(mt, "impcall", MIR_T_I64);
@@ -11272,9 +11268,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 // This prevents aliasing when args reference parameters being overwritten (e.g., f(b, a))
                 AstNode* arg = call_node->argument;
                 AstNamedNode* param = mt->tco_func->param;
-                MIR_reg_t temps[16];
+                MIR_reg_t temps[LAMBDA_MAX_FUNCTION_ARGS];
                 int arg_idx = 0;
-                while (arg && param && arg_idx < 16) {
+                while (arg && param && arg_idx < LAMBDA_MAX_FUNCTION_ARGS) {
                     TypeParam* parameter = (TypeParam*)param->type;
                     bool short_circuit_error = mir_param_short_circuits_item_error(parameter) &&
                         mir_argument_may_return_item_error(arg);
@@ -11416,7 +11412,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             if (expected_params == 0 && !call_is_variadic) expected_params = arg_count;
 
             // Build resolved_args array: maps each parameter position to its argument expression
-            AstNode* resolved_args[16] = {0};
+            AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
 
             if (has_named_args && fn_def) {
                 // Reorder: named args go to their param positions, positional fill sequentially
@@ -11432,7 +11428,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                             if (param->name && named_arg->name &&
                                 param->name->len == named_arg->name->len &&
                                 memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
-                                if (param_idx < 16) resolved_args[param_idx] = named_arg->as;
+                                if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
                                 break;
                             }
                             param_idx++;
@@ -11440,15 +11436,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                         }
                     } else {
                         // Skip positional slots already filled by named args
-                        while (positional_idx < 16 && resolved_args[positional_idx]) positional_idx++;
-                        if (positional_idx < 16) resolved_args[positional_idx++] = arg;
+                        while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
+                        if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
                     }
                     arg = arg->next;
                 }
             } else {
                 // Simple positional: fill in order
                 arg = call_node->argument;
-                for (int i = 0; i < arg_count && i < 16; i++) {
+                for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                     resolved_args[i] = arg;
                     arg = arg->next;
                 }
@@ -11506,10 +11502,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
 
             // Emit args in parameter order, filling defaults for missing slots
-            MIR_op_t arg_ops[16];
-            MIR_var_t arg_vars[16];
-            int arg_root_slots[16];
-            for (int i = 0; i < 16; i++) arg_root_slots[i] = -1;
+            MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_var_t arg_vars[LAMBDA_MAX_FUNCTION_ARGS];
+            int arg_root_slots[LAMBDA_MAX_FUNCTION_ARGS];
+            for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) arg_root_slots[i] = -1;
             int ai = 0;
             AstNamedNode* param_iter = fn_def ? fn_def->param : NULL;
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -11519,7 +11515,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_label_t parameter_error_label = new_label(mt);
             MIR_reg_t parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
             bool has_parameter_error_guard = false;
-            for (int i = 0; i < expected_params && i < 16; i++) {
+            for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 TypeParam* type_param = param_iter ? (TypeParam*)param_iter->type : NULL;
                 Type* parameter_contract = param_iter && param_iter->declared_type
                     ? mir_unwrap_decl_type(param_iter->declared_type) : NULL;
@@ -11672,7 +11668,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             ai = expected_params;
 
             // Handle variadic arguments: collect extra args into a List*
-            if (call_is_variadic && ai < 16) {
+            if (call_is_variadic && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 int extra_count = arg_count - expected_params;
                 if (extra_count < 0) extra_count = 0;
 
@@ -11687,7 +11683,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     // Create list and push extra args
                     vargs_reg = emit_call_0(mt, "list", MIR_T_I64);
                     int vargs_root = create_gc_root_slot(mt, vargs_reg);
-                    for (int i = expected_params; i < arg_count && i < 16; i++) {
+                    for (int i = expected_params; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                         if (resolved_args[i]) {
                             MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
                             int val_root = create_gc_root_slot(mt, val);
@@ -11706,7 +11702,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 ai++;
             }
 
-            if (local_func && fn_def && mir_region_producer_candidate(fn_def) && ai < 16) {
+            if (local_func && fn_def && mir_region_producer_candidate(fn_def) && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 MIR_reg_t region_arg = mt->region_producer_call == call_node
                     ? mt->region_capability_reg : mt->region_capability_reg;
                 if (!region_arg) {
@@ -11727,8 +11723,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             LocalFuncEntry* local_entry = local_func && direct_call_name
                 ? find_local_func_entry(mt, direct_call_name) : NULL;
             int scalar_home_id = 0;
-            MIR_type_t call_types[16];
-            MIR_op_t call_ops[16];
+            MIR_type_t call_types[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_op_t call_ops[LAMBDA_MAX_FUNCTION_ARGS];
             for (int i = 0; i < ai; i++) {
                 call_types[i] = arg_vars[i].type;
                 call_ops[i] = arg_root_slots[i] >= 0
@@ -14827,6 +14823,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    emit_call_void_1(mt,
+                        fn_node->node_type == AST_NODE_PROC
+                            ? "lambda_function_mark_lambda_boxed_procedure"
+                            : "lambda_function_mark_lambda_boxed_function",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
@@ -14850,6 +14851,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    emit_call_void_1(mt,
+                        fn_node->node_type == AST_NODE_PROC
+                            ? "lambda_function_mark_lambda_boxed_procedure"
+                            : "lambda_function_mark_lambda_boxed_function",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
                 mir_attach_function_type(mt, fn_obj, fn_node);
@@ -15232,8 +15238,8 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
         ? (TypeFunc*)fn_as->type : nullptr;
 
     // Collect FnParamEvidence for each untyped param
-    FnParamEvidence ctxs[16];
-    int ctx_indices[16];  // maps ctx index → param index
+    FnParamEvidence ctxs[LAMBDA_MAX_FUNCTION_ARGS];
+    int ctx_indices[LAMBDA_MAX_FUNCTION_ARGS];  // maps ctx index → param index
     int ctx_count = 0;
 
     TypeParam* tp = ft ? ft->param : nullptr;
@@ -15273,7 +15279,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
     bool changed = true;
     while (changed) {
         changed = false;
-        int prev_counts[16];
+        int prev_counts[LAMBDA_MAX_FUNCTION_ARGS];
         for (int c = 0; c < ctx_count; c++) prev_counts[c] = ctxs[c].name_count;
         find_aliases_multi(fn_node->body, ctxs, ctx_count);
         for (int c = 0; c < ctx_count; c++) {
@@ -15703,8 +15709,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     // The wrapper preserves hidden env/self/vargs parameters but exposes boxed
     // Items for every user parameter plus a mandatory caller-owned result home.
-    MIR_var_t params[34];
-    char* param_name_copies[34];
+    enum { WRAPPER_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 4 };
+    MIR_var_t params[WRAPPER_PARAM_CAPACITY];
+    char* param_name_copies[WRAPPER_PARAM_CAPACITY];
     int param_count = 0;
     params[param_count] = {MIR_T_P, raw_strdup("runtime"), 0};
     param_name_copies[param_count] = (char*)params[param_count].name;
@@ -15719,7 +15726,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         param_count++;
     }
     AstNamedNode* param = fn_node->param;
-    while (param && param_count < 31) {
+    while (param && param_count < WRAPPER_PARAM_CAPACITY - 2) {
         char pname[64];
         snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
         params[param_count] = {MIR_T_I64, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
@@ -15727,8 +15734,10 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         param_count++;
         param = (AstNamedNode*)param->next;
     }
-    if (is_variadic && param_count < 32) {
-        params[param_count] = {MIR_T_P, raw_strdup("_vargs"), 0}; // RAWALLOC_OK: MIR owns a copy
+    if (is_variadic && param_count < WRAPPER_PARAM_CAPACITY - 1) {
+        // The public entry receives every semantic operand as an Item.  The
+        // raw body still consumes List*, so the wrapper performs the ABI cast.
+        params[param_count] = {MIR_T_I64, raw_strdup("_vargs"), 0}; // RAWALLOC_OK: MIR owns a copy
         param_name_copies[param_count] = (char*)params[param_count].name;
         param_count++;
     }
@@ -15772,12 +15781,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     emit_number_frame_enter(mt);
     push_scope(mt);
 
-    MIR_op_t call_args[33];
-    MIR_var_t call_vars[33];
+    MIR_op_t call_args[WRAPPER_PARAM_CAPACITY];
+    MIR_var_t call_vars[WRAPPER_PARAM_CAPACITY];
     // Finish all boxed parameter preparation before choosing a lane.  The slow
     // body shares these bindings, so it must see the same defaults and checked
     // declared values as the raw call would have received.
-    MIR_reg_t prepared_params[16] = {0};
+    MIR_reg_t prepared_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     bool has_slow_body = nfi && nfi->needs_boxed_slow_body;
     MIR_reg_t inferred_guard = 0;
     MIR_label_t slow_body_label = NULL;
@@ -15799,7 +15808,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     param = fn_node->param;
     int user_index = 0;
-    while (param && user_index < 16) {
+    while (param && user_index < LAMBDA_MAX_FUNCTION_ARGS) {
         char prefixed[68];
         snprintf(prefixed, sizeof(prefixed), "_%.*s", (int)param->name->len, param->name->chars);
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
@@ -15890,8 +15899,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         call_arg_count++;
     }
     if (is_variadic) {
-        MIR_reg_t vargs = MIR_reg(mt->ctx, "_vargs", wrapper_func);
-        call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, vargs);
+        MIR_reg_t boxed_vargs = MIR_reg(mt->ctx, "_vargs", wrapper_func);
+        MIR_reg_t raw_vargs = new_reg(mt, "raw_vargs", MIR_T_P);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, raw_vargs),
+            MIR_new_reg_op(mt->ctx, boxed_vargs)));
+        call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, raw_vargs);
         call_vars[call_arg_count++] = {MIR_T_P, "vargs", 0};
     }
     if (region_producer) {
@@ -15914,7 +15927,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     int raw_lane_kind = native_return
         ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
         : RETURN_LANE_SCALAR;
-    MIR_type_t call_types[33];
+    MIR_type_t call_types[WRAPPER_PARAM_CAPACITY];
     for (int i = 0; i < call_arg_count; i++) {
         call_types[i] = call_vars[i].type;
     }
@@ -16027,14 +16040,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // We resolve types BEFORE creating the MIR function so we can decide whether
     // to generate a native-typed version or the traditional all-Item version.
     // Uses infer_cache from prepass_forward_declare to avoid redundant body walks.
-    TypeId resolved_param_types[16];
+    TypeId resolved_param_types[LAMBDA_MAX_FUNCTION_ARGS];
     int user_param_count = 0;
 
     // First pass: collect declared types and TypeUnary array resolution
     {
         TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
         AstNamedNode* p = fn_node->param;
-        while (p && user_param_count < 16) {
+        while (p && user_param_count < LAMBDA_MAX_FUNCTION_ARGS) {
             TypeId tid = resolve_declared_param_type(p, tp_iter);
             if (tid == LMD_TYPE_ARRAY_NUM) {
                 log_debug("mir: param '%.*s' resolved typed array annotation -> type_id=%d",
@@ -16122,7 +16135,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // ===== Build MIR parameter list =====
     // For native version: use resolved native MIR types for params
     // For boxed version (non-native): all params are MIR_T_I64 (Item)
-    MIR_var_t params[34];
+    enum { RAW_FUNCTION_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 4 };
+    MIR_var_t params[RAW_FUNCTION_PARAM_CAPACITY];
     int param_count = 0;
 
     // Every generated Lambda entry receives its owner context explicitly.
@@ -16143,7 +16157,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // User params: use native types for native version, MIR_T_I64 for boxed
     AstNamedNode* param = fn_node->param;
     int pi_build = 0;
-    while (param && param_count < 31) {
+    while (param && param_count < RAW_FUNCTION_PARAM_CAPACITY - 2) {
         char pname[64];
         snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
 
@@ -16157,13 +16171,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         param = (AstNamedNode*)param->next;
     }
 
-    if (region_producer && param_count < 32) {
+    if (region_producer && param_count < RAW_FUNCTION_PARAM_CAPACITY - 1) {
         params[param_count] = {MIR_T_P, raw_strdup("_region"), 0};
         param_count++;
     }
 
     // Hidden trailing params (_vargs)
-    if (is_variadic && param_count < 32) {
+    if (is_variadic && param_count < RAW_FUNCTION_PARAM_CAPACITY - 1) {
         params[param_count] = {MIR_T_P, raw_strdup("_vargs"), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
     }
@@ -16192,7 +16206,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         ? (return_lane_kind == RETURN_LANE_ERROR
             ? FN_RETURN_HOME_ERROR : FN_RETURN_HOME_NORMAL)
         : 0;
-    if (scalar_home_lane_mask && param_count < 33) {
+    if (scalar_home_lane_mask && param_count < RAW_FUNCTION_PARAM_CAPACITY) {
         // Only generated bodies expose the trailing caller-owned scalar home.
         params[param_count] = {MIR_T_P, raw_strdup("_scalar_home"), 0};
         param_count++;
@@ -16251,7 +16265,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Save original strdup pointers before MIR overwrites them
-    char* param_name_copies[34];
+    char* param_name_copies[RAW_FUNCTION_PARAM_CAPACITY];
     for (int i = 0; i < param_count; i++) param_name_copies[i] = (char*)params[i].name;
 
     // Create function (MIR replaces params[i].name with internal copies)
@@ -17121,12 +17135,12 @@ static CallSiteEntry* mir_callsite_entry(MirTranspiler* mt, AstFuncNode* fn, boo
     key.fn = fn;
     CallSiteEntry* found = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
     if (found || !create) return found;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
         key.arg_types[i] = LMD_TYPE_ERROR;  // "unset"
         key.specialization_types[i] = LMD_TYPE_ERROR;
     }
     int count = 0;
-    for (AstNamedNode* p = fn->param; p && count < 16; p = (AstNamedNode*)p->next) count++;
+    for (AstNamedNode* p = fn->param; p && count < LAMBDA_MAX_FUNCTION_ARGS; p = (AstNamedNode*)p->next) count++;
     key.param_count = count;
     hashmap_set(mt->callsite_info, &key);
     return (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
@@ -17285,13 +17299,13 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         !is_closure &&
                         !is_variadic && !is_method) {
                     // Resolve all param types (matching transpile_func_def logic)
-                    TypeId fwd_param_types[16];
+                    TypeId fwd_param_types[LAMBDA_MAX_FUNCTION_ARGS];
                     int fwd_param_count = 0;
                     bool has_native = false;
                     {
                         TypeParam* tp = ft ? ft->param : NULL;
                         AstNamedNode* p = fn_node->param;
-                        while (p && fwd_param_count < 16) {
+                        while (p && fwd_param_count < LAMBDA_MAX_FUNCTION_ARGS) {
                             TypeId tid = resolve_declared_param_type(p, tp);
                             fwd_param_types[fwd_param_count] = tid;
                             fwd_param_count++;
@@ -17612,7 +17626,7 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
         void* item = NULL;
         while (hashmap_iter(mt->callsite_info, &iter, &item)) {
             CallSiteEntry* e = (CallSiteEntry*)item;
-            for (int i = 0; i < 16; i++) {
+            for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 e->arg_types[i] = LMD_TYPE_ERROR;
                 e->specialization_types[i] = LMD_TYPE_ERROR;
             }
@@ -17629,7 +17643,7 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
         item = NULL;
         while (hashmap_iter(mt->callsite_info, &iter, &item)) {
             CallSiteEntry* e = (CallSiteEntry*)item;
-            TypeId resolved[16];
+            TypeId resolved[LAMBDA_MAX_FUNCTION_ARGS];
             TypeParam* tp = NULL;
             AstNode* fn_as = (AstNode*)e->fn;
             if (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC) {

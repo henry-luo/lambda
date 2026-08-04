@@ -98,6 +98,7 @@ typedef enum LambdaErrorCode {
     ERR_RETURN_OUTSIDE_FUNCTION = 227,// return used outside function
     ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ? or ^err
     ERR_UNSUPPORTED_DYNAMIC_ABI = 229,// valid dynamic call exceeds physical dispatch ABI
+    ERR_FUNCTION_ARGUMENT_LIMIT = 230,// Core Lambda function/call exceeds LAMBDA_MAX_FUNCTION_ARGS
     
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors

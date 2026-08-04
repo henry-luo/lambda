@@ -32,37 +32,11 @@ bool has_typed_params(AstFuncNode* fn_node) {
 }
 
 bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
-    if (fn_node->captures) return false;  // closures already use Item ABI
-    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-
-    // Dynamic dispatch has to materialize absent optionals/defaults and the
-    // trailing vargs list before the raw fixed-arity body is entered.
-    if (fn_type && (fn_type->is_variadic ||
-            fn_type->required_param_count != fn_type->param_count)) return true;
-
-    // Functions with typed params need param unboxing wrapper
-    if (has_typed_params(fn_node)) return true;
-
-    // can_raise non-closure/non-method functions return RetItem from the main function,
-    // which doesn't match fn_call*'s Item ABI — need a _b wrapper
-    if (fn_type->can_raise) return true;
-
-    // Functions with ALL untyped params: body uses Item-level ops → effectively returns Item
-    // No wrapper needed (fn_call* can use the function directly)
-    if (fn_node->param) return false;
-
-    // Functions with NO params: body may return raw native values → needs wrapper
-    {
-        Type *ret_type = fn_type->returned;
-        if (!ret_type && fn_node->body) ret_type = fn_node->body->type;
-        if (!ret_type) ret_type = &TYPE_ANY;
-        TypeId ret_tid = ret_type->type_id;
-        if (is_fn_call_wrapper_return_type_id(ret_tid)) {
-            return true;
-        }
-    }
-
-    return false;
+    (void)fn_node;
+    // A first-class Core Lambda value always names its boxed public wrapper.
+    // The raw JIT entry may use native operands, but publishing it would let a
+    // dynamic call reinterpret boxed Items as those native operands.
+    return true;
 }
 
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {

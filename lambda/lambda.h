@@ -996,14 +996,23 @@ Item item_spread(Item item);
 
 typedef void* (*fn_ptr)();
 
-// Function flags (stored in Function.flags field)
-#define FN_FLAG_BOXED_RET     0x01  // bit 0: fn->ptr returns RetItem instead of Item
-#define FN_FLAG_HAS_KWARGS    0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
-#define FN_FLAG_IS_GENERATOR  0x04  // bit 2: function is a Python generator (resume fn, frame in closure_env)
-#define FN_FLAG_IS_COROUTINE  0x08  // bit 3: function is a Python coroutine (async def)
-#define FN_FLAG_SYS_REF       0x10  // bit 4: first-class builtin identity, not dynamic-call ABI
-#define FN_FLAG_MIR_PUBLIC_ABI 0x20 // bit 5: trailing caller-owned scalar-home parameter
-#define FN_FLAG_MIR_CONTEXT_ABI 0x40 // bit 6: generated entry takes Context* first
+// Core Lambda's native dynamic dispatcher expands individual boxed ABI
+// operands.  This is a language limit, not storage capacity: longer values
+// must travel in an array/map or a single rest argument.
+enum { LAMBDA_MAX_FUNCTION_ARGS = 16 };
+
+// Every Core Function value explicitly describes the entry stored in ptr.
+// Keep this unversioned layout local to the current JIT process: persistent
+// AOT compatibility is deliberately deferred rather than guessed.
+typedef uint8_t FunctionEntryAbi;
+enum {
+    FN_ENTRY_ABI_UNKNOWN = 0,
+    FN_ENTRY_ABI_LAMBDA_DIRECT_ONLY,
+    FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION,
+    FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE,
+    FN_ENTRY_ABI_FOREIGN,
+    FN_ENTRY_ABI_HOST_ADAPTER,
+};
 
 // Function as first-class value
 // Supports both direct function references and closures
@@ -1011,8 +1020,20 @@ struct Function {
     uint8_t type_id;
     uint8_t arity;               // number of parameters (0-255)
     uint8_t closure_field_count;  // number of Item fields in closure_env (0 if not a closure)
-    uint8_t flags;               // function flags (FN_FLAG_BOXED_RET, etc.)
-    // --- 4 bytes padding --- (offset 4..7)
+    FunctionEntryAbi entry_abi;  // FunctionEntryAbi; checked before ptr dispatch
+    union {
+        uint32_t flags;          // whole-word initialization/copy only
+        struct {
+            uint32_t returns_ret_item : 1;
+            uint32_t has_kwargs : 1;
+            uint32_t is_generator : 1;
+            uint32_t is_coroutine : 1;
+            uint32_t is_system_function_ref : 1;
+            uint32_t requires_scalar_result_home : 1;
+            uint32_t requires_runtime_context : 1;
+            uint32_t reserved_flags : 25;
+        };
+    };
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
@@ -1023,6 +1044,8 @@ struct Function {
 #if !defined(LAMBDA_C2MIR_RUNTIME)
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
                      "Function TypeId must remain at byte zero");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, fn_type) == 8,
+                     "Function metadata must preserve pointer alignment");
 #endif
 
 // Dynamic function invocation for first-class functions
@@ -1074,6 +1097,8 @@ extern "C" {
 #endif
 void lambda_function_mark_mir_public_abi(Function* fn);
 void lambda_function_mark_mir_context_abi(Function* fn);
+void lambda_function_mark_lambda_boxed_function(Function* fn);
+void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 void lambda_function_set_type(Function* fn, void* fn_type);
 #ifdef __cplusplus
 }

@@ -18,7 +18,7 @@
 #include <uv.h>
 
 extern __thread EvalContext* context;
-extern "C" Item lambda_concurrency_fn_call_into(Function* fn, List* args,
+extern "C" Item lambda_concurrency_fn_call_procedure_into(Function* fn, List* args,
     uint64_t* result_home);
 extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* env);
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -1240,7 +1240,7 @@ static LambdaTaskPoll task_launch_resume(LambdaTask* task, void* data, Item* out
         ? frame->roots[0].function : NULL;
     // A task publishes its result after this callback returns. Its companion
     // word is therefore the stable home for a MIR public wrapper's wide scalar.
-    Item result = lambda_concurrency_fn_call_into(function,
+    Item result = lambda_concurrency_fn_call_procedure_into(function,
         frame ? &frame->args : NULL, task ? &task->result_scalar : NULL);
     if (result.item == ITEM_TASK_SUSPENDED) return LAMBDA_TASK_POLL_PARKED;
     if (out) *out = result;
@@ -1318,6 +1318,7 @@ extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
     // the generated entry's Context argument.
     lambda_function_mark_mir_public_abi(function);
     lambda_function_mark_mir_context_abi(function);
+    lambda_function_mark_lambda_boxed_procedure(function);
     function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;
     Item handle = lambda_task_start_function((Item){.function = function}, args);
     LambdaTask* task = lambda_task_from_handle(handle);

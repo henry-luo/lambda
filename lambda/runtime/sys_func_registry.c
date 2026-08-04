@@ -1095,6 +1095,14 @@ extern Item fn_call_boxed_5_into(void* fp, Item a, Item b, Item c, Item d, Item 
 extern Item fn_call_boxed_6_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
 extern Item fn_call_boxed_7_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
 extern Item fn_call_boxed_8_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
+extern Item fn_call_boxed_9_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, uint64_t* result_home);
+extern Item fn_call_boxed_10_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, uint64_t* result_home);
+extern Item fn_call_boxed_11_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, uint64_t* result_home);
+extern Item fn_call_boxed_12_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, uint64_t* result_home);
+extern Item fn_call_boxed_13_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, uint64_t* result_home);
+extern Item fn_call_boxed_14_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, uint64_t* result_home);
+extern Item fn_call_boxed_15_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, uint64_t* result_home);
+extern Item fn_call_boxed_16_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, Item p, uint64_t* result_home);
 extern Item js_call_export_0_into(Function* function, uint64_t* result_home);
 extern Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 extern Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
@@ -1111,6 +1119,8 @@ extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
 extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
 extern void lambda_function_mark_mir_public_abi(Function* fn);
 extern void lambda_function_mark_mir_context_abi(Function* fn);
+extern void lambda_function_mark_lambda_boxed_function(Function* fn);
+extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
@@ -2989,6 +2999,14 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6_into", FPTR(fn_call_boxed_6_into)},
     {"fn_call_boxed_7_into", FPTR(fn_call_boxed_7_into)},
     {"fn_call_boxed_8_into", FPTR(fn_call_boxed_8_into)},
+    {"fn_call_boxed_9_into", FPTR(fn_call_boxed_9_into)},
+    {"fn_call_boxed_10_into", FPTR(fn_call_boxed_10_into)},
+    {"fn_call_boxed_11_into", FPTR(fn_call_boxed_11_into)},
+    {"fn_call_boxed_12_into", FPTR(fn_call_boxed_12_into)},
+    {"fn_call_boxed_13_into", FPTR(fn_call_boxed_13_into)},
+    {"fn_call_boxed_14_into", FPTR(fn_call_boxed_14_into)},
+    {"fn_call_boxed_15_into", FPTR(fn_call_boxed_15_into)},
+    {"fn_call_boxed_16_into", FPTR(fn_call_boxed_16_into)},
     {"js_call_export_0_into", FPTR(js_call_export_0_into)},
     {"js_call_export_1_into", FPTR(js_call_export_1_into)},
     {"js_call_export_2_into", FPTR(js_call_export_2_into)},
@@ -3005,6 +3023,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_call3_into", FPTR(fn_call3_into)},
     {"lambda_function_mark_mir_public_abi", FPTR(lambda_function_mark_mir_public_abi)},
     {"lambda_function_mark_mir_context_abi", FPTR(lambda_function_mark_mir_context_abi)},
+    {"lambda_function_mark_lambda_boxed_function", FPTR(lambda_function_mark_lambda_boxed_function)},
+    {"lambda_function_mark_lambda_boxed_procedure", FPTR(lambda_function_mark_lambda_boxed_procedure)},
     {"lambda_function_set_type", FPTR(lambda_function_set_type)},
     {"to_sys_fn_named", FPTR(to_sys_fn_named)},
 

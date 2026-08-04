@@ -3773,6 +3773,7 @@ static Item jube_host_data_function_new(void* session, void* function_ptr, int p
     Function* function = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     if (!function) return ItemNull;
     function->type_id = LMD_TYPE_FUNC;
+    function->entry_abi = FN_ENTRY_ABI_FOREIGN;
     function->ptr = (fn_ptr)function_ptr;
     function->arity = (uint8_t)param_count;
     return (Item){.function = function};
