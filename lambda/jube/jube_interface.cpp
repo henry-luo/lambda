@@ -359,7 +359,8 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     env[0] = rooted_receiver.get();
     env[1] = jube_name_item(rec->snake_name);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->arity = (uint8_t)rec->arity;
+    fn->entry_abi = FN_ENTRY_ABI_HOST_ADAPTER;
+    fn->arity = (uint8_t)arity;
     fn->fn_type = NULL;
     fn->ptr = (fn_ptr)s_jube_lambda_method_tramps[arity];
     fn->closure_env = env;

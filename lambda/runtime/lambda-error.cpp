@@ -129,6 +129,7 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_RETURN_OUTSIDE_FUNCTION, "RETURN_OUTSIDE_FUNCTION", "Return outside function"},
     {ERR_UNHANDLED_ERROR, "UNHANDLED_ERROR", "Unhandled error-returning call"},
     {ERR_UNSUPPORTED_DYNAMIC_ABI, "UNSUPPORTED_DYNAMIC_ABI", "Unsupported dynamic call ABI"},
+    {ERR_FUNCTION_ARGUMENT_LIMIT, "FUNCTION_ARGUMENT_LIMIT", "Function argument limit exceeded"},
     
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},

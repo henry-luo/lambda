@@ -1,7 +1,7 @@
 // lambda/module/py/py_async.cpp — Python async/await and asyncio support (Phase D)
 // ==========================================================================
 // Coroutines are specializations of generator objects: they carry
-// FN_FLAG_IS_COROUTINE (0x08) in addition to FN_FLAG_IS_GENERATOR (0x04).
+// Function::is_coroutine in addition to Function::is_generator.
 //
 // await expr  compiles as  yield from expr + py_coro_get_return()
 // async def   compiles as  generator (state machine) via pm_compile_generator
@@ -27,10 +27,10 @@
 // =========================================================================
 
 extern "C" Item py_coro_create(void* resume_fn_ptr, int frame_size) {
-    // Identical to py_gen_create but also sets FN_FLAG_IS_COROUTINE.
+    // Identical to py_gen_create but also sets is_coroutine.
     Item gen = py_gen_create(resume_fn_ptr, frame_size);
     if (get_type_id(gen) == LMD_TYPE_FUNC && gen.function) {
-        gen.function->flags |= FN_FLAG_IS_COROUTINE;
+        gen.function->is_coroutine = 1;
     }
     return gen;
 }
@@ -38,7 +38,7 @@ extern "C" Item py_coro_create(void* resume_fn_ptr, int frame_size) {
 extern "C" bool py_is_coroutine(Item x) {
     if (get_type_id(x) != LMD_TYPE_FUNC) return false;
     Function* fn = x.function;
-    return fn && (fn->flags & FN_FLAG_IS_COROUTINE);
+    return fn && fn->is_coroutine;
 }
 
 // =========================================================================

@@ -2014,7 +2014,7 @@ extern "C" Item py_get_iterator(Item iterable) {
     // generator objects are already iterators — pass through unchanged
     if (get_type_id(iterable) == LMD_TYPE_FUNC) {
         Function* fn = iterable.function;
-        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) return iterable;
+        if (fn && fn->is_generator) return iterable;
     }
     // create a stateful iterator object: {__data__: iterable, __idx__: 0, __len__: len}
     Item len_item = py_builtin_len(iterable);
@@ -2034,7 +2034,7 @@ extern "C" Item py_iterator_next(Item iterator) {
     // generator objects: call resume function
     if (get_type_id(iterator) == LMD_TYPE_FUNC) {
         Function* fn = iterator.function;
-        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) {
+        if (fn && fn->is_generator) {
             uint64_t* frame = (uint64_t*)fn->closure_env;
             if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
             typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
@@ -2144,7 +2144,7 @@ extern "C" Item py_new_closure_with_env(void* func_ptr, int param_count,
 
 extern "C" Item py_mark_mir_public_abi(Item fn_item) {
     if (get_type_id(fn_item) == LMD_TYPE_FUNC && fn_item.function) {
-        fn_item.function->flags |= FN_FLAG_MIR_PUBLIC_ABI;
+        fn_item.function->requires_scalar_result_home = 1;
     }
     return fn_item;
 }
@@ -2171,11 +2171,11 @@ extern "C" Item py_env_load(uint64_t* env, int slot) {
     return (Item){.item = env[slot]};
 }
 
-// set FN_FLAG_HAS_KWARGS on a function item (called at definition site for **kwargs functions)
+// set has_kwargs on a function item (called at definition site for **kwargs functions)
 extern "C" Item py_set_kwargs_flag(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return fn_item;
     Function* fn = fn_item.function;
-    if (fn) fn->flags |= FN_FLAG_HAS_KWARGS;
+    if (fn) fn->has_kwargs = 1;
     return fn_item;
 }
 
@@ -2207,7 +2207,7 @@ static bool py_can_prepend_call_arg(const char* call_kind, int arg_count) {
     return true;
 }
 
-// call a function that may accept **kwargs: if FN_FLAG_HAS_KWARGS, append kwargs_map as last arg
+// call a function that may accept **kwargs: if has_kwargs, append kwargs_map as last arg
 extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map) {
     if (arg_count < 0 || arg_count > 16) {
         log_error("py-call: keyword call argument count %d exceeds native dispatch limit", arg_count);
@@ -2252,7 +2252,7 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
     if (!fn || !fn->ptr) return ItemNull;
 
     // if the function doesn't take **kwargs, fall back to regular dispatch
-    if (!(fn->flags & FN_FLAG_HAS_KWARGS)) {
+    if (!fn->has_kwargs) {
         return py_call_function(func, args, arg_count);
     }
 
@@ -2441,7 +2441,7 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
 extern "C" Item py_call_function_into(Item func, Item* args, int arg_count,
         uint64_t* result_home) {
     if (get_type_id(func) != LMD_TYPE_FUNC || !func.function ||
-            !(func.function->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+            !func.function->requires_scalar_result_home) {
         return py_call_function(func, args, arg_count);
     }
     if (!result_home) {
@@ -2450,7 +2450,7 @@ extern "C" Item py_call_function_into(Item func, Item* args, int arg_count,
     }
     Function* fn = func.function;
     if (!fn->ptr || arg_count < 0 || arg_count > 16 ||
-            (fn->flags & FN_FLAG_HAS_KWARGS)) {
+            fn->has_kwargs) {
         log_error("py-call-into: unsupported MIR public function dispatch");
         return ItemError;
     }
@@ -2489,10 +2489,10 @@ extern "C" Item py_call_function_into(Item func, Item* args, int arg_count,
 extern "C" Item py_call_function_kw_into(Item func, Item* args, int arg_count,
         Item kwargs_map, uint64_t* result_home) {
     if (get_type_id(func) != LMD_TYPE_FUNC || !func.function ||
-            !(func.function->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+            !func.function->requires_scalar_result_home) {
         return py_call_function_kw(func, args, arg_count, kwargs_map);
     }
-    if (!result_home || !(func.function->flags & FN_FLAG_HAS_KWARGS)) {
+    if (!result_home || !func.function->has_kwargs) {
         log_error("py-call-kw-into: invalid MIR public keyword dispatch");
         return ItemError;
     }
@@ -2674,7 +2674,7 @@ extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
     uint64_t* frame = py_alloc_env(frame_size + 1);
     if (!frame) return ItemNull;
     fn = rooted_fn.get().function;
-    fn->flags = FN_FLAG_IS_GENERATOR;
+    fn->is_generator = 1;
     // Preserve the logical frame count so resume calls can locate its final
     // destination-owned scalar payload slot without borrowing C stack storage.
     fn->arity = (uint8_t)frame_size;
@@ -2690,7 +2690,7 @@ extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
 extern "C" int64_t py_gen_get_frame_c(Item gen) {
     if (get_type_id(gen) != LMD_TYPE_FUNC) return 0;
     Function* fn = gen.function;
-    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return 0;
+    if (!fn || !fn->is_generator) return 0;
     return (int64_t)(uintptr_t)fn->closure_env;
 }
 
@@ -2715,7 +2715,7 @@ extern "C" Item py_gen_next(Item gen) {
     gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;
-    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    if (!fn || !fn->is_generator) return py_stop_iteration();
     uint64_t* frame = (uint64_t*)fn->closure_env;
     if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
     typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
@@ -2733,7 +2733,7 @@ extern "C" Item py_gen_send(Item gen, Item value) {
     gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;
-    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    if (!fn || !fn->is_generator) return py_stop_iteration();
     uint64_t* frame = (uint64_t*)fn->closure_env;
     if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
     typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
@@ -2747,5 +2747,5 @@ extern "C" Item py_gen_send(Item gen, Item value) {
 extern "C" bool py_is_generator(Item x) {
     if (get_type_id(x) != LMD_TYPE_FUNC) return false;
     Function* fn = x.function;
-    return fn && (fn->flags & FN_FLAG_IS_GENERATOR) != 0;
+    return fn && fn->is_generator;
 }

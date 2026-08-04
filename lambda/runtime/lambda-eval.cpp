@@ -659,6 +659,7 @@ Range* fn_to(Item item_a, Item item_b) {
 Function* to_fn(fn_ptr ptr) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
+    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
     fn->ptr = ptr;
     fn->closure_env = NULL;
     return fn;
@@ -668,6 +669,7 @@ Function* to_fn(fn_ptr ptr) {
 Function* to_fn_n(fn_ptr ptr, int arity) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
+    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -679,6 +681,7 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
+    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -689,7 +692,8 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
 Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name) {
     Function *fn = to_fn_named(ptr, arity, name);
     // builtin C functions have heterogeneous ABIs; this value is for identity/name.
-    fn->flags |= FN_FLAG_SYS_REF;
+    fn->is_system_function_ref = 1;
+    fn->entry_abi = FN_ENTRY_ABI_FOREIGN;
     return fn;
 }
 
@@ -697,7 +701,7 @@ void lambda_function_mark_mir_public_abi(Function* fn) {
     if (!fn) return;
     // MIR wrappers have a trailing home; treating them as legacy Item calls
     // would drop the only storage that survives their number-frame teardown.
-    fn->flags |= FN_FLAG_MIR_PUBLIC_ABI;
+    fn->requires_scalar_result_home = 1;
 }
 
 void lambda_function_mark_mir_context_abi(Function* fn) {
@@ -709,8 +713,18 @@ void lambda_function_mark_mir_context_abi(Function* fn) {
     }
     // A generated Function may outlive its creating activation. Capture the
     // TLS owner here so later native dispatch can forward it only to MIR code.
-    fn->flags |= FN_FLAG_MIR_CONTEXT_ABI;
+    fn->requires_runtime_context = 1;
     fn->runtime_context = runtime;
+}
+
+void lambda_function_mark_lambda_boxed_function(Function* fn) {
+    if (!fn) return;
+    fn->entry_abi = FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION;
+}
+
+void lambda_function_mark_lambda_boxed_procedure(Function* fn) {
+    if (!fn) return;
+    fn->entry_abi = FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE;
 }
 
 void lambda_function_set_type(Function* fn, void* fn_type) {
@@ -725,6 +739,7 @@ void lambda_function_set_type(Function* fn, void* fn_type) {
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
+    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
@@ -738,6 +753,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
+    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
@@ -775,6 +791,9 @@ static inline bool is_valid_function(Function* fn) {
     return type_id == LMD_TYPE_FUNC;
 }
 
+// Retired pre-metadata dispatcher.  Keep it out of the translation unit while
+// the new exact-rooted dispatcher below replaces every exported entry point.
+#if 0
 static bool reject_missing_mir_result_home(Function* fn, const char* caller) {
     if (!(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) return false;
     // MIR public wrappers have a trailing home argument. Calling one through
@@ -1098,6 +1117,357 @@ extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* 
     return to_closure(ptr, arity, env);
 }
 
+#endif
+
+typedef enum LambdaDynamicCallMode {
+    LAMBDA_DYNAMIC_CALL_FUNCTION,
+    LAMBDA_DYNAMIC_CALL_PROCEDURE,
+} LambdaDynamicCallMode;
+
+static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
+        const char* detail) {
+    char message[256];
+    snprintf(message, sizeof(message), "%s: %s", caller, detail);
+    set_runtime_error(code, "%s", message);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) loc.file = context->current_file;
+        LambdaError* error = err_create_heap(code, message, &loc);
+        if (error) {
+            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            return err2it(error);
+        }
+    }
+    return ItemError;
+}
+
+static Item lambda_dynamic_argument_limit_error(const char* caller, int64_t count,
+        const char* kind) {
+    char detail[192];
+    snprintf(detail, sizeof(detail), "%s count %lld exceeds Core Lambda limit %d",
+        kind, (long long)count, LAMBDA_MAX_FUNCTION_ARGS);
+    return lambda_dynamic_call_error(ERR_FUNCTION_ARGUMENT_LIMIT, caller, detail);
+}
+
+static bool lambda_dynamic_abi_is_core(FunctionEntryAbi abi) {
+    return abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
+        abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE;
+}
+
+static bool lambda_dynamic_signature_has_var_parameter(const TypeFunc* signature) {
+    if (!signature) return false;
+    for (const TypeParam* param = signature->param; param; param = param->next) {
+        if (param->is_var_param) return true;
+    }
+    return false;
+}
+
+static Item lambda_dynamic_check_signature(Function* fn, int actual,
+        LambdaDynamicCallMode mode, const char* caller, int* physical_count,
+        bool* needs_adapter) {
+    if (actual > LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, actual, "argument");
+    }
+    if (fn->arity > LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, fn->arity, "function arity");
+    }
+    if (mode == LAMBDA_DYNAMIC_CALL_FUNCTION &&
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
+            fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "dynamic expression call requires a boxed Lambda function entry");
+    }
+    if (mode == LAMBDA_DYNAMIC_CALL_PROCEDURE &&
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE) {
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "task launch requires a boxed Lambda procedure entry");
+    }
+    if (!fn->ptr) {
+        return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+            "function has no native entry");
+    }
+    if (fn->is_system_function_ref) {
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "builtin references do not expose the boxed dynamic-call ABI");
+    }
+
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    if (lambda_dynamic_abi_is_core(fn->entry_abi) &&
+            (!signature || signature->type_id != LMD_TYPE_FUNC) &&
+            mode != LAMBDA_DYNAMIC_CALL_PROCEDURE) {
+        // A Core boxed pointer without its semantic signature cannot safely
+        // materialize optional/rest slots or reject mutable parameters.
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "boxed Lambda entry is missing its function signature");
+    }
+
+    int required = fn->arity;
+    int fixed = fn->arity;
+    bool variadic = false;
+    if (signature && signature->type_id == LMD_TYPE_FUNC) {
+        if (lambda_dynamic_signature_has_var_parameter(signature)) {
+            return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+                "dynamic dispatch of a function with `var` parameters is deferred");
+        }
+        required = signature->required_param_count;
+        fixed = signature->param_count;
+        variadic = signature->is_variadic;
+    } else if (lambda_dynamic_abi_is_core(fn->entry_abi)) {
+        // Async task root lowering has a generated procedure wrapper but no
+        // source TypeFunc in its scheduler frame. It has no optional/rest
+        // adapter; retain the exact fixed arity supplied by the launcher.
+        fixed = fn->arity;
+    }
+    int physical = fixed + (variadic ? 1 : 0);
+    if (physical > LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, physical, "formal slot");
+    }
+    if (actual < required || (!variadic && actual > fixed)) {
+        char detail[192];
+        snprintf(detail, sizeof(detail), "function '%s' expects %d%s argument%s, got %d",
+            fn->name ? fn->name : "<anonymous>", required,
+            variadic ? " or more" : "", required == 1 && !variadic ? "" : "s", actual);
+        return lambda_dynamic_call_error(ERR_ARGUMENT_COUNT_MISMATCH, caller, detail);
+    }
+    if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER &&
+            (variadic || actual != fixed)) {
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "host adapter does not expose optional or rest argument adaptation");
+    }
+    *physical_count = physical;
+    *needs_adapter = variadic || actual < fixed;
+    return ItemNull;
+}
+
+template <int... indices>
+struct LambdaDynamicIndexSequence {};
+
+template <int count, int... indices>
+struct LambdaDynamicMakeIndexSequence
+    : LambdaDynamicMakeIndexSequence<count - 1, count - 1, indices...> {};
+
+template <int... indices>
+struct LambdaDynamicMakeIndexSequence<0, indices...> {
+    typedef LambdaDynamicIndexSequence<indices...> Type;
+};
+
+template <int>
+using LambdaDynamicItem = Item;
+
+template <typename IndexSequence>
+struct LambdaDynamicNativeInvoker;
+
+template <int... indices>
+struct LambdaDynamicNativeInvoker<LambdaDynamicIndexSequence<indices...>> {
+    static Item invoke(Function* fn, const Item* args, uint64_t* result_home,
+            const char* caller) {
+        if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER) {
+            if (fn->closure_env) {
+                return ((Item (*)(void*, LambdaDynamicItem<indices>...))fn->ptr)(
+                    fn->closure_env, args[indices]...);
+            }
+            return ((Item (*)(LambdaDynamicItem<indices>...))fn->ptr)(args[indices]...);
+        }
+
+        if (!fn->requires_scalar_result_home || !fn->requires_runtime_context) {
+            // A published Core entry must retain both hidden operands. This
+            // blocks raw/native bodies from being reinterpreted as boxed calls.
+            return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+                "boxed Lambda entry is missing its context/result-home ABI metadata");
+        }
+        if (!result_home) {
+            return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+                "boxed Lambda entry requires a caller-owned scalar result home");
+        }
+        Context* runtime = fn->runtime_context;
+        if (!runtime) {
+            return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+                "boxed Lambda entry has no owning runtime context");
+        }
+        if (eval_context_tls_runtime() != runtime) {
+            return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+                "boxed Lambda entry belongs to a different runtime context");
+        }
+        if (fn->closure_env) {
+            return ((Item (*)(Context*, void*, LambdaDynamicItem<indices>...,
+                uint64_t*))fn->ptr)(runtime, fn->closure_env, args[indices]...,
+                    result_home);
+        }
+        return ((Item (*)(Context*, LambdaDynamicItem<indices>..., uint64_t*))fn->ptr)(
+            runtime, args[indices]..., result_home);
+    }
+};
+
+template <int count>
+static Item lambda_dynamic_invoke_native(Function* fn, const Item* args,
+        uint64_t* result_home, const char* caller) {
+    typedef typename LambdaDynamicMakeIndexSequence<count>::Type Indices;
+    return LambdaDynamicNativeInvoker<Indices>::invoke(fn, args, result_home, caller);
+}
+
+static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
+        int count, uint64_t* result_home, const char* caller) {
+    // This is the sole Core Lambda C++ function-pointer arity dispatch.
+    switch (count) {
+    case 0: return lambda_dynamic_invoke_native<0>(fn, args, result_home, caller);
+    case 1: return lambda_dynamic_invoke_native<1>(fn, args, result_home, caller);
+    case 2: return lambda_dynamic_invoke_native<2>(fn, args, result_home, caller);
+    case 3: return lambda_dynamic_invoke_native<3>(fn, args, result_home, caller);
+    case 4: return lambda_dynamic_invoke_native<4>(fn, args, result_home, caller);
+    case 5: return lambda_dynamic_invoke_native<5>(fn, args, result_home, caller);
+    case 6: return lambda_dynamic_invoke_native<6>(fn, args, result_home, caller);
+    case 7: return lambda_dynamic_invoke_native<7>(fn, args, result_home, caller);
+    case 8: return lambda_dynamic_invoke_native<8>(fn, args, result_home, caller);
+    case 9: return lambda_dynamic_invoke_native<9>(fn, args, result_home, caller);
+    case 10: return lambda_dynamic_invoke_native<10>(fn, args, result_home, caller);
+    case 11: return lambda_dynamic_invoke_native<11>(fn, args, result_home, caller);
+    case 12: return lambda_dynamic_invoke_native<12>(fn, args, result_home, caller);
+    case 13: return lambda_dynamic_invoke_native<13>(fn, args, result_home, caller);
+    case 14: return lambda_dynamic_invoke_native<14>(fn, args, result_home, caller);
+    case 15: return lambda_dynamic_invoke_native<15>(fn, args, result_home, caller);
+    case 16: return lambda_dynamic_invoke_native<16>(fn, args, result_home, caller);
+    default: return lambda_dynamic_argument_limit_error(caller, count, "physical argument");
+    }
+}
+
+static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
+        LambdaDynamicCallMode mode, const char* caller) {
+    int64_t source_actual = args ? args->length : 0;
+    if (source_actual < 0 || source_actual > LAMBDA_MAX_FUNCTION_ARGS) {
+        return lambda_dynamic_argument_limit_error(caller, source_actual,
+            "argument");
+    }
+    int actual = (int)source_actual;
+    if (!is_valid_function(fn)) {
+        return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+            "value is not a Core Lambda function");
+    }
+    // A LambdaJS function begins with the common type id but has a distinct
+    // layout. Validate this byte before reading Core Function metadata.
+    if (fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
+            fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
+        return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
+            "function does not publish a Core boxed dynamic-call entry");
+    }
+
+    int physical = 0;
+    bool needs_adapter = false;
+    Item checked = lambda_dynamic_check_signature(fn, actual, mode, caller,
+        &physical, &needs_adapter);
+    if (checked.item != ITEM_NULL) return checked;
+
+    // Root the function plus every source Item before `list()` can allocate.
+    // This exact span is the native equivalent of LambdaJS's adapter span.
+    RootSpan source_roots((size_t)actual + 1);
+    if (!source_roots.valid()) {
+        return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+            "dynamic boxed dispatch requires an active Lambda runtime");
+    }
+    uint64_t* source_words = source_roots.words();
+    source_words[0] = (uint64_t)(uintptr_t)fn;
+    for (int i = 0; i < actual; i++) source_words[i + 1] = args->items[i].item;
+    Item* source_items = (Item*)(void*)(source_words + 1);
+
+    if (!needs_adapter) {
+        Function* rooted_fn = (Function*)(uintptr_t)source_words[0];
+        return lambda_dynamic_invoke_by_count(rooted_fn, source_items, actual,
+            result_home, caller);
+    }
+
+    RootSpan adapter_roots((size_t)physical);
+    if (!adapter_roots.valid()) {
+        return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+            "could not reserve dynamic-call adapter roots");
+    }
+    uint64_t* adapter_words = adapter_roots.words();
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    int fixed = signature->param_count;
+    for (int i = 0; i < fixed; i++) {
+        adapter_words[i] = i < actual ? source_words[i + 1] : ITEM_MISSING_ARGUMENT;
+    }
+    if (signature->is_variadic) {
+        adapter_words[fixed] = ITEM_NULL;
+        if (actual > fixed) {
+            List* rest = list();
+            if (!rest) {
+                return lambda_dynamic_call_error(ERR_OUT_OF_MEMORY, caller,
+                    "could not allocate rest argument list");
+            }
+            adapter_words[fixed] = (uint64_t)(uintptr_t)rest;
+            for (int i = fixed; i < actual; i++) {
+                // Reload both rooted values after each append: growth may collect.
+                rest = (List*)(uintptr_t)adapter_words[fixed];
+                list_push(rest, (Item){.item = source_words[i + 1]});
+            }
+        }
+    }
+    Function* rooted_fn = (Function*)(uintptr_t)source_words[0];
+    return lambda_dynamic_invoke_by_count(rooted_fn,
+        (Item*)(void*)adapter_words, physical, result_home, caller);
+}
+
+Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
+    return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_FUNCTION,
+        "fn_call_into");
+}
+
+Item fn_call0_into(Function* fn, uint64_t* result_home) {
+    return fn_call_into(fn, NULL, result_home);
+}
+
+Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
+    List args = {.length = 1, .items = &a};
+    return fn_call_into(fn, &args, result_home);
+}
+
+Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
+    Item values[] = {a, b};
+    List args = {.length = 2, .items = values};
+    return fn_call_into(fn, &args, result_home);
+}
+
+Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) {
+    Item values[] = {a, b, c};
+    List args = {.length = 3, .items = values};
+    return fn_call_into(fn, &args, result_home);
+}
+
+Item fn_call(Function* fn, List* args) {
+    return lambda_dynamic_call(fn, args, NULL, LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call");
+}
+
+Item fn_call0(Function* fn) { return fn_call(fn, NULL); }
+
+Item fn_call1(Function* fn, Item a) {
+    List args = {.length = 1, .items = &a};
+    return fn_call(fn, &args);
+}
+
+Item fn_call2(Function* fn, Item a, Item b) {
+    Item values[] = {a, b};
+    List args = {.length = 2, .items = values};
+    return fn_call(fn, &args);
+}
+
+Item fn_call3(Function* fn, Item a, Item b, Item c) {
+    Item values[] = {a, b, c};
+    List args = {.length = 3, .items = values};
+    return fn_call(fn, &args);
+}
+
+// Concurrency intentionally selects the procedure entry kind; an ordinary
+// function cannot be launched as a task merely because its pointer is boxed.
+extern "C" Item lambda_concurrency_fn_call_procedure_into(Function* fn, List* args,
+        uint64_t* result_home) {
+    return lambda_dynamic_call(fn, args, result_home,
+        LAMBDA_DYNAMIC_CALL_PROCEDURE, "lambda task launch");
+}
+
+extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* env) {
+    return to_closure(ptr, arity, env);
+}
+
 // Trampolines for calling _b boxed wrapper functions from MIR Direct code.
 // _b wrappers generated by transpile-mir.cpp return plain Item values; routing
 // through C keeps the function-pointer call ABI stable across platforms.
@@ -1154,10 +1524,20 @@ DEFINE_BOXED_CALL_INTO(5, (Item a, Item b, Item c, Item d, Item e), (a, b, c, d,
 DEFINE_BOXED_CALL_INTO(6, (Item a, Item b, Item c, Item d, Item e, Item f), (a, b, c, d, e, f))
 DEFINE_BOXED_CALL_INTO(7, (Item a, Item b, Item c, Item d, Item e, Item f, Item g), (a, b, c, d, e, f, g))
 DEFINE_BOXED_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h), (a, b, c, d, e, f, g, h))
+DEFINE_BOXED_CALL_INTO(9, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i), (a, b, c, d, e, f, g, h, i))
+DEFINE_BOXED_CALL_INTO(10, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j), (a, b, c, d, e, f, g, h, i, j))
+DEFINE_BOXED_CALL_INTO(11, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k), (a, b, c, d, e, f, g, h, i, j, k))
+DEFINE_BOXED_CALL_INTO(12, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l), (a, b, c, d, e, f, g, h, i, j, k, l))
+DEFINE_BOXED_CALL_INTO(13, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m), (a, b, c, d, e, f, g, h, i, j, k, l, m))
+DEFINE_BOXED_CALL_INTO(14, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n), (a, b, c, d, e, f, g, h, i, j, k, l, m, n))
+DEFINE_BOXED_CALL_INTO(15, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o), (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o))
+DEFINE_BOXED_CALL_INTO(16, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, Item p), (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p))
 #undef DEFINE_BOXED_CALL_INTO
 #undef EXPAND_BOXED_CALL_PARAMS
 } // extern "C"
 
+// Retired pre-metadata convenience dispatchers.
+#if 0
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
 // For _b boxed functions (FN_FLAG_BOXED_RET), cast to RetItem return and convert via ri_to_item()
@@ -1264,6 +1644,8 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
         return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
     }
 }
+
+#endif
 
 static bool numeric_type_subsumes(Type* actual, Type* target) {
     if (!actual || !target) return false;
@@ -1879,7 +2261,14 @@ static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid, i
 static Bool function_eq(Function* a, Function* b, int depth) {
     if (a == b) return BOOL_TRUE;
     if (!a || !b) return BOOL_FALSE;
-    if (a->ptr != b->ptr || a->arity != b->arity || a->flags != b->flags) return BOOL_FALSE;
+    if (a->ptr != b->ptr || a->arity != b->arity || a->entry_abi != b->entry_abi ||
+            a->returns_ret_item != b->returns_ret_item ||
+            a->has_kwargs != b->has_kwargs ||
+            a->is_generator != b->is_generator ||
+            a->is_coroutine != b->is_coroutine ||
+            a->is_system_function_ref != b->is_system_function_ref ||
+            a->requires_scalar_result_home != b->requires_scalar_result_home ||
+            a->requires_runtime_context != b->requires_runtime_context) return BOOL_FALSE;
     if (a->closure_field_count != b->closure_field_count) return BOOL_FALSE;
     if (a->closure_field_count > 0) {
         if (!a->closure_env || !b->closure_env) return BOOL_FALSE;
@@ -4019,6 +4408,11 @@ Item fn_member(Item item, Item key) {
                     // runtime before its boxed self argument.
                     lambda_function_mark_mir_public_abi(bound);
                     lambda_function_mark_mir_context_abi(bound);
+                    if (method->is_proc) {
+                        lambda_function_mark_lambda_boxed_procedure(bound);
+                    } else {
+                        lambda_function_mark_lambda_boxed_function(bound);
+                    }
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -4039,6 +4433,11 @@ Item fn_member(Item item, Item key) {
                         // binding before fn_call dispatches them.
                         lambda_function_mark_mir_public_abi(bound);
                         lambda_function_mark_mir_context_abi(bound);
+                        if (bmethod->is_proc) {
+                            lambda_function_mark_lambda_boxed_procedure(bound);
+                        } else {
+                            lambda_function_mark_lambda_boxed_function(bound);
+                        }
                         return {.item = (uint64_t)(uintptr_t)bound};
                     }
                     bmethod = bmethod->next;

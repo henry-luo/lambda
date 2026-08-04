@@ -2757,6 +2757,15 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
     return NULL;
 }
 
+static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
+        int count, const char* subject) {
+    if (count <= LAMBDA_MAX_FUNCTION_ARGS) return true;
+    record_semantic_error(tp, node, ERR_FUNCTION_ARGUMENT_LIMIT,
+        "%s count %d exceeds Core Lambda limit %d; use a rest parameter or an array/map",
+        subject, count, LAMBDA_MAX_FUNCTION_ARGS);
+    return false;
+}
+
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp,
@@ -2773,6 +2782,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
     log_debug("arg count: %d", arg_count);
+    (void)validate_lambda_argument_limit(tp, call_node, arg_count, "call argument");
 
     // build function name
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
@@ -3152,6 +3162,25 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
+
+    bool has_named_arguments = false;
+    for (AstNode* call_arg = ast_node->argument; call_arg; call_arg = call_arg->next) {
+        if (call_arg->node_type == AST_NODE_NAMED_ARG) {
+            has_named_arguments = true;
+            break;
+        }
+    }
+    if (has_named_arguments && !ast_called_function_signature_ready(ast_node->function)) {
+        // Runtime dispatch has only boxed positional operands.  Preserve names
+        // for statically resolved calls; fail before lowering an opaque call
+        // that would otherwise silently discard them.
+        record_semantic_error(tp, call_node, ERR_UNSUPPORTED_DYNAMIC_ABI,
+            "named arguments require a statically resolved Lambda callee");
+        if (!should_continue_transpiling(tp)) {
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+    }
 
     if (sys_func_info) {
         // Arguments are built after the registry call is resolved. Refine only
@@ -7010,6 +7039,7 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     }
     ts_tree_cursor_delete(&cursor);
     fn_type->param_count = param_count;
+    (void)validate_lambda_argument_limit(tp, func_node, param_count, "function formal");
 
     arraylist_append(tp->type_list, ast_node->type);
     fn_type->type_index = tp->type_list->length - 1;
@@ -9524,6 +9554,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     ts_tree_cursor_delete(&cursor);
     fn_type->param_count = param_count;
     fn_type->required_param_count = required_count;
+    (void)validate_lambda_argument_limit(tp, func_node,
+        param_count + (fn_type->is_variadic ? 1 : 0), "function formal");
 
     // build the function body
     // ast_node->locals = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
@@ -9969,6 +10001,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
                     fn_type->param_count = param_count;
                     fn_type->required_param_count = required_count;
+                    (void)validate_lambda_argument_limit(tp, child,
+                        param_count + (fn_type->is_variadic ? 1 : 0),
+                        "function formal");
 
                     // Build function body
                     TSNode fn_body_node = ts_node_child_by_field_id(child, FIELD_BODY);

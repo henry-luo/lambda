@@ -1,6 +1,6 @@
 #pragma once
 // py_async.h — Python async/await and asyncio support (Phase D)
-// Coroutines are generator objects with FN_FLAG_IS_COROUTINE set.
+// Coroutines are generator objects with Function::is_coroutine set.
 // The event loop is single-threaded and cooperative.
 
 #ifdef __cplusplus
@@ -13,7 +13,7 @@ extern "C" {
 // Coroutine creation and identification
 // =========================================================================
 
-// Create a coroutine object (like py_gen_create but sets FN_FLAG_IS_COROUTINE).
+// Create a coroutine object (like py_gen_create but sets is_coroutine).
 Item py_coro_create(void* resume_fn_ptr, int frame_size);
 
 // Returns true if x is a coroutine (IS_GENERATOR + IS_COROUTINE flags).

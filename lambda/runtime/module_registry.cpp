@@ -239,6 +239,11 @@ Item module_build_lambda_namespace(void* script_ptr) {
                         // shifts its first Item into the generated Context slot.
                         lambda_function_mark_mir_public_abi(fn);
                         lambda_function_mark_mir_context_abi(fn);
+                        if (node->node_type == AST_NODE_PROC) {
+                            lambda_function_mark_lambda_boxed_procedure(fn);
+                        } else {
+                            lambda_function_mark_lambda_boxed_function(fn);
+                        }
                     }
                     // Lambda procedures cross into JavaScript through one
                     // uniform Promise membrane, even when a particular call

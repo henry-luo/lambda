@@ -1120,6 +1120,11 @@ TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_FunctionArgumentLimit) {
+    ExpectErrorMessage("test/lambda/negative/semantic/function_argument_limit.ls",
+        "function formal count 17 exceeds Core Lambda limit 16");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_IntegralLiteralZero) {
     ExpectErrorMessage("test/lambda/negative/semantic/integral_literal_zero.ls",
         "integral division or remainder by literal zero");
@@ -1181,15 +1186,6 @@ TEST_F(NegativeScriptTest, RuntimeError_DivByZero) {
 
 TEST_F(NegativeScriptTest, RuntimeError_TooManyArgs) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_too_many_args.ls");
-}
-
-TEST_F(NegativeScriptTest, RuntimeError_UnsupportedDynamicAbi) {
-    ScriptResult result = run_lambda_script(
-        "test/lambda/negative/runtime/type_enforce_dynamic_abi.ls", true);
-    EXPECT_NE(result.exit_code, 0);
-    EXPECT_NE(strstr(result.output.c_str(),
-        "error[E229]: fn_call_into: dynamic call to function '<anonymous>' requires 8 ABI arguments, but this dispatch ABI supports at most 7"), nullptr)
-        << result.output;
 }
 
 TEST_F(NegativeScriptTest, RuntimeError_TypeError) {
