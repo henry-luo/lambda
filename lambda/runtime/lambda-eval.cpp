@@ -1172,9 +1172,10 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
         return lambda_dynamic_argument_limit_error(caller, fn->arity, "function arity");
     }
     if (mode == LAMBDA_DYNAMIC_CALL_FUNCTION &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
+            !lambda_dynamic_abi_is_core(fn->entry_abi) &&
             fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
+        // Procedure methods are boxed entries too; ordinary object.method()
+        // reaches this function-mode dispatcher even when the method is `pn`.
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "dynamic expression call requires a boxed Lambda callable entry");
     }
@@ -1341,7 +1342,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     int actual = (int)source_actual;
     if (!is_valid_function(fn)) {
         return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
-            "value is not a Core Lambda function");
+            "cannot call non-function value");
     }
     // A LambdaJS function begins with the common type id but has a distinct
     // layout. Validate this byte before reading Core Function metadata.
@@ -1354,7 +1355,12 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
 
     int physical = 0;
     bool needs_adapter = false;
-    Item checked = lambda_dynamic_check_signature(fn, actual, mode, caller,
+    // Keep the public *_into diagnostic stable while convenience wrappers
+    // retain their historical names for non-function values.
+    const char* signature_caller = strncmp(caller, "fn_call", 7) == 0
+        ? "fn_call_into" : caller;
+    Item checked = lambda_dynamic_check_signature(fn, actual, mode,
+        signature_caller,
         &physical, &needs_adapter);
     if (checked.item != ITEM_NULL) return checked;
 
@@ -1424,14 +1430,16 @@ static Item lambda_dynamic_public_non_function_error(Function* fn, const char* c
 Item fn_call0_into(Function* fn, uint64_t* result_home) {
     Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call0");
     if (invalid.item != ITEM_NULL) return invalid;
-    return fn_call_into(fn, NULL, result_home);
+    return lambda_dynamic_call(fn, NULL, result_home,
+        LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call0");
 }
 
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
     Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call1");
     if (invalid.item != ITEM_NULL) return invalid;
     List args = {.length = 1, .items = &a};
-    return fn_call_into(fn, &args, result_home);
+    return lambda_dynamic_call(fn, &args, result_home,
+        LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call1");
 }
 
 Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
@@ -1439,7 +1447,8 @@ Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
     if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b};
     List args = {.length = 2, .items = values};
-    return fn_call_into(fn, &args, result_home);
+    return lambda_dynamic_call(fn, &args, result_home,
+        LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call2");
 }
 
 Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) {
@@ -1447,7 +1456,8 @@ Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) 
     if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b, c};
     List args = {.length = 3, .items = values};
-    return fn_call_into(fn, &args, result_home);
+    return lambda_dynamic_call(fn, &args, result_home,
+        LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call3");
 }
 
 Item fn_call(Function* fn, List* args) {
@@ -4204,7 +4214,7 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
         (void*)(uintptr_t)self.item, method->compiled_name);
     // A method table keeps raw code, so reattach its TypeFunc when rebuilding
     // the bound closure; dynamic dispatch needs it to validate and marshal calls.
-    lambda_function_set_type(bound, method->function_type);
+    lambda_function_set_type(bound, method->fn_type);
     lambda_function_mark_mir_public_abi(bound);
     lambda_function_mark_mir_context_abi(bound);
     if (method->is_proc) {

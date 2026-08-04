@@ -978,7 +978,50 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
 }
 
 inline bool line_contains(const std::string& line, const std::string& pattern) {
-    return line.find(pattern) != std::string::npos;
+    static const char kGeneratedRegisterToken[] = "{{r}}";
+    if (pattern.find(kGeneratedRegisterToken) == std::string::npos) {
+        return line.find(pattern) != std::string::npos;
+    }
+
+    // Internal MIR registers intentionally use opaque %r<hex> names.  This
+    // token keeps emission checks structural instead of coupling them to a
+    // diagnostic register spelling.
+    for (size_t start = 0; start <= line.size(); start++) {
+        size_t line_index = start;
+        size_t pattern_index = 0;
+        bool matched = true;
+        while (pattern_index < pattern.size()) {
+            if (pattern.compare(pattern_index, sizeof(kGeneratedRegisterToken) - 1,
+                    kGeneratedRegisterToken) == 0) {
+                if (line_index + 2 > line.size() || line[line_index] != '%' ||
+                        line[line_index + 1] != 'r') {
+                    matched = false;
+                    break;
+                }
+                line_index += 2;
+                size_t hex_start = line_index;
+                while (line_index < line.size() &&
+                        ((line[line_index] >= '0' && line[line_index] <= '9') ||
+                         (line[line_index] >= 'a' && line[line_index] <= 'f'))) {
+                    line_index++;
+                }
+                if (line_index == hex_start) {
+                    matched = false;
+                    break;
+                }
+                pattern_index += sizeof(kGeneratedRegisterToken) - 1;
+                continue;
+            }
+            if (line_index >= line.size() || line[line_index] != pattern[pattern_index]) {
+                matched = false;
+                break;
+            }
+            line_index++;
+            pattern_index++;
+        }
+        if (matched) return true;
+    }
+    return false;
 }
 
 // count emitted instructions in a slice of dump text. Instruction lines start

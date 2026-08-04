@@ -8,8 +8,9 @@
         ":\tfunc\ti64, p:runtime, i64:_n, i64:_acc, p:_scalar_home"
       ],
       "expect_seq": [
+        { "pattern": "call\tlambda_item_adopt_scalar_home_p" },
         { "pattern": ", _scalar_home" },
-        { "pattern": ", number_frame_", "next_line": true },
+        { "pattern": "call\tlambda_restore_number_frame_top_p" },
         { "pattern": "ret\t", "next_line": true }
       ],
       "count": {

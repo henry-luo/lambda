@@ -5,7 +5,7 @@
     {
       "in_func": "_closed_gap_#",
       "expect": [
-        "sub\tia_raw_"
+        "sub\t{{r}}"
       ],
       "forbid": [
         "call\tfn_sub_p, fn_sub"
@@ -14,7 +14,7 @@
     {
       "in_func": "_open_gap_#",
       "expect": [
-        "sub\tia_raw_"
+        "sub\t{{r}}"
       ]
     },
     {

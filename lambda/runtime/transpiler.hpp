@@ -50,11 +50,9 @@ extern "C" {
 #ifndef WASM_BUILD
 #include <mir.h>
 #include <mir-gen.h>
-#include <c2mir.h>
 #else
 #include "../../wasm-deps/include/mir.h"
 #include "../../wasm-deps/include/mir-gen.h"
-#include "../../wasm-deps/include/c2mir.h"
 #endif
 }
 
@@ -72,7 +70,6 @@ struct Runtime {
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
     unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
-    const char* transpile_dir;   // directory for transpiled C output files (NULL = current dir)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)
@@ -135,30 +132,18 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
-void print_ast_root(Script *script);
 void print_ts_root(const char *source, TSTree* syntax_tree);
 void print_tree(TSNode node, int depth);
 
 void write_node_source(Transpiler* tp, TSNode node);
-void write_type(StrBuf* code_buf, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
 bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
-// Transpiler shared functions (used by transpile.cpp and transpile-call.cpp)
-void transpile_expr(Transpiler* tp, AstNode *expr_node);
-void transpile_box_item(Transpiler* tp, AstNode *node);
-void transpile_call_expr(Transpiler* tp, AstCallNode *call_node);
-bool callee_returns_retitem(AstCallNode* call_node);
-bool current_func_returns_retitem(Transpiler* tp);
-bool emit_zero_value(Transpiler* tp, TypeId tid);
-bool value_emits_native_type(Transpiler* tp, AstNode* value, TypeId target_type);
-const char* get_container_unbox_fn(TypeId type_id);
-bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
+// Shared AST/MIR helpers.
 bool has_typed_params(AstFuncNode* fn_node);
-Type* resolve_native_ret_type(AstFuncNode* fn_node);
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
@@ -168,9 +153,6 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
 
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
-#ifdef LAMBDA_C2MIR
-void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
-#endif
 void* jit_gen_func(MIR_context_t ctx, const char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
@@ -198,10 +180,6 @@ void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void preserve_context_last_error(Item result);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
-Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
-Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
-Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
-
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations

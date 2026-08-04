@@ -16,14 +16,6 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_CONFIG = ROOT / "build_lambda_config.json"
 
-# Retired C2MIR is not a module-split participant.  Keeping this list narrow
-# makes an accidental widening of the frozen enclave visible in every report.
-FROZEN_C2MIR = (
-    "lambda/lambda.h",
-    "lambda/lambda-embed.h",
-    "lambda/transpile.cpp",
-)
-
 # These paths preserve source compatibility while the authoritative public
 # declarations live in their owning Lambda module. They are not lib providers
 # and therefore do not represent a lib-to-Lambda dependency.
@@ -34,7 +26,7 @@ COMPATIBILITY_FORWARDERS = {
 }
 
 PUBLIC_HEADERS = {
-    "lambda/lambda.h": "frozen-c2mir-compatibility",
+    "lambda/lambda.h": "runtime-candidate",
     "lambda/lambda.hpp": "mixed-active-core-io-rt",
     "lambda/lambda-data.hpp": "mixed-active-core-rt",
     # Source regrouping moved the public Mark APIs into their owning modules;
@@ -138,11 +130,10 @@ def header_inventory() -> list[dict]:
         entries.append({
             "path": path,
             "planned_owner": planned_owner,
-            "frozen": path in FROZEN_C2MIR,
+            "frozen": False,
             "runtime_markers": runtime,
             "io_markers": io,
             "outcome": (
-                "exclude under SM14" if path in FROZEN_C2MIR else
                 "split by provider before enforcement" if runtime and io else
                 "candidate for provider probe after relocation"
             ),
@@ -203,8 +194,6 @@ def boundary_failure_baseline() -> dict:
 def macro_hygiene_inventory() -> list[dict]:
     entries = []
     for path in PUBLIC_HEADERS:
-        if path in FROZEN_C2MIR:
-            continue
         text = source(path)
         for match in PUBLIC_STATIC_SELECTOR.finditer(text):
             entries.append({
@@ -220,7 +209,6 @@ def inventory() -> dict:
     return {
         "schema_version": 1,
         "mode": "report-only",
-        "frozen_c2mir": list(FROZEN_C2MIR),
         "public_header_providers": header_inventory(),
         "include_edges": include_inventory(),
         "runtime_native_io": io_inventory(),

@@ -1538,7 +1538,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
             jm_emit_exc_propagate_check(mt);
         }
-        int param_index = jm_arguments_param_index(mt, vname);
+        int param_index = jm_arguments_param_index(mt, vname, var);
         if (param_index >= 0) {
             return jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
@@ -5016,7 +5016,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
             // v20: arguments aliasing — write back to arguments[i] when param is assigned
             {
-                int api = jm_arguments_param_index(mt, vname);
+                int api = jm_arguments_param_index(mt, vname, var);
                 if (api >= 0) {
                     MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
                     jm_arguments_writeback_param(mt, api, boxed);
@@ -5069,7 +5069,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
             // v20: arguments aliasing — write back to arguments[i] when param is assigned
             {
-                int api = jm_arguments_param_index(mt, vname);
+                int api = jm_arguments_param_index(mt, vname, var);
                 if (api >= 0) {
                     MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
                     jm_arguments_writeback_param(mt, api, boxed);
@@ -5135,7 +5135,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         MIR_new_reg_op(mt->ctx, var->reg)));
                 }
                 {
-                    int api = jm_arguments_param_index(mt, vname);
+                    int api = jm_arguments_param_index(mt, vname, var);
                     if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5201,7 +5201,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     MIR_new_reg_op(mt->ctx, var->reg)));
             }
             {
-                int api = jm_arguments_param_index(mt, vname);
+                int api = jm_arguments_param_index(mt, vname, var);
                 if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
             }
 
@@ -5280,7 +5280,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     MIR_new_reg_op(mt->ctx, var->reg)));
             }
             {
-                int api = jm_arguments_param_index(mt, vname);
+                int api = jm_arguments_param_index(mt, vname, var);
                 if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5314,7 +5314,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         jm_write_last_closure_capture_if_matching(mt, vname, var->reg, var->type_id);
         // v20: arguments aliasing — write back to arguments[i] when param is assigned
         {
-            int api = jm_arguments_param_index(mt, vname);
+            int api = jm_arguments_param_index(mt, vname, var);
             if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
         }
         return var->reg;
@@ -5453,8 +5453,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         JsLiteralNode* idx_lit = (JsLiteralNode*)member->property;
                         if (idx_lit->literal_type == JS_LITERAL_NUMBER && !idx_lit->has_decimal) {
                             int idx = (int)idx_lit->value.number_value;
-                            if (idx >= 0 && idx < mt->arguments_param_count) {
-                                JsMirVarEntry* pvar = jm_find_var(mt, mt->arguments_param_names[idx]);
+                            if (idx >= 0) {
+                                JsMirVarEntry* pvar = jm_arguments_param_var(mt, idx);
                                 if (pvar) {
                                     MIR_reg_t mapped_val = jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
                                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
@@ -5843,10 +5843,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     JsLiteralNode* idx_lit = (JsLiteralNode*)member->property;
                     if (idx_lit->literal_type == JS_LITERAL_NUMBER && !idx_lit->has_decimal) {
                         int idx = (int)idx_lit->value.number_value;
-                        if (idx >= 0 && idx < mt->arguments_param_count) {
+                        if (idx >= 0) {
                             // Write back to the param register only if the
                             // arguments exotic mapping still points at it.
-                            JsMirVarEntry* pvar = jm_find_var(mt, mt->arguments_param_names[idx]);
+                            JsMirVarEntry* pvar = jm_arguments_param_var(mt, idx);
                             if (pvar) {
                                 MIR_reg_t mapped_val = jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
@@ -6631,7 +6631,7 @@ bool jm_should_inline(JsFuncCollected* fc) {
     if (fc->capture_count > 0) return false;
     if (fc->has_non_simple_params) return false;
     for (int i = 0; i < fc->param_count; i++) {
-        if (fc->param_types[i] == LMD_TYPE_ANY) return false;
+        if (jm_param_type(fc, i) == LMD_TYPE_ANY) return false;
     }
     if (fc->param_count > 4) return false;
     if (!fc->node || !fc->node->body) return false;
@@ -6656,15 +6656,14 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
     // before the callee frame exists; doing this first also prevents a later
     // argument's free variable from being shadowed by an already-bound inline
     // parameter of the same name (the crypto-md5 P6 hygiene/eval-order bug).
-    // param_count is <= 4 here (jm_should_inline), so 8 slots is a safe bound.
-    MIR_reg_t arg_regs[8];
-    MIR_type_t arg_mir_types[8];
-    bool has_arg[8];
+    MIR_reg_t* arg_regs = LAMBDA_ALLOCA(fc->param_count, MIR_reg_t);
+    MIR_type_t* arg_mir_types = LAMBDA_ALLOCA(fc->param_count, MIR_type_t);
+    bool* has_arg = LAMBDA_ALLOCA(fc->param_count, bool);
     JsAstNode* arg_node = call->arguments;
-    for (int i = 0; i < fc->param_count && i < 8; i++) {
+    for (int i = 0; i < fc->param_count; i++) {
         has_arg[i] = (arg_node != NULL);
         if (arg_node) {
-            TypeId ptype = fc->param_types[i];
+            TypeId ptype = jm_param_type(fc, i);
             TypeId actual = jm_get_effective_type(mt, arg_node);
             if (ptype == LMD_TYPE_FLOAT) {
                 arg_regs[i] = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_FLOAT);
@@ -6706,10 +6705,10 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
             JsIdentifierNode* pid = (JsIdentifierNode*)pid_node;
             char pname[140];
             snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
-            TypeId ptype = fc->param_types[i];
+            TypeId ptype = jm_param_type(fc, i);
             MIR_reg_t arg_reg;
             MIR_type_t arg_mir_type;
-            if (i < 8 && has_arg[i]) {
+            if (has_arg[i]) {
                 // argument already evaluated in the caller scope (phase 1)
                 arg_reg = arg_regs[i];
                 arg_mir_type = arg_mir_types[i];
@@ -6915,7 +6914,7 @@ static void jm_eval_env_writeback_bindings(JsMirTranspiler* mt, struct hashmap* 
         var->type_id = LMD_TYPE_ANY;
         var->mir_type = MIR_T_I64;
         jm_scope_env_mark_and_writeback(mt, seen->name, value_reg);
-        int param_index = jm_arguments_param_index(mt, seen->name);
+        int param_index = jm_arguments_param_index(mt, seen->name, var);
         if (param_index >= 0) jm_arguments_writeback_param(mt, param_index, value_reg);
     }
     hashmap_free(bridged);
@@ -8737,7 +8736,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     for (int i = 0; i < p7_fc->param_count; i++) {
                         if (p7_arg) {
                             p7_args[i] = jm_transpile_as_native(mt, p7_arg,
-                                jm_get_effective_type(mt, p7_arg), p7_fc->param_types[i]);
+                                jm_get_effective_type(mt, p7_arg), jm_param_type(p7_fc, i));
                             p7_arg = p7_arg->next;
                         } else {
                             p7_args[i] = jm_new_reg(mt, "p7z", MIR_T_I64);
@@ -9909,7 +9908,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     int pi = 0;
                     JsAstNode* acheck = call->arguments;
                     while (acheck && pi < fc->param_count) {
-                        TypeId expected = fc->param_types[pi];
+                        TypeId expected = jm_param_type(fc, pi);
                         TypeId actual = jm_get_effective_type(mt, acheck);
                         if (expected == LMD_TYPE_INT && actual != LMD_TYPE_INT) {
                             all_args_match = false; break;
@@ -9934,15 +9933,16 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             mt->in_tail_position = false;
 
                             // Phase 1: Evaluate all arguments into temp registers
-                            MIR_reg_t temps[16];
+                            MIR_reg_t* temps = LAMBDA_ALLOCA(fc->param_count,
+                                MIR_reg_t);
                             JsAstNode* arg = call->arguments;
                             for (int i = 0; i < fc->param_count; i++) {
                                 if (arg) {
                                     temps[i] = jm_transpile_as_native(mt, arg,
-                                        jm_get_effective_type(mt, arg), fc->param_types[i]);
+                                        jm_get_effective_type(mt, arg), jm_param_type(fc, i));
                                     arg = arg->next;
                                 } else {
-                                    MIR_type_t mt2 = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                                    MIR_type_t mt2 = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                                     temps[i] = jm_new_reg(mt, "tz", mt2);
                                     if (mt2 == MIR_T_D) {
                                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -9969,7 +9969,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                     snprintf(pname, sizeof(pname), "_js_p%d", i);
                                 }
                                 MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->em.func);
-                                MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                                MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                                 MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
                                 jm_emit(mt, MIR_new_insn(mt->ctx, mov,
                                     MIR_new_reg_op(mt->ctx, preg),
@@ -10012,7 +10012,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         for (int i = 0; i < fc->param_count; i++) {
                             if (arg) {
                                 native_args[i] = jm_transpile_as_native(mt, arg,
-                                    jm_get_effective_type(mt, arg), fc->param_types[i]);
+                                    jm_get_effective_type(mt, arg), jm_param_type(fc, i));
                                 arg = arg->next;
                             } else {
                                 native_args[i] = jm_new_reg(mt, "nz", MIR_T_I64);

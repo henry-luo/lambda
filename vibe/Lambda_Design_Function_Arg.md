@@ -1,4 +1,4 @@
-# Dynamic function arguments in Lambda and LambdaJS
+# Function arguments in Lambda and LambdaJS
 
 ## Status
 
@@ -11,6 +11,10 @@
   rules are recorded here so neither runtime guesses the other's native ABI.
 - **AOT compatibility:** deliberately deferred. This design does not add an
   entry-ABI version or define compatibility with previously compiled modules.
+- **Unified parameter metadata:** implemented. Core Lambda and LambdaJS now use
+  one shared, dynamically sized parameter-type/representation model. This is
+  a compiler metadata migration and does not change either language's call
+  semantics or argument limits.
 
 This document consolidates the implemented LambdaJS design from
 `Lambda_Impl_JS_Dynamic_Arg.md` and defines the corresponding Core Lambda
@@ -46,6 +50,194 @@ policy. The general compilation and root-frame model remains documented in
 | Dynamic call of an unboxed/foreign entry | Rejected by explicit `FunctionEntryAbi` before the function pointer is cast | Not applicable to the JS generic boundary |
 | Argument adaptation storage | Exact precise-root spans; no native `physical_args[]` owner | Exact borrowed or owned adapter span; no `padded_args[]` |
 
+## Unified parameter metadata (implemented)
+
+`TypeId` is already the common semantic type used by Core Lambda and
+LambdaJS. There must not be a second JS-only parameter-type vocabulary or a
+JS replacement for `LAMBDA_MAX_FUNCTION_ARGS`; that constant remains a Core
+Lambda language/ABI rule only.
+
+### Shared records
+
+Fixed per-function type tables have been replaced with this dynamically sized
+shared record:
+
+```cpp
+struct FnParamTypeInfo {
+    TypeId semantic_type; // declared or inferred effective type
+    uint32_t flags;       // declared, inferred-specialization, etc.
+};
+```
+
+The function analysis object owns `FnParamTypeInfo* param_types` with one
+record for every actual formal parameter and an explicit `param_count`. The
+source parameter list remains authoritative for ordering and source semantics:
+
+- Core Lambda walks its linked `AstNamedNode` parameter list.
+- LambdaJS walks its `JsAstNode` parameter list, including default,
+  destructuring, and rest nodes.
+
+The two ASTs therefore do not need to become the same node type. They share
+the parameter metadata contract instead of copying Core's AST layout into JS.
+
+`FnParamAnalysis` remains the per-entry ABI record:
+
+```cpp
+struct FnParamAnalysis {
+    TypeId semantic_type;
+    ValueRep canonical_rep;
+    uint32_t demand_mask;
+};
+```
+
+`FnVariantAnalysis::params` already points to these records. Public, boxed, and
+native entries must allocate this array dynamically from their physical
+parameter count; the current JS arrays `[17]` and `[16]` are removed. The
+native physical MIR type is derived from `canonical_rep` (or the shared
+`type_to_mir`/representation helper), so a second `param_mir[]` table is not
+needed.
+
+### Core Lambda migration
+
+`NativeFuncInfo` no longer owns `param_types[]`, `param_mir[]`, or parallel
+per-parameter flag arrays. It retains function-level native-entry metadata and
+points to the target `AstFuncNode`/function analysis. Each call-site lookup
+walks to the target formal record by index:
+
+```text
+target function → formal parameter node → FnParamTypeInfo
+                                      → semantic TypeId
+                                      → derived ValueRep/MIR carrier
+```
+
+The prepass writes inferred types into the function's parameter records, so
+the separate fixed `InferCacheEntry::param_types[]` cache is also retired.
+The AST pool owns the records for the compilation lifetime; no manual free is
+needed.
+
+The existing Core `LAMBDA_MAX_FUNCTION_ARGS = 16` validation remains exactly
+as-is. This migration removes duplicate metadata storage; it does not widen
+Core Lambda's language or dynamic-dispatch limit.
+
+### LambdaJS implementation
+
+`JsFuncCollected::param_types[16]` is replaced by the same dynamically sized
+`FnParamTypeInfo` records. `jm_infer_param_types()` initializes and infers all
+formal positions; it must not return early merely because a function has more
+than 16 formals. A JS function with many formals remains a valid JS function;
+native specialization is selected from the resulting records and can fall
+back to the boxed entry for any unsupported shape.
+
+P6/type-inference helpers must consume the AST parameter list or dynamically
+allocated records rather than parallel fixed arrays. This includes parameter
+bindings, type evidence, alias maps, and return-inference inputs. A dynamic
+JS actual span remains independent of native specialization metadata.
+
+The JS public-wrapper, boxed-body, and native-body ABI descriptions all point
+through `FnVariantAnalysis::params`. Their hidden environment/context entries
+are represented explicitly in the variant's physical count; they do not alter
+the source formal count and must not be used to reintroduce a Core 16-slot
+limit.
+
+### Fields that remain language-specific
+
+| Field or behavior | Why it remains separate |
+|---|---|
+| `formal_length` | JavaScript's observable `Function.length`; Core Lambda has no equivalent. |
+| Rest/default/destructuring parameter semantics | JS parameter initialization and argument collection rules differ from Core Lambda's function contracts. A shared variadic flag may describe the ABI, but not replace JS lowering state. |
+| `has_non_simple_params`, `uses_arguments` | JS `arguments` aliasing depends on simple versus non-simple parameter lists. |
+| `is_strict`, direct `eval`, `with`, `this`, `new.target` | JavaScript execution semantics with no Core Lambda counterpart. |
+| Class/constructor shape fields | JS object construction and `super()` behavior. |
+| `native_func_item`, `body_func_item` | Backend entry handles; the shared analysis describes them but does not own their MIR item lifetimes. |
+| `NativeReturnKind` | Most return representation can map to shared `FnReturnAnalysis`; `NONE` and JS-specific native eligibility remain JS compilation state. |
+
+These fields must not be folded into `FnParamTypeInfo`. They describe function
+execution semantics or backend ownership, not the type/carrier of one formal
+parameter.
+
+## Remaining fixed implementation limits
+
+The Core Lambda ceiling of `LAMBDA_MAX_FUNCTION_ARGS` is intentional language
+design and is not repeated here as a migration target. The following limits are
+still hard-coded implementation, optimization, or interop boundaries.
+
+### Runtime ABI boundaries
+
+- **LambdaJS context wrappers:** `JS_MIR_CONTEXT_CALL_MAX_ARITY` is 32. A
+  generated JS wrapper with more than 32 physical formals is rejected by the
+  C++ wrapper dispatcher. This does not cap the generic JS source-actual span:
+  `Item* args + argc` is dynamically sized and may contain more than 32 actuals
+  when JS semantics permit it (for example, through rest handling).
+- **LambdaJS legacy native callbacks:** the non-context `P0`...`P16`
+  function-pointer family accepts at most 16 Item operands, or 15 user
+  operands when a closure environment occupies one operand. This applies to
+  host callbacks created through the non-MIR `js_new_function`/
+  `js_new_closure`/
+  `js_new_method_function` path, not ordinary generated JS source functions.
+- **Core-to-JS export bridge:** the current bridge publishes only
+  `js_call_export_0_into` through `js_call_export_8_into`. A Core-to-JS
+  direct-symbol call with more than eight operands therefore remains an
+  interop limitation. It is separate from the unbounded JS adapter span and is
+  deferred with the broader interop work.
+
+### Compiler and optimization metadata
+
+- **JS native specialization metadata:** the unified parameter records are
+  dynamically sized by the actual formal count. No JS formal-count
+  limit is introduced by Core Lambda's `LAMBDA_MAX_FUNCTION_ARGS`; unsupported
+  native shapes may still select the boxed JS entry.
+- **JS constructor-shape inference:** constructor property metadata has 16
+  slots. Discovering a 17th property disables this optimization; it does not
+  limit the object's actual property count.
+- **JS P6/type-inference scratch state:** the migration removes the fixed
+  parameter/evidence/alias tables and uses AST-owned parameter records or
+  dynamically sized Lambda containers. Return inference still has at most 32
+  local-name slots (`local_names[32][128]`); that is an analysis-name limit,
+  not a JS call limit.
+- **Shared inference alias evidence:** `FnParamEvidence` keeps eight
+  64-character alias-name slots for the legacy evidence walker. This can
+  discard additional aliases during inference, but it does not cap JS formal
+  parameters or runtime calls; widening it is a separate analysis cleanup.
+- **MIR argument-register bookkeeping:**
+  `MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS` is 32. It bounds emitter-side
+  recording of incoming argument registers only; it is not a runtime ABI
+  ceiling.
+- **Frozen legacy C transpiler:** the old named-argument reorder path keeps a
+  `MAX_PARAMS` 32-entry array. This applies to the legacy C transpiler path,
+  not MIR Direct.
+- **Closure analysis trackers:** JS closure read-back and TDZ trackers each
+  have a 512-entry capacity, and tracked names are copied into 128-byte slots.
+  The tracker clamps or reports overflow; this is not a limit on JS formal
+  parameters or on the runtime closure object itself.
+
+### Remaining source-name staging buffers
+
+There is no language-level maximum identifier length in the AST/name pool, but
+several compiler boundaries still stage source-derived names in fixed C buffers:
+
+- JS function/local/capture metadata commonly uses `char[128]`; function body
+  names use `char[144]`.
+- JS closure scope-environment keys use dynamically allocated entries of
+  `char[64]` and are copied with bounded `snprintf`, so long keys can be
+  truncated and potentially collide.
+- Core MIR formal-name staging still uses buffers such as `pname[64]` and
+  `prefixed[68]`, in addition to broader `char[128]` scratch names.
+- Shared MIR import/scope metadata also contains `name[128]` fields.
+
+These are remaining name-truncation/collision risks and should be removed or
+changed to stable mapped identifiers in a follow-up. The `%r<hex-serial>`
+scheme already removes source-name dependence for generated MIR registers, but
+it does not yet remove every source-derived formal, local, or environment-name
+buffer.
+
+### Retired argument buffers
+
+The active JS implementation no longer contains a fixed `padded_args[]`,
+`arguments_param_names[16][128]`, or JS `physical_args[]` argument marshal
+buffer. Any old Core `physical_args[8]` occurrence is inside retired `#if 0`
+code and is not an execution-time limit. Adapter spans are exact-sized rooted
+spans.
+
 ## Why the runtimes differ
 
 C and MIR can call a function pointer when the prototype and every operand are
@@ -53,6 +245,31 @@ known while compiling the call. They cannot make an ordinary native call whose
 number of register/stack operands is discovered from `argc` at runtime. Doing
 that requires a generic array ABI, an interpreter/libffi-style bridge, or a
 precompiled family of fixed signatures.
+
+## Internal MIR register names
+
+MIR names are NUL-terminated C strings and are compared by spelling.  They are
+an implementation detail, not LambdaJS or Core Lambda binding identities.
+Therefore the shared internal-register allocator uses this compact scheme:
+
+```text
+%r<lowercase-hex-register-serial>
+```
+
+For example, the 42nd generated register in one MIR function is `%r2a`.  The
+serial is the existing monotonic per-function register counter, so it already
+distinguishes lexical shadows and temporaries.  `%` is accepted as an initial
+MIR name character but cannot begin an ordinary Lambda or JavaScript source
+identifier; this keeps generated registers distinct from source-derived formal
+names during the remaining migration.
+
+The register allocator must not embed source spellings in these names.  Source
+spelling and lexical scope remain the responsibility of each language's binding
+resolver, which maps a resolved binding to its `MIR_reg_t`.  External ABI names
+(imports, exports, and runtime symbols) remain exact C-string names.  Direct
+source-derived MIR formal names are a separate follow-up: they must be mapped
+or retained by parameter index before the compiler-wide source-name buffers can
+be retired.
 
 LambdaJS already has the generic dynamic boundary:
 
@@ -569,6 +786,12 @@ Required boundary behavior:
   actuals, even though the JS generic boundary can hold more. A long data set
   crosses as one collection until a future explicit spread/bridge API is
   designed. The bridge then supplies a rooted JS `Item* + argc` span.
+- **Current export bridge limit:** the existing Core Lambda-to-JS export bridge
+  only publishes `js_call_export_0_into` through `js_call_export_8_into`.
+  Therefore a Core-to-JS direct-symbol call with more than eight operands is
+  not supported today. This is an interop-only limitation, not a LambdaJS
+  adapter-span limit; replace the fixed wrapper family with an explicit rooted
+  span bridge as part of the deferred interop work.
 - **Context and heap ownership:** a span rooted in one runtime/context is not
   automatically valid in another. Cross-context invocation must either prove
   a shared heap/root domain or copy through a bridge-owned exact root span.
@@ -616,6 +839,11 @@ Required boundary behavior:
    keeping direct MIR calls on their specialized path.
 7. Add boundary, entry-kind rejection, forced-GC, default/rest, closure,
    procedure-mode, result-home, module, and cross-platform tests.
+8. Completed: Core Lambda and LambdaJS parameter metadata now use shared
+   dynamic `FnParamTypeInfo`/`FnParamAnalysis` records. Core's duplicate
+   `param_types[]`/`param_mir[]`, JS `JsFuncCollected::param_types[16]`, and
+   fixed JS variant parameter-analysis arrays are retired without changing the
+   Core-only `LAMBDA_MAX_FUNCTION_ARGS` rule.
 
 ## Acceptance criteria
 
@@ -648,5 +876,8 @@ Required boundary behavior:
 - Cross-language dynamic calls remain rejected or routed through existing
   explicitly supported bridges until the deferred interop design is
   implemented.
+- Core and JS parameter inference use shared dynamically sized metadata;
+  there is no `JS_MIR_TYPED_PARAM_LIMIT`, and Core's 16-slot rule is not
+  applied to JS.
 - AOT compatibility and `entry_abi` versioning remain outside this
   implementation.

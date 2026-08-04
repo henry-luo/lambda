@@ -170,7 +170,6 @@ BashTranspiler* bash_transpiler_create(Runtime* runtime) {
     // initialize memory pools
     tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "bash.ast");
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
-    tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
 
     // initialize scopes (Bash uses dynamic scoping)
@@ -187,7 +186,6 @@ BashTranspiler* bash_transpiler_create(Runtime* runtime) {
 
 void bash_transpiler_destroy(BashTranspiler* tp) {
     if (!tp) return;
-    if (tp->code_buf) strbuf_free(tp->code_buf);
     if (tp->error_buf) strbuf_free(tp->error_buf);
     if (tp->ast_pool) pool_destroy(tp->ast_pool);
     mem_free(tp);

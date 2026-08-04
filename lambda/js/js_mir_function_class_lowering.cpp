@@ -302,36 +302,29 @@ static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollect
 
 static bool jm_function_has_duplicate_param_names(JsFunctionNode* fn) {
     if (!fn) return false;
-    char names[16][128];
-    int count = 0;
-    for (JsAstNode* p = fn->params; p && count < 16; p = p->next) {
-        char pname[128];
-        jm_get_param_name(p, count, pname, sizeof(pname));
-        for (int i = 0; i < count; i++) {
-            if (strcmp(names[i], pname) == 0) return true;
+    for (JsAstNode* param = fn->params; param; param = param->next) {
+        JsIdentifierNode* identifier = jm_get_param_identifier(param);
+        if (!identifier || !identifier->name) continue;
+        for (JsAstNode* later = param->next; later; later = later->next) {
+            JsIdentifierNode* later_identifier = jm_get_param_identifier(later);
+            if (later_identifier && later_identifier->name &&
+                later_identifier->name->len == identifier->name->len &&
+                memcmp(later_identifier->name->chars, identifier->name->chars,
+                    identifier->name->len) == 0) {
+                return true;
+            }
         }
-        snprintf(names[count], sizeof(names[count]), "%s", pname);
-        count++;
     }
     return false;
 }
 
 static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn, MIR_reg_t args_reg) {
-    if (jm_function_arguments_are_aliased(mt, fc, fn)) {
-        mt->arguments_reg = args_reg;
-        mt->arguments_param_count = 0;
-        JsAstNode* ap = fn->params;
-        while (ap && mt->arguments_param_count < 16) {
-            char apname[128];
-            jm_get_param_name(ap, mt->arguments_param_count, apname, sizeof(apname));
-            snprintf(mt->arguments_param_names[mt->arguments_param_count], 128, "%s", apname);
-            mt->arguments_param_count++;
-            ap = ap->next;
-        }
-    } else {
-        mt->arguments_reg = args_reg;
-        mt->arguments_param_count = 0;
-    }
+    mt->arguments_reg = args_reg;
+    // The AST already owns every formal.  Keeping its head avoids a second,
+    // silently truncated name table for mapped `arguments` lowering.
+    mt->arguments_params = jm_function_arguments_are_aliased(mt, fc, fn)
+        ? fn->params : NULL;
+    mt->arguments_param_scope_depth = mt->arguments_params ? mt->scope_depth : -1;
 }
 
 static bool jm_function_has_formal_arguments_binding(JsFunctionNode* fn) {
@@ -751,6 +744,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int param_count = jm_count_params(fn);
     bool has_captures = (fc->capture_count > 0);
+    MIR_reg_t saved_arguments_reg_fn = mt->arguments_reg;
+    JsAstNode* saved_arguments_params_fn = mt->arguments_params;
+    int saved_arguments_param_scope_depth_fn = mt->arguments_param_scope_depth;
+    mt->arguments_reg = 0;
+    mt->arguments_params = NULL;
+    mt->arguments_param_scope_depth = -1;
 
     // Phase 4: Check if this function qualifies for a native version.
     // Requirements: no captures, at least one INT/FLOAT specialization, a
@@ -765,13 +764,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         !jm_function_has_duplicate_param_names(fn) &&
         !(fn->is_arrow && fn->body &&
           fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
-        param_count > 0 && param_count <= 16 &&
+        param_count > 0 &&
         (fc->native_return_kind == NATIVE_RETURN_INT ||
          fc->native_return_kind == NATIVE_RETURN_FLOAT)) {
         bool has_native_param = false;
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
-            TypeId param_type = fc->param_types[i];
+            TypeId param_type = jm_param_type(fc, i);
             if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
                 has_native_param = true;
                 continue;
@@ -799,7 +798,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         for (int i = 0; i < param_count; i++) {
             n_param_names[i + 1] = LAMBDA_ALLOCA(128, char);
             jm_get_param_name(param_node, i, n_param_names[i + 1], 128);
-            MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+            MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
             n_params[i + 1] = {mtype, n_param_names[i + 1], 0};
             param_node = param_node ? param_node->next : NULL;
         }
@@ -866,8 +865,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 char vname[128];
                 jm_get_param_name(param_node, i, vname, sizeof(vname));
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, native_func);
-                MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                jm_set_var(mt, vname, preg, mtype, fc->param_types[i]);
+                MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                jm_set_var(mt, vname, preg, mtype, jm_param_type(fc, i));
             }
             param_node = param_node ? param_node->next : NULL;
         }
@@ -1219,6 +1218,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t saved_eval_local_frame_reg_sm = mt->eval_local_frame_reg;
         bool saved_in_generator = mt->in_generator;
         bool saved_in_async = mt->in_async;
+        MIR_reg_t saved_arguments_reg_sm = mt->arguments_reg;
+        JsAstNode* saved_arguments_params_sm = mt->arguments_params;
+        int saved_arguments_param_scope_depth_sm = mt->arguments_param_scope_depth;
 
         if (jm_has_use_strict_directive(fn)) {
             fc->is_strict = true;
@@ -1234,6 +1236,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_main = false;
         mt->current_fc = fc;
         mt->current_class = NULL;
+        mt->arguments_reg = 0;
+        mt->arguments_params = NULL;
+        mt->arguments_param_scope_depth = -1;
         mt->scope_env_reg = 0;
         mt->scope_env_slot_count = 0;
         mt->current_func_index = (int)(fc - mt->func_entries);
@@ -1781,6 +1786,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->eval_local_frame_reg = saved_eval_local_frame_reg_sm;
         mt->in_generator = saved_in_generator;
         mt->in_async = saved_in_async;
+        mt->arguments_reg = saved_arguments_reg_sm;
+        mt->arguments_params = saved_arguments_params_sm;
+        mt->arguments_param_scope_depth = saved_arguments_param_scope_depth_sm;
 
         hashmap_free(gen_lexicals);
         hashmap_free(gen_locals);
@@ -1858,6 +1866,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             bool saved_in_async = mt->in_async;
             MIR_label_t saved_except_label_sm = mt->func_except_label;
             JsExcTrack saved_exc_track_sm = mt->exc_track;
+            MIR_reg_t saved_arguments_reg_sm = mt->arguments_reg;
+            JsAstNode* saved_arguments_params_sm = mt->arguments_params;
+            int saved_arguments_param_scope_depth_sm = mt->arguments_param_scope_depth;
 
             if (jm_has_use_strict_directive(fn)) {
                 fc->is_strict = true;
@@ -1873,6 +1884,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->in_main = false;
             mt->current_fc = fc;
             mt->current_class = NULL;
+            mt->arguments_reg = 0;
+            mt->arguments_params = NULL;
+            mt->arguments_param_scope_depth = -1;
             mt->scope_env_reg = 0;
             mt->scope_env_slot_count = 0;
             mt->current_func_index = (int)(fc - mt->func_entries);
@@ -2328,6 +2342,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->exc_track = saved_exc_track_sm;
             mt->in_generator = saved_in_generator;
             mt->in_async = saved_in_async;
+            mt->arguments_reg = saved_arguments_reg_sm;
+            mt->arguments_params = saved_arguments_params_sm;
+            mt->arguments_param_scope_depth = saved_arguments_param_scope_depth_sm;
 
             hashmap_free(async_locals);
 
@@ -2548,9 +2565,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
 
-            if (fc->param_types[i] != LMD_TYPE_ANY) {
+            if (jm_param_type(fc, i) != LMD_TYPE_ANY) {
                 MIR_reg_t exact = jm_emit_exact_native_shape_test(mt, preg,
-                    fc->param_types[i]);
+                    jm_param_type(fc, i));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
                     MIR_new_reg_op(mt->ctx, inferred_guard),
                     MIR_new_reg_op(mt->ctx, inferred_guard),
@@ -2569,9 +2586,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_get_param_name(param_node, i, vname, sizeof(vname));
             MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
 
-            if (fc->param_types[i] == LMD_TYPE_FLOAT) {
+            if (jm_param_type(fc, i) == LMD_TYPE_FLOAT) {
                 native_args[i] = jm_emit_unbox_float(mt, preg);
-            } else if (fc->param_types[i] == LMD_TYPE_INT) {
+            } else if (jm_param_type(fc, i) == LMD_TYPE_INT) {
                 native_args[i] = jm_emit_unbox_int(mt, preg);
             } else {
                 native_args[i] = preg;
@@ -3149,8 +3166,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_set_var(mt, "_js_arguments", args_arr);
             jm_scope_env_mark_and_writeback(mt, "_js_arguments", args_arr);
             arguments_object_materialized = true;
-            mt->arguments_reg = args_arr;
-            mt->arguments_param_count = 0;
+            jm_activate_arguments_aliasing(mt, fc, fn, args_arr);
         }
 
         if (has_default_params) {
@@ -3619,21 +3635,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     val = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
                     jm_set_var(mt, "_js_arguments", val);
                     arguments_object_materialized = true;
-                    if (args_aliased) {
-                        mt->arguments_reg = val;
-                        mt->arguments_param_count = 0;
-                        JsAstNode* ap = fn->params;
-                        while (ap && mt->arguments_param_count < 16) {
-                            char apname[128];
-                            jm_get_param_name(ap, mt->arguments_param_count, apname, sizeof(apname));
-                            snprintf(mt->arguments_param_names[mt->arguments_param_count], 128, "%s", apname);
-                            mt->arguments_param_count++;
-                            ap = ap->next;
-                        }
-                    } else {
-                        mt->arguments_reg = val;
-                        mt->arguments_param_count = 0;
-                    }
+                    jm_activate_arguments_aliasing(mt, fc, fn, val);
                 } else {
                     // Variable not found locally. Try transitive capture from parent's scope env.
                     bool found_transitive = false;
@@ -3794,24 +3796,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_set_var(mt, "_js_arguments", args_arr);
                 jm_scope_env_mark_and_writeback(mt, "_js_arguments", args_arr);
             }
-            if (args_aliased) {
-                mt->arguments_reg = args_arr;
-                mt->arguments_param_count = 0;
-                JsAstNode* ap = fn->params;
-                while (ap && mt->arguments_param_count < 16) {
-                    char apname[128];
-                    jm_get_param_name(ap, mt->arguments_param_count, apname, sizeof(apname));
-                    snprintf(mt->arguments_param_names[mt->arguments_param_count], 128, "%s", apname);
-                    mt->arguments_param_count++;
-                    ap = ap->next;
-                }
-            } else {
-                mt->arguments_reg = args_arr;
-                mt->arguments_param_count = 0;
-            }
+            jm_activate_arguments_aliasing(mt, fc, fn, args_arr);
         } else {
             mt->arguments_reg = 0;
-            mt->arguments_param_count = 0;
+            mt->arguments_params = NULL;
+            mt->arguments_param_scope_depth = -1;
         }
 
         // Transpile body
@@ -3971,6 +3960,9 @@ finish_boxed:
     mt->current_func_index = saved_func_index;
     mt->eval_completion_reg = saved_eval_completion_reg;
     mt->eval_local_frame_reg = saved_eval_local_frame_reg;
+    mt->arguments_reg = saved_arguments_reg_fn;
+    mt->arguments_params = saved_arguments_params_fn;
+    mt->arguments_param_scope_depth = saved_arguments_param_scope_depth_fn;
 }
 
 // ============================================================================

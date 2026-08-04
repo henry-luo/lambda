@@ -3,12 +3,9 @@
 
 // Include standard integer types from system
 #include <stdint.h>
-#if !defined(LAMBDA_C2MIR_RUNTIME)
 #include <stddef.h>
-#endif
 
-// Define size_t only when compiled by MIR C compiler (not standard C/C++ compiler)
-// MIR doesn't include stddef.h so size_t won't be defined
+// Keep a fallback for freestanding C consumers that do not provide stddef.h.
 #if !defined(__cplusplus) && !defined(_SIZE_T) && !defined(_SIZE_T_) && !defined(__SIZE_T__) && !defined(_SYS__TYPES_H_)
 typedef uint64_t size_t;
 #endif
@@ -31,9 +28,7 @@ typedef uint64_t size_t;
 
 #define null 0
 
-// C math function declarations (for native math optimization in transpiler)
-// These are imported from libm at runtime via MIR's import resolver
-// Only declare when compiled by C2MIR (not by C++ compiler which includes <cmath>)
+// C math declarations for freestanding C consumers.
 #if !defined(__cplusplus)
 extern double sin(double x);
 extern double cos(double x);
@@ -172,7 +167,6 @@ typedef uint8_t TypeId;
 // tables must be sized by this, not by LMD_TYPE_COUNT.
 #define LAMBDA_TAG_SPACE_SIZE  0x20
 
-#if !defined(LAMBDA_C2MIR_RUNTIME)
 #ifdef __cplusplus
 #define LAMBDA_STATIC_ASSERT(cond, msg) static_assert((cond), msg)
 #else
@@ -216,9 +210,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_TYPE), "type tag must be no
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FUNC), "function tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ANY), "any tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ERROR), "error tag must be non-double");
-#else
-#define LAMBDA_STATIC_ASSERT(cond, msg)
-#endif
 
 // ============================================================================
 // Sized numeric sub-types (stored in bits [55:48] of NUM_SIZED Items)
@@ -773,7 +764,6 @@ struct Container {
     uint8_t reserved_state;
 };
 
-#if !defined(LAMBDA_C2MIR_RUNTIME)
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
                      "Container TypeId must remain at byte zero");
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, flags) == 1,
@@ -796,7 +786,6 @@ LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_JS_PROPS == (1u << 6),
                      "Container JS-properties mask must match its bitfield");
 LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_CTOR_RESERVED == (1u << 7),
                      "Container constructor-reserved mask must match its bitfield");
-#endif
 
 // List/Array flags (stored in List.flags / Array.flags field)
 
@@ -1044,12 +1033,10 @@ struct Function {
     struct Context* runtime_context; // owner passed through generated calls
 };
 
-#if !defined(LAMBDA_C2MIR_RUNTIME)
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
                      "Function TypeId must remain at byte zero");
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, fn_type) == 8,
                      "Function metadata must preserve pointer alignment");
-#endif
 
 // Dynamic function invocation for first-class functions
 Item fn_call(Function* fn, List* args);
@@ -1270,7 +1257,6 @@ static inline bool is_fn_call_wrapper_return_type_id(TypeId type_id) {
 #define ITEM_FLOAT_P0       ((uint64_t)LMD_TYPE_FLOAT << 56)
 #define ITEM_FLOAT_N0       (ITEM_FLOAT_P0 | UINT64_C(1))
 
-#if !defined(LAMBDA_C2MIR_RUNTIME)
 #ifndef __cplusplus
 LAMBDA_STATIC_ASSERT(sizeof(Item) == sizeof(uint64_t), "C Item must remain one word");
 #endif
@@ -1298,7 +1284,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_SENTINEL_TAG),
                      "sentinel tag must stay out of the inline-int octant");
 LAMBDA_STATIC_ASSERT(ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_DONE_SENTINEL,
                      "internal sentinels must stay distinct");
-#endif
 
 static inline void lambda_item_debug_trap(void) {
 #if defined(_MSC_VER)
@@ -1311,7 +1296,7 @@ static inline void lambda_item_debug_trap(void) {
 }
 
 static inline void assert_raw_item_pointer(const void* ptr) {
-#if !defined(NDEBUG) && !defined(LAMBDA_C2MIR_RUNTIME)
+#if !defined(NDEBUG)
     if (!ptr) return;
     uint64_t word = (uint64_t)(uintptr_t)ptr;
     // Raw-pointer Items must be bit-identical native pointers, never tagged.
@@ -1527,15 +1512,9 @@ static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
 
 // Float16/Float32 packing into NUM_SIZED Items
 // float32: store IEEE 754 binary32 bit pattern in low 32 bits
-// C2MIR: import from native runtime (C2MIR has issues with float in inline functions)
-// Native: use __builtin_memcpy for type-safe bit conversion
-#if defined(LAMBDA_C2MIR_RUNTIME)
-extern uint32_t f32_to_bits(float f);
-extern float bits_to_f32(uint32_t u);
-#else
+// Use compiler builtins for type-safe bit conversion.
 static inline uint32_t f32_to_bits(float f) { uint32_t u; __builtin_memcpy(&u, &f, 4); return u; }
 static inline float bits_to_f32(uint32_t u) { float f; __builtin_memcpy(&f, &u, 4); return f; }
-#endif
 #define f32_to_item(v) NUM_SIZED_PACK(NUM_FLOAT32, f32_to_bits((float)(v)))
 
 // float16: software conversion (IEEE 754 binary16)

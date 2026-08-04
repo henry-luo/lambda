@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Procedural tail recursion becomes a counter-guarded loop, exactly as the functional form does: no self-call remains in the procedure body.",
+  "description": "Procedural tail recursion becomes a counter-guarded loop, exactly as the functional form does: no self-call remains in the procedure body. Internal register spelling is deliberately opaque.",
   "checks": [
     {
       "in_func": "_countdown_#",
@@ -8,8 +8,8 @@
         "call\t_countdown_"
       ],
       "expect": [
-        "tco_count_",
-        "tco_dummy_"
+        "add\t{{r}}, {{r}}, 1",
+        "ble\t"
       ]
     }
   ]

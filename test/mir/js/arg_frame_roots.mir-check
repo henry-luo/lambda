@@ -4,9 +4,9 @@
   "checks": [
     {
       "in_func": "_js_callDynamic_#_body",
-      "expect": [
-        "add\tjs_arg_frame_",
-        "add\tjs_args_ptr_"
+      "expect_seq": [
+        { "pattern": "add\t{{r}}, {{r}}, 0" },
+        { "pattern": "call\tjs_call_function_prerooted_args_into_p" }
       ],
       "forbid": [
         "js_args_save",

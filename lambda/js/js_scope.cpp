@@ -411,8 +411,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     // Initialize memory pools
     tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "js.ast"); // Memory pool
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
-    tp->code_buf = strbuf_new();
-    tp->func_buf = strbuf_new();  // Buffer for function expressions
     tp->error_buf = NULL;
 
     // Initialize Tree-sitter parser
@@ -457,12 +455,6 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     }
     if (tp->ast_pool) {
         pool_destroy(tp->ast_pool);
-    }
-    if (tp->code_buf) {
-        strbuf_free(tp->code_buf);
-    }
-    if (tp->func_buf) {
-        strbuf_free(tp->func_buf);
     }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);

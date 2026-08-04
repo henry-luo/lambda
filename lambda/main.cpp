@@ -575,7 +575,6 @@ extern void event_sim_set_replay_assert_state(bool assert_state);
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
-void transpile_ast_root(Transpiler* tp, AstScript *script);
 
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
@@ -657,7 +656,6 @@ extern "C" {
 #endif
 
 // Forward declare function with run_main support
-Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
 // Forward declare REPL functions from main-repl.cpp
 const char* get_repl_prompt();
@@ -713,7 +711,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 }
 #endif
 
-void run_repl(Runtime *runtime, bool use_mir) {
+void run_repl(Runtime *runtime) {
     printf("Lambda Script REPL v1.0\n");
     printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
@@ -802,11 +800,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
         char script_path[64];
         snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
 
-        // Run the accumulated script
-        Input* output_input = nullptr;
-        // All executable paths use MIR Direct; C2MIR has no exact-root ABI.
-        (void)use_mir;
-        output_input = run_script_mir(runtime, repl_history->str, script_path, false);
+        // Run the accumulated script through the sole MIR Direct backend.
+        Input* output_input = run_script_mir(runtime, repl_history->str, script_path, false);
 
         if (output_input) {
             if (output_input->root.type_id() == LMD_TYPE_ERROR) {
@@ -853,11 +848,9 @@ void run_repl(Runtime *runtime, bool use_mir) {
 }
 
 // Run a script file and return 0 on success, 1 on failure
-int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
-    log_debug("run_script_file called: %s, use_mir=%d", script_path, use_mir);
+int run_script_file(Runtime *runtime, const char *script_path, bool transpile_only = false, bool run_main = false) {
+    log_debug("run_script_file called: %s", script_path);
     Input* output_input = nullptr;
-    // C2MIR is disabled until it publishes exact roots at every MAY_GC call.
-    (void)use_mir;
     output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
 
     log_debug("run_script_file: output_input = %p", output_input);
@@ -1857,11 +1850,10 @@ static int node_runner_main(int argc, char** argv) {
     return lambda_main_finish(final_status);
 }
 
-static bool apply_common_mir_option(const char* arg, Runtime* runtime, bool* use_mir) {
-    if (!arg || !runtime || !use_mir) return false;
-    // Direct and `run` entry paths must share MIR and task-drain policy parsing.
+static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
+    if (!arg || !runtime) return false;
+    // Keep accepting --mir as an explicit spelling of the sole backend.
     if (strcmp(arg, "--mir") == 0) {
-        *use_mir = true;
         return true;
     }
     if (strcmp(arg, "--mir-interp") == 0) {
@@ -3807,7 +3799,6 @@ int main(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "test-batch") == 0) {
         log_debug("Entering test-batch command handler");
 
-        bool use_mir = true;
         int batch_timeout = 60; // default per-script timeout in seconds
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--no-log") == 0) {
@@ -3858,7 +3849,7 @@ int main(int argc, char *argv[]) {
                 batch_timeout_active = 1;
                 if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                     alarm(batch_timeout);
-                    result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+                    result = run_script_file(&runtime, script_path, false, run_main);
                     alarm(0);
                     batch_timeout_active = 0;
                 } else {
@@ -3868,10 +3859,10 @@ int main(int argc, char *argv[]) {
                 }
                 sigaction(SIGALRM, &old_sa, NULL);
             } else {
-                result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+                result = run_script_file(&runtime, script_path, false, run_main);
             }
 #else
-            result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+            result = run_script_file(&runtime, script_path, false, run_main);
 #endif
             fflush(stdout);
 
@@ -4569,11 +4560,10 @@ int main(int argc, char *argv[]) {
         }
 
         // Parse run command arguments
-        bool use_mir = true;  // MIR Direct is default
         char* script_file = NULL;
 
         for (int i = 2; i < argc; i++) {
-            if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
+            if (apply_common_mir_option(argv[i], &runtime)) {
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
@@ -4601,16 +4591,15 @@ int main(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
 
-        log_debug("Running script '%s' with run_main=true, use_mir=%s", script_file, use_mir ? "true" : "false");
+        log_debug("Running script '%s' with run_main=true", script_file);
 
         // Execute script with run_main enabled
-        int result = run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
+        int result = run_script_file(&runtime, script_file, false, true);  // true for run_main
 
         runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
 
-    bool use_mir = true;  // MIR Direct is default
     bool transpile_only = false;
     bool help_only = false;
     char* script_file = NULL;
@@ -4626,7 +4615,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
         }
-        else if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
+        else if (apply_common_mir_option(argv[i], &runtime)) {
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;
@@ -4697,7 +4686,7 @@ int main(int argc, char *argv[]) {
         print_help();
     }
     else if (script_file) {
-        ret_code = run_script_file(&runtime, script_file, use_mir, transpile_only, false);  // false for run_main in regular execution
+        ret_code = run_script_file(&runtime, script_file, transpile_only, false);  // false for run_main in regular execution
     }
     else if (transpile_only) { // without a script file
         printf("Error: --transpile-only requires a script file\n");
@@ -4705,7 +4694,7 @@ int main(int argc, char *argv[]) {
         ret_code = 1;
     } else {
         // Start the MIR-Direct REPL by default.
-        run_repl(&runtime, use_mir);
+        run_repl(&runtime);
     }
 
     cleanup_utf8proc_support();

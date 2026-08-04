@@ -61,7 +61,7 @@ Environment variables:
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
   LAMBDA_UI_TEST_JOBS        Override UI automation parallelism in suite runs
-  LAMBDA_USE_C2MIR           Set to 1 for legacy C2MIR JIT path`);
+`);
         process.exit(0);
     } else {
         console.error(`Unknown option: ${arg}\nUse --help for usage information`);

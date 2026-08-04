@@ -214,7 +214,9 @@ void jm_emit_pending_exception_exit(JsMirTranspiler* mt);
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 void jm_push_scope(JsMirTranspiler* mt);
-int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname);
+int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
+    JsMirVarEntry* resolved_var);
+JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index);
 bool jm_has_use_strict_directive(JsFunctionNode* fn);
 void jm_pop_scope(JsMirTranspiler* mt);
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
@@ -386,7 +388,24 @@ void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t fu
 void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler* mt);
 int jm_count_params(JsFunctionNode* fn);
 int jm_formal_length(JsFunctionNode* fn);
+JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node);
 void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size);
+static inline bool jm_js_name_equal(const String* left, const String* right) {
+    return left && right && left->len == right->len &&
+        memcmp(left->chars, right->chars, left->len) == 0;
+}
+static inline bool jm_js_generated_name_equal(const String* source, const char* generated) {
+    static const char prefix[] = "_js_";
+    if (!source || !generated) return false;
+    size_t generated_len = strlen(generated);
+    return generated_len == sizeof(prefix) - 1 + source->len &&
+        memcmp(generated, prefix, sizeof(prefix) - 1) == 0 &&
+        memcmp(generated + sizeof(prefix) - 1, source->chars, source->len) == 0;
+}
+static inline const String* jm_param_binding_name(JsAstNode* param_node) {
+    JsIdentifierNode* identifier = jm_get_param_identifier(param_node);
+    return identifier ? identifier->name : NULL;
+}
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);;
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node);
@@ -405,7 +424,7 @@ TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 void jm_disable_ctor_shape_for_method_overwrite(JsClassEntry* ce);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
-void jm_infer_walk(JsAstNode* node, const char param_names[][128],
+void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
                           FnParamEvidence* evidence, int param_count,
                           const char* self_name);
 void jm_infer_param_types(JsFuncCollected* fc);
@@ -527,13 +546,13 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 // Js52 R1: closure env size accounting for remapped scope_env_slot captures.
 int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped);
 TypeId jm_p6_expr_type(JsAstNode* expr,
-                               const char param_names[][128], TypeId* param_types, int param_count,
+                               const String* const param_bindings[], TypeId* param_types, int param_count,
                                const char local_names[][128], TypeId* local_types, int local_count);
 void jm_p6_collect_locals(JsAstNode* body,
-                                  const char param_names[][128], TypeId* param_types, int param_count,
+                                  const String* const param_bindings[], TypeId* param_types, int param_count,
                                   char local_names[][128], TypeId* local_types, int* local_count, int max_locals);
 void jm_p6_return_walk(JsAstNode* node,
-                               const char param_names[][128], TypeId* param_types, int param_count,
+                               const String* const param_bindings[], TypeId* param_types, int param_count,
                                const char local_names[][128], TypeId* local_types, int local_count,
                                TypeId* collected, int* count, int max_count);
 void jm_p6_reinfer_return_type(JsFuncCollected* fc);
@@ -541,7 +560,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
 void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
                               P4bCtorEvidence* evidence);
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               FnParamEvidence evidence[][16]);
+                               FnParamEvidence** evidence);
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);

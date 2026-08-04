@@ -5,10 +5,8 @@
     {
       "in_func": "_inner_b_#",
       "expect_seq": [
-        { "pattern": "add\tscalar_home_" },
-        { "pattern": ", scalar_home_" },
-        { "pattern": "call\tlambda_item_adopt_scalar_home_p" },
-        { "pattern": ", number_frame_" },
+        { "pattern": ", _scalar_home" },
+        { "pattern": "call\tlambda_restore_number_frame_top_p" },
         { "pattern": "ret\t" }
       ],
       "expect": [

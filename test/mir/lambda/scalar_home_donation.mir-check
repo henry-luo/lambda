@@ -11,17 +11,15 @@
     {
       "in_func": "main",
       "expect_seq": [
-        { "pattern": "mov\tcall_number_base_" },
         { "pattern": "call\tbox_int64_result_or_error_p" },
         { "pattern": "lambda_item_adopt_scalar_home" },
-        { "pattern": ", call_number_base_" }
+        { "pattern": "call\tlambda_restore_number_frame_top_p" },
+        { "pattern": "call\t_twice_b_" }
       ],
       "count": {
-        "call\tbox_int64_result_or_error_p": 1,
-        "mov\tcall_number_base_": 2
+        "call\tbox_int64_result_or_error_p": 1
       },
       "expect": [
-        ", scalar_home_",
         "call\t_twice_b_"
       ]
     }

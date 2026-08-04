@@ -14,16 +14,16 @@
 
 struct JsClassEntry;
 
-// Max positional args for an emitted MIR call. 8 accommodates fn_hash_join_tuples
-// (join tuple stream + prior keys + rows + row keys + name + optional + index name/values).
-#define MIR_SHARED_MAX_CALL_ARGS 8
+// Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
+// storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
+// imports even though the Core dispatcher and generated wrappers accept them.
 
 struct MirImportEntry {
     MIR_item_t proto;
     MIR_item_t import;
     JitImportMetadata audit;
     JitCallMetadata call;
-    JitAbiArg abi_args[MIR_SHARED_MAX_CALL_ARGS];
+    JitAbiArg abi_args[LAMBDA_MAX_FUNCTION_ARGS];
 };
 
 struct MirImportCacheEntry {
@@ -180,7 +180,7 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     entry->call.scalar_return_home_arg_index = -1;
     entry->call.scalar_home_lane_mask =
         entry->call.normal_result.may_use_scalar_return_home ? 1u : 0u;
-    for (int i = 0; i < nargs && i < MIR_SHARED_MAX_CALL_ARGS; i++) {
+    for (int i = 0; i < nargs && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
         JitValueClass arg_class = jit_import_arg_class(&entry->audit, i);
         entry->abi_args[i].value.abi_rep = em_abi_rep(
             args[i].type, arg_class, true);
@@ -199,7 +199,11 @@ static inline MIR_reg_t mir_new_numbered_reg(MIR_context_t ctx, MIR_func_t func,
                                              MIR_type_t type,
                                              bool coerce_float32 = false) {
     char name[64];
-    snprintf(name, sizeof(name), "%s_%d", prefix, (*reg_counter)++);
+    // Source identifiers can exceed compiler scratch buffers; the monotonic
+    // counter, not the diagnostic prefix, is the register's real identity.
+    (void)prefix;
+    unsigned int number = (unsigned int)(*reg_counter)++;
+    snprintf(name, sizeof(name), "%%r%x", number);
     return MIR_new_func_reg(ctx, func, mir_reg_type_for_alloc(type, coerce_float32), name);
 }
 
@@ -945,7 +949,10 @@ static inline void mir_emit_i64_const_to_reg(MIR_context_t ctx,
 static inline void mir_prepare_call_args(MIR_var_t* args,
                                          MIR_type_t* arg_types,
                                          int nargs) {
-    static const char* ARG_NAMES[MIR_SHARED_MAX_CALL_ARGS] = {"a", "b", "c", "d", "e", "f", "g", "h"};
+    static const char* ARG_NAMES[LAMBDA_MAX_FUNCTION_ARGS] = {
+        "a", "b", "c", "d", "e", "f", "g", "h",
+        "i", "j", "k", "l", "m", "n", "o", "p"
+    };
     for (int i = 0; i < nargs; i++) {
         args[i].type = arg_types[i];
         args[i].name = ARG_NAMES[i];
@@ -2885,8 +2892,8 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
                                           MIR_type_t* arg_types,
                                           MIR_op_t* arg_ops,
                                           bool include_signature) {
-    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) return 0;
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return 0;
+    MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
     if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
     MirImportEntry* ie = em_ensure_import(em, fn_name, ret_type, nargs,
         nargs ? args : NULL, 1, include_signature);
@@ -2936,8 +2943,8 @@ static inline void em_call_void_with_args(MirEmitter* em,
                                           MIR_type_t* arg_types,
                                           MIR_op_t* arg_ops,
                                           bool include_signature) {
-    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) return;
-    MIR_var_t args[MIR_SHARED_MAX_CALL_ARGS];
+    if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return;
+    MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
     if (nargs > 0) {
         mir_prepare_call_args(args, arg_types, nargs);
     }

@@ -2213,14 +2213,14 @@ static int jube_host_mir_runtime_import_call_emit(void* compiler_cursor,
         uint32_t* out_result_register) {
     MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
     if (!emitter || !emitter->ctx || !emitter->func || !emitter->func_item ||
-            !function_name || !*function_name || operand_count > MIR_SHARED_MAX_CALL_ARGS ||
+            !function_name || !*function_name || operand_count > LAMBDA_MAX_FUNCTION_ARGS ||
             (operand_count > 0 && !operands) || (!discard_result && !out_result_register)) {
         return -1;
     }
     MIR_type_t result_type = jube_host_compiler_value_type(result_kind);
     if (result_type == MIR_T_UNDEF) return -1;
-    MIR_type_t argument_types[MIR_SHARED_MAX_CALL_ARGS] = {};
-    MIR_op_t argument_ops[MIR_SHARED_MAX_CALL_ARGS] = {};
+    MIR_type_t argument_types[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    MIR_op_t argument_ops[LAMBDA_MAX_FUNCTION_ARGS] = {};
     for (uint32_t i = 0; i < operand_count; i++) {
         const JubeCompilerCallOperand* operand = &operands[i];
         argument_types[i] = jube_host_compiler_value_type(operand->value_kind);

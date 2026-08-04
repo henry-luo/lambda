@@ -197,7 +197,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     MIR_op_t* ops = arg_count > 0
         ? LAMBDA_ALLOCA(arg_count, MIR_op_t) : NULL;
     for (int i = 0; i < arg_count; i++) {
-        types[i] = callee->param_types[i] == LMD_TYPE_FLOAT
+        types[i] = jm_param_type(callee, i) == LMD_TYPE_FLOAT
             ? MIR_T_D : MIR_T_I64;
         ops[i] = MIR_new_reg_op(mt->ctx, arg_regs[i]);
     }

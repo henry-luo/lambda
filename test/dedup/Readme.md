@@ -60,9 +60,8 @@ not for suppressing ordinary duplication.
 
 File exclusions are passed directly to Lizard with `-x`. Paths and patterns are
 relative to the repository root. The current Lambda exclusions cover the
-generated `lambda/lambda-embed.h` and every vendored `lambda/tree-sitter*`
-tree, including runtimes, grammar sources, generated parsers, scanners, and
-language bindings.
+every vendored `lambda/tree-sitter*` tree, including runtimes, grammar sources,
+generated parsers, scanners, and language bindings.
 
 ```json
 {

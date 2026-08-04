@@ -39,7 +39,6 @@ typedef struct BashTranspiler {
     // core transpiler components
     Pool* ast_pool;                 // AST memory pool
     NamePool* name_pool;            // string interning pool
-    StrBuf* code_buf;               // MIR code generation buffer
     const char* source;             // Bash source code
     size_t source_length;
 

@@ -216,11 +216,11 @@ def parse_profile_file():
                     "ast_ms": float(parts[2]),
                     "transpile_ms": float(parts[3]),
                     "jit_init_ms": float(parts[4]),
-                    "file_write_ms": float(parts[5]),
-                    "c2mir_ms": float(parts[6]),
-                    "mir_gen_ms": float(parts[7]),
-                    "total_ms": float(parts[8]),
-                    "code_len": int(parts[9]),
+                    "mir_gen_ms": float(parts[5]),
+                    "total_ms": float(parts[6]),
+                    "code_len": int(parts[7]),
+                    "worker_thread": int(parts[8]),
+                    "thread_id": int(parts[9]),
                 })
             except (ValueError, IndexError):
                 continue
@@ -235,9 +235,9 @@ def aggregate_profile(entries):
     """
     parse_ms = sum(e["parse_ms"] for e in entries)
     ast_ms = sum(e["ast_ms"] for e in entries)
-    # transpile_ms covers: MIR Direct → transpile_mir_ast + MIR_link
-    #                      C2MIR     → C code gen + C→MIR compilation
-    transpile_ms = sum(e["transpile_ms"] + e["c2mir_ms"] for e in entries)
+    # the profile format contains only the supported MIR Direct pipeline; the
+    # former C2MIR timing column was removed with the deleted C-text backend.
+    transpile_ms = sum(e["transpile_ms"] for e in entries)
     # jit_ms covers: jit_init + jit_gen_func (native code generation)
     jit_ms = sum(e["jit_init_ms"] + e["mir_gen_ms"] for e in entries)
     total_ms = parse_ms + ast_ms + transpile_ms + jit_ms

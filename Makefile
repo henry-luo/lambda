@@ -182,25 +182,6 @@ $(TS_ENUM_H): $(GRAMMAR_JS)
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
-# Lambda embedding dependencies
-# Auto-generate lambda-embed.h when lambda.h changes
-# This embeds the lambda.h header file as a byte array for runtime access
-LAMBDA_H_FILE = lambda/lambda.h
-LAMBDA_EMBED_H_FILE = lambda/lambda-embed.h
-
-# Auto-generate lambda-embed.h when lambda.h changes or lambda-embed.h doesn't exist
-$(LAMBDA_EMBED_H_FILE): $(LAMBDA_H_FILE)
-	@echo "lambda.h changed or lambda-embed.h missing, regenerating lambda-embed.h..."
-	@if command -v xxd >/dev/null 2>&1; then \
-		echo "Regenerating $(LAMBDA_EMBED_H_FILE) from $(LAMBDA_H_FILE)..."; \
-		xxd -i "$(LAMBDA_H_FILE)" > "$(LAMBDA_EMBED_H_FILE)"; \
-		echo "Successfully regenerated $(LAMBDA_EMBED_H_FILE)"; \
-	else \
-		echo "Error: xxd command not found! Cannot regenerate $(LAMBDA_EMBED_H_FILE)"; \
-		echo "Install xxd or manually run: xxd -i $(LAMBDA_H_FILE) > $(LAMBDA_EMBED_H_FILE)"; \
-		exit 1; \
-	fi
-
 # Tree-sitter library targets
 # Build from source on all platforms
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
@@ -226,6 +207,9 @@ MIR_LIB = $(MIR_BUILD_DIR)/libmir.a
 # GNUmakefile's `git log -1` does not resolve to the Lambda repo's HEAD, which
 # would rebuild all of MIR on every Lambda commit.
 MIR_UPSTREAM_COMMIT = 99c65079038f3ba9242ef646f308c266cfd7a8e5
+# The upstream libmir archive currently has a hard dependency on its c2mir
+# object. Lambda never includes or calls that frontend; vendor sources stay
+# untouched under the dependency boundary.
 MIR_SOURCES = $(wildcard $(MIR_BUILD_DIR)/mir*.c $(MIR_BUILD_DIR)/mir*.h $(MIR_BUILD_DIR)/c2mir/*.c $(MIR_BUILD_DIR)/c2mir/*.h)
 
 # JavaScript scanner dependencies
@@ -366,8 +350,9 @@ $(RE2_LIB):
 	@echo "re2 library built: $(RE2_LIB)"
 
 # Build MIR JIT library from the vendored source at lambda/mir.
-# Only the libmir.a target is built (mir.o + mir-gen.o + c2mir.o); MIR's own
-# executables (c2m, m2b, b2m, mir-bin-run) are not part of the vendored subset.
+# Only the libmir.a target is built (the upstream target includes mir.o,
+# mir-gen.o, and c2mir.o); Lambda does not invoke c2mir. MIR's own executables
+# (c2m, m2b, b2m, mir-bin-run) are not part of the vendored subset.
 $(MIR_LIB): $(MIR_SOURCES)
 	@echo "Building MIR library from vendored source ($(MIR_BUILD_DIR))..."
 ifeq ($(IS_MSYS2),yes)
@@ -556,7 +541,7 @@ help:
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
-	@echo "  clean-grammar - Remove generated grammar and embed files (parser.c, ts-enum.h, lambda-embed.h)"
+	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
 	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -673,7 +658,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -711,7 +696,7 @@ $(LAMBDA_EXE): build
 
 
 # Debug build
-debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
+debug: $(TS_ENUM_H) tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call toolchain_verify)
@@ -743,7 +728,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-compile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -765,7 +750,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -781,7 +766,7 @@ build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs
 
 # Keep regular debug free of profiler hooks so its runtime cost reflects only
 # debugging and sanitizer instrumentation; use this target to collect JS profiles.
-build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-debug-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_profile version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
@@ -799,7 +784,7 @@ build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
-build-cli: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+build-cli: $(TS_ENUM_H) tree-sitter-libs
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
 	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
 	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
@@ -827,7 +812,7 @@ build-jube: build build-lang-python
 # of the standard host build, so Python stays absent unless this target is run.
 # Build the matching host first: an exact Jube service-table bump must not
 # leave a freshly stamped module paired with a stale executable.
-build-lang-python: build $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_PYTHON_LIB)
+build-lang-python: build $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building external lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -886,7 +871,7 @@ $(eval $(call release_node_module,zlib))
 # The release language module is built independently, then copied next to the
 # full distribution's unchanged host executable.  The standard bundle never
 # depends on this target.
-release-lang-python: release $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_PYTHON_LIB)
+release-lang-python: release $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building release lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -1365,7 +1350,6 @@ clean:
 	@rm -f .lambda_release_build
 	@rm -f .lambda_release_backup.exe
 	@rm -f .lambda_build_backup.exe
-	@rm -f temp/_transpiled*.c
 	@echo "Build artifacts and executables cleaned."
 
 clean-test:
@@ -1386,7 +1370,6 @@ clean-grammar:
 	@rm -f $(PARSER_C)
 	@rm -f $(GRAMMAR_JSON)
 	@rm -f $(NODE_TYPES_JSON)
-	@rm -f $(LAMBDA_EMBED_H_FILE)
 	@echo "Generated grammar and embed files cleaned."
 
 # IntelliSense support
@@ -1440,7 +1423,6 @@ distclean: clean-all clean-grammar clean-test
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f lambda-linux.exe
-	@rm -f temp/_transpiled*.c
 	@rm -f *.exe
 	@echo "Complete cleanup finished."
 
@@ -1710,7 +1692,7 @@ node-official-report:
 	@$(PYTHON) -B test/node/node_official_report.py
 
 ensure-yaml-submodule:
-	@if [ ! -f test/yaml/README.md ]; then \
+	@if [ ! -f test/yaml/229Q/=== ]; then \
 		echo "Initializing test/yaml submodule..."; \
 		git submodule update --init test/yaml; \
 	fi

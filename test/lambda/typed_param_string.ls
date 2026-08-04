@@ -1,6 +1,6 @@
 // Test: typed string parameters on user-defined functions
 // Issue #16: `: string` annotation makes C param `String*`, but callers
-// may pass `Item` (e.g., untyped args), causing C2MIR type mismatch.
+// may pass `Item` (e.g., untyped args), causing a type mismatch.
 
 // Function with typed string parameter
 fn greet(name: string) {

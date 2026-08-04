@@ -121,8 +121,6 @@ typedef struct PhaseProfile {
     double ast_ms;
     double transpile_ms;
     double jit_init_ms;
-    double file_write_ms;
-    double c2mir_ms;
     double mir_gen_ms;
     int code_len;
     int worker_thread;
@@ -225,14 +223,14 @@ void profile_dump_to_file() {
     FILE* f = fopen("temp/phase_profile.txt", "w");
     if (!f) return;
     fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1)\n");
-    fprintf(f, "# script | parse | ast | transpile | jit_init | file_write | c2mir | mir_gen | total | code_len | worker | thread_id\n");
+    fprintf(f, "# script | parse | ast | transpile | jit_init | mir_gen | total | code_len | worker | thread_id\n");
     for (int i = 0; i < profile_count; i++) {
         PhaseProfile* p = &profile_data[i];
         double total = p->parse_ms + p->ast_ms + p->transpile_ms +
-                       p->jit_init_ms + p->file_write_ms + p->c2mir_ms + p->mir_gen_ms;
-        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
+                       p->jit_init_ms + p->mir_gen_ms;
+        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
                 p->script_path, p->parse_ms, p->ast_ms, p->transpile_ms,
-                p->jit_init_ms, p->file_write_ms, p->c2mir_ms, p->mir_gen_ms,
+                p->jit_init_ms, p->mir_gen_ms,
                 total, p->code_len, p->worker_thread, p->thread_id);
     }
     if (import_level_profile_count > 0) {
@@ -300,9 +298,6 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void ensure_jit_imports_initialized(void);
 }
-#ifdef LAMBDA_C2MIR
-void transpile_ast_root(Transpiler* tp, AstScript *script);
-#endif
 void ensure_sys_func_maps_initialized(void);
 void check_memory_leak();
 void print_heap_entries();
@@ -645,10 +640,6 @@ void init_module_import(Transpiler *tp, AstScript *script) {
     log_leave();
 }
 
-#ifdef LAMBDA_C2MIR
-extern unsigned int lambda_lambda_h_len;
-#endif
-
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
@@ -732,10 +723,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
 
-    // MIR Direct path: skip C code generation entirely; compile the AST straight to MIR.
-    // compile_script_as_mir_direct() handles import registration, transpile_mir_ast(),
-    // MIR_link(), and stores jit_context/main_func on the script.
-    if (tp->runtime && tp->runtime->use_mir_direct) {
+    // compile the AST directly to MIR; this is the only supported Lambda backend.
+    {
         double mir_jit_init_ms = 0, mir_transpile_ms = 0, mir_gen_ms = 0;
         compile_script_as_mir_direct(tp, script, script_path,
                                       profiling ? &mir_jit_init_ms : NULL,
@@ -749,8 +738,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             prof.ast_ms = elapsed_ms_val(p1, p2);
             prof.transpile_ms = mir_transpile_ms;
             prof.jit_init_ms = mir_jit_init_ms;
-            prof.file_write_ms = 0;
-            prof.c2mir_ms = 0;
             prof.mir_gen_ms = mir_gen_ms;
             prof.code_len = 0;
             prof.worker_thread = tls_parser ? 1 : 0;
@@ -760,106 +747,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
 
-#ifdef LAMBDA_C2MIR
-    profile_time_t p3, p4, p5, p6, p7;  // only used in the C2MIR pipeline below
-    // print the AST for debugging
-    log_debug("AST: %s ---------", tp->reference);
-    print_ast_root(tp);
-
-    // transpile the AST to C code
-    log_debug("transpiling...");
-    get_time(&start);
-    tp->code_buf = strbuf_new_cap(1024);
-    transpile_ast_root(tp, (AstScript*)tp->ast_root);
-    get_time(&end);
-    print_elapsed_time("transpiling", start, end);
-
-    if (profiling) profile_get_time(&p3);
-
-    // Check for errors during transpilation
-    if (tp->error_count > 0) {
-        log_error("compiled '%s' with error!!", script_path);
-        strbuf_free(tp->code_buf);  tp->code_buf = NULL;
-        return;
-    }
-
-    // JIT compile the C code
-    get_time(&start);
-    tp->jit_context = jit_init(tp->runtime->optimize_level);
-
-    if (profiling) profile_get_time(&p4);
-
-    // compile user code to MIR
-    log_debug("compiling to MIR...");
-    // Write transpiled C code when:
-    //   (a) user explicitly passed --transpile-dir (transpile_dir != NULL), or
-    //   (b) dev mode: log is configured to a file (not stdout/stderr)
-    // In release mode without --transpile-dir, skip the write to keep the working directory clean.
-    bool log_to_file = (log_default_category && log_default_category->output &&
-        log_default_category->output != stdout && log_default_category->output != stderr);
-    const char* write_dir = tp->runtime->transpile_dir;
-    if (write_dir || log_to_file) {
-        if (!write_dir) write_dir = "temp";  // dev mode fallback
-        char transpiled_filename[256];
-        create_dir_recursive(write_dir);
-        snprintf(transpiled_filename, sizeof(transpiled_filename), "%s/_transpiled_%d.c", write_dir, script->index);
-        write_text_file(transpiled_filename, tp->code_buf->str);
-    }
-
-    if (profiling) profile_get_time(&p5);
-
-    int profile_code_len = (int)tp->code_buf->length;
-    char* code = tp->code_buf->str + lambda_lambda_h_len;
-    // printf("code len: %d\n", (int)strlen(code));
-    log_debug("transpiled code (first 500 chars):\n---------%.500s", code);
-    fflush(NULL);  // force flush all open streams for large log
-    jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
-
-    if (profiling) profile_get_time(&p6);
-
-    strbuf_free(tp->code_buf);  tp->code_buf = NULL;
-    // generate native code and return the function
-    tp->main_func = (main_func_t)jit_gen_func(tp->jit_context, "main");
-    get_time(&end);
-
-    if (profiling) profile_get_time(&p7);
-
-    // Record profiling data
-    if (profiling) {
-        PhaseProfile prof;
-        memset(&prof, 0, sizeof(prof));
-        profile_set_script_path(&prof, script_path);
-        prof.parse_ms = elapsed_ms_val(p0, p1);
-        prof.ast_ms = elapsed_ms_val(p1, p2);
-        prof.transpile_ms = elapsed_ms_val(p2, p3);
-        prof.jit_init_ms = elapsed_ms_val(p3, p4);
-        prof.file_write_ms = elapsed_ms_val(p4, p5);
-        prof.c2mir_ms = elapsed_ms_val(p5, p6);
-        prof.mir_gen_ms = elapsed_ms_val(p6, p7);
-        prof.code_len = profile_code_len;
-        prof.worker_thread = tls_parser ? 1 : 0;
-        prof.thread_id = profile_current_thread_id();
-        profile_record_phase(&prof);
-    }
-
-    // Build debug info table for stack traces (after MIR_link has assigned addresses)
-    // Pass func_name_map so MIR internal names are mapped to Lambda user-friendly names
-    tp->debug_info = (ArrayList*)build_debug_info_table(tp->jit_context, tp->func_name_map);
-
-    // init lambda imports
-    init_module_import(tp, (AstScript*)tp->ast_root);
-
-    log_info("JIT compiled %s", script_path);
-    log_debug("jit_context: %p, main_func: %p, debug_info: %p", tp->jit_context, tp->main_func, tp->debug_info);
-    // copy value back to script
-    memcpy(script, tp, sizeof(Script));
-    script->main_func = tp->main_func;
-
-    print_elapsed_time("JIT compiling", start, end);
-#else
-    // C2MIR not available — this should not be reached
-    log_error("C2MIR path not available in this build (use MIR Direct)");
-#endif // LAMBDA_C2MIR
 }
 
 // ============================================================================
@@ -1384,8 +1271,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import) {
     if (!runtime) return NULL;
-    // Cross-language loaders do not enter run_script_mir(), so select MIR Direct
-    // here or imported Lambda modules incorrectly fall through to the absent C2MIR path.
+    // Cross-language loaders do not enter run_script_mir(), so select the sole
+    // MIR Direct backend explicitly before loading the module.
     bool was_mir_direct = runtime->use_mir_direct;
     runtime->use_mir_direct = true;
     Script* script = load_script(runtime, script_path, source, is_import);
@@ -1665,33 +1552,6 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     return output;
 }
 
-Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
-    (void)runtime;
-    (void)source;
-    (void)script_path;
-    (void)transpile_only;
-    // C2MIR relies on native-stack discovery. Re-enable only after its emitter
-    // publishes canonical side-stack roots at every MAY_GC boundary.
-    log_error("C2MIR execution is disabled: it has no precise GC root contract");
-    return nullptr;
-}
-
-Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
-    return run_script(runtime, NULL, script_path, transpile_only);
-}
-
-// Extended function that supports setting run_main context and returns Input*
-Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
-    (void)runtime;
-    (void)script_path;
-    (void)transpile_only;
-    (void)run_main;
-    // C2MIR relies on native-stack discovery. Re-enable only after its emitter
-    // publishes canonical side-stack roots at every MAY_GC boundary.
-    log_error("C2MIR execution is disabled: it has no precise GC root contract");
-    return nullptr;
-}
-
 // Installs runtime_cleanup into the DOM layer's hook so dom_document_destroy()
 // can clean up a document's reactive lambda_runtime without dom_element.cpp
 // hard-linking runner.cpp (keeps input/DOM unit tests free of the runtime).
@@ -1700,12 +1560,14 @@ extern "C" void jube_register_builtin_modules(void);
 
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
+    // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
+    // and import scheduling code that still uses it as a fast-path predicate.
+    runtime->use_mir_direct = true;
     runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
     runtime->script_index = script_index_new(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
-    runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
     const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
     runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||

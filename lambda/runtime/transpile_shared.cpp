@@ -1,9 +1,7 @@
 /**
  * transpile_shared.cpp — Shared transpiler utilities
  *
- * Functions used by both C2MIR transpiler (transpile.cpp) and MIR Direct
- * transpiler (transpile-mir.cpp) + module_registry. Extracted to allow
- * excluding transpile.cpp from core lambda build.
+ * Naming and AST helpers shared by MIR Direct and module_registry.
  */
 
 #include "transpiler.hpp"

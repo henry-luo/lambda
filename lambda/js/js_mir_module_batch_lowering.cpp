@@ -2265,7 +2265,7 @@ static bool jm_p6_expr_has_self_call(JsAstNode* expr, const char* self_name) {
 }
 
 TypeId jm_p6_expr_type(JsAstNode* expr,
-                               const char param_names[][128], TypeId* param_types, int param_count,
+                               const String* const param_bindings[], TypeId* param_types, int param_count,
                                const char local_names[][128], TypeId* local_types, int local_count,
                                const char* self_name, TypeId self_return_type) {
     if (!expr) return LMD_TYPE_ANY;
@@ -2285,12 +2285,12 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
     }
     if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        char name[128];
-        snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
         for (int i = 0; i < param_count; i++)
-            if (strcmp(name, param_names[i]) == 0) return param_types[i];
+            if (jm_js_name_equal(id->name, param_bindings[i])) return param_types[i];
         for (int i = 0; i < local_count; i++)
-            if (strcmp(name, local_names[i]) == 0) return local_types[i];
+            if (jm_js_generated_name_equal(id->name, local_names[i])) {
+                return local_types[i];
+            }
         return LMD_TYPE_ANY;
     }
     if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
@@ -2302,10 +2302,10 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         case JS_OP_DIV: case JS_OP_EXP:
             return LMD_TYPE_FLOAT;
         default: {
-            TypeId lt = jm_p6_expr_type(bin->left, param_names, param_types, param_count,
+            TypeId lt = jm_p6_expr_type(bin->left, param_bindings, param_types, param_count,
                                          local_names, local_types, local_count,
                                          self_name, self_return_type);
-            TypeId rt = jm_p6_expr_type(bin->right, param_names, param_types, param_count,
+            TypeId rt = jm_p6_expr_type(bin->right, param_bindings, param_types, param_count,
                                          local_names, local_types, local_count,
                                          self_name, self_return_type);
             if (bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR || bin->op == JS_OP_BIT_XOR ||
@@ -2331,20 +2331,20 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
         if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
         if (un->op == JS_OP_MINUS || un->op == JS_OP_PLUS)
-            return jm_p6_expr_type(un->operand, param_names, param_types, param_count,
+            return jm_p6_expr_type(un->operand, param_bindings, param_types, param_count,
                                     local_names, local_types, local_count,
                                     self_name, self_return_type);
         if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT)
-            return jm_p6_expr_type(un->operand, param_names, param_types, param_count,
+            return jm_p6_expr_type(un->operand, param_bindings, param_types, param_count,
                                     local_names, local_types, local_count,
                                     self_name, self_return_type);
     }
     if (expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
         JsConditionalNode* cond = (JsConditionalNode*)expr;
-        TypeId ct = jm_p6_expr_type(cond->consequent, param_names, param_types, param_count,
+        TypeId ct = jm_p6_expr_type(cond->consequent, param_bindings, param_types, param_count,
                                      local_names, local_types, local_count,
                                      self_name, self_return_type);
-        TypeId at = jm_p6_expr_type(cond->alternate, param_names, param_types, param_count,
+        TypeId at = jm_p6_expr_type(cond->alternate, param_bindings, param_types, param_count,
                                      local_names, local_types, local_count,
                                      self_name, self_return_type);
         if (ct == at) return ct;
@@ -2363,7 +2363,7 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
 // For `let x = 0`, type is INT. For `let x = param`, type is param type.
 // For compound assignments/updates, the type stays the same.
 void jm_p6_collect_locals(JsAstNode* body,
-                                  const char param_names[][128], TypeId* param_types, int param_count,
+                                  const String* const param_bindings[], TypeId* param_types, int param_count,
                                   char local_names[][128], TypeId* local_types, int* local_count, int max_locals) {
     if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
     JsBlockNode* blk = (JsBlockNode*)body;
@@ -2378,7 +2378,7 @@ void jm_p6_collect_locals(JsAstNode* body,
                     if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER && d->init) {
                         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                         TypeId init_type = jm_p6_expr_type(d->init,
-                            param_names, param_types, param_count,
+                            param_bindings, param_types, param_count,
                             local_names, local_types, *local_count,
                             NULL, LMD_TYPE_ANY);
                         if (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT) {
@@ -2399,7 +2399,7 @@ void jm_p6_collect_locals(JsAstNode* body,
 
 // Walk return statements and resolve their types using param + local info.
 void jm_p6_return_walk(JsAstNode* node,
-                               const char param_names[][128], TypeId* param_types, int param_count,
+                               const String* const param_bindings[], TypeId* param_types, int param_count,
                                const char local_names[][128], TypeId* local_types, int local_count,
                                TypeId* collected, int* count, int max_count,
                                const char* self_name, TypeId self_return_type,
@@ -2410,7 +2410,7 @@ void jm_p6_return_walk(JsAstNode* node,
         JsReturnNode* ret = (JsReturnNode*)node;
         if (!ret->argument) { collected[(*count)++] = LMD_TYPE_NULL; return; }
         TypeId t = jm_p6_expr_type(ret->argument,
-            param_names, param_types, param_count,
+            param_bindings, param_types, param_count,
             local_names, local_types, local_count,
             self_name, self_return_type);
         if (skip_self_unknown && t == LMD_TYPE_ANY &&
@@ -2423,55 +2423,55 @@ void jm_p6_return_walk(JsAstNode* node,
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         JsAstNode* s = blk->statements;
-        while (s) { jm_p6_return_walk(s, param_names, param_types, param_count,
+        while (s) { jm_p6_return_walk(s, param_bindings, param_types, param_count,
                         local_names, local_types, local_count, collected, count, max_count,
                         self_name, self_return_type, skip_self_unknown); s = s->next; }
         break;
     }
     case JS_AST_NODE_IF_STATEMENT: {
         JsIfNode* n = (JsIfNode*)node;
-        jm_p6_return_walk(n->consequent, param_names, param_types, param_count,
+        jm_p6_return_walk(n->consequent, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
-        jm_p6_return_walk(n->alternate, param_names, param_types, param_count,
+        jm_p6_return_walk(n->alternate, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_WHILE_STATEMENT: {
         JsWhileNode* n = (JsWhileNode*)node;
-        jm_p6_return_walk(n->body, param_names, param_types, param_count,
+        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_FOR_STATEMENT: {
         JsForNode* n = (JsForNode*)node;
-        jm_p6_return_walk(n->body, param_names, param_types, param_count,
+        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_DO_WHILE_STATEMENT: {
         JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_p6_return_walk(n->body, param_names, param_types, param_count,
+        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* n = (JsTryNode*)node;
-        jm_p6_return_walk(n->block, param_names, param_types, param_count,
+        jm_p6_return_walk(n->block, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
-        jm_p6_return_walk(n->handler, param_names, param_types, param_count,
+        jm_p6_return_walk(n->handler, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* n = (JsCatchNode*)node;
-        jm_p6_return_walk(n->body, param_names, param_types, param_count,
+        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown);
         break;
@@ -2479,7 +2479,7 @@ void jm_p6_return_walk(JsAstNode* node,
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* n = (JsSwitchNode*)node;
         JsAstNode* c = n->cases;
-        while (c) { jm_p6_return_walk(c, param_names, param_types, param_count,
+        while (c) { jm_p6_return_walk(c, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown); c = c->next; }
         break;
@@ -2487,7 +2487,7 @@ void jm_p6_return_walk(JsAstNode* node,
     case JS_AST_NODE_SWITCH_CASE: {
         JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
         JsAstNode* s = n->consequent;
-        while (s) { jm_p6_return_walk(s, param_names, param_types, param_count,
+        while (s) { jm_p6_return_walk(s, param_bindings, param_types, param_count,
             local_names, local_types, local_count, collected, count, max_count,
             self_name, self_return_type, skip_self_unknown); s = s->next; }
         break;
@@ -2532,13 +2532,23 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
         return;
     }
 
-    // Build param names array
-    char param_names[16][128];
+    // Keep formal bindings as AST-owned names; fixed C-string copies made
+    // return inference sensitive to source-name length.
+    const String** param_bindings = (const String**)mem_calloc(
+        (size_t)fc->param_count, sizeof(*param_bindings), MEM_CAT_JS_RUNTIME);
     int param_count = fc->param_count;
-    if (param_count > 16) param_count = 16;
+    TypeId* param_types = (TypeId*)mem_calloc((size_t)param_count,
+        sizeof(*param_types), MEM_CAT_JS_RUNTIME);
+    if ((param_count > 0 && !param_bindings) ||
+            (param_count > 0 && !param_types)) {
+        if (param_bindings) mem_free(param_bindings);
+        if (param_types) mem_free(param_types);
+        return;
+    }
     JsAstNode* pn = fn->params;
     for (int i = 0; i < param_count; i++) {
-        jm_get_param_name(pn, i, param_names[i], 128);
+        param_bindings[i] = jm_param_binding_name(pn);
+        param_types[i] = jm_param_type(fc, i);
         pn = pn ? pn->next : NULL;
     }
 
@@ -2546,7 +2556,7 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
     char local_names[32][128];
     TypeId local_types[32];
     int local_count = 0;
-    jm_p6_collect_locals(fn->body, param_names, fc->param_types, param_count,
+    jm_p6_collect_locals(fn->body, param_bindings, param_types, param_count,
                           local_names, local_types, &local_count, 32);
 
     char self_name[128] = {0};
@@ -2560,37 +2570,59 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
     // recursive calls and the other operand are both proven numeric.
     TypeId collected[32];
     int count = 0;
-    jm_p6_return_walk(fn->body, param_names, fc->param_types, param_count,
+    jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
                        local_names, local_types, local_count,
                        collected, &count, 32,
                        self_name, LMD_TYPE_ANY, true);
 
     bool ok = true;
     TypeId inferred = jm_p6_unify_return_types(collected, count, &ok);
-    if (!ok) return;
+    if (!ok) {
+        mem_free(param_bindings);
+        mem_free(param_types);
+        return;
+    }
 
     if (inferred != LMD_TYPE_ANY && self_name[0]) {
         for (int pass = 0; pass < 4; pass++) {
             count = 0;
-            jm_p6_return_walk(fn->body, param_names, fc->param_types, param_count,
+            jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
                                local_names, local_types, local_count,
                                collected, &count, 32,
                                self_name, inferred, false);
-            if (count == 0) { fc->return_type = LMD_TYPE_NULL; return; }
+            if (count == 0) {
+                fc->return_type = LMD_TYPE_NULL;
+                mem_free(param_bindings);
+                mem_free(param_types);
+                return;
+            }
             TypeId next = jm_p6_unify_return_types(collected, count, &ok);
-            if (!ok || next == LMD_TYPE_ANY) return;
+            if (!ok || next == LMD_TYPE_ANY) {
+                mem_free(param_bindings);
+                mem_free(param_types);
+                return;
+            }
             if (next == inferred) break;
             inferred = next;
         }
     } else {
         count = 0;
-        jm_p6_return_walk(fn->body, param_names, fc->param_types, param_count,
+        jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
                            local_names, local_types, local_count,
                            collected, &count, 32,
                            self_name, LMD_TYPE_ANY, false);
-        if (count == 0) { fc->return_type = LMD_TYPE_NULL; return; }
+        if (count == 0) {
+            fc->return_type = LMD_TYPE_NULL;
+            mem_free(param_bindings);
+            mem_free(param_types);
+            return;
+        }
         inferred = jm_p6_unify_return_types(collected, count, &ok);
-        if (!ok || inferred == LMD_TYPE_ANY) return;
+        if (!ok || inferred == LMD_TYPE_ANY) {
+            mem_free(param_bindings);
+            mem_free(param_types);
+            return;
+        }
     }
 
     if (inferred != LMD_TYPE_ANY) {
@@ -2598,6 +2630,8 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
         log_info("P6 re-inferred return type for %s: %s",
                  fc->name, inferred == LMD_TYPE_INT ? "INT" : inferred == LMD_TYPE_FLOAT ? "FLOAT" : "OTHER");
     }
+    mem_free(param_bindings);
+    mem_free(param_types);
 }
 
 // ============================================================================
@@ -2692,13 +2726,9 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
 static int jm_p6_param_index_for_identifier(JsAstNode* arg, JsFuncCollected* fc) {
     if (!arg || arg->node_type != JS_AST_NODE_IDENTIFIER || !fc || !fc->node) return -1;
     JsIdentifierNode* id = (JsIdentifierNode*)arg;
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
     JsAstNode* p = fc->node->params;
-    for (int i = 0; p && i < fc->param_count && i < 16; i++, p = p->next) {
-        char pname[128];
-        jm_get_param_name(p, i, pname, sizeof(pname));
-        if (strcmp(vname, pname) == 0) return i;
+    for (int i = 0; p && i < fc->param_count; i++, p = p->next) {
+        if (jm_js_name_equal(id->name, jm_param_binding_name(p))) return i;
     }
     return -1;
 }
@@ -2712,15 +2742,13 @@ static TypeId jm_p6_evidence_type(FnParamEvidence* e) {
 
 static bool jm_p6_function_has_duplicate_param_names(JsFunctionNode* fn) {
     if (!fn) return false;
-    char names[16][128];
     int count = 0;
-    for (JsAstNode* p = fn->params; p && count < 16; p = p->next) {
-        char pname[128];
-        jm_get_param_name(p, count, pname, sizeof(pname));
-        for (int i = 0; i < count; i++) {
-            if (strcmp(names[i], pname) == 0) return true;
+    for (JsAstNode* p = fn->params; p; p = p->next) {
+        const String* pname = jm_param_binding_name(p);
+        JsAstNode* prior = fn->params;
+        for (int i = 0; prior && i < count; i++, prior = prior->next) {
+            if (jm_js_name_equal(pname, jm_param_binding_name(prior))) return true;
         }
-        snprintf(names[count], sizeof(names[count]), "%s", pname);
         count++;
     }
     return false;
@@ -2993,24 +3021,26 @@ void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
 // Per-function, per-param call-site evidence
 // Walk AST collecting call-site argument types for narrowing
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               FnParamEvidence evidence[][16]) {
-    if (!node) return;
+                               FnParamEvidence** evidence) {
+    if (!node || !evidence) return;
     switch (node->node_type) {
     case JS_AST_NODE_CALL_EXPRESSION: {
         JsCallNode* call = (JsCallNode*)node;
         JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
         if (callee_fc) {
             int fi = (int)(callee_fc - mt->func_entries);
-            JsAstNode* arg = call->arguments;
-            for (int pi = 0; pi < callee_fc->param_count && pi < 16; pi++) {
-                TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
-                // boolean arguments must stay boxed; treating them as INT makes
-                // native conditions read boxed boolean tags as nonzero numbers.
-                if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
-                    evidence[fi][pi].float_evidence++;
-                else
-                    evidence[fi][pi].other_evidence++;
-                if (arg) arg = arg->next;
+            if (fi >= 0 && fi < mt->func_count && evidence[fi]) {
+                JsAstNode* arg = call->arguments;
+                for (int pi = 0; pi < callee_fc->param_count; pi++) {
+                    TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
+                    // boolean arguments must stay boxed; treating them as INT makes
+                    // native conditions read boxed boolean tags as nonzero numbers.
+                    if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
+                        evidence[fi][pi].float_evidence++;
+                    else
+                        evidence[fi][pi].other_evidence++;
+                    if (arg) arg = arg->next;
+                }
             }
         }
         // recurse into arguments
@@ -3202,7 +3232,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
         JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
         if (callee_fc && callee_fc->has_native_version) {
             JsAstNode* arg = call->arguments;
-            for (int i = 0; i < callee_fc->param_count && i < 16; i++) {
+            for (int i = 0; i < callee_fc->param_count; i++) {
                 if (!arg) break;
                 if (arg->node_type == JS_AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)arg;
@@ -3215,7 +3245,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                         arg_type = LMD_TYPE_STRING;
                     else if (lit->literal_type == JS_LITERAL_BOOLEAN)
                         arg_type = LMD_TYPE_BOOL;
-                    TypeId expected = callee_fc->param_types[i];
+                    TypeId expected = jm_param_type(callee_fc, i);
                     bool ok = true;
                     if (expected == LMD_TYPE_INT)
                         ok = (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_BOOL || arg_type == LMD_TYPE_ANY);
@@ -5995,9 +6025,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // local variable tracing to resolve the return type.
         if (fc->return_type == LMD_TYPE_ANY) {
             bool has_typed_param = false;
-            for (int j = 0; j < fc->param_count &&
-                    j < JS_MIR_TYPED_PARAM_LIMIT; j++) {
-                if (fc->param_types[j] == LMD_TYPE_INT || fc->param_types[j] == LMD_TYPE_FLOAT) {
+            for (int j = 0; j < fc->param_count; j++) {
+                if (jm_param_type(fc, j) == LMD_TYPE_INT || jm_param_type(fc, j) == LMD_TYPE_FLOAT) {
                     has_typed_param = true; break;
                 }
             }
@@ -6010,14 +6039,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Native specialization cannot use duplicate MIR param names, and arrow
         // block bodies still need boxed statement-completion return handling.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
-                         fc->param_count <= 16 && !fc->uses_arguments &&
+                         !fc->uses_arguments &&
                          jm_p6_function_allows_native_specialization(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
         bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
-                TypeId param_type = fc->param_types[j];
+                TypeId param_type = jm_param_type(fc, j);
                 if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
                     has_native_param = true;
                     continue;
@@ -6043,7 +6072,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         fc->is_tco_eligible = false;
         if (eligible && has_native_param) {
             for (int j = 0; j < fc->param_count; j++) {
-                if (fc->param_types[j] == LMD_TYPE_ANY) {
+                if (jm_param_type(fc, j) == LMD_TYPE_ANY) {
                     has_native_param = false;
                     break;
                 }
@@ -6068,11 +6097,19 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Phase 1.77: P6 call-site narrowing — for params still ANY after body-scan,
     // narrow to INT/FLOAT when ALL call sites pass compatible types.
     if (mt->func_count > 0) {
-        // allocate evidence per function per param (max 16 params)
-        FnParamEvidence (*evi)[JS_MIR_TYPED_PARAM_LIMIT] =
-            (FnParamEvidence (*)[JS_MIR_TYPED_PARAM_LIMIT])mem_calloc(
-            mt->func_count * JS_MIR_TYPED_PARAM_LIMIT,
-            sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
+        // allocate evidence rows to each function's actual formal count;
+        // the old 16-column matrix was only a transient optimization cap.
+        FnParamEvidence** evi = (FnParamEvidence**)mem_calloc(
+            (size_t)mt->func_count, sizeof(*evi), MEM_CAT_JS_RUNTIME);
+        if (evi) {
+            for (int i = 0; i < mt->func_count; i++) {
+                if (mt->func_entries[i].param_count > 0) {
+                    evi[i] = (FnParamEvidence*)mem_calloc(
+                        (size_t)mt->func_entries[i].param_count,
+                        sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
+                }
+            }
+        }
         // Program bodies are linked statement lists; walking only the head
         // misses later top-level calls that seed recursive parameter types.
         for (JsAstNode* top = (JsAstNode*)program->body; top; top = top->next) {
@@ -6090,21 +6127,20 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (fc->node && (fc->node->is_generator || fc->node->is_async)) continue;
             if (fc->has_scope_env) continue; // params may be captured by child closures — don't narrow
             bool narrowed = false;
-            for (int p = 0; p < fc->param_count &&
-                    p < JS_MIR_TYPED_PARAM_LIMIT; p++) {
-                if (fc->param_types[p] != LMD_TYPE_ANY) continue;
+            for (int p = 0; p < fc->param_count; p++) {
+                if (jm_param_type(fc, p) != LMD_TYPE_ANY || !evi || !evi[i]) continue;
                 FnParamEvidence* e = &evi[i][p];
                 int total = e->int_evidence + e->float_evidence + e->other_evidence;
                 if (total == 0) continue; // never called
                 if (e->other_evidence > 0) continue; // something non-numeric passed
                 if (e->float_evidence > 0 && e->int_evidence == 0) {
-                    fc->param_types[p] = LMD_TYPE_FLOAT;
+                    jm_set_param_type(fc, p, LMD_TYPE_FLOAT);
                     narrowed = true;
                     log_info("P6 narrow %s param[%d] → FLOAT (calls: %d int, %d float, %d other)",
                              fc->name, p, e->int_evidence, e->float_evidence, e->other_evidence);
                 } else {
                     // mixed int+float → narrow to FLOAT (int is promotable)
-                    fc->param_types[p] = LMD_TYPE_FLOAT;
+                    jm_set_param_type(fc, p, LMD_TYPE_FLOAT);
                     narrowed = true;
                     log_info("P6 narrow %s param[%d] → FLOAT (mixed: %d int, %d float)",
                              fc->name, p, e->int_evidence, e->float_evidence);
@@ -6121,12 +6157,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                  // P6 must not re-enable native after the first gate vetoed it.
                                  !fc->uses_arguments &&
                                  jm_p6_function_allows_native_specialization(fc) &&
-                                 !fc->has_non_simple_params &&
-                                 fc->param_count <= 16);
+                                 !fc->has_non_simple_params);
                 bool has_native_param = false;
                 if (eligible) {
                     for (int p = 0; p < fc->param_count; p++) {
-                        TypeId pt = fc->param_types[p];
+                        TypeId pt = jm_param_type(fc, p);
                         if (pt == LMD_TYPE_INT || pt == LMD_TYPE_FLOAT) {
                             has_native_param = true;
                             continue;
@@ -6156,7 +6191,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // recompute TCO after narrowing so deep tail calls stay loops.
                 bool all_native_params = has_native_param;
                 for (int p = 0; p < fc->param_count; p++) {
-                    if (fc->param_types[p] == LMD_TYPE_ANY) {
+                    if (jm_param_type(fc, p) == LMD_TYPE_ANY) {
                         all_native_params = false;
                         break;
                     }
@@ -6165,7 +6200,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_has_tail_call(fc->node->body, fc);
             }
         }
-        mem_free(evi);
+        if (evi) {
+            for (int i = 0; i < mt->func_count; i++) {
+                if (evi[i]) mem_free(evi[i]);
+            }
+            mem_free(evi);
+        }
     }
 
     // Phase 1.78: P4b constructor call-site type propagation.
@@ -6252,12 +6292,13 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         int env_param_count = fc->capture_count > 0 ? 1 : 0;
         int physical_param_count = fc->param_count + env_param_count;
         public_entry->param_count = physical_param_count + 1;
-        if (fc->param_count <= 16 && physical_param_count <= 17) {
-            public_entry->params = fc->public_param_analysis;
+        if (physical_param_count > 0) {
+            public_entry->params = (FnParamAnalysis*)pool_calloc(
+                mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
                 public_entry->params[p] = {env ? LMD_TYPE_ANY :
-                    fc->param_types[p - env_param_count],
+                    jm_param_type(fc, p - env_param_count),
                     env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
             }
         }
@@ -6273,12 +6314,13 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
         body->param_count = physical_param_count;
-        if (fc->param_count <= 16 && physical_param_count <= 17) {
-            body->params = fc->body_param_analysis;
+        if (physical_param_count > 0) {
+            body->params = (FnParamAnalysis*)pool_calloc(
+                mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
                 body->params[p] = {env ? LMD_TYPE_ANY :
-                    fc->param_types[p - env_param_count],
+                    jm_param_type(fc, p - env_param_count),
                     env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
             }
         }
@@ -6294,13 +6336,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE, false};
             native->param_count = fc->param_count;
-            if (fc->param_count <= 16) {
-                native->params = fc->native_param_analysis;
+            if (fc->param_count > 0) {
+                native->params = (FnParamAnalysis*)pool_calloc(
+                    mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)fc->param_count);
                 for (int p = 0; p < fc->param_count; p++) {
-                    ValueRep rep = fc->param_types[p] == LMD_TYPE_FLOAT
-                        ? VALUE_REP_F64 : fc->param_types[p] == LMD_TYPE_ANY
+                    TypeId param_type = jm_param_type(fc, p);
+                    ValueRep rep = param_type == LMD_TYPE_FLOAT
+                        ? VALUE_REP_F64 : param_type == LMD_TYPE_ANY
                             ? VALUE_REP_ITEM : VALUE_REP_I64;
-                    native->params[p] = {fc->param_types[p], rep, 0};
+                    native->params[p] = {param_type, rep, 0};
                 }
             }
         }

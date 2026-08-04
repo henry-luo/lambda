@@ -41,31 +41,6 @@ extern "C" {
     int gc_object_zone_class_index(size_t size);
 }
 
-// Profiling infrastructure (defined in runner.cpp)
-#define PROFILE_MAX_SCRIPTS 64
-typedef struct PhaseProfile {
-    const char* script_path;
-    double parse_ms;
-    double ast_ms;
-    double transpile_ms;
-    double jit_init_ms;
-    double file_write_ms;
-    double c2mir_ms;
-    double mir_gen_ms;
-    int code_len;
-} PhaseProfile;
-extern bool is_profile_enabled();
-extern PhaseProfile profile_data[];
-extern int profile_count;
-#ifdef _WIN32
-#include <windows.h>
-typedef LARGE_INTEGER profile_time_t;
-#else
-typedef struct timespec profile_time_t;
-#endif
-extern void profile_get_time(profile_time_t* t);
-extern double elapsed_ms_val(profile_time_t t0, profile_time_t t1);
-extern void profile_dump_to_file();
 extern Url* get_current_dir();
 
 // Forward declare Runner helper functions from runner.cpp
@@ -273,9 +248,6 @@ struct MirTranspiler {
     // Variadic function body context: when true, return/raise must emit restore_vargs
     bool in_variadic_body;
 
-    // Infer cache: AstFuncNode* -> InferCacheEntry (cached param type inference results)
-    struct hashmap* infer_cache;
-
     // M2 call-site evidence: AstFuncNode* -> CallSiteEntry. Populated by the
     // collect stage of prepass_forward_declare before any body is transpiled.
     struct hashmap* callsite_info;
@@ -314,13 +286,7 @@ HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 // that have a dual native+boxed version (Phase 4 optimization).
 struct NativeFuncInfo {
     char name[128];           // mangled function name (native version)
-    TypeId param_types[LAMBDA_MAX_FUNCTION_ARGS];   // resolved (declared or inferred) TypeId per param
-    MIR_type_t param_mir[LAMBDA_MAX_FUNCTION_ARGS]; // MIR type per param
-    // Keep source authority separate from the chosen physical carrier. A
-    // native param inferred from callers needs an exact entry guard; a
-    // declared native param instead relies on its checked boundary.
-    bool param_is_declared[LAMBDA_MAX_FUNCTION_ARGS];
-    bool param_is_inferred_specialization[LAMBDA_MAX_FUNCTION_ARGS];
+    AstFuncNode* fn_node;      // source parameter list owns per-param metadata
     int param_count;          // number of user params (excluding _env_ptr, _self, _vargs)
     TypeId return_type;       // resolved return TypeId (LMD_TYPE_ANY if unknown)
     MIR_type_t return_mir;    // MIR return type
@@ -341,16 +307,6 @@ struct GlobalVarEntry {
     MIR_type_t mir_type;
 };
 HASHMAP_DEFINE_STRKEY(global_var, struct GlobalVarEntry, name)
-
-// Infer cache entry: caches inferred parameter types per function to avoid
-// redundant body walks between prepass_forward_declare and transpile_func_def.
-// Keyed by AstFuncNode pointer (stable across the compilation).
-struct InferCacheEntry {
-    AstFuncNode* fn;
-    TypeId param_types[LAMBDA_MAX_FUNCTION_ARGS];
-    int param_count;
-};
-HASHMAP_DEFINE_PTRKEY(infer_cache, struct InferCacheEntry, fn)
 
 // M2: per-function summary of how the compilation unit calls it. Body evidence
 // alone cannot narrow `fn f(x, y) { x - y }` — there is no literal to learn
@@ -392,6 +348,77 @@ static MIR_type_t type_to_mir(TypeId type_id) {
         // unsigned semantics independently of that register spelling.
         return MIR_T_I64;
     }
+}
+
+static AstNamedNode* mir_param_at(AstFuncNode* fn_node, int index) {
+    if (!fn_node || index < 0) return NULL;
+    AstNamedNode* param = fn_node->param;
+    for (int i = 0; param && i < index; i++) {
+        param = (AstNamedNode*)param->next;
+    }
+    return param;
+}
+
+static FnParamTypeInfo* mir_param_info_at(AstFuncNode* fn_node, int index) {
+    if (!fn_node || !fn_node->analysis || index < 0 ||
+            index >= fn_node->analysis->param_count ||
+            !fn_node->analysis->param_types) return NULL;
+    return &fn_node->analysis->param_types[index];
+}
+
+static TypeId mir_param_type_at(AstFuncNode* fn_node, int index) {
+    FnParamTypeInfo* info = mir_param_info_at(fn_node, index);
+    return info ? info->semantic_type : LMD_TYPE_ANY;
+}
+
+static bool mir_param_is_declared(AstFuncNode* fn_node, int index) {
+    FnParamTypeInfo* info = mir_param_info_at(fn_node, index);
+    return info && (info->flags & FN_PARAM_FLAG_DECLARED) != 0;
+}
+
+static bool mir_param_is_inferred_specialization(AstFuncNode* fn_node, int index) {
+    FnParamTypeInfo* info = mir_param_info_at(fn_node, index);
+    return info && (info->flags & FN_PARAM_FLAG_INFERRED_SPECIALIZATION) != 0;
+}
+
+static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
+        const TypeId* resolved_types, int param_count) {
+    if (!mt || !fn_node || param_count < 0 || param_count > LAMBDA_MAX_FUNCTION_ARGS) return;
+    if (!fn_node->analysis) {
+        fn_node->analysis = (FnAnalysis*)pool_calloc(mt->script_pool,
+            sizeof(FnAnalysis));
+    }
+    if (!fn_node->analysis) {
+        log_error("mir: function analysis allocation failed for parameter metadata");
+        abort();
+    }
+    if (fn_node->analysis->param_count != param_count ||
+            (param_count > 0 && !fn_node->analysis->param_types)) {
+        fn_node->analysis->param_types = param_count > 0
+            ? (FnParamTypeInfo*)pool_calloc(mt->script_pool,
+                sizeof(FnParamTypeInfo) * (size_t)param_count) : NULL;
+    }
+    fn_node->analysis->param_count = param_count;
+    if (param_count > 0 && !fn_node->analysis->param_types) {
+        log_error("mir: parameter metadata allocation failed for %d formals", param_count);
+        abort();
+    }
+    for (int i = 0; i < param_count; i++) {
+        AstNamedNode* param = mir_param_at(fn_node, i);
+        FnParamTypeInfo* info = &fn_node->analysis->param_types[i];
+        info->semantic_type = resolved_types ? resolved_types[i] : LMD_TYPE_ANY;
+        info->flags = param && param->declared_type &&
+            param->declared_type->type_id != LMD_TYPE_ANY
+            ? FN_PARAM_FLAG_DECLARED : 0;
+        if (!(info->flags & FN_PARAM_FLAG_DECLARED) &&
+                is_native_param_type_id(info->semantic_type)) {
+            info->flags |= FN_PARAM_FLAG_INFERRED_SPECIALIZATION;
+        }
+    }
+}
+
+static TypeId mir_native_param_type(const NativeFuncInfo* info, int index) {
+    return info ? mir_param_type_at(info->fn_node, index) : LMD_TYPE_ANY;
 }
 
 static bool mir_type_needs_mutable_clone(TypeId type_id) {
@@ -1602,17 +1629,12 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     nfi->needs_boxed_slow_body = false;
     nfi->needs_boxed_entry = false;
 
-    AstNamedNode* param = fn_node->param;
-    for (int i = 0; i < nfi->param_count && param; i++) {
-        bool declared = param->declared_type &&
-            param->declared_type->type_id != LMD_TYPE_ANY;
-        nfi->param_is_declared[i] = declared;
-        nfi->param_is_inferred_specialization[i] = !declared &&
-            mir_is_native_param_type(nfi->param_types[i]);
-        if (nfi->param_is_inferred_specialization[i]) {
+    for (int i = 0; i < nfi->param_count; i++) {
+        bool declared = mir_param_is_declared(fn_node, i);
+        bool inferred = mir_param_is_inferred_specialization(fn_node, i);
+        if (inferred) {
             nfi->has_inferred_specialization = true;
         }
-        param = (AstNamedNode*)param->next;
     }
     CallSiteEntry key;
     memset(&key, 0, sizeof(key));
@@ -1625,8 +1647,8 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     // never needs an inferred slow body.
     if (callers && callers->has_call) {
         for (int i = 0; i < nfi->param_count; i++) {
-            if (!nfi->param_is_declared[i]) continue;
-            if (callers->arg_types[i] != nfi->param_types[i]) {
+            if (!mir_param_is_declared(fn_node, i)) continue;
+            if (callers->arg_types[i] != mir_param_type_at(fn_node, i)) {
                 nfi->needs_boxed_entry = true;
                 break;
             }
@@ -1637,8 +1659,8 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     bool closed = callers && !callers->escaped;
     if (closed && callers->has_call) {
         for (int i = 0; i < nfi->param_count; i++) {
-            if (!nfi->param_is_inferred_specialization[i]) continue;
-            if (callers->arg_types[i] != nfi->param_types[i]) {
+            if (!mir_param_is_inferred_specialization(fn_node, i)) continue;
+            if (callers->arg_types[i] != mir_param_type_at(fn_node, i)) {
                 closed = false;
                 break;
             }
@@ -2639,7 +2661,7 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
 // T-A1: a boundary that can neither reject nor convert is pure cost — the box +
 // `lambda_type_check` + error test + unbox round trip around it computes a known
 // answer. Eliding it is what makes an annotation pin a representation instead of
-// installing a check (see vibe/Lambda_Tune_Typed_Vs_C2MIR.md M1).
+// installing a check (see the typed-vs-boxed representation tuning notes).
 //
 // The redundancy rule itself lives with the other type reasoning in
 // build_ast.cpp; asking it here rather than re-deriving it is what keeps
@@ -4262,7 +4284,7 @@ static inline bool mir_native_math_arg_type(TypeId tid) {
 
 // Widen an already-transpiled native scalar to a double register. FLOAT values
 // are already MIR_T_D; integers need an explicit conversion, matching the
-// (double) cast C2MIR emits.
+// native double cast.
 static inline MIR_reg_t mir_emit_as_double(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
     // G0: `int` shares float's native lane, so both are already doubles and
     // this is the identity for them. Only the genuinely integer lanes (int64,
@@ -6780,7 +6802,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     // path allocates a Range, then calls item_keys + iter_len once and
     // iter_val_at *per iteration*, handing the body a boxed `i` that degrades
     // every operation touching it to dynamic dispatch (M4 -> M5 in
-    // vibe/Lambda_Tune_Typed_Vs_C2MIR.md). Everything else about the loop —
+    // the typed-vs-boxed representation tuning notes). Everything else about the loop —
     // comprehension output, where/order/limit, nested sources, break/continue —
     // is deliberately left on the shared path below.
     AstNode* range_src = mir_unwrap_primary(loop->as);
@@ -10434,7 +10456,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // When object is ANY and field is also ANY, check if the field expression
     // is an INDEX_EXPR into a typed int array. If so, the field produces an
     // integer Item and we can use item_at(obj, it2i(field)) instead of the
-    // expensive fn_index double dispatch. Mirrors C2MIR D1 Level 3.
+    // expensive fn_index double dispatch.
     // ======================================================================
     if (obj_tid == LMD_TYPE_ANY && idx_tid == LMD_TYPE_ANY) {
         bool field_known_int = false;
@@ -11016,9 +11038,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // element-wise over vectors, but their scalar branch is literally
         // push_d(sqrt(item_to_double(v))) — so for a statically-numeric scalar
         // argument the native call is bit-identical while skipping the boxed
-        // call, its type dispatch and its result boxing. C2MIR has lowered
-        // these since can_use_native_math (transpile-call.cpp); MIR-Direct
-        // never did. ANY-typed args are excluded so vector semantics keep the
+        // call, its type dispatch and its result boxing. ANY-typed args are
+        // excluded so vector semantics keep the
         // boxed path — that exclusion is the whole safety argument here.
         if (info->native_c_name && info->native_func_ptr &&
                 info->native_returns_float && !mt->emitting_async_call &&
@@ -11674,15 +11695,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             const char* direct_call_name = fn_mangled;
             if (native_call && fn_def) {
                 for (int i = 0; i < call_nfi->param_count; i++) {
-                    if (!call_nfi->param_is_declared[i] &&
-                            !call_nfi->param_is_inferred_specialization[i]) {
+                    if (!mir_param_is_declared(call_nfi->fn_node, i) &&
+                            !mir_param_is_inferred_specialization(call_nfi->fn_node, i)) {
                         continue;
                     }
                     TypeId argument_tid = resolved_args[i]
                         ? get_effective_type(mt, resolved_args[i]) : LMD_TYPE_ANY;
-                    if (argument_tid != call_nfi->param_types[i]) {
+                    if (argument_tid != mir_native_param_type(call_nfi, i)) {
                         routed_to_boxed_entry = true;
-                        if (call_nfi->param_is_inferred_specialization[i]) {
+                        if (mir_param_is_inferred_specialization(call_nfi->fn_node, i)) {
                             routed_to_inferred_slow_body = true;
                         }
                         break;
@@ -11734,9 +11755,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     mir_argument_may_return_item_error(resolved_args[i]);
                 if (native_call && i < call_nfi->param_count &&
                     (!parameter_contract || !lambda_type_accepts_error(parameter_contract)) &&
-                    mir_is_native_param_type(call_nfi->param_types[i])) {
+                    mir_is_native_param_type(mir_native_param_type(call_nfi, i))) {
                     // Phase 4: Native param — pass native value directly (skip boxing)
-                    TypeId param_tid = call_nfi->param_types[i];
+                    TypeId param_tid = mir_native_param_type(call_nfi, i);
                     if (resolved_args[i]) {
                         // `f(n - 1)` into a native int param is the hottest shape
                         // in the language. Ask the int lowering for the value in
@@ -11815,7 +11836,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                             arg_ops[i] = MIR_new_reg_op(mt->ctx, zero);
                         }
                     }
-                    arg_vars[i] = {call_nfi->param_mir[i], "p", 0};
+                    arg_vars[i] = {type_to_mir(param_tid), "p", 0};
                 } else {
                     // Non-native param: standard boxed Item ABI
                     if (resolved_args[i]) {
@@ -15787,7 +15808,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         }
         body->param_count = native_info->param_count;
         for (int i = 0; i < native_info->param_count; i++) {
-            TypeId param_type = native_info->param_types[i];
+            TypeId param_type = mir_native_param_type(native_info, i);
             body->params[i] = {param_type,
                 mir_is_native_param_type(param_type)
                     ? lambda_value_rep(param_type) : VALUE_REP_ITEM,
@@ -16071,9 +16092,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
         prepared_params[user_index] = preg;
         if (has_slow_body && user_index < nfi->param_count &&
-                nfi->param_is_inferred_specialization[user_index]) {
+                mir_param_is_inferred_specialization(nfi->fn_node, user_index)) {
             MIR_reg_t exact = emit_exact_inferred_shape_test(mt, preg,
-                nfi->param_types[user_index]);
+                mir_native_param_type(nfi, user_index));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
                 MIR_new_reg_op(mt->ctx, inferred_guard),
                 MIR_new_reg_op(mt->ctx, inferred_guard),
@@ -16092,10 +16113,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     for (int i = 0; i < user_index; i++) {
         MIR_reg_t prepared = prepared_params[i];
         if (nfi && i < nfi->param_count &&
-                mir_is_native_param_type(nfi->param_types[i])) {
-            MIR_reg_t unboxed = emit_unbox(mt, prepared, nfi->param_types[i]);
+                mir_is_native_param_type(mir_native_param_type(nfi, i))) {
+            TypeId param_type = mir_native_param_type(nfi, i);
+            MIR_reg_t unboxed = emit_unbox(mt, prepared, param_type);
             call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, unboxed);
-            call_vars[call_arg_count] = {nfi->param_mir[i], "p", 0};
+            call_vars[call_arg_count] = {type_to_mir(param_type), "p", 0};
         } else {
             call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, prepared);
             call_vars[call_arg_count] = {MIR_T_I64, "p", 0};
@@ -16243,7 +16265,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // ===== Phase 4: Pre-resolve all parameter types (declared + inferred) =====
     // We resolve types BEFORE creating the MIR function so we can decide whether
     // to generate a native-typed version or the traditional all-Item version.
-    // Uses infer_cache from prepass_forward_declare to avoid redundant body walks.
     TypeId resolved_param_types[LAMBDA_MAX_FUNCTION_ARGS];
     int user_param_count = 0;
 
@@ -16265,25 +16286,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
-    // Infer types for untyped params: use cache from prepass_forward_declare, or batch-infer
+    // infer types for untyped params directly into the shared AST metadata.
+    // The former fixed-size infer cache duplicated this per-formal table and
+    // made the ownership of inferred types depend on compilation order.
     if (fn_node->body) {
-        InferCacheEntry cache_key;
-        cache_key.fn = fn_node;
-        InferCacheEntry* cached = (InferCacheEntry*)hashmap_get(mt->infer_cache, &cache_key);
-        if (cached && cached->param_count == user_param_count) {
-            // Apply cached inference results from prepass_forward_declare
-            for (int i = 0; i < user_param_count; i++) {
-                if (resolved_param_types[i] == LMD_TYPE_ANY &&
-                    cached->param_types[i] != LMD_TYPE_ANY) {
-                    log_debug("mir: param[%d] inferred type_id=%d (cached)", i, cached->param_types[i]);
-                    resolved_param_types[i] = cached->param_types[i];
-                }
-            }
-        } else {
-            // No cache hit (closure/variadic/method): batch-infer in single body walk
-            infer_param_types_batched(mt, fn_node, is_proc_fn, resolved_param_types, user_param_count);
-        }
+        infer_param_types_batched(mt, fn_node, is_proc_fn, resolved_param_types, user_param_count);
     }
+    mir_store_param_types(mt, fn_node, resolved_param_types, user_param_count);
 
     // Determine if this function qualifies for native (unboxed) dual version.
     // Eligible: not a closure, not a method, not variadic, has at least one
@@ -16320,12 +16329,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (generate_native) {
         NativeFuncInfo nfi;
         memset(&nfi, 0, sizeof(nfi));
+        nfi.fn_node = fn_node;
         nfi.param_count = user_param_count;
         nfi.has_native = true;
-        for (int i = 0; i < user_param_count; i++) {
-            nfi.param_types[i] = resolved_param_types[i];
-            nfi.param_mir[i] = type_to_mir(resolved_param_types[i]);
-        }
         // P4-3.3: Infer return type for native version
         TypeId ret_tid = infer_return_type(fn_node);
         nfi.return_type = ret_tid;
@@ -17525,27 +17531,16 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         if (mir_is_native_param_type(fwd_param_types[i])) has_native = true;
                     }
                     if (has_typed_array_param) has_native = false;
-                    // Cache inferred param types so transpile_func_def can skip re-inference
-                    {
-                        InferCacheEntry ice;
-                        memset(&ice, 0, sizeof(ice));
-                        ice.fn = fn_node;
-                        ice.param_count = fwd_param_count;
-                        for (int i = 0; i < fwd_param_count; i++) {
-                            ice.param_types[i] = fwd_param_types[i];
-                        }
-                        hashmap_set(mt->infer_cache, &ice);
-                    }
+                    // publish the same dynamic metadata consumed by final lowering;
+                    // prepass and final compilation therefore share one source of truth.
+                    mir_store_param_types(mt, fn_node, fwd_param_types, fwd_param_count);
                     if (has_native) {
                         // Pre-register NativeFuncInfo so call sites can use native ABI
                         NativeFuncInfo nfi;
                         memset(&nfi, 0, sizeof(nfi));
+                        nfi.fn_node = fn_node;
                         nfi.param_count = fwd_param_count;
                         nfi.has_native = true;
-                        for (int i = 0; i < fwd_param_count; i++) {
-                            nfi.param_types[i] = fwd_param_types[i];
-                            nfi.param_mir[i] = type_to_mir(fwd_param_types[i]);
-                        }
                         // P4-3.3: Infer return type
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
                         nfi.return_type = fwd_ret_tid;
@@ -17561,12 +17556,9 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
                             NativeFuncInfo nfi;
                             memset(&nfi, 0, sizeof(nfi));
+                            nfi.fn_node = fn_node;
                             nfi.param_count = fwd_param_count;
                             nfi.has_native = true;
-                            for (int i = 0; i < fwd_param_count; i++) {
-                                nfi.param_types[i] = fwd_param_types[i];
-                                nfi.param_mir[i] = type_to_mir(fwd_param_types[i]);
-                            }
                             nfi.return_type = fwd_ret_tid;
                             nfi.return_mir = type_to_mir(fwd_ret_tid);
                             plan_native_func_specialization(mt, fn_node, &nfi);
@@ -18615,7 +18607,6 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.em.const_list = const_list;
     mt.local_funcs  = local_func_new(32);
     mt.global_vars  = global_var_new(32);
-    mt.infer_cache  = infer_cache_new(32);
     mt.callsite_info = callsite_info_new(32);
     if (out_property_keys) *out_property_keys = NULL;
 
@@ -18852,7 +18843,6 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     hashmap_free(mt.em.import_cache);
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
-    hashmap_free(mt.infer_cache);
     hashmap_free(mt.callsite_info);
     if (out_property_keys) *out_property_keys = mt.property_keys;
     else if (mt.property_keys) arraylist_free(mt.property_keys);
@@ -18912,7 +18902,6 @@ static void register_module_pub_fns(AstImportNode* imp) {
         } else if (mod_child->node_type == AST_NODE_PUB_STAM) {
             // Register pub variable BSS addresses.
             // MIR Direct names BSS items "_gvar_<name>" (see prepass_create_global_vars).
-            // C2MIR names them the same as write_var_name: "_<name>".
             // The consuming module always imports via write_var_name ("_<name>"),
             // so we register the lookup result under that key regardless of format.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
@@ -18927,7 +18916,6 @@ static void register_module_pub_fns(AstImportNode* imp) {
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
                     MIR_item_t bss_item = find_import(imp->script->jit_context, gvar);
                     if (!bss_item || !bss_item->addr) {
-                        // fall back for C2MIR-compiled modules (BSS == import_key)
                         bss_item = find_import(imp->script->jit_context, import_key->str);
                     }
                     if (bss_item && bss_item->addr) {
@@ -19404,8 +19392,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     Runner runner;
     runner_init(runtime, &runner);
 
-    // Enable MIR Direct mode: load_script will call compile_script_as_mir_direct() for every
-    // module (main + all imports) instead of going through the C transpiler (C2MIR) path.
+    // Enable MIR Direct mode for every module (main + all imports).
     // Each compile_script_as_mir_direct() call clears dynamic_imports, registers the module's
     // direct sub-imports' pub symbols, then does transpile_mir_ast() + MIR_link().
     // Imports are compiled depth-first, so by the time any module is linked its dependencies

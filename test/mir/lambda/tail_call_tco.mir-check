@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Self-recursive tail call is turned into a counter-guarded loop: the function contains no call back into itself, and carries the TCO counter and dummy registers. The 1000000 literal is the documented TCO iteration cap (JO10 in vibe/Lambda_Design_Stack_Frame_JS.md), a semantic constant rather than a baked address, so pinning it is deliberate.",
+  "description": "Self-recursive tail call is turned into a counter-guarded loop: the function contains no call back into itself and retains the documented 1000000 iteration cap. Internal register spelling is deliberately opaque, so this checks the emitted loop shape rather than a diagnostic register name.",
   "checks": [
     {
       "in_func": "_factorial_#",
@@ -8,8 +8,8 @@
         "call\t_factorial_"
       ],
       "expect": [
-        "tco_count_",
-        "tco_dummy_"
+        "add\t{{r}}, {{r}}, 1",
+        "ble\t"
       ],
       "count": {
         ", 1000000": 1
