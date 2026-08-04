@@ -545,16 +545,6 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
                                           const char* export_name, int export_len);
 // Js52 R1: closure env size accounting for remapped scope_env_slot captures.
 int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped);
-TypeId jm_p6_expr_type(JsAstNode* expr,
-                               const String* const param_bindings[], TypeId* param_types, int param_count,
-                               const char local_names[][128], TypeId* local_types, int local_count);
-void jm_p6_collect_locals(JsAstNode* body,
-                                  const String* const param_bindings[], TypeId* param_types, int param_count,
-                                  char local_names[][128], TypeId* local_types, int* local_count, int max_locals);
-void jm_p6_return_walk(JsAstNode* node,
-                               const String* const param_bindings[], TypeId* param_types, int param_count,
-                               const char local_names[][128], TypeId* local_types, int local_count,
-                               TypeId* collected, int* count, int max_count);
 void jm_p6_reinfer_return_type(JsFuncCollected* fc);
 TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
 void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,

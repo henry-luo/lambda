@@ -2140,8 +2140,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 // declarations and assignments to resolve return expression types.
 // ============================================================================
 
-// Resolve expression type given known param types and a simple local type map.
-// local_names/local_types track declared locals (let x , etc).
+// Resolve expression types from formal types and AST-owned local declaration facts.
 static bool jm_p6_expr_has_bigint_literal(JsAstNode* node) {
     if (!node) return false;
     switch (node->node_type) {
@@ -2264,10 +2263,51 @@ static bool jm_p6_expr_has_self_call(JsAstNode* expr, const char* self_name) {
     }
 }
 
-TypeId jm_p6_expr_type(JsAstNode* expr,
-                               const String* const param_bindings[], TypeId* param_types, int param_count,
-                               const char local_names[][128], TypeId* local_types, int local_count,
-                               const char* self_name, TypeId self_return_type) {
+typedef struct JsP6InferenceContext {
+    JsFunctionNode* fn;
+    const String** param_bindings;
+    TypeId* param_types;
+    int param_count;
+    const char* self_name;
+    TypeId self_return_type;
+} JsP6InferenceContext;
+
+// p6 only tracks declarations directly in the function body.  Keep the
+// binding lookup on the AST so repeated P6 passes cannot retain a copied name
+// or accidentally confuse equal long-name prefixes.
+static TypeId jm_p6_local_type(const JsP6InferenceContext* p6,
+        JsIdentifierNode* identifier) {
+    if (!p6 || !p6->fn || !identifier || !identifier->entry ||
+            !p6->fn->body ||
+            p6->fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return LMD_TYPE_ANY;
+    }
+    uint32_t use_start = ts_node_is_null(identifier->node)
+        ? UINT32_MAX : ts_node_start_byte(identifier->node);
+    JsBlockNode* body = (JsBlockNode*)p6->fn->body;
+    TypeId found = LMD_TYPE_ANY;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)stmt;
+        for (JsAstNode* node = declaration->declarations; node; node = node->next) {
+            if (node->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)node;
+            if (!declarator->id || declarator->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+            JsIdentifierNode* binding = (JsIdentifierNode*)declarator->id;
+            if (binding->entry != identifier->entry) continue;
+            if (!ts_node_is_null(declarator->node) &&
+                    ts_node_start_byte(declarator->node) > use_start) {
+                continue;
+            }
+            if (jm_p6_type_is_numeric(declarator->p6_type)) {
+                found = declarator->p6_type;
+            }
+        }
+    }
+    return found;
+}
+
+static TypeId jm_p6_expr_type(JsAstNode* expr, const JsP6InferenceContext* p6) {
     if (!expr) return LMD_TYPE_ANY;
     if (expr->node_type == JS_AST_NODE_LITERAL) {
         JsLiteralNode* lit = (JsLiteralNode*)expr;
@@ -2285,13 +2325,9 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
     }
     if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        for (int i = 0; i < param_count; i++)
-            if (jm_js_name_equal(id->name, param_bindings[i])) return param_types[i];
-        for (int i = 0; i < local_count; i++)
-            if (jm_js_generated_name_equal(id->name, local_names[i])) {
-                return local_types[i];
-            }
-        return LMD_TYPE_ANY;
+        for (int i = 0; i < p6->param_count; i++)
+            if (jm_js_name_equal(id->name, p6->param_bindings[i])) return p6->param_types[i];
+        return jm_p6_local_type(p6, id);
     }
     if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
         JsBinaryNode* bin = (JsBinaryNode*)expr;
@@ -2302,12 +2338,8 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         case JS_OP_DIV: case JS_OP_EXP:
             return LMD_TYPE_FLOAT;
         default: {
-            TypeId lt = jm_p6_expr_type(bin->left, param_bindings, param_types, param_count,
-                                         local_names, local_types, local_count,
-                                         self_name, self_return_type);
-            TypeId rt = jm_p6_expr_type(bin->right, param_bindings, param_types, param_count,
-                                         local_names, local_types, local_count,
-                                         self_name, self_return_type);
+            TypeId lt = jm_p6_expr_type(bin->left, p6);
+            TypeId rt = jm_p6_expr_type(bin->right, p6);
             if (bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR || bin->op == JS_OP_BIT_XOR ||
                 bin->op == JS_OP_BIT_LSHIFT || bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT) {
                 // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
@@ -2331,22 +2363,14 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
         if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
         if (un->op == JS_OP_MINUS || un->op == JS_OP_PLUS)
-            return jm_p6_expr_type(un->operand, param_bindings, param_types, param_count,
-                                    local_names, local_types, local_count,
-                                    self_name, self_return_type);
+            return jm_p6_expr_type(un->operand, p6);
         if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT)
-            return jm_p6_expr_type(un->operand, param_bindings, param_types, param_count,
-                                    local_names, local_types, local_count,
-                                    self_name, self_return_type);
+            return jm_p6_expr_type(un->operand, p6);
     }
     if (expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
         JsConditionalNode* cond = (JsConditionalNode*)expr;
-        TypeId ct = jm_p6_expr_type(cond->consequent, param_bindings, param_types, param_count,
-                                     local_names, local_types, local_count,
-                                     self_name, self_return_type);
-        TypeId at = jm_p6_expr_type(cond->alternate, param_bindings, param_types, param_count,
-                                     local_names, local_types, local_count,
-                                     self_name, self_return_type);
+        TypeId ct = jm_p6_expr_type(cond->consequent, p6);
+        TypeId at = jm_p6_expr_type(cond->alternate, p6);
         if (ct == at) return ct;
         if ((ct == LMD_TYPE_INT && at == LMD_TYPE_FLOAT) || (ct == LMD_TYPE_FLOAT && at == LMD_TYPE_INT))
             return LMD_TYPE_FLOAT;
@@ -2354,39 +2378,41 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
     }
     if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
         JsCallNode* call = (JsCallNode*)expr;
-        if (jm_p6_call_matches_name(call, self_name)) return self_return_type;
+        if (jm_p6_call_matches_name(call, p6->self_name)) return p6->self_return_type;
     }
     return LMD_TYPE_ANY;
 }
 
-// Collect local variable types by scanning declarations in a block.
-// For `let x = 0`, type is INT. For `let x = param`, type is param type.
-// For compound assignments/updates, the type stays the same.
-void jm_p6_collect_locals(JsAstNode* body,
-                                  const String* const param_bindings[], TypeId* param_types, int param_count,
-                                  char local_names[][128], TypeId* local_types, int* local_count, int max_locals) {
-    if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
-    JsBlockNode* blk = (JsBlockNode*)body;
+static void jm_p6_collect_locals(JsP6InferenceContext* p6) {
+    if (!p6 || !p6->fn || !p6->fn->body ||
+            p6->fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    JsBlockNode* blk = (JsBlockNode*)p6->fn->body;
+
+    // clear every direct local before recomputing: P6 runs again after
+    // call-site narrowing, and a later declaration must not leak an old fact
+    // into an earlier initializer on the next pass.
+    for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)stmt;
+        for (JsAstNode* node = declaration->declarations; node; node = node->next) {
+            if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                ((JsVariableDeclaratorNode*)node)->p6_type = LMD_TYPE_ANY;
+            }
+        }
+    }
+
     JsAstNode* stmt = blk->statements;
-    while (stmt && *local_count < max_locals) {
+    while (stmt) {
         if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
             JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
             JsAstNode* decl = vd->declarations;
-            while (decl && *local_count < max_locals) {
+            while (decl) {
                 if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
                     JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
                     if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER && d->init) {
-                        JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-                        TypeId init_type = jm_p6_expr_type(d->init,
-                            param_bindings, param_types, param_count,
-                            local_names, local_types, *local_count,
-                            NULL, LMD_TYPE_ANY);
+                        TypeId init_type = jm_p6_expr_type(d->init, p6);
                         if (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT) {
-                            int li = *local_count;
-                            snprintf(local_names[li], 128, "_js_%.*s",
-                                (int)id->name->len, id->name->chars);
-                            local_types[li] = init_type;
-                            (*local_count)++;
+                            d->p6_type = init_type;
                         }
                     }
                 }
@@ -2397,24 +2423,17 @@ void jm_p6_collect_locals(JsAstNode* body,
     }
 }
 
-// Walk return statements and resolve their types using param + local info.
-void jm_p6_return_walk(JsAstNode* node,
-                               const String* const param_bindings[], TypeId* param_types, int param_count,
-                               const char local_names[][128], TypeId* local_types, int local_count,
-                               TypeId* collected, int* count, int max_count,
-                               const char* self_name, TypeId self_return_type,
-                               bool skip_self_unknown) {
+// Walk return statements and resolve their types from AST-owned binding facts.
+static void jm_p6_return_walk(JsAstNode* node, const JsP6InferenceContext* p6,
+        TypeId* collected, int* count, int max_count, bool skip_self_unknown) {
     if (!node || *count >= max_count) return;
     switch (node->node_type) {
     case JS_AST_NODE_RETURN_STATEMENT: {
         JsReturnNode* ret = (JsReturnNode*)node;
         if (!ret->argument) { collected[(*count)++] = LMD_TYPE_NULL; return; }
-        TypeId t = jm_p6_expr_type(ret->argument,
-            param_bindings, param_types, param_count,
-            local_names, local_types, local_count,
-            self_name, self_return_type);
+        TypeId t = jm_p6_expr_type(ret->argument, p6);
         if (skip_self_unknown && t == LMD_TYPE_ANY &&
-                jm_p6_expr_has_self_call(ret->argument, self_name)) {
+                jm_p6_expr_has_self_call(ret->argument, p6->self_name)) {
             return;
         }
         collected[(*count)++] = t;
@@ -2423,73 +2442,54 @@ void jm_p6_return_walk(JsAstNode* node,
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         JsAstNode* s = blk->statements;
-        while (s) { jm_p6_return_walk(s, param_bindings, param_types, param_count,
-                        local_names, local_types, local_count, collected, count, max_count,
-                        self_name, self_return_type, skip_self_unknown); s = s->next; }
+        while (s) { jm_p6_return_walk(s, p6, collected, count, max_count,
+                        skip_self_unknown); s = s->next; }
         break;
     }
     case JS_AST_NODE_IF_STATEMENT: {
         JsIfNode* n = (JsIfNode*)node;
-        jm_p6_return_walk(n->consequent, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
-        jm_p6_return_walk(n->alternate, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->consequent, p6, collected, count, max_count, skip_self_unknown);
+        jm_p6_return_walk(n->alternate, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_WHILE_STATEMENT: {
         JsWhileNode* n = (JsWhileNode*)node;
-        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_FOR_STATEMENT: {
         JsForNode* n = (JsForNode*)node;
-        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_DO_WHILE_STATEMENT: {
         JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* n = (JsTryNode*)node;
-        jm_p6_return_walk(n->block, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
-        jm_p6_return_walk(n->handler, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->block, p6, collected, count, max_count, skip_self_unknown);
+        jm_p6_return_walk(n->handler, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* n = (JsCatchNode*)node;
-        jm_p6_return_walk(n->body, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown);
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
         break;
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* n = (JsSwitchNode*)node;
         JsAstNode* c = n->cases;
-        while (c) { jm_p6_return_walk(c, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown); c = c->next; }
+        while (c) { jm_p6_return_walk(c, p6, collected, count, max_count,
+            skip_self_unknown); c = c->next; }
         break;
     }
     case JS_AST_NODE_SWITCH_CASE: {
         JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
         JsAstNode* s = n->consequent;
-        while (s) { jm_p6_return_walk(s, param_bindings, param_types, param_count,
-            local_names, local_types, local_count, collected, count, max_count,
-            self_name, self_return_type, skip_self_unknown); s = s->next; }
+        while (s) { jm_p6_return_walk(s, p6, collected, count, max_count,
+            skip_self_unknown); s = s->next; }
         break;
     }
     default: break;
@@ -2552,28 +2552,27 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
         pn = pn ? pn->next : NULL;
     }
 
-    // Collect local variable types from declarations
-    char local_names[32][128];
-    TypeId local_types[32];
-    int local_count = 0;
-    jm_p6_collect_locals(fn->body, param_bindings, param_types, param_count,
-                          local_names, local_types, &local_count, 32);
+    JsP6InferenceContext p6 = {};
+    p6.fn = fn;
+    p6.param_bindings = param_bindings;
+    p6.param_types = param_types;
+    p6.param_count = param_count;
+    jm_p6_collect_locals(&p6);
 
     char self_name[128] = {0};
     if (fn->name) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s",
             (int)fn->name->len, fn->name->chars);
     }
+    p6.self_name = self_name;
 
     // seed recursive return inference from concrete non-recursive returns, then
     // re-walk all returns with that self type. This keeps `+` numeric only after
     // recursive calls and the other operand are both proven numeric.
     TypeId collected[32];
     int count = 0;
-    jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
-                       local_names, local_types, local_count,
-                       collected, &count, 32,
-                       self_name, LMD_TYPE_ANY, true);
+    p6.self_return_type = LMD_TYPE_ANY;
+    jm_p6_return_walk(fn->body, &p6, collected, &count, 32, true);
 
     bool ok = true;
     TypeId inferred = jm_p6_unify_return_types(collected, count, &ok);
@@ -2586,10 +2585,8 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
     if (inferred != LMD_TYPE_ANY && self_name[0]) {
         for (int pass = 0; pass < 4; pass++) {
             count = 0;
-            jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
-                               local_names, local_types, local_count,
-                               collected, &count, 32,
-                               self_name, inferred, false);
+            p6.self_return_type = inferred;
+            jm_p6_return_walk(fn->body, &p6, collected, &count, 32, false);
             if (count == 0) {
                 fc->return_type = LMD_TYPE_NULL;
                 mem_free(param_bindings);
@@ -2607,10 +2604,8 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
         }
     } else {
         count = 0;
-        jm_p6_return_walk(fn->body, param_bindings, param_types, param_count,
-                           local_names, local_types, local_count,
-                           collected, &count, 32,
-                           self_name, LMD_TYPE_ANY, false);
+        p6.self_return_type = LMD_TYPE_ANY;
+        jm_p6_return_walk(fn->body, &p6, collected, &count, 32, false);
         if (count == 0) {
             fc->return_type = LMD_TYPE_NULL;
             mem_free(param_bindings);
