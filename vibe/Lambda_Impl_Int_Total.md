@@ -650,6 +650,31 @@ finally return true for it. Two constraints the arm must respect, or it will cor
 Phase E recorded that E4 does **not** apply today for exactly this reason; G7 is the change that
 makes the recorded premise true rather than aspirational.
 
+**LANDED 2026-08-03.** Implemented as `mir_boundary_is_lane_identity()` in
+[transpile-mir.cpp](../lambda/runtime/transpile-mir.cpp), consulted by
+`mir_boundary_is_redundant()` after `lambda_boundary_is_redundant()` declines. The rule stays in
+the MIR layer deliberately: the elision turns on the *carrier*, which only the emitter knows, so
+`lambda_boundary_is_redundant()` remains the pure type-relation predicate it was.
+
+Three things the measurement corrected, none of which the plan anticipated:
+
+1. **The declaration site was never the payoff.** `declaration_boundary_applies`
+   ([transpile-mir.cpp](../lambda/runtime/transpile-mir.cpp)) already requires
+   `boundary_numeric_admission_is_dynamic(expr_tid, declared)`, and int → float is a pure
+   widening that never admits dynamically — so `let x: float = <int>` emitted **no boundary to
+   begin with**. The live sites are the argument, return and assignment boundaries.
+2. **Pointer identity against `&TYPE_INT` rejected every real site.** Inferred expression types
+   are per-node `Type` objects, not the global singleton. A probe over 120 corpus scripts found
+   8 int → float pairs reaching the predicate, 6 of them unadorned (`kind == TYPE_KIND_SIMPLE`)
+   with an `int` carrier — all 6 wrongly refused. The source is now matched structurally; the
+   *target* keeps identity, since the annotation is where a constraint or alias would ride.
+   The other 2 pairs carry a boxed source and are still correctly refused.
+3. **The payoff is not measurable.** 6 elisions across 120 scripts. Interleaved A/B on AWFY
+   (4 rounds, min-of-run, two saved binaries) gives ratios 0.986–1.012 — noise. A microbenchmark
+   built to hit the pattern moved 0.4%. Sequential (non-interleaved) measurement showed a
+   spurious 1.5–2x, entirely machine drift and cache warm-up; **do not A/B this tree without
+   interleaving the two binaries.** G7 is correct and free, not fast.
+
 #### G8. Sysfunc C signatures — convert ten, keep one
 
 Apply the G0 mapping: `C_RET_INT64` → `C_RET_DOUBLE` for every row whose declared Lambda type

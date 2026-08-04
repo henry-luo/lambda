@@ -2541,9 +2541,47 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
 // The redundancy rule itself lives with the other type reasoning in
 // build_ast.cpp; asking it here rather than re-deriving it is what keeps
 // emission and diagnosis from drifting apart.
-static bool mir_boundary_is_redundant(AstNode* source_node, Type* target) {
+static TypeId get_effective_type(MirTranspiler* mt, AstNode* node);
+
+// G7/E4: `int` and `float` share ONE native lane. Both are MIR_T_D and an int's
+// native value IS the IEEE double, so widening int -> float in a native
+// register is the identity — nothing to convert, and the boundary around it is
+// pure cost. This is the payoff G0 was aiming at: Phase E recorded that E4 did
+// not apply, because back then int lived in an i64 and the widening was a real
+// I2D.
+//
+// Conditioned on the LANE, never on the type pair alone. Two ways to get this
+// wrong, both silent:
+//
+//   - A BOXED source. An int Item is rotl(bits,1), a float Item is the raw
+//     bits, so a boxed int still needs converting. The carrier test below is
+//     what refuses that case — `any` carries MIR_T_I64, so it never qualifies.
+//   - An ADORNED type. Only the unadorned global singletons are pure carriers;
+//     a constrained `int(>0)` or a named alias reaches runtime admission for a
+//     reason, so comparing against &TYPE_INT / &TYPE_FLOAT by identity (not by
+//     type_id) is load-bearing.
+//
+// One-directional: float -> int stays checked, because a non-integral float
+// must still be rejected there.
+static bool mir_boundary_is_lane_identity(MirTranspiler* mt, AstNode* source_node, Type* target) {
+    // The source is matched STRUCTURALLY (plain `int`, no adornment) rather than
+    // by pointer: inferred expression types are per-node Type objects, not the
+    // &TYPE_INT singleton, and requiring identity rejected every real site. The
+    // target keeps the identity test — it is the annotation, which is where a
+    // constraint or alias would ride, and where admission must still run.
+    if (!source_node->type || source_node->type->type_id != LMD_TYPE_INT ||
+            source_node->type->kind != TYPE_KIND_SIMPLE) return false;
+    if (target != &TYPE_FLOAT) return false;
+    // the static type says int; this asks what the value is actually carried in
+    // right here, which is the only question the elision turns on.
+    if (get_effective_type(mt, source_node) != LMD_TYPE_INT) return false;
+    return type_to_mir(LMD_TYPE_INT) == MIR_T_D && type_to_mir(LMD_TYPE_FLOAT) == MIR_T_D;
+}
+
+static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
     if (!source_node || !source_node->type || !target) return false;
-    return lambda_boundary_is_redundant(source_node->type, target);
+    if (lambda_boundary_is_redundant(source_node->type, target)) return true;
+    return mir_boundary_is_lane_identity(mt, source_node, target);
 }
 
 // A declared `T | error` parameter receives an incoming ItemError as a body
@@ -4767,7 +4805,10 @@ static bool mir_matches_compact_loop_add(MirTranspiler* mt, AstBinaryNode* binar
 }
 
 // Does this node lower through the int arithmetic below, so a consumer that
-// wants a raw i64 can ask for one instead of boxing and immediately unboxing?
+// wants the value in int's native lane can ask for it instead of boxing and
+// immediately unboxing? That lane is a double (G0) -- it was a raw i64 while
+// the flexint dual lane existed, and every "raw i64" reading of this path is
+// now wrong.
 // Both compact-loop forms and the exact-u32 form have their own raw lowerings
 // and must keep them.
 // G0 exception 1: offsets, limits and counts handed to container helpers are
@@ -4878,10 +4919,10 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
         !mir_matches_compact_loop_add(mt, bi);
 }
 
-// Emit an int ADD/SUB/MUL straight into a native i64 for a consumer that wants
-// one. Otherwise the value is boxed here and unboxed again immediately by the
-// consumer's `it2i` — a call and a tag round-trip per operation, on the hottest
-// arithmetic in the language.
+// Emit an int ADD/SUB/MUL straight into int's native lane -- a MIR_T_D double
+// (G0) -- for a consumer that wants it there. Otherwise the value is boxed here
+// and unboxed again immediately by the consumer: a call and a tag round-trip per
+// operation, on the hottest arithmetic in the language.
 static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out);
 
@@ -7417,7 +7458,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // comment below describes, and it made mbrot/permute/towers
                 // return ITEM_ERROR or spin. Keep the unbox, drop the call.
                 bool declaration_boundary_redundant = declaration_boundary_applies &&
-                    mir_boundary_is_redundant(asn->as, declared_value_type);
+                    mir_boundary_is_redundant(mt, asn->as, declared_value_type);
                 if (declaration_boundary_applies && declaration_boundary_redundant &&
                         expr_tid == LMD_TYPE_ANY) {
                     checked_declaration_boundary = true;
@@ -11492,18 +11533,18 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     TypeId param_tid = call_nfi->param_types[i];
                     if (resolved_args[i]) {
                         // `f(n - 1)` into a native int param is the hottest shape
-                        // in the language. Ask the int lowering for a raw i64
-                        // instead of boxing it here and unboxing it three lines
-                        // down.
-                        bool flexint_native_arg = !short_circuit_error &&
+                        // in the language. Ask the int lowering for the value in
+                        // int's native lane (a double, G0) instead of boxing it
+                        // here and unboxing it three lines down.
+                        bool native_int_arg = !short_circuit_error &&
                             param_tid == LMD_TYPE_INT &&
                             mir_is_native_int_arith(mt, resolved_args[i]);
-                        MIR_reg_t val = flexint_native_arg
+                        MIR_reg_t val = native_int_arg
                             ? mir_emit_int_arith_native(mt, (AstBinaryNode*)resolved_args[i])
                             : (short_circuit_error
                                 ? transpile_box_item(mt, resolved_args[i])
                                 : transpile_expr(mt, resolved_args[i]));
-                        TypeId val_tid = flexint_native_arg ? LMD_TYPE_INT
+                        TypeId val_tid = native_int_arg ? LMD_TYPE_INT
                             : (short_circuit_error ? LMD_TYPE_ANY
                                 : get_effective_type(mt, resolved_args[i]));
                         if (short_circuit_error) {
@@ -11514,12 +11555,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                             has_parameter_error_guard = true;
                         }
                         // T-A1: `val_tid` is a representation label, not the
-                        // argument's semantic type — a flexint result is ANY
-                        // here while its AST type is `int`. Ask the boundary
-                        // relation before paying for a check the AST checker
-                        // already proved, or every typed call re-boxes.
+                        // argument's semantic type — the two diverge whenever a
+                        // lowering hands back a carrier the AST type does not
+                        // name. Ask the boundary relation before paying for a
+                        // check the AST checker already proved, or every typed
+                        // call re-boxes.
                         if (parameter_contract && parameter_contract != &TYPE_ANY &&
-                                !mir_boundary_is_redundant(resolved_args[i],
+                                !mir_boundary_is_redundant(mt, resolved_args[i],
                                     parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
                                  (parameter_contract->type_id == LMD_TYPE_MAP &&
@@ -11594,7 +11636,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                         TypeId val_tid = get_effective_type(mt, resolved_args[i]);
                         // T-A1, boxed-ABI mirror of the native-param site above.
                         if (parameter_contract && parameter_contract != &TYPE_ANY &&
-                                !mir_boundary_is_redundant(resolved_args[i],
+                                !mir_boundary_is_redundant(mt, resolved_args[i],
                                     parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
                                  (parameter_contract->type_id == LMD_TYPE_MAP &&
@@ -12497,7 +12539,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // eliding needs no carrier repair — the checked path also left val_tid
         // as ANY, so the native-return conversion below sees the same input.
         if (return_contract_needs_checked_boundary(mt->current_return_type) &&
-                !mir_boundary_is_redundant(ret_node->value,
+                !mir_boundary_is_redundant(mt, ret_node->value,
                     mir_unwrap_decl_type(mt->current_return_type)) &&
                 (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
                  (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
@@ -12626,7 +12668,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         // val_tid as ANY, so the widening below sees the same representation
         // either way.
         if (contract && contract->type_id != LMD_TYPE_ANY &&
-                !mir_boundary_is_redundant(assign->value, contract) &&
+                !mir_boundary_is_redundant(mt, assign->value, contract) &&
                 (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
                  (contract->type_id == LMD_TYPE_MAP && val_tid == LMD_TYPE_MAP &&
                   assign->value->type != contract))) {

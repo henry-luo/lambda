@@ -31,7 +31,7 @@ Item   py_bigint_from_int64(int64_t val);
 // Used for large integer literals. Returns ItemNull on parse failure.
 Item   py_bigint_from_cstr(const char* s);
 
-// Normalize: if the bigint fits in int56, return an int56 Item; otherwise return bigint.
+// Normalize: if the bigint fits int's band, return an int Item; otherwise return bigint.
 Item   py_bigint_normalize(Item x);
 
 // Arithmetic — operands may be LMD_TYPE_INT or bigint; result is normalized.

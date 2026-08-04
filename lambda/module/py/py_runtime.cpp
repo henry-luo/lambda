@@ -408,7 +408,7 @@ extern "C" bool py_is_truthy(Item value) {
     }
     case LMD_TYPE_DECIMAL:
         if (py_is_bigint(value)) {
-            // non-zero bigint is truthy: compare against zero int56
+            // non-zero bigint is truthy: compare against a zero int
             return py_bigint_cmp(value, (Item){.item = i2it(0)}) != 0;
         }
         return false;
@@ -948,7 +948,8 @@ extern "C" Item py_lshift(Item left, Item right) {
         int64_t shift = it2i(right);
         if (shift < 0) { log_error("py: ValueError: negative shift count"); return ItemNull; }
         if (shift >= 56) {
-            // result won't fit in int56 — promote to bigint
+            // pre-guard against UB in `a << shift`; the band test below is what
+            // actually decides int admission (+/-(2^53-1))
             return py_bigint_lshift(left, right);
         }
         int64_t a = it2i(left);

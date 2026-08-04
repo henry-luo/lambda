@@ -2273,7 +2273,13 @@ TypeId jm_p6_expr_type(JsAstNode* expr,
         JsLiteralNode* lit = (JsLiteralNode*)expr;
         if (lit->literal_type == JS_LITERAL_NUMBER)
             return lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
-        if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_INT;
+        // A boolean is LMD_TYPE_BOOL, not INT. Reporting INT here opted `let
+        // flag = false` into P6's native *numeric* local lane (jm_p6_local_walk
+        // admits only INT/FLOAT), so a later `flag = true` stored 1 and the
+        // value came back an INT-tagged number: `typeof` said "number" and
+        // `=== true` was false. Every other literal-typing site in the JS
+        // front end already answers BOOL.
+        if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
         if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
         return LMD_TYPE_ANY;
     }

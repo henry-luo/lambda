@@ -206,7 +206,7 @@ public:
     /**
      * Create primitive Items
      */
-    Item createInt(int64_t value);  // accepts int64, packs as int56
+    Item createInt(int64_t value);  // accepts int64, boxes through the C16 int encoder
     Item createLong(int64_t value);
     Item createUInt64(uint64_t value);
     Item createFloat(double value);
