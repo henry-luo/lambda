@@ -1,5 +1,6 @@
 // An escaped untyped function may infer an exact raw shape for direct calls,
 // but indirect and mismatched calls must keep the source-equivalent boxed lane.
+// v5 saturates both wide call routes at the int53 boundary before comparison.
 fn add_one(value) { value + 1 }
 fn exposed() any { add_one }
 fn dynamic(value) any { value }

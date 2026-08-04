@@ -1581,9 +1581,9 @@ extern "C" Item js_buffer_compare(Item a, Item b) {
     int min_len = alen < blen ? alen : blen;
     int cmp = min_len > 0 ? memcmp(adata, bdata, min_len) : 0;
     if (cmp == 0) cmp = alen - blen;
-    if (cmp < 0) return (Item){.item = i2it(-1)};
-    if (cmp > 0) return (Item){.item = i2it(1)};
-    return (Item){.item = i2it(0)};
+    // Buffer.compare is part of the JS API: its tri-state result must cross
+    // the boundary as a JS number, never as a Lambda int Item or symbol.
+    return js_make_number(cmp < 0 ? -1.0 : cmp > 0 ? 1.0 : 0.0);
 }
 
 // helper: resolve byteOffset to a valid start index for indexOf

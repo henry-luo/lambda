@@ -125,11 +125,10 @@ typedef struct Item {
             // `type(nan)` is `int` lives in fn_type()/item_static_type_for_is().
             return LMD_TYPE_FLOAT;
         }
-        // Inline int: the `100` octant. Bits 62-61 are already known clear, so
-        // the sign bit alone separates it from the tag space below it.
-        if (LAMBDA_ITEM_IS_INLINE_INT(this->item)) {
-            return LMD_TYPE_INT;
-        }
+        // v5: a finite int is a 56-bit payload under the ordinary LMD_TYPE_INT
+        // tag byte, so it needs no arm of its own -- the tag-byte path below
+        // reports it. (v4 needed one: its rotation encoding put ints in the
+        // `100` octant, outside the tag space entirely.)
         if (this->_type_id) {
             return this->_type_id;
         }
@@ -300,7 +299,9 @@ static inline double lambda_int_item_value(Item item) {
 }
 
 static inline int64_t lambda_int_item_to_i64(Item item) {
-    return (int64_t)lambda_int_unbox_double(item.item);
+    // Shared IEEE poison must re-enter the i64 lane as its sentinel; casting
+    // inf/nan would lose the v5 closure value before the caller can classify it.
+    return lambda_int_item_to_lane(item.item);
 }
 
 // Compatibility aggregate: the native root/GC helpers are provided by rt.

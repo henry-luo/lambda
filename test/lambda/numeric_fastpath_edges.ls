@@ -19,7 +19,7 @@ fn any_eq(a, b) => a == b
 fn any_ne(a, b) => a != b
 fn all_ops(a, b) => [any_lt(a, b), any_le(a, b), any_gt(a, b), any_ge(a, b), any_eq(a, b), any_ne(a, b)]
 
-"=== M2: int add/sub at the compact-int boundary ==="
+"=== M2: int add/sub at the int53 boundary ==="
 show(9007199254740990 + 1)
 show(9007199254740991 + 1)
 show(9007199254740991 + 2)
@@ -30,7 +30,7 @@ show(9007199254740991 - 1)
 show(0 + 0)
 show(0 - 0)
 
-"=== M2: int mul at the compact-int boundary ==="
+"=== M2: int mul at the int53 boundary ==="
 show(94906265 * 94906265)
 show(94906266 * 94906266)
 show(0 * -5)

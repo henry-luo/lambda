@@ -1515,9 +1515,13 @@ Item fn_neg(Item item) {
             if (t == LMD_TYPE_ARRAY_NUM) {
                 ArrayNum* arr = item.array_num;
                 ArrayNumElemType et = arr->get_elem_type();
-                // C16: ELEM_INT joins ELEM_FLOAT64 as a double-backed lane.
-                if (et == ELEM_FLOAT64 || et == ELEM_INT) {
+                if (et == ELEM_FLOAT64) {
                     result->float_items[i] = -arr->float_items[i]; continue;
+                }
+                if (et == ELEM_INT) {
+                    // ELEM_INT owns raw v5 lanes, so reading float_items would
+                    // reinterpret their bits instead of converting the int value.
+                    result->float_items[i] = -lambda_int_lane_to_double(arr->items[i]); continue;
                 }
                 if (et == ELEM_INT64) {
                     result->float_items[i] = -(double)arr->items[i]; continue;

@@ -1,17 +1,14 @@
-// C16 gives `int` the float64-representable integers, so 2^70 is an ordinary
-// int. Every carrier must hold it -- it only fits because `int`'s one native
-// representation is the IEEE double (G0/G1). Each route below was separately
-// clamped at 2^63 by a leftover int64_t carrier, and each is a distinct code
-// path: boxed arithmetic, shaped field storage, member assignment, and the
-// packed element lane.
+// v5 closes int at the exact int53 band: 2^70 saturates to shared `inf`.
+// Every carrier must preserve that closure value through arithmetic, shaped
+// fields, member assignment, and the packed element lane.
 
 pn main() {
     // computed, because the literal band caps int SPELLINGS at 2^53-1
     let big = 4503599627370496 * 262144        // 2^70
 
-    // arithmetic: the boxed fallback computes in binary64, not int64
+    // arithmetic saturates at the int53 boundary
     print(big ++ "\n")
-    print((big * 2) ++ "\n")                   // 2^71, not 2^64
+    print((big * 2) ++ "\n")                   // remains inf
 
     // shaped storage: declared field, inferred map literal, element attribute
     let m: {v: int} = {v: big}

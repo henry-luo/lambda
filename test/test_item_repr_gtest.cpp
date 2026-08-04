@@ -363,10 +363,8 @@ TEST(ItemRepresentation, NonPointerDiscriminatorWordsDoNotReadHeaders) {
 // ---------------------------------------------------------------------------
 // Boxed `int` representation.
 //
-// These are written against the canonical encoder/accessors rather than raw
-// bits, so they hold before and after the rotated inline-int cutover
-// (`vibe/Lambda_Type_Int_Boxing.md`). A bit-level expectation here would have
-// to be rewritten by the very change it is meant to protect.
+// These are written against the v5 finite payload contract rather than the
+// retired rotation encoding. Poison has its own shared IEEE representation.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -379,13 +377,6 @@ const int64_t kIntRoundTripValues[] = {
     -4503599627370496LL,
     9007199254740990LL,   // 2^53 - 2
     INT53_MAX, INT53_MIN,
-    // Past the old carrier band: these are the values the retired compact
-    // encoding could not hold at all (it returned ITEM_ERROR — the O1 defect).
-    9007199254740992LL,   // 2^53
-    -9007199254740992LL,
-    18014398509481984LL,  // 2^54
-    4611686018427387904LL,  // 2^62
-    -4611686018427387904LL,
 };
 }  // namespace
 
@@ -416,6 +407,20 @@ TEST(ItemRepresentation, IntItemsStayOutOfDoubleSpace) {
         Item boxed = {.item = i2it(value)};
         EXPECT_EQ(boxed.item & ITEM_DBL_MASK, UINT64_C(0)) << "value " << value;
     }
+}
+
+TEST(ItemRepresentation, IntBoxSaturatesOutOfBandValuesToSharedPoison) {
+    Item positive = {.item = i2it(INT53_MAX + 1)};
+    Item negative = {.item = i2it(INT53_MIN - 1)};
+
+    // v5 reserves packed int Items for finite int53 values; saturation must
+    // use the shared IEEE payload instead of retaining a sparse fake int.
+    EXPECT_TRUE(lambda_item_is_merged_poison(positive.item));
+    EXPECT_TRUE(lambda_item_is_merged_poison(negative.item));
+    EXPECT_EQ(get_type_id(positive), LMD_TYPE_FLOAT);
+    EXPECT_EQ(get_type_id(negative), LMD_TYPE_FLOAT);
+    EXPECT_EQ(lambda_int_item_to_i64(positive), INT_LANE_INF);
+    EXPECT_EQ(lambda_int_item_to_i64(negative), INT_LANE_NEG_INF);
 }
 
 TEST(ItemRepresentation, IntItemsNeverCollideWithInternalSentinels) {

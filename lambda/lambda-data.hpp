@@ -738,6 +738,7 @@ typedef struct TypeMethod {
     StrView* name;              // method name (interned)
     fn_ptr compiled_fn;         // non-GC JIT code pointer
     const char* compiled_name;  // JIT-owned name used by bound call wrappers
+    Type* function_type;        // source TypeFunc needed by boxed dynamic dispatch
     uint8_t arity;              // user-visible arity, excluding self
     bool is_proc;               // true for pn, false for fn
     struct TypeMethod* next;    // linked list

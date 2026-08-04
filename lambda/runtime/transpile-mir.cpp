@@ -383,10 +383,10 @@ HASHMAP_DEFINE_PTRKEY(callsite_info, struct CallSiteEntry, fn)
 static MIR_type_t type_to_mir(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_FLOAT:
-    // C16/G0: `int` has ONE native representation, the IEEE double. There is no
-    // i64 int lane, range-proven or otherwise.
-    case LMD_TYPE_INT:
         return MIR_T_D;
+    // v5: `int`'s native lane is the machine i64 -- the working int is back.
+    // A lane value is either a band integer or one of the three lane sentinels
+    // (lambda.h INT_LANE_*), never an IEEE pattern.
     default:
         // MIR uses I64 as the physical word carrier. VALUE_REP_U64 retains
         // unsigned semantics independently of that register spelling.
@@ -932,10 +932,39 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, false)
+// ---------------------------------------------------------------------------
+// Register provenance types (v5)
+//
+// An int LANE value and a boxed Item are BOTH MIR_T_I64, so MIR's register type
+// can no longer tell them apart. Under v4 the lane was MIR_T_D and the
+// distinction came free -- which hid the fact that the register class was never
+// a SOUND discriminator, just a coincidence of that encoding. MIR cannot help
+// here: MIR_new_func_reg accepts only I64/F/D/LD, and `mir_reg_type_for_alloc`
+// already folds MIR_T_P into MIR_T_I64, so a "pointer register" answers I64 too.
+//
+// These wrappers restore the check in C++ instead: mixing a lane with an Item is
+// a compile error, and every crossing has to name itself. Zero runtime cost --
+// one MIR_reg_t, passed in a register under both SysV and AAPCS64.
+//
+// The constructors are `explicit` on purpose: an implicit one would let a raw
+// MIR_reg_t slide in and defeat the whole point.
+// ---------------------------------------------------------------------------
+struct BoxedReg {   // a tagged Lambda Item
+    MIR_reg_t r;
+    explicit BoxedReg(MIR_reg_t reg) : r(reg) {}
+};
+struct LaneReg {    // an int lane value: a band integer, or a lane sentinel
+    MIR_reg_t r;
+    explicit LaneReg(MIR_reg_t reg) : r(reg) {}
+};
+
 static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id);
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg);
 static MIR_reg_t emit_machine_index(MirTranspiler* mt, MIR_reg_t value, TypeId tid);
-static MIR_reg_t emit_int_native_lane(MirTranspiler* mt, MIR_reg_t reg);
+static LaneReg  emit_int_native_lane_typed(MirTranspiler* mt, MIR_reg_t reg, TypeId tid);
+static LaneReg  emit_double_to_int_lane(MirTranspiler* mt, MIR_reg_t d_reg);
+static LaneReg  emit_unbox_int_lane(MirTranspiler* mt, BoxedReg item);
+static MIR_reg_t emit_int_lane_to_double(MirTranspiler* mt, LaneReg lane);
 static MIR_reg_t emit_scalar_native_lane(MirTranspiler* mt, MIR_reg_t reg, TypeId tid);
 static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id);
@@ -1834,37 +1863,52 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 // here, and `emit_unbox(.., LMD_TYPE_INT)` is its read-side peer. Keep it that
 // way — the boxed int representation is changed by editing these two, so an
 // open-coded tag/mask sequence elsewhere would silently survive the change.
-// Box a native double as an `int` Item. Hot arm is the class test plus one
-// rotate; everything else (0, +/-1, poison, |v| >= 2^257) goes to `int2it`.
-static MIR_reg_t emit_box_int_double(MirTranspiler* mt, MIR_reg_t d_reg) {
+// v5 (design doc 5.4): box a native LANE value (i64) as an `int` Item.
+// Hot arm is the band test plus AND/OR; the three lane sentinels and any
+// out-of-band value take the cold call, which saturates per formal semantics
+// 4.9. Nothing here touches the FP unit.
+static BoxedReg emit_box_int_lane(MirTranspiler* mt, LaneReg lane) {
+    MIR_reg_t lane_reg = lane.r;
     MIR_reg_t result = new_reg(mt, "boxi", MIR_T_I64);
-    MIR_reg_t bits = emit_double_bits(mt, d_reg);
-    MIR_reg_t cls = new_reg(mt, "icls", MIR_T_I64);
-    MIR_reg_t in_class = new_reg(mt, "iclsok", MIR_T_I64);
-    MIR_label_t l_inline = new_label(mt);
+    MIR_reg_t lo_ok = new_reg(mt, "iblo", MIR_T_I64);
+    MIR_reg_t hi_ok = new_reg(mt, "ibhi", MIR_T_I64);
+    MIR_reg_t in_band = new_reg(mt, "ibok", MIR_T_I64);
+    MIR_reg_t payload = new_reg(mt, "ibpay", MIR_T_I64);
+    MIR_label_t l_pack = new_label(mt);
     MIR_label_t l_end = new_label(mt);
 
-    // in_class = (bits & 0x7000...) == 0x4000...  — the exponent's own top
-    // three bits are the octant marker, so no bias or mask is needed below.
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, cls),
-        MIR_new_reg_op(mt->ctx, bits), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_CLASS_MASK)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, in_class),
-        MIR_new_reg_op(mt->ctx, cls), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_CLASS_BITS)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_inline),
-        MIR_new_reg_op(mt->ctx, in_class)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, lo_ok),
+        MIR_new_reg_op(mt->ctx, lane_reg), MIR_new_int_op(mt->ctx, INT53_MIN)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, hi_ok),
+        MIR_new_reg_op(mt->ctx, lane_reg), MIR_new_int_op(mt->ctx, INT53_MAX)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_pack),
+        MIR_new_reg_op(mt->ctx, in_band)));
 
-    MIR_reg_t cold = emit_call_1(mt, "int2it", MIR_T_I64, MIR_T_D,
-        MIR_new_reg_op(mt->ctx, d_reg));
+    MIR_reg_t cold = emit_call_1(mt, "int2it_lane", MIR_T_I64, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, lane_reg));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, cold)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-    emit_label(mt, l_inline);
-    // rotate left by one == rotate right by 63
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ROTR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, bits), MIR_new_int_op(mt->ctx, 63)));
+    emit_label(mt, l_pack);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, payload),
+        MIR_new_reg_op(mt->ctx, lane_reg),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_PAYLOAD_MASK)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, payload), MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT)));
     emit_label(mt, l_end);
-    return result;
+    return BoxedReg(result);
+}
+
+// Box a native double known to be integral (or poison) as an `int` Item. Used
+// at float->int boundaries; arithmetic uses the lane form above. D2I is
+// undefined for nan/out-of-range on some targets, so the cold call owns every
+// non-band case rather than converting first and testing after.
+static MIR_reg_t emit_box_int_double(MirTranspiler* mt, MIR_reg_t d_reg) {
+    return emit_call_1(mt, "int2it", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
 }
 
 // Box a MACHINE integer (an index, a counter, a byte offset) as a Lambda `int`
@@ -1875,27 +1919,26 @@ static MIR_reg_t emit_box_int_double(MirTranspiler* mt, MIR_reg_t d_reg) {
 // Callers that want a machine length (loop bounds, capacities) narrow here —
 // the sanctioned value-to-machine direction.
 static MIR_reg_t emit_machine_len(MirTranspiler* mt, MIR_reg_t boxed_item) {
-    MIR_reg_t as_double = emit_call_1(mt, "fn_len", MIR_T_D, MIR_T_I64,
+    // v5: `fn_len` returns a Lambda `int`, whose C return mirrors it as
+    // int64_t -- and an int IS a machine quantity now, so there is nothing to
+    // narrow. A length is in band by construction (no addressable object has
+    // 2^53 elements), which is exactly why this needs no check.
+    return emit_call_1(mt, "fn_len", MIR_T_I64, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, boxed_item));
-    MIR_reg_t out = new_reg(mt, "mlen", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, out),
-        MIR_new_reg_op(mt->ctx, as_double)));
-    return out;
 }
 
+// v5: a machine integer already IS a lane value (finite by contract), so this
+// is the lane encoder with no conversion at all. Under v4 it needed an I2D.
 static MIR_reg_t emit_box_machine_int(MirTranspiler* mt, MIR_reg_t i64_reg) {
-    MIR_reg_t as_double = new_reg(mt, "mi2d", MIR_T_D);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, as_double),
-        MIR_new_reg_op(mt->ctx, i64_reg)));
-    return emit_box_int_double(mt, as_double);
+    // A machine quantity is finite by contract, so it IS a valid lane value.
+    return emit_box_int_lane(mt, LaneReg(i64_reg)).r;
 }
 
 static MIR_reg_t emit_box_int(MirTranspiler* mt, MIR_reg_t val_reg) {
-    // G0: the int lane is a double, so boxing is exactly the double encoder.
-    // The A5 `INT64_ERROR` guard that used to live here is gone with the i64
-    // lane — a double lane cannot carry that sentinel, so the legacy helpers
-    // that still use it convert (and are checked) at their own call boundary.
-    return emit_box_int_double(mt, val_reg);
+    // v5: the int lane is an i64, so boxing is exactly the lane encoder. The
+    // caller's contract is that `val_reg` holds a LANE (transpile_expr returns
+    // the node's native lane); this wrap is where that contract is asserted.
+    return emit_box_int_lane(mt, LaneReg(val_reg)).r;
 }
 
 // Zero-extend uint8_t Bool return from a runtime function call.
@@ -2290,15 +2333,11 @@ static MIR_reg_t emit_coerce_value_to_declared(MirTranspiler* mt, MIR_reg_t val,
 }
 
 static MIR_reg_t emit_bitwise_i64_arg(MirTranspiler* mt, MIR_reg_t val, TypeId tid) {
-    // G0: a bitwise operand is a MACHINE word — bit reinterpretation is not
-    // number math — so `int` narrows out of its native lane here, at the entry
-    // to the operation. The other integer lanes are already machine words.
-    if (tid == LMD_TYPE_INT) {
-        MIR_reg_t out = new_reg(mt, "bwarg", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, out),
-            MIR_new_reg_op(mt->ctx, val)));
-        return out;
-    }
+    // v5: a bitwise operand is a machine word and `int`'s lane IS a machine
+    // word, so there is nothing to narrow -- the convert-op-convert sandwich
+    // v4 needed here is gone. This is the collatz class the benchmark table
+    // priced at 6.99x.
+    if (tid == LMD_TYPE_INT) return val;
     if (is_integer_type_id(tid) || tid == LMD_TYPE_UINT64) return val;
     MIR_reg_t boxed = emit_box(mt, val, tid);
     return emit_call_1(mt, "_barg", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
@@ -2319,8 +2358,11 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_INT:
-        // G0: unboxing an int yields its native double, not an i64.
-        return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
+        // v5: unboxing an int yields its LANE value (i64), so poison arrives as
+        // a lane sentinel. The packed payload sign-extends inline; poison takes
+        // the cold call. `it2i` is deliberately NOT used -- it answers the
+        // machine-integer question, and a sentinel is not a machine integer.
+        return emit_unbox_int_lane(mt, BoxedReg(item_reg)).r;
     case LMD_TYPE_FLOAT:
         {
             MIR_reg_t in_band = new_reg(mt, "fumask", MIR_T_I64);
@@ -2370,18 +2412,103 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
 // whichever lane a leaf happened to produce -- a boxed Item from a variable or
 // call, a double from native arithmetic. Anything entering a D-domain
 // instruction must be coerced first, or MIR rejects the operand mode.
-static MIR_reg_t emit_int_native_lane(MirTranspiler* mt, MIR_reg_t reg) {
-    if (MIR_reg_type(mt->ctx, reg, mt->em.func) == MIR_T_D) return reg;
-    return emit_unbox(mt, reg, LMD_TYPE_INT);
+// v5: int's lane is MIR_T_I64 -- the SAME register class a boxed Item uses --
+// so the register type can no longer tell "already in the lane" from "boxed".
+// The discriminator is the node's static type plus transpile_expr's contract:
+// an INT-typed node hands back the lane, anything else hands back an Item.
+// (Under v4 the lane was MIR_T_D, which was self-identifying; that is the one
+// convenience the i64 lane costs, and the contract is what replaces it.)
+// Unbox an int Item to its LANE value. Hot arm sign-extends the 56-bit payload
+// inline (one sbfx on aarch64); the poison arm is the cold call.
+static LaneReg emit_unbox_int_lane(MirTranspiler* mt, BoxedReg item) {
+    MIR_reg_t item_reg = item.r;
+    MIR_reg_t out = new_reg(mt, "ulane", MIR_T_I64);
+    MIR_reg_t tag = new_reg(mt, "ulane_t", MIR_T_I64);
+    MIR_reg_t is_int = new_reg(mt, "ulane_ii", MIR_T_I64);
+    MIR_reg_t shifted = new_reg(mt, "ulane_s", MIR_T_I64);
+    MIR_label_t l_poison = new_label(mt);
+    MIR_label_t l_done = new_label(mt);
+    // The inline arm requires an actual INT-tagged Item. A statically int-typed
+    // expression can still hand back another numeric tag -- `ndim()` declares
+    // `int` but returns an int64 Item, which is a tagged POINTER -- so the tag
+    // is tested rather than assumed. (v4 got this for free: it unboxed through
+    // the `it2d` runtime call, which dispatched on the real type.) Everything
+    // that is not a packed int, poison included, takes the cold call.
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, tag),
+        MIR_new_reg_op(mt->ctx, item_reg), MIR_new_int_op(mt->ctx, 56)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_int),
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_poison),
+        MIR_new_reg_op(mt->ctx, is_int)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, shifted),
+        MIR_new_reg_op(mt->ctx, item_reg), MIR_new_int_op(mt->ctx, 8)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, shifted), MIR_new_int_op(mt->ctx, 8)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    emit_label(mt, l_poison);
+    MIR_reg_t cold = emit_call_1(mt, "lambda_item_to_int_lane_c", MIR_T_I64, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, item_reg));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, cold)));
+    emit_label(mt, l_done);
+    return LaneReg(out);
 }
 
-// Same coercion for the shared int/float lane: `tid` selects which unboxing
-// rule applies, since int and float box differently even though they land in
-// the same register class.
+// int lane -> double. EXACT for every band value (that exactness is what
+// `int <= float` rests on, design doc 5.1), and the lane sentinels map to their
+// shared IEEE values so poison survives the widening.
+static MIR_reg_t emit_int_lane_to_double(MirTranspiler* mt, LaneReg lane) {
+    MIR_reg_t lane_reg = lane.r;
+    MIR_reg_t out = new_reg(mt, "l2d", MIR_T_D);
+    MIR_reg_t lo_ok = new_reg(mt, "l2d_lo", MIR_T_I64);
+    MIR_reg_t hi_ok = new_reg(mt, "l2d_hi", MIR_T_I64);
+    MIR_reg_t in_band = new_reg(mt, "l2d_ok", MIR_T_I64);
+    MIR_label_t l_poison = new_label(mt);
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, lo_ok),
+        MIR_new_reg_op(mt->ctx, lane_reg), MIR_new_int_op(mt->ctx, INT53_MIN)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, hi_ok),
+        MIR_new_reg_op(mt->ctx, lane_reg), MIR_new_int_op(mt->ctx, INT53_MAX)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_poison),
+        MIR_new_reg_op(mt->ctx, in_band)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, lane_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    emit_label(mt, l_poison);
+    MIR_reg_t pd = emit_call_1(mt, "lambda_int_lane_to_double_c", MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, lane_reg));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, pd)));
+    emit_label(mt, l_done);
+    return out;
+}
+
+// double -> int lane. Non-integral values are a narrowing question owned by the
+// boundary machinery; this is the representation move only, so it defers every
+// non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
+// for those on some targets.
+static LaneReg emit_double_to_int_lane(MirTranspiler* mt, MIR_reg_t d_reg) {
+    return LaneReg(emit_call_1(mt, "lambda_double_to_int_lane_c", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg)));
+}
+
+static LaneReg emit_int_native_lane_typed(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
+    if (tid == LMD_TYPE_INT) return LaneReg(reg);        // already the lane
+    if (MIR_reg_type(mt->ctx, reg, mt->em.func) == MIR_T_D) {
+        return emit_double_to_int_lane(mt, reg);         // float lane -> int lane
+    }
+    return emit_unbox_int_lane(mt, BoxedReg(reg));       // boxed Item -> lane
+}
+
+// Coerce to whichever native lane `tid` names: MIR_T_I64 for int, MIR_T_D for
+// float. Callers that need both operands in ONE lane must widen explicitly.
 static MIR_reg_t emit_scalar_native_lane(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
+    if (tid == LMD_TYPE_INT) return emit_int_native_lane_typed(mt, reg, tid).r;
+    if (tid != LMD_TYPE_FLOAT) return reg;
     if (MIR_reg_type(mt->ctx, reg, mt->em.func) == MIR_T_D) return reg;
-    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_FLOAT) return reg;
-    return emit_unbox(mt, reg, tid);
+    return emit_unbox(mt, reg, LMD_TYPE_FLOAT);
 }
 
 // Text values can reach a native fast path either as their raw GC pointer or
@@ -2425,11 +2552,9 @@ static MIR_reg_t emit_text_pointer_lane(MirTranspiler* mt, MIR_reg_t value,
 static ValueRep lambda_value_rep(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_FLOAT:
-    // G0: int's native carrier is the double. The rep only selects the register
-    // class; `emit_box_impl` still dispatches on the semantic type, so int and
-    // float share a lane without sharing a boxing rule.
-    case LMD_TYPE_INT:
         return VALUE_REP_F64;
+    // v5: int's native carrier is the machine i64 again.
+    case LMD_TYPE_INT:
     case LMD_TYPE_BOOL:
     case LMD_TYPE_INT64:
         return VALUE_REP_I64;
@@ -3169,10 +3294,9 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         *(bool*)field_ptr = value.bool_val; return true;
     case LMD_TYPE_INT:
         if (value_type != LMD_TYPE_INT) return false;
-        // C16/G0: `int` has one native representation, the IEEE double, so a
-        // declared int field stores one. The int64_t carrier clamped every
-        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
-        // the map layout is unchanged.
+        // Shaped int fields share the float slot's double word (see
+        // emit_mir_direct_field_read): exact for every int53, and poison
+        // widens to its IEEE form.
         *(double*)field_ptr = lambda_int_item_value(value); return true;
     case LMD_TYPE_INT64:
         if (value_type == LMD_TYPE_INT) { *(int64_t*)field_ptr = lambda_int_item_to_i64(value); return true; }
@@ -3180,6 +3304,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         return false;
     case LMD_TYPE_FLOAT:
         if (value_type == LMD_TYPE_FLOAT) { *(double*)field_ptr = value.get_double(); return true; }
+        // a float field is a double slot: an int value WIDENS into it
         if (value_type == LMD_TYPE_INT) { *(double*)field_ptr = lambda_int_item_value(value); return true; }
         if (value_type == LMD_TYPE_INT64) { *(double*)field_ptr = (double)value.get_int64(); return true; }
         if (value_type == LMD_TYPE_UINT64) { *(double*)field_ptr = (double)value.get_uint64(); return true; }
@@ -3236,7 +3361,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         case LMD_TYPE_NULL: case LMD_TYPE_UNDEFINED: case LMD_TYPE_ERROR: break;
         case LMD_TYPE_BOOL: titem.bool_val = value.bool_val; break;
         // C16: carry the numeric value; an int Item's payload is not its value.
-        case LMD_TYPE_INT: titem.double_val = lambda_int_item_value(value); break;
+        case LMD_TYPE_INT: titem.long_val = lambda_int_item_to_lane(value.item); break;
         case LMD_TYPE_INT64: titem.long_val = value.get_int64(); break;
         case LMD_TYPE_FLOAT: titem.double_val = value.get_double(); break;
         case LMD_TYPE_DTIME: titem.datetime_ptr = value.get_datetime_ptr(); break;
@@ -3510,27 +3635,24 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
     if (node->type->is_literal) {
         switch (tid) {
         case LMD_TYPE_INT: {
-            // G0: the int lane is a double, so an int literal materializes as a
-            // double immediate. C2 keeps literals inside +/-(2^53-1), so the
-            // conversion here is exact by construction.
-            int64_t val;
+            // v5: the int lane is the machine i64, so an int literal is an
+            // integer immediate -- and the const pool stores int64 words, so
+            // the pooled arm is a plain load with no conversion at all. (Under
+            // v4 both arms had to reach the FP unit.) The literal band keeps
+            // every value in range by construction.
             if (node->type == &LIT_INT || ts_node_symbol(node->node) == SYM_INT) {
-                val = parse_int_literal(mt->source, node->node);
-            } else {
-                TypeConst* tc = (TypeConst*)node->type;
-                MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
-                MIR_reg_t raw = new_reg(mt, "intc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
-                MIR_reg_t rd = new_reg(mt, "intcd", MIR_T_D);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, rd),
-                    MIR_new_reg_op(mt->ctx, raw)));
-                return rd;
+                int64_t val = parse_int_literal(mt->source, node->node);
+                MIR_reg_t r = new_reg(mt, "int", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, val)));
+                return r;
             }
-            MIR_reg_t r = new_reg(mt, "int", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_double_op(mt->ctx, (double)val)));
-            return r;
+            TypeConst* tc = (TypeConst*)node->type;
+            MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
+            MIR_reg_t raw = new_reg(mt, "intc", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
+            return raw;
         }
         case LMD_TYPE_FLOAT: {
             // Float literals are stored in const_list, load from there
@@ -4893,7 +5015,9 @@ static bool sysfunc_params_reject_error(SysFuncInfo* info) {
 
 // The MIR register class a sys func's C result lands in.
 static MIR_type_t sysfunc_c_ret_mir_type(TypeId c_ret_tid) {
-    return (c_ret_tid == LMD_TYPE_FLOAT || c_ret_tid == LMD_TYPE_INT) ? MIR_T_D :
+    // v5: a sys func's C return mirrors its declared Lambda type, and `int` is
+    // an i64 lane again -- so only float maps to MIR_T_D (G8's revert).
+    return (c_ret_tid == LMD_TYPE_FLOAT) ? MIR_T_D :
            (c_ret_tid == LMD_TYPE_STRING || c_ret_tid == LMD_TYPE_SYMBOL ||
             c_ret_tid == LMD_TYPE_TYPE) ? MIR_T_P : MIR_T_I64;
 }
@@ -4927,6 +5051,65 @@ static MIR_reg_t mir_emit_int_arith_native(MirTranspiler* mt, AstBinaryNode* bi)
 
 static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     return transpile_binary_out(mt, bi, false);
+}
+
+// Bring either scalar lane into the double lane for mixed arithmetic.
+static MIR_reg_t emit_int_or_float_to_double(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
+    if (tid == LMD_TYPE_INT) {
+        return emit_int_lane_to_double(mt, emit_int_native_lane_typed(mt, reg, tid));
+    }
+    return emit_scalar_native_lane(mt, reg, tid);
+}
+
+// v5: emit a checked int ADD/SUB/MUL in the native i64 lane.
+//
+// ADD/SUB cannot overflow i64 from in-band operands (|a|,|b| <= 2^53-1 so the
+// sum fits 2^54), which is why the band test alone is sound for them. MUL can
+// reach ~2^106, so it must branch on MIR's signed-overflow flag before a
+// wrapped product is compared with the band.
+static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
+        LaneReg left_lane, LaneReg right_lane) {
+    MIR_reg_t left = left_lane.r, right = right_lane.r;
+    MIR_reg_t raw = new_reg(mt, "ia_raw", MIR_T_I64);
+    MIR_reg_t out = new_reg(mt, "ia_res", MIR_T_I64);
+    MIR_reg_t lo_ok = new_reg(mt, "ia_lo", MIR_T_I64);
+    MIR_reg_t hi_ok = new_reg(mt, "ia_hi", MIR_T_I64);
+    MIR_reg_t in_band = new_reg(mt, "ia_ok", MIR_T_I64);
+    MIR_label_t l_slow = new_label(mt);
+    MIR_label_t l_done = new_label(mt);
+
+    emit_insn(mt, MIR_new_insn(mt->ctx,
+        op == OPERATOR_ADD ? MIR_ADD : op == OPERATOR_SUB ? MIR_SUB : MIR_MULO,
+        MIR_new_reg_op(mt->ctx, raw),
+        MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
+    if (op == OPERATOR_MUL) {
+        // The v5 band check must not inspect a wrapped 64-bit product: e.g.
+        // 2^52 * 2^18 wraps to zero, which would otherwise launder to int 0.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BO,
+            MIR_new_label_op(mt->ctx, l_slow)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, lo_ok),
+        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MIN)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, hi_ok),
+        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MAX)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_band),
+        MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, in_band)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, raw)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+
+    emit_label(mt, l_slow);
+    const char* helper = op == OPERATOR_ADD ? "lambda_int_lane_add_slow"
+        : op == OPERATOR_SUB ? "lambda_int_lane_sub_slow" : "lambda_int_lane_mul_slow";
+    MIR_reg_t slow = emit_call_2(mt, helper, MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, slow)));
+    emit_label(mt, l_done);
+    return LaneReg(out);
 }
 
 static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
@@ -4994,24 +5177,23 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
                 MIR_new_reg_op(mt->ctx, right)));
             return result;
         }
-        // C16 B1 + G0: `int` arithmetic is TOTAL and its native lane IS the
-        // double, so the whole operation is one instruction on the operands as
-        // they already are. No conversion, no range test, no branch — the
-        // I2D/D2I round trip that B1 needed while the lane was still an i64 is
-        // gone with the lane.
-        MIR_reg_t left = emit_int_native_lane(mt, transpile_expr(mt, bi->left));
-        MIR_reg_t right = emit_int_native_lane(mt, transpile_expr(mt, bi->right));
-        MIR_reg_t dres = new_reg(mt, "fi_res", MIR_T_D);
-        emit_insn(mt, MIR_new_insn(mt->ctx,
-            bi->op == OPERATOR_ADD ? MIR_DADD :
-            bi->op == OPERATOR_SUB ? MIR_DSUB : MIR_DMUL,
-            MIR_new_reg_op(mt->ctx, dres),
-            MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
-        // `native_int_out` now means "give me the value in its native lane",
-        // which is this double. F1's range-proven i64 narrowing is retired with
-        // the i64 lane it existed to feed.
-        if (native_int_out) return dres;
-        return emit_box_int_double(mt, dres);
+        // v5 (design doc 5.3): `int` arithmetic is TOTAL and its native lane is
+        // the machine i64, so the emission is the plain integer instruction
+        // plus a band check. The check is what buys totality back now that the
+        // hardware no longer provides it: IEEE propagated poison for free in
+        // v4's double lane; two's complement has no absorbing element, so the
+        // out-of-band arm has to be branched.
+        //
+        // Operands are checked at INGRESS, not here (5.3): a poison operand
+        // arrives as a lane sentinel, and because the sentinels sit at the i64
+        // extremes any arithmetic on one lands far out of band -- so the SAME
+        // band check that catches overflow also re-poisons a leaked sentinel.
+        // That is why one branch suffices for both duties.
+        LaneReg left = emit_int_native_lane_typed(mt, transpile_expr(mt, bi->left), left_tid);
+        LaneReg right = emit_int_native_lane_typed(mt, transpile_expr(mt, bi->right), right_tid);
+        LaneReg res = emit_int_lane_arith(mt, bi->op, left, right);
+        if (native_int_out) return res.r;
+        return emit_box_int_lane(mt, res).r;
     }
 
     // Arithmetic ops with native types
@@ -5019,15 +5201,19 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         MIR_reg_t left = transpile_expr(mt, bi->left);
         MIR_reg_t right = transpile_expr(mt, bi->right);
 
-        // G0: `int` and `float` share one native lane, the double. So a mixed
-        // int/float operation needs NO conversion — the widening that used to
-        // be emitted here is now the identity — and every arm below is the
-        // D-variant regardless of which pair arrived. The semantic result type
-        // still differs (int+int is int, int+float is float); that lives in
-        // get_effective_type, not in the register class.
+        // v5: int and float have DIFFERENT native lanes again (i64 vs double),
+        // so a mixed operation widens the int side explicitly. The widening is
+        // exact for every band value -- that exactness is what `int <= float`
+        // rests on (design doc 5.1), and it is why the band is 2^53 rather than
+        // the 2^55 the 56-bit payload could hold. Poison widens too: a lane
+        // sentinel maps to its shared IEEE value.
+        //
+        // This block only runs for pairs the int-only path above declined
+        // (float involved, or a non-ADD/SUB/MUL operator), so every arm below
+        // computes in the float lane.
         const bool use_float = true;
-        MIR_reg_t fl = emit_scalar_native_lane(mt, left, left_tid);
-        MIR_reg_t fr = emit_scalar_native_lane(mt, right, right_tid);
+        MIR_reg_t fl = emit_int_or_float_to_double(mt, left, left_tid);
+        MIR_reg_t fr = emit_int_or_float_to_double(mt, right, right_tid);
         MIR_type_t rtype = MIR_T_D;
 
         switch (bi->op) {
@@ -5509,9 +5695,22 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
 
     switch (un->op) {
     case OPERATOR_NEG: {
-        // G0: int and float share the double lane, so they share DNEG. They
-        // keep separate arms only because the semantic type differs downstream.
-        if (operand_tid == LMD_TYPE_INT || operand_tid == LMD_TYPE_FLOAT) {
+        // v5: negation in the int lane is a plain machine NEG and needs NO
+        // sentinel branch -- placing the lane sentinels at the two's-complement
+        // extremes makes poison propagate for free (design doc 5.1):
+        //   -(INT64_MIN)   wraps to itself      -> nan stays nan
+        //   -(INT64_MAX)   is INT64_MIN + 1     -> +inf becomes -inf
+        //   -(INT64_MIN+1) is INT64_MAX         -> -inf becomes +inf
+        // and the band is symmetric, so every finite case closes too. The
+        // classic two's-complement negation trap IS the mechanism here.
+        if (operand_tid == LMD_TYPE_INT) {
+            MIR_reg_t operand = transpile_expr(mt, un->operand);
+            MIR_reg_t r = new_reg(mt, "neg", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_NEG, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_reg_op(mt->ctx, operand)));
+            return r;
+        }
+        if (operand_tid == LMD_TYPE_FLOAT) {
             MIR_reg_t operand = transpile_expr(mt, un->operand);
             MIR_reg_t r = new_reg(mt, "neg", MIR_T_D);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DNEG, MIR_new_reg_op(mt->ctx, r),
@@ -6692,12 +6891,14 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         // Lambda `int`, so it materializes in int's one native lane. The
         // induction variable itself stays an integer — that is the strength
         // reduction the rule permits, not an int lane.
-        MIR_reg_t counter = new_reg(mt, "range_ii", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, counter),
+        // v5: the induction variable and the bound `int` value are the SAME
+        // register -- this is where the shadow-counter split dissolves. Under
+        // v4 the counter had to stay i64 (a machine quantity) while the
+        // binding was a separate MIR_T_D fed by I2D on every iteration; with
+        // int's lane back on i64 there is one register and no conversion.
+        val_reg = new_reg(mt, "range_i", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, val_reg),
             MIR_new_reg_op(mt->ctx, range_start), MIR_new_reg_op(mt->ctx, idx)));
-        val_reg = new_reg(mt, "range_i", MIR_T_D);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, val_reg),
-            MIR_new_reg_op(mt->ctx, counter)));
     } else {
     // Get current loop item; `for k at item` binds keys, while `in` binds values.
     current_item = emit_call_4(mt, key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
@@ -6745,10 +6946,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             // this BINDING is a user-visible Lambda `int`, so it is declared in
             // int's one native lane. Binding the raw i64 made every read of the
             // variable return the wrong register class for its declared type.
-            MIR_reg_t idx_binding = new_reg(mt, "for_idx", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-                MIR_new_reg_op(mt->ctx, idx_binding), MIR_new_reg_op(mt->ctx, idx)));
-            set_var(mt, idx_name, idx_binding, MIR_T_D, LMD_TYPE_INT);
+            // v5: the machine counter IS the user-visible `int` binding -- the
+            // shadow-binding split dissolves with the i64 lane.
+            set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
         } else {
             // Get key via iter_key_at(data, keys, idx, key_filter)
             MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
@@ -6811,10 +7011,8 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             snprintf(nl_idx_name, sizeof(nl_idx_name), "%.*s", (int)nl->index_name->len, nl->index_name->chars);
             // Same split as the outer loop: `nidx` stays the machine counter,
             // the binding the user names lives in int's native lane.
-            MIR_reg_t nl_idx_binding = new_reg(mt, "for_idx", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-                MIR_new_reg_op(mt->ctx, nl_idx_binding), MIR_new_reg_op(mt->ctx, nidx)));
-            set_var(mt, nl_idx_name, nl_idx_binding, MIR_T_D, LMD_TYPE_INT);
+            // Same as the outer loop: one register, no conversion.
+            set_var(mt, nl_idx_name, nidx, MIR_T_I64, LMD_TYPE_INT);
         }
 
         nested_loops[nested_count++] = {nidx, nl_len, nl_loop, nl_cont, nl_end};
@@ -8027,10 +8225,12 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             if (val_tid == LMD_TYPE_ANY) {
                 val = emit_unbox(mt, val, LMD_TYPE_INT);
             }
+            // v5: ELEM_INT is an i64 lane again, so the value crosses as the
+            // lane -- no FP round trip on the int-array store path.
             emit_call_void_3(mt, "array_int_set",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
-                MIR_T_D, MIR_new_reg_op(mt->ctx, val));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             idx++;
             item = item->next;
         }
@@ -9005,6 +9205,12 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     // width, so an int field reads exactly like a float one. Leaving int on the
     // integer arm below made the JIT load an i64 out of a slot the runtime now
     // writes as a double.
+    // Shaped int/float fields SHARE the double slot word (as they did under v4).
+    // v5 keeps that storage on purpose: many writers reach these slots -- object
+    // construction, map_put, the validator, TypedItem -- and a double word holds
+    // every int53 exactly and widens poison to its IEEE form, so only the JIT's
+    // lane conversion has to change, not the layout. The int lane is recovered
+    // below, once, at the boundary.
     if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_INT) {
         MIR_reg_t result = new_reg(mt, "dfld", MIR_T_D);
         if (!skip_null_guard) {
@@ -9033,6 +9239,8 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
                 MIR_new_reg_op(mt->ctx, nn_result)));
             emit_label(mt, l_done);
         }
+        // an int-typed field must leave in the INT lane, not the double slot
+        if (type_id == LMD_TYPE_INT) return emit_double_to_int_lane(mt, result).r;
         return result;
     }
 
@@ -9142,17 +9350,20 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     // C16/G0: an `int` field stores a double, same as a `float` one, so both
     // are written here. The integer arm below now serves only int64/uint64/bool.
     if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_INT) {
-        // value should be native double from transpile_expr for FLOAT-typed expressions
+        // The slot is a double word for both (see the read side): the value is
+        // widened into it here, and an int-typed READ converts back to the lane.
         TypeId val_tid = get_effective_type(mt, value);
         MIR_reg_t val;
-        if (val_tid == LMD_TYPE_FLOAT || val_tid == LMD_TYPE_INT) {
+        if (val_tid == LMD_TYPE_FLOAT) {
             val = transpile_expr(mt, value);
+        } else if (val_tid == LMD_TYPE_INT) {
+            val = emit_int_lane_to_double(mt,
+                emit_int_native_lane_typed(mt, transpile_expr(mt, value), val_tid));
         } else if (is_integer_type_id(val_tid)) {
             val = mir_emit_as_double(mt, transpile_expr(mt, value), val_tid);
         } else {
-            // fallback: box then unbox into the shared lane
             MIR_reg_t boxed = transpile_box_item(mt, value);
-            val = emit_unbox(mt, boxed, type_id);
+            val = emit_unbox(mt, boxed, LMD_TYPE_FLOAT);
         }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
             MIR_new_mem_op(mt->ctx, MIR_T_D, (int)offset, data_ptr, 0, 1),
@@ -9323,8 +9534,8 @@ typedef enum MirIndexResultKind {
     MIR_INDEX_RESULT_NATIVE_FLOAT,
     MIR_INDEX_RESULT_BOXED_INT,
     MIR_INDEX_RESULT_NATIVE_BOOL,
-    // C16: the `int` lane stores doubles, so its element loads arrive as
-    // MIR_T_D. These two convert that to the shape the consumer asked for.
+    // Retained aliases: under D1 (v4) the `int` lane stored doubles and these
+    // converted. v5 restored i64 storage, so they equal the plain kinds above.
     MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE,
     MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
 } MirIndexResultKind;
@@ -9400,11 +9611,11 @@ static void emit_index_result_move(MirTranspiler* mt, MIR_reg_t result,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded),
             MIR_new_int_op(mt->ctx, 1)));
         break;
+    // v5: ELEM_INT stores LANE values (i64) again, so these two are the plain
+    // int kinds -- the names survive only to keep the policy tables stable.
     case MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE:
-        // The lane is a double and so is the consumer's native int, so this is
-        // a plain move on both the fast and the boxed-slow path.
         if (loaded_is_boxed) loaded = emit_unbox(mt, loaded, LMD_TYPE_INT);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
         break;
     case MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE:
@@ -9412,7 +9623,7 @@ static void emit_index_result_move(MirTranspiler* mt, MIR_reg_t result,
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
         } else {
-            MIR_reg_t boxed = emit_box_int_double(mt, loaded);
+            MIR_reg_t boxed = emit_box_int(mt, loaded);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, boxed)));
         }
@@ -9670,11 +9881,15 @@ static bool mir_index_expr_is_native_int(MirTranspiler* mt, AstNode* node) {
 // carries no from-the-end meaning, so every bounds check and fallback rejects
 // it, which is exactly what an unusable index should do.
 static MIR_reg_t emit_machine_index(MirTranspiler* mt, MIR_reg_t value, TypeId tid) {
-    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_FLOAT) return value;
-    // Narrows int's native lane (the IEEE double) to a machine index. The
-    // input is in that lane by transpile_expr's contract; a value that is
-    // ALREADY a machine quantity -- a loop counter, a length -- must not be
-    // routed here at all, since there is nothing to narrow.
+    // v5: int's native lane IS the machine i64, so an int index needs no
+    // narrowing at all -- the band check that used to guard the D2I is
+    // subsumed by the consumer's bounds check (design doc 5.3: an in-bounds
+    // index is in-band by construction). This is where G0's 25-site
+    // "exception 1" carve-out dissolves: there is no longer a value lane and a
+    // machine lane to convert between.
+    if (tid == LMD_TYPE_INT) return value;
+    if (tid != LMD_TYPE_FLOAT) return value;
+    // A float index still narrows, and keeps its range guard.
     MIR_reg_t out = new_reg(mt, "midx", MIR_T_I64);
     MIR_reg_t lo_ok = new_reg(mt, "midx_lo", MIR_T_I64);
     MIR_reg_t hi_ok = new_reg(mt, "midx_hi", MIR_T_I64);
@@ -9938,9 +10153,9 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayNum*
         MIR_reg_t boxed_obj = obj_elem_guarded ? emit_box_container(mt, obj_item) : (MIR_reg_t)0;
         MirIndexLoadPolicy policy = {
-            // C16: ELEM_INT is double-backed, ELEM_INT64 stays an i64 lane.
+            // v5: ELEM_INT and ELEM_INT64 are BOTH i64 storage again.
             MIR_INDEX_STORAGE_ARRAY_NUM,
-            obj_elem_type == LMD_TYPE_INT64 ? MIR_T_I64 : MIR_T_D, 8,
+            MIR_T_I64, 8,
             obj_elem_type == LMD_TYPE_INT64 ? MIR_INDEX_RESULT_NATIVE_INT
                                             : MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE,
             obj_elem_guarded ? MIR_INDEX_GUARD_ELEM_TYPE : MIR_INDEX_GUARD_NONE,
@@ -10062,7 +10277,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
             MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
             MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_D, 8,
+                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,   // v5: int lane storage
                 safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE
                                 : MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
                 MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
@@ -10148,7 +10363,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
             MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
             MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_D, 8,
+                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,   // v5: int lane storage
                 safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE
                                 : MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
                 MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
@@ -10205,7 +10420,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         MIR_reg_t arr_ptr = emit_unbox_container(mt, boxed_obj);
         MirIndexLoadPolicy policy = {
-            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_D, 8,
+            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,   // v5: int lane storage
             MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
             MIR_INDEX_GUARD_BOXED_TYPE, LMD_TYPE_ARRAY_NUM,
             MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_FN_INDEX,
@@ -10507,19 +10722,19 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             TypeId arg_tid = get_effective_type(mt, arg);
             if (arg_tid == LMD_TYPE_ARRAY) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
-                return emit_call_1(mt, "fn_len_l", MIR_T_D, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (arg_tid == LMD_TYPE_ARRAY || arg_tid == LMD_TYPE_ARRAY_NUM) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
-                return emit_call_1(mt, "fn_len_a", MIR_T_D, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                return emit_call_1(mt, "fn_len_a", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (is_text_type_id(arg_tid)) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
-                return emit_call_1(mt, "fn_len_s", MIR_T_D, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                return emit_call_1(mt, "fn_len_s", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (arg_tid == LMD_TYPE_ELEMENT) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
-                return emit_call_1(mt, "fn_len_e", MIR_T_D, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                return emit_call_1(mt, "fn_len_e", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             // Fallback: use generic fn_len(Item) for unknown types (handled below)
         }
@@ -10560,7 +10775,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             TypeId a1_tid = get_effective_type(mt, arg);
             if (a1_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
-                return emit_call_1(mt, "fn_ord_str", MIR_T_D, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                return emit_call_1(mt, "fn_ord_str", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
         }
 
@@ -10643,10 +10858,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 // in whichever lane the caller's type says it is. An `int`
                 // result re-enters int's one native lane here.
                 if (get_effective_type(mt, (AstNode*)call_node) == LMD_TYPE_INT) {
-                    MIR_reg_t lane = new_reg(mt, "bw_d", MIR_T_D);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-                        MIR_new_reg_op(mt->ctx, lane), MIR_new_reg_op(mt->ctx, result)));
-                    return lane;
+                    // v5: a bitwise result already IS int\'s lane (both machine words).
+                    return result;
                 }
                 return result;
             }
@@ -10744,10 +10957,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_new_int_op(mt->ctx, (int64_t)-1)));
             // G0: back into the caller's lane — see band/bor/bxor above.
             if (get_effective_type(mt, (AstNode*)call_node) == LMD_TYPE_INT) {
-                MIR_reg_t lane = new_reg(mt, "bnot_d", MIR_T_D);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-                    MIR_new_reg_op(mt->ctx, lane), MIR_new_reg_op(mt->ctx, result)));
-                return lane;
+                return result;
             }
             return result;
         }
@@ -13798,12 +14008,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-            // In bounds: direct store to the lane's own element type. C16 made
-            // the `int` lane double-backed, so only ELEM_INT64 still takes a
-            // raw i64 store; ELEM_INT converts first.
+            // In bounds: direct store. v5 made ELEM_INT an i64 lane again, so
+            // BOTH int element types take a raw i64 store and the double arm
+            // that D1 needed is gone.
             emit_label(mt, l_ok);
             {
-                bool store_double_lane = (assign_obj_elem != LMD_TYPE_INT64);
                 MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
@@ -13816,20 +14025,17 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
                     MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
 
-                // G0: the element lane is fixed by the array's storage, not
-                // by the value's static type -- an int-typed value reaches a
-                // double-backed ELEM_INT array and an i64-backed ELEM_INT64
-                // one. Coerce into the slot's lane rather than assuming the
-                // producer already picked it.
-                if (store_double_lane) {
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1),
-                        MIR_new_reg_op(mt->ctx, emit_scalar_native_lane(mt, val_native, val_tid))));
-                } else {
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1),
-                        MIR_new_reg_op(mt->ctx, emit_machine_index(mt, val_native, val_tid))));
-                }
+                // The element lane is fixed by the array's storage, not by the
+                // value's static type, so the value is coerced into the int
+                // lane here rather than assuming the producer picked it. An
+                // ELEM_INT slot holds a LANE value (sentinels included); an
+                // ELEM_INT64 slot holds a plain machine integer.
+                MIR_reg_t store_val = assign_obj_elem == LMD_TYPE_INT64
+                    ? emit_machine_index(mt, val_native, val_tid)
+                    : emit_int_native_lane_typed(mt, val_native, val_tid).r;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, elem_addr, 0, 1),
+                    MIR_new_reg_op(mt->ctx, store_val)));
             }
 
             emit_label(mt, l_end);
@@ -14479,7 +14685,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         if (mt->in_pipe) return mt->pipe_index_reg;
         MIR_reg_t r = new_reg(mt, "pipe_idx", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_INT_ZERO)));
+            MIR_new_int_op(mt->ctx, (int64_t)(ITEM_INT | UINT64_C(0)))));
         return r;
     }
     case AST_NODE_LAST_INDEX: {
@@ -14501,10 +14707,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // so it leaves in int's lane -- the double -- and its callers box.
         // Returning a boxed Item here made every consumer treat an Item as a
         // native value for a node whose effective type says `int`.
-        MIR_reg_t last_d = new_reg(mt, "last_idx_d", MIR_T_D);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, last_d), MIR_new_reg_op(mt->ctx, r)));
-        return last_d;
+        // v5: `last` is an index -- already int\'s lane.
+        return r;
     }
     case AST_NODE_TYPE:
         return transpile_base_type(mt, (AstTypeNode*)node);

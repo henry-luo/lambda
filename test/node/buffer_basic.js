@@ -44,6 +44,7 @@ console.log(Buffer.equals(Buffer.from('abc'), Buffer.from('xyz')));
 // Buffer.compare
 console.log(Buffer.compare(Buffer.from('abc'), Buffer.from('abc')));
 console.log(Buffer.compare(Buffer.from('abc'), Buffer.from('abd')));
+console.log(typeof Buffer.compare(Buffer.from('abc'), Buffer.from('abd')));
 
 // Buffer.indexOf
 var buf8 = Buffer.from('hello world');

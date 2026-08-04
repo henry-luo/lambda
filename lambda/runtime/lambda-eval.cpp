@@ -1173,9 +1173,10 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     }
     if (mode == LAMBDA_DYNAMIC_CALL_FUNCTION &&
             fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
             fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
-            "dynamic expression call requires a boxed Lambda function entry");
+            "dynamic expression call requires a boxed Lambda callable entry");
     }
     if (mode == LAMBDA_DYNAMIC_CALL_PROCEDURE &&
             fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE) {
@@ -1412,22 +1413,38 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
         "fn_call_into");
 }
 
+static Item lambda_dynamic_public_non_function_error(Function* fn, const char* caller) {
+    if (is_valid_function(fn)) return ItemNull;
+    // The result-home helper is invisible to Lambda code; retain the public
+    // arity wrapper in a non-function diagnostic.
+    return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
+        "cannot call non-function value");
+}
+
 Item fn_call0_into(Function* fn, uint64_t* result_home) {
+    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call0");
+    if (invalid.item != ITEM_NULL) return invalid;
     return fn_call_into(fn, NULL, result_home);
 }
 
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
+    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call1");
+    if (invalid.item != ITEM_NULL) return invalid;
     List args = {.length = 1, .items = &a};
     return fn_call_into(fn, &args, result_home);
 }
 
 Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
+    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call2");
+    if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b};
     List args = {.length = 2, .items = values};
     return fn_call_into(fn, &args, result_home);
 }
 
 Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) {
+    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call3");
+    if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b, c};
     List args = {.length = 3, .items = values};
     return fn_call_into(fn, &args, result_home);
@@ -4182,6 +4199,22 @@ int64_t fn_int64_index(Item item) {
     return lambda_item_to_int64_exact(item, &value) ? value : INT64_MIN;
 }
 
+static Item lambda_bind_object_method(TypeMethod* method, Item self) {
+    Function* bound = to_closure_named(method->compiled_fn, method->arity,
+        (void*)(uintptr_t)self.item, method->compiled_name);
+    // A method table keeps raw code, so reattach its TypeFunc when rebuilding
+    // the bound closure; dynamic dispatch needs it to validate and marshal calls.
+    lambda_function_set_type(bound, method->function_type);
+    lambda_function_mark_mir_public_abi(bound);
+    lambda_function_mark_mir_context_abi(bound);
+    if (method->is_proc) {
+        lambda_function_mark_lambda_boxed_procedure(bound);
+    } else {
+        lambda_function_mark_lambda_boxed_function(bound);
+    }
+    return {.item = (uint64_t)(uintptr_t)bound};
+}
+
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
 
@@ -4395,25 +4428,7 @@ Item fn_member(Item item, Item key) {
             TypeMethod* method = obj_type->methods;
             while (method) {
                 if (strcmp(method->name->str, key_str) == 0 && method->compiled_fn) {
-                    // Create a bound method: closure where closure_env = boxed self Item
-                    // fn_call will pass closure_env as first arg (the _self parameter)
-                    Function* bound = to_closure_named(
-                        method->compiled_fn,
-                        method->arity,
-                        (void*)(uintptr_t)item.item,  // boxed self as closure_env
-                        method->compiled_name);
-                    // Object method tables retain ABI wrappers rather than GC
-                    // Function values.  Restore the wrapper's context ABI on
-                    // each bound function so dynamic dispatch supplies the
-                    // runtime before its boxed self argument.
-                    lambda_function_mark_mir_public_abi(bound);
-                    lambda_function_mark_mir_context_abi(bound);
-                    if (method->is_proc) {
-                        lambda_function_mark_lambda_boxed_procedure(bound);
-                    } else {
-                        lambda_function_mark_lambda_boxed_function(bound);
-                    }
-                    return {.item = (uint64_t)(uintptr_t)bound};
+                    return lambda_bind_object_method(method, item);
                 }
                 method = method->next;
             }
@@ -4423,22 +4438,7 @@ Item fn_member(Item item, Item key) {
                 TypeMethod* bmethod = base->methods;
                 while (bmethod) {
                     if (strcmp(bmethod->name->str, key_str) == 0 && bmethod->compiled_fn) {
-                        Function* bound = to_closure_named(
-                            bmethod->compiled_fn,
-                            bmethod->arity,
-                            (void*)(uintptr_t)item.item,
-                            bmethod->compiled_name);
-                        // Inherited methods use the same raw ABI wrapper
-                        // storage as direct methods and need the same context
-                        // binding before fn_call dispatches them.
-                        lambda_function_mark_mir_public_abi(bound);
-                        lambda_function_mark_mir_context_abi(bound);
-                        if (bmethod->is_proc) {
-                            lambda_function_mark_lambda_boxed_procedure(bound);
-                        } else {
-                            lambda_function_mark_lambda_boxed_function(bound);
-                        }
-                        return {.item = (uint64_t)(uintptr_t)bound};
+                        return lambda_bind_object_method(bmethod, item);
                     }
                     bmethod = bmethod->next;
                 }
@@ -4476,7 +4476,7 @@ Item fn_member(Item item, Item key) {
 }
 
 // length of an item's content, relates to indexed access, i.e. item[index]
-double fn_len(Item item) {
+int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
     switch (type_id) {
@@ -4582,7 +4582,7 @@ double fn_len(Item item) {
 // Used when compile-time type is known. The transpiler must unbox Items to raw
 // pointers before calling these (emit_unbox_container strips tag bits).
 
-extern "C" double fn_len_l(List* list) {
+extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
     // Runtime check: nested numeric literals may have been auto-promoted from
     // List/Array to N-D ArrayNum (the JIT dispatched based on static type).
@@ -4592,7 +4592,7 @@ extern "C" double fn_len_l(List* list) {
     return list->length;
 }
 
-extern "C" double fn_len_a(Array* arr) {
+extern "C" int64_t fn_len_a(Array* arr) {
     if (!arr) return 0;
     // Runtime check: static type may say Array but actual could be ArrayNum
     // (e.g. nested literals auto-promoted to N-D). For N-D ArrayNum, return
@@ -4603,12 +4603,12 @@ extern "C" double fn_len_a(Array* arr) {
     return arr->length;
 }
 
-extern "C" double fn_len_s(String* str) {
+extern "C" int64_t fn_len_s(String* str) {
     if (!str) return 0;
     return str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str->chars, str->len);
 }
 
-extern "C" double fn_len_e(Element* elmt) {
+extern "C" int64_t fn_len_e(Element* elmt) {
     if (!elmt) return 0;
     return elmt->length;
 }
@@ -4880,7 +4880,7 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
 // Also works on lists: index_of(list, item) finds first matching element
-double fn_index_of(Item str_item, Item sub_item) {
+int64_t fn_index_of(Item str_item, Item sub_item) {
     // Formal semantics 7.7: these parameters are `any - error`, so an error
     // argument is rejected at the CALL BOUNDARY and never reaches this body --
     // which is what lets the return type stay a plain `int` instead of going
@@ -4959,7 +4959,7 @@ double fn_index_of(Item str_item, Item sub_item) {
 
 // last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
 // Also works on lists: last_index_of(list, item) finds last matching element
-double fn_last_index_of(Item str_item, Item sub_item) {
+int64_t fn_last_index_of(Item str_item, Item sub_item) {
     // Formal semantics 7.7: these parameters are `any - error`, so an error
     // argument is rejected at the CALL BOUNDARY and never reaches this body --
     // which is what lets the return type stay a plain `int` instead of going
@@ -5632,7 +5632,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
 // ord(str) - return Unicode code point of first character
 // ord native: String* in, int64_t ABI out; registry exposes compact Lambda int
-double fn_ord_str(String* str) {
+int64_t fn_ord_str(String* str) {
     // The typed fast path for fn_ord, so it must answer identically: -1 where
     // there is no ordinal (7.7). 0 is U+0000, a real character, so it cannot
     // stand for "no answer" in either variant.
@@ -5643,7 +5643,7 @@ double fn_ord_str(String* str) {
     return (int64_t)codepoint;
 }
 
-double fn_ord(Item str_item) {
+int64_t fn_ord(Item str_item) {
     TypeId type = get_type_id(str_item);
 
     // Formal semantics 7.7: broad input, and a result drawn from OUTSIDE the
@@ -6592,10 +6592,10 @@ static void convert_specialized_to_generic(Array* arr) {
             }
             arr->extra = extra_count;
         } else {
-            // ELEM_INT is double-backed; box each element through the encoder.
-            double* old_items = num_arr->float_items;
+            // v5: ELEM_INT is an i64 LANE array; box each lane through the encoder.
+            int64_t* old_items = num_arr->items;
             for (int64_t i = 0; i < len; i++) {
-                new_items[i] = {.item = lambda_int_box_double(old_items[i])};
+                new_items[i] = {.item = lambda_int_box_lane(old_items[i])};
             }
         }
     } else {
@@ -6691,14 +6691,14 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 array_set(arr, index, value);
             }
         } else {
-            // ELEM_INT
+            // ELEM_INT -- v5: an i64 LANE array. The whole int domain fits,
+            // poison included, because poison rides as a lane sentinel.
             if (val_type == LMD_TYPE_INT) {
-                // Whole domain fits, poison included — no widening needed.
-                num_arr->float_items[index] = lambda_int_item_value(value);
+                num_arr->items[index] = lambda_int_item_to_lane(value.item);
             } else if (val_type == LMD_TYPE_INT64) {
                 int64_t lval = value.get_int64();
                 if (lval >= INT53_MIN && lval <= INT53_MAX) {
-                    num_arr->float_items[index] = (double)lval;
+                    num_arr->items[index] = lval;
                 } else {
                     convert_specialized_to_generic(arr);
                     array_set(arr, index, value);
@@ -6793,9 +6793,8 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.bool_val = value.bool_val;
             break;
         case LMD_TYPE_INT:
-            // C16: an int Item's payload is not its value, so the union's
-            // integer view would store rotated bits. Carry the numeric value,
-            // which is exact for the whole domain and for poison.
+            // TypedItem's int arm follows the shaped-field carrier: the double
+            // view, exact over the whole band and for poison.
             titem.double_val = lambda_int_item_value(value);
             break;
         case LMD_TYPE_INT64:
