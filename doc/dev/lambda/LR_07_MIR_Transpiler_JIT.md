@@ -118,7 +118,13 @@ The MIR Direct backend carries a large, deliberate set of workarounds. They clus
 5. **Type widening is truncate-or-box.** `transpile_assign_stam` (`:7973`) assigns a FLOAT to an INT variable by truncating via `MIR_D2I` *inside loops* (lossy, but required to keep the register type stable) and by boxing to `ANY` *outside* loops. This is the most architecturally impactful divergence from C2MIR. A related sharp edge: an error Item (e.g. from division by zero) is silently coerced to `0`/`0.0`/`false` when a boxed value is unboxed into a native variable (`:8000`).
 6. **`get_effective_type` only narrows IDENTs to ANY** (`:2137`); it does not catch every post-mutation type change, leaving a stale-type boxing hazard for non-identifier expressions.
 7. **MATCH and vectorized-comparison results are forced boxed** (`:2077`, `:2200`) to prevent callers re-boxing an already-boxed value and then dereferencing it as a pointer.
-8. **Inference caps.** `NativeFuncInfo` stores at most 16 parameter types (`param_types[16]`/`param_mir[16]`, `:278`), `InferCacheEntry` likewise caps at 16 (`:301`), and `transpile_func_def` copies at most 32 parameter names (`param_name_copies[32]`, `:10580`) — all silent truncations past the cap. The MIR Direct inference engine is also entirely separate code from the C2MIR call-site inference, with no shared table.
+8. **Inference metadata.** MIR Direct stores per-parameter inference on the
+   AST/function-analysis records. The former parallel `param_types[16]`,
+   `param_mir[16]`, fixed alias-name table, and copied 32-entry parameter-name
+   table are retired. Core source arity remains capped at the intentional
+   `LAMBDA_MAX_FUNCTION_ARGS` language limit; LambdaJS source formals remain
+   dynamically represented. Remaining fixed source-name staging buffers are
+   tracked in `vibe/Lambda_Design_Function_Arg.md`.
 9. **Precise-root correctness is type-driven.** BUG-001's heap-frame growth hole is closed by static side-stack slots and publish-before-call lowering. The remaining invariant is that any register carrying a heap-capable boxed value must retain a heap/ANY MIR type; the root predicate deliberately roots unknown/manual capture entries pessimistically.
 10. **Bitwise ops are special-cased before generic dispatch** (`:6560`) because `SysFuncInfo` has no native-argument-convention field: `band`/`bor`/`bxor` lower to a single MIR instruction, and `shl`/`shr` are guarded against out-of-range shift counts. (Note: the older runtime doc claims these go through `fn_band` calls; the current code lowers them inline.)
 11. **`uint8_t Bool` returns need masking.** Runtime functions returning a `uint8_t` bool leave garbage in the upper 56 bits of the MIR return register, so every bool box/unbox must `emit_uext8` (`:874`, `:1121`).

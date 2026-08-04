@@ -1259,54 +1259,6 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
     return (JsAstNode*)object;
 }
 
-// Build JavaScript function node
-static void js_func_add_lexical_for_head_name(JsTranspiler* tp, JsFunctionNode* func, TSNode node) {
-    if (func->lexical_for_head_capture_count >= 8) return;
-    if (strcmp(ts_node_type(node), "identifier") != 0) return;
-    int len = 0;
-    const char* text = ts_node_text_util(tp, node, &len);
-    if (!text || len <= 0 || len > 59) return;
-
-    char name[64];
-    snprintf(name, sizeof(name), "_js_%.*s", len, text);
-    for (int i = 0; i < func->lexical_for_head_capture_count; i++) {
-        if (strcmp(func->lexical_for_head_capture_names[i], name) == 0) return;
-    }
-    snprintf(func->lexical_for_head_capture_names[func->lexical_for_head_capture_count], 64, "%s", name);
-    func->lexical_for_head_capture_count++;
-}
-
-static void js_func_collect_lexical_for_head_names(JsTranspiler* tp, JsFunctionNode* func, TSNode node) {
-    if (ts_node_is_null(node) || func->lexical_for_head_capture_count >= 8) return;
-    const char* type = ts_node_type(node);
-    if (strcmp(type, "identifier") == 0) {
-        js_func_add_lexical_for_head_name(tp, func, node);
-        return;
-    }
-    uint32_t count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < count; i++) {
-        js_func_collect_lexical_for_head_names(tp, func, ts_node_named_child(node, i));
-    }
-}
-
-static void js_func_mark_enclosing_lexical_for_heads(JsTranspiler* tp, JsFunctionNode* func, TSNode func_node) {
-    TSNode node = ts_node_parent(func_node);
-    while (!ts_node_is_null(node)) {
-        if (strcmp(ts_node_type(node), "for_in_statement") == 0) {
-            TSNode kind = ts_node_child_by_field_name(node, "kind", 4);
-            if (!ts_node_is_null(kind)) {
-                const char* kind_type = ts_node_type(kind);
-                if (strcmp(kind_type, "let") == 0 || strcmp(kind_type, "const") == 0 ||
-                    strcmp(kind_type, "using") == 0) {
-                    TSNode left = ts_node_child_by_field_name(node, "left", 4);
-                    js_func_collect_lexical_for_head_names(tp, func, left);
-                }
-            }
-        }
-        node = ts_node_parent(node);
-    }
-}
-
 static bool js_ts_string_is_raw_use_strict(JsTranspiler* tp, TSNode str_node) {
     if (!tp || ts_node_is_null(str_node) || strcmp(ts_node_type(str_node), "string") != 0) {
         return false;
@@ -1359,12 +1311,6 @@ static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsA
     method->is_async = fn->is_async;
     method->is_generator = fn->is_generator;
     method->has_use_strict_directive = fn->has_use_strict_directive;
-    method->lexical_for_head_capture_count = fn->lexical_for_head_capture_count;
-    for (int i = 0; i < fn->lexical_for_head_capture_count && i < 8; i++) {
-        memcpy(method->lexical_for_head_capture_names[i],
-            fn->lexical_for_head_capture_names[i],
-            sizeof(method->lexical_for_head_capture_names[i]));
-    }
     method->ts_return_type = fn->ts_return_type;
     method->type = fn->type;
 }
@@ -1419,7 +1365,6 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
     func->has_use_strict_directive = false;
-    js_func_mark_enclosing_lexical_for_heads(tp, func, func_node);
 
     // Detect async: check for "async" anonymous child before "function" keyword or "=>"
     func->is_async = false;
@@ -3240,8 +3185,43 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     JsForOfNode* for_of = (JsForOfNode*)alloc_js_ast_node(
         tp, is_for_of ? JS_AST_NODE_FOR_OF_STATEMENT : JS_AST_NODE_FOR_IN_STATEMENT,
         for_node, sizeof(JsForOfNode));
+
+    // the loop head and body share a block scope; without it, a lexical head
+    // is unresolved while its closure is built and loses per-iteration identity.
+    JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, for_scope);
+
+    // Determine whether the head declares a binding before building its AST.
+    // `var` is zero, so the explicit flag distinguishes it from an assignment
+    // head such as `for (x of values)`.
+    uint32_t child_count = ts_node_child_count(for_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(for_node, i);
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "var") == 0) {
+            for_of->kind = JS_VAR_VAR;
+            for_of->declares_binding = true;
+            break;
+        }
+        if (strcmp(child_type, "let") == 0) {
+            for_of->kind = JS_VAR_LET;
+            for_of->declares_binding = true;
+            break;
+        }
+        if (strcmp(child_type, "const") == 0) {
+            for_of->kind = JS_VAR_CONST;
+            for_of->declares_binding = true;
+            break;
+        }
+        if (strcmp(child_type, "using") == 0) {
+            for_of->kind = JS_VAR_LET;
+            for_of->declares_binding = true;
+            break;
+        }
+        if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
+    }
+
     if (is_for_of) {
-        uint32_t child_count = ts_node_child_count(for_node);
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(for_node, i);
             if (strcmp(ts_node_type(child), "await") == 0) {
@@ -3254,6 +3234,7 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     // Get the variable declaration (left side)
     // Tree-sitter structure: for (const x of arr) → "left" field contains the variable
     TSNode left_node = ts_node_child_by_field_name(for_node, "left", strlen("left"));
+    bool left_is_declaration = false;
     if (!ts_node_is_null(left_node)) {
         const char* left_type = ts_node_type(left_node);
         // Workaround: tree-sitter misparsing of `for await (let [a, b] of ...)`
@@ -3294,46 +3275,25 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
                 }
             }
         }
-        if (strcmp(left_type, "identifier") == 0) {
-            for_of->left = build_js_identifier(tp, left_node);
+        left_is_declaration = strcmp(left_type, "variable_declaration") == 0 ||
+            strcmp(left_type, "lexical_declaration") == 0;
+        if (left_is_declaration) {
+            for_of->left = build_js_variable_declaration(tp, left_node);
+        } else if (strcmp(left_type, "identifier") == 0 && for_of->declares_binding) {
+            // Build declared names without resolving them as reads, then attach
+            // the loop-scope entry below after the head kind is known.
+            for_of->left = build_js_binding_identifier(tp, left_node);
         } else {
-            // Could be a variable declaration or pattern
+            // Could be an assignment target or a destructuring pattern.
             for_of->left = build_js_expression(tp, left_node);
         }
     }
     for_in_left_done:
 
-    // Determine whether the head declares bindings and its kind from the first
-    // child. `var` is enum value zero, so kind alone cannot distinguish
-    // `for (var [x] of xs)` from the assignment form `for ([x] of xs)`.
-    // (skip if already set by the let[...] misparse fixup above)
-    if (for_of->kind == 0) {
-        uint32_t child_count = ts_node_child_count(for_node);
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode child = ts_node_child(for_node, i);
-            const char* child_type = ts_node_type(child);
-            if (strcmp(child_type, "var") == 0) {
-                for_of->kind = JS_VAR_VAR;
-                for_of->declares_binding = true;
-                break;
-            }
-            if (strcmp(child_type, "let") == 0) {
-                for_of->kind = JS_VAR_LET;
-                for_of->declares_binding = true;
-                break;
-            }
-            if (strcmp(child_type, "const") == 0) {
-                for_of->kind = JS_VAR_CONST;
-                for_of->declares_binding = true;
-                break;
-            }
-            if (strcmp(child_type, "using") == 0) {
-                for_of->kind = JS_VAR_LET;
-                for_of->declares_binding = true;
-                break;
-            }
-            if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
-        }
+    if (for_of->declares_binding && for_of->left && !left_is_declaration) {
+        // declaration nodes bind their own patterns while being built; the
+        // synthetic `let [..]` recovery path reaches this shared bind point.
+        js_bind_pattern_names(tp, for_of->left, (JsVarKind)for_of->kind);
     }
 
     TSNode init_node = ts_node_child_by_field_name(for_node, "value", strlen("value"));
@@ -3352,6 +3312,8 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     if (!ts_node_is_null(body_node)) {
         for_of->body = build_js_statement(tp, body_node);
     }
+
+    js_scope_pop(tp);
 
     for_of->type = &TYPE_NULL;
     return (JsAstNode*)for_of;

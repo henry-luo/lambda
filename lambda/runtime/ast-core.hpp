@@ -12,6 +12,7 @@ typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
 typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
+typedef struct _ArrayList ArrayList;
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -520,6 +521,9 @@ typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
     TsTypeAnnotationNode* ts_type;
+    // p6 stores its recomputed numeric-local fact on the declaration so long
+    // JavaScript names never need a copied, fixed-capacity inference table.
+    TypeId p6_type;
 } AstDeclaratorNode;
 
 typedef struct AstSpreadNode : AstNode {
@@ -566,8 +570,6 @@ typedef struct AstFuncNode : AstNode {
     bool is_async;
     bool is_generator;
     bool has_use_strict_directive;
-    int lexical_for_head_capture_count;
-    char lexical_for_head_capture_names[8][64];
     TsTypeAnnotationNode* ts_return_type;
 } AstFuncNode;
 
@@ -600,10 +602,6 @@ typedef struct FnCapture {
     struct FnCapture* next;
 } FnCapture;
 
-enum {
-    FN_PARAM_MAX_ALIASES = 8,
-};
-
 typedef struct FnParamEvidence {
     int evidence;
     int int_evidence;
@@ -611,8 +609,10 @@ typedef struct FnParamEvidence {
     int string_evidence;
     int other_evidence;
     int name_count;
-    char names[FN_PARAM_MAX_ALIASES][64];
-    int name_lens[FN_PARAM_MAX_ALIASES];
+    // String* entries contain the parameter binding followed by any aliases.
+    // The list is compiler-owned scratch state, so inference has no fixed
+    // alias count or source-name width.
+    ArrayList* names;
     bool used_as_container;
     bool compared_with_non_numeric;
     bool param_reassigned;

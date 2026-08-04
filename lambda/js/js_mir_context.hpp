@@ -117,6 +117,7 @@ struct JsNameSetEntry {
     bool from_func_decl;  // true if this name came from a nested function declaration
     uint32_t binding_start; // source range of the resolved defining binding, if known
     uint32_t binding_end;
+    NameEntry* entry; // AST binding identity, when this record came from an identifier
 };
 
 static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;

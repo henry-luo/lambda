@@ -63,6 +63,27 @@ static bool jm_binding_is_inside_range(uint32_t binding_start, uint32_t binding_
         binding_start >= body_start && binding_end <= body_end;
 }
 
+// identify a lexical binding from the AST instead of copying its generated
+// name into a fixed-capacity function-side table.
+static bool jm_entry_is_lexical_for_head(NameEntry* entry) {
+    if (!entry || !entry->is_lexical || !entry->node) return false;
+    JsAstNode* binding = (JsAstNode*)entry->node;
+    if (ts_node_is_null(binding->node)) return false;
+    uint32_t binding_start = ts_node_start_byte(binding->node);
+    uint32_t binding_end = ts_node_end_byte(binding->node);
+    for (TSNode parent = ts_node_parent(binding->node);
+         !ts_node_is_null(parent); parent = ts_node_parent(parent)) {
+        if (strcmp(ts_node_type(parent), "for_in_statement") != 0) continue;
+        TSNode left = ts_node_child_by_field_name(parent, "left", 4);
+        if (!ts_node_is_null(left) &&
+            binding_start >= ts_node_start_byte(left) &&
+            binding_end <= ts_node_end_byte(left)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentifierNode* id,
                                 uint32_t body_start, uint32_t body_end) {
     JsNameSetEntry e;
@@ -76,6 +97,7 @@ static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentif
         }
         e.var_kind = id->entry->is_const ? JS_VAR_CONST :
             (id->entry->is_lexical ? JS_VAR_LET : 0);
+        e.entry = id->entry;
     }
     JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, &e);
     if (existing) {
@@ -90,13 +112,16 @@ static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentif
             existing->binding_start = e.binding_start;
             existing->binding_end = e.binding_end;
             existing->var_kind = e.var_kind;
+            existing->entry = e.entry;
             return;
         }
         if ((existing->binding_start == 0 && existing->binding_end == 0) &&
             (e.binding_start != 0 || e.binding_end != 0)) {
             existing->binding_start = e.binding_start;
             existing->binding_end = e.binding_end;
+            existing->entry = e.entry;
         }
+        if (!existing->entry && e.entry) existing->entry = e.entry;
         if (existing->var_kind == 0 && e.var_kind != 0) existing->var_kind = e.var_kind;
         return;
     }
@@ -131,7 +156,9 @@ static void jm_name_set_add_existing(struct hashmap* set, JsNameSetEntry* entry)
             (entry->binding_start != 0 || entry->binding_end != 0)) {
             existing->binding_start = entry->binding_start;
             existing->binding_end = entry->binding_end;
+            existing->entry = entry->entry;
         }
+        if (!existing->entry && entry->entry) existing->entry = entry->entry;
         return;
     }
     hashmap_set(set, entry);
@@ -2040,6 +2067,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         // for a top-level closure whose parent_index is -1.
         bool force_env_capture = ancestor_func_locals &&
             jm_name_set_has(ancestor_func_locals, ref->name);
+        bool is_lexical_for_head = jm_entry_is_lexical_for_head(ref->entry);
 
         // This is a capture
         {
@@ -2055,20 +2083,16 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             fc->captures[fc->capture_count].private_env_slot = -1;
             fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
+            fc->captures[fc->capture_count].entry = ref->entry;
             // Binding metadata is authoritative when scope analysis resolved
             // the reference; name-only ancestor scans can confuse an outer
             // const with a nearer same-named var in minified code.
-            fc->captures[fc->capture_count].is_let_const = ref->var_kind != 0;
+            fc->captures[fc->capture_count].is_let_const = ref->var_kind != 0 ||
+                is_lexical_for_head;
             fc->captures[fc->capture_count].is_const = ref->var_kind == JS_VAR_CONST;
             fc->captures[fc->capture_count].is_nfe_binding = false;
-            fc->captures[fc->capture_count].force_env_capture = force_env_capture;
-            for (int li = 0; li < fn->lexical_for_head_capture_count; li++) {
-                if (strcmp(fn->lexical_for_head_capture_names[li], ref->name) == 0) {
-                    fc->captures[fc->capture_count].is_let_const = true;
-                    fc->captures[fc->capture_count].force_env_capture = true;
-                    break;
-                }
-            }
+            fc->captures[fc->capture_count].force_env_capture = force_env_capture ||
+                is_lexical_for_head;
             const char* capture_key = fc->captures[fc->capture_count].scope_env_key;
             fc->capture_count++;
             log_debug("js-mir: capture '%s' [%s] in function '%s'",

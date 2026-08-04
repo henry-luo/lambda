@@ -22,6 +22,7 @@
 #include "recovery_frame.h"
 #include "heap_api.h"
 #include "runtime-state.h"
+#include "../../lib/arraylist.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <stddef.h>
@@ -15185,8 +15186,9 @@ static bool is_tracked_ref(AstNode* node, FnParamEvidence* ctx) {
         AstIdentNode* ident = (AstIdentNode*)node;
         if (!ident->name) return false;
         for (int i = 0; i < ctx->name_count; i++) {
-            if ((int)ident->name->len == ctx->name_lens[i] &&
-                memcmp(ident->name->chars, ctx->names[i], ctx->name_lens[i]) == 0)
+            String* tracked = (String*)arraylist_get(ctx->names, i);
+            if (tracked && ident->name->len == tracked->len &&
+                memcmp(ident->name->chars, tracked->chars, tracked->len) == 0)
                 return true;
         }
     }
@@ -15198,17 +15200,38 @@ static bool is_tracked_ref(AstNode* node, FnParamEvidence* ctx) {
 }
 
 // Add alias name to tracking context
-static void add_alias(FnParamEvidence* ctx, const char* name, int name_len) {
-    if (ctx->name_count >= FN_PARAM_MAX_ALIASES || name_len >= 64) return;
+static bool add_alias(FnParamEvidence* ctx, String* name) {
+    if (!ctx || !name) return false;
+    if (!ctx->names) {
+        ctx->names = arraylist_new(4);
+        if (!ctx->names) {
+            log_error("mir: could not allocate parameter alias list");
+            return false;
+        }
+    }
     // Check if already tracked
     for (int i = 0; i < ctx->name_count; i++) {
-        if (ctx->name_lens[i] == name_len &&
-            memcmp(ctx->names[i], name, name_len) == 0) return;
+        String* tracked = (String*)arraylist_get(ctx->names, i);
+        if (tracked && tracked->len == name->len &&
+            memcmp(tracked->chars, name->chars, name->len) == 0) return true;
     }
-    memcpy(ctx->names[ctx->name_count], name, name_len);
-    ctx->names[ctx->name_count][name_len] = '\0';
-    ctx->name_lens[ctx->name_count] = name_len;
+    if (!arraylist_append(ctx->names, name)) {
+        log_error("mir: could not grow parameter alias list");
+        return false;
+    }
     ctx->name_count++;
+    return true;
+}
+
+static void free_param_evidence_names(FnParamEvidence* ctxs, int count) {
+    if (!ctxs || count <= 0) return;
+    for (int i = 0; i < count; i++) {
+        if (ctxs[i].names) {
+            arraylist_free(ctxs[i].names);
+            ctxs[i].names = NULL;
+        }
+        ctxs[i].name_count = 0;
+    }
 }
 
 // Classify the "other side" type for a binary op involving our param
@@ -15250,7 +15273,7 @@ static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_cou
             if (named->as && named->name) {
                 for (int c = 0; c < ctx_count; c++) {
                     if (is_tracked_ref(named->as, &ctxs[c])) {
-                        add_alias(&ctxs[c], named->name->chars, (int)named->name->len);
+                        add_alias(&ctxs[c], named->name);
                     }
                 }
             }
@@ -15485,11 +15508,13 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
 
         FnParamEvidence* ctx = &ctxs[ctx_count];
         memset(ctx, 0, sizeof(FnParamEvidence));
-        int len = (int)p->name->len;
-        if (len >= 64) len = 63;
-        memcpy(ctx->names[0], p->name->chars, len);
-        ctx->names[0][len] = '\0';
-        ctx->name_lens[0] = len;
+        ctx->names = arraylist_new(4);
+        if (!ctx->names || !arraylist_append(ctx->names, p->name)) {
+            if (ctx->names) arraylist_free(ctx->names);
+            ctx->names = NULL;
+            log_error("mir: could not initialize parameter alias list");
+            break;
+        }
         ctx->name_count = 1;
         ctx_indices[ctx_count] = i;
         ctx_count++;
@@ -15527,12 +15552,16 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
             }
         }
         TypeId inferred = resolve_inferred_type(&ctxs[c], is_proc);
+        String* primary_name = ctxs[c].name_count > 0
+            ? (String*)arraylist_get(ctxs[c].names, 0) : NULL;
         log_debug("mir: infer_param_types_batched('%s') aliases=%d evidence=%d → %d",
-            ctxs[c].names[0], ctxs[c].name_count - 1, ctxs[c].evidence, inferred);
+            primary_name ? primary_name->chars : "<unknown>",
+            ctxs[c].name_count - 1, ctxs[c].evidence, inferred);
         if (inferred != LMD_TYPE_ANY) {
             out_types[pi] = inferred;
         }
     }
+    free_param_evidence_names(ctxs, ctx_count);
 }
 
 // ============================================================================
