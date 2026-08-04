@@ -46,6 +46,84 @@ policy. The general compilation and root-frame model remains documented in
 | Dynamic call of an unboxed/foreign entry | Rejected by explicit `FunctionEntryAbi` before the function pointer is cast | Not applicable to the JS generic boundary |
 | Argument adaptation storage | Exact precise-root spans; no native `physical_args[]` owner | Exact borrowed or owned adapter span; no `padded_args[]` |
 
+## Remaining fixed implementation limits
+
+The Core Lambda ceiling of `LAMBDA_MAX_FUNCTION_ARGS` is intentional language
+design and is not repeated here as a migration target. The following limits are
+still hard-coded implementation, optimization, or interop boundaries.
+
+### Runtime ABI boundaries
+
+- **LambdaJS context wrappers:** `JS_MIR_CONTEXT_CALL_MAX_ARITY` is 32. A
+  generated JS wrapper with more than 32 physical formals is rejected by the
+  C++ wrapper dispatcher. This does not cap the generic JS source-actual span:
+  `Item* args + argc` is dynamically sized and may contain more than 32 actuals
+  when JS semantics permit it (for example, through rest handling).
+- **LambdaJS legacy native callbacks:** the non-context `P0`...`P16`
+  function-pointer family accepts at most 16 Item operands, or 15 user
+  operands when a closure environment occupies one operand. This applies to
+  host callbacks created through the non-MIR `js_new_function`/
+  `js_new_closure`/
+  `js_new_method_function` path, not ordinary generated JS source functions.
+- **Core-to-JS export bridge:** the current bridge publishes only
+  `js_call_export_0_into` through `js_call_export_8_into`. A Core-to-JS
+  direct-symbol call with more than eight operands therefore remains an
+  interop limitation. It is separate from the unbounded JS adapter span and is
+  deferred with the broader interop work.
+
+### Compiler and optimization metadata
+
+- **JS native specialization:** `JS_MIR_TYPED_PARAM_LIMIT` is 16. Functions
+  with more parameters remain valid JS functions but do not receive the fixed
+  native-specialization metadata and use the boxed path.
+- **JS constructor-shape inference:** constructor property metadata has 16
+  slots. Discovering a 17th property disables this optimization; it does not
+  limit the object's actual property count.
+- **JS P6/type-inference scratch state:** the native/type-inference metadata
+  still has 16 parameter/evidence slots, and return inference has at most 32
+  local-name slots (`local_names[32][128]`). Formal and alias names now remain
+  AST-owned `String` references rather than copied `param_names[16][128]`
+  buffers. These are analysis limits, not JS call limits.
+- **MIR argument-register bookkeeping:**
+  `MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS` is 32. It bounds emitter-side
+  recording of incoming argument registers only; it is not a runtime ABI
+  ceiling.
+- **Frozen legacy C transpiler:** the old named-argument reorder path keeps a
+  `MAX_PARAMS` 32-entry array. This applies to the legacy C transpiler path,
+  not MIR Direct.
+- **Closure analysis trackers:** JS closure read-back and TDZ trackers each
+  have a 512-entry capacity, and tracked names are copied into 128-byte slots.
+  The tracker clamps or reports overflow; this is not a limit on JS formal
+  parameters or on the runtime closure object itself.
+
+### Remaining source-name staging buffers
+
+There is no language-level maximum identifier length in the AST/name pool, but
+several compiler boundaries still stage source-derived names in fixed C buffers:
+
+- JS function/local/capture metadata commonly uses `char[128]`; function body
+  names use `char[144]`.
+- JS closure scope-environment keys use dynamically allocated entries of
+  `char[64]` and are copied with bounded `snprintf`, so long keys can be
+  truncated and potentially collide.
+- Core MIR formal-name staging still uses buffers such as `pname[64]` and
+  `prefixed[68]`, in addition to broader `char[128]` scratch names.
+- Shared MIR import/scope metadata also contains `name[128]` fields.
+
+These are remaining name-truncation/collision risks and should be removed or
+changed to stable mapped identifiers in a follow-up. The `%r<hex-serial>`
+scheme already removes source-name dependence for generated MIR registers, but
+it does not yet remove every source-derived formal, local, or environment-name
+buffer.
+
+### Retired argument buffers
+
+The active JS implementation no longer contains a fixed `padded_args[]`,
+`arguments_param_names[16][128]`, or JS `physical_args[]` argument marshal
+buffer. Any old Core `physical_args[8]` occurrence is inside retired `#if 0`
+code and is not an execution-time limit. Adapter spans are exact-sized rooted
+spans.
+
 ## Why the runtimes differ
 
 C and MIR can call a function pointer when the prototype and every operand are
