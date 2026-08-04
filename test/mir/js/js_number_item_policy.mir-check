@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "v5 §5.6: a native JS index converts to double before crossing the Item boundary; no int2it call may reintroduce a Lambda int Item.",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "i2d"
+      ],
+      "forbid": [
+        "int2it"
+      ]
+    }
+  ]
+}

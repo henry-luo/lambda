@@ -281,29 +281,36 @@ static bool contract_numeric_to_uint64_exact(Item value, uint64_t* out) {
 static bool contract_numeric_admit_signed(Item value, LambdaNumericKind target,
         Item* converted) {
     if (target == LAMBDA_NUM_INT) {
-        // C16 E1/E2: admission into `int` is a MEMBERSHIP test over the
-        // float64-representable integers, not the retired +/-(2^53-1) band and
-        // not a detour through int64 (which cannot even hold the domain). So
-        // any finite integral value is admitted at any magnitude, and a shared
-        // infinity re-tags as int's own — it is the same value (ruling 12).
-        // A fractional value, and a foreign nan, are not members and reject.
+        // v5 closes int at int53.  The shared IEEE poison remains a member,
+        // but finite admission must reject sparse values before boxing would
+        // silently turn them into inf.
         LambdaNumericRuntimePart int_part;
         if (!lambda_numeric_runtime_part(value, &int_part)) {
-            // decimal and other non-part carriers keep the exact-integral route
+            // Decimal and other non-part carriers keep the exact-integral route.
             int64_t exact = 0;
             if (!contract_numeric_is_integral(value)) return false;
             if (!lambda_item_to_int64_exact(value, &exact)) return false;
-            converted->item = lambda_int_box_double((double)exact);
+            if (exact < INT53_MIN || exact > INT53_MAX) return false;
+            converted->item = i2it(exact);
             return true;
         }
-        double numeric = int_part.kind == LAMBDA_NUM_PART_FLOAT ? int_part.float_value :
-            int_part.kind == LAMBDA_NUM_PART_UNSIGNED ? (double)int_part.unsigned_value :
-            (double)int_part.signed_value;
-        if (numeric != numeric) return false;   // a foreign nan is not a member
-        // An infinity IS a member: same-signed infinities are one value across
-        // the numeric domains (ruling 14), so it re-tags rather than converts.
-        // Everything else must be integral to be a member.
-        if (!isinf(numeric) && !contract_numeric_is_integral(value)) return false;
+        if (lambda_item_is_merged_poison(value.item)) {
+            *converted = value;
+            return true;
+        }
+        if (int_part.kind == LAMBDA_NUM_PART_SIGNED) {
+            if (int_part.signed_value < INT53_MIN || int_part.signed_value > INT53_MAX) return false;
+            converted->item = i2it(int_part.signed_value);
+            return true;
+        }
+        if (int_part.kind == LAMBDA_NUM_PART_UNSIGNED) {
+            if (int_part.unsigned_value > (uint64_t)INT53_MAX) return false;
+            converted->item = i2it((int64_t)int_part.unsigned_value);
+            return true;
+        }
+        double numeric = int_part.float_value;
+        if (!isfinite(numeric) || floor(numeric) != numeric ||
+                numeric < (double)INT53_MIN || numeric > (double)INT53_MAX) return false;
         converted->item = lambda_int_box_double(numeric);
         return true;
     }

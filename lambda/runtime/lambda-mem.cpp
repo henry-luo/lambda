@@ -849,10 +849,97 @@ Item int2it(double value) {
     return {.item = lambda_int_box_double(value)};
 }
 
+// v5 cold path for the emitted lane encoder: the three lane sentinels and any
+// out-of-band value. Generated code inlines the in-band arm (band test + AND +
+// OR) and calls this only when that test fails.
+// ---------------------------------------------------------------------------
+// v5 int lane arithmetic -- cold arms (design doc 5.2's poison algebra).
+//
+// Reached only when the inline band check fails, which happens for exactly two
+// reasons: a genuine overflow, or an operand that was a lane sentinel (poison
+// propagates by landing out of band). These helpers separate the two and apply
+// the IEEE-aligned rules -- the indeterminate forms `inf - inf` and `inf * 0`
+// are nan; everything else saturates by sign.
+// ---------------------------------------------------------------------------
+
+static inline bool lane_is_nan(int64_t v)     { return v == INT_LANE_NAN; }
+static inline bool lane_is_inf(int64_t v)     { return v == INT_LANE_INF || v == INT_LANE_NEG_INF; }
+static inline bool lane_is_poison(int64_t v)  { return lane_is_nan(v) || lane_is_inf(v); }
+static inline int  lane_inf_sign(int64_t v)   { return v == INT_LANE_INF ? 1 : -1; }
+static inline int64_t lane_inf_of(int sign)   { return sign >= 0 ? INT_LANE_INF : INT_LANE_NEG_INF; }
+
+// Saturate an out-of-band finite result by sign.
+static inline int64_t lane_saturate(int64_t sign_source) {
+    return sign_source >= 0 ? INT_LANE_INF : INT_LANE_NEG_INF;
+}
+
+int64_t lambda_int_lane_add_slow(int64_t a, int64_t b) {
+    if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
+    if (lane_is_inf(a) && lane_is_inf(b)) {
+        // inf + inf = inf; inf + (-inf) = nan -- IEEE's indeterminate form.
+        return lane_inf_sign(a) == lane_inf_sign(b) ? a : INT_LANE_NAN;
+    }
+    if (lane_is_inf(a)) return a;
+    if (lane_is_inf(b)) return b;
+    return lane_saturate(a + b);  // in-band operands: the sum's sign is exact
+}
+
+int64_t lambda_int_lane_sub_slow(int64_t a, int64_t b) {
+    if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
+    if (lane_is_inf(a) && lane_is_inf(b)) {
+        // inf - inf = nan; inf - (-inf) = inf.
+        return lane_inf_sign(a) == lane_inf_sign(b) ? INT_LANE_NAN : a;
+    }
+    if (lane_is_inf(a)) return a;
+    if (lane_is_inf(b)) return lane_inf_of(-lane_inf_sign(b));
+    return lane_saturate(a - b);
+}
+
+int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b) {
+    if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
+    if (lane_is_inf(a) || lane_is_inf(b)) {
+        // inf * 0 = nan -- IEEE's other indeterminate form.
+        if ((!lane_is_poison(a) && a == 0) || (!lane_is_poison(b) && b == 0)) {
+            return INT_LANE_NAN;
+        }
+        int sa = lane_is_inf(a) ? lane_inf_sign(a) : (a >= 0 ? 1 : -1);
+        int sb = lane_is_inf(b) ? lane_inf_sign(b) : (b >= 0 ? 1 : -1);
+        return lane_inf_of(sa * sb);
+    }
+    // Both in band: the product overflowed the band (it may also have
+    // overflowed i64, so the sign is taken from the OPERANDS, not the product).
+    int sign = ((a >= 0) == (b >= 0)) ? 1 : -1;
+    return lane_inf_of(sign);
+}
+
+// Cold arms of the emitted lane<->double converters (design doc 5.1's map).
+// Thin wrappers so the JIT registry has callable symbols; the logic is
+// header-only in lambda.h because `core/` needs it and must not link `runtime/`.
+double lambda_int_lane_to_double_c(int64_t lane) { return lambda_int_lane_to_double(lane); }
+
+// Cold arm of the emitted int unbox: every Item shape that is NOT a packed
+// int. A statically int-typed expression may still produce another numeric tag
+// (sys funcs declaring `int` while returning an int64 Item, ANY-typed
+// initializers), so this dispatches on the real type exactly as `it2i` does --
+// and maps the shared poison to its lane sentinel, which `it2i` cannot.
+int64_t lambda_item_to_int_lane_c(uint64_t item_bits) {
+    Item it = {.item = item_bits};
+    TypeId t = get_type_id(it);
+    if (t == LMD_TYPE_INT) return lambda_int_item_to_lane(item_bits);
+    if (t == LMD_TYPE_FLOAT) return lambda_double_to_int_lane(it.get_double());
+    return it2i(it);
+}
+
+int64_t lambda_double_to_int_lane_c(double value) { return lambda_double_to_int_lane(value); }
+
+Item int2it_lane(int64_t lane) {
+    return {.item = lambda_int_box_lane(lane)};
+}
+
 // Same encoder for callers that hold a native int64 (the guest-language
 // transpilers, whose compiler API has no int-to-double conversion).
 Item int2it_i64(int64_t value) {
-    return {.item = lambda_int_box_double((double)value)};
+    return {.item = lambda_int_box_lane(value)};
 }
 
 // Cold path for generated int boxing. Legacy native helpers (fn_len, index_of,
@@ -862,7 +949,7 @@ Item int2it_i64(int64_t value) {
 // emitted fast path fold it into the class predicate instead of branching twice.
 Item int2it_i64_or_error(int64_t value) {
     if (value == INT64_ERROR) return ItemError;
-    return {.item = lambda_int_box_double((double)value)};
+    return {.item = lambda_int_box_lane(value)};
 }
 
 Item flt2it(double dval) {

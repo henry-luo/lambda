@@ -9,14 +9,14 @@ int64
 int64
 u8
 i8
-"=== int shift stays int past the old compact band ==="
+"=== int shift closes at the int53 boundary ==="
 4503599627370496
 int
-9007199254740992
+inf
 int
-18014398509481984
+inf
 int
-4611686018427387904
+inf
 int
 "=== i64 shift keeps the wide lane, no promotion ==="
 18014398509481984

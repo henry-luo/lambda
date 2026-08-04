@@ -124,7 +124,9 @@ void print_int_value(StrBuf* strbuf, double value) {
 void print_packed_int_elem(StrBuf* strbuf, ArrayNumElemType et, const ArrayNum* arr,
                            int64_t index) {
     if (et == ELEM_INT) {
-        print_int_value(strbuf, arr->float_items[index]);
+        // v5: ELEM_INT stores LANE values, so a sentinel maps back to its
+        // shared IEEE value before the one int renderer sees it.
+        print_int_value(strbuf, lambda_int_lane_to_double(arr->items[index]));
         return;
     }
     strbuf_append_format(strbuf, "%lld", (long long)arr->items[index]);

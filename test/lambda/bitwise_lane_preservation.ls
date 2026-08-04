@@ -1,15 +1,6 @@
-// Bitwise ops preserve their operand's integer lane, and an int shift stays
-// `int` at every magnitude.
-//
-// C16 retired overflow promotion: there is no band for a shift to leave. That
-// is also sound for shifts specifically — scaling by a power of two moves the
-// exponent and leaves the mantissa alone, so a valid `int` shifts to a valid
-// `int`. The values below print exactly for the same reason; before C16 they
-// promoted to float and rendered lossily (2^62 as 4611686018427388000).
-//
-// History: before 2026-07-29 the inlined JIT path range-checked against the
-// 56-bit payload width instead of +/-(2^53-1), so shl(1,54) minted a compact
-// int holding a value the C path rejected.
+// Bitwise ops preserve their operand's integer lane. v5 closes `int` at the
+// exact int53 band, so shifts beyond it produce the shared signed infinity;
+// i64 shifts retain their independent wide lane.
 
 "=== lane preserved by operand type ==="
 type(band(12, 10))
@@ -23,7 +14,7 @@ type(shl(1i64, 54))
 type(band(12u8, 10u8))
 type(band(12i8, 10i8))
 
-"=== int shift stays int past the old compact band ==="
+"=== int shift closes at the int53 boundary ==="
 shl(1, 52)
 type(shl(1, 52))
 shl(1, 53)

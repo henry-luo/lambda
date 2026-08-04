@@ -221,6 +221,9 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
 
 static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     TypeId actual = item.type_id();
+    // Shared IEEE poison decodes as float, but its surface type is int; keep
+    // validator admission aligned with fn_type() and the runtime type boundary.
+    if (lambda_item_is_merged_poison(item.item)) actual = LMD_TYPE_INT;
     NumSizedType kind = NUM_INT8;
     if (actual == LMD_TYPE_NUM_SIZED) {
         kind = ((Item*)&item)->get_num_type();

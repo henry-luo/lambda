@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "C16/G0: the `int` parameter is in int's one native lane, the IEEE double, so it appears as `d:` rather than `i64:`; the int64 scalar-home donation this fixture checks is unchanged. Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark, then returns (Stack API #15/#16/#21).",
+  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark, then returns (Stack API #15/#16/#21).",
   "checks": [
     {
       "in_func": "_accumulate_#",
       "expect": [
-        ":\tfunc\ti64, p:runtime, d:_n, i64:_acc, p:_scalar_home"
+        ":\tfunc\ti64, p:runtime, i64:_n, i64:_acc, p:_scalar_home"
       ],
       "expect_seq": [
         { "pattern": "call\tlambda_item_adopt_scalar_home_p" },

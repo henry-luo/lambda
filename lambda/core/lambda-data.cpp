@@ -259,7 +259,7 @@ void init_type_info() {
     type_info[LMD_TYPE_NULL] = {sizeof(void*), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};  // pointer-sized for NULL↔container transitions
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
-    type_info[LMD_TYPE_INT] = {sizeof(double), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // C16: int's native form is the IEEE double
+    type_info[LMD_TYPE_INT] = {sizeof(double), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // shaped int fields share float's double slot
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
@@ -641,7 +641,7 @@ Item scalar_storage_read(Item item, bool immortal) {
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0 || offset >= array->length) return ItemNull;
     switch (array->get_elem_type()) {
-        case ELEM_INT:     return (Item){.item = lambda_int_box_double(array->float_items[offset])};
+        case ELEM_INT:     return (Item){.item = lambda_int_box_lane(array->items[offset])};
         case ELEM_INT64:
 #ifdef LAMBDA_IO_STATIC_VALUES
             return {.item = l2it(&array->items[offset])};

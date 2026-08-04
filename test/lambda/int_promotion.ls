@@ -1,6 +1,6 @@
-// Phase 4 numeric model: compact-int overflow promotes to float and stays float.
+// v5 numeric model: finite int overflow saturates to shared signed infinity.
 
-"=== int overflow promotion ==="
+"=== int overflow saturation ==="
 let max = math.max_int
 max + 1
 type(max + 1)

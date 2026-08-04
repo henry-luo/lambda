@@ -263,7 +263,7 @@ SysFuncInfo sys_func_defs[] = {
     // Type/conversion functions — all method-eligible
     // ========================================================================
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_DOUBLE, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
+     C_RET_INT64, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
 
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
      C_RET_TYPE_PTR, C_ARG_ITEM, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
@@ -553,10 +553,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_BOOL, C_ARG_ITEM, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
 
     {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_DOUBLE, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
+     C_RET_INT64, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_DOUBLE, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
+     C_RET_INT64, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0},
@@ -599,7 +599,7 @@ SysFuncInfo sys_func_defs[] = {
 
     // Unicode code points fit in compact Lambda int; keep the C ABI as int64_t.
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_DOUBLE, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
+     C_RET_INT64, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
 
     {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},
@@ -1432,6 +1432,37 @@ JitImport jit_runtime_imports[] = {
     {"int2it", FPTR(int2it),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"int2it_lane", FPTR(int2it_lane),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_int_lane_to_double_c", FPTR(lambda_int_lane_to_double_c),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_double_to_int_lane_c", FPTR(lambda_double_to_int_lane_c),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_item_to_int_lane_c", FPTR(lambda_item_to_int_lane_c),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_int_lane_add_slow", FPTR(lambda_int_lane_add_slow),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_int_lane_sub_slow", FPTR(lambda_int_lane_sub_slow),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
+
+    {"lambda_int_lane_mul_slow", FPTR(lambda_int_lane_mul_slow),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     {"int2it_i64", FPTR(int2it_i64),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -3237,6 +3268,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "owned_item_slot_store", "lambda_module_var_store",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
+        // v5 int lane: pure integer arithmetic on lane values, no allocation.
+        "lambda_int_lane_to_double_c", "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
+        "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "js_is_truthy", "js_is_nullish",
         // Only the flag read is an audited NO_GC helper. Debug assertions can
         // log on failure and exception extraction can allocate a number home.

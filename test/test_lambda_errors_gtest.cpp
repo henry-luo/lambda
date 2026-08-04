@@ -228,11 +228,11 @@ TEST(NumericBoundaryAdmissionTest, ExactScalarConversionsPreserveTargetTags) {
 
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(-0.0), &TYPE_F32, &converted));
     EXPECT_TRUE(signbit(converted.get_num_sized_as_double()));
-    // C16 rulings 12+14: admission into `int` is a MEMBERSHIP test. Same-signed
-    // infinities are ONE value shared across the numeric domains, so an inf
-    // re-tags into int's own; a foreign nan is a distinct value per IEEE and is
-    // rejected exactly like 3.5. Before C16 both were refused by a band check.
-    EXPECT_FALSE(lambda_numeric_boundary_admit(push_d(NAN), &TYPE_INT, &converted));
+    // v5 retains shared IEEE poison as part of int while finite values must
+    // remain in the exact int53 band.
+    ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(NAN), &TYPE_INT, &converted));
+    EXPECT_TRUE(lambda_item_is_merged_poison(converted.item));
+    EXPECT_TRUE(isnan(lambda_int_item_value(converted)));
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(INFINITY), &TYPE_INT, &converted));
     // Admitted inf keeps the shared representation rather than re-tagging into
     // an int-only sentinel, so the Item is the plain inline IEEE bits.
@@ -241,11 +241,7 @@ TEST(NumericBoundaryAdmissionTest, ExactScalarConversionsPreserveTargetTags) {
     ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(-INFINITY), &TYPE_INT, &converted));
     EXPECT_EQ(lambda_int_item_value(converted), -INFINITY);
 
-    // E1: membership is integrality, not the retired +/-(2^53-1) band, so a
-    // value past it admits when it is a float64-representable integer.
-    ASSERT_TRUE(lambda_numeric_boundary_admit(push_d(9007199254740994.0), &TYPE_INT, &converted));
-    EXPECT_EQ(get_type_id(converted), LMD_TYPE_INT);
-    EXPECT_EQ(lambda_int_item_value(converted), 9007199254740994.0);
+    EXPECT_FALSE(lambda_numeric_boundary_admit(push_d(9007199254740994.0), &TYPE_INT, &converted));
 }
 
 //==============================================================================

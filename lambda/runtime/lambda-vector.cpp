@@ -535,10 +535,13 @@ static inline uint8_t clamp_uint8_even(double value) {
 static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double v) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:
-            // C16: double-backed, but still the *integer* lane, so a fractional
-            // value rounds on store exactly as the old i64 lane did. Poison
-            // passes through untouched — llround would destroy inf/nan.
-            arr->float_items[off] = LAMBDA_INT_VALUE_IS_POISON(v) ? v : (double)llround(v);
+            // v5: the int lane is i64 and stores LANE values. A fractional value
+            // rounds on store (design doc 5.8); poison and out-of-band magnitudes
+            // become their lane sentinels via the shared map -- llround on those
+            // is undefined, which is why the conversion is not a bare cast.
+            arr->items[off] = LAMBDA_INT_VALUE_IS_POISON(v)
+                ? lambda_double_to_int_lane(v)
+                : lambda_double_to_int_lane((double)llround(v));
             return;
         case ELEM_INT64:   arr->items[off] = (int64_t)llround(v); return;
         case ELEM_FLOAT64: arr->float_items[off] = v; return;
@@ -1518,12 +1521,13 @@ Item fn_fill(Item n_item, Item value) {
     TypeId val_type = get_type_id(value);
 
     if (is_integer_type_id(val_type)) {
-        // C16: the int lane is double-backed, so fill writes the numeric value.
-        double val = (val_type == LMD_TYPE_INT) ? lambda_int_item_value(value)
-                                                : (double)value.get_int64();
+        // v5: the int lane is i64, so fill writes the LANE value (poison rides
+        // as its lane sentinel).
+        int64_t val = (val_type == LMD_TYPE_INT) ? lambda_int_item_to_lane(value.item)
+                                                 : value.get_int64();
         ArrayNum* result = array_int_new(n);
         for (int64_t i = 0; i < n; i++) {
-            result->float_items[i] = val;
+            result->items[i] = val;
         }
         return { .array_num = result };
     }
@@ -2787,10 +2791,10 @@ Item fn_unique(Item item) {
                 }
             }
         } else if (arr->get_elem_type() == ELEM_INT) {
-            // C16: the int lane is double-backed, and its poison is the IEEE
-            // special, so dedup compares numerically and re-boxes as int.
+            // v5: the int lane is i64; dedup still compares numerically (so a
+            // lane sentinel compares as its IEEE value) and re-boxes as int.
             for (int64_t i = 0; i < len; i++) {
-                double val = arr->float_items[i];
+                double val = lambda_int_lane_to_double(arr->items[i]);
                 bool found = false;
                 for (int64_t j = 0; j < (int64_t)result->length; j++) {
                     double res_val = item_to_double(result->items[j]);
@@ -3731,7 +3735,7 @@ static double reduce_contig_dispatch(ArrayNum* arr, int64_t base_off, int64_t le
             case RED_AVG:  return k_reduce_contig<CT, RED_AVG>(p, len); \
         } } while (0)
     switch (arr->get_elem_type()) {
-        case ELEM_INT:                      LMD_RED(double);   break;
+        case ELEM_INT:                      LMD_RED(int64_t);  break;   // v5: i64 lane
         case ELEM_INT64:                    LMD_RED(int64_t);  break;
         case ELEM_FLOAT64:                  LMD_RED(double);   break;
         case ELEM_FLOAT32:                  LMD_RED(float);    break;
@@ -4655,7 +4659,7 @@ Item fn_histogram(Item img, Item bins_item) {
     bool is_float = !elem_is_int(in->get_elem_type());
     ArrayNum* counts = array_num_new(ELEM_INT, bins);
     if (!counts) return ItemError;
-    for (int64_t i = 0; i < bins; i++) counts->float_items[i] = 0.0;
+    for (int64_t i = 0; i < bins; i++) counts->items[i] = 0;   // v5: i64 lane
     int64_t shp[32], str[32];
     int ndim = get_shape_strides(in, shp, str);
     int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
@@ -4665,7 +4669,7 @@ Item fn_histogram(Item img, Item bins_item) {
         double v = array_num_read_double(in, off);
         int64_t bin = is_float ? (int64_t)floor(v * bins) : (int64_t)llround(v);
         if (bin < 0) bin = 0; else if (bin >= bins) bin = bins - 1;
-        counts->float_items[bin] += 1.0;
+        counts->items[bin] += 1;
         for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
     }
     return { .array_num = counts };
@@ -4724,9 +4728,9 @@ Item fn_label(Item mask_item) {
     int64_t oshape[2] = { H, W };
     ArrayNum* out = alloc_ndim_arraynum(ELEM_INT, 2, oshape);
     if (!out) return ItemError;
-    // The int lane is double-backed (C16), so the label workspace writes doubles.
-    double* lab = out->float_items;
-    for (int64_t i = 0; i < H * W; i++) lab[i] = 0.0;
+    // v5: the int lane is i64, so the label workspace is int64 too.
+    int64_t* lab = out->items;
+    for (int64_t i = 0; i < H * W; i++) lab[i] = 0;
     int64_t* stack = (int64_t*)malloc(sizeof(int64_t) * (size_t)H * (size_t)W);
     if (!stack) { log_error("label: out of memory"); return ItemError; }
     const int64_t di[4] = { -1, 1, 0, 0 }, dj[4] = { 0, 0, -1, 1 };

@@ -157,7 +157,10 @@ typedef uint8_t TypeId;
 // (bits 62-61 clear) and bit 63 is set, so the discriminator is a sign test on
 // the word — see `lambda_item_is_inline_int`. Tags therefore must stay in
 // 0x00-0x1F; 0x80-0x9F is no longer tag headroom.
-#define ITEM_INT_OCTANT      UINT64_C(0x8000000000000000)
+// v5 retired the `100` octant reservation: rotation is gone, so high bytes
+// 0x80-0x9F are ordinary reserved tag headroom again. The predicate survives as
+// the tag-space assert below (no tag may collide with the retired octant, which
+// keeps the JS sentinel relocation of P2 honest and the space re-usable).
 #define ITEM_TAG_IS_NOT_INLINE_INT(tag)  ((((uint8_t)(tag)) & 0x80u) == 0)
 
 // Every legal tag byte, TypeIds and reserved sentinel tags alike. Per-tag
@@ -230,7 +233,7 @@ typedef uint8_t NumSizedType;
 // ============================================================================
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
-    ELEM_INT   = 0x00,   // 8 bytes  — double lane (C16/D1; was int56-as-int64)
+    ELEM_INT   = 0x00,   // 8 bytes  — v5 IntLane i64 (finite values or poison sentinels)
     ELEM_FLOAT64 = 0x10, // 8 bytes  — canonical double lane (was ARRAY_FLOAT)
     ELEM_FLOAT = ELEM_FLOAT64, // source compatibility alias; not a distinct representation
 
@@ -262,7 +265,7 @@ typedef uint8_t ArrayNumElemType;
 
 // Bytes per element, indexed by (elem_type >> 4)
 static const uint8_t ELEM_TYPE_SIZE[16] = {
-    8, // 0x00 ELEM_INT     — double (C16: the int lane is float64-backed)
+    8, // 0x00 ELEM_INT     — int64_t (v5: the int lane is the machine i64)
     8, // 0x10 ELEM_FLOAT64 — double
     1, // 0x20 ELEM_INT8
     2, // 0x30 ELEM_INT16
@@ -1306,59 +1309,58 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #endif
 }
 
-// C16: `int` is the float64-representable integers, so a boxed int carries the
-// value's own IEEE bits rather than a separate integer payload. See
-// `vibe/Lambda_Type_Int_Boxing.md` §3 for the derivation; the mechanism is:
+// v5 (`vibe/Lambda_Semantics_Int_Type.md` §5.4): `int` is the contiguous band
+// +/-(2^53 - 1), and a FINITE int boxes as a 56-bit two's-complement payload
+// under the LMD_TYPE_INT tag byte:
 //
-//   every double with |v| in [2, 2^257) has biased exponent 1024..1279, and
-//   every one of those exponents begins with the bits `100` — which is exactly
-//   the free octant's marker. So rotating the word left by one moves the sign
-//   out of the way (to bit 0) and lands the value in the int octant with no
-//   mask and no bias. Unboxing is the inverse rotate; nothing is cleared.
+//     box(n)   = (LMD_TYPE_INT << 56) | (n & MASK56)     // AND + OR
+//     unbox(i) = ((int64_t)(i << 8)) >> 8                // sign-extend low 56
 //
-// Values outside that class do not have `100` in place, so they take the cold
-// path: 0 and +/-1 and the poison trio become sentinels on the (otherwise
-// unused) LMD_TYPE_INT tag byte, exactly as +/-0.0 rides the float tag byte.
-// Integral magnitudes >= 2^257 keep the plain inline-float encoding; they are
-// still exact, and `type()` reporting `float` up there is the documented drift.
-#define ITEM_INT_CLASS_MASK   UINT64_C(0x7000000000000000)
-#define ITEM_INT_CLASS_BITS   UINT64_C(0x4000000000000000)
+// One instruction each way on aarch64 (bfi / sbfx), no FP unit on the int path.
+// The payload has 56 bits and the band needs 54, so every int value round-trips
+// exactly and the encoding is canonical.
+//
+// POISON IS NOT PACKED. `inf`/`-inf`/`nan` are the values `int` SHARES with
+// `float` (formal semantics 4, kept by v5), stored as ordinary inline IEEE bits
+// in the float octants. So a tag-byte-INT Item ALWAYS decodes to a finite band
+// value -- the payload invariant every consumer may rely on.
+//
+// History: v4 (C16) instead carried the value's own IEEE bits rotated left by
+// one, which put int in the `100` octant and made int/float share a native
+// lane. That is retired with the double lane; see the design doc §1 for the
+// v1-v5 arc and `Lambda_Type_Int_Boxing.md` for the rotation scheme itself.
+#define ITEM_INT_PAYLOAD_MASK  UINT64_C(0x00FFFFFFFFFFFFFF)  // low 56 bits
 
-// INT53 is no longer a carrier capacity: nothing is packed into 53 bits. It
-// survives as (a) the literal/parser ingestion band (C16 rulings 6 + 9) and
-// (b) the bound below which i64 and double arithmetic agree exactly, which is
-// what a range-proven native i64 lane must prove.
+// The band. Under v5 this is the WHOLE int domain -- not just the literal
+// ingestion rule -- so it is simultaneously the carrier capacity, the
+// saturation point, and the `int <= float` subtyping edge (§5.1: every band
+// value converts to double exactly, which is why int53 beats int56).
 #define INT53_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
 #define INT53_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
 
-// The int sentinels. Payloads 0 and 1 are deliberately the same bits the
-// retired compact encoding used for 0 and +1 — the two hottest int values keep
-// their representation across the change.
-#define ITEM_INT_ZERO     (ITEM_INT | UINT64_C(0))
-#define ITEM_INT_ONE      (ITEM_INT | UINT64_C(1))
-#define ITEM_INT_NEG_ONE  (ITEM_INT | UINT64_C(2))
-// History: C16 first gave `int` its OWN poison sentinels here (ITEM_INT_INF /
-// _NEG_INF / _NAN, tags 3-5) so `7 div 0` stayed inside int. That was retired
-// when inf/nan merged into one representation shared with float: the sentinels
-// forced every int -> machine-integer lowering to special-case them, and the
-// count of such sites (45 in the core, 423 more in LambdaJS) made the carve-out
-// cost far more than it bought. Poison is now the ordinary inline IEEE bits.
-#define ITEM_INT_SENTINEL_MAX  UINT64_C(2)
+// Raw IEEE bit patterns for the three shared poison values.
+#define LAMBDA_IEEE_INF_BITS      UINT64_C(0x7FF0000000000000)
+#define LAMBDA_IEEE_NEG_INF_BITS  UINT64_C(0xFFF0000000000000)
+#define LAMBDA_IEEE_NAN_BITS      UINT64_C(0x7FF8000000000000)
 
-// An int Item is inline iff it sits in the `100` octant. Bits 62-61 are clear
-// there (it is not a double), so after the double test the sign bit alone
-// decides — see `Item::type_id()`.
-#define LAMBDA_ITEM_IS_INLINE_INT(item_bits)  (((int64_t)(item_bits)) < 0)
+// LANE SENTINELS -- PRIVATE to the native i64 lane (§5.1). IEEE bits cannot
+// live in an i64, so within the lane only, poison is three reserved i64 values.
+// They are converted at box/unbox and NEVER escape the lane: no Item, no
+// container, no guest bridge ever sees one.
+//
+// Placed at the two's-complement extremes for two reasons. (1) Degradation:
+// they sit >= 2^63 - 2^54 from the band, so a sentinel that leaks past a
+// forgotten check lands far out of band and re-poisons at the next band check
+// instead of laundering into a finite value. (2) `neg`/`abs` become BRANCH-FREE
+// total -- -(INT64_MIN) wraps to itself so nan stays nan, -(INT64_MAX) is
+// INT64_MIN+1 so +inf becomes -inf, and the band is symmetric so every finite
+// case closes. The classic two's-complement negation trap becomes the mechanism
+// that propagates poison correctly.
+#define INT_LANE_NAN      INT64_MIN
+#define INT_LANE_NEG_INF  (INT64_MIN + 1)
+#define INT_LANE_INF      INT64_MAX
 
-static inline uint64_t lambda_rotr64(uint64_t v, unsigned n) {
-    n &= 63u;
-    return n == 0 ? v : (v >> n) | (v << (64u - n));
-}
-
-// Box a double known to be an integral value (or int poison) as an `int` Item.
-// An IEEE special: exponent all ones, so inf (mantissa 0) or nan. These are
-// the values `int` and `float` SHARE -- one representation, stored inline as
-// raw bits in the float octants, never relocated into a sentinel.
+// An IEEE special: exponent all ones, so inf (mantissa 0) or nan.
 #define LAMBDA_ITEM_IS_IEEE_SPECIAL(b) \
     (((b) & UINT64_C(0x7FF0000000000000)) == UINT64_C(0x7FF0000000000000))
 
@@ -1373,64 +1375,74 @@ static inline bool lambda_item_is_merged_poison(uint64_t bits) {
     return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
 }
 
-static inline uint64_t lambda_int_box_double(double value) {
-    uint64_t bits;
-    __builtin_memcpy(&bits, &value, sizeof(bits));
-    if ((bits & ITEM_INT_CLASS_MASK) == ITEM_INT_CLASS_BITS) {
-        return lambda_rotr64(bits, 63);  // rotate left by one
+// Is this Item word a packed (finite) int? The tag byte alone decides -- but
+// the double test must come first, because an inline double can carry any high
+// byte. Callers inside type_id() have already excluded doubles.
+#define LAMBDA_ITEM_IS_PACKED_INT(item_bits) \
+    ((((item_bits) & ITEM_HIGH_BYTE_MASK) >> 56) == (uint64_t)LMD_TYPE_INT)
+
+// Box a LANE value as an int Item. TOTAL: the three sentinels become their
+// shared IEEE values, and an out-of-band finite value SATURATES by sign rather
+// than truncating (formal semantics 4.9 -- an int result that cannot be carried
+// as an int is +/-inf, never a wrapped or error value). So `i2it` never fails,
+// which is the O1-class safety property v4 established and v5 keeps.
+static inline uint64_t lambda_int_box_lane(int64_t lane) {
+    if (lane >= INT53_MIN && lane <= INT53_MAX) {
+        return ITEM_INT | ((uint64_t)lane & ITEM_INT_PAYLOAD_MASK);
     }
-    if (value == 0.0) return ITEM_INT_ZERO;      // both signed zeros: int has one 0
-    if (value == 1.0) return ITEM_INT_ONE;
-    if (value == -1.0) return ITEM_INT_NEG_ONE;
-    // `int` and `float` share one poison representation: the ordinary inline
-    // IEEE bits (formal semantics 4). No int-specific sentinel, so the 45 sites
-    // that lower an int Item to a machine integer can no longer silently
-    // destroy nan-ness -- comparisons come out unordered and isnan works, from
-    // the hardware. inf/nan need no relocation because their exponent is 2047,
-    // whose top three bits are `111`: the raw bits already sit in the
-    // inline-float octants.
-    if (LAMBDA_ITEM_IS_IEEE_SPECIAL(bits)) return bits;
-    // |v| >= 2^257 -- beyond what the int octant can tag. Formal semantics 4.9:
-    // an int result that cannot be carried as an int SATURATES to +/-int.inf,
-    // keeping the sign, exactly as IEEE overflows a double to +/-inf rather
-    // than to nan. Returning the raw bits here instead let the value keep its
-    // magnitude but lose its tag, so an `int` silently became a `float` just by
-    // growing; saturating closes int arithmetic in int at every magnitude.
-    // Note `int` therefore saturates far earlier than `float` (2^257 vs
-    // ~2^1024) -- an encoding property, not a domain one.
-    return value > 0.0 ? UINT64_C(0x7FF0000000000000)
-                       : UINT64_C(0xFFF0000000000000);
+    if (lane == INT_LANE_NAN) return LAMBDA_IEEE_NAN_BITS;
+    // covers both +/-inf sentinels AND ordinary out-of-band saturation
+    return lane > 0 ? LAMBDA_IEEE_INF_BITS : LAMBDA_IEEE_NEG_INF_BITS;
+}
+
+// Box a double known to be integral (or poison) as an int Item. The caller's
+// contract is integrality; magnitude is handled here by saturation.
+static inline uint64_t lambda_int_box_double(double value) {
+    if (value != value) return LAMBDA_IEEE_NAN_BITS;
+    if (value > (double)INT53_MAX) return LAMBDA_IEEE_INF_BITS;
+    if (value < (double)INT53_MIN) return LAMBDA_IEEE_NEG_INF_BITS;
+    return ITEM_INT | ((uint64_t)(int64_t)value & ITEM_INT_PAYLOAD_MASK);
+}
+
+// The LANE value of an int Item: finite payloads sign-extend, poison maps to
+// its lane sentinel. This is the ONLY place an Item becomes a lane value.
+static inline int64_t lambda_int_item_to_lane(uint64_t item_bits) {
+    if (item_bits & ITEM_DBL_MASK) {  // shared poison, inline IEEE
+        if ((item_bits & UINT64_C(0x000FFFFFFFFFFFFF)) != 0) return INT_LANE_NAN;
+        return (item_bits >> 63) ? INT_LANE_NEG_INF : INT_LANE_INF;
+    }
+    return ((int64_t)(item_bits << 8)) >> 8;  // sign-extend the 56-bit payload
 }
 
 // The value of an int Item as a double. Poison comes back as the IEEE special
 // it denotes, so numeric consumers need no poison branch.
+// The value of an int Item as a double. Poison comes back as the IEEE special
+// it denotes, so numeric consumers need no poison branch. Exact for every
+// finite value: the band is chosen precisely so that int -> double never
+// rounds (§5.1 -- this is what `int <= float` rests on).
 static inline double lambda_int_unbox_double(uint64_t item_bits) {
     double result;
-    uint64_t bits;
-    // ORDER MATTERS. LAMBDA_ITEM_IS_INLINE_INT is a bare sign test whose
-    // contract is that bits 62-61 are ALREADY known clear, so the double test
-    // has to come first. `-inf` (0xFFF0...) has the sign bit set, so testing
-    // for an inline int first misread it as a rotated int and returned garbage
-    // -- while `+inf` (0x7FF0...) fell through correctly, which is exactly the
-    // asymmetry that surfaced: `1 div 0` was right and `-1 div 0` was not.
     if (item_bits & ITEM_DBL_MASK) {  // shared inf/nan, stored as raw IEEE bits
         __builtin_memcpy(&result, &item_bits, sizeof(result));
         return result;
     }
-    if (LAMBDA_ITEM_IS_INLINE_INT(item_bits)) {
-        bits = lambda_rotr64(item_bits, 1);
-        __builtin_memcpy(&result, &bits, sizeof(result));
-        return result;
-    }
-    // Only three sentinels remain: 0 and +/-1, whose exponents (0 and 1023) fall
-    // outside the `100` octant so rotation cannot tag them. inf and nan are not
-    // among them -- they return through the DBL_MASK arm above as raw bits.
-    switch (item_bits & ~ITEM_HIGH_BYTE_MASK) {
-    case 1:  return 1.0;
-    case 2:  return -1.0;
-    default: return 0.0;
-    }
+    return (double)(((int64_t)(item_bits << 8)) >> 8);
 }
+
+// Lane <-> double conversions. Header-only because `core/` uses them and must
+// not link `runtime/`; the runtime keeps thin `_c` wrappers so the JIT registry
+// has a callable symbol.
+static inline double lambda_int_lane_to_double(int64_t lane) {
+    return lambda_int_unbox_double(lambda_int_box_lane(lane));
+}
+
+static inline int64_t lambda_double_to_int_lane(double value) {
+    if (value != value) return INT_LANE_NAN;
+    if (value > (double)INT53_MAX) return INT_LANE_INF;
+    if (value < (double)INT53_MIN) return INT_LANE_NEG_INF;
+    return (int64_t)value;
+}
+
 
 // (The retired int-poison classifiers lived here. With one shared inf/nan
 // representation, "is this poison?" is lambda_item_is_merged_poison() and
@@ -1467,13 +1479,10 @@ static inline uint64_t lambda_uint64_ptr_to_item_bits(const uint64_t* ptr) {
 inline uint64_t b2it(uint8_t bool_val) {
     return bool_val >= BOOL_ERROR ? ITEM_ERROR : ((((uint64_t)LMD_TYPE_BOOL)<<56) | bool_val);
 }
-// Box an int64 as an `int` Item. Total by construction: every int64 magnitude
-// is far below the 2^257 inline ceiling, so there is no overflow arm and no
-// ITEM_ERROR. That retired arm was the O1 divergence — a boxed out-of-band
-// value became the bare error singleton while the same expression computed
-// natively did not. Values above 2^53 round to the nearest representable
-// integer, which is the C16 domain answer rather than a failure.
-#define i2it(int_val)        lambda_int_box_double((double)(int64_t)(int_val))
+// Box an int64 as an `int` Item. v5 closes the finite domain at int53, so
+// out-of-band input saturates to the shared IEEE infinity instead of wrapping,
+// silently rounding, or producing an error Item.
+#define i2it(int_val)        lambda_int_box_lane((int64_t)(int_val))
 // BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       lambda_int64_ptr_to_item_bits((const int64_t*)(long_ptr))
@@ -1859,7 +1868,7 @@ extern "C" {
     ArrayNum* array_float_new(int64_t length);
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
-    void array_int_set(ArrayNum *arr, int64_t index, double value);
+    void array_int_set(ArrayNum *arr, int64_t index, int64_t lane);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
     Item array_num_read_item(ArrayNum *arr, int64_t index);
     double array_num_read_double(ArrayNum *arr, int64_t index);
@@ -1920,7 +1929,14 @@ extern "C" {
     Item v2it(List *list);
 
     Item flt2it(double dval);  // canonical double -> Item encoder
-    Item int2it(double value);     // canonical C16 int encoder
+    Item int2it(double value);     // integral double -> int Item (boundary form)
+    Item int2it_lane(int64_t lane); // LANE value -> int Item (v5 canonical encoder)
+    double lambda_int_lane_to_double_c(int64_t lane);
+    int64_t lambda_double_to_int_lane_c(double value);
+    int64_t lambda_item_to_int_lane_c(uint64_t item_bits);
+    int64_t lambda_int_lane_add_slow(int64_t a, int64_t b);
+    int64_t lambda_int_lane_sub_slow(int64_t a, int64_t b);
+    int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b);
     Item int2it_i64(int64_t value); // same encoder, native-int64 caller
     Item int2it_i64_or_error(int64_t value); // + legacy INT64_ERROR boundary
     Item push_d(double dval);
@@ -1978,7 +1994,7 @@ extern "C" {
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     // length function
-    double fn_len(Item item);
+    int64_t fn_len(Item item);
     Item fn_int(Item a);
     int64_t fn_int64(Item a);
     Item fn_float(Item a);
@@ -2155,10 +2171,10 @@ extern "C" {
     // Collection length — type-specialized native variants
     // G0: these return a Lambda `int`, so they return int's one native
     // representation. Their receivers are raw pointers, so none can fail.
-    double fn_len_l(List* list);       // list length
-    double fn_len_a(Array* arr);       // array length
-    double fn_len_s(String* str);      // string length (UTF-8 aware)
-    double fn_len_e(Element* elmt);    // element children count
+    int64_t fn_len_l(List* list);       // list length
+    int64_t fn_len_a(Array* arr);       // array length
+    int64_t fn_len_s(String* str);      // string length (UTF-8 aware)
+    int64_t fn_len_e(Element* elmt);    // element children count
 
     // Boolean operations
     Bool fn_not_u(Bool x);
@@ -2304,8 +2320,8 @@ extern "C" {
     Bool fn_starts_with_str(String* str, String* prefix);   // native String* variant
     Bool fn_ends_with(Item str, Item suffix);
     Bool fn_ends_with_str(String* str, String* suffix);     // native String* variant
-    double fn_index_of(Item str, Item sub);
-    double fn_last_index_of(Item str, Item sub);
+    int64_t fn_index_of(Item str, Item sub);
+    int64_t fn_last_index_of(Item str, Item sub);
     Item fn_trim(Item str);
     Item fn_trim_start(Item str);
     Item fn_trim_end(Item str);
@@ -2342,8 +2358,8 @@ extern "C" {
     Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
     Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
-    double fn_ord(Item str);           // ord(str) - Unicode code point, semantically Lambda int
-    double fn_ord_str(String* str);    // native String* variant, semantically Lambda int
+    int64_t fn_ord(Item str);           // ord(str) - Unicode code point, semantically Lambda int
+    int64_t fn_ord_str(String* str);    // native String* variant, semantically Lambda int
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);

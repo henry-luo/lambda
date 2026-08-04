@@ -1,9 +1,9 @@
-"=== int overflow promotion ==="
-9007199254740992
+"=== int overflow saturation ==="
+inf
 int
--9007199254740992
+-inf
 int
-18014398509481982
+inf
 int
-9007199254740992
+inf
 int

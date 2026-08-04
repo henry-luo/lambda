@@ -485,7 +485,7 @@ Item array_num_read_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0) return ItemNull;
     if (!array_num_resolve_data(array, false) && array->length > 0) return ItemNull;
     switch (array->get_elem_type()) {
-        case ELEM_INT:     return (Item){.item = lambda_int_box_double(array->float_items[offset])};
+        case ELEM_INT:     return (Item){.item = lambda_int_box_lane(array->items[offset])};
         case ELEM_INT64:   return box_int64_value(array->items[offset]);
         case ELEM_FLOAT64:   return push_d(array->float_items[offset]);
         case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
@@ -509,9 +509,10 @@ double array_num_read_double(ArrayNum* arr, int64_t offset) {
     if (!array_num_resolve_data(arr, false) && arr->length > 0) return 0.0;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
-        // C16: the `int` lane is double-backed — an int is a float64-representable
-        // integer, and only a double lane can also hold int.inf/int.nan.
-        return arr->float_items[offset];
+        // v5: the `int` lane is i64 and stores lane values (band integers or
+        // the three lane sentinels), so reading as a double goes through the
+        // lane->double map, which turns a sentinel back into its IEEE value.
+        return lambda_int_lane_to_double(arr->items[offset]);
     case ELEM_INT64:
         return (double)arr->items[offset];
     case ELEM_FLOAT64:
@@ -709,11 +710,11 @@ ArrayNum* array_int_new(int64_t length) {
 }
 
 ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(double))) {
+    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(int64_t))) {
         va_list args;
         va_start(args, count);
         for (int i = 0; i < count; i++) {
-            arr->float_items[i] = (double)va_arg(args, int64_t);
+            arr->items[i] = va_arg(args, int64_t);   // v5: lane storage
         }
         va_end(args);
     }
@@ -729,7 +730,7 @@ Item array_int_get(ArrayNum *array, int64_t index) {
         log_debug("array_int_get: index out of bounds: %lld", (long long)index);
         return ItemNull;  // return null instead of error
     }
-    Item item = (Item){.item = lambda_int_box_double(array->float_items[index])};
+    Item item = (Item){.item = lambda_int_box_lane(array->items[index])};
     return item;
 }
 
@@ -837,8 +838,12 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
     }
 }
 
-// G0: the value arrives in `int`'s one native lane, the double.
-void array_int_set(ArrayNum *arr, int64_t index, double value) {
+// v5: the value arrives in `int`'s native LANE (i64), so the ABI is integral.
+// The backing store is still D1's double array -- correct at every band value
+// (exact to 2^53) and for poison (a lane sentinel widens to its IEEE form).
+// Flipping the storage itself to i64 is a recorded follow-up: it is what
+// re-enables the SIMD kernels D1 had to gate to ELEM_INT64.
+void array_int_set(ArrayNum *arr, int64_t index, int64_t lane) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;
     }
@@ -847,7 +852,7 @@ void array_int_set(ArrayNum *arr, int64_t index, double value) {
         return;
     }
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
-    arr->float_items[index] = value;
+    arr->items[index] = lane;   // v5: ELEM_INT stores the lane value directly
     if (index >= arr->length) {
         arr->length = index + 1;
     }
@@ -950,7 +955,7 @@ void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
-        arr->float_items[index] = (double)value;
+        arr->items[index] = value;   // v5: machine int IS a lane value
         break;
     case ELEM_INT64:
         arr->items[index] = value;
@@ -1126,8 +1131,9 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
-        // Poison rides through as the IEEE special it denotes; no lane sentinel.
-        arr->float_items[index] = item_to_float_value(value);
+        // v5: store the LANE value -- poison becomes its lane sentinel here and
+        // is mapped back to the shared IEEE value on read.
+        arr->items[index] = lambda_double_to_int_lane(item_to_float_value(value));
         break;
     case ELEM_INT64:
         arr->items[index] = item_to_int_value(value);
@@ -2999,8 +3005,9 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             for (int64_t i = 0; i < length; i++) {
                 // compact ArrayNum lanes do not live in items[]; widen through
                 // Item access so sized numeric payloads are decoded first.
-                // C16: the int lane is double-backed.
-                typed->float_items[i] = item_to_float_value(array_num_get(src, i));
+                // v5: the int lane is i64, so land the LANE value here.
+                typed->items[i] = lambda_double_to_int_lane(
+                    item_to_float_value(array_num_get(src, i)));
             }
             return typed;
         }
