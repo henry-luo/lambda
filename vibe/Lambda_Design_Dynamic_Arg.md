@@ -54,6 +54,31 @@ number of register/stack operands is discovered from `argc` at runtime. Doing
 that requires a generic array ABI, an interpreter/libffi-style bridge, or a
 precompiled family of fixed signatures.
 
+## Internal MIR register names
+
+MIR names are NUL-terminated C strings and are compared by spelling.  They are
+an implementation detail, not LambdaJS or Core Lambda binding identities.
+Therefore the shared internal-register allocator uses this compact scheme:
+
+```text
+%r<lowercase-hex-register-serial>
+```
+
+For example, the 42nd generated register in one MIR function is `%r2a`.  The
+serial is the existing monotonic per-function register counter, so it already
+distinguishes lexical shadows and temporaries.  `%` is accepted as an initial
+MIR name character but cannot begin an ordinary Lambda or JavaScript source
+identifier; this keeps generated registers distinct from source-derived formal
+names during the remaining migration.
+
+The register allocator must not embed source spellings in these names.  Source
+spelling and lexical scope remain the responsibility of each language's binding
+resolver, which maps a resolved binding to its `MIR_reg_t`.  External ABI names
+(imports, exports, and runtime symbols) remain exact C-string names.  Direct
+source-derived MIR formal names are a separate follow-up: they must be mapped
+or retained by parameter index before the compiler-wide source-name buffers can
+be retired.
+
 LambdaJS already has the generic dynamic boundary:
 
 ```text
@@ -569,6 +594,12 @@ Required boundary behavior:
   actuals, even though the JS generic boundary can hold more. A long data set
   crosses as one collection until a future explicit spread/bridge API is
   designed. The bridge then supplies a rooted JS `Item* + argc` span.
+- **Current export bridge limit:** the existing Core Lambda-to-JS export bridge
+  only publishes `js_call_export_0_into` through `js_call_export_8_into`.
+  Therefore a Core-to-JS direct-symbol call with more than eight operands is
+  not supported today. This is an interop-only limitation, not a LambdaJS
+  adapter-span limit; replace the fixed wrapper family with an explicit rooted
+  span bridge as part of the deferred interop work.
 - **Context and heap ownership:** a span rooted in one runtime/context is not
   automatically valid in another. Cross-context invocation must either prove
   a shared heap/root domain or copy through a bridge-owned exact root span.

@@ -1710,7 +1710,7 @@ node-official-report:
 	@$(PYTHON) -B test/node/node_official_report.py
 
 ensure-yaml-submodule:
-	@if [ ! -f test/yaml/README.md ]; then \
+	@if [ ! -f test/yaml/229Q/=== ]; then \
 		echo "Initializing test/yaml submodule..."; \
 		git submodule update --init test/yaml; \
 	fi

@@ -214,7 +214,9 @@ void jm_emit_pending_exception_exit(JsMirTranspiler* mt);
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 void jm_push_scope(JsMirTranspiler* mt);
-int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname);
+int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
+    JsMirVarEntry* resolved_var);
+JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index);
 bool jm_has_use_strict_directive(JsFunctionNode* fn);
 void jm_pop_scope(JsMirTranspiler* mt);
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
@@ -386,6 +388,7 @@ void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t fu
 void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler* mt);
 int jm_count_params(JsFunctionNode* fn);
 int jm_formal_length(JsFunctionNode* fn);
+JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node);
 void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);;

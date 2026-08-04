@@ -5,12 +5,12 @@
     {
       "in_func": "_guarded_load_#",
       "expect_seq": [
-        { "pattern": "mov\tidx_type_" },
-        { "pattern": "eq\tidx_type_ok_" },
-        { "pattern": "mov\tidx_flags_" },
-        { "pattern": "and\tidx_shaped_" },
-        { "pattern": "mov\tidx_elem_" },
-        { "pattern": "eq\tidx_elem_ok_" },
+        { "pattern": "call\tit2d_p, it2d" },
+        { "pattern": "and\t{{r}}, {{r}}, 72057594037927935" },
+        { "pattern": "mov\t{{r}}, u8:({{r}})" },
+        { "pattern": "eq\t{{r}}, {{r}}, 18" },
+        { "pattern": "mov\t{{r}}, u8:2({{r}})" },
+        { "pattern": "and\t{{r}}, {{r}}, 3" },
         { "pattern": "call\titem_at_p, item_at" }
       ],
       "count": {
@@ -24,10 +24,9 @@
       ],
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
-        { "pattern": "mov\tgtid_" },
-        { "pattern": "eq\tgtidok_" },
-        { "pattern": "call\tfn_array_set_p, fn_array_set" },
-        { "pattern": "mov\tfitms_" }
+        { "pattern": "call\tit2d_p, it2d" },
+        { "pattern": "call\tlambda_module_const_at_p" },
+        { "pattern": "call\tfn_array_set_p, fn_array_set" }
       ]
     }
   ]

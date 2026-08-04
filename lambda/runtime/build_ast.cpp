@@ -6835,6 +6835,9 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
                 method_name_view->length = fn_method->name->len;
                 tm->name = method_name_view;
                 tm->compiled_fn = NULL;  // populated after JIT compilation
+                // retain the source signature; the runtime wrapper alone cannot
+                // recover optional, variadic, or mutable-parameter semantics.
+                tm->fn_type = (struct TypeFunc*)fn_method->type;
                 tm->is_proc = (method->node_type == AST_NODE_PROC);
                 tm->next = NULL;
                 if (!obj_type->methods) { obj_type->methods = tm; }
@@ -10164,6 +10167,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             method_name_view->length = fn_method->name->len;
                             tm->name = method_name_view;
                             tm->compiled_fn = NULL;
+                            // retain the source signature; the runtime wrapper alone cannot
+                            // recover optional, variadic, or mutable-parameter semantics.
+                            tm->fn_type = (struct TypeFunc*)fn_method->type;
                             tm->is_proc = (method->node_type == AST_NODE_PROC);
                             tm->next = NULL;
                             if (!obj_type->methods) { obj_type->methods = tm; }

@@ -363,31 +363,39 @@ int jm_formal_length(JsFunctionNode* fn) {
     return needs_correction ? count : -1;
 }
 
+// Return the identifier bound by a parameter pattern, when it has one.
+JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node) {
+    if (!param_node) return NULL;
+    if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
+        return (JsIdentifierNode*)param_node;
+    }
+    if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+        // TsParameterNode: delegate to the wrapped pattern
+        TsParameterNode* tsp = (TsParameterNode*)param_node;
+        return jm_get_param_identifier(tsp->pattern);
+    }
+    if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
+        return jm_get_param_identifier(ap->left);
+    }
+    if (param_node->node_type == JS_AST_NODE_REST_ELEMENT ||
+        param_node->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)param_node;
+        return jm_get_param_identifier(sp->argument);
+    }
+    return NULL;
+}
+
 // Extract the MIR param name for a function parameter node.
 // For IDENTIFIER: "_js_<name>"; for ASSIGNMENT_PATTERN: extract left identifier name;
 // for REST_ELEMENT: extract argument identifier name; fallback: "_js_p<i>".
 void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size) {
-    if (!param_node) {
-        snprintf(out, out_size, "_js_p%d", index);
+    JsIdentifierNode* pid = jm_get_param_identifier(param_node);
+    if (pid && pid->name) {
+        snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
         return;
     }
-    if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
-        snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
-    } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
-        // TsParameterNode: delegate to the wrapped pattern
-        TsParameterNode* tsp = (TsParameterNode*)param_node;
-        jm_get_param_name(tsp->pattern, index, out, out_size);
-    } else if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
-        jm_get_param_name(ap->left, index, out, out_size);
-    } else if (param_node->node_type == JS_AST_NODE_REST_ELEMENT ||
-               param_node->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)param_node;
-        jm_get_param_name(sp->argument, index, out, out_size);
-    } else {
-        snprintf(out, out_size, "_js_p%d", index);
-    }
+    snprintf(out, out_size, "_js_p%d", index);
 }
 
 // ============================================================================

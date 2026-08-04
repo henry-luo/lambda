@@ -6,13 +6,15 @@
       "in_func": "_js_anon1_#_body",
       "expect_seq": [
         { "pattern": "call\tjs_new_function_mir_p" },
-        { "pattern": "mov\ti64:16(active_js_module_vars_" }
+        { "pattern": "mov\t{{r}}, i64:312(ctx)" },
+        { "pattern": "mov\t{{r}}, i64:({{r}})" },
+        { "pattern": "mov\ti64:16({{r}}), {{r}}" }
       ],
       "expect": [
         ", _js_helper_"
       ],
       "count": {
-        "mov\ti64:16(active_js_module_vars_": { "min": 1 }
+        "mov\ti64:16({{r}}), {{r}}": { "min": 1 }
       }
     }
   ]

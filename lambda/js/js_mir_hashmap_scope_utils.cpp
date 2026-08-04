@@ -666,14 +666,83 @@ void jm_push_scope(JsMirTranspiler* mt) {
     mt->var_scopes[mt->scope_depth] = em_var_scope_new(16);
 }
 
+static bool jm_arguments_param_matches_vname(JsAstNode* param, const char* vname) {
+    JsIdentifierNode* identifier = jm_get_param_identifier(param);
+    if (!identifier || !identifier->name || !vname || strncmp(vname, "_js_", 4) != 0) {
+        return false;
+    }
+    const char* source_name = vname + 4;
+    size_t source_len = strlen(source_name);
+    return identifier->name->len == source_len &&
+        memcmp(identifier->name->chars, source_name, source_len) == 0;
+}
+
+static JsAstNode* jm_arguments_param_at(JsMirTranspiler* mt, int param_index) {
+    if (!mt || !mt->arguments_params || param_index < 0) return NULL;
+    JsAstNode* param = mt->arguments_params;
+    for (int index = 0; param && index < param_index; index++) param = param->next;
+    return param;
+}
+
+static JsMirVarEntry* jm_find_var_for_param_identifier(JsMirTranspiler* mt,
+        JsIdentifierNode* identifier) {
+    if (!mt || !identifier || !identifier->name) return NULL;
+    int depth = mt->arguments_param_scope_depth;
+    if (depth < 0 || depth > mt->scope_depth || !mt->var_scopes[depth]) return NULL;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
+        JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
+        if (strncmp(entry->name, "_js_", 4) != 0) continue;
+        const char* source_name = entry->name + 4;
+        if (strlen(source_name) == identifier->name->len &&
+            memcmp(source_name, identifier->name->chars,
+                identifier->name->len) == 0) {
+            return &entry->var;
+        }
+    }
+    return NULL;
+}
+
 // v20: Find the formal parameter index for a variable name in arguments aliasing.
 // Returns -1 if not found or arguments aliasing is not active.
-int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname) {
-    if (mt->arguments_reg == 0 || mt->arguments_param_count <= 0) return -1;
-    for (int i = 0; i < mt->arguments_param_count; i++) {
-        if (strcmp(mt->arguments_param_names[i], vname) == 0) return i;
+int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
+        JsMirVarEntry* resolved_var) {
+    if (!mt || !resolved_var || mt->arguments_reg == 0 || !mt->arguments_params) return -1;
+    int matched_index = -1;
+    int index = 0;
+    for (JsAstNode* param = mt->arguments_params; param; param = param->next, index++) {
+        if (jm_arguments_param_matches_vname(param, vname)) {
+            // Duplicate sloppy formals map only the rightmost argument index.
+            matched_index = index;
+        }
     }
-    return -1;
+    if (matched_index < 0) return -1;
+    // A same-named inner declaration must not write through to a formal's
+    // mapped argument; binding identity, rather than spelling, decides it.
+    return jm_arguments_param_var(mt, matched_index) == resolved_var
+        ? matched_index : -1;
+}
+
+// Return the formal binding paired with arguments[index], if one exists.
+JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index) {
+    JsAstNode* param = jm_arguments_param_at(mt, param_index);
+    JsIdentifierNode* identifier = jm_get_param_identifier(param);
+    if (!identifier || !identifier->name) return NULL;
+
+    // Earlier duplicate formals are ordinary arguments properties, not mapped
+    // bindings.  The final matching formal is the one kept by the JS binding.
+    for (JsAstNode* later = param->next; later; later = later->next) {
+        JsIdentifierNode* later_identifier = jm_get_param_identifier(later);
+        if (later_identifier && later_identifier->name &&
+            later_identifier->name->len == identifier->name->len &&
+            memcmp(later_identifier->name->chars, identifier->name->chars,
+                identifier->name->len) == 0) {
+            return NULL;
+        }
+    }
+
+    return jm_find_var_for_param_identifier(mt, identifier);
 }
 
 // v20: Check if a function body starts with "use strict" directive.

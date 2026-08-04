@@ -5,12 +5,12 @@
     {
       "in_func": "main",
       "expect_seq": [
-        { "pattern": "), array_" },
+        { "pattern": "call\tarray_p, array" },
+        { "pattern": "mov\ti64:({{r}}), {{r}}" },
         { "pattern": "call\t_boxed_" },
         { "pattern": "call\tarray_end_p, array_end" }
       ],
       "count": {
-        "), array_": 1,
         "call\t_boxed_": 3,
         "call\tarray_end_p, array_end": 1
       }

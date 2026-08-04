@@ -497,8 +497,10 @@ struct JsMirTranspiler {
 
     // v20: arguments aliasing state
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)
-    int arguments_param_count;       // number of formal params mapped to arguments
-    char arguments_param_names[16][128]; // formal param var names (_js_xxx)
+    // The AST owns this linked list for the full compilation.  Copying formal
+    // names here capped mapped `arguments` semantics at 16 parameters.
+    JsAstNode* arguments_params;     // simple formal parameters mapped to arguments, or NULL
+    int arguments_param_scope_depth; // lexical scope containing those formal bindings
 
     // Batch preamble mode: compile harness (sta.js + assert.js) so func decls persist as module vars
     bool preamble_mode;

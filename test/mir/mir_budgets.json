@@ -47,7 +47,7 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation and its reviewed Phase 3 clean-return firewall.",
       "budgets": {
         "default": {
-          "module_insns": 131,
+          "module_insns": 187,
           "functions": {
             "_accumulate_#": {
               "insns": 88
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 1999
+          "module_insns": 2281
         }
       }
     },
@@ -238,7 +238,7 @@
       "description": "Typed numeric-array load guards plus the in-place procedure-parameter write guard, including reviewed Phase 3 return-firewall growth. C16/G1 re-baseline: `int` moved to the IEEE-double native lane. Instruction counts fell across most probes; the growth recorded here is the cost of the out-of-bounds fix -- an int-element array load now delivers a BOXED result because a double register cannot hold the ItemNull an out-of-range read must yield. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 512,
+          "module_insns": 654,
           "functions": {
             "_guarded_load_#": {
               "insns": 103
@@ -275,7 +275,7 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 418,
+          "module_insns": 504,
           "functions": {
             "_closed_gap_#": {
               "insns": 55
