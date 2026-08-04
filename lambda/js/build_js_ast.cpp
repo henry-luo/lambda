@@ -1259,54 +1259,6 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
     return (JsAstNode*)object;
 }
 
-// Build JavaScript function node
-static void js_func_add_lexical_for_head_name(JsTranspiler* tp, JsFunctionNode* func, TSNode node) {
-    if (func->lexical_for_head_capture_count >= 8) return;
-    if (strcmp(ts_node_type(node), "identifier") != 0) return;
-    int len = 0;
-    const char* text = ts_node_text_util(tp, node, &len);
-    if (!text || len <= 0 || len > 59) return;
-
-    char name[64];
-    snprintf(name, sizeof(name), "_js_%.*s", len, text);
-    for (int i = 0; i < func->lexical_for_head_capture_count; i++) {
-        if (strcmp(func->lexical_for_head_capture_names[i], name) == 0) return;
-    }
-    snprintf(func->lexical_for_head_capture_names[func->lexical_for_head_capture_count], 64, "%s", name);
-    func->lexical_for_head_capture_count++;
-}
-
-static void js_func_collect_lexical_for_head_names(JsTranspiler* tp, JsFunctionNode* func, TSNode node) {
-    if (ts_node_is_null(node) || func->lexical_for_head_capture_count >= 8) return;
-    const char* type = ts_node_type(node);
-    if (strcmp(type, "identifier") == 0) {
-        js_func_add_lexical_for_head_name(tp, func, node);
-        return;
-    }
-    uint32_t count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < count; i++) {
-        js_func_collect_lexical_for_head_names(tp, func, ts_node_named_child(node, i));
-    }
-}
-
-static void js_func_mark_enclosing_lexical_for_heads(JsTranspiler* tp, JsFunctionNode* func, TSNode func_node) {
-    TSNode node = ts_node_parent(func_node);
-    while (!ts_node_is_null(node)) {
-        if (strcmp(ts_node_type(node), "for_in_statement") == 0) {
-            TSNode kind = ts_node_child_by_field_name(node, "kind", 4);
-            if (!ts_node_is_null(kind)) {
-                const char* kind_type = ts_node_type(kind);
-                if (strcmp(kind_type, "let") == 0 || strcmp(kind_type, "const") == 0 ||
-                    strcmp(kind_type, "using") == 0) {
-                    TSNode left = ts_node_child_by_field_name(node, "left", 4);
-                    js_func_collect_lexical_for_head_names(tp, func, left);
-                }
-            }
-        }
-        node = ts_node_parent(node);
-    }
-}
-
 static bool js_ts_string_is_raw_use_strict(JsTranspiler* tp, TSNode str_node) {
     if (!tp || ts_node_is_null(str_node) || strcmp(ts_node_type(str_node), "string") != 0) {
         return false;
@@ -1359,12 +1311,6 @@ static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsA
     method->is_async = fn->is_async;
     method->is_generator = fn->is_generator;
     method->has_use_strict_directive = fn->has_use_strict_directive;
-    method->lexical_for_head_capture_count = fn->lexical_for_head_capture_count;
-    for (int i = 0; i < fn->lexical_for_head_capture_count && i < 8; i++) {
-        memcpy(method->lexical_for_head_capture_names[i],
-            fn->lexical_for_head_capture_names[i],
-            sizeof(method->lexical_for_head_capture_names[i]));
-    }
     method->ts_return_type = fn->ts_return_type;
     method->type = fn->type;
 }
@@ -1419,7 +1365,6 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
     func->has_use_strict_directive = false;
-    js_func_mark_enclosing_lexical_for_heads(tp, func, func_node);
 
     // Detect async: check for "async" anonymous child before "function" keyword or "=>"
     func->is_async = false;

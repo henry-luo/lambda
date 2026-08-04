@@ -319,47 +319,27 @@ static bool jm_scope_env_key_binding_start(const FnCapture* cap, uint32_t* out_s
     return true;
 }
 
-static bool jm_function_captures_lexical_for_head(const JsFunctionNode* fn,
-        const char* name) {
-    if (!fn || !name) return false;
-    for (int i = 0; i < fn->lexical_for_head_capture_count; i++) {
-        if (strcmp(fn->lexical_for_head_capture_names[i], name) == 0) return true;
-    }
-    return false;
-}
-
-static bool jm_ts_node_contains_byte(TSNode node, uint32_t byte) {
-    return !ts_node_is_null(node) &&
-        byte >= ts_node_start_byte(node) && byte < ts_node_end_byte(node);
-}
-
-static bool jm_ts_loop_owns_binding(TSNode node,
-        uint32_t closure_start, uint32_t binding_start) {
-    if (ts_node_is_null(node) || !jm_ts_node_contains_byte(node, closure_start)) return false;
-    const char* type = ts_node_type(node);
-    if (strcmp(type, "for_statement") == 0 ||
-        strcmp(type, "for_in_statement") == 0 ||
-        strcmp(type, "while_statement") == 0 ||
-        strcmp(type, "do_statement") == 0) {
+static bool jm_ts_loop_owns_binding(TSNode closure_node, uint32_t binding_start) {
+    if (ts_node_is_null(closure_node)) return false;
+    uint32_t closure_start = ts_node_start_byte(closure_node);
+    for (TSNode node = ts_node_parent(closure_node);
+         !ts_node_is_null(node); node = ts_node_parent(node)) {
+        const char* type = ts_node_type(node);
+        if (strcmp(type, "for_statement") != 0 &&
+                strcmp(type, "for_in_statement") != 0) continue;
         TSNode body = ts_node_child_by_field_name(node, "body", 4);
-        bool closure_in_body = jm_ts_node_contains_byte(body, closure_start);
-        bool binding_in_body = jm_ts_node_contains_byte(body, binding_start);
-        // Per-iteration bindings can be declared either in the loop body or
-        // in a for/for-in header immediately before that body.  A forced
+        if (ts_node_is_null(body)) continue;
+        bool closure_in_body = closure_start >= ts_node_start_byte(body) &&
+            closure_start < ts_node_end_byte(body);
+        bool binding_in_body = binding_start >= ts_node_start_byte(body) &&
+            binding_start < ts_node_end_byte(body);
+        // per-iteration bindings can be declared either in the loop body or
+        // in a for/for-in header immediately before that body. A forced
         // capture alone is not evidence of loop ownership: normal nested
         // callbacks force their parent lexical cell too.
         bool binding_in_header = binding_start >= ts_node_start_byte(node) &&
             binding_start < ts_node_start_byte(body);
-        if (closure_in_body && (binding_in_body || binding_in_header)) {
-            return true;
-        }
-    }
-    uint32_t child_count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        if (jm_ts_loop_owns_binding(ts_node_named_child(node, i),
-                closure_start, binding_start)) {
-            return true;
-        }
+        if (closure_in_body && (binding_in_body || binding_in_header)) return true;
     }
     return false;
 }
@@ -369,18 +349,20 @@ static bool jm_capture_is_loop_private(JsFuncCollected* child,
     if (!cap || !cap->force_env_capture || !cap->is_let_const) return false;
     uint32_t binding_start = 0;
     if (!jm_scope_env_key_binding_start(cap, &binding_start)) {
-        // Tree-sitter's for-in/for-of lexical head uses the compiler's
-        // dedicated marker rather than a source-keyed reference. Preserve its
-        // per-iteration cell without classifying ordinary forced captures as
-        // loop-private.
-        return child && jm_function_captures_lexical_for_head(child->node, cap->name);
+        // binding identity is retained from the AST when no source-keyed
+        // capture suffix was produced. This keeps loop ownership independent
+        // of copied names and their former fixed buffers.
+        if (!cap->entry || !cap->entry->node || !child || !child->node ||
+                !parent || !parent->node) return false;
+        JsAstNode* binding = (JsAstNode*)cap->entry->node;
+        if (ts_node_is_null(binding->node)) return false;
+        binding_start = ts_node_start_byte(binding->node);
     }
     if (!child || !child->node || !parent || !parent->node) return false;
     // A lexical declared in a loop body needs one closure cell per iteration;
     // a function-local lexical merely carries a source key to disambiguate it
     // from a same-named module binding and must remain in the shared parent env.
-    return jm_ts_loop_owns_binding(parent->node->node,
-        ts_node_start_byte(child->node->node), binding_start);
+    return jm_ts_loop_owns_binding(child->node->node, binding_start);
 }
 
 static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollected* parent) {
@@ -5088,6 +5070,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].private_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].parent_env_link_slot_override = -1;
+                        parent->captures[parent->capture_count].entry = child->captures[ci].entry;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
                         // A child closure can reference its enclosing named function

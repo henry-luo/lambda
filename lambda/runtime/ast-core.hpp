@@ -569,8 +569,6 @@ typedef struct AstFuncNode : AstNode {
     bool is_async;
     bool is_generator;
     bool has_use_strict_directive;
-    int lexical_for_head_capture_count;
-    char lexical_for_head_capture_names[8][64];
     TsTypeAnnotationNode* ts_return_type;
 } AstFuncNode;
 
