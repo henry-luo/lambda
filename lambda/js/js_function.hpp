@@ -50,6 +50,7 @@ struct JsFunction {
     const char** ctor_prop_names;
     int* ctor_prop_lens;
     int ctor_prop_count;
+    void* ctor_shape_cache;
     Context* runtime_context;
 };
 

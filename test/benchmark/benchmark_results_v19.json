@@ -1,0 +1,2998 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-08-05T00:23:45",
+    "command": "test/benchmark/run_benchmarks.py -s awfy -b json,havlak -n 3 -e mir,lambdajs -t 180 --cooldown 0 --results-output test/benchmark/benchmark_results_v19.json",
+    "engines": [
+      "mir",
+      "lambdajs"
+    ],
+    "runs": 3,
+    "timeout_s": 180,
+    "suite_cooldown_seconds": 0,
+    "results_output": "test/benchmark/benchmark_results_v19.json",
+    "fresh": false,
+    "suite_filters": [
+      "awfy"
+    ],
+    "bench_filters": [
+      "json",
+      "havlak"
+    ],
+    "canonical_duplicate_suites": {
+      "mandelbrot": "awfy",
+      "nbody": "awfy",
+      "richards": "awfy",
+      "deltablue": "awfy",
+      "primes": "kostya"
+    },
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 20420264,
+    "lambda_archive": null,
+    "lambda_archive_size_bytes": null,
+    "lambda_archive_sha256": null,
+    "test262_baseline": {
+      "status": "not_run"
+    },
+    "lambda_commit": "ffcd4b0f0e950f99ed5b6cef217a01b464d7b6cf",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "not_recorded",
+    "log_dir": null,
+    "typed_variants": false,
+    "finished_at": "2026-08-05T00:29:11"
+  },
+  "r7rs": {
+    "fib": {
+      "category": "recursive",
+      "mir": 22.665,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 7.785,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 29.304,
+      "quickjs": 21.405,
+      "nodejs": 2.285833,
+      "python": 23.652
+    },
+    "fibfp": {
+      "category": "recursive",
+      "mir": 18.479,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 9.784,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 29.965625,
+      "quickjs": 20.735,
+      "nodejs": 2.281625,
+      "python": 27.446
+    },
+    "tak": {
+      "category": "recursive",
+      "mir": 1.734,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.31,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 2.33275,
+      "quickjs": 3.068,
+      "nodejs": 0.908458,
+      "python": 2.38
+    },
+    "cpstak": {
+      "category": "closure",
+      "mir": 3.522,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.826,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 4.850167,
+      "quickjs": 7.839,
+      "nodejs": 1.41725,
+      "python": 4.696
+    },
+    "sum": {
+      "category": "iterative",
+      "mir": 36.958,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.639,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 15.036084,
+      "quickjs": 37.948,
+      "nodejs": 1.810917,
+      "python": 36.084
+    },
+    "sumfp": {
+      "category": "iterative",
+      "mir": 2.766,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.954,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1.352084,
+      "quickjs": 5.406,
+      "nodejs": 2.36325,
+      "python": 3.744
+    },
+    "nqueens": {
+      "category": "backtrack",
+      "mir": 3.743,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 6.333,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 82.4385,
+      "quickjs": 11.405,
+      "nodejs": 3.616875,
+      "python": 3.911
+    },
+    "fft": {
+      "category": "numeric",
+      "mir": 3.404,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.988,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 13.137833,
+      "quickjs": 5.721,
+      "nodejs": 3.759708,
+      "python": 5.17
+    },
+    "mbrot": {
+      "category": "numeric",
+      "mir": 12.65,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.845,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 11.011666,
+      "quickjs": 22.122,
+      "nodejs": 4.084416,
+      "python": 20.106
+    },
+    "ack": {
+      "category": "recursive",
+      "mir": 102.233,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 22.683,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 99.273042,
+      "quickjs": null,
+      "nodejs": 15.794958,
+      "python": 163.489
+    }
+  },
+  "awfy": {
+    "sieve": {
+      "category": "micro",
+      "mir": 0.627,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.305,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 0.597333,
+      "quickjs": 1.002,
+      "nodejs": 0.480667,
+      "python": 1839.5
+    },
+    "permute": {
+      "category": "micro",
+      "mir": 1.129,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 3.524,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 24.295834,
+      "quickjs": 1.59,
+      "nodejs": 0.909625,
+      "python": 2142.473
+    },
+    "queens": {
+      "category": "micro",
+      "mir": 0.664,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.562,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 14.266208,
+      "quickjs": 1.078,
+      "nodejs": 0.67875,
+      "python": 1185.868
+    },
+    "towers": {
+      "category": "micro",
+      "mir": 1.643,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 4.165,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 70.786833,
+      "quickjs": 2.336,
+      "nodejs": 1.159333,
+      "python": 1143.251
+    },
+    "bounce": {
+      "category": "micro",
+      "mir": 0.713,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.867,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 12.219459,
+      "quickjs": 0.918,
+      "nodejs": 0.688083,
+      "python": 1331.588
+    },
+    "list": {
+      "category": "micro",
+      "mir": 0.901,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.322,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 16.633,
+      "quickjs": 1.089,
+      "nodejs": 0.537041,
+      "python": 977.06
+    },
+    "storage": {
+      "category": "micro",
+      "mir": 1.034,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.892,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 34.475167,
+      "quickjs": 2.256,
+      "nodejs": 0.657959,
+      "python": 1288.027
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "mir": 59.099,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 58.924,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 350.598375,
+      "quickjs": 930.65,
+      "nodejs": 32.804167,
+      "python": 936.01
+    },
+    "nbody": {
+      "category": "compute",
+      "mir": 181.237,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 16.007,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1024.375792,
+      "quickjs": 168.661,
+      "nodejs": 6.004042,
+      "python": 171.822
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 2539.22,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 250.357,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 4412.610334,
+      "quickjs": 190.755,
+      "nodejs": 46.907291,
+      "python": 161.862
+    },
+    "json": {
+      "category": "macro",
+      "mir": 107.339,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 104.158,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 110.090125,
+      "quickjs": 11.204,
+      "nodejs": 2.763417,
+      "python": 7.062
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 94.143,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 97.168,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 3060.151917,
+      "quickjs": 101.988,
+      "nodejs": 12.574709,
+      "python": 70.458
+    },
+    "havlak": {
+      "category": "macro",
+      "mir": 60.89,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 58.947,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 106827.831125,
+      "quickjs": 3303.432,
+      "nodejs": 95.673583,
+      "python": 2157.57
+    },
+    "cd": {
+      "category": "macro",
+      "mir": 893.172,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "exit_1"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        }
+      },
+      "mir_typed": 842.515,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 27564.0005,
+      "quickjs": 954.039,
+      "nodejs": 35.478458,
+      "python": null
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "mir": 12.22,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 43.97,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 76.664041,
+      "quickjs": 23.635,
+      "nodejs": 4.2585,
+      "python": 10.31
+    },
+    "fannkuch": {
+      "category": "permutation",
+      "mir": 3.003,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.436,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 15.784958,
+      "quickjs": 7.225,
+      "nodejs": 4.2155,
+      "python": 4.882
+    },
+    "fasta": {
+      "category": "generation",
+      "mir": 1.802,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.258,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 74.869333,
+      "quickjs": 8.813,
+      "nodejs": 6.1765,
+      "python": 1.871
+    },
+    "knucleotide": {
+      "category": "hashing",
+      "mir": 5.385,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 5.871,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 151.198,
+      "quickjs": null,
+      "nodejs": 5.208541,
+      "python": 3.615
+    },
+    "pidigits": {
+      "category": "bignum",
+      "mir": 0.308,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.309,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 0.342875,
+      "quickjs": 0.136,
+      "nodejs": 2.019583,
+      "python": 0.098
+    },
+    "regexredux": {
+      "category": "regex",
+      "mir": 1.292,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.293,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 40.362708,
+      "quickjs": null,
+      "nodejs": 2.52225,
+      "python": 1.558
+    },
+    "revcomp": {
+      "category": "string",
+      "mir": 1.543,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.545,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 133.962708,
+      "quickjs": null,
+      "nodejs": 3.61475,
+      "python": 0.086
+    },
+    "spectralnorm": {
+      "category": "numeric",
+      "mir": 47.342,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 20.363,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 423.452667,
+      "quickjs": 63.584,
+      "nodejs": 2.594291,
+      "python": 42.925
+    }
+  },
+  "kostya": {
+    "brainfuck": {
+      "category": "interpreter",
+      "mir": 549.145,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 416.587,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1045.752875,
+      "quickjs": 881.905,
+      "nodejs": 33.471208,
+      "python": 690.725
+    },
+    "matmul": {
+      "category": "numeric",
+      "mir": 178.432,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1294.06,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 898.451917,
+      "quickjs": 536.849,
+      "nodejs": 15.308291,
+      "python": 515.599
+    },
+    "primes": {
+      "category": "numeric",
+      "mir": 69.308,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 11.578,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 99.818167,
+      "quickjs": 94.056,
+      "nodejs": 4.383333,
+      "python": 90.509
+    },
+    "base64": {
+      "category": "string",
+      "mir": 80.29,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 67.778,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1092.170459,
+      "quickjs": 155.813,
+      "nodejs": 17.094542,
+      "python": 77.197
+    },
+    "levenshtein": {
+      "category": "string",
+      "mir": 49.609,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 52.822,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 83.868167,
+      "quickjs": 54.262,
+      "nodejs": 3.905792,
+      "python": 66.006
+    },
+    "json_gen": {
+      "category": "data",
+      "mir": 23.095,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 25.377,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 55.493792,
+      "quickjs": 19.862,
+      "nodejs": 6.16475,
+      "python": 7.904
+    },
+    "collatz": {
+      "category": "numeric",
+      "mir": 7861.2,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 5077.37,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 2075.745208,
+      "quickjs": 6196.275,
+      "nodejs": 1413.404,
+      "python": 7349.041
+    }
+  },
+  "larceny": {
+    "triangl": {
+      "category": "search",
+      "mir": 1283.09,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 414.916,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 4114.191458,
+      "quickjs": 2163.568,
+      "nodejs": 66.152583,
+      "python": 2712.834
+    },
+    "array1": {
+      "category": "array",
+      "mir": 10.632,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 20.052,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 27.883708,
+      "quickjs": 35.846,
+      "nodejs": 1.892458,
+      "python": 30.252
+    },
+    "deriv": {
+      "category": "symbolic",
+      "mir": 32.186,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 130.885,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 344.602542,
+      "quickjs": 59.858,
+      "nodejs": 3.622917,
+      "python": 23.925
+    },
+    "diviter": {
+      "category": "iterative",
+      "mir": 19778.0,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1244.74,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 8391.809208,
+      "quickjs": 26701.759,
+      "nodejs": 468.651542,
+      "python": 23346.074
+    },
+    "divrec": {
+      "category": "recursive",
+      "mir": 24.37,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 2.575,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 29.153125,
+      "quickjs": 36.202,
+      "nodejs": 7.688417,
+      "python": 41.057
+    },
+    "gcbench": {
+      "category": "allocation",
+      "mir": 287.812,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1078.97,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1779.116208,
+      "quickjs": 548.713,
+      "nodejs": 23.405834,
+      "python": 251.976
+    },
+    "paraffins": {
+      "category": "combinat",
+      "mir": 2.308,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.707,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 3.275417,
+      "quickjs": 2.527,
+      "nodejs": 1.001584,
+      "python": 2.572
+    },
+    "pnpoly": {
+      "category": "numeric",
+      "mir": 142.897,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 20.726,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 125.661791,
+      "quickjs": 203.104,
+      "nodejs": 5.949958,
+      "python": 111.789
+    },
+    "puzzle": {
+      "category": "search",
+      "mir": 24.982,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 14.358,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 25.5665,
+      "quickjs": 29.253,
+      "nodejs": 3.2775,
+      "python": 19.028
+    },
+    "quicksort": {
+      "category": "sorting",
+      "mir": 18.714,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 23.846,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 65.774417,
+      "quickjs": 19.318,
+      "nodejs": 1.648333,
+      "python": 23.003
+    },
+    "ray": {
+      "category": "numeric",
+      "mir": 10.573,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 1.601,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 11.776875,
+      "quickjs": 13.88,
+      "nodejs": 3.582709,
+      "python": 13.293
+    }
+  },
+  "jetstream": {
+    "cube3d": {
+      "category": "3d",
+      "mir": 31.981,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 30.833,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1412.019,
+      "quickjs": null,
+      "nodejs": 18.951,
+      "python": null
+    },
+    "navier_stokes": {
+      "category": "numeric",
+      "mir": 1399.7,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 226.331,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1679.307,
+      "quickjs": 98.635,
+      "nodejs": 14.165,
+      "python": null
+    },
+    "splay": {
+      "category": "data",
+      "mir": 175.424,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 196.337,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 861.191,
+      "quickjs": 146.876,
+      "nodejs": 19.205,
+      "python": null
+    },
+    "hashmap": {
+      "category": "data",
+      "mir": 150.542,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "toolchain_missing",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 239.7,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 8384.906,
+      "quickjs": 316.101,
+      "nodejs": 15.334,
+      "python": null
+    },
+    "crypto_sha1": {
+      "category": "crypto",
+      "mir": 280.984,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 285.666,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 3327.324,
+      "quickjs": 218.547,
+      "nodejs": 8.667,
+      "python": null
+    },
+    "raytrace3d": {
+      "category": "3d",
+      "mir": 285.916,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "missing_port",
+        "go": "build_failed",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok",
+        "python": "missing_file"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 546.507,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 3117.264,
+      "quickjs": null,
+      "nodejs": 18.132,
+      "python": null
+    }
+  }
+}

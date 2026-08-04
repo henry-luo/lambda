@@ -110,6 +110,25 @@ pn test_bool_to_string() {
     print("\n")
 }
 
+// Test 11: a shape rebuild must retain a sibling abstract numeric contract.
+pn test_preserves_number_contract() {
+    let factor = 0.75
+    var obj = {items: fill(4, 0), threshold: int(floor(float(4) * factor))}
+    obj.items = [1]
+    print(obj.threshold)
+    print("\n")
+}
+
+// Test 12: a boxed system conversion must remain boxed at a shaped int write.
+pn test_u32_to_int_map_assignment() {
+    var state = {seed: 49734321}
+    var next: u32 = state.seed
+    next = next * 1103515245u32 + 12345u32
+    state.seed = int(next)
+    print(state.seed)
+    print("\n")
+}
+
 pn main() {
     test_int_to_string()
     test_int_to_float()
@@ -121,4 +140,6 @@ pn main() {
     test_type_change_in_loop()
     test_null_to_int()
     test_bool_to_string()
+    test_preserves_number_contract()
+    test_u32_to_int_map_assignment()
 }

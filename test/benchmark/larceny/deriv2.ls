@@ -7,7 +7,7 @@
 
 // Expression tags: 0=const, 1=var(x), 2=add, 3=mul
 // Unified shape: all nodes carry t, v, l, r (leaves set l/r to null)
-type Expr = {t: int, v: int, l: map, r: map}
+type Expr = {t: int, v: int, l: map?, r: map?}
 
 pn deriv(e: Expr) {
     if (e.t == 0) {

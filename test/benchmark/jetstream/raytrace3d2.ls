@@ -11,7 +11,7 @@
 // runs in ~85 ms without them. The types stay on PARAMETERS, which are borrows
 // and are worth ~2x here. Field reads go through fn_member either way: the
 // Phase 3 direct-offset path is disabled in transpile-mir.cpp.
-type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map, reflection: float}
+type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map?, reflection: float}
 type Scene = {triangles: array, lights: array, ambient: array, background: array, n_lights: int, n_triangles: int}
 type Light = {pos: array, colour: array}
 type Camera = {origin: array, d0: array, d1: array, d2: array, d3: array}
@@ -194,7 +194,9 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
     var i: int = 0
     while (i < scene.n_triangles) {
         var tri = (scene.triangles)[i]
-        var d: float = triangle_intersect(tri, origin, dir, near, far)
+        // An invalid intersection cannot be a hit; keep the soft error channel explicit.
+        var d_result = triangle_intersect(tri, origin, dir, near, far)
+        var d: float = match d_result { case error: -1.0 case float: d_result }
         if (d > 0.0) {
             far = d
             closest = tri
@@ -217,14 +219,16 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
     while (i < scene.n_lights) {
         var light = (scene.lights)[i]
         var to_light = vec_sub(light.pos, hit)
-        var distance: float = vec_length(to_light)
+        var distance_result = vec_length(to_light)
+        var distance: float = match distance_result { case error: 1.0 case float: distance_result }
         to_light = vec_scale(to_light, 1.0 / distance)
         // Shadow test
         var blocked = false
         var bi: int = 0
         while (bi < scene.n_triangles) {
             var tri = (scene.triangles)[bi]
-            var sd: float = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
+            var sd_result = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
+            var sd: float = match sd_result { case error: -1.0 case float: sd_result }
             if (sd > 0.0) {
                 blocked = true
                 bi = scene.n_triangles  // break
@@ -232,7 +236,8 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
             bi = bi + 1
         }
         if (blocked == false) {
-            var nl: float = vec_dot(normal, to_light)
+            var nl_result = vec_dot(normal, to_light)
+            var nl: float = match nl_result { case error: 0.0 case float: nl_result }
             if (nl > 0.0) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }

@@ -100,6 +100,8 @@ extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
+extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
+    TypeId value_type);
 
 // External typeset function
 
@@ -7894,7 +7896,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     int field_index = 0;
     int64_t byte_offset = (int64_t)fixed_slot_count * (int64_t)sizeof(void*);
     while (e) {
-        TypeId ft = (e == changed_entry) ? new_value_type : e->type->type_id;
+        Type* field_contract = e == changed_entry ? type_info[new_value_type].type : e->type;
 
         // allocate ShapeEntry + embedded StrView
         ShapeEntry* ne = (ShapeEntry*)pool_calloc(context->pool,
@@ -7910,7 +7912,10 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         ne->name_hash = e->name_hash ? e->name_hash : typemap_name_hash(nv->str, (int)nv->length);
         ne->predefined_id = e->predefined_id;
         ne->key_ref = e->key_ref;
-        ne->type = type_info[ft].type;
+        // Retain an unchanged field's full contract. Replacing `number` or a
+        // union with its LMD_TYPE_TYPE carrier makes the packed Item look like
+        // a Type* and corrupts it on the next validation read.
+        ne->type = field_contract;
         bool fixed_slot = field_index < fixed_slot_count;
         ne->byte_offset = fixed_slot ? e->byte_offset : byte_offset;
         ne->next = NULL;
@@ -7927,7 +7932,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         last = ne;
         prev = ne;
         if (!fixed_slot) {
-            byte_offset += type_info[ft].byte_size;
+            byte_offset += type_info[type_field_storage_type_id(field_contract)].byte_size;
         }
         field_index++;
         e = e->next;
@@ -8077,12 +8082,8 @@ static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
-    // NULL→T is blueprint establishment (slots are born NULL and the first real
-    // write tags them), so it must not detach. T→NULL is a genuine per-instance
-    // divergence: the in-place store writes a null word while a shared entry
-    // keeps claiming T, so a sibling instance would read this null back as a
-    // zero-valued T (e.g. `false` / 0).
-    if (field_type == LMD_TYPE_NULL) return false;
+    // FLOAT stores its numeric payload in the same double carrier as INT.
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return false;
     return true;
 }
 
@@ -8272,6 +8273,15 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
         return entry;
     }
+    TypeMap* transition = js_typemap_transition_for_type(map_item, entry, value_type);
+    if (transition) {
+        *map_type_slot = transition;
+        if (type_slot) *type_slot = transition;
+        ShapeEntry* refreshed = key_ref && property_key_requires_identity(key_ref)
+            ? typemap_hash_lookup_key(transition, key_ref)
+            : map_find_shape_entry(transition, key_cstr, key_len);
+        if (refreshed) return refreshed;
+    }
     TypeMap* clone = js_typemap_clone_for_mutation_pub(map_item);
     if (!clone) return entry;
     *map_type_slot = clone;
@@ -8398,12 +8408,9 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 return;
             }
 
-            // INT ↔ INT64 promotion — fast path (same byte size)
-            if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_INT64) ||
-                (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT)) {
-                map_field_store(field_ptr, value, value_type);
-                return;
-            }
+            // `int` and `int64` both occupy eight bytes, but their slot
+            // carriers differ (double versus int64_t).  Rebuild the field so
+            // subsequent reads use the carrier that was actually written.
 
             // NULL → INT/FLOAT/STRING/FUNC fast path — same byte size (all 8 bytes)
             // Avoids map_rebuild_for_type_change which allocates from data zone and

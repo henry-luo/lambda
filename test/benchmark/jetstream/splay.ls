@@ -13,7 +13,9 @@ pn create_node(key, value) {
 
 // Simple LCG pseudo-random number generator (deterministic)
 // u32 arithmetic intentionally wraps like the original 32-bit PRNG.
-pn next_random(state) {
+// The PRNG and tree are explicit inout values; ordinary parameters are
+// snapshots under COW and would lose the state update that makes keys unique.
+pn next_random(var state) {
     var s: u32 = state.seed
     s = s * 1103515245u32 + 12345u32
     state.seed = int(s)
@@ -29,7 +31,7 @@ pn splay_is_empty(tree) {
     return tree.root == null
 }
 
-pn splay(tree, key) {
+pn splay(var tree, key) {
     if (splay_is_empty(tree)) {
         return 0
     }
@@ -94,7 +96,7 @@ pn splay(tree, key) {
     return 0
 }
 
-pn splay_insert(tree, key, value) {
+pn splay_insert(var tree, key, value) {
     if (splay_is_empty(tree)) {
         tree.root = create_node(key, value)
         return 0
@@ -119,7 +121,7 @@ pn splay_insert(tree, key, value) {
     return 0
 }
 
-pn splay_remove(tree, key) {
+pn splay_remove(var tree, key) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -140,7 +142,7 @@ pn splay_remove(tree, key) {
     return removed
 }
 
-pn splay_find(tree, key) {
+pn splay_find(var tree, key) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -158,7 +160,7 @@ pn splay_find_max(node) {
     return node
 }
 
-pn splay_find_greatest_less_than(tree, key) {
+pn splay_find_greatest_less_than(var tree, key) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -201,7 +203,7 @@ pn generate_payload(depth: int, tag) {
             right_p: generate_payload(depth - 1, tag)}
 }
 
-pn insert_new_node(tree, rng) {
+pn insert_new_node(var tree, var rng) {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)
