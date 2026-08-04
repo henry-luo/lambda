@@ -169,6 +169,14 @@ LARCENY = [
     ("ray",        "numeric",    "test/benchmark/larceny/ray.ls",       "test/benchmark/larceny/ray.js",        "test/benchmark/larceny/python/ray.py"),
 ]
 
+# LJS-only library workloads. These are opt-in through `-s text` because they
+# have no Lambda/Python ports and are intended to measure the embedded JS APIs.
+TEXT = [
+    ("fast_diff", "text-diff", None, "test/benchmark/text/fast_diff.js", None),
+    ("microdiff", "data-diff", None, "test/benchmark/text/microdiff.js", None),
+    ("hyphen", "hyphenation", None, "test/benchmark/text/hyphen.js", None),
+]
+
 JETSTREAM_LS = [
     ("nbody",         "numeric", "test/benchmark/jetstream/nbody.ls"),
     ("cube3d",        "3d",      "test/benchmark/jetstream/cube3d.ls"),
@@ -219,7 +227,7 @@ STANDARD_SUITES = [
     ("larceny", LARCENY),
 ]
 
-ALL_SUITE_NAMES = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream"]
+ALL_SUITE_NAMES = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream", "text"]
 
 # These benchmark names represent the same standardized workloads in multiple
 # suites. Keep one authoritative row so timing and report populations do not
@@ -569,7 +577,7 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
 # Build the unified benchmark list
 # ============================================================
 
-def build_benchmark_list(suite_filters, bench_filters):
+def build_benchmark_list(suite_filters, bench_filters, include_text=False):
     """
     Build flat list of benchmarks to run based on suite/bench filters.
     Returns list of dicts with keys:
@@ -588,6 +596,24 @@ def build_benchmark_list(suite_filters, bench_filters):
                 continue
             benchmarks.append({
                 "suite": suite_name,
+                "name": bench_name,
+                "category": category,
+                "ls_path": ls_path,
+                "js_path": js_path,
+                "py_path": py_path,
+                "is_jetstream": False,
+                "ref_js": None,
+            })
+
+    # Text library benchmarks are intentionally opt-in: they are standalone
+    # LambdaJS workloads without corresponding Lambda or Python implementations.
+    if include_text or (suite_filters and match_filter("text", suite_filters)):
+        for entry in TEXT:
+            bench_name, category, ls_path, js_path, py_path = entry
+            if not match_filter(bench_name, bench_filters):
+                continue
+            benchmarks.append({
+                "suite": "text",
                 "name": bench_name,
                 "category": category,
                 "ls_path": ls_path,
@@ -620,7 +646,7 @@ def build_benchmark_list(suite_filters, bench_filters):
 
 def list_benchmarks():
     """Print all available benchmarks grouped by suite."""
-    all_b = build_benchmark_list(None, None)
+    all_b = build_benchmark_list(None, None, include_text=True)
     current_suite = None
     for b in all_b:
         if b["suite"] != current_suite:
@@ -828,7 +854,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
     row = {}
 
     # --- MIR Direct ---
-    if "mir" in engines:
+    if "mir" in engines and ls_path:
         untyped_path, typed_path = mir_script_variants(b)
         mir_path = untyped_path if include_typed else ls_path
         print(f"  MIR      ", end="", flush=True)
@@ -877,7 +903,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
     # `lambda.exe run --c2mir` was removed from the CLI, so the C2MIR column now
     # measures the native C ports through MIR's own C frontend (mac-deps/mir/c2m).
     for native_engine in ("c2mir", "go"):
-        if native_engine in engines:
+        if native_engine in engines and ls_path:
             run_native_engine(native_engine, suite, name, num_runs, timeout_s, results, row)
 
     if not is_js:
@@ -1053,7 +1079,7 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path
             print(f"{'=' * 70}")
 
         print(f"\n  {b['name']} ({b['category']}):")
-        if not os.path.exists(b["ls_path"]):
+        if b["ls_path"] and not os.path.exists(b["ls_path"]):
             print(f"    SKIPPED (file not found: {b['ls_path']})")
             continue
 
@@ -1168,7 +1194,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
     row = {}
 
     # --- MIR Direct ---
-    if "mir" in engines:
+    if "mir" in engines and ls_path:
         print(f"  MIR      ", end="", flush=True)
         peak, ok = mem_measure_n(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
         results[suite][name]["mir"] = peak
@@ -1180,7 +1206,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
     # frontend and MIR generator in-process; a Go binary carries its runtime and
     # GC heap), so they bound Lambda's RSS only loosely.
     for native_engine in ("c2mir", "go"):
-        if native_engine not in engines:
+        if native_engine not in engines or not ls_path:
             continue
         label = ENGINE_LABELS.get(native_engine, native_engine)
         print(f"  {label:<8} ", end="", flush=True)
@@ -1313,7 +1339,7 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
             print(f"{'=' * 70}")
 
         print(f"\n  {b['name']} ({b['category']}):")
-        if not os.path.exists(b["ls_path"]):
+        if b["ls_path"] and not os.path.exists(b["ls_path"]):
             print(f"    SKIPPED (file not found: {b['ls_path']})")
             continue
 

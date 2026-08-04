@@ -1,6 +1,6 @@
 # Lambda Benchmark Guide
 
-This document describes how to prepare, run, and report Lambda benchmarks across 6 suites and 6 engines.
+This document describes how to prepare, run, and report Lambda benchmarks across 6 canonical suites and an opt-in text-library suite.
 
 **Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py` from the project root. It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
 
@@ -23,10 +23,12 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 | **Kostya** | `kostya/` | 7 | [kostya/benchmarks](https://github.com/kostya/benchmarks) | Community: brainfuck, matmul, base64, JSON |
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
 | **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
+| **Text libraries** (opt-in) | `text/` | 3 | Embedded JS library sources | fast-diff, microdiff, and hyphen core workloads |
 
 **Total: 62 benchmarks**
 
 Each benchmark has a Lambda script (`.ls`), a JavaScript equivalent (`.js`), and where available a Python equivalent (`.py`).
+The text-library suite is JavaScript-only and runs with `-s text`; its workloads intentionally have no `.ls` or Python counterpart.
 
 ### File naming
 
