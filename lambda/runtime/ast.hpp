@@ -427,7 +427,6 @@ typedef struct NamespaceEntry {
 
 typedef struct Transpiler : Script {
     TSParser* parser;
-    StrBuf* code_buf;
     Runtime* runtime;
 
     // Error tracking for accumulated type errors

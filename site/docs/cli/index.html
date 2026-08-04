@@ -53,7 +53,6 @@ lambda &lt;command&gt; [options] [arguments]      # Run a subcommand</code></pre
       </thead>
       <tbody>
         <tr><td><code>-h, --help</code></td><td>Show help message</td><td></td></tr>
-        <tr><td><code>--c2mir</code></td><td>Use C2MIR JIT compilation</td><td><code>false</code></td></tr>
         <tr><td><code>--optimize=N</code></td><td>MIR JIT optimization level (0–3)</td><td><code>2</code></td></tr>
         <tr><td><code>--max-errors N</code></td><td>Max type errors before stopping</td><td><code>10</code></td></tr>
         <tr><td><code>--dry-run</code></td><td>Skip real I/O; fabricated results</td><td><code>false</code></td></tr>
@@ -66,7 +65,7 @@ lambda &lt;command&gt; [options] [arguments]      # Run a subcommand</code></pre
 <pre><code>lambda run [options] &lt;script.ls&gt;</code></pre>
 <pre><code># Example
 lambda run server.ls
-lambda run --c2mir script.ls</code></pre>
+lambda run server.ls</code></pre>
 
     <!-- validate -->
     <h2 id="validate"><code>validate</code> — Validate Data Against a Schema</h2>

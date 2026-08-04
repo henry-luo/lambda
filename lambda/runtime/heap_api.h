@@ -5,8 +5,7 @@
 // select their non-collecting construction paths explicitly.
 #include "../lambda.h"
 
-// Kept C++ linkage to match the active transpiler API; this is not callable
-// from the frozen C2MIR surface.
+// Keep C++ linkage to match the active runtime API.
 void* heap_alloc(int size, TypeId type_id);
 void heap_init();
 void heap_destroy();

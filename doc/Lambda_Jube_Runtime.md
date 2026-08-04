@@ -60,10 +60,11 @@ Supported builds use only the MIR Direct path:
 Lambda AST -> transpile-mir.cpp -> MIR API -> native code
 ```
 
-The retired C2MIR implementation in `transpile.cpp` and
-`transpile-call.cpp` remains as legacy reference source. It is excluded from
-the host and CLI build configurations and from generated test projects;
-supported binaries do not expose `--c2mir`.
+The retired C2MIR implementation (`transpile.cpp` and `transpile-call.cpp`) has
+been removed from the Lambda source tree. The host and CLI use MIR Direct;
+supported binaries do not expose `--c2mir`. The vendored MIR distribution still
+contains its upstream C2MIR sources because that dependency is not modified by
+Lambda.
 
 ## Boundary and ownership
 

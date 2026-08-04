@@ -272,7 +272,7 @@ echo "🔧 Cleanup"
 echo "=========="
 
 # Clean up test files
-rm -f test_*.ls _transpiled.c
+rm -f test_*.ls
 
 echo
 echo "📋 Test Summary"

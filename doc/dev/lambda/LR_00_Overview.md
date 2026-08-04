@@ -13,7 +13,7 @@ Lambda Script is a pure-functional, cross-platform scripting language for data p
 
 - **JIT-only execution, no interpreter.** A script is always compiled — parsed by Tree-sitter, built into a typed AST, lowered to [MIR](https://github.com/vnmakarov/mir) intermediate representation, and JIT-generated to native code. There is no tree-walking evaluator; what looks like an "evaluator" (`lambda-eval.cpp`) is in fact the C-ABI *runtime support library* the generated code calls into ([LR_09](LR_09_Runtime_Builtins.md)).
 - **A single 64-bit tagged value, `Item`.** Every value — scalar, container, document node, JIT temporary — is one tagged word, dispatched uniformly by `get_type_id` ([LR_03](LR_03_Value_and_Type_Model.md)). The same representation is shared with the embedded JavaScript engine and the document subsystems.
-- **One supported backend.** MIR Direct lowers the AST straight to MIR ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The former C-text/c2mir backend is retained only as archived source ([LR_06](LR_06_C_Transpiler.md)); it is excluded from core and Jube builds and is not tested for parity.
+- **One supported backend.** MIR Direct lowers the AST straight to MIR ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The former C-text/c2mir backend and its Lambda-side implementation have been removed; [LR_06](LR_06_C_Transpiler.md) is retained only as a historical design record.
 - **Garbage collection with a non-moving heap.** Object structs never move (so tagged pointers stay valid across collections), while variable-size data buffers live in a compacting data nursery ([LR_08](LR_08_Memory_and_GC.md)).
 - **Documents are first-class.** The `Element` type is simultaneously an ordered list of children and a keyed map of attributes, and the Mark API ([LR_11](LR_11_Mark_Data_API.md)) is the construction boundary every input parser builds through.
 
@@ -49,7 +49,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 2. **Load.** `load_script` reads the source, de-duplicates and circular-checks imports, and precompiles them in parallel.
 3. **Parse.** Tree-sitter produces a CST; `parse.c` is the thin wrapper over the generated grammar ([LR_02](LR_02_Parsing_AST.md)).
 4. **Build AST.** `build_script` walks the CST into a typed AST via `build_expr`, inferring expression types as it goes ([LR_02](LR_02_Parsing_AST.md)).
-5. **Transpile.** `compile_script_as_mir_direct` lowers the AST to a MIR module — inline boxing, register-type tracking, and root/number side-frame emission ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The retired C2MIR source is archived in [LR_06](LR_06_C_Transpiler.md) and excluded from supported builds.
+5. **Transpile.** `compile_script_as_mir_direct` lowers the AST to a MIR module — inline boxing, register-type tracking, and root/number side-frame emission ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The removed C2MIR implementation is retained only as a historical design record in [LR_06](LR_06_C_Transpiler.md).
 6. **Link & generate.** `mir.c` resolves runtime-function imports, links the module, and runs `MIR_gen` to native code; module-level globals are registered as GC roots post-link.
 7. **Run.** `execute_script_and_create_output` calls the generated `main_func(context)` under a stack-overflow guard; the result is printed by the canonical value serializer ([LR_11](LR_11_Mark_Data_API.md)).
 
@@ -70,7 +70,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 
 ### Part III — Compilation backend
 
-- **[LR_06 — The C Transpiler](LR_06_C_Transpiler.md)** — archived design of the retired C2MIR backend.
+- **[LR_06 — The C Transpiler](LR_06_C_Transpiler.md)** — historical design record for the removed C2MIR backend.
 - **[LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md)** — the default backend: AST → MIR IR, the immutable-register boxing strategy, the calling convention and inference, the JIT GC-root frame, and `mir.c` integration.
 
 ### Part IV — Runtime services
@@ -109,7 +109,7 @@ The runtime is mature and heavily tested, but the per-document Known Issues sect
 - **Precise rooting and scalar ownership depend on honest lowering.** The transpiler must publish every heap-capable live register to the root side-stack before allocation-capable calls, while wide scalar values that outlive a number frame must be copied to storage-owned lanes. Shared emit/store helpers centralize those invariants, but new lowering paths must use them ([LR_08](LR_08_Memory_and_GC.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
 - **Equality and coercion are representation-sensitive.** `item_deep_equal` lacks cases for several types and falls back to pointer equality; numeric arrays compare by raw `memcmp` (robust value-equality is `sum(abs(a-b)) == 0`); `it2d`/`it2l`/`it2b` have poisoning and sentinel-collision sharp edges ([LR_03](LR_03_Value_and_Type_Model.md), [LR_05](LR_05_Strings_and_Vectors.md)).
 - **Hard-coded caps with silent failure modes.** Fixed sizes recur — map hash table, shape-chain length 64, scope depth 64, loop stack 32, inference parameter arrays 16, `ndim` 32 — and several truncate or fall back silently rather than erroring ([LR_03](LR_03_Value_and_Type_Model.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), [LR_11](LR_11_Mark_Data_API.md)).
-- **One supported backend.** MIR Direct is the sole implementation target; the retired C2MIR backend is not kept in semantic parity. A second type-vocabulary hazard once existed here too — the validator's parallel `TypeSchema` model — but it was dead code and has since been removed, leaving the runtime `Type*` family as the single vocabulary ([LR_03](LR_03_Value_and_Type_Model.md), [LR_13](LR_13_Schema_Validator.md)).
+- **One supported backend.** MIR Direct is the sole implementation target; the retired C2MIR backend has been removed from Lambda. A second type-vocabulary hazard once existed here too — the validator's parallel `TypeSchema` model — but it was dead code and has since been removed, leaving the runtime `Type*` family as the single vocabulary ([LR_03](LR_03_Value_and_Type_Model.md), [LR_13](LR_13_Schema_Validator.md)).
 - **Conservatism by default.** The safety analyzer always requests a stack check and disables TCO at the gate despite a full TCO analysis being implemented; param inference dropped speculative-INT after it truncated float arguments. These are deliberate trades of performance for correctness ([LR_12](LR_12_Procedural_Runtime.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
 
 None of these block normal use; they are the concrete future-improvement targets the set surfaces.
@@ -134,7 +134,7 @@ Mermaid rendering needs `npx`/mmdc; the C4 views additionally need a JDK and str
 - **Container** — a heap object beginning with a `TypeId` (range, list/array, numeric array, map, object, element, vmap).
 - **ShapeEntry / TypeMap** — the linked field chain and shape descriptor that lay out a map's packed `data` buffer.
 - **MIR** — the intermediate representation and JIT (vnmakarov/mir) used by the supported backend.
-- **MIR Direct** — the supported backend that lowers AST straight to MIR; **C2MIR** is retired archived source.
+- **MIR Direct** — the supported backend that lowers AST straight to MIR; **C2MIR** is retired and removed from Lambda.
 - **Data nursery** — the moving GC region for variable-size buffers, compacted into tenured data on collection ([LR_08](LR_08_Memory_and_GC.md)).
 - **Execution side stacks** — separate stable root-Item and raw-number regions; generated frames save/restore both watermarks ([LR_07](LR_07_MIR_Transpiler_JIT.md)).
 - **Name pool** — the interning pool for structural identifiers, giving pointer-equality key comparison.

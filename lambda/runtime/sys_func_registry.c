@@ -4,8 +4,7 @@
 // This file consolidates:
 //   - sys_funcs[] from build_ast.cpp (AST builder metadata)
 //   - func_list[] fn_*/pn_* entries from mir.c (JIT import pointers)
-//   - native_math_funcs[] from transpile.cpp (native C math optimization)
-//   - native_binary_funcs[] from transpile.cpp (native binary func optimization)
+//   - native math and binary function metadata used by MIR Direct
 //
 // Adding a new system function now requires editing ONLY this file.
 // When built for the IO dylib (LAMBDA_IO_STATIC_VALUES defined), all function pointers
@@ -217,16 +216,6 @@ extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
-
-// Frozen C2MIR compatibility only. MIR Direct generated code carries Context*
-// explicitly and its native helpers read EvalContext from TLS.
-#ifdef LAMBDA_C2MIR
-extern Context* _lambda_rt;
-
-static Pool* get_runtime_pool(void) {
-    return _lambda_rt ? _lambda_rt->pool : NULL;
-}
-#endif
 
 // helper functions for map pipe iteration in JIT
 static int64_t pipe_map_len(void* keys_ptr) {
@@ -1294,7 +1283,7 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
-    // float32 bit conversion (C2MIR can't inline these correctly)
+    // float32 bit conversion helpers used by generated MIR code
     {"f32_to_bits", FPTR(f32_to_bits)},
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
@@ -1803,15 +1792,6 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Runtime pool access
     // ========================================================================
-#ifdef LAMBDA_C2MIR
-    {"get_runtime_pool", FPTR(get_runtime_pool)},
-
-    // ========================================================================
-    // Shared runtime context pointer
-    // ========================================================================
-    {"_lambda_rt", (fn_ptr) &_lambda_rt},
-#endif
-
     // ========================================================================
     // StringBuf functions (template literals)
     // ========================================================================

@@ -52,7 +52,7 @@ class FileExclusionConfigTest(unittest.TestCase):
 
         self.assertEqual(
             CHECK_CODE_DUP.active_file_exclusions(config, ("lambda",)),
-            ["lambda/lambda-embed.h", "lambda/tree-sitter*"],
+            ["lambda/tree-sitter*"],
         )
 
     def test_lambda_css_table_is_the_only_reviewed_block_exclusion(self):

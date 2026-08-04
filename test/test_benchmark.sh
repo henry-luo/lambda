@@ -88,7 +88,7 @@ run_benchmark "Full Test Suite" "./test/test_all.sh" 3
 run_benchmark "Library Tests Only" "cd test && gcc -o test_benchmark_lib.exe test_strbuf.c ../lib/strbuf.c -lcriterion && ./test_benchmark_lib.exe --verbose && rm test_benchmark_lib.exe" 5
 
 # Benchmark 3: MIR JIT compilation
-run_benchmark "MIR JIT Tests" "cd test && gcc -o test_benchmark_mir.exe test_mir.c ../build/*.o -lcriterion -lmir -lc2mir && ./test_benchmark_mir.exe --verbose && rm test_benchmark_mir.exe" 3
+run_benchmark "MIR JIT Tests" "cd test && gcc -o test_benchmark_mir.exe test_mir.c ../build/*.o -lcriterion -lmir && ./test_benchmark_mir.exe --verbose && rm test_benchmark_mir.exe" 3
 
 # Benchmark 4: Validator tests
 run_benchmark "Validator Tests" "cd test && gcc -o test_benchmark_validator.exe test_validator.c -lcriterion && ./test_benchmark_validator.exe --verbose && rm test_benchmark_validator.exe" 3

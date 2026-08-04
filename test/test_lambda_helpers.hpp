@@ -135,24 +135,21 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 
 // Helper function to execute a lambda script and capture output
 // is_procedural: if true, uses "./lambda.exe run <script>" for procedural scripts
-// use_mir: if true, uses MIR Direct (default JIT path); if false, uses C2MIR (--c2mir flag)
-inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
+inline char* execute_lambda_script(const char* script_path, bool is_procedural = false) {
     char command[512];
-    const char* c2mir_flag = use_mir ? "" : " --c2mir";
-    // c2mir is a lambda.exe mode; lambda-jube.exe can abort before BATCH_END and hide every script result.
     const char* exe = "lambda.exe";
     const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "%s run%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "%s run%s \"%s\"", exe, no_log_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "%s%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "%s%s \"%s\"", exe, no_log_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./%s run%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "./%s run%s \"%s\"", exe, no_log_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./%s%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "./%s%s \"%s\"", exe, no_log_flag, script_path);
     }
 #endif
 
@@ -395,15 +392,14 @@ inline void strip_timing_lines(char* output) {
 }
 
 // Helper function to test lambda script against expected output file
-inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural, bool use_mir = false) {
-    // use_mir=false: runs C2MIR path (--c2mir flag), use_mir=true: runs MIR Direct (default)
+inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural) {
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
     char* expected_output = read_expected_output(expected_file_path);
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
-    char* actual_output = execute_lambda_script(script_path, is_procedural, use_mir);
+    char* actual_output = execute_lambda_script(script_path, is_procedural);
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
 
     // Trim whitespace from actual output
@@ -475,7 +471,6 @@ inline void run_sub_batch(
     const std::vector<std::string>& scripts,
     const std::vector<bool>& is_procedural,
     size_t start, size_t end,
-    bool use_mir,
     int batch_id,
     std::unordered_map<std::string, BatchResult>& results,
     std::atomic<size_t>& completed_scripts,
@@ -498,15 +493,13 @@ inline void run_sub_batch(
     fclose(manifest);
 
     char command[512];
-    const char* c2mir_flag = use_mir ? "" : " --c2mir";
-    // c2mir is a lambda.exe mode; lambda-jube.exe can abort before BATCH_END and hide every script result.
     const char* exe = "lambda.exe";
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "%s test-batch --no-log --timeout=60%s < \"%s\"",
-             exe, c2mir_flag, manifest_path);
+    snprintf(command, sizeof(command), "%s test-batch --no-log --timeout=60 < \"%s\"",
+             exe, manifest_path);
 #else
-    snprintf(command, sizeof(command), "./%s test-batch --no-log --timeout=60%s < \"%s\"",
-             exe, c2mir_flag, manifest_path);
+    snprintf(command, sizeof(command), "./%s test-batch --no-log --timeout=60 < \"%s\"",
+             exe, manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -576,7 +569,6 @@ static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 8;
 inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     const std::vector<std::string>& scripts,
     const std::vector<bool>& is_procedural,
-    bool use_mir = true,
     size_t batch_chunk_size = BATCH_CHUNK_SIZE)
 {
     std::unordered_map<std::string, BatchResult> results;
@@ -605,7 +597,7 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
                 if (i >= batches.size()) break;
                 run_sub_batch(scripts, is_procedural,
                               batches[i].start, batches[i].end,
-                              use_mir, batches[i].id, thread_results[i],
+                              batches[i].id, thread_results[i],
                               completed_scripts, progress_mutex, scripts.size());
             }
         });

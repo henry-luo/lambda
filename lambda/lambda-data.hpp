@@ -98,7 +98,7 @@ typedef struct LambdaModuleState {
 
 // Runtime-facing scalar materializers are needed by native input adapters as
 // well as generated code. Keep DateTime construction here because static input
-// headers intentionally suppress the C2MIR-only lambda.h ABI declarations.
+// headers intentionally keep the public lambda.h ABI declarations minimal.
 extern "C" Item push_k(DateTime dtval);
 
 typedef struct EvalContext : Context {
@@ -1050,8 +1050,7 @@ void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
 void list_push_io(List* list, Item item);
 void list_push_pooled(List* list, Item item, Pool* pool);
 #ifdef LAMBDA_IO_STATIC_VALUES
-// C2MIR's frozen declaration remains runtime-owned.  Static input sources
-// select their explicit Pool/Arena provider at compile time instead.
+// Static input sources select their explicit Pool/Arena provider at compile time.
 #define list_push list_push_io
 #endif
 Map* map_pooled(Pool* pool);

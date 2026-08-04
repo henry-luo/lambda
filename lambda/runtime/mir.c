@@ -9,9 +9,6 @@
 #include "../../lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
-#ifdef LAMBDA_C2MIR
-#include "c2mir.h"
-#endif
 #include "../lambda.h"
 #include "lambda-error.h"
 #include "runtime-state.h"
@@ -20,19 +17,6 @@
 // POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
 // Set via JS_MIR_INTERP=1 environment variable
 int g_mir_interp_mode = 0;
-
-typedef struct jit_item {
-    const char *code;
-    size_t code_size;
-    size_t curr;
-} jit_item_t;
-
-int getc_func(void *data) {
-    jit_item_t *item = data;
-    // printf("getc_func: %d\n", item->curr);
-    return item->curr >= item->code_size ? EOF : item->code[item->curr++];
-}
-
 
 // ============================================================================
 // O(1) Import Resolution via Hashmap
@@ -252,9 +236,6 @@ void *import_resolver(const char *name) {
 MIR_context_t jit_init(unsigned int optimize_level) {
     init_func_map();  // build O(1) import resolution hashmap
     MIR_context_t ctx = MIR_init();
-#ifdef LAMBDA_C2MIR
-    c2mir_init(ctx);
-#endif
     if (g_mir_interp_mode) {
         log_info("MIR INTERPRETER mode (JIT compilation skipped)");
     } else {
@@ -269,71 +250,6 @@ MIR_context_t jit_init(unsigned int optimize_level) {
     }
     return ctx;
 }
-
-#ifdef LAMBDA_C2MIR
-// compile C code to MIR
-void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
-    struct c2mir_options ops = {0}; // Default options
-
-    // Check if we want to capture C2MIR debug messages via environment variable
-    const char* debug_env = getenv("LAMBDA_C2MIR_DEBUG");
-    bool enable_debug = (debug_env && (strcmp(debug_env, "1") == 0 || strcmp(debug_env, "true") == 0));
-
-    #ifdef ENABLE_C2MIR_DEBUG
-        enable_debug = true;  // Force enable if compile-time flag is set
-    #endif
-
-    if (enable_debug) {
-        // Create a temporary file to capture C2MIR messages
-        FILE* temp_log = tmpfile();
-        if (temp_log) {
-            ops.message_file = temp_log;
-            ops.verbose_p = 1;  // Enable verbose output
-            ops.debug_p = 0;    // Keep debug off to avoid too much noise
-            log_debug("C2MIR debug logging enabled");
-        } else {
-            ops.message_file = NULL;
-            ops.verbose_p = 0;
-            ops.debug_p = 0;
-            log_warn("Failed to create temporary file for C2MIR logging");
-        }
-    } else {
-        ops.message_file = NULL;
-        ops.verbose_p = 0;
-        ops.debug_p = 0;
-    }
-
-    log_notice("Compiling C code in '%s' to MIR", file_name);
-    jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
-    if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
-        log_error("compiled '%s' with error!!", file_name);
-    }
-
-    // Read and log the captured C2MIR messages
-    if (enable_debug && ops.message_file) {
-        // Rewind to beginning of temp file
-        rewind(ops.message_file);
-
-        // Read and log each line
-        char line_buffer[1024];
-        while (fgets(line_buffer, sizeof(line_buffer), ops.message_file)) {
-            // Remove trailing newline
-            size_t len = strlen(line_buffer);
-            if (len > 0 && line_buffer[len - 1] == '\n') {
-                line_buffer[len - 1] = '\0';
-            }
-
-            // Log the C2MIR message (skip empty lines)
-            if (strlen(line_buffer) > 0) {
-                log_debug("C2MIR: %s", line_buffer);
-            }
-        }
-
-        // Close the temporary file
-        fclose(ops.message_file);
-    }
-}
-#endif // LAMBDA_C2MIR
 
 void print_module_item(MIR_item_t mitem) {
     switch (mitem->item_type) {
@@ -469,9 +385,6 @@ void* find_data(MIR_context_t ctx, const char *data_name) {
 void jit_cleanup(MIR_context_t ctx) {
     // Cleanup
     if (!g_mir_interp_mode) MIR_gen_finish(ctx);
-#ifdef LAMBDA_C2MIR
-    c2mir_finish(ctx);
-#endif
     MIR_finish(ctx);
 }
 

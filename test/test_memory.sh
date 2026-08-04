@@ -81,7 +81,7 @@ compile_with_asan() {
                 deps="../lib/mime-detect.c ../lib/mime-types.c"
                 ;;
             "test_mir.c")
-                deps="../build/*.o -lmir -lc2mir"
+                deps="../build/*.o -lmir"
                 ;;
             "test_validator.c")
                 deps="-I../include -I../lambda -I../lambda/validator"

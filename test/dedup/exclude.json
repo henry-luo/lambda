@@ -2,11 +2,6 @@
   "version": 1,
   "file_exclusions": [
     {
-      "pattern": "lambda/lambda-embed.h",
-      "modules": ["lambda"],
-      "reason": "Generated embedded-resource data is not maintained source code."
-    },
-    {
       "pattern": "lambda/tree-sitter*",
       "modules": ["lambda"],
       "reason": "Vendored Tree-sitter runtimes, grammars, generated parsers, scanners, and bindings are not maintained Lambda source code."

@@ -41,31 +41,6 @@ extern "C" {
     int gc_object_zone_class_index(size_t size);
 }
 
-// Profiling infrastructure (defined in runner.cpp)
-#define PROFILE_MAX_SCRIPTS 64
-typedef struct PhaseProfile {
-    const char* script_path;
-    double parse_ms;
-    double ast_ms;
-    double transpile_ms;
-    double jit_init_ms;
-    double file_write_ms;
-    double c2mir_ms;
-    double mir_gen_ms;
-    int code_len;
-} PhaseProfile;
-extern bool is_profile_enabled();
-extern PhaseProfile profile_data[];
-extern int profile_count;
-#ifdef _WIN32
-#include <windows.h>
-typedef LARGE_INTEGER profile_time_t;
-#else
-typedef struct timespec profile_time_t;
-#endif
-extern void profile_get_time(profile_time_t* t);
-extern double elapsed_ms_val(profile_time_t t0, profile_time_t t1);
-extern void profile_dump_to_file();
 extern Url* get_current_dir();
 
 // Forward declare Runner helper functions from runner.cpp
@@ -2561,7 +2536,7 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
 // T-A1: a boundary that can neither reject nor convert is pure cost — the box +
 // `lambda_type_check` + error test + unbox round trip around it computes a known
 // answer. Eliding it is what makes an annotation pin a representation instead of
-// installing a check (see vibe/Lambda_Tune_Typed_Vs_C2MIR.md M1).
+// installing a check (see the typed-vs-boxed representation tuning notes).
 //
 // The redundancy rule itself lives with the other type reasoning in
 // build_ast.cpp; asking it here rather than re-deriving it is what keeps
@@ -4187,7 +4162,7 @@ static inline bool mir_native_math_arg_type(TypeId tid) {
 
 // Widen an already-transpiled native scalar to a double register. FLOAT values
 // are already MIR_T_D; integers need an explicit conversion, matching the
-// (double) cast C2MIR emits.
+// native double cast.
 static inline MIR_reg_t mir_emit_as_double(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
     // G0: `int` shares float's native lane, so both are already doubles and
     // this is the identity for them. Only the genuinely integer lanes (int64,
@@ -6628,7 +6603,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     // path allocates a Range, then calls item_keys + iter_len once and
     // iter_val_at *per iteration*, handing the body a boxed `i` that degrades
     // every operation touching it to dynamic dispatch (M4 -> M5 in
-    // vibe/Lambda_Tune_Typed_Vs_C2MIR.md). Everything else about the loop —
+    // the typed-vs-boxed representation tuning notes). Everything else about the loop —
     // comprehension output, where/order/limit, nested sources, break/continue —
     // is deliberately left on the shared path below.
     AstNode* range_src = mir_unwrap_primary(loop->as);
@@ -10266,7 +10241,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // When object is ANY and field is also ANY, check if the field expression
     // is an INDEX_EXPR into a typed int array. If so, the field produces an
     // integer Item and we can use item_at(obj, it2i(field)) instead of the
-    // expensive fn_index double dispatch. Mirrors C2MIR D1 Level 3.
+    // expensive fn_index double dispatch.
     // ======================================================================
     if (obj_tid == LMD_TYPE_ANY && idx_tid == LMD_TYPE_ANY) {
         bool field_known_int = false;
@@ -10853,9 +10828,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // element-wise over vectors, but their scalar branch is literally
         // push_d(sqrt(item_to_double(v))) — so for a statically-numeric scalar
         // argument the native call is bit-identical while skipping the boxed
-        // call, its type dispatch and its result boxing. C2MIR has lowered
-        // these since can_use_native_math (transpile-call.cpp); MIR-Direct
-        // never did. ANY-typed args are excluded so vector semantics keep the
+        // call, its type dispatch and its result boxing. ANY-typed args are
+        // excluded so vector semantics keep the
         // boxed path — that exclusion is the whole safety argument here.
         if (info->native_c_name && info->native_func_ptr &&
                 info->native_returns_float && !mt->emitting_async_call &&
@@ -18724,7 +18698,6 @@ static void register_module_pub_fns(AstImportNode* imp) {
         } else if (mod_child->node_type == AST_NODE_PUB_STAM) {
             // Register pub variable BSS addresses.
             // MIR Direct names BSS items "_gvar_<name>" (see prepass_create_global_vars).
-            // C2MIR names them the same as write_var_name: "_<name>".
             // The consuming module always imports via write_var_name ("_<name>"),
             // so we register the lookup result under that key regardless of format.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
@@ -18739,7 +18712,6 @@ static void register_module_pub_fns(AstImportNode* imp) {
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
                     MIR_item_t bss_item = find_import(imp->script->jit_context, gvar);
                     if (!bss_item || !bss_item->addr) {
-                        // fall back for C2MIR-compiled modules (BSS == import_key)
                         bss_item = find_import(imp->script->jit_context, import_key->str);
                     }
                     if (bss_item && bss_item->addr) {
@@ -19216,8 +19188,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     Runner runner;
     runner_init(runtime, &runner);
 
-    // Enable MIR Direct mode: load_script will call compile_script_as_mir_direct() for every
-    // module (main + all imports) instead of going through the C transpiler (C2MIR) path.
+    // Enable MIR Direct mode for every module (main + all imports).
     // Each compile_script_as_mir_direct() call clears dynamic_imports, registers the module's
     // direct sub-imports' pub symbols, then does transpile_mir_ast() + MIR_link().
     // Imports are compiled depth-first, so by the time any module is linked its dependencies

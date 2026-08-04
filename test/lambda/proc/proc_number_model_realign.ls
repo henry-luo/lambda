@@ -1,4 +1,4 @@
-// MIR-Direct/C2MIR parity for the type-directed number model.
+// Regression coverage for the type-directed number model.
 pn emit(value) {
     print(type(value))
     print(":")

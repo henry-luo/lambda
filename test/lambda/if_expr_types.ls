@@ -1,6 +1,6 @@
 // Test: if-else expressions where branches have same semantic type
-// but different C return types (e.g., String* vs Item)
-// This covers the C2MIR "incompatible types in cond-expression" fix
+// but different native representations (e.g., String* vs Item).
+// This covers incompatible conditional-expression branches.
 
 "1. string() vs join() - String* vs Item"
 let parts = ["a", "b", "c"]

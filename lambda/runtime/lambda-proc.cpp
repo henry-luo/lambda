@@ -21,8 +21,7 @@
 extern __thread EvalContext* context;
 
 // Global dry-run flag: when true, IO operations return fabricated results.
-// Its declaration is runtime-owned in runtime-state.h; C2MIR's legacy copy
-// remains frozen and is not an active module interface.
+// Its declaration is runtime-owned in runtime-state.h.
 bool g_dry_run = false;
 
 // ============================================================================

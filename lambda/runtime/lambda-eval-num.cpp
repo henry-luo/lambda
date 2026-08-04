@@ -1884,7 +1884,7 @@ extern "C" Symbol* fn_symbol(Item item) {
 // name: string or symbol - the local name
 // url: string or symbol - the namespace URL
 // fn_symbol2 - create namespaced symbol from name and URL
-// Note: Must be declared in lambda.h for MIR C2MIR to know the signature
+// Keep the declaration in lambda.h so generated MIR sees the same signature.
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     GUARD_ERROR2(name_item, url_item);
 
@@ -2023,8 +2023,8 @@ Item fn_float(Item item) {
 // --- Math functions (double → double) ---
 
 // Note: sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
-// are already handled by native_math_funcs in transpile.cpp which calls
-// the C math library directly. We don't need wrappers for those.
+// are already handled by the generated MIR call path. We don't need wrappers
+// for those.
 
 // Power function: native double version
 extern "C" double fn_pow_u(double base, double exponent) {

@@ -50,8 +50,6 @@
   ],
   "sqlite_version": "3.45.3",
   "exclude_source_files": [
-    "lambda/runtime/transpile.cpp",
-    "lambda/runtime/transpile-call.cpp",
     "lambda/runtime/lambda-decimal-runtime.cpp",
     "lambda/runtime/path_runtime.c",
     "radiant/ime_mac_static.cpp",
@@ -75,7 +73,6 @@
   "includes": [
     ".",
     "lambda/mir",
-    "lambda/mir/c2mir",
     "build_temp/re2-noabsl",
     "lambda/tree-sitter/lib/include",
     "lambda/tree-sitter-lambda/bindings/c",
@@ -599,8 +596,6 @@
         "lambda/validator/*.cpp"
       ],
       "exclude_patterns": [
-        "lambda/runtime/transpile.cpp",
-        "lambda/runtime/transpile-call.cpp",
         "lambda/runtime/http_module_stub.cpp",
         "lambda/runtime/headless_stubs.cpp"
       ],
@@ -1024,7 +1019,6 @@
       "includes": [
         ".",
         "lambda/mir",
-        "lambda/mir/c2mir",
         "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",

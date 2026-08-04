@@ -269,8 +269,7 @@ static void run_std_sub_batch(
     }
     fclose(manifest);
 
-    // C2MIR is frozen and does not implement the exact result-home ABI;
-    // structured tests must exercise the supported MIR-Direct batch path.
+    // Structured tests exercise the supported MIR-Direct batch path.
     const char* args[] = {
         LAMBDA_EXE, "test-batch", "--no-log", "--timeout=60", NULL,
     };

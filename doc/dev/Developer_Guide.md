@@ -339,7 +339,7 @@ The Makefile tracks this entire chain automatically. When `grammar.js` changes, 
        break;
    ```
 
-4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. `lambda/transpile.cpp` is archived C2MIR source and is not an implementation target.
+4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -398,10 +398,10 @@ Lambda AST  ──→  transpile.cpp  ──→  C source code string
                                    C2MIR compiler  ──→  MIR IR  ──→  machine code
 ```
 
-- `lambda/transpile.cpp` contains the retired C source generator. It and
-  `transpile-call.cpp` are excluded from core and Jube builds.
-- `lambda/mir.c` feeds this C source into the C2MIR compiler character-by-character via `getc_func()`.
-- The C2MIR frontend parses the C code into MIR IR, which is then compiled to native machine code.
+- The former Lambda C source generator (`transpile.cpp` and
+  `transpile-call.cpp`) and its `getc_func()` bridge have been removed.
+- The diagram is retained only to explain the historical architecture; current
+  builds use the direct MIR path below.
 
 #### Supported: Direct MIR (AST → MIR IR → machine code)
 
@@ -415,14 +415,14 @@ Lambda AST  ──→  transpile-mir.cpp  ──→  MIR instructions (MIR_MOV, 
 - `lambda/transpile-mir.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
-Legacy C2MIR source shares runtime declarations with MIR Direct, but it is not
-part of the supported build or test matrix.
+The vendored MIR dependency still contains its upstream C2MIR frontend, but
+Lambda no longer feeds generated Lambda C into it.
 
 ### Key Files
 
 | File | Role |
 |------|------|
-| `lambda/transpile.cpp` | Archived C2MIR source generator (not built) |
+| `doc/dev/lambda/LR_06_C_Transpiler.md` | Historical C2MIR design record (implementation removed) |
 | `lambda/transpile-mir.cpp` | Emits MIR IR directly from Lambda AST (direct path) |
 | `lambda/mir.c` | MIR context, runtime import registry, linking, and code generation |
 | `lambda/lambda.h` | C API header — function signatures callable from JIT code |

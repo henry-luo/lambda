@@ -12,7 +12,6 @@ echo "2. WASM Dependencies Stub Libraries Created:"
 echo "   - wasm-deps/include/gmp.h (GMP stub)"
 echo "   - wasm-deps/include/mir.h (MIR stub)"
 echo "   - wasm-deps/include/mir-gen.h (MIR-GEN stub)"
-echo "   - wasm-deps/include/c2mir.h (C2MIR stub)"
 echo "   - wasm-deps/include/lexbor/url/url.h (Lexbor URL stub)"
 echo
 

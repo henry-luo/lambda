@@ -5239,8 +5239,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ((left_numeric_array && (right_numeric_array || right_numeric_scalar)) ||
          (right_numeric_array && left_numeric_scalar))) {
         // Numeric vector operations finalize to ArrayNum. Describing their
-        // result as the source TypeArray made C2MIR call array_get on an
-        // ArrayNum pointer after a vector expression.
+        // result as the source TypeArray made the old call path use array_get
+        // on an ArrayNum pointer after a vector expression.
         type_id = LMD_TYPE_ARRAY_NUM;
     }
     else if (arithmetic_op && ast_node->op == OPERATOR_ADD &&
