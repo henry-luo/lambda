@@ -147,6 +147,21 @@ void js_array_set_props(Array* arr, Map* props) {
 }
 
 void array_push(Array* arr, Item item) {
+    if (array_has_native_lane(arr)) {
+        if (arr->length >= arr->capacity) {
+            int64_t old_capacity = arr->capacity;
+            expand_list((List*)arr, nullptr);
+            if (arr->capacity <= old_capacity) return;
+        }
+        // Untyped mutators do not have a semantic contract to widen. Preserve
+        // the lane invariant instead of appending an unrepresentable raw Item.
+        if (!array_native_lane_store(arr, arr->length, item)) {
+            log_error("array_push: native lane rejected incompatible Item store");
+            return;
+        }
+        arr->length++;
+        return;
+    }
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) {
         List* nested = item.array;

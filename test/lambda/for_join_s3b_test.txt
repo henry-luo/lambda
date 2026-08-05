@@ -32,7 +32,7 @@
   }, {
     pos: 1,
     item: "z",
-    name: null
+    name: "none"
   }]
 [{
     item: "a",

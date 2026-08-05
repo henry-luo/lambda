@@ -43,9 +43,11 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
+AstNode* build_nullable_array_type(Transpiler* tp, TSNode array_node);
 AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node);
 AstNode* build_return_type_pattern(Transpiler* tp, TSNode node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
+static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
 
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
@@ -1636,11 +1638,16 @@ static void check_compound_assignment_static_boundary(Transpiler* tp, TSNode nod
     const char* destination_label = label;
     Type* expected = declared_compound_destination_type(tp, destination, &destination_label);
     if (!expected || !value || !value->type) return;
-    if (static_boundary_relation(value->type, expected) != STATIC_BOUNDARY_REJECTED) return;
+    // A value-producing conversion can return ItemError before this store. Its
+    // lowering propagates that error and never mutates the destination, so the
+    // assignment boundary must validate only the success constituents.
+    Type* success_type = lambda_type_remove_error(tp->pool, value->type);
+    if (!success_type || static_boundary_relation(success_type, expected) !=
+            STATIC_BOUNDARY_REJECTED) return;
     char expected_name[128];
     char value_name[128];
     lambda_type_format_name(expected, expected_name, sizeof(expected_name));
-    lambda_type_format_name(value->type, value_name, sizeof(value_name));
+    lambda_type_format_name(success_type, value_name, sizeof(value_name));
     record_semantic_error(tp, node, ERR_TYPE_MISMATCH,
         "cannot assign %s to typed %s of type %s",
         value_name, destination_label, expected_name);
@@ -2584,9 +2591,11 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     Type* declared_index_type = node_type == AST_NODE_INDEX_EXPR
         ? declared_compound_destination_type(tp, (AstNode*)ast_node, NULL) : NULL;
     if (declared_index_type) {
-        // An explicitly typed array read preserves its element contract. Treating
-        // it as opaque any invents a possible error at every clean call boundary.
-        ast_node->type = declared_index_type;
+        // Indexing is total: an absent element contributes null even when the
+        // array's element contract is plain T. Keep T? in the AST rather than
+        // erasing it to any; MIR can then select the matching nullable lane.
+        ast_node->type = lambda_type_nullable_normalized(tp->pool,
+            declared_index_type);
         return (AstNode*)ast_node;
     }
 
@@ -5212,13 +5221,16 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
     log_debug("left type: %d, right type: %d", left_type, right_type);
-    Type* comparison_left = lambda_type_remove_error(tp->pool, ast_node->left->type);
-    Type* comparison_right = lambda_type_remove_error(tp->pool, ast_node->right->type);
-    if (is_relational_op(ast_node->op) &&
+    Type* comparison_left = lambda_type_remove_error_and_null(tp->pool,
+        ast_node->left->type);
+    Type* comparison_right = lambda_type_remove_error_and_null(tp->pool,
+        ast_node->right->type);
+    if (is_relational_op(ast_node->op) && comparison_left && comparison_right &&
             !known_magnitude_comparable_type_set(comparison_left, comparison_right)) {
         // A converter's ordinary ItemError propagates through the boxed
-        // comparison at runtime. Validate the success constituents here so an
-        // `float(text) >= 0` expression is not misdiagnosed as `type >= float`.
+        // comparison at runtime, and null absorbs the comparison. Validate
+        // only the remaining success constituents so `int? > int` stays
+        // valid while `string? > int` is rejected.
         record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
             "ordered comparison has no magnitude for these types; use sort() for total ordering");
         ast_node->type = &TYPE_ERROR;
@@ -5905,10 +5917,13 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                         if (expected_elem && rhs_type->type_id == LMD_TYPE_ARRAY) {
                             TypeArray* arr_type = (TypeArray*)rhs_type;
                             if (arr_type->nested) {
-                                // RHS has known element type — check compatibility
+                                // Preserve the optional element contract here. Comparing its
+                                // compact TypeId alone made decimal?[]/datetime?[] look like
+                                // `type[]`, rejecting the valid T[] -> T?[] covariance path.
                                 TypeId expected_tid = expected_elem->type_id;
                                 TypeId actual_tid = arr_type->nested->type_id;
-                                if (expected_tid != actual_tid &&
+                                if (static_boundary_relation(arr_type->nested, expected_elem) ==
+                                        STATIC_BOUNDARY_REJECTED &&
                                     !types_compatible(arr_type->nested, expected_elem) &&
                                     !typed_array_element_compatible(arr_type->nested, expected_elem)) {
                                     int line = ts_node_start_point(asn_node).row + 1;
@@ -7482,6 +7497,28 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
     return (AstNode*)wrapper_node;
 }
 
+static void find_occurrence_nodes(TSNode type_node, TSNode* operand_out, TSNode* operator_out) {
+    TSNode operand_node = ts_node_child_by_field_id(type_node, FIELD_OPERAND);
+    TSNode operator_node = ts_node_child_by_field_id(type_node, FIELD_OPERATOR);
+
+    // return_occurrence_type has an optional named `occurrence` child. Tree-sitter
+    // may select the production without preserving its optional field map, so
+    // recover the two structural children instead of treating a valid `T?`
+    // contract as a malformed node.
+    uint32_t child_count = ts_node_named_child_count(type_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(type_node, i);
+        if (ts_node_symbol(child) == sym_occurrence) {
+            if (ts_node_is_null(operator_node)) operator_node = child;
+        } else if (ts_node_is_null(operand_node)) {
+            operand_node = child;
+        }
+    }
+
+    *operand_out = operand_node;
+    *operator_out = operator_node;
+}
+
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     log_debug("build occurrence type");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
@@ -7493,7 +7530,15 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     type->min_count = 0;
     type->max_count = -1;
 
-    TSNode op_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERATOR);
+    TSNode operand_node = {0};
+    TSNode op_node = {0};
+    find_occurrence_nodes(occurrence_node, &operand_node, &op_node);
+    if (ts_node_is_null(op_node) || ts_node_is_null(operand_node)) {
+        record_semantic_error(tp, occurrence_node, ERR_INVALID_LITERAL,
+            "occurrence type requires both an operand and modifier");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
     TSSymbol op_symbol = ts_node_symbol(op_node);
     StrView op = ts_node_source(tp, op_node);
     ast_node->op_str = op;
@@ -7536,7 +7581,6 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
 
     type->op = ast_node->op;
 
-    TSNode operand_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
     type->operand = ast_node->operand->type;
 
@@ -7547,6 +7591,23 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
 
     // log_debug("built occurrence type with modifier '%c' for base type %d", modifier, node_type->type->type_id);
     return (AstNode*)ast_node;
+}
+
+AstNode* build_nullable_array_type(Transpiler* tp, TSNode array_node) {
+    AstNode* result = build_occurrence_type(tp, array_node);
+    if (!result || result->node_type != AST_NODE_UNARY_TYPE) return result;
+    AstUnaryNode* outer = (AstUnaryNode*)result;
+    Type* element_type = outer->operand ? outer->operand->type : NULL;
+    if (element_type && element_type->type_id == LMD_TYPE_TYPE &&
+            element_type->kind == TYPE_KIND_SIMPLE) {
+        element_type = ((TypeType*)element_type)->type;
+    }
+    if (!element_type || element_type->kind != TYPE_KIND_UNARY ||
+            ((TypeUnary*)element_type)->op != OPERATOR_OPTIONAL) {
+        record_semantic_error(tp, array_node, ERR_INVALID_LITERAL,
+            "only nullable element types may precede []");
+    }
+    return result;
 }
 
 // todo: build reference type
@@ -8887,22 +8948,31 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                 // Keep the original full annotation for runtime boundary
                 // checks; the TypeParam prefix only preserves a compact TypeId.
                 ast_node->declared_type = type_type->type;
-                set_param_contract(param_type, type_type->type, true);
+                Type* parameter_contract = type_type->type;
+                if (was_optional && !default_value) {
+                    // An omitted `p?: T` reaches the body as null.  The compact
+                    // TypeParam remains T for its register class, but its full
+                    // contract must be T? so native lanes do not decode absence
+                    // as a zero value.
+                    parameter_contract = lambda_type_nullable_normalized(tp->pool,
+                        parameter_contract);
+                }
+                set_param_contract(param_type, parameter_contract, true);
                 // For complex types (TypeBinary, TypeUnary) and named map/object types,
                 // store pointer to full type so that downstream code can access
                 // extended fields (shape, struct_name, methods, etc.)
-                if (!is_global_simple_type(type_type->type) &&
-                    type_type->type->kind == TYPE_KIND_BINARY) {
-                    param_type->full_type = type_type->type;
+                if (!is_global_simple_type(parameter_contract) &&
+                    parameter_contract->kind == TYPE_KIND_BINARY) {
+                    param_type->full_type = parameter_contract;
                     log_debug("parameter has union type, storing full_type pointer");
-                } else if (!is_global_simple_type(type_type->type) &&
-                           type_type->type->kind == TYPE_KIND_UNARY) {
-                    param_type->full_type = type_type->type;
+                } else if (!is_global_simple_type(parameter_contract) &&
+                           parameter_contract->kind == TYPE_KIND_UNARY) {
+                    param_type->full_type = parameter_contract;
                     log_debug("parameter has occurrence type, storing full_type pointer");
-                } else if (is_param_full_type_id(type_type->type->type_id)) {
+                } else if (is_param_full_type_id(parameter_contract->type_id)) {
                     // Phase 7: store full TypeMap/TypeObject/TypeElmt so direct
                     // struct access (Phase 2/3) works on typed function params
-                    param_type->full_type = type_type->type;
+                    param_type->full_type = parameter_contract;
                 } else {
                     param_type->full_type = NULL;
                 }
@@ -10434,6 +10504,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_func_type(tp, expr_node);
     case sym_occurrence_type:
         return build_occurrence_type(tp, expr_node);
+    case sym_nullable_array_type:
+        return build_nullable_array_type(tp, expr_node);
     case SYM_RANGE_TYPE:
         return build_range_type(tp, expr_node);
     case SYM_CONSTRAINED_TYPE:

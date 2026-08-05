@@ -1770,7 +1770,11 @@ bool lambda_type_matches(Item item, Type* expected) {
     }
     if ((expected->type_id == LMD_TYPE_TYPE &&
             (expected->kind == TYPE_KIND_BINARY || expected->kind == TYPE_KIND_UNARY)) ||
-            expected->type_id == LMD_TYPE_MAP || expected->type_id == LMD_TYPE_ELEMENT) {
+            ((expected->type_id == LMD_TYPE_MAP || expected->type_id == LMD_TYPE_ELEMENT) &&
+             expected != &TYPE_MAP && expected != &TYPE_ELMT)) {
+        // TYPE_MAP and TYPE_ELMT are compact global Type prefixes, not shaped
+        // TypeMap/TypeElmt payloads. Their tag match below is complete; casting
+        // either singleton into the validator would read past its allocation.
         return runtime_validate_value_against_type(item, expected, NULL);
     }
 
@@ -2253,7 +2257,7 @@ static Bool vmap_eq(VMap* a, VMap* b, int depth) {
 // helper: get element at index from any sequence type (list, array, range)
 static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
-    case LMD_TYPE_ARRAY:        return item.array->items[i];
+    case LMD_TYPE_ARRAY:        return array_get(item.array, i);
     case LMD_TYPE_ARRAY_NUM:   return array_num_get(item.array_num, i);
     case LMD_TYPE_RANGE:       return {.item = i2it(item.range->start + i)};
     default:                   return ItemNull;
@@ -6558,6 +6562,60 @@ Item fn_varg1(Item index_item) {
 // The struct pointer stays the same — only the type_id and items buffer change.
 // All specialized array types share the same struct layout (Container + items_ptr + length + extra + capacity),
 // so this in-place conversion is safe.
+static bool array_native_lane_supported(const LaneStorageDesc* desc) {
+    return desc && (desc->kind == LANE_STORAGE_POINTER || (desc->nullable &&
+        (desc->kind == LANE_STORAGE_INT || desc->kind == LANE_STORAGE_BOOL ||
+         desc->kind == LANE_STORAGE_FLOAT64 || desc->kind == LANE_STORAGE_ITEM ||
+         desc->kind == LANE_STORAGE_SIZED_I64)));
+}
+
+static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
+        Item* rebuilt) {
+    if (!rebuilt || !array_native_lane_supported(desc)) return false;
+    TypeId source_type = get_type_id(source);
+    if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM) return false;
+    Array* source_array = source.array;
+    if (!source_array || source_array->has_js_props ||
+            (source_type == LMD_TYPE_ARRAY_NUM &&
+             (source_array->is_view || source_array->is_ndim))) {
+        // A view aliases its ArrayNum backing. Replacing it would silently
+        // sever write-through, so nullable mutation through views is deferred.
+        return false;
+    }
+
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Array*> rooted_result(roots, array_plain());
+    Array* result = rooted_result.get();
+    if (!result) return false;
+    source_array = rooted_source.get().array;
+    int64_t length = source_array->length;
+    if (length < 0) return false;
+    result->flags = source_array->flags;
+    result->is_heap = 1;
+    result->is_static = 0;
+    result->is_immortal = 0;
+    result->is_data_migrated = 0;
+    result->array_flags = 0;
+    array_native_lane_configure(result, desc);
+    result->length = length;
+    result->capacity = length;
+    if (length > 0) {
+        size_t bytes = 0;
+        if (!lam::checked_mul((size_t)length, sizeof(Item), &bytes)) return false;
+        result->items = (Item*)heap_data_calloc(bytes);
+        result = rooted_result.get();
+        if (!result->items) return false;
+    }
+    for (int64_t index = 0; index < length; index++) {
+        Item value = item_at(rooted_source.get(), index);
+        result = rooted_result.get();
+        if (!array_native_lane_store(result, index, value)) return false;
+    }
+    *rebuilt = {.array = rooted_result.get()};
+    return true;
+}
+
 static void convert_specialized_to_generic(Array* arr) {
     TypeId old_type = arr->type_id;
     int64_t len = arr->length;
@@ -6653,7 +6711,15 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     switch (arr_type) {
     case LMD_TYPE_ARRAY: {
         // generic Array with Item* items — use internal array_set
-        array_set(arr, index, value);
+        if (array_has_native_lane(arr)) {
+            if (!array_native_lane_store(arr, index, value)) {
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "fn_array_set: incompatible write to native lane array");
+                return ItemError;
+            }
+        } else {
+            array_set(arr, index, value);
+        }
         break;
     }
     case LMD_TYPE_ARRAY_NUM: {
@@ -6764,13 +6830,15 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
     case LMD_TYPE_UNDEFINED:  *(bool*)field_ptr = false; break;
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
-    // C16/G0: a declared int field stores int's one native form, the IEEE
-    // double. This is the write path member assignment takes (`m.f = v` ->
-    // map_set_cow -> fn_map_set -> here), so leaving it on int64_t made a
-    // field readable but not writable at full range.
-    case LMD_TYPE_INT:   *(double*)field_ptr = lambda_int_item_value(value); break;
+    // Maps use int's canonical i64 lane too, so the nullable form can reserve
+    // ItemNull without changing either the field width or its shape offset.
+    case LMD_TYPE_INT:   *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
     case LMD_TYPE_UINT64: *(uint64_t*)field_ptr = value.get_uint64(); break;
+    case LMD_TYPE_NUM_SIZED:
+        // Keep the packed Item: the TypeId alone does not carry i8 versus u32.
+        *(Item*)field_ptr = value;
+        break;
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: *(double*)field_ptr = value.get_double(); break;
     case LMD_TYPE_DTIME: *(DateTime**)field_ptr = value.get_datetime_ptr(); break;
@@ -6973,7 +7041,11 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
             // contracts such as `string | error` use the raw Item lane even
             // though their semantic TypeId is LMD_TYPE_TYPE.
             void* dst_field = (char*)mutable_clone_owner_data(dst_owner) + entry->byte_offset;
-            if (shape_entry_uses_raw_item_storage(entry)) {
+            if (map_shape_field_store_native_lane(dst_field, entry, field_clone)) {
+                // Nullable native slots must be reconstructed through their
+                // lane writer; map_field_store would treat ItemNull as a raw
+                // pointer and corrupt a packed lane during COW.
+            } else if (shape_entry_uses_raw_item_storage(entry)) {
                 *(Item*)dst_field = field_clone;
             } else {
                 map_field_store(dst_field, field_clone, shape_entry_storage_type_id(entry));
@@ -7009,6 +7081,23 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     // Mutable values may contain cycles through arrays/maps; register the
     // destination before cloning children so back-edges keep object identity.
     mutable_clone_register(clone_ctx, src, {.array = rooted_dst.get()});
+    if (array_has_native_lane(src)) {
+        dst->array_flags = src->array_flags;
+        dst->map_kind = src->map_kind;
+        dst->reserved_state = src->reserved_state;
+        dst->length = src->length;
+        dst->capacity = src->capacity;
+        if (src->capacity > 0) {
+            size_t bytes = 0;
+            if (!lam::checked_mul((size_t)src->capacity, sizeof(Item), &bytes)) return ItemNull;
+            dst->items = (Item*)heap_data_alloc(bytes);
+            dst = rooted_dst.get();
+            src = rooted_src.get();
+            if (!dst->items) return ItemNull;
+            memcpy(dst->items, src->items, bytes);
+        }
+        return {.array = rooted_dst.get()};
+    }
     for (int64_t i = 0; i < src->length; i++) {
         src = rooted_src.get();
         Item child = clone_mutable_item(src->items[i], clone_ctx);
@@ -7685,11 +7774,19 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
 
 static Type* runtime_array_contract_element(Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
-    if (!expected || expected->type_id != LMD_TYPE_TYPE ||
-            expected->kind != TYPE_KIND_UNARY) return NULL;
-    TypeUnary* occurrence = (TypeUnary*)expected;
-    if (occurrence->op != OPERATOR_REPEAT) return NULL;
-    return runtime_boundary_unwrap_type(occurrence->operand);
+    if (!expected) return NULL;
+    if (expected->type_id == LMD_TYPE_ARRAY) {
+        TypeArray* array = (TypeArray*)expected;
+        if (array->item_patterns || !array->nested) return NULL;
+        return runtime_boundary_unwrap_type(array->nested);
+    }
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_UNARY) {
+        TypeUnary* occurrence = (TypeUnary*)expected;
+        if (occurrence->op == OPERATOR_REPEAT) {
+            return runtime_boundary_unwrap_type(occurrence->operand);
+        }
+    }
+    return NULL;
 }
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
@@ -7714,6 +7811,24 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     if (candidate_type != LMD_TYPE_ARRAY && candidate_type != LMD_TYPE_ARRAY_NUM &&
             candidate_type != LMD_TYPE_ELEMENT) {
         return lambda_type_error(rooted_owner.get(), expected, boundary);
+    }
+    LaneStorageDesc lane_desc = {};
+    if (candidate_type == LMD_TYPE_ARRAY_NUM &&
+            lambda_type_lane_storage_desc(element_type, &lane_desc) &&
+            array_native_lane_supported(&lane_desc)) {
+        if (publish_in_place) {
+            // The current pn-var ABI owns an ArrayNum pointer. Publishing an
+            // Array replacement needs a separate ABI transition, so reject it.
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "nullable native array write through pn var is not implemented");
+            return ItemError;
+        }
+        Item rebuilt = ItemNull;
+        if (!array_rebuild_native_lane(rooted_candidate.get(), &lane_desc, &rebuilt)) {
+            return lambda_type_error(rooted_candidate.get(), expected, boundary);
+        }
+        rooted_candidate.set(rebuilt);
+        candidate_type = LMD_TYPE_ARRAY;
     }
     Item set_result = fn_array_set(rooted_candidate.get().array, index, rooted_value.get());
     if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
@@ -7868,9 +7983,13 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
                                         TypeId container_type_id,
                                         Container* container,
                                         ShapeEntry* changed_entry,
-                                        TypeId new_value_type, Item new_value) {
+                                        Type* new_field_contract, Item new_value) {
     TypeMap* old_map_type = (TypeMap*)*type_slot;
     void* old_data = NULL;
+    if (!new_field_contract) {
+        log_error("map_rebuild: missing replacement field contract");
+        return;
+    }
 
     // count existing fields
     int field_count = 0;
@@ -7896,7 +8015,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     int field_index = 0;
     int64_t byte_offset = (int64_t)fixed_slot_count * (int64_t)sizeof(void*);
     while (e) {
-        Type* field_contract = e == changed_entry ? type_info[new_value_type].type : e->type;
+        Type* field_contract = e == changed_entry ? new_field_contract : e->type;
 
         // allocate ShapeEntry + embedded StrView
         ShapeEntry* ne = (ShapeEntry*)pool_calloc(context->pool,
@@ -7979,8 +8098,12 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         if (old_e == changed_entry) {
             // decrement old value's ref count
             map_field_decrement_ref(old_field, old_e->type->type_id);
-            // store the new value (with ref count increment)
-            map_field_store(new_field, new_value, new_value_type);
+            // The new ShapeEntry owns the semantic contract. In particular,
+            // `int?` must encode null as its lane sentinel rather than using
+            // the historical raw Item fallback selected by TypeId alone.
+            if (!map_shape_field_store_native_lane(new_field, new_e, new_value)) {
+                map_field_store(new_field, new_value, get_type_id(new_value));
+            }
         } else {
             // unchanged field — copy bytes (ref count unchanged, same pointers)
             int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
@@ -8105,6 +8228,17 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
     return NULL;
 }
 
+static bool runtime_map_contract_has_native_lane(Type* expected) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected || expected->type_id != LMD_TYPE_MAP) return false;
+    TypeMap* map_type = (TypeMap*)expected;
+    for (ShapeEntry* field = map_type->shape; field; field = field->next) {
+        LaneStorageDesc lane = {};
+        if (shape_entry_uses_native_lane(field, &lane)) return true;
+    }
+    return false;
+}
+
 static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) {
     if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected ||
             expected->type_id != LMD_TYPE_MAP) {
@@ -8142,7 +8276,6 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) 
             return false;
         }
         rooted_converted.set(field_converted);
-        if (rooted_converted.get().item == rooted_field.get().item) continue;
 
         candidate_map = rooted_candidate.get().map;
         candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
@@ -8150,13 +8283,27 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) 
             expected_field->name->str, expected_field->name->length);
         if (!candidate_field || !candidate_field->type) return false;
         TypeId converted_type = get_type_id(rooted_converted.get());
-        if (candidate_field->type->type_id != converted_type) {
+        LaneStorageDesc expected_lane = {};
+        LaneStorageDesc candidate_lane = {};
+        bool expected_native_lane = shape_entry_uses_native_lane(expected_field,
+            &expected_lane);
+        bool candidate_native_lane = shape_entry_uses_native_lane(candidate_field,
+            &candidate_lane);
+        bool value_changed = rooted_converted.get().item != rooted_field.get().item;
+        bool needs_native_reification = expected_native_lane && !candidate_native_lane;
+        if (!value_changed && !needs_native_reification) continue;
+
+        if (needs_native_reification || candidate_field->type->type_id != converted_type) {
             // `fn_map_set` deliberately widens an int back into a float slot.
             // Boundary admission instead changes the detached candidate shape so
             // the stored field's observable tag satisfies the named contract.
+            // The nullable case also changes its physical carrier even though
+            // the source int already satisfies the optional semantic contract.
             map_rebuild_for_type_change((void**)&candidate_map->type,
                 &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
-                (Container*)candidate_map, candidate_field, converted_type,
+                (Container*)candidate_map, candidate_field,
+                needs_native_reification ? expected_field->type :
+                    type_info[converted_type].type,
                 rooted_converted.get());
         } else {
             String* field_name = heap_create_name(expected_field->name->str,
@@ -8212,6 +8359,16 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         }
     }
 
+    LaneStorageDesc lane_desc = {};
+    if (lambda_type_lane_storage_desc(element_type, &lane_desc) &&
+            array_native_lane_supported(&lane_desc) &&
+            !array_native_lane_matches_desc(rooted_candidate.get().array, &lane_desc)) {
+        Item rebuilt = ItemNull;
+        if (!array_rebuild_native_lane(rooted_candidate.get(), &lane_desc, &rebuilt)) {
+            return false;
+        }
+        rooted_candidate.set(rebuilt);
+    }
     if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
     *converted = rooted_candidate.get();
     return true;
@@ -8232,6 +8389,30 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
         // float boundary, after which a native float body could unbox it as
         // the wrong physical lane.
         return lambda_numeric_boundary_admit(value, expected, converted);
+    }
+
+    // A nullable concrete array needs its own carrier even when its current
+    // values also satisfy the narrower T[] contract. This is the covariant
+    // int[] -> int?[] boundary; do not lose the destination's nullability.
+    if ((get_type_id(value) == LMD_TYPE_ARRAY || get_type_id(value) == LMD_TYPE_ARRAY_NUM)) {
+        Type* element_type = runtime_array_contract_element(expected);
+        LaneStorageDesc lane_desc = {};
+        if (element_type && lambda_type_lane_storage_desc(element_type, &lane_desc) &&
+                array_native_lane_supported(&lane_desc) &&
+                !array_native_lane_matches_desc(value.array, &lane_desc)) {
+            return runtime_type_admit_array(value, expected, converted);
+        }
+    }
+
+    // A map with `int?`/`bool?` fields needs a descriptor-bearing packed
+    // shape even if all of its current values already match the narrower
+    // non-null fields. This is the map analogue of int[] -> int?[] admission.
+    // Guard the cast helper at the call site: an `element` contract may be the
+    // compact TYPE_ELMT singleton, so an inlined TypeMap probe must not speculatively
+    // read its ShapeEntry pointer before the concrete map-tag check.
+    if (get_type_id(value) == LMD_TYPE_MAP && expected->type_id == LMD_TYPE_MAP &&
+            expected != &TYPE_MAP && runtime_map_contract_has_native_lane(expected)) {
+        return runtime_type_admit_map(value, expected, converted);
     }
 
     // Preserve an already conforming union member rather than arbitrarily
@@ -8395,6 +8576,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
+            LaneStorageDesc lane = {};
+            if (shape_entry_uses_native_lane(entry, &lane) &&
+                    map_shape_field_store_native_lane(field_ptr, entry, value)) {
+                return;
+            }
+
             if (field_type == value_type) {
                 // same type — fast path: in-place update
                 map_field_decrement_ref(field_ptr, field_type);
@@ -8494,7 +8681,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
             Container* cont = map_item.container;
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,
-                                        value_type, value);
+                                        type_info[value_type].type, value);
             return;
         }
         entry = entry->next;

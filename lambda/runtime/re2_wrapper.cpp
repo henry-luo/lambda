@@ -583,8 +583,9 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     mp = rooted_map.get();
     *(String**)((char*)mp->data + e_value->byte_offset) = val_str;
 
-    // C16/G0: an `int` field stores int's one native form, the IEEE double.
-    *(double*)((char*)mp->data + e_index->byte_offset) = (double)index;
+    // Shaped int fields are int64 lanes. Writing IEEE bits here makes the
+    // map reader decode an ordinary match offset as the `+inf` sentinel.
+    *(int64_t*)((char*)mp->data + e_index->byte_offset) = lambda_double_to_int_lane((double)index);
 
     return mp;
 }

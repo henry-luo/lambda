@@ -78,6 +78,9 @@ static Item vector_get(Item item, int64_t index) {
             return array_num_read_item(item.array_num, index);
         }
         case LMD_TYPE_ARRAY:
+            // Nullable native lanes are deliberately outside the first kernel
+            // slice: vector operators need an explicit null propagation policy.
+            if (array_has_native_lane(item.array)) return ItemError;
             return item.array->items[index];
         case LMD_TYPE_RANGE:
             return { .item = i2it(item.range->start + index) };

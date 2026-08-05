@@ -152,6 +152,105 @@ bool lambda_type_accepts_null(Type* type) {
     return lambda_type_accepts_null(binary->left) || lambda_type_accepts_null(binary->right);
 }
 
+static Type* contract_nullable_lane_base(Type* type, bool* nullable) {
+    type = contract_unwrap_type(type);
+    if (!type || !nullable) return NULL;
+    *nullable = false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if (unary->op == OPERATOR_OPTIONAL) {
+            *nullable = true;
+            return contract_unwrap_type(unary->operand);
+        }
+    }
+    if (!contract_is_union(type)) return type;
+
+    TypeBinary* binary = (TypeBinary*)type;
+    Type* left = contract_unwrap_type(binary->left);
+    Type* right = contract_unwrap_type(binary->right);
+    if (left && left->type_id == LMD_TYPE_NULL && right &&
+            !lambda_type_accepts_error(right)) {
+        *nullable = true;
+        return right;
+    }
+    if (right && right->type_id == LMD_TYPE_NULL && left &&
+            !lambda_type_accepts_error(left)) {
+        *nullable = true;
+        return left;
+    }
+    return NULL;
+}
+
+bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
+    if (!out) return false;
+    *out = {};
+
+    Type* semantic = contract_unwrap_type(type);
+    bool nullable = false;
+    Type* base = contract_nullable_lane_base(semantic, &nullable);
+    if (!semantic || !base || base->type_id == LMD_TYPE_ANY ||
+            base->type_id == LMD_TYPE_NULL || base->type_id == LMD_TYPE_ERROR ||
+            base->type_id == LMD_TYPE_TYPE) {
+        return false;
+    }
+
+    LaneStorageDesc desc = {};
+    desc.semantic_contract = semantic;
+    desc.base_contract = base;
+    desc.nullable = nullable ? 1 : 0;
+    switch (base->type_id) {
+    case LMD_TYPE_INT:
+        desc.kind = LANE_STORAGE_INT;
+        desc.byte_size = (uint8_t)sizeof(int64_t);
+        break;
+    case LMD_TYPE_BOOL:
+        desc.kind = LANE_STORAGE_BOOL;
+        desc.byte_size = (uint8_t)sizeof(uint8_t);
+        break;
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        desc.kind = LANE_STORAGE_FLOAT64;
+        desc.byte_size = (uint8_t)sizeof(double);
+        break;
+    case LMD_TYPE_NUM_SIZED:
+        if (!nullable || base == &TYPE_NUM_SIZED ||
+                !lambda_num_sized_is_integer(type_num_sized_kind(base))) return false;
+        desc.kind = LANE_STORAGE_SIZED_I64;
+        desc.byte_size = (uint8_t)sizeof(int64_t);
+        break;
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+        if (!nullable) return false;
+        desc.kind = LANE_STORAGE_ITEM;
+        desc.byte_size = (uint8_t)sizeof(Item);
+        break;
+    default:
+        if (!lambda_type_id_has_pointer_lane(base->type_id)) return false;
+        desc.kind = LANE_STORAGE_POINTER;
+        desc.byte_size = (uint8_t)sizeof(void*);
+        break;
+    }
+    *out = desc;
+    return true;
+}
+
+Type* lambda_type_nullable_normalized(Pool* pool, Type* type) {
+    type = contract_unwrap_type(type);
+    if (!type || lambda_type_accepts_null(type) || lambda_type_accepts_error(type) ||
+            !pool) {
+        return type;
+    }
+    // A total read contributes absence, not a heterogeneous union. Preserve
+    // the exact payload Type so the lane resolver can distinguish T from T?.
+    TypeUnary* optional = (TypeUnary*)alloc_type_kind(pool, TYPE_KIND_UNARY,
+        sizeof(TypeUnary));
+    optional->operand = type;
+    optional->op = OPERATOR_OPTIONAL;
+    optional->min_count = 0;
+    optional->max_count = 1;
+    return (Type*)optional;
+}
+
 bool lambda_type_has_proven_error(Type* type) {
     type = contract_unwrap_type(type);
     if (!type || type->type_id == LMD_TYPE_ANY) return false;

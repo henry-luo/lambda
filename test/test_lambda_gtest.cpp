@@ -382,6 +382,22 @@ TEST(LambdaNegativeTests, test_type_enforcement_dynamic_declaration) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls");
 }
 
+TEST(LambdaNegativeTests, nullable_array_rejects_null_without_widening) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_array_reject_null.ls");
+}
+
+TEST(LambdaNegativeTests, nullable_pointer_array_rejects_null_without_widening) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_pointer_array_reject_null.ls");
+}
+
+TEST(LambdaNegativeTests, nullable_map_rejects_non_lane_value) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_map_reject_wrong_type.ls");
+}
+
+TEST(LambdaNegativeTests, nullable_index_read_rejects_plain_int) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/nullable_index_read_reject_plain_int.ls");
+}
+
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_map) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_map.ls");
 }

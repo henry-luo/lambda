@@ -7,7 +7,12 @@
 
 #include "../lambda/lambda.hpp"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/js/js_property_attrs.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/runtime/heap_api.h"
+#include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/side_stack.h"
 
 extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -52,6 +57,181 @@ protected:
             gc_heap_destroy(gc);
             gc = nullptr;
         }
+    }
+};
+
+static String* shape_transition_test_name(Pool* pool, const char* text) {
+    size_t length = strlen(text);
+    String* name = (String*)pool_calloc(pool, sizeof(String) + length + 1);
+    if (!name) return nullptr;
+    name->len = (uint32_t)length;
+    name->is_ascii = 1;
+    memcpy(name->chars, text, length + 1);
+    return name;
+}
+
+static ShapeEntry* shape_transition_find_field_in_type(TypeMap* type, String* name) {
+    if (!type || !name) return nullptr;
+    ShapeEntry* field = typemap_hash_lookup(type, name->chars, (int)name->len);
+    if (field) return field;
+    // freshly assembled Element shapes do not publish a hash table until a
+    // runtime shape rebuild; the linked chain is still the authoritative data.
+    for (field = type->shape; field; field = field->next) {
+        if (field->name && field->name->length == name->len &&
+                memcmp(field->name->str, name->chars, name->len) == 0) {
+            return field;
+        }
+    }
+    return nullptr;
+}
+
+static ShapeEntry* shape_transition_find_field(Map* map, String* name) {
+    if (!map || !map->type) return nullptr;
+    return shape_transition_find_field_in_type((TypeMap*)map->type, name);
+}
+
+static Item shape_transition_read_field(Map* map, String* name) {
+    ShapeEntry* field = shape_transition_find_field(map, name);
+    return field ? map_shape_field_to_item(map->data, field) : ItemError;
+}
+
+static Item shape_transition_read_typed_field(TypeMap* type, void* data, String* name) {
+    ShapeEntry* field = shape_transition_find_field_in_type(type, name);
+    return field ? map_field_to_item((char*)data + field->byte_offset,
+        shape_entry_storage_type_id(field)) : ItemError;
+}
+
+class RuntimeShapeTransition : public ::testing::Test {
+protected:
+    Pool* pool = nullptr;
+    Input input = {};
+    EvalContext eval = {};
+    String* fixed_left = nullptr;
+    String* fixed_right = nullptr;
+    String* late_flag = nullptr;
+    String* after_flag = nullptr;
+
+    void SetUp() override {
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        input.pool = pool;
+        input.type_list = arraylist_new(8);
+        ASSERT_NE(input.type_list, nullptr);
+        eval.pool = pool;
+        eval.type_list = input.type_list;
+        ASSERT_TRUE(eval_context_thread_initialize(&eval));
+        heap_init();
+        ASSERT_NE(eval.heap, nullptr);
+        ASSERT_TRUE(js_runtime_state_thread_initialize(&eval));
+        lambda_stack_init();
+        eval.stack_limit = _lambda_stack_limit;
+        ASSERT_TRUE(lambda_side_stack_bind());
+        js_runtime_set_input(&input);
+
+        fixed_left = shape_transition_test_name(pool, "fixedLeft");
+        fixed_right = shape_transition_test_name(pool, "fixedRight");
+        late_flag = shape_transition_test_name(pool, "lateFlag");
+        after_flag = shape_transition_test_name(pool, "afterFlag");
+        ASSERT_NE(fixed_left, nullptr);
+        ASSERT_NE(fixed_right, nullptr);
+        ASSERT_NE(late_flag, nullptr);
+        ASSERT_NE(after_flag, nullptr);
+    }
+
+    void TearDown() override {
+        js_runtime_set_input(nullptr);
+        js_runtime_state_destroy_context();
+        lambda_stack_cleanup();
+        if (eval.heap) {
+            heap_destroy();
+            eval.heap = nullptr;
+        }
+        EXPECT_TRUE(eval_context_thread_shutdown(&eval));
+        arraylist_free(input.type_list);
+        input.type_list = nullptr;
+        pool_destroy(pool);
+        pool = nullptr;
+    }
+
+    Map* make_transition_map(void) {
+        Map* map = map_pooled(pool);
+        if (!map) return nullptr;
+        map->map_kind = MAP_KIND_PLAIN;
+
+        map_put(map, fixed_left, {.item = i2it(42)}, &input);
+        map_put(map, fixed_right, {.item = i2it(7)}, &input);
+        TypeMap* constructor_shape = (TypeMap*)map->type;
+        if (!constructor_shape || !constructor_shape->shape ||
+                !constructor_shape->shape->next) {
+            return nullptr;
+        }
+
+        ShapeEntry** slots = (ShapeEntry**)pool_calloc(pool, 2 * sizeof(ShapeEntry*));
+        if (!slots) return nullptr;
+        slots[0] = constructor_shape->shape;
+        slots[1] = constructor_shape->shape->next;
+        constructor_shape->slot_entries = slots;
+        constructor_shape->slot_count = 2;
+        constructor_shape->is_shared_constructor_shape = true;
+
+        map_put(map, late_flag, {.item = b2it(BOOL_FALSE)}, &input);
+        map_put(map, after_flag, {.item = i2it(123456)}, &input);
+        return map;
+    }
+
+    Element* make_transition_element(void) {
+        Element* element = elmt_pooled(pool);
+        if (!element) return nullptr;
+
+        TypeElmt* element_type = (TypeElmt*)pool_calloc(pool, sizeof(TypeElmt));
+        if (!element_type) return nullptr;
+        element_type->type_id = LMD_TYPE_ELEMENT;
+        element_type->type_index = -1;
+        element_type->name.str = "repr-element";
+        element_type->name.length = 12;
+        element->type = element_type;
+
+        element->items = (Item*)pool_calloc(pool, 6 * sizeof(Item));
+        if (!element->items) return nullptr;
+        element->length = 2;
+        element->capacity = 6;
+
+        elmt_put(element, fixed_left, {.item = i2it(42)}, pool);
+        elmt_put(element, fixed_right, {.item = i2it(7)}, pool);
+        elmt_put(element, late_flag, {.item = b2it(BOOL_FALSE)}, pool);
+        elmt_put(element, after_flag, {.item = i2it(123456)}, pool);
+        return element;
+    }
+
+    void expect_fixed_prefix(Map* map) {
+        TypeMap* shape = (TypeMap*)map->type;
+        ASSERT_NE(shape, nullptr);
+        EXPECT_EQ(typemap_fixed_slot_prefix_count(shape), 2);
+
+        ShapeEntry* left = shape_transition_find_field(map, fixed_left);
+        ShapeEntry* right = shape_transition_find_field(map, fixed_right);
+        ASSERT_NE(left, nullptr);
+        ASSERT_NE(right, nullptr);
+        EXPECT_TRUE(typemap_entry_uses_fixed_slot(shape, left));
+        EXPECT_TRUE(typemap_entry_uses_fixed_slot(shape, right));
+        EXPECT_EQ(left->byte_offset, 0);
+        EXPECT_EQ(right->byte_offset, (int64_t)sizeof(void*));
+        EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, fixed_right)), 7);
+    }
+
+    void expect_packed_sibling(Map* map, TypeId late_type, int64_t late_offset,
+                               int64_t after_offset) {
+        TypeMap* shape = (TypeMap*)map->type;
+        ShapeEntry* late = shape_transition_find_field(map, late_flag);
+        ShapeEntry* after = shape_transition_find_field(map, after_flag);
+        ASSERT_NE(late, nullptr);
+        ASSERT_NE(after, nullptr);
+        EXPECT_EQ(late->type->type_id, late_type);
+        EXPECT_EQ(late->byte_offset, late_offset);
+        EXPECT_EQ(after->byte_offset, after_offset);
+        EXPECT_FALSE(typemap_entry_uses_fixed_slot(shape, late));
+        EXPECT_FALSE(typemap_entry_uses_fixed_slot(shape, after));
+        EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, after_flag)), 123456);
     }
 };
 
@@ -114,6 +294,316 @@ TEST(ItemRepresentation, ContainerHeaderNamedStatePreservesRawAbi) {
     map_ctor_set_reserved_mask(&map, 0);
     EXPECT_FALSE(map.has_ctor_reserved);
     EXPECT_EQ(map_ctor_reserved_mask(&map), 0);
+}
+
+TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) {
+    Map* map = make_transition_map();
+    ASSERT_NE(map, nullptr);
+    Item map_item = {.map = map};
+
+    TypeMap* initial_shape = (TypeMap*)map->type;
+    ASSERT_NE(initial_shape, nullptr);
+    EXPECT_TRUE(typemap_is_shared_shape(initial_shape));
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_BOOL, 2 * (int64_t)sizeof(void*),
+                           2 * (int64_t)sizeof(void*) + 1);
+    EXPECT_EQ(initial_shape->byte_size, 2 * (int64_t)sizeof(void*) + 1 +
+        (int64_t)sizeof(void*));
+
+    // Fixed constructor slots may use a cached type transition because their
+    // addresses stay slot-indexed even when the assigned value's tag changes.
+    Map fixed_value = {};
+    fixed_value.type_id = LMD_TYPE_MAP;
+    fn_map_set(map_item, {.item = s2it(fixed_left)}, {.map = &fixed_value});
+    EXPECT_TRUE(((TypeMap*)map->type)->is_transition_shared_shape);
+    expect_fixed_prefix(map);
+    EXPECT_EQ(it2map(shape_transition_read_field(map, fixed_left)), &fixed_value);
+    expect_packed_sibling(map, LMD_TYPE_BOOL, 2 * (int64_t)sizeof(void*),
+                           2 * (int64_t)sizeof(void*) + 1);
+
+    TypeMap* packed_shape = (TypeMap*)map->type;
+    ShapeEntry* packed_entry = shape_transition_find_field(map, late_flag);
+    ASSERT_NE(packed_entry, nullptr);
+    // `lateFlag` is followed by `afterFlag`; retaining its old one-byte offset
+    // for a Map write would overwrite the packed sibling. The cache must defer
+    // to the rebuild path instead of publishing a retag-only transition.
+    EXPECT_EQ(js_typemap_transition_for_type(map_item, packed_entry, LMD_TYPE_MAP), nullptr);
+    EXPECT_EQ(map->type, packed_shape);
+
+    Map replacement = {};
+    replacement.type_id = LMD_TYPE_MAP;
+    fn_map_set(map_item, {.item = s2it(late_flag)}, {.map = &replacement});
+    EXPECT_FALSE(typemap_is_shared_shape((TypeMap*)map->type));
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_MAP, 2 * (int64_t)sizeof(void*),
+                           3 * (int64_t)sizeof(void*));
+    EXPECT_EQ(((TypeMap*)map->type)->byte_size, 4 * (int64_t)sizeof(void*));
+    EXPECT_EQ(it2map(shape_transition_read_field(map, late_flag)), &replacement);
+
+    fn_map_set(map_item, {.item = s2it(late_flag)}, {.item = b2it(BOOL_TRUE)});
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_BOOL, 2 * (int64_t)sizeof(void*),
+                           2 * (int64_t)sizeof(void*) + 1);
+    EXPECT_EQ(((TypeMap*)map->type)->byte_size, 2 * (int64_t)sizeof(void*) + 1 +
+        (int64_t)sizeof(void*));
+    EXPECT_EQ(shape_transition_read_field(map, late_flag).item, b2it(BOOL_TRUE));
+
+    fn_map_set(map_item, {.item = s2it(late_flag)}, {.item = i2it(77)});
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_INT, 2 * (int64_t)sizeof(void*),
+                           3 * (int64_t)sizeof(void*));
+    EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, late_flag)), 77);
+
+    int64_t wide_value = INT64_C(9007199254740991);
+    fn_map_set(map_item, {.item = s2it(late_flag)}, {.item = l2it(&wide_value)});
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_INT64, 2 * (int64_t)sizeof(void*),
+                           3 * (int64_t)sizeof(void*));
+    EXPECT_EQ(shape_transition_read_field(map, late_flag).get_int64(), wide_value);
+
+    double float_value = 3.5;
+    fn_map_set(map_item, {.item = s2it(late_flag)}, {.item = d2it(&float_value)});
+    expect_fixed_prefix(map);
+    expect_packed_sibling(map, LMD_TYPE_FLOAT, 2 * (int64_t)sizeof(void*),
+                           3 * (int64_t)sizeof(void*));
+    EXPECT_DOUBLE_EQ(shape_transition_read_field(map, late_flag).get_double(), 3.5);
+}
+
+TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
+    ArrayNum* array = array_int_new(4);
+    ASSERT_NE(array, nullptr);
+    EXPECT_EQ(array->type_id, LMD_TYPE_ARRAY_NUM);
+    EXPECT_EQ(array->get_elem_type(), ELEM_INT);
+
+    array_int_set(array, 0, INT53_MIN);
+    array_num_set_item(array, 1, {.item = i2it(INT53_MAX)});
+    int64_t in_band = -123456789;
+    array_num_set_item(array, 2, {.item = l2it(&in_band)});
+    Item positive_infinity = {.item = lambda_int_box_double(INFINITY)};
+    array_num_set_item(array, 3, positive_infinity);
+
+    // ELEM_INT is an i64 lane now; it must not reinterpret the storage as
+    // float64 while boxing or while preserving the shared poison values.
+    EXPECT_EQ(array->items[0], INT53_MIN);
+    EXPECT_EQ(array->items[1], INT53_MAX);
+    EXPECT_EQ(array->items[2], in_band);
+    EXPECT_EQ(array->items[3], INT_LANE_INF);
+
+    Item first = array_num_read_item(array, 0);
+    Item second = array_num_read_item(array, 1);
+    Item third = array_num_read_item(array, 2);
+    Item fourth = array_num_read_item(array, 3);
+    EXPECT_EQ(get_type_id(first), LMD_TYPE_INT);
+    EXPECT_EQ(lambda_int_item_to_i64(first), INT53_MIN);
+    EXPECT_EQ(lambda_int_item_to_i64(second), INT53_MAX);
+    EXPECT_EQ(lambda_int_item_to_i64(third), in_band);
+    EXPECT_EQ(get_type_id(fourth), LMD_TYPE_FLOAT);
+    EXPECT_EQ(fourth.get_double(), INFINITY);
+    EXPECT_EQ(array_num_read_double(array, 0), (double)INT53_MIN);
+    EXPECT_EQ(array_num_read_double(array, 1), (double)INT53_MAX);
+    EXPECT_EQ(array_num_read_double(array, 3), INFINITY);
+
+    EXPECT_EQ(fn_array_set((Array*)array, 0, {.item = i2it(77)}).item,
+              ItemNull.item);
+    EXPECT_EQ(array->items[0], 77);
+
+    // An out-of-band int64 cannot remain in the compact int lane; widening
+    // must preserve all existing lane values as ordinary generic Items.
+    int64_t out_of_band = INT64_MAX;
+    EXPECT_EQ(fn_array_set((Array*)array, 1, {.item = l2it(&out_of_band)}).item,
+              ItemNull.item);
+    EXPECT_EQ(array->type_id, LMD_TYPE_ARRAY);
+    Array* generic = (Array*)array;
+    EXPECT_EQ(get_type_id(generic->items[0]), LMD_TYPE_INT);
+    EXPECT_EQ(lambda_int_item_to_i64(generic->items[0]), 77);
+    EXPECT_EQ(get_type_id(generic->items[3]), LMD_TYPE_FLOAT);
+    EXPECT_EQ(generic->items[1].get_int64(), out_of_band);
+    EXPECT_EQ(array->extra, 1);
+
+    ArrayNum* float_array = array_float_new(3);
+    ASSERT_NE(float_array, nullptr);
+    EXPECT_EQ(float_array->get_elem_type(), ELEM_FLOAT64);
+    double tiny = ldexp(1.0, -1074);
+    array_float_set(float_array, 0, tiny);
+    array_num_set_item(float_array, 1, {.item = i2it(11)});
+    array_num_set_item(float_array, 2, {.item = lambda_int_box_double(INFINITY)});
+    EXPECT_DOUBLE_EQ(float_array->float_items[0], tiny);
+    EXPECT_DOUBLE_EQ(float_array->float_items[1], 11.0);
+    EXPECT_EQ(array_num_read_item(float_array, 0).get_double(), tiny);
+    EXPECT_EQ(array_num_read_double(float_array, 2), INFINITY);
+
+    EXPECT_EQ(fn_array_set((Array*)float_array, 0, {.item = i2it(13)}).item,
+              ItemNull.item);
+    EXPECT_DOUBLE_EQ(float_array->float_items[0], 13.0);
+
+    // A non-numeric write widens a float lane and must preserve the exact
+    // subnormal and infinity values while moving them into owned Item storage.
+    EXPECT_EQ(fn_array_set((Array*)float_array, 2,
+        {.item = b2it(BOOL_TRUE)}).item, ItemNull.item);
+    Array* generic_float = (Array*)float_array;
+    EXPECT_EQ(float_array->type_id, LMD_TYPE_ARRAY);
+    EXPECT_EQ(generic_float->items[0].get_double(), 13.0);
+    EXPECT_EQ(generic_float->items[1].get_double(), 11.0);
+    EXPECT_EQ(generic_float->items[2].item, b2it(BOOL_TRUE));
+}
+
+TEST(ItemRepresentation, OwnedTailRelocationRebasesWideScalarItems) {
+    Item old_items[6] = {};
+    Item new_items[8] = {};
+    List list = {};
+    list.type_id = LMD_TYPE_ARRAY;
+    list.items = old_items;
+    list.length = 3;
+    list.extra = 3;
+    list.capacity = 6;
+
+    *(int64_t*)&old_items[5] = INT64_MAX - 1;
+    *(double*)&old_items[4] = ldexp(1.0, -1074);
+    *(uint64_t*)&old_items[3] = UINT64_MAX;
+    old_items[0] = {.item = l2it(&old_items[5])};
+    old_items[1] = {.item = d2it(&old_items[4])};
+    old_items[2] = {.item = u2it(&old_items[3])};
+    // Growth has already copied the old allocation before this helper moves
+    // the owned tail to its new end.
+    memcpy(new_items, old_items, sizeof(old_items));
+
+    list_relocate_owned_tail(&list, old_items, 6, new_items, 8);
+
+    // The tail moves from [3, 6) to [5, 8); dense Items must follow the
+    // owned payload rather than retain pointers into the abandoned buffer.
+    EXPECT_EQ(new_items[0].get_int64(), INT64_MAX - 1);
+    EXPECT_EQ(new_items[1].get_double(), ldexp(1.0, -1074));
+    EXPECT_EQ(new_items[2].get_uint64(), UINT64_MAX);
+    EXPECT_EQ((int64_t*)new_items[0].int64_ptr, (int64_t*)&new_items[7]);
+    EXPECT_EQ((double*)new_items[1].double_ptr, (double*)&new_items[6]);
+    EXPECT_EQ((uint64_t*)new_items[2].uint64_ptr, (uint64_t*)&new_items[5]);
+    EXPECT_EQ(new_items[3].item, ItemNull.item);
+    EXPECT_EQ(new_items[4].item, ItemNull.item);
+
+    Item old_props[4] = {};
+    Item new_props[6] = {};
+    List js_list = {};
+    js_list.type_id = LMD_TYPE_ARRAY;
+    js_list.items = old_props;
+    js_list.length = 2;
+    js_list.extra = 1;
+    js_list.capacity = 4;
+    js_list.has_js_props = 1;
+    old_props[3] = {.item = ITEM_JS_DELETED_SENTINEL};
+    memcpy(new_props, old_props, sizeof(old_props));
+
+    list_relocate_owned_tail(&js_list, old_props, 4, new_props, 6);
+    EXPECT_EQ(new_props[5].item, ITEM_JS_DELETED_SENTINEL);
+    EXPECT_EQ(new_props[3].item, ITEM_JS_DELETED_SENTINEL);
+    EXPECT_EQ(new_props[4].item, ITEM_JS_DELETED_SENTINEL);
+}
+
+TEST_F(RuntimeShapeTransition, ElementContentAndAttributesKeepSeparateStorage) {
+    Element* element = make_transition_element();
+    ASSERT_NE(element, nullptr);
+    Item element_item = {.element = element};
+
+    int64_t content_int64 = INT64_MIN + 7;
+    double content_float = ldexp(1.0, -1074);
+    EXPECT_EQ(fn_array_set((Array*)element, 0, {.item = l2it(&content_int64)}).item,
+              ItemNull.item);
+    EXPECT_EQ(fn_array_set((Array*)element, 1, {.item = d2it(&content_float)}).item,
+              ItemNull.item);
+    EXPECT_EQ(element->extra, 2);
+    EXPECT_EQ(element->items[0].get_int64(), content_int64);
+    EXPECT_EQ(element->items[1].get_double(), content_float);
+
+    Item initial_attr = shape_transition_read_typed_field((TypeMap*)element->type,
+        element->data, late_flag);
+    EXPECT_EQ(get_type_id(initial_attr), LMD_TYPE_BOOL);
+    EXPECT_EQ(initial_attr.item, b2it(BOOL_FALSE));
+
+    Map replacement = {};
+    replacement.type_id = LMD_TYPE_MAP;
+    fn_map_set(element_item, {.item = s2it(late_flag)}, {.map = &replacement});
+    TypeMap* map_type = (TypeMap*)element->type;
+    ShapeEntry* after = shape_transition_find_field_in_type(map_type, after_flag);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(((ShapeEntry*)shape_transition_find_field_in_type(map_type, late_flag))->type->type_id,
+              LMD_TYPE_MAP);
+    EXPECT_EQ(after->byte_offset, 3 * (int64_t)sizeof(void*));
+    EXPECT_EQ(it2map(shape_transition_read_typed_field(map_type, element->data,
+        late_flag)), &replacement);
+
+    // Rebuild back to the one-byte boolean carrier while retaining the sibling
+    // field and the independently owned content tail.
+    fn_map_set(element_item, {.item = s2it(late_flag)}, {.item = b2it(BOOL_TRUE)});
+    map_type = (TypeMap*)element->type;
+    after = shape_transition_find_field_in_type(map_type, after_flag);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(after->byte_offset, 2 * (int64_t)sizeof(void*) + 1);
+    EXPECT_EQ(shape_transition_read_typed_field(map_type, element->data,
+        late_flag).item, b2it(BOOL_TRUE));
+    EXPECT_EQ(element->items[0].get_int64(), content_int64);
+    EXPECT_EQ(element->items[1].get_double(), content_float);
+}
+
+TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {
+    Map* seed = make_transition_map();
+    ASSERT_NE(seed, nullptr);
+
+    // The object branch shares the same packed shape machinery, but its
+    // derived header must remain an OBJECT Item throughout the rebuild.
+    Object object = {};
+    object.type_id = LMD_TYPE_OBJECT;
+    object.type = seed->type;
+    object.data = seed->data;
+    object.data_cap = seed->data_cap;
+    Item object_item = {.object = &object};
+    EXPECT_EQ(get_type_id(object_item), LMD_TYPE_OBJECT);
+    EXPECT_EQ(object_get(&object, {.item = s2it(late_flag)}).item,
+              b2it(BOOL_FALSE));
+
+    Map replacement = {};
+    replacement.type_id = LMD_TYPE_MAP;
+    fn_map_set(object_item, {.item = s2it(late_flag)}, {.map = &replacement});
+
+    TypeMap* object_type = (TypeMap*)object.type;
+    ShapeEntry* late = shape_transition_find_field_in_type(object_type, late_flag);
+    ShapeEntry* after = shape_transition_find_field_in_type(object_type, after_flag);
+    ASSERT_NE(late, nullptr);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(late->type->type_id, LMD_TYPE_MAP);
+    EXPECT_EQ(late->byte_offset, 2 * (int64_t)sizeof(void*));
+    EXPECT_EQ(after->byte_offset, 3 * (int64_t)sizeof(void*));
+    EXPECT_EQ(it2map(object_get(&object, {.item = s2it(late_flag)})), &replacement);
+    EXPECT_EQ(lambda_int_item_value(object_get(&object,
+        {.item = s2it(after_flag)})), 123456);
+
+    fn_map_set(object_item, {.item = s2it(late_flag)}, {.item = b2it(BOOL_TRUE)});
+    EXPECT_EQ(object_get(&object, {.item = s2it(late_flag)}).item,
+              b2it(BOOL_TRUE));
+    EXPECT_EQ(lambda_int_item_value(object_get(&object,
+        {.item = s2it(after_flag)})), 123456);
+}
+
+TEST_F(RuntimeShapeTransition, VMapMutationStabilizesWideValues) {
+    Item vmap_item = vmap_new();
+    ASSERT_EQ(get_type_id(vmap_item), LMD_TYPE_VMAP);
+    ASSERT_NE(vmap_item.vmap, nullptr);
+
+    int64_t wide_value = INT64_MAX;
+    vmap_set(vmap_item, {.item = s2it(late_flag)}, {.item = l2it(&wide_value)});
+    ASSERT_NE(vmap_item.vmap->data, nullptr);
+    Item stored = vmap_item.vmap->vtable->get(vmap_item.vmap->data,
+        {.item = s2it(late_flag)});
+    EXPECT_EQ(get_type_id(stored), LMD_TYPE_INT64);
+    EXPECT_EQ(stored.get_int64(), wide_value);
+    EXPECT_NE((int64_t*)(uintptr_t)stored.int64_ptr, &wide_value);
+
+    double float_value = ldexp(1.0, -1074);
+    fn_map_set(vmap_item, {.item = s2it(late_flag)}, {.item = d2it(&float_value)});
+    stored = vmap_item.vmap->vtable->get(vmap_item.vmap->data,
+        {.item = s2it(late_flag)});
+    EXPECT_EQ(get_type_id(stored), LMD_TYPE_FLOAT);
+    EXPECT_DOUBLE_EQ(stored.get_double(), float_value);
+    EXPECT_NE((double*)(uintptr_t)stored.double_ptr, &float_value);
+    EXPECT_EQ(vmap_item.vmap->vtable->count(vmap_item.vmap->data), 1);
 }
 
 TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedPayload) {

@@ -381,6 +381,214 @@ struct List : Container {
     ConstItem get(int index) const;
 };
 
+#define ARRAY_NATIVE_LANE_KIND_MASK 0x07u
+#define ARRAY_NATIVE_LANE_NULLABLE  0x08u
+
+static inline Item lambda_num_sized_lane_to_item(int64_t lane, NumSizedType num_type) {
+    switch (num_type) {
+    case NUM_INT8: return {.item = i8_to_item((int8_t)lane)};
+    case NUM_INT16: return {.item = i16_to_item((int16_t)lane)};
+    case NUM_INT32: return {.item = i32_to_item((int32_t)lane)};
+    case NUM_UINT8: return {.item = u8_to_item((uint8_t)lane)};
+    case NUM_UINT16: return {.item = u16_to_item((uint16_t)lane)};
+    case NUM_UINT32: return {.item = u32_to_item((uint32_t)lane)};
+    default: return ItemError;
+    }
+}
+
+static inline bool lambda_pointer_lane_accepts_item(TypeId base_type, TypeId value_type) {
+    if (base_type == LMD_TYPE_ARRAY) {
+        return value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM;
+    }
+    if (base_type == LMD_TYPE_MAP) {
+        return value_type == LMD_TYPE_MAP || value_type == LMD_TYPE_VMAP;
+    }
+    return value_type == base_type;
+}
+
+static inline Item lambda_pointer_lane_to_item(uint64_t word, TypeId base_type) {
+    if (word == 0) return ItemNull;
+    void* ptr = (void*)(uintptr_t)word;
+    switch (base_type) {
+    case LMD_TYPE_DECIMAL: return {.item = c2it((Decimal*)ptr)};
+    case LMD_TYPE_DTIME: return {.item = k2it((DateTime*)ptr)};
+    case LMD_TYPE_SYMBOL: return {.item = y2it((Symbol*)ptr)};
+    case LMD_TYPE_STRING: return {.item = s2it((String*)ptr)};
+    case LMD_TYPE_BINARY: return {.item = x2it((Binary*)ptr)};
+    case LMD_TYPE_COMPLEX: return {.item = word};
+    default:
+        // Container, function, path, and Type Items are already raw pointers.
+        return {.item = word};
+    }
+}
+
+static inline bool lambda_pointer_lane_store(void* storage, TypeId base_type, bool nullable,
+        Item value) {
+    if (!storage || !lambda_type_id_has_pointer_lane(base_type)) return false;
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_NULL) {
+        if (!nullable) return false;
+        *(uint64_t*)storage = 0;
+        return true;
+    }
+    if (!lambda_pointer_lane_accepts_item(base_type, value_type)) return false;
+
+    uint64_t word = 0;
+    switch (base_type) {
+    case LMD_TYPE_DECIMAL: word = (uint64_t)(uintptr_t)value.get_decimal(); break;
+    case LMD_TYPE_DTIME: word = (uint64_t)(uintptr_t)value.get_datetime_ptr(); break;
+    case LMD_TYPE_SYMBOL: word = (uint64_t)(uintptr_t)value.get_safe_symbol(); break;
+    case LMD_TYPE_STRING: word = (uint64_t)(uintptr_t)value.get_safe_string(); break;
+    case LMD_TYPE_BINARY: word = (uint64_t)(uintptr_t)value.get_safe_binary(); break;
+    case LMD_TYPE_COMPLEX: word = (uint64_t)(uintptr_t)value.get_complex(); break;
+    default: word = value.item; break;
+    }
+    *(uint64_t*)storage = word;
+    return true;
+}
+
+static inline LaneStorageKind array_native_lane_kind(const Array* array) {
+    return array ? (LaneStorageKind)(array->map_kind & ARRAY_NATIVE_LANE_KIND_MASK) :
+        LANE_STORAGE_INVALID;
+}
+
+static inline bool array_native_lane_nullable(const Array* array) {
+    return array && (array->map_kind & ARRAY_NATIVE_LANE_NULLABLE) != 0;
+}
+
+static inline NumSizedType array_native_lane_num_sized_type(const Array* array) {
+    return array ? (NumSizedType)array->reserved_state : NUM_SIZED_COUNT;
+}
+
+static inline TypeId array_native_lane_pointer_type(const Array* array) {
+    return array ? (TypeId)array->reserved_state : LMD_TYPE_NULL;
+}
+
+static inline void array_native_lane_configure(Array* array, const LaneStorageDesc* desc) {
+    if (!array || !desc) return;
+    // Generic Arrays otherwise do not consume map_kind. Keep the compact lane
+    // contract here so List and DOM/Element layouts remain unchanged.
+    array->is_native_lane_array = 1;
+    array->map_kind = (uint8_t)desc->kind |
+        (desc->nullable ? ARRAY_NATIVE_LANE_NULLABLE : 0);
+    if (desc->kind == LANE_STORAGE_SIZED_I64 && desc->base_contract) {
+        array->reserved_state = desc->base_contract->kind;
+    } else if (desc->kind == LANE_STORAGE_POINTER && desc->base_contract) {
+        array->reserved_state = desc->base_contract->type_id;
+    } else {
+        array->reserved_state = 0;
+    }
+}
+
+static inline bool array_has_native_lane(const Array* array) {
+    return array && array->is_native_lane_array &&
+        array_native_lane_kind(array) != LANE_STORAGE_INVALID;
+}
+
+static inline bool array_native_lane_matches_desc(const Array* array,
+        const LaneStorageDesc* desc) {
+    if (!array_has_native_lane(array) || !desc ||
+            array_native_lane_kind(array) != desc->kind ||
+            array_native_lane_nullable(array) != (desc->nullable != 0)) {
+        return false;
+    }
+    if (desc->kind == LANE_STORAGE_SIZED_I64) {
+        return desc->base_contract && array_native_lane_num_sized_type(array) ==
+            (NumSizedType)desc->base_contract->kind;
+    }
+    if (desc->kind == LANE_STORAGE_POINTER) {
+        return desc->base_contract && array_native_lane_pointer_type(array) ==
+            desc->base_contract->type_id;
+    }
+    return true;
+}
+
+static inline Item array_native_lane_read(const Array* array, int64_t index) {
+    if (!array_has_native_lane(array) || index < 0 || index >= array->length) return ItemNull;
+    uint64_t word = array->items[index].item;
+    switch (array_native_lane_kind(array)) {
+    case LANE_STORAGE_INT:
+        return {.item = lambda_int_box_lane((int64_t)word)};
+    case LANE_STORAGE_BOOL:
+        if (array_native_lane_nullable(array) && word == 2) return ItemNull;
+        return {.item = b2it(word ? BOOL_TRUE : BOOL_FALSE)};
+    case LANE_STORAGE_FLOAT64:
+        if (array_native_lane_nullable(array) && lambda_float_lane_is_null(word)) {
+            return ItemNull;
+        }
+        // The lane word itself is stable array-owned double storage. Use the
+        // existing pointer boxer here because lambda.hpp is also compiled by
+        // input-only targets that do not link the runtime push_d helper.
+        return lambda_float_ptr_to_item((const double*)&array->items[index]);
+    case LANE_STORAGE_ITEM:
+        return array->items[index];
+    case LANE_STORAGE_SIZED_I64: {
+        int64_t lane = (int64_t)word;
+        if (array_native_lane_nullable(array) && lane == SIZED_LANE_NULL) return ItemNull;
+        NumSizedType num_type = array_native_lane_num_sized_type(array);
+        return lambda_num_sized_is_integer(num_type)
+            ? lambda_num_sized_lane_to_item(lane, num_type) : ItemError;
+    }
+    case LANE_STORAGE_POINTER:
+        return lambda_pointer_lane_to_item(word, array_native_lane_pointer_type(array));
+    default:
+        return ItemNull;
+    }
+}
+
+static inline bool array_native_lane_store(Array* array, int64_t index, Item value) {
+    if (!array_has_native_lane(array) || index < 0 || index >= array->capacity) return false;
+    TypeId value_type = get_type_id(value);
+    switch (array_native_lane_kind(array)) {
+    case LANE_STORAGE_INT:
+        if (value.item == ITEM_NULL) {
+            if (!array_native_lane_nullable(array)) return false;
+            array->items[index] = {.item = (uint64_t)INT_LANE_NULL};
+            return true;
+        }
+        // int poison values are stored as Float Items but belong to IntLane.
+        if (value_type != LMD_TYPE_INT && !lambda_item_is_merged_poison(value.item)) return false;
+        array->items[index] = {.item = (uint64_t)lambda_int_item_to_lane(value.item)};
+        return true;
+    case LANE_STORAGE_BOOL:
+        if (value.item == ITEM_NULL) {
+            if (!array_native_lane_nullable(array)) return false;
+            array->items[index] = {.item = 2};
+            return true;
+        }
+        if (value_type != LMD_TYPE_BOOL) return false;
+        array->items[index] = {.item = value.bool_val == BOOL_TRUE ? 1u : 0u};
+        return true;
+    case LANE_STORAGE_FLOAT64:
+        if (value.item == ITEM_NULL) {
+            if (!array_native_lane_nullable(array)) return false;
+            array->items[index] = {.item = FLOAT_LANE_NULL_BITS};
+            return true;
+        }
+        if (value_type != LMD_TYPE_FLOAT && value_type != LMD_TYPE_FLOAT64) return false;
+        array->items[index] = {.item = lambda_float_lane_from_double(value.get_double())};
+        return true;
+    case LANE_STORAGE_ITEM:
+        array->items[index] = value;
+        return true;
+    case LANE_STORAGE_SIZED_I64:
+        if (value.item == ITEM_NULL) {
+            if (!array_native_lane_nullable(array)) return false;
+            array->items[index] = {.item = (uint64_t)SIZED_LANE_NULL};
+            return true;
+        }
+        if (value_type != LMD_TYPE_NUM_SIZED ||
+                value.get_num_type() != array_native_lane_num_sized_type(array)) return false;
+        array->items[index] = {.item = (uint64_t)lambda_num_sized_item_to_lane(value.item)};
+        return true;
+    case LANE_STORAGE_POINTER:
+        return lambda_pointer_lane_store(&array->items[index],
+            array_native_lane_pointer_type(array), array_native_lane_nullable(array), value);
+    default:
+        return false;
+    }
+}
+
 struct ArrayNum : Container {
     // Container::map_kind byte holds the elem_type for ArrayNum.
     // Container::array_flags stores layout flags (is_ndim/is_view/is_pinned).

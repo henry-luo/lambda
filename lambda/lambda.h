@@ -138,6 +138,33 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Pointer-backed semantic values keep their raw pointer carrier when nullable;
+// zero is the lane spelling of null. Numeric/wide scalar tags are deliberately
+// excluded because their pointer payloads have distinct ownership rules.
+static inline bool lambda_type_id_has_pointer_lane(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_DTIME:
+    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_BINARY:
+    case LMD_TYPE_COMPLEX:
+    case LMD_TYPE_PATH:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_VMAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_TYPE:
+    case LMD_TYPE_FUNC:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Item tag-space partition for the self-tagged double representation
 // (`vibe/Lambda_Type_Double_Boxing.md` §2.3) and the rotated inline-int
 // representation (`vibe/Lambda_Type_Int_Boxing.md` §3). The 64-bit space splits
@@ -749,10 +776,12 @@ struct Container {
     union {
         uint8_t array_flags; // ArrayNum flags
         struct {
-            uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
-            uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
-            uint8_t is_pinned:1;         // bit 6: reserved legacy pin marker; nursery data is always relocated
-            uint8_t is_mutable_view:1;   // bit 7: a view writable through to its base (procedural in-place updates)
+            uint8_t is_ndim:1;           // bit 0: has shape side-table in `extra` (n-d owned array)
+            uint8_t is_view:1;           // bit 1: aliases another container's storage (implies is_ndim)
+            uint8_t is_pinned:1;         // bit 2: reserved legacy pin marker; nursery data is always relocated
+            uint8_t is_mutable_view:1;   // bit 3: a view writable through to its base (procedural in-place updates)
+            uint8_t is_native_lane_array:1; // bit 4: List.items holds native lane words
+            uint8_t array_flag_reserved:3;
         };
     };    
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
@@ -786,6 +815,27 @@ LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_JS_PROPS == (1u << 6),
                      "Container JS-properties mask must match its bitfield");
 LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_CTOR_RESERVED == (1u << 7),
                      "Container constructor-reserved mask must match its bitfield");
+
+// A descriptor carries the full semantic contract for a packed carrier. TypeId
+// alone cannot distinguish int from int?, even though both have LMD_TYPE_INT.
+typedef enum LaneStorageKind {
+    LANE_STORAGE_INVALID = 0,
+    LANE_STORAGE_ITEM,
+    LANE_STORAGE_INT,
+    LANE_STORAGE_BOOL,
+    LANE_STORAGE_SIZED_I64,
+    LANE_STORAGE_FLOAT64,
+    LANE_STORAGE_POINTER,
+} LaneStorageKind;
+
+typedef struct LaneStorageDesc {
+    Type* semantic_contract;
+    Type* base_contract;
+    uint8_t kind;       // LaneStorageKind
+    uint8_t nullable;
+    uint8_t byte_size;  // packed map width; native Array slots remain 8 bytes
+    uint8_t reserved[5];
+} LaneStorageDesc;
 
 // List/Array flags (stored in List.flags / Array.flags field)
 
@@ -1359,6 +1409,35 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #define INT_LANE_NAN      INT64_MIN
 #define INT_LANE_NEG_INF  (INT64_MIN + 1)
 #define INT_LANE_INF      INT64_MAX
+// This fourth sentinel is valid only in an int? lane. It shares ItemNull's
+// word so box/unbox is exact, but ArrayNum must demote before it is stored.
+#define INT_LANE_NULL     ((int64_t)ITEM_NULL)
+// Widened i8?…u32? lanes use the same out-of-domain bit pattern. Keep a
+// separate name so sized-lane checks cannot accidentally be routed through
+// int poison arithmetic.
+#define SIZED_LANE_NULL   INT_LANE_NULL
+
+// ItemNull is not an IEEE double bit-pattern, so float? reserves one quiet
+// NaN payload in its native lane. Ordinary Lambda NaN uses the canonical
+// zero-payload quiet NaN above; normalize this one payload on stores so a
+// guest numeric NaN can never be mistaken for nullable absence.
+#define FLOAT_LANE_NULL_BITS UINT64_C(0x7FF8000000000001)
+
+static inline bool lambda_float_lane_is_null(uint64_t bits) {
+    return bits == FLOAT_LANE_NULL_BITS;
+}
+
+static inline uint64_t lambda_float_lane_from_double(double value) {
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    return bits == FLOAT_LANE_NULL_BITS ? LAMBDA_IEEE_NAN_BITS : bits;
+}
+
+static inline double lambda_float_lane_to_double(uint64_t bits) {
+    double value;
+    __builtin_memcpy(&value, &bits, sizeof(value));
+    return value;
+}
 
 // An IEEE special: exponent all ones, so inf (mantissa 0) or nan.
 #define LAMBDA_ITEM_IS_IEEE_SPECIAL(b) \
@@ -1387,6 +1466,7 @@ static inline bool lambda_item_is_merged_poison(uint64_t bits) {
 // as an int is +/-inf, never a wrapped or error value). So `i2it` never fails,
 // which is the O1-class safety property v4 established and v5 keeps.
 static inline uint64_t lambda_int_box_lane(int64_t lane) {
+    if (lane == INT_LANE_NULL) return ITEM_NULL;
     if (lane >= INT53_MIN && lane <= INT53_MAX) {
         return ITEM_INT | ((uint64_t)lane & ITEM_INT_PAYLOAD_MASK);
     }
@@ -1407,6 +1487,7 @@ static inline uint64_t lambda_int_box_double(double value) {
 // The LANE value of an int Item: finite payloads sign-extend, poison maps to
 // its lane sentinel. This is the ONLY place an Item becomes a lane value.
 static inline int64_t lambda_int_item_to_lane(uint64_t item_bits) {
+    if (item_bits == ITEM_NULL) return INT_LANE_NULL;
     if (item_bits & ITEM_DBL_MASK) {  // shared poison, inline IEEE
         if ((item_bits & UINT64_C(0x000FFFFFFFFFFFFF)) != 0) return INT_LANE_NAN;
         return (item_bits >> 63) ? INT_LANE_NEG_INF : INT_LANE_INF;
@@ -1547,6 +1628,25 @@ static inline uint16_t item_to_u16(uint64_t it) { return (uint16_t)(NUM_SIZED_RA
 static inline uint32_t item_to_u32(uint64_t it) { return NUM_SIZED_RAW32(it); }
 static inline float    item_to_f32(uint64_t it) { return bits_to_f32(NUM_SIZED_RAW32(it)); }
 static inline float    item_to_f16(uint64_t it) { return f16_bits_to_f32((uint16_t)(NUM_SIZED_RAW32(it) & 0xFFFF)); }
+
+// Nullable sized-integer lanes widen to i64 so no source-domain bit pattern
+// is reserved. Floating-sized values have their own IEEE representation and
+// are intentionally not admitted by this integer-lane helper.
+static inline bool lambda_num_sized_is_integer(NumSizedType num_type) {
+    return num_type >= NUM_INT8 && num_type <= NUM_UINT32;
+}
+
+static inline int64_t lambda_num_sized_item_to_lane(uint64_t item) {
+    switch ((NumSizedType)NUM_SIZED_SUBTYPE(item)) {
+    case NUM_INT8: return (int64_t)item_to_i8(item);
+    case NUM_INT16: return (int64_t)item_to_i16(item);
+    case NUM_INT32: return (int64_t)item_to_i32(item);
+    case NUM_UINT8: return (int64_t)item_to_u8(item);
+    case NUM_UINT16: return (int64_t)item_to_u16(item);
+    case NUM_UINT32: return (int64_t)item_to_u32(item);
+    default: return 0;
+    }
+}
 
 // ============================================================================
 // Forward declaration for structured error handling
@@ -1932,6 +2032,7 @@ extern "C" {
     Item int2it(double value);     // integral double -> int Item (boundary form)
     Item int2it_lane(int64_t lane); // LANE value -> int Item (v5 canonical encoder)
     double lambda_int_lane_to_double_c(int64_t lane);
+    double lambda_float_null_lane_c(void);
     int64_t lambda_double_to_int_lane_c(double value);
     int64_t lambda_item_to_int_lane_c(uint64_t item_bits);
     int64_t lambda_int_lane_add_slow(int64_t a, int64_t b);

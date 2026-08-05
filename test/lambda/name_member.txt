@@ -17,9 +17,9 @@
 'name on function:'
 'name_member_target'
 'name on null returns null:'
-"no"
+"yes"
 'name on anonymous function returns null:'
-"no"
+"yes"
 'error code:'
 318
 'error message:'
