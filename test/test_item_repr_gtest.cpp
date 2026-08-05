@@ -1048,10 +1048,10 @@ TEST(ItemRepresentation, SelfTaggedFloatHelperBoxesOutOfBandPayloads) {
     EXPECT_EQ(it2d(encoded), tiny);
 }
 
-TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
+TEST(ItemRepresentation, MirMemberAccessUsesPackedFieldWithoutReconstruction) {
     // use a test-private dump path: the default temp/mir_dump.txt is truncated and
     // rewritten by every concurrent debug lambda.exe run (e.g. test_lambda_gtest in
-    // the parallel harness), which raced this test and made member_calls == 0 flaky.
+    // the parallel harness), which raced this test and made direct_loads == 0 flaky.
     const char* dump_path = "temp/item_repr_mir_dump.txt";
     remove(dump_path);
     const ShellEnvEntry env[] = {
@@ -1076,27 +1076,23 @@ TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
     // dump contract broke rather than that this build cannot produce one.
     ASSERT_NE(f, nullptr) << "no MIR artifact written to " << dump_path;
 
-    char window[12][512] = {};
-    int line_index = 0;
     int member_calls = 0;
+    int direct_loads = 0;
     char line[512];
     while (fgets(line, sizeof(line), f)) {
-        // Member sites use fn_member and must receive the raw container Item.
+        // The typed Point fixture is lowered through its packed ShapeEntry now;
+        // direct field loads replace generic fn_member without reconstructing a
+        // different container Item for the member call.
         if (strstr(line, "call\tfn_member_p, fn_member,")) {
             member_calls++;
-            for (int i = 0; i < 12; i++) {
-                const char* prev = window[(line_index + i) % 12];
-                // Raw container Items must flow into member lookup without pointer reconstruction.
-                EXPECT_EQ(strstr(prev, "\tand\t"), nullptr) << prev;
-                EXPECT_EQ(strstr(prev, "\txor\t"), nullptr) << prev;
-                EXPECT_EQ(strstr(prev, "72057594037927935"), nullptr) << prev;
-                EXPECT_EQ(strstr(prev, "ITEM_DBL_MASK"), nullptr) << prev;
-            }
         }
-        snprintf(window[line_index % 12], sizeof(window[0]), "%s", line);
-        line_index++;
+        if (strstr(line, "\tmov\t%") && strstr(line, "i64:") &&
+                strstr(line, "(%r")) {
+            direct_loads++;
+        }
     }
     fclose(f);
 
-    ASSERT_GT(member_calls, 0);
+    EXPECT_EQ(member_calls, 0);
+    ASSERT_GE(direct_loads, 2);
 }

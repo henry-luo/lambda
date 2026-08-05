@@ -1,20 +1,22 @@
 {
   "schema_version": 1,
-  "description": "Typed numeric-array loads retain their guarded fast path. A proven float procedure parameter validates the physical array guard before writing in place, preserving the caller-visible procedure ABI without a per-store whole-array scan.",
+  "description": "Typed numeric-array loads use the guarded direct ArrayNum data lane. A proven float procedure parameter validates the physical array header before reading or writing in place, preserving the caller-visible procedure ABI without generic item_at dispatch.",
   "checks": [
     {
       "in_func": "_guarded_load_#",
-      "expect_seq": [
-        { "pattern": "and\t{{r}}, {{r}}, 72057594037927935" },
-        { "pattern": "mov\t{{r}}, u8:({{r}})" },
-        { "pattern": "eq\t{{r}}, {{r}}, 18" },
-        { "pattern": "mov\t{{r}}, u8:2({{r}})" },
-        { "pattern": "and\t{{r}}, {{r}}, 3" },
-        { "pattern": "call\titem_at_p, item_at" }
+      "forbid": [
+        "call\titem_at_p, item_at"
       ],
-      "count": {
-        "call\titem_at_p, item_at": 1
-      }
+      "expect_seq": [
+        { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
+        { "pattern": "mov\t{{r}}, i64:8({{r}})" },
+        { "pattern": "mov\t{{r}}, i64:16({{r}})" },
+        { "pattern": "and\t{{r}}, {{r}}, 72057594037927935" },
+        { "pattern": "lts\t{{r}}, %p2, 0" },
+        { "pattern": "ges\t{{r}}, %p2, {{r}}" },
+        { "pattern": "mul\t{{r}}, %p2, 8" },
+        { "pattern": "dmov\t{{r}}, d:({{r}})" }
+      ]
     },
     {
       "in_func": "_guarded_store_#",

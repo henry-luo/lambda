@@ -1987,6 +1987,9 @@ extern "C" {
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
         void* type_list_ptr);
+    Map* map_with_type_tl(struct TypeMap* map_type, void* type_list_ptr);
+    Map* map_with_region_type_tl(LambdaRegion* region, struct TypeMap* map_type,
+        void* type_list_ptr);
     Element* elmt(int64_t type_index);
     Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object(int64_t type_index);

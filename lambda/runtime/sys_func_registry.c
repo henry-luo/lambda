@@ -1371,6 +1371,8 @@ JitImport jit_runtime_imports[] = {
     {"map_with_data", FPTR(map_with_data)},
     {"map_with_tl", FPTR(map_with_tl)},
     {"map_with_region_tl", FPTR(map_with_region_tl)},
+    {"map_with_type_tl", FPTR(map_with_type_tl)},
+    {"map_with_region_type_tl", FPTR(map_with_region_type_tl)},
     {"map_fill", FPTR(map_fill)},
     {"map_get", FPTR(map_get)},
     {"elmt", FPTR(elmt)},

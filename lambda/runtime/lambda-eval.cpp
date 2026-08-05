@@ -42,6 +42,8 @@
 
 extern __thread EvalContext* context;
 extern "C" void cow_profile_note_mutable_value(void);
+extern "C" void cow_profile_note_map_admit_clone(void);
+extern "C" void cow_profile_note_map_admit_bytes(uint64_t bytes);
 
 static Item publish_recovery_fault_item(Context* runtime_context,
                                         uint64_t raw_fault_item) {
@@ -1899,7 +1901,9 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
     if (get_type_id(value) == LMD_TYPE_ERROR) return value;
 
     Item converted = ItemError;
-    if (runtime_type_admit_value(value, expected, &converted)) return converted;
+    if (runtime_type_admit_value(value, expected, &converted)) {
+        return converted;
+    }
 
     // Shape/union/occurrence matching is delegated to the validator. Reuse its
     // first concrete failure here so a rejected dynamic binding identifies the
@@ -6950,6 +6954,18 @@ struct MutableCloneContext {
     HashMap* visited;
 };
 
+static TypeMap* mutable_shape_type(TypeId container_type, Type* type) {
+    // Generic maps/objects/elements carry compact global descriptors. Treating
+    // those two-byte prefixes as TypeMap headers reads unrelated memory during
+    // COW; only an allocated descriptor with the matching container tag owns a
+    // shape chain and byte-size contract.
+    if (!type || type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT ||
+            !typemap_ptr_is_plausible(type) || type->type_id != container_type) {
+        return NULL;
+    }
+    return (TypeMap*)type;
+}
+
 static uint64_t mutable_clone_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     uintptr_t ptr = (uintptr_t)((const MutableCloneEntry*)item)->src;
     return hashmap_sip(&ptr, sizeof(ptr), seed0, seed1);
@@ -7156,6 +7172,7 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
 static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     Map* src = src_item.map;
     if (!src || !src->type) return ItemNull;
+    TypeMap* source_type = mutable_shape_type(LMD_TYPE_MAP, (Type*)src->type);
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
     RootFrame roots(2);
@@ -7169,15 +7186,22 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     dst->type_id = LMD_TYPE_MAP;
     dst->map_kind = src->map_kind;
     dst->type = src->type;
-    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeMap*)src->type)->byte_size;
+    int data_cap = src->data_cap > 0 ? src->data_cap :
+        (source_type ? source_type->byte_size : 0);
     dst->data_cap = data_cap;
     // Register before descending into fields because map graphs can cycle
     // through `any` fields or spread-map slots.
     mutable_clone_register(clone_ctx, src, {.map = rooted_dst.get()});
     if (data_cap > 0) {
         rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
-            {.map = rooted_dst.get()}, {.map = rooted_src.get()}, clone_ctx);
+        if (source_type) {
+            clone_mutable_shape_data(source_type, {.map = rooted_dst.get()},
+                {.map = rooted_src.get()}, clone_ctx);
+        } else if (rooted_src.get()->data) {
+            // An opaque generic map has no shape metadata to guide child
+            // ownership, but its raw data still needs to survive the clone.
+            memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
+        }
     }
     return {.map = rooted_dst.get()};
 }
@@ -7185,6 +7209,7 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
 static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) {
     Object* src = src_item.object;
     if (!src || !src->type) return ItemNull;
+    TypeMap* source_type = mutable_shape_type(LMD_TYPE_OBJECT, (Type*)src->type);
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
     RootFrame roots(2);
@@ -7198,13 +7223,18 @@ static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) 
     dst->type_id = LMD_TYPE_OBJECT;
     dst->map_kind = src->map_kind;
     dst->type = src->type;
-    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeObject*)src->type)->byte_size;
+    int data_cap = src->data_cap > 0 ? src->data_cap :
+        (source_type ? source_type->byte_size : 0);
     dst->data_cap = data_cap;
     mutable_clone_register(clone_ctx, src, {.object = rooted_dst.get()});
     if (data_cap > 0) {
         rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
-            {.object = rooted_dst.get()}, {.object = rooted_src.get()}, clone_ctx);
+        if (source_type) {
+            clone_mutable_shape_data(source_type, {.object = rooted_dst.get()},
+                {.object = rooted_src.get()}, clone_ctx);
+        } else if (rooted_src.get()->data) {
+            memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
+        }
     }
     return {.object = rooted_dst.get()};
 }
@@ -7212,6 +7242,7 @@ static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) 
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
     Element* src = src_item.element;
     if (!src || !src->type) return ItemNull;
+    TypeMap* source_type = mutable_shape_type(LMD_TYPE_ELEMENT, (Type*)src->type);
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
     RootFrame roots(2);
@@ -7233,12 +7264,17 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
         array_push((Array*)rooted_dst.get(), child);
     }
 
-    int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeElmt*)src->type)->byte_size;
+    int data_cap = src->data_cap > 0 ? src->data_cap :
+        (source_type ? source_type->byte_size : 0);
     dst->data_cap = data_cap;
     if (data_cap > 0) {
         rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
-            {.element = rooted_dst.get()}, {.element = rooted_src.get()}, clone_ctx);
+        if (source_type) {
+            clone_mutable_shape_data(source_type, {.element = rooted_dst.get()},
+                {.element = rooted_src.get()}, clone_ctx);
+        } else if (rooted_src.get()->data) {
+            memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
+        }
     }
     return {.element = rooted_dst.get()};
 }
@@ -7295,6 +7331,21 @@ typedef struct CowProfileCounters {
     uint64_t vmap_snapshots;
     uint64_t vmap_rejections;
     uint64_t mutable_value_calls;
+    uint64_t map_admit_calls;
+    uint64_t map_admit_exact_shape_hits;
+    uint64_t map_admit_storage_compatible_hits;
+    uint64_t map_admit_readonly_validations;
+    uint64_t map_admit_reifications;
+    uint64_t map_admit_deep_clone_calls;
+    uint64_t map_admit_fields_visited;
+    uint64_t map_admit_bytes_copied;
+    uint64_t array_checked_store_calls;
+    uint64_t array_checked_store_direct;
+    uint64_t array_checked_store_unique_inplace;
+    uint64_t array_checked_store_cow_detach;
+    uint64_t array_checked_store_rebuild;
+    uint64_t array_checked_store_full_clone;
+    uint64_t array_checked_store_bytes_copied;
 } CowProfileCounters;
 
 static CowProfileCounters g_cow_profile = {};
@@ -7341,6 +7392,13 @@ static uint64_t cow_one_level_copy_bytes(Item value) {
         return sizeof(Array) + (uint64_t)value.array->length * sizeof(Item);
     case LMD_TYPE_MAP:
         return sizeof(Map) + (uint64_t)value.map->data_cap;
+    case LMD_TYPE_ARRAY_NUM: {
+        ArrayNum* array = value.array_num;
+        if (!array) return 0;
+        int elem_size = ELEM_TYPE_SIZE[array->get_elem_type() >> 4];
+        return sizeof(ArrayNum) + (uint64_t)(elem_size > 0 ? elem_size : 0) *
+            (uint64_t)array->length;
+    }
     case LMD_TYPE_OBJECT:
         return sizeof(Object) + (uint64_t)value.object->data_cap;
     case LMD_TYPE_ELEMENT:
@@ -7357,6 +7415,14 @@ static uint64_t cow_one_level_copy_bytes(Item value) {
 
 void cow_profile_note_mutable_value(void) {
     if (cow_profile_enabled()) g_cow_profile.mutable_value_calls++;
+}
+
+void cow_profile_note_map_admit_clone(void) {
+    if (cow_profile_enabled()) g_cow_profile.map_admit_deep_clone_calls++;
+}
+
+void cow_profile_note_map_admit_bytes(uint64_t bytes) {
+    if (cow_profile_enabled()) g_cow_profile.map_admit_bytes_copied += bytes;
 }
 
 void cow_profile_note_vmap_snapshot(void) {
@@ -7397,6 +7463,36 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.vmap_rejections);
     strbuf_append_str(output, "\nfn_mutable_value_calls\t");
     strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
+    strbuf_append_str(output, "\nmap_admit_calls\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
+    strbuf_append_str(output, "\nmap_admit_exact_shape_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_exact_shape_hits);
+    strbuf_append_str(output, "\nmap_admit_storage_compatible_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_storage_compatible_hits);
+    strbuf_append_str(output, "\nmap_admit_readonly_validations\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_readonly_validations);
+    strbuf_append_str(output, "\nmap_admit_reifications\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_reifications);
+    strbuf_append_str(output, "\nmap_admit_deep_clone_calls\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_deep_clone_calls);
+    strbuf_append_str(output, "\nmap_admit_fields_visited\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_fields_visited);
+    strbuf_append_str(output, "\nmap_admit_bytes_copied\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_bytes_copied);
+    strbuf_append_str(output, "\narray_checked_store_calls\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_calls);
+    strbuf_append_str(output, "\narray_checked_store_direct\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_direct);
+    strbuf_append_str(output, "\narray_checked_store_unique_inplace\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_unique_inplace);
+    strbuf_append_str(output, "\narray_checked_store_cow_detach\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_cow_detach);
+    strbuf_append_str(output, "\narray_checked_store_rebuild\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_rebuild);
+    strbuf_append_str(output, "\narray_checked_store_full_clone\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_full_clone);
+    strbuf_append_str(output, "\narray_checked_store_bytes_copied\t");
+    strbuf_append_uint64(output, g_cow_profile.array_checked_store_bytes_copied);
     strbuf_append_char(output, '\n');
     if (write_text_file_atomic(output_path, output->str ? output->str : "") != 0) {
         log_error("cow profile: failed to write '%s'", output_path);
@@ -7443,6 +7539,32 @@ static Item cow_clone_array_one_level(Array* source) {
     if (!rooted_copy.get()) return ItemError;
     source = rooted_source.get();
     clone_mutable_container_flags((Container*)rooted_copy.get(), (Container*)source);
+    if (array_has_native_lane(source)) {
+        // Nullable typed-array reification stores raw lane words in a generic
+        // Array. Treating those words as Items during COW cloning makes values
+        // such as integer lane `1` look like a pointer and dereferences it in
+        // get_type_id; copy the physical lane and mark only decoded references.
+        Array* copy = rooted_copy.get();
+        copy->array_flags = source->array_flags;
+        copy->map_kind = source->map_kind;
+        copy->reserved_state = source->reserved_state;
+        copy->length = source->length;
+        copy->capacity = source->capacity;
+        if (source->capacity > 0) {
+            size_t bytes = 0;
+            if (!lam::checked_mul((size_t)source->capacity, sizeof(Item), &bytes)) {
+                return ItemError;
+            }
+            copy->items = (Item*)heap_data_alloc(bytes);
+            if (!copy->items) return ItemError;
+            memcpy(copy->items, source->items, bytes);
+        }
+        for (int64_t index = 0; index < source->length; index++) {
+            cow_mark_shared(array_native_lane_read(source, index));
+        }
+        copy->cow_state &= ~COW_STATE_SHARED;
+        return {.array = copy};
+    }
     for (int64_t index = 0; index < source->length; index++) {
         source = rooted_source.get();
         Item child = source->items[index];
@@ -7479,7 +7601,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         Map* src = rooted_source.get().map;
         Map* dst = rooted_copy.get().map;
         dst->type = src->type;
-        type = (TypeMap*)src->type;
+        type = mutable_shape_type(type_id, (Type*)src->type);
         source_data = src->data;
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
@@ -7488,7 +7610,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         Object* src = rooted_source.get().object;
         Object* dst = rooted_copy.get().object;
         dst->type = src->type;
-        type = (TypeMap*)src->type;
+        type = mutable_shape_type(type_id, (Type*)src->type);
         source_data = src->data;
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
@@ -7497,7 +7619,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         Element* src = rooted_source.get().element;
         Element* dst = rooted_copy.get().element;
         dst->type = src->type;
-        type = (TypeMap*)src->type;
+        type = mutable_shape_type(type_id, (Type*)src->type);
         source_data = src->data;
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
@@ -7675,6 +7797,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->byte_size = new_size;
     new_type->type_index = ((ArrayList*)context->type_list)->length;
     new_type->has_named_shape = old_type->has_named_shape;
+    new_type->is_trusted_contract = false;
     new_type->struct_name = old_type->struct_name;
     new_type->is_private_clone = true;
     typemap_hash_build(new_type, context->pool);
@@ -7791,6 +7914,10 @@ static Type* runtime_array_contract_element(Type* expected) {
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, bool publish_in_place) {
+    if (cow_profile_enabled()) {
+        g_cow_profile.array_checked_store_calls++;
+        if (publish_in_place) g_cow_profile.array_checked_store_unique_inplace++;
+    }
     // An annotated array owns a clean element contract. Create the candidate
     // before touching the original so a bad dynamic value cannot trigger
     // ArrayNum-to-Array degradation or leak through a COW snapshot.
@@ -7805,8 +7932,22 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_value(roots, checked_value);
-    Rooted<Item> rooted_candidate(roots, publish_in_place ? rooted_owner.get() :
-        fn_mutable_value(rooted_owner.get()));
+    TypeId owner_type = get_type_id(rooted_owner.get());
+    Item candidate = publish_in_place ? rooted_owner.get() :
+        (owner_type == LMD_TYPE_ARRAY_NUM
+            ? fn_mutable_value(rooted_owner.get())
+            : cow_prepare_write(rooted_owner.get()));
+    Rooted<Item> rooted_candidate(roots, candidate);
+    if (!publish_in_place && cow_profile_enabled() &&
+            rooted_candidate.get().item != rooted_owner.get().item) {
+        if (get_type_id(rooted_owner.get()) == LMD_TYPE_ARRAY_NUM) {
+            g_cow_profile.array_checked_store_full_clone++;
+        } else {
+            g_cow_profile.array_checked_store_cow_detach++;
+        }
+        g_cow_profile.array_checked_store_bytes_copied +=
+            cow_one_level_copy_bytes(rooted_owner.get());
+    }
     TypeId candidate_type = get_type_id(rooted_candidate.get());
     if (candidate_type != LMD_TYPE_ARRAY && candidate_type != LMD_TYPE_ARRAY_NUM &&
             candidate_type != LMD_TYPE_ELEMENT) {
@@ -7824,6 +7965,7 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
             return ItemError;
         }
         Item rebuilt = ItemNull;
+        if (cow_profile_enabled()) g_cow_profile.array_checked_store_rebuild++;
         if (!array_rebuild_native_lane(rooted_candidate.get(), &lane_desc, &rebuilt)) {
             return lambda_type_error(rooted_candidate.get(), expected, boundary);
         }
@@ -8145,6 +8287,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->byte_size = new_byte_size;
         new_mt->type_index = tl->length;
         new_mt->has_named_shape = old_map_type->has_named_shape;
+        new_mt->is_trusted_contract = false;
         new_mt->struct_name = old_map_type->struct_name;
         new_mt->is_private_clone = old_map_type->is_private_clone;
         new_mt->is_shared_constructor_shape = false;
@@ -8228,32 +8371,29 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
     return NULL;
 }
 
-static bool runtime_map_contract_has_native_lane(Type* expected) {
-    expected = runtime_boundary_unwrap_type(expected);
-    if (!expected || expected->type_id != LMD_TYPE_MAP) return false;
-    TypeMap* map_type = (TypeMap*)expected;
-    for (ShapeEntry* field = map_type->shape; field; field = field->next) {
-        LaneStorageDesc lane = {};
-        if (shape_entry_uses_native_lane(field, &lane)) return true;
-    }
-    return false;
-}
-
-static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) {
+static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
+        bool relation_proven = false) {
     if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected ||
             expected->type_id != LMD_TYPE_MAP) {
         return false;
     }
 
-    // The source may be an input-owned or shared dynamic map. Clone the entire
-    // reachable candidate before its first converted field so a failed nested
-    // admission cannot alter the source value or any COW snapshot.
+    // A map conversion must isolate only the root being reified. Its fields and
+    // unchanged nested containers remain shared until a later write detaches
+    // them; deep cloning here made validation cost grow with the full graph.
+    if (cow_profile_enabled()) {
+        cow_profile_note_map_admit_bytes(cow_one_level_copy_bytes(value));
+    }
     RootFrame roots(3);
-    Rooted<Item> rooted_candidate(roots, fn_mutable_value(value));
+    // COW already records whether this root has aliases. Reifying a unique
+    // map in place publishes the verified contract to later boundary reads;
+    // cloning every admission kept the original generic shape alive and made
+    // the same recursive tree node pay the conversion repeatedly. Shared or
+    // static roots still detach through the normal COW path.
+    Rooted<Item> rooted_candidate(roots, cow_prepare_write(value));
     Rooted<Item> rooted_field(roots, ItemNull);
     Rooted<Item> rooted_converted(roots, ItemNull);
-    if (get_type_id(rooted_candidate.get()) != LMD_TYPE_MAP ||
-            rooted_candidate.get().item == value.item) {
+    if (get_type_id(rooted_candidate.get()) != LMD_TYPE_MAP) {
         return false;
     }
 
@@ -8263,6 +8403,7 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) 
         if (!expected_field->name || !expected_field->name->str || !expected_field->type) {
             continue;
         }
+        if (cow_profile_enabled()) g_cow_profile.map_admit_fields_visited++;
         Map* candidate_map = rooted_candidate.get().map;
         TypeMap* candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
         ShapeEntry* candidate_field = map_find_shape_entry(candidate_type,
@@ -8314,7 +8455,16 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted) 
         }
     }
 
-    if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    if (relation_proven && rooted_candidate.get().map->data_cap >= expected_map->byte_size) {
+        // Reification constructed the expected lane layout field by field; use
+        // the canonical contract descriptor so later exact admissions remain
+        // O(1) instead of validating this freshly converted root again.
+        rooted_candidate.get().map->type = expected_map;
+    }
+    // relation_proven means every field already passed the structural semantic
+    // relation; the loop above owns the conversion proof and a graph-wide
+    // validator would rescan unchanged child maps.
+    if (!relation_proven && !lambda_type_matches(rooted_candidate.get(), expected)) return false;
     *converted = rooted_candidate.get();
     return true;
 }
@@ -8404,15 +8554,48 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
         }
     }
 
-    // A map with `int?`/`bool?` fields needs a descriptor-bearing packed
-    // shape even if all of its current values already match the narrower
-    // non-null fields. This is the map analogue of int[] -> int?[] admission.
-    // Guard the cast helper at the call site: an `element` contract may be the
-    // compact TYPE_ELMT singleton, so an inlined TypeMap probe must not speculatively
-    // read its ShapeEntry pointer before the concrete map-tag check.
+    // A trusted compiler-built map contract is an admission certificate only
+    // when the candidate carries that exact TypeMap. Dynamic and JS-created
+    // shapes still take the validator/conversion path even if their bytes line up.
     if (get_type_id(value) == LMD_TYPE_MAP && expected->type_id == LMD_TYPE_MAP &&
-            expected != &TYPE_MAP && runtime_map_contract_has_native_lane(expected)) {
-        return runtime_type_admit_map(value, expected, converted);
+            expected != &TYPE_MAP) {
+        if (cow_profile_enabled()) g_cow_profile.map_admit_calls++;
+        TypeMap* expected_map = (TypeMap*)expected;
+        TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
+        if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
+            MapContractRelation relation = lambda_map_contract_relation(candidate_map,
+                expected_map);
+            if (relation == MAP_CONTRACT_EXACT_TRUSTED) {
+                if (cow_profile_enabled()) g_cow_profile.map_admit_exact_shape_hits++;
+                *converted = value;
+                return true;
+            }
+            if (relation == MAP_CONTRACT_STORAGE_COMPATIBLE) {
+                if (cow_profile_enabled()) {
+                    g_cow_profile.map_admit_storage_compatible_hits++;
+                    g_cow_profile.map_admit_readonly_validations++;
+                }
+                // The candidate shape is maintained by every map write: a
+                // type-changing store retags or rebuilds its ShapeEntry before
+                // publishing the value. Once every field has the same semantic
+                // contract and physical lane as the expected shape, rescanning
+                // the packed value through the schema validator only repeats
+                // the proof already made by the shape relation.
+                *converted = value;
+                return true;
+            }
+            if (relation == MAP_CONTRACT_NEEDS_REIFICATION ||
+                    relation == MAP_CONTRACT_INCOMPATIBLE) {
+                if (cow_profile_enabled()) g_cow_profile.map_admit_reifications++;
+                // The static relation deliberately rejects erased `any` fields,
+                // but the runtime value may still satisfy the named contract.
+                // Route that conservative result through field admission rather
+                // than letting the generic validator accept a physically
+                // incompatible shape that direct MIR reads would misaddress.
+                return runtime_type_admit_map(value, expected, converted,
+                    relation == MAP_CONTRACT_NEEDS_REIFICATION);
+            }
+        }
     }
 
     // Preserve an already conforming union member rather than arbitrarily

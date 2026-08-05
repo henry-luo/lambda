@@ -103,6 +103,8 @@ uint64_t js_exec_profile_enter(JsExecProfileEvent event);
 void js_exec_profile_leave(JsExecProfileEvent event, uint64_t token);
 void js_exec_profile_count(JsExecProfileEvent event);
 void js_exec_profile_note_mir_call(const char* fn_name);
+void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_t owner_pool);
+void js_exec_profile_name_lookup_bypassed(void);
 void js_exec_profile_dump(void);
 void js_profile_property_set_site(const char* label);
 uint64_t js_profile_property_set_branch_enter(const char* label);
@@ -128,6 +130,12 @@ static inline void js_exec_profile_leave(JsExecProfileEvent event, uint64_t toke
 }
 static inline void js_exec_profile_count(JsExecProfileEvent event) { (void)event; }
 static inline void js_exec_profile_note_mir_call(const char* fn_name) { (void)fn_name; }
+static inline void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_t owner_pool) {
+    (void)probes;
+    (void)hit;
+    (void)owner_pool;
+}
+static inline void js_exec_profile_name_lookup_bypassed(void) {}
 static inline void js_exec_profile_dump(void) {}
 static inline void js_profile_property_set_site(const char* label) { (void)label; }
 static inline uint64_t js_profile_property_set_branch_enter(const char* label) {

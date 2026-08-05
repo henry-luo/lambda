@@ -834,9 +834,15 @@ extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
 // ToPrimitive(string hint), then Symbols → their unique NameRecord key,
 // strings → as-is, others → ToString.
 extern "C" Item js_to_property_key(Item key) {
-    if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+    if (js_key_is_symbol(key)) {
+        js_exec_profile_name_lookup_bypassed();
+        return js_symbol_to_key(key);
+    }
     TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_STRING) return key;
+    if (kt == LMD_TYPE_STRING) {
+        js_exec_profile_name_lookup_bypassed();
+        return key;
+    }
     if (key.item == 0 || kt == LMD_TYPE_NULL)
         return (Item){.item = s2it(heap_create_name("null", 4))};
     if (kt == LMD_TYPE_UNDEFINED)

@@ -279,6 +279,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
     clone->has_named_shape = tm->has_named_shape;
+    clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
     clone->is_shared_constructor_shape = false;
@@ -327,6 +328,7 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
     clone->has_named_shape = tm->has_named_shape;
+    clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
     clone->is_shared_constructor_shape = false;
@@ -420,6 +422,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->length = parent->length + 1;
     child->byte_size = added->byte_offset + type_info[type_id].byte_size;
     child->has_named_shape = parent->has_named_shape;
+    child->is_trusted_contract = false;
     child->struct_name = parent->struct_name;
     child->is_private_clone = false;
     child->is_shared_constructor_shape = false;

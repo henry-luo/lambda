@@ -2100,19 +2100,28 @@ Map* map(int64_t type_index) {
 // The data buffer is placed immediately after the Map struct,
 // eliminating the separate heap_data_calloc call.
 // This is used for all static maps where byte_size is known at transpile time.
-Map* map_with_data(int64_t type_index) {
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
+static Map* map_alloc_for_type(TypeMap* map_type, LambdaRegion* region) {
+    if (!map_type) return NULL;
     int64_t byte_size = map_type->byte_size;
     size_t total_size = sizeof(Map) + (byte_size > 0 ? (size_t)byte_size : 0);
-    Map *m = (Map *)heap_calloc(total_size, LMD_TYPE_MAP);
+    Map *m = region
+        ? (Map*)lambda_region_calloc(region, total_size, LMD_TYPE_MAP)
+        : (Map*)heap_calloc(total_size, LMD_TYPE_MAP);
+    if (!m) return NULL;
     m->type_id = LMD_TYPE_MAP;
+    if (region) m->is_heap = 1;
     m->type = map_type;
     if (byte_size > 0) {
         m->data = (char*)m + sizeof(Map);
         m->data_cap = (int)byte_size;
     }
     return m;
+}
+
+Map* map_with_data(int64_t type_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
+    return map_alloc_for_type(map_type, NULL);
 }
 
 // MIR Direct module-type-list-aware wrapper: saves/restores context->type_list around
@@ -2133,20 +2142,22 @@ Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
     ArrayList* type_list = (ArrayList*)type_list_ptr;
     if (!type_list || type_index < 0 || type_index >= type_list->length) return NULL;
     TypeMap* map_type = (TypeMap*)type_list->data[type_index];
-    if (!map_type) return NULL;
-    int64_t byte_size = map_type->byte_size;
-    if (byte_size < 0) return NULL;
-    size_t total_size = sizeof(Map) + (size_t)byte_size;
-    Map* m = (Map*)lambda_region_calloc(region, total_size, LMD_TYPE_MAP);
-    if (!m) return NULL;
-    m->type_id = LMD_TYPE_MAP;
-    m->is_heap = 1;
-    m->type = map_type;
-    if (byte_size > 0) {
-        m->data = (char*)m + sizeof(Map);
-        m->data_cap = (int)byte_size;
-    }
-    return m;
+    return map_alloc_for_type(map_type, region);
+}
+
+// A named map contract may be a TypeMap that is not itself the type-list entry:
+// aliases store a TypeType wrapper in that list. Pass the resolved TypeMap
+// directly so typed literals cannot cast a wrapper into a runtime map shape.
+Map* map_with_type_tl(TypeMap* map_type, void* type_list_ptr) {
+    (void)type_list_ptr;
+    return map_alloc_for_type(map_type, NULL);
+}
+
+Map* map_with_region_type_tl(LambdaRegion* region, TypeMap* map_type,
+        void* type_list_ptr) {
+    (void)type_list_ptr;
+    if (!region) return map_with_type_tl(map_type, type_list_ptr);
+    return map_alloc_for_type(map_type, region);
 }
 
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes

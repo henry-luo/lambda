@@ -92,6 +92,13 @@ struct VarEntry {
     // A local initialized by an exact integer zero literal can safely serve as
     // the counted accumulator of a compiler-proven positive-step loop.
     bool compact_int_known_zero;
+    // Exact typed-array bindings may cache their stable payload descriptor for
+    // repeated native reads. The cache is installed only after the body has
+    // ruled out representation-changing aliases or borrowed writes.
+    MIR_reg_t typed_array_cache_ptr;
+    MIR_reg_t typed_array_cache_items;
+    MIR_reg_t typed_array_cache_len;
+    bool typed_array_cache_valid;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };
@@ -431,6 +438,7 @@ struct MirEmitter {
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
     void* call_owner;
     void (*before_may_gc_call)(void* owner);
+    void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg);
     void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
     void (*note_call_exception)(void* owner, JitExceptionEffect effect);
@@ -2930,6 +2938,7 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
             if (em->root_call_value) em->root_call_value(em->call_owner, reg);
         }
     }
+    if (em->after_may_gc_call) em->after_may_gc_call(em->call_owner);
 }
 
 static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
@@ -2991,6 +3000,10 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         resolved.import, res, nargs, arg_ops);
     mir_append_emit_insn(em->ctx, em->func_item, call);
     em_after_resolved_call(em, fn_name, &resolved.call, call, res, ret_type);
+    if (em->after_may_gc_call &&
+            resolved.call.effects.gc != JIT_EFFECT_NO_GC) {
+        em->after_may_gc_call(em->call_owner);
+    }
     if (scalar_home_id) {
         res = em_adopt_scalar_item(em, scalar_mode, res,
             em->frame.runtime, offsetof(Context, side_number_top),
@@ -3022,6 +3035,9 @@ static inline void em_call_void_with_args(MirEmitter* em,
         0, nargs, arg_ops);
     mir_append_emit_insn(em->ctx, em->func_item, call);
     em_after_resolved_call(em, fn_name, &ie->call, call, 0, MIR_T_I64);
+    if (em->after_may_gc_call && ie->call.effects.gc != JIT_EFFECT_NO_GC) {
+        em->after_may_gc_call(em->call_owner);
+    }
 }
 
 static inline MIR_type_t em_mir_type_for_rep(ValueRep rep) {
@@ -3180,6 +3196,9 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         result, nargs, physical_ops);
     mir_append_emit_insn(em->ctx, em->func_item, call);
     em_after_resolved_call(em, call_name, &metadata, call, result, result_type);
+    if (em->after_may_gc_call && metadata.effects.gc != JIT_EFFECT_NO_GC) {
+        em->after_may_gc_call(em->call_owner);
+    }
     call_result.normal = em_value(result, result_type, normal.semantic_type,
         normal.abi_rep, metadata.normal_result.value.value_class);
     call_result.normal.scalar_home_id = scalar_home_id;

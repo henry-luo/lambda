@@ -782,6 +782,7 @@ static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
 static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);
 static bool sys_conversion_literal_is_error_free(Transpiler* tp, SysFuncInfo* info,
         AstNode* first_arg);
+static bool ast_is_explicit_type_value(AstNode* node);
 
 static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     // Keep this proof deliberately narrower than the abstract `number` type:
@@ -4959,6 +4960,8 @@ static bool ast_is_explicit_type_value(AstNode* node) {
         AstIdentNode* ident = (AstIdentNode*)node;
         AstNode* declaration = ident->entry ? ident->entry->node : NULL;
         return declaration && (declaration->node_type == AST_NODE_TYPE_STAM ||
+            (declaration->node_type == AST_NODE_ASSIGN &&
+                ((AstNamedNode*)declaration)->is_type_definition) ||
             declaration->node_type == AST_NODE_STRING_PATTERN ||
             declaration->node_type == AST_NODE_SYMBOL_PATTERN);
     }
@@ -5831,7 +5834,8 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         // resolves to TYPE_ANY, breaking direct field access optimization.
         TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
         TypeMap* pre_map = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-        pre_map->struct_name = ast_node->name->chars;
+                pre_map->struct_name = ast_node->name->chars;
+                pre_map->is_trusted_contract = true;
         pre_type->type = (Type*)pre_map;
         ast_node->type = (Type*)pre_type;
         push_name(tp, ast_node, NULL);
@@ -5850,7 +5854,22 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 if (inner && inner->type_id == LMD_TYPE_TYPE) {
                     Type* actual = ((TypeType*)inner)->type;
                     if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && ast_node->name) {
-                        ((TypeMap*)actual)->struct_name = ast_node->name->chars;
+                        TypeMap* actual_map = (TypeMap*)actual;
+                        // Recursive fields were built against the pre-registered
+                        // map. Publish the completed shape through that same
+                        // identity so function contracts and self-references
+                        // cannot split into placeholder and final maps.
+                        *pre_map = *actual_map;
+                        pre_map->struct_name = ast_node->name->chars;
+                        pre_map->is_trusted_contract = true;
+                        pre_type->type = (Type*)pre_map;
+                        ((TypeType*)inner)->type = (Type*)pre_map;
+                        if (pre_map->type_index >= 0 &&
+                                pre_map->type_index < tp->type_list->length &&
+                                tp->type_list->data[pre_map->type_index] == actual_map) {
+                            tp->type_list->data[pre_map->type_index] = pre_map;
+                        }
+                        ast_node->type = (Type*)pre_type;
                     }
                 }
             } else {
@@ -6714,6 +6733,7 @@ AstNode* build_object_type(Transpiler* tp, TSNode type_node) {
     obj_type->type_name.length = ast_node->name->len;
     // set struct_name for direct field access optimization (Phase 5/6)
     obj_type->struct_name = ast_node->name->chars;
+    obj_type->is_trusted_contract = true;
     log_debug("build_object_type: name='%.*s'", (int)name.length, name.str);
 
     // get optional base type (inheritance)
@@ -7657,9 +7677,24 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         else {
             shape_entry->name = NULL;
         }
-        shape_entry->type = item->type;
-        if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
-            log_error("invalid map item type %s, should be map or any", get_type_name(item->type->type_id));
+        // Only syntactic type expressions produce a first-class Type* field.
+        // Ordinary calls can carry a TypeType-shaped abstract contract while
+        // still returning an Item; treating that carrier as `type` makes a
+        // numeric result read through the Type* lane and dereference its bits.
+        bool is_type_value = !is_spread &&
+            ast_is_explicit_type_value(((AstNamedNode*)item)->as);
+        Type* field_type = item->type;
+        if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+            if (is_type_value) {
+                field_type = &TYPE_TYPE;
+            } else if (!type_is_global_meta_type(field_type) &&
+                    field_type->kind == TYPE_KIND_SIMPLE) {
+                field_type = ((TypeType*)field_type)->type;
+            }
+        }
+        shape_entry->type = field_type;
+        if (!shape_entry->name && !(field_type->type_id == LMD_TYPE_MAP || field_type->type_id == LMD_TYPE_ANY)) {
+            log_error("invalid map item type %s, should be map or any", get_type_name(field_type->type_id));
         }
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { type->shape = shape_entry; }
@@ -7668,7 +7703,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
 
         type->length++;
         byte_offset += (!is_spread) ?
-            type_info[type_field_storage_type_id(item->type)].byte_size : sizeof(void*);
+            type_info[type_field_storage_type_id(field_type)].byte_size : sizeof(void*);
         child = ts_node_next_named_sibling(child);
     }
     type->byte_size = byte_offset;
@@ -10125,6 +10160,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 TypeObject* obj_type = (TypeObject*)tt->type;
                 // set struct_name for direct field access optimization (Phase 5/6)
                 obj_type->struct_name = obj_node->name->chars;
+                obj_type->is_trusted_contract = true;
                 log_debug("pass 2: completing object type '%.*s'", (int)obj_name.length, obj_name.str);
 
                 // get optional base type

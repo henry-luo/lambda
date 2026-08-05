@@ -19,6 +19,23 @@ enum StaticBoundaryResult {
     STATIC_BOUNDARY_DEFERRED,
 };
 
+enum MapContractRelation {
+    MAP_CONTRACT_INCOMPATIBLE,
+    MAP_CONTRACT_EXACT_TRUSTED,
+    MAP_CONTRACT_STORAGE_COMPATIBLE,
+    MAP_CONTRACT_NEEDS_REIFICATION,
+};
+
+// Compare a runtime map shape with a concrete map contract. The exact result
+// is reserved for the explicit compiler certificate; dynamic shapes never
+// become trusted merely because their current fields happen to line up.
+MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
+        const TypeMap* expected);
+
+// Compare one proven expression result with a map field contract without
+// exposing the relation's recursive implementation to the MIR transpiler.
+bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected);
+
 // True when an annotated boundary from `source` to `target` needs no runtime
 // check at all, so the MIR transpiler can skip emitting one.
 //

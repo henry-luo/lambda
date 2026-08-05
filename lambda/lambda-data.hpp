@@ -324,6 +324,9 @@ typedef struct TypeMap : Type {
     int64_t byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
     bool has_named_shape;  // shape was merged from a named type annotation (safe for direct stores)
+    // only compiler-built named contracts set this certificate; dynamic/input/JS
+    // shapes may have the same bytes but their writers do not enforce the contract.
+    bool is_trusted_contract;
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)
@@ -947,11 +950,22 @@ static inline const char* type_contract_display_name(const Type* type) {
 // carrier, not as a value representation. A shaped field with one of those
 // contracts must retain its boxed Item; dispatching it through the `type`
 // pointer lane corrupts unions such as string | error.
+static inline Type* type_field_unwrap_simple_decl(Type* type) {
+    while (type && type->type_id == LMD_TYPE_TYPE &&
+            !type_is_global_meta_type(type) && type->kind == TYPE_KIND_SIMPLE) {
+        Type* inner = ((TypeType*)type)->type;
+        if (!inner) break;
+        type = inner;
+    }
+    return type;
+}
+
 static inline TypeId type_field_storage_type_id(const Type* type) {
     if (!type) return LMD_TYPE_NULL;
+    type = type_field_unwrap_simple_decl((Type*)type);
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
             ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
-        Type* base = ((TypeUnary*)type)->operand;
+        Type* base = type_field_unwrap_simple_decl(((TypeUnary*)type)->operand);
         if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
                 base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
             return base->type_id;
@@ -967,14 +981,20 @@ static inline TypeId type_field_storage_type_id(const Type* type) {
         TypeBinary* binary = (TypeBinary*)type;
         Type* base = binary->left && binary->left->type_id == LMD_TYPE_NULL ? binary->right :
             (binary->right && binary->right->type_id == LMD_TYPE_NULL ? binary->left : NULL);
+        base = type_field_unwrap_simple_decl(base);
         if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
                 base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
             return base->type_id;
         }
     }
-    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_NULL;
+    // Abstract numeric contracts describe numeric Items; they are not
+    // Type* payloads. Keep them in the self-describing TypedItem lane so a
+    // map field such as `score: min(values)` cannot be read as a Type pointer.
+    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_ANY;
     if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
-        return LMD_TYPE_NULL;
+        // Unions and constrained contracts retain their runtime Item tag;
+        // reserving a zero-byte slot would let map_fill write past the shape.
+        return LMD_TYPE_ANY;
     }
     return type->type_id;
 }
@@ -982,12 +1002,7 @@ static inline TypeId type_field_storage_type_id(const Type* type) {
 static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out) {
     if (!field || !field->type || !out) return false;
-    Type* semantic = field->type;
-    while (semantic->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(semantic) && semantic->kind == TYPE_KIND_SIMPLE) {
-        Type* inner = ((TypeType*)semantic)->type;
-        if (!inner) break;
-        semantic = inner;
-    }
+    Type* semantic = type_field_unwrap_simple_decl(field->type);
     Type* base = NULL;
     if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_UNARY &&
             ((TypeUnary*)semantic)->op == OPERATOR_OPTIONAL) {
@@ -999,12 +1014,7 @@ static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
         else if (binary->right && binary->right->type_id == LMD_TYPE_NULL) base = binary->left;
     }
     if (!base) return false;
-    while (base->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(base) &&
-            base->kind == TYPE_KIND_SIMPLE) {
-        Type* inner = ((TypeType*)base)->type;
-        if (!inner) break;
-        base = inner;
-    }
+    base = type_field_unwrap_simple_decl(base);
     *out = {};
     out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
     if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }

@@ -120,6 +120,7 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
     clone->has_named_shape = tm->has_named_shape;
+    clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
     clone->is_shared_constructor_shape = false;

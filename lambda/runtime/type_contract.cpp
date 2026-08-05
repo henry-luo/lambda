@@ -17,6 +17,118 @@ static Type* contract_unwrap_type(Type* type) {
     return type;
 }
 
+static bool contract_storage_desc_equal(const ShapeEntry* left,
+        const ShapeEntry* right) {
+    LaneStorageDesc left_lane = {};
+    LaneStorageDesc right_lane = {};
+    bool left_native = shape_entry_uses_native_lane(left, &left_lane);
+    bool right_native = shape_entry_uses_native_lane(right, &right_lane);
+    if (left_native != right_native) return false;
+    if (left_native) {
+        return left_lane.kind == right_lane.kind &&
+            left_lane.byte_size == right_lane.byte_size &&
+            left_lane.nullable == right_lane.nullable &&
+            left_lane.base_contract == right_lane.base_contract;
+    }
+    return shape_entry_storage_type_id(left) == shape_entry_storage_type_id(right) &&
+        type_info[shape_entry_storage_type_id(left)].byte_size ==
+            type_info[shape_entry_storage_type_id(right)].byte_size;
+}
+
+static bool contract_semantics_equal(const Type* left, const Type* right) {
+    left = contract_unwrap_type((Type*)left);
+    right = contract_unwrap_type((Type*)right);
+    if (left == right) return true;
+    if (!left || !right || left->type_id != right->type_id || left->kind != right->kind) {
+        return false;
+    }
+    if (left->type_id == LMD_TYPE_TYPE && left->kind == TYPE_KIND_UNARY) {
+        const TypeUnary* left_unary = (const TypeUnary*)left;
+        const TypeUnary* right_unary = (const TypeUnary*)right;
+        return left_unary->op == right_unary->op &&
+            contract_semantics_equal(left_unary->operand, right_unary->operand);
+    }
+    if (left->type_id == LMD_TYPE_TYPE && left->kind == TYPE_KIND_BINARY) {
+        const TypeBinary* left_binary = (const TypeBinary*)left;
+        const TypeBinary* right_binary = (const TypeBinary*)right;
+        return left_binary->op == right_binary->op &&
+            contract_semantics_equal(left_binary->left, right_binary->left) &&
+            contract_semantics_equal(left_binary->right, right_binary->right);
+    }
+    return left->type_id != LMD_TYPE_MAP && left->type_id != LMD_TYPE_ARRAY &&
+        left->type_id != LMD_TYPE_ELEMENT && left->type_id != LMD_TYPE_OBJECT;
+}
+
+static bool contract_semantics_compatible(const Type* candidate,
+        const Type* expected) {
+    candidate = contract_unwrap_type((Type*)candidate);
+    expected = contract_unwrap_type((Type*)expected);
+    if (contract_semantics_equal(candidate, expected)) return true;
+    if (!candidate || !expected) return false;
+
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_UNARY) {
+        const TypeUnary* expected_unary = (const TypeUnary*)expected;
+        if (expected_unary->op == OPERATOR_OPTIONAL) {
+            if (candidate->type_id == LMD_TYPE_NULL) return true;
+            return contract_semantics_compatible(candidate, expected_unary->operand);
+        }
+        if (candidate->type_id != LMD_TYPE_TYPE ||
+                candidate->kind != TYPE_KIND_UNARY) return false;
+        const TypeUnary* candidate_unary = (const TypeUnary*)candidate;
+        return candidate_unary->op == expected_unary->op &&
+            contract_semantics_compatible(candidate_unary->operand,
+                expected_unary->operand);
+    }
+    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_BINARY) {
+        const TypeBinary* expected_binary = (const TypeBinary*)expected;
+        if (expected_binary->op == OPERATOR_UNION) {
+            return contract_semantics_compatible(candidate, expected_binary->left) ||
+                contract_semantics_compatible(candidate, expected_binary->right);
+        }
+    }
+
+    // Numeric boundary admission permits a narrower integer carrier at a
+    // wider numeric field; the runtime conversion still decides exact value
+    // membership before the destination lane is published.
+    LambdaNumericKind candidate_kind = lambda_numeric_kind_from_type((Type*)candidate);
+    LambdaNumericKind expected_kind = lambda_numeric_kind_from_type((Type*)expected);
+    if (candidate_kind != LAMBDA_NUM_INVALID && expected_kind != LAMBDA_NUM_INVALID) {
+        return true;
+    }
+    return false;
+}
+
+bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected) {
+    return contract_semantics_compatible(candidate, expected);
+}
+
+MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
+        const TypeMap* expected) {
+    if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
+    if (candidate == expected && expected->is_trusted_contract) {
+        return MAP_CONTRACT_EXACT_TRUSTED;
+    }
+    if (candidate->length != expected->length) return MAP_CONTRACT_INCOMPATIBLE;
+
+    bool storage_compatible = true;
+    for (ShapeEntry* expected_field = expected->shape; expected_field;
+            expected_field = expected_field->next) {
+        if (!expected_field->name || !expected_field->type) continue;
+        ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
+            expected_field->name->str, (int)expected_field->name->length);
+        if (!candidate_field || !contract_semantics_compatible(candidate_field->type,
+                expected_field->type)) {
+            return MAP_CONTRACT_INCOMPATIBLE;
+        }
+        if (candidate_field->byte_offset != expected_field->byte_offset ||
+                !contract_storage_desc_equal(candidate_field, expected_field)) {
+            storage_compatible = false;
+        }
+    }
+    return storage_compatible ? MAP_CONTRACT_STORAGE_COMPATIBLE
+        : MAP_CONTRACT_NEEDS_REIFICATION;
+}
+
 static const Type* contract_display_unwrap_type(const Type* type) {
     Type* unwrapped = contract_unwrap_type((Type*)type);
     if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE &&

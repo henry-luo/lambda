@@ -128,6 +128,15 @@ static int g_js_exec_profile_load_ic_site_count = 0;
 static int g_js_exec_profile_store_ic_site_count = 0;
 static int g_js_exec_profile_registered = 0;
 static bool g_js_exec_profile_dumped = false;
+static uint64_t g_js_name_lookup_calls = 0;
+static uint64_t g_js_name_lookup_hits = 0;
+static uint64_t g_js_name_lookup_misses = 0;
+static uint64_t g_js_name_lookup_total_probes = 0;
+static uint64_t g_js_name_lookup_max_probes = 0;
+static uint64_t g_js_name_lookup_owner_markup = 0;
+static uint64_t g_js_name_lookup_owner_lambda = 0;
+static uint64_t g_js_name_lookup_owner_js = 0;
+static uint64_t g_js_name_lookup_bypassed = 0;
 
 static const char* g_js_load_ic_reason_names[JS_LOAD_IC_SITE_REASON_COUNT] = {
     "probe",
@@ -204,6 +213,15 @@ void js_exec_profile_reset(void) {
     g_js_exec_profile_property_set_branch_count = 0;
     g_js_exec_profile_load_ic_site_count = 0;
     g_js_exec_profile_store_ic_site_count = 0;
+    g_js_name_lookup_calls = 0;
+    g_js_name_lookup_hits = 0;
+    g_js_name_lookup_misses = 0;
+    g_js_name_lookup_total_probes = 0;
+    g_js_name_lookup_max_probes = 0;
+    g_js_name_lookup_owner_markup = 0;
+    g_js_name_lookup_owner_lambda = 0;
+    g_js_name_lookup_owner_js = 0;
+    g_js_name_lookup_bypassed = 0;
 }
 
 static void js_exec_profile_note_mir_call_name(const char* fn_name) {
@@ -497,6 +515,30 @@ void js_exec_profile_note_mir_call(const char* fn_name) {
     g_js_exec_profile_slots[event].mir_sites++;
 }
 
+void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_t owner_pool) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0) return;
+    g_js_name_lookup_calls++;
+    g_js_name_lookup_total_probes += probes;
+    if (probes > g_js_name_lookup_max_probes) g_js_name_lookup_max_probes = probes;
+    if (!hit) {
+        g_js_name_lookup_misses++;
+        return;
+    }
+    g_js_name_lookup_hits++;
+    switch (owner_pool) {
+    case 0: g_js_name_lookup_owner_markup++; break;
+    case 1: g_js_name_lookup_owner_lambda++; break;
+    case 2: g_js_name_lookup_owner_js++; break;
+    default: break;
+    }
+}
+
+void js_exec_profile_name_lookup_bypassed(void) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode > 0) g_js_name_lookup_bypassed++;
+}
+
 void js_exec_profile_dump(void) {
     if (g_js_exec_profile_mode <= 0 || g_js_exec_profile_dumped) return;
     // MIR-call labels can be pool-owned by the transpiler; runtime cleanup must
@@ -604,6 +646,29 @@ void js_exec_profile_dump(void) {
             }
             strbuf_append_char(buf, '\n');
         }
+    }
+    if (g_js_name_lookup_calls > 0 || g_js_name_lookup_bypassed > 0) {
+        strbuf_append_str(buf, "\n# Well-known name lookup\n");
+        strbuf_append_str(buf, "name_lookup_metric\tvalue\n");
+        strbuf_append_str(buf, "calls\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_calls);
+        strbuf_append_str(buf, "\nhits\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_hits);
+        strbuf_append_str(buf, "\nmisses\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_misses);
+        strbuf_append_str(buf, "\ntotal_probes\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_total_probes);
+        strbuf_append_str(buf, "\nmax_probes\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_max_probes);
+        strbuf_append_str(buf, "\ncanonical_owner_markup\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_owner_markup);
+        strbuf_append_str(buf, "\ncanonical_owner_lambda\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_owner_lambda);
+        strbuf_append_str(buf, "\ncanonical_owner_js\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_owner_js);
+        strbuf_append_str(buf, "\nbypassed_property_key\t");
+        strbuf_append_uint64(buf, g_js_name_lookup_bypassed);
+        strbuf_append_char(buf, '\n');
     }
     if (g_js_exec_profile_shape_guard_site_count > 0) {
         strbuf_append_str(buf, "\n# Shape guard sites\n");
