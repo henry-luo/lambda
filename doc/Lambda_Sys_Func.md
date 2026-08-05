@@ -1398,7 +1398,6 @@ if (result is error) {
 | `sleep` | 1 | Park for milliseconds |
 | `self` | 0 | Current task handle |
 | `cancel` | 1 | Request task cancellation |
-| `toPromise` | 1 | Convert a handle to a JS Promise |
 
 ### Other Functions
 | Function | Args | Description |
