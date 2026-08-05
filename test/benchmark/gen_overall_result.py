@@ -397,7 +397,7 @@ def write_report(args, data):
         w("C2MIR and Go are native statically typed ports of the same workloads, present as a "
           "reference bound rather than as Lambda execution paths. The C2MIR column is **not** the "
           "retired `lambda --c2mir` transpiler: it is the C port run through MIR's own C frontend "
-          "(`mac-deps/mir/c2m`), so its emitted MIR can be read side by side with Lambda's. Both "
+          "(`lambda/mir/c2m`), so its emitted MIR can be read side by side with Lambda's. Both "
           "native columns report workload-only `__TIMING__` milliseconds like every other engine — "
           "the C ports are compiled alongside `test/benchmark/c2mir/bench_timer_main.c` under "
           "`-Dmain=`, keeping c2m's own parse and JIT time outside the measurement, and the Go "

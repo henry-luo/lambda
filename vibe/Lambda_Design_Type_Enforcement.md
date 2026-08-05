@@ -1608,6 +1608,133 @@ never reaches the skip machinery.
 - **Engagement-set finalization** — the exact list of skip-suppressing forms, kept aligned with
   the E228 acknowledgment forms as those settle.
 
+### TE-17 — Container acceptance is type-sensitive: native lanes gate on provable infallibility (decided 2026-08-06, user)
+
+**Decision.** A container element position is an error *acceptor* only when its element
+contract admits error. A **native-lane** element position is not an acceptor and never becomes
+one at runtime; instead, a value that can only be inferred as `T | error` **cannot enter the
+native lane at all** and is carried boxed until the error is discharged. Native-lane entry is
+gated on *static* proof of error-freedom, so §2's native-lane invariant is preserved by
+construction and no error-routing machinery is ever emitted inside a native lane. The cost is
+that fewer values qualify for the fast lane.
+
+#### The problem it closes
+
+`Lambda_Impl_Error_Handling.md` C2 lists "container element positions (list/map/element
+children)" as unconditional acceptors — the batch idiom. That is **unsatisfiable for typed
+containers and contradicts §2 of the same plan.** `ArrayNum` element storage is a raw
+`int64_t*` / `double*` / packed byte array ([`lambda.hpp:592`](../lambda/lambda.hpp#L592),
+[`lambda.h:864`](../lambda/lambda.h#L864)); there is no Item word in an `int[]` slot to hold an
+error. The same holds for every other native-lane destination, which C2's *positional* framing
+misses entirely: declared map fields (packed struct storage), indexed stores `arr[i] = e`,
+field stores, `push`/`splice`, and declared params and returns.
+
+TE-13's implementation notes already settled the substance — *"the batch idiom for per-item
+failures is simply a plain array holding successes and errors; typed `int[]` stays clean-only,
+and no new `(int^)[]` spelling is needed."* TE-17 makes that rule general (it governs every
+lane destination, not just array literals), states the mechanism, and records the rejected
+alternatives so C2 cannot silently re-appear.
+
+#### Options considered (2026-08-06)
+
+1. **Error sentinel in the lane** — rejected. Not merely undesirable: **unavailable.** Under C16
+   the int lane's out-of-domain encodings are spent on legitimate *values* — `INT_LANE_NAN`,
+   `INT_LANE_INF`, `INT_LANE_NEG_INF` denote `int.nan`/`int.inf`
+   ([`lambda.h:1396-1410`](../lambda/lambda.h#L1396)) — and `INT_LANE_NULL` /
+   `FLOAT_LANE_NULL_BITS` / `SIZED_LANE_NULL` are valid only in *nullable* lanes
+   ([`:1411-1428`](../lambda/lambda.h#L1411)). Dense sized lanes (`i8`…`u32`) have no spare bit
+   pattern at all. Even with room, a sentinel records only *that* a failure happened, which
+   contradicts TE-9's rich payloads, and it re-creates the in-band sentinel TE-15 rejected —
+   whose consumer-dependent meaning was the measured O1 divergence. A lane that must be decoded
+   for error-ness is a boxed Item wearing a native costume.
+2. **Sidecar** (dense lane + sparse index→error table) — rejected. It solves the *write* and
+   nothing else: on read-back, `a[i]` on a slot declared `int` yields an error, so the error
+   enters the native lane anyway and every downstream consumer needs a check. §2 then collapses
+   at every read instead of at one write. Dead end.
+3. **Option A — route.** The lane store is an origination site; the defect skips outward to the
+   next enclosing acceptor. Sound, but **abandons the whole container**: there is no
+   partially-built `int[]`, so one bad item discards the batch. Retained only as the *fault*
+   -regime behavior (below), not as the soft/raised-error policy.
+4. **Option B — report.** Store a placeholder in the slot, append the failure to a construction
+   error list, keep iterating. Preserves the batch idiom. Rejected on two counts. (a)
+   **Mechanically impossible for the general case:** "store null" requires a spare encoding, and
+   non-nullable native lanes have none (option 1's finding). (b) Even where a placeholder exists,
+   the construction *succeeds-looking* — the array is produced and the program continues, so the
+   failure is lost unless someone inspects the list. That is exactly the evaporating-defect
+   failure mode TE-15 exists to prevent.
+5. **Option C — conservative gating** — **DECIDED.** Do not make the lane carry errors and do
+   not make lane code route them. Make the *type* carry the possibility, and let the existing
+   static-inference obligation do the work.
+
+#### The rule
+
+Acceptance is read from the **destination contract**, never from the syntactic fact that an
+expression sits inside a container. The predicate already exists and needs no new machinery:
+[`lambda_type_accepts_error()`](../lambda/runtime/type_contract.hpp#L60) decides admission, and
+[`lambda_type_lane_storage_desc()`](../lambda/runtime/type_contract.hpp#L63) decides
+representation (it already "returns false for abstract/heterogeneous contracts that must remain
+boxed"). Three outcomes, applied uniformly to every write destination — literal element,
+indexed store, field store, `push`, param, return:
+
+| Destination contract | Outcome |
+|---|---|
+| admits error (`any`, `error`, `T \| error`, `T^`, unannotated boxed slot) | **accept** — the error is the element; batch idiom, unchanged |
+| native lane, source provably infallible | **enter the lane** — branch-free, §2 holds |
+| native lane, source only inferable as `T \| error` | **cannot enter the lane** — carried boxed until discharged |
+
+The third row is the whole of TE-17. `let x: int[] = e` where `e : int[] | error` does not
+produce a checked lane store that might fail — `x` simply is not lane-eligible until the union
+is narrowed, and the E228/§10.8 obligation the user already owes is what narrows it. Likewise a
+fallible *element* expression is not typed into an `int` element slot and then rescued at
+runtime; it fails to type, and the user discharges it locally:
+
+```
+[ f(x) ^ { 0 } for x in xs ]      // : int[], native lane preserved
+[ f(x) for x in xs ]              // : (int | error)[], boxed, per-element errors retained
+```
+
+Both spellings are available, the choice is visible in the source, and neither requires the
+lane to change shape. This is why C is preferred over A and B: the failure mode is a
+**compile-time obligation the user fixes locally**, not a silent whole-batch abandonment (A) or
+a silently successful-looking result (B).
+
+#### Consequences
+
+- **§2 is preserved verbatim, and TE-15's zone 2 is narrowed.** Container element positions are
+  acceptors *for boxed element contracts only*. No skip target, landing pad, or error edge is
+  ever emitted inside a native lane, and the impl plan's C2 must be restated as a contract
+  predicate rather than a positional list.
+- **The batch theorem becomes typed.** Per-element error retention is a capability of Item-lane
+  containers. Typed containers are all-or-nothing by construction, which is the honest reading
+  of "typed `int[]` stays clean-only."
+- **Fault regime is unaffected and remains A-shaped.** System/resource faults are untyped and
+  unwind through `LambdaRecoveryFrame`, abandoning any partially-built container. No batch-idiom
+  loss, since faults are not resumable. This keeps the three regimes distinct: soft values flow
+  as data, defects are gated by TE-17 before they can reach a lane, raised errors stay E228-gated.
+- **Effect analysis becomes load-bearing for performance, not a peephole.** D4's ruling that
+  *unknown ⇒ defect-capable* combines with TE-17 into a viral demotion: an unproven callee's
+  result cannot feed a typed container, so every unanalyzed call can cost a native lane. The
+  `may_defect` call-graph fixed point is therefore what buys the fast path back, and it must be
+  built before, not after, the routing work. This is the main risk to watch.
+- **`any`-sourced data needs an explicit discharge** to reach a typed container, since every
+  `any`→native transition is already a deferred check (TE-5 R3). Ergonomically acceptable — the
+  remedy is one `^ { }` — but it should be measured against the corpus before Phase C.
+- **Diagnose the silent case.** An *annotated* `int[]` that cannot be satisfied is a compile
+  error, which is visible. An *unannotated* literal silently infers `(int | error)[]` and boxes,
+  losing SIMD and the typed-array path with no source-level signal. Emit a note when a container
+  is boxed solely because of unproven fallibility.
+
+#### Open
+
+- Whether the `T | error` demotion should be *transitive through containers* (does
+  `(int | error)[]` disqualify the array from lane treatment forever, or does a discharging
+  `match`/`^ { }` over the whole array re-narrow it to `int[]` in place, or only by copy?).
+  Re-narrowing by copy is the safe default; in-place re-narrowing needs the COW exclusivity
+  rules and should not be assumed.
+- The interaction with lazy/streaming `for` bodies (already KIV in TE-15): with a typed-lane
+  destination and a streaming source, representation cannot be chosen before consumption.
+  Committing to boxed-until-proven is consistent with TE-17 and is the presumed answer.
+
 ---
 
 ## 8. Phasing

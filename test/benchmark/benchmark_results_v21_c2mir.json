@@ -1,0 +1,754 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-08-06T00:09:02",
+    "command": "test/benchmark/run_benchmarks.py -e c2mir -n 3 -t 180 --cooldown 10 --fresh --results-output test/benchmark/benchmark_results_v21_c2mir.json",
+    "engines": [
+      "c2mir"
+    ],
+    "runs": 3,
+    "timeout_s": 180,
+    "suite_cooldown_seconds": 10,
+    "results_output": "test/benchmark/benchmark_results_v21_c2mir.json",
+    "fresh": true,
+    "suite_filters": [],
+    "bench_filters": [],
+    "canonical_duplicate_suites": {
+      "mandelbrot": "awfy",
+      "nbody": "awfy",
+      "richards": "awfy",
+      "deltablue": "awfy",
+      "primes": "kostya"
+    },
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 20520136,
+    "lambda_archive": null,
+    "lambda_archive_size_bytes": null,
+    "lambda_archive_sha256": null,
+    "test262_baseline": {
+      "status": "not_run"
+    },
+    "lambda_commit": "7e9c3ee8ceacb55428a9290e5a915079cbcbee59",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "not_recorded",
+    "log_dir": null,
+    "typed_variants": false,
+    "finished_at": "2026-08-06T00:10:01"
+  },
+  "r7rs": {
+    "fib": {
+      "category": "recursive",
+      "c2mir": 1.178955,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "fibfp": {
+      "category": "recursive",
+      "c2mir": 1.14209,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "tak": {
+      "category": "recursive",
+      "c2mir": 0.12207,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "cpstak": {
+      "category": "closure",
+      "c2mir": 0.235107,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "sum": {
+      "category": "iterative",
+      "c2mir": 0.272949,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "sumfp": {
+      "category": "iterative",
+      "c2mir": 0.081055,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "nqueens": {
+      "category": "backtrack",
+      "c2mir": 0.12915,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "fft": {
+      "category": "numeric",
+      "c2mir": 0.025146,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "mbrot": {
+      "category": "numeric",
+      "c2mir": 0.448975,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "ack": {
+      "category": "recursive",
+      "c2mir": 11.785889,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  },
+  "awfy": {
+    "sieve": {
+      "category": "micro",
+      "c2mir": 0.016846,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "permute": {
+      "category": "micro",
+      "c2mir": 0.026123,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "queens": {
+      "category": "micro",
+      "c2mir": 0.019043,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "towers": {
+      "category": "micro",
+      "c2mir": 0.028076,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "bounce": {
+      "category": "micro",
+      "c2mir": 0.024902,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "list": {
+      "category": "micro",
+      "c2mir": 0.021973,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "storage": {
+      "category": "micro",
+      "c2mir": 0.095947,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "c2mir": 31.079834,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "nbody": {
+      "category": "compute",
+      "c2mir": 1.513916,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "richards": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "json": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "deltablue": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "havlak": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "cd": {
+      "category": "macro",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "c2mir": 3.01001,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "fannkuch": {
+      "category": "permutation",
+      "c2mir": 0.1521,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "fasta": {
+      "category": "generation",
+      "c2mir": 0.24707,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "knucleotide": {
+      "category": "hashing",
+      "c2mir": 0.288818,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "pidigits": {
+      "category": "bignum",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "regexredux": {
+      "category": "regex",
+      "c2mir": 1.148926,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "revcomp": {
+      "category": "string",
+      "c2mir": 0.38501,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "spectralnorm": {
+      "category": "numeric",
+      "c2mir": 0.356201,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  },
+  "kostya": {
+    "brainfuck": {
+      "category": "interpreter",
+      "c2mir": 28.614014,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "matmul": {
+      "category": "numeric",
+      "c2mir": 6.153076,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "primes": {
+      "category": "numeric",
+      "c2mir": 1.62207,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "base64": {
+      "category": "string",
+      "c2mir": 0.563965,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "levenshtein": {
+      "category": "string",
+      "c2mir": 0.914062,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "json_gen": {
+      "category": "data",
+      "c2mir": 1.532959,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "collatz": {
+      "category": "numeric",
+      "c2mir": 229.056885,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  },
+  "larceny": {
+    "triangl": {
+      "category": "search",
+      "c2mir": 61.311035,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "array1": {
+      "category": "array",
+      "c2mir": 0.322021,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "deriv": {
+      "category": "symbolic",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "diviter": {
+      "category": "iterative",
+      "c2mir": 270.908936,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "divrec": {
+      "category": "recursive",
+      "c2mir": 4.955078,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "gcbench": {
+      "category": "allocation",
+      "c2mir": 71.568848,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "paraffins": {
+      "category": "combinat",
+      "c2mir": 0.049805,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "pnpoly": {
+      "category": "numeric",
+      "c2mir": 1.985107,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "puzzle": {
+      "category": "search",
+      "c2mir": 1.281006,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "quicksort": {
+      "category": "sorting",
+      "c2mir": 0.202148,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "ray": {
+      "category": "numeric",
+      "c2mir": 0.171875,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    }
+  },
+  "jetstream": {
+    "cube3d": {
+      "category": "3d",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "navier_stokes": {
+      "category": "numeric",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "splay": {
+      "category": "data",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "hashmap": {
+      "category": "data",
+      "c2mir": 2.883057,
+      "_status": {
+        "c2mir": "ok"
+      },
+      "_status_detail": {
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
+    },
+    "crypto_sha1": {
+      "category": "crypto",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    },
+    "raytrace3d": {
+      "category": "3d",
+      "c2mir": null,
+      "_status": {
+        "c2mir": "missing_port"
+      }
+    }
+  }
+}

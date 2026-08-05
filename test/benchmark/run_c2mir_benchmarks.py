@@ -2,7 +2,7 @@
 """Compile and execute the native C2MIR benchmark ports.
 
 The Lambda --c2mir execution path is retired.  These C sources exercise the
-embedded MIR C frontend directly through mac-deps/mir/c2m instead.
+embedded MIR C frontend directly through the driver built in lambda/mir.
 
 Usage:
   python3 test/benchmark/run_c2mir_benchmarks.py
@@ -19,7 +19,9 @@ import time
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
-C2M = PROJECT_ROOT / "mac-deps/mir/c2m"
+# Native reference results must use the driver built from Lambda's pinned MIR
+# sources so their backend revision matches the MIR Direct implementation.
+C2M = PROJECT_ROOT / "lambda/mir/c2m"
 TIMER_MAIN = PROJECT_ROOT / "test/benchmark/c2mir/bench_timer_main.c"
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 SUITES = {

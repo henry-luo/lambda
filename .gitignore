@@ -26,6 +26,7 @@ lambda-static
 *.bin|
 *.pyc
 *.dvi
+lambda/mir/c2m
 
 # Build directories
 build/
