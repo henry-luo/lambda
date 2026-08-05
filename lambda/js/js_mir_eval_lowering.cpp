@@ -29,14 +29,28 @@ int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 static const int64_t JS_EVAL_FLAG_VM_GLOBAL_CONTEXT = 16;
 
+void js_eval_preamble_entries_free(void) {
+    if (g_eval_preamble_entries) {
+        for (int i = 0; i < g_eval_preamble_entry_count; i++) {
+            if (g_eval_preamble_entries[i].name) {
+                mem_free((void*)g_eval_preamble_entries[i].name);
+            }
+            if (g_eval_preamble_entries[i].live_binding_specifier) {
+                mem_free((void*)g_eval_preamble_entries[i].live_binding_specifier);
+            }
+        }
+        mem_free(g_eval_preamble_entries);
+    }
+    g_eval_preamble_entries = NULL;
+    g_eval_preamble_entry_count = 0;
+    g_eval_preamble_var_count = 0;
+}
+
 // Per-unit module-var management (defined in js_runtime_state.cpp). Used by the
 // vm.runInContext path to give each unit its own module-var slot namespace.
 
 extern "C" void js_eval_preamble_cache_reset(void) {
-    mem_free(g_eval_preamble_entries);
-    g_eval_preamble_entries = NULL;
-    g_eval_preamble_entry_count = 0;
-    g_eval_preamble_var_count = 0;
+    js_eval_preamble_entries_free();
 }
 
 #define JS_DYNFUNC_STATS_CAP 512

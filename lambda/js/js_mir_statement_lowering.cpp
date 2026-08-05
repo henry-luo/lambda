@@ -5,19 +5,19 @@
 // ============================================================================
 
 static JsMirVarEntry* jm_find_var_in_scope_depth(JsMirTranspiler* mt, const char* name, int depth) {
-    if (!mt || !name || depth < 0 || depth > mt->scope_depth || depth >= 64) return NULL;
-    if (!mt->var_scopes[depth]) return NULL;
+    if (!mt || !name || depth < 0 || depth > mt->scope_depth) return NULL;
+    struct hashmap* scope = jm_var_scope_at(mt, depth);
+    if (!scope) return NULL;
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
     key.name = name;
-    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
+    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
     return found ? &found->var : NULL;
 }
 
 static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return NULL;
     int start_depth = mt->scope_depth;
-    if (start_depth >= 64) start_depth = 63;
     for (int depth = start_depth; depth >= 0; depth--) {
         JsMirVarEntry* var = jm_find_var_in_scope_depth(mt, name, depth);
         if (var && var->from_catch_param) return var;
@@ -30,7 +30,7 @@ typedef struct JsMirLastClosureSnapshot {
     MIR_reg_t env_reg;
     int capture_count;
     bool preserve_after_readback;
-    char capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    const char* capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
@@ -50,8 +50,7 @@ static void jm_save_last_closure_snapshot(JsMirTranspiler* mt, JsMirLastClosureS
     snapshot->capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
     snapshot->preserve_after_readback = mt->preserve_last_closure_env_after_readback;
     for (int i = 0; i < snapshot->capture_count; i++) {
-        snprintf(snapshot->capture_names[i], sizeof(snapshot->capture_names[i]),
-            "%s", mt->last_closure_capture_names[i]);
+        snapshot->capture_names[i] = jm_persist_name(mt->last_closure_capture_names[i]);
         snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
         snapshot->capture_is_transitive[i] = mt->last_closure_capture_is_transitive[i];
         snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
@@ -74,8 +73,7 @@ static void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
     mt->last_closure_capture_count = snapshot->capture_count;
     mt->preserve_last_closure_env_after_readback = snapshot->preserve_after_readback;
     for (int i = 0; i < snapshot->capture_count; i++) {
-        snprintf(mt->last_closure_capture_names[i],
-            sizeof(mt->last_closure_capture_names[i]), "%s", snapshot->capture_names[i]);
+        mt->last_closure_capture_names[i] = jm_persist_name(snapshot->capture_names[i]);
         mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
         mt->last_closure_capture_is_transitive[i] = snapshot->capture_is_transitive[i];
         mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
@@ -142,7 +140,7 @@ static void jm_write_env_backing_if_needed(JsMirTranspiler* mt, JsMirVarEntry* v
 
 static bool jm_has_outer_block_func_binding(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return false;
-    for (int depth = 2; depth < mt->scope_depth && depth < 64; depth++) {
+    for (int depth = 2; depth < mt->scope_depth; depth++) {
         JsMirVarEntry* var = jm_find_var_in_scope_depth(mt, name, depth);
         if (var && var->from_block_func_decl) return true;
     }
@@ -202,9 +200,7 @@ static bool jm_current_function_has_direct_body_function_binding(JsFunctionNode*
         if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
         JsFunctionNode* decl = (JsFunctionNode*)stmt;
         if (!decl->name) continue;
-        char name[128];
-        snprintf(name, sizeof(name), "_js_%.*s",
-            (int)decl->name->len, decl->name->chars);
+        const char* name = jm_format_name("_js_%.*s", (int)decl->name->len, decl->name->chars);
         if (strcmp(name, vname) == 0) return true;
     }
     return false;
@@ -258,8 +254,7 @@ static bool jm_scope_env_name_matches_binding_in_statement(const char* scope_nam
     size_t base_len = (size_t)(at - scope_name);
     if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
     if (!binding_node || ts_node_is_null(binding_node->node)) return false;
-    char key[128];
-    snprintf(key, sizeof(key), "%s@%u:%u", name,
+    const char* key = jm_format_name("%s@%u:%u", name,
         ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
     return strcmp(scope_name, key) == 0;
 }
@@ -270,8 +265,7 @@ static void jm_scope_env_mark_pattern_bindings(JsMirTranspiler* mt, JsAstNode* p
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         if (!id->name) return;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* ve = jm_find_var(mt, vname);
         if (ve) {
             jm_scope_env_mark_and_writeback_binding(mt, vname, pat, ve->reg, ve->type_id);
@@ -491,11 +485,10 @@ static bool jm_can_skip_plain_top_level_var_decl_without_init(
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
         if (d->init || !d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsModuleConstEntry lookup;
         memset(&lookup, 0, sizeof(lookup));
-        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        lookup.name = jm_persist_name(vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
         if (!mc || mc->const_type != MCONST_MODVAR || (int)mc->int_val < 0) return false;
         decl = decl->next;
@@ -525,8 +518,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
             if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-                char vname[128];
-                snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
 
                 JsMirVarEntry* catch_param_var = NULL;
                 if (var->kind == JS_VAR_VAR && d->init && mt->scope_depth >= 0) {
@@ -560,7 +552,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 int modvar_index = -1;
                 if (mt->module_consts && var->kind != JS_VAR_CONST) {
                     JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    mclookup.name = jm_persist_name(vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                     bool at_top = (mt->scope_depth <= 1) ||
                         (var->kind == JS_VAR_VAR && mt->var_hoist_depth <= 1);
@@ -730,7 +722,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                     p7_ce->constructor->fc->ctor_prop_count > 0) {
                                     JsModuleConstEntry p7_lookup;
                                     memset(&p7_lookup, 0, sizeof(p7_lookup));
-                                    snprintf(p7_lookup.name, sizeof(p7_lookup.name), "%s", vname);
+                                    p7_lookup.name = jm_persist_name(vname);
                                     JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_lookup);
                                     if (p7_mc) {
                                         p7_mc->class_entry = p7_ce;
@@ -1160,7 +1152,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     (var->kind == JS_VAR_VAR && mt->var_hoist_depth <= 1);
                 if (!with_var_init_handled && !is_modvar && at_top_for_writeback && mt->module_consts) {
                     JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    mclookup.name = jm_persist_name(vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                     bool in_modvar_scope = mt->in_main ||
                         (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
@@ -1227,7 +1219,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     while (hashmap_iter(pat_names, &piter, &pitem)) {
                         JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
                         JsModuleConstEntry mlookup;
-                        snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
+                        mlookup.name = jm_persist_name(ne->name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
                         bool in_modvar_scope = mt->in_main ||
                             (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
@@ -1287,7 +1279,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     while (hashmap_iter(pat_names, &piter, &pitem)) {
                         JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
                         JsModuleConstEntry mlookup;
-                        snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
+                        mlookup.name = jm_persist_name(ne->name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
                         bool in_modvar_scope = mt->in_main ||
                             (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
@@ -1354,8 +1346,7 @@ JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
 // Only narrows ANY→FLOAT for "number" guards (creates a new unboxed double register).
 bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId narrowed_type) {
     if (!id) return false;
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
     JsMirVarEntry* orig = jm_find_var(mt, vname);
     if (!orig || orig->type_id != LMD_TYPE_ANY) return false;
 
@@ -1380,8 +1371,7 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
 
 static bool jm_branch_assigns_identifier(JsAstNode* branch, JsIdentifierNode* id) {
     if (!branch || !id || !id->name) return false;
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
     struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     jm_collect_func_assignments(branch, assigned);
@@ -1396,8 +1386,7 @@ static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* s
     if (!fn->name) return;
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
     if (!fc || !fc->func_item) return;
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+    const char* vname = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
     MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
     jm_set_var(mt, vname, fn_reg);
     JsMirVarEntry* ve = jm_find_var(mt, vname);
@@ -1579,9 +1568,10 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
     bool reload_iife_modvars = mt->module_consts && mt->current_fc && mt->current_fc->is_iife_body;
     if (mt->scope_env_reg == 0 && !reload_iife_modvars) return;
     for (int sd = 0; sd <= mt->scope_depth; sd++) {
-        if (!mt->var_scopes[sd]) continue;
+        struct hashmap* scope = jm_var_scope_at(mt, sd);
+        if (!scope) continue;
         size_t iter = 0; void* entry_ptr;
-        while (hashmap_iter(mt->var_scopes[sd], &iter, &entry_ptr)) {
+        while (hashmap_iter(scope, &iter, &entry_ptr)) {
             JsVarScopeEntry* e = (JsVarScopeEntry*)entry_ptr;
             if (e->var.from_block_func_decl) continue;
             if (strcmp(e->name, "_js_arguments") == 0 &&
@@ -1617,7 +1607,7 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
             if (reload_iife_modvars && e->var.reg != 0) {
                 JsModuleConstEntry lookup;
                 memset(&lookup, 0, sizeof(lookup));
-                snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                lookup.name = jm_persist_name(e->name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var &&
                     e->var.is_iife_module_var_binding) {
@@ -1650,9 +1640,10 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
 // from the env to avoid stale cached register values.
 void jm_env_reload_shared_captures(JsMirTranspiler* mt) {
     for (int sd = 0; sd <= mt->scope_depth; sd++) {
-        if (!mt->var_scopes[sd]) continue;
+        struct hashmap* scope = jm_var_scope_at(mt, sd);
+        if (!scope) continue;
         size_t iter = 0; void* entry_ptr;
-        while (hashmap_iter(mt->var_scopes[sd], &iter, &entry_ptr)) {
+        while (hashmap_iter(scope, &iter, &entry_ptr)) {
             JsVarScopeEntry* e = (JsVarScopeEntry*)entry_ptr;
             if (!e->var.from_shared_env || e->var.env_reg == 0) continue;
             int slot = e->var.env_slot;
@@ -1731,10 +1722,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // visible after the loop ends. Only push a new scope for 'let'/'const' inits.
     bool init_is_var = false;
     bool init_is_lexical_decl = false;
-    char for_var_init_name[128];
-    for_var_init_name[0] = 0;
-    char for_lexical_init_name[128];
-    for_lexical_init_name[0] = 0;
+    const char* for_var_init_name = NULL;
+    const char* for_lexical_init_name = NULL;
     if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
         JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
         if (vd->kind == JS_VAR_VAR) {
@@ -1743,8 +1732,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
                 if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-                    snprintf(for_var_init_name, sizeof(for_var_init_name),
-                        "_js_%.*s", (int)id->name->len, id->name->chars);
+                    for_var_init_name = jm_format_name("_js_%.*s",
+                        (int)id->name->len, id->name->chars);
                 }
             }
         }
@@ -1754,8 +1743,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
                 if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-                    snprintf(for_lexical_init_name, sizeof(for_lexical_init_name),
-                        "_js_%.*s", (int)id->name->len, id->name->chars);
+                    for_lexical_init_name = jm_format_name("_js_%.*s",
+                        (int)id->name->len, id->name->chars);
                 }
             }
         }
@@ -1999,7 +1988,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         if (mt->try_ctx_depth > 0 && !jm_is_native_type(jm_get_effective_type(mt, for_node->update))) {
             jm_emit_exc_propagate_check(mt);
         }
-        if (init_is_lexical_decl && for_lexical_init_name[0] && mt->last_closure_has_env) {
+        if (init_is_lexical_decl && for_lexical_init_name &&
+                for_lexical_init_name[0] && mt->last_closure_has_env) {
             jm_scope_env_reload_vars(mt);
             JsMirVarEntry* loop_var = jm_find_var(mt, for_lexical_init_name);
             if (loop_var && loop_var->reg) {
@@ -2014,7 +2004,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
     jm_emit_label(mt, l_end);
 
-    if (init_is_var && for_var_init_name[0]) {
+    if (init_is_var && for_var_init_name && for_var_init_name[0]) {
         JsMirVarEntry* init_var = jm_find_var(mt, for_var_init_name);
         if (init_var && init_var->type_id == LMD_TYPE_INT && !init_var->from_env) {
             MIR_reg_t boxed_counter = jm_box_native(mt, init_var->reg, LMD_TYPE_INT);
@@ -4021,8 +4011,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         is_const_loop = (fo->kind == 2);
     }
     if (var_name) {
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
+        const char* vname = jm_format_name("_js_%.*s", var_len, var_name);
         // For var declarations and pre-declared identifiers, reuse the existing
         // register so the outer-scope variable is updated by the loop.
         // Only create a new register for let/const (block-scoped) bindings.
@@ -4055,8 +4044,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, loop_var),
         MIR_new_int_op(mt->ctx, (var_name && is_let_const_loop) ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
     if (var_name && is_let_const_loop) {
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
+        const char* vname = jm_format_name("_js_%.*s", var_len, var_name);
         JsMirVarEntry* ve = jm_find_var(mt, vname);
         if (ve) ve->tdz_active = true;
     }
@@ -4073,8 +4061,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             }
         }
         if (init_expr) {
-            char init_vname[128];
-            snprintf(init_vname, sizeof(init_vname), "_js_%.*s", var_len, var_name);
+            const char* init_vname = jm_format_name("_js_%.*s", var_len, var_name);
             MIR_reg_t init_val = jm_transpile_box_item(mt, init_expr);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, loop_var),
@@ -4094,8 +4081,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 // elision: no variable to pre-create
             } else if (pe->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* pid = (JsIdentifierNode*)pe;
-                char pvname[128];
-                snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                const char* pvname = jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
                 // Reuse existing var-scoped variable if present
                 JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
                 if (!pexist || !pexist->reg) {
@@ -4116,8 +4102,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)pe;
                 if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* pid = (JsIdentifierNode*)ap->left;
-                    char pvname[128];
-                    snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                    const char* pvname = jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
                     JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
                     if (!pexist || !pexist->reg) {
                         MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
@@ -4146,8 +4131,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                         else if (pp->key && pp->key->node_type == JS_AST_NODE_IDENTIFIER)
                             plocal = ((JsIdentifierNode*)pp->key)->name;
                         if (plocal) {
-                            char pvname[128];
-                            snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)plocal->len, plocal->chars);
+                            const char* pvname = jm_format_name("_js_%.*s",
+                                (int)plocal->len, plocal->chars);
                             JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
                             if (!pexist || !pexist->reg) {
                                 MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
@@ -4170,8 +4155,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 JsSpreadElementNode* sp = (JsSpreadElementNode*)pe;
                 if (sp->argument && sp->argument->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* pid = (JsIdentifierNode*)sp->argument;
-                    char pvname[128];
-                    snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                    const char* pvname = jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
                     JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
                     if (!pexist || !pexist->reg) {
                         MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
@@ -4210,8 +4194,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     local_name = ((JsIdentifierNode*)p->key)->name;
                 }
                 if (local_name) {
-                    char pvname[128];
-                    snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)local_name->len, local_name->chars);
+                    const char* pvname = jm_format_name("_js_%.*s",
+                        (int)local_name->len, local_name->chars);
                     // Reuse existing var-scoped variable if present
                     JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
                     if (!pexist || !pexist->reg) {
@@ -4297,11 +4281,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
         // Write-back loop variable to module var / global property / scope_env
         if (var_name && !is_let_const_loop) {
-            char wb_vname[128];
-            snprintf(wb_vname, sizeof(wb_vname), "_js_%.*s", var_len, var_name);
+            const char* wb_vname = jm_format_name("_js_%.*s", var_len, var_name);
             if (mt->module_consts) {
                 JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
+                lookup.name = jm_persist_name(wb_vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 // If a function-local var shadows the module-level binding,
                 // the local MIR_MOV above is the only update needed; do not
@@ -4371,8 +4354,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         ? jm_call_1(mt, "js_get_async_iterator", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable))
         : jm_emit_get_iterator(mt, iterable);
-    if (mt->for_of_depth < 32) {
-        mt->for_of_iterators[mt->for_of_depth++] = iterator;
+    JsMirIteratorFrame* iterator_frame =
+        jm_for_of_iterator_at(mt, mt->for_of_depth);
+    if (iterator_frame) {
+        iterator_frame->iterator = iterator;
+        mt->for_of_depth++;
     }
 
     // Check for exception (e.g. TypeError: null is not iterable)
@@ -4425,7 +4411,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_push_loop_labels(mt, l_update, l_break);
     mt->iteration_depth++;
     if (mt->loop_depth > 0) {
-        mt->loop_stack[mt->loop_depth - 1].iterator_to_close = iterator;
+        JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
+        if (loop) loop->iterator_to_close = iterator;
     }
 
     // Pre-initialize delayed-return registers BEFORE the loop test label,
@@ -4436,7 +4423,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t forit_return_val = 0;
     MIR_reg_t forit_has_return = 0;
     MIR_label_t l_forit_ret = jm_new_label(mt);
-    if (mt->try_ctx_depth < 16) {
+    if (JsTryContext* tc = jm_try_context_push(mt)) {
         forit_return_val = jm_new_reg(mt, "_forit_ret", MIR_T_I64);
         forit_has_return = jm_new_reg(mt, "_forit_hret", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -4480,7 +4467,6 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             }
             mt->em.label_counter++;
         }
-        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
         tc->catch_label = l_iter_exc;
         tc->finally_label = 0;
         tc->end_label = l_forit_ret;
@@ -4549,12 +4535,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Write-back loop variable to module var / global property / scope_env
     if (var_name && !is_let_const_loop) {
-        char wb_vname[128];
-        snprintf(wb_vname, sizeof(wb_vname), "_js_%.*s", var_len, var_name);
+        const char* wb_vname = jm_format_name("_js_%.*s", var_len, var_name);
         // Module variable writeback
         if (mt->module_consts) {
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
+            lookup.name = jm_persist_name(wb_vname);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             // Skip module var / global writeback if a function-local shadows.
             JsMirVarEntry* lv = jm_find_var(mt, wb_vname);
@@ -4774,8 +4759,9 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     }
 
     for (int i = mt->loop_depth - 1; i >= 0; i--) {
-        if (mt->loop_stack[i].iterator_to_close) {
-            jm_emit_iterator_close(mt, mt->loop_stack[i].iterator_to_close);
+        JsLoopLabels* loop = jm_loop_label_at(mt, i);
+        if (loop && loop->iterator_to_close) {
+            jm_emit_iterator_close(mt, loop->iterator_to_close);
         }
     }
 
@@ -4819,8 +4805,7 @@ static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclaratio
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)n;
         if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (!var || !var->reg) continue;
         MIR_reg_t value = var->reg;
@@ -4850,8 +4835,7 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
         MIR_new_reg_op(mt->ctx, has_return_reg),
         MIR_new_int_op(mt->ctx, 0)));
 
-    if (mt->try_ctx_depth < 16) {
-        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+    if (JsTryContext* tc = jm_try_context_push(mt)) {
         tc->catch_label = 0;
         tc->finally_label = finally_label;
         tc->end_label = end_label;
@@ -4950,9 +4934,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // do NOT overwrite the parameter binding (B.3.3.1 step 2.ii).
         JsFunctionNode* fn_decl = (JsFunctionNode*)stmt;
         if (fn_decl->name) {
-            char fn_vname[128];
-            snprintf(fn_vname, sizeof(fn_vname), "_js_%.*s",
-                (int)fn_decl->name->len, fn_decl->name->chars);
+            const char* fn_vname = jm_format_name("_js_%.*s", (int)fn_decl->name->len, fn_decl->name->chars);
             // Check Annex B skip condition: parameter name collision
             JsFunctionNode* enclosing_fn = mt->current_fc ? mt->current_fc->node : NULL;
             bool current_body_direct = enclosing_fn &&
@@ -5014,7 +4996,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             bool annexb_suppressed = false;
             if (!existing && mt->module_consts) {
                 JsModuleConstEntry mclookup;
-                snprintf(mclookup.name, sizeof(mclookup.name), "%s", fn_vname);
+                mclookup.name = jm_persist_name(fn_vname);
                 JsModuleConstEntry* mvc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                 if (mvc && mvc->const_type == MCONST_MODVAR && mvc->var_kind == 0) {
                     annexb_modvar = mvc;
@@ -5118,7 +5100,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 // (closures that capture let/const vars are resolved via js_get_module_var)
                 if (mt->module_consts) {
                     JsModuleConstEntry mvlookup;
-                    snprintf(mvlookup.name, sizeof(mvlookup.name), "%s", fn_vname);
+                    mvlookup.name = jm_persist_name(fn_vname);
                     JsModuleConstEntry* mvc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mvlookup);
                         if (mvc && mvc->const_type == MCONST_MODVAR && mvc->var_kind == 0 &&
                             !mvc->annexb_suppressed && mvc != annexb_modvar) {
@@ -5201,8 +5183,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     // Store class object in module var
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
+                    const char* vname = jm_format_name("_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
                     JsMirVarEntry* local_class_binding = jm_find_var(mt, vname);
                     if (local_class_binding && local_class_binding->is_let_const) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5217,7 +5198,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             local_class_binding->reg);
                     }
                     JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    mclookup.name = jm_persist_name(vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                     if (mc && (mc->const_type == MCONST_CLASS || mc->const_type == MCONST_MODVAR)) {
                         // Static member lowering reads the class module slot.
@@ -5815,8 +5796,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             MIR_new_int_op(mt->ctx, 0)));
 
         // Push try context
-        if (mt->try_ctx_depth < 16) {
-            JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+        if (JsTryContext* tc = jm_try_context_push(mt)) {
             tc->catch_label = catch_label;
             tc->finally_label = finally_label;
             tc->end_label = end_label;
@@ -5885,8 +5865,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // (so return in catch still goes through finally)
             // This context has no catch_label, so throws propagate outward
             bool pushed_catch_ctx = false;
-            if (has_finally && mt->try_ctx_depth < 16) {
-                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+            if (has_finally) {
+                JsTryContext* tc = jm_try_context_push(mt);
+                if (tc) {
                 tc->catch_label = 0;
                 tc->finally_label = finally_label;
                 tc->end_label = end_label;
@@ -5899,12 +5880,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->saved_exc_flag_reg = 0;
                 tc->saved_exc_val_reg = 0;
                 pushed_catch_ctx = true;
-            } else if (!has_finally && mt->in_generator && mt->try_ctx_depth < 16) {
+                }
+            } else if (!has_finally && mt->in_generator) {
                 // Generator yield inside catch body needs the inner try's state
                 // regs (return_val_reg/has_return_reg) re-initialized on resume.
                 // Push a synthetic ctx marked yield_state_only so the resume
                 // code finds these regs while throw/return routing skips it.
-                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                JsTryContext* tc = jm_try_context_push(mt);
+                if (tc) {
                 tc->catch_label = 0;
                 tc->finally_label = 0;
                 tc->end_label = 0;
@@ -5917,6 +5900,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->saved_exc_flag_reg = 0;
                 tc->saved_exc_val_reg = 0;
                 pushed_catch_ctx = true;
+                }
             }
 
             // catch has two lexical environments: one for the parameter and a
@@ -5925,8 +5909,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_push_scope(mt);
             if (catch_node->param && catch_node->param->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* param_id = (JsIdentifierNode*)catch_node->param;
-                char vname[128];
-                snprintf(vname, sizeof(vname), "_js_%.*s", (int)param_id->name->len, param_id->name->chars);
+                const char* vname = jm_format_name("_js_%.*s", (int)param_id->name->len, param_id->name->chars);
                 jm_set_var(mt, vname, thrown_val);
                 JsMirVarEntry* catch_entry = jm_find_var(mt, vname);
                 if (catch_entry) catch_entry->from_catch_param = true;
@@ -6019,8 +6002,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // finally block (so throws propagate outward), but the generator
             // yield save/restore needs to know about these registers.
             bool pushed_gen_finally_ctx = false;
-            if (mt->in_generator && mt->try_ctx_depth < 16) {
-                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+            if (mt->in_generator) {
+                JsTryContext* tc = jm_try_context_push(mt);
+                if (tc) {
                 tc->catch_label = 0;
                 tc->finally_label = 0;
                 tc->end_label = 0;
@@ -6033,6 +6017,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->saved_exc_flag_reg = 0;
                 tc->saved_exc_val_reg = 0;
                 pushed_gen_finally_ctx = true;
+                }
             }
 
             // Eval completion: save completion value before finally body.
@@ -6063,7 +6048,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 saved_exc_val_spill = jm_gen_spill_save(mt, saved_exc_val);
             }
             if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) {
-                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+                JsTryContext* tc = jm_try_context_at(mt, mt->try_ctx_depth - 1);
                 tc->saved_exc_flag_reg = saved_exc_flag;
                 tc->saved_exc_val_reg = saved_exc_val;
             }
@@ -6197,8 +6182,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
         // Bind default import: import X from 'module'
         if (imp->default_name) {
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%.*s",
+            const char* vname = jm_format_name("_js_%.*s",
                 (int)imp->default_name->len, imp->default_name->chars);
             // Js57 P3 (Track B2): self-import live binding.
             // When the source resolves to the current module's filename, the
@@ -6230,7 +6214,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_set_var(mt, vname, var_reg);
                 // Also update module var for closure access
                 JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                lookup.name = jm_persist_name(vname);
                 JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 if (mce && mce->const_type == MCONST_MODVAR) {
                     jm_call_void_2(mt, "js_set_module_var",
@@ -6242,8 +6226,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
         // Bind namespace import: import * as X from 'module'
         if (imp->namespace_name) {
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%.*s",
+            const char* vname = jm_format_name("_js_%.*s",
                 (int)imp->namespace_name->len, imp->namespace_name->chars);
             MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -6251,7 +6234,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 MIR_new_reg_op(mt->ctx, ns)));
             jm_set_var(mt, vname, var_reg);
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            lookup.name = jm_persist_name(vname);
             JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             if (mce && mce->const_type == MCONST_MODVAR) {
                 jm_call_void_2(mt, "js_set_module_var",
@@ -6273,8 +6256,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                     // Bind to local name
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                    const char* vname = jm_format_name("_js_%.*s",
                         (int)isp->local_name->len, isp->local_name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -6283,7 +6265,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_set_var(mt, vname, var_reg);
                     // Also update module var for closure access
                     JsModuleConstEntry lookup;
-                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    lookup.name = jm_persist_name(vname);
                     JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                     if (mce && mce->const_type == MCONST_MODVAR) {
                         jm_call_void_2(mt, "js_set_module_var",

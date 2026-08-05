@@ -3,7 +3,7 @@
 
 index_of("hello world", "world")
 index_of("hello", "l")
-index_of("hello", "xyz")
+type(index_of("hello", "xyz"))
 last_index_of("hello", "l")
 contains("hello world", "world")
 contains("hello", "xyz")

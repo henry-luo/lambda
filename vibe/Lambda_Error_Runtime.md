@@ -266,8 +266,8 @@ These functions return C types that have no in-band error representation:
 | `it2d()` | `double` | Returns `0.0` for error items | 🟡 MEDIUM | `lambda-data-runtime.cpp` |
 | `it2l()` | `int64_t` | Returns `INT64_ERROR` sentinel | 🟢 OK-ish | `lambda-data-runtime.cpp` |
 | `is_truthy()` | `Bool` | Error items evaluate as **truthy** | 🟠 HIGH | `lambda-data-runtime.cpp` |
-| `fn_index_of()` | `int64_t` | Returns -1 for errors (same as "not found") | 🟠 HIGH | `lambda-data-runtime.cpp` |
-| `fn_last_index_of()` | `int64_t` | Returns -1 for errors (same as "not found") | 🟠 HIGH | `lambda-data-runtime.cpp` |
+| `fn_index_of()` | `Item` (`int | null`) | Returns `ItemError` for error operands; `null` means no match | ✅ FIXED | `lambda/runtime/lambda-eval.cpp` |
+| `fn_last_index_of()` | `Item` (`int | null`) | Returns `ItemError` for error operands; `null` means no match | ✅ FIXED | `lambda/runtime/lambda-eval.cpp` |
 
 ### Category B: Functions Returning NULL Instead of Error
 
@@ -903,7 +903,7 @@ These changes prevent crashes without altering function signatures:
 
 4. **Fix `fn_min2()` typo**: `item_a._type_id` → `item_b._type_id`
 
-5. **`fn_index_of` / `fn_last_index_of`**: Return `INT64_ERROR` for error inputs instead of `-1`
+5. **`fn_index_of` / `fn_last_index_of`**: **Superseded 2026-08-05.** The public functions now return `Item` (`int | null`): error operands stay `ItemError`, and no-match results are `null`. Raw `-1` helpers remain private to C/JS adapters that require the foreign ABI.
 
 6. **`it2d()`: Return `NAN` instead of `0.0` for error/unrecognized types**
    - Poison NaN auto-propagates through all downstream float arithmetic
@@ -1016,7 +1016,7 @@ Define proper sentinel values for each type: `STR_ERROR` for strings, `DATETIME_
 |----------|-------|---------|
 | 🔴 CRASH (NULL deref) | 4 | `fn_string`, `it2s`, `fn_symbol1`, `fn_format1/2` |
 | 🔴 SILENT CORRUPTION | 3 | `fn_datetime1`, `fn_date3`, `s2it(NULL)→UNDEFINED` |
-| 🟠 HIGH (wrong behavior) | 8 | `is_truthy(error)=true`, `fn_index_of(error)=-1`, datetime no-validation |
+| 🟠 HIGH (wrong behavior) | 8 | `is_truthy(error)=true`, datetime no-validation |
 | 🟡 MEDIUM (accidental fallthrough) | ~25 | All arithmetic/string functions without `GUARD_ERROR` |
 | 🟢 LOW (latent issues) | 5 | `fn_to_cstr`→empty, `fn_neg` decimal, `fn_mod_i` div-by-zero |
 

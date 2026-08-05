@@ -1,6 +1,5 @@
 'Crash 1: argmin/argmax empty array'
-error
-error
+[true, true]
 'Crash 2: for-in on error value'
 []
 'Crash 3: ~ in type method'

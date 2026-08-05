@@ -10,7 +10,7 @@ fn ind_obj(n, dict, data) {
 
 fn name(s) { { kind: "name", value: s } }
 
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn main() {
     let img_dict = {

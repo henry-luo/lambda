@@ -126,9 +126,79 @@ static void stable_sort_items_by_total_order(Item* items, int64_t len, bool desc
     }
 }
 
+// ArrayNum transforms used to fall back to generic Item arrays for the
+// representation-specific branches. Stage through Items for shared comparison
+// semantics, then restore the source lane type at the result boundary.
+static Item array_num_from_items(ArrayNumElemType elem_type, Array* items) {
+    if (!items) return ItemError;
+
+    RootFrame roots(2);
+    Rooted<Array*> rooted_items(roots, items);
+    ArrayNum* result = array_num_new(elem_type, items->length);
+    if (!result) return ItemError;
+    Rooted<ArrayNum*> rooted_result(roots, result);
+
+    int64_t length = rooted_items.get()->length;
+    for (int64_t i = 0; i < length; i++) {
+        array_num_set_item(rooted_result.get(), i, rooted_items.get()->items[i]);
+    }
+    return { .array_num = rooted_result.get() };
+}
+
+static Item array_num_slice_result(Item item, int64_t start, int64_t length) {
+    RootFrame roots(2);
+    Rooted<ArrayNum*> rooted_source(roots, item.array_num);
+    ArrayNum* source = rooted_source.get();
+    ArrayNum* result = array_num_new(source->get_elem_type(), length);
+    if (!result) return ItemError;
+    Rooted<ArrayNum*> rooted_result(roots, result);
+
+    if (!array_num_copy_same_type_bytes(rooted_result.get(), 0,
+            rooted_source.get(), start, length)) {
+        return ItemError;
+    }
+    return { .array_num = rooted_result.get() };
+}
+
+static Item array_num_reverse_result(Item item) {
+    RootFrame roots(2);
+    Rooted<ArrayNum*> rooted_source(roots, item.array_num);
+    ArrayNum* source = rooted_source.get();
+    ArrayNum* result = array_num_new(source->get_elem_type(), source->length);
+    if (!result) return ItemError;
+    Rooted<ArrayNum*> rooted_result(roots, result);
+
+    if (!array_num_copy_reversed_bytes(rooted_result.get(), rooted_source.get())) {
+        return ItemError;
+    }
+    return { .array_num = rooted_result.get() };
+}
+
+static Item array_num_sort_result(Item item, int64_t length, bool descending) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, item);
+    Array* sortable = vector_to_plain_array(rooted_source.get(), length);
+    if (!sortable) return ItemError;
+    Rooted<Array*> rooted_sortable(roots, sortable);
+    stable_sort_items_by_total_order(rooted_sortable.get()->items, length, descending);
+
+    ArrayNum* source = rooted_source.get().array_num;
+    return array_num_from_items(source->get_elem_type(), rooted_sortable.get());
+}
+
 // convert item to double for arithmetic (returns NAN on error)
 static double item_to_double(Item item) {
     return it2d(item);
+}
+
+static bool unique_items_equal(Item left, Item right) {
+    if (fn_eq(left, right) == BOOL_TRUE) return true;
+    // Preserve unique()'s established numeric NaN behavior while using the
+    // common equality implementation for every ArrayNum element type.
+    if (is_scalar_numeric(get_type_id(left)) && is_scalar_numeric(get_type_id(right))) {
+        return std::isnan(item_to_double(left)) && std::isnan(item_to_double(right));
+    }
+    return false;
 }
 
 // check if an elem_type represents a float variant
@@ -1440,9 +1510,13 @@ Item fn_math_cumprod(Item item) {
 Item fn_argmin(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) {
-        log_error("argmin: empty collection");
+    if (len < 0) {
+        log_error("argmin: expected a collection, got type: %s", get_type_name(get_type_id(item)));
         return ItemError;
+    }
+    if (len == 0) {
+        // an empty selection has no candidate; keep it admissive as scalar absence
+        return ItemNull;
     }
 
     int64_t min_idx = 0;
@@ -1472,9 +1546,13 @@ Item fn_argmin(Item item) {
 Item fn_argmax(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) {
-        log_error("argmax: empty collection");
+    if (len < 0) {
+        log_error("argmax: expected a collection, got type: %s", get_type_name(get_type_id(item)));
         return ItemError;
+    }
+    if (len == 0) {
+        // an empty selection has no candidate; keep it admissive as scalar absence
+        return ItemNull;
     }
 
     int64_t max_idx = 0;
@@ -2461,33 +2539,15 @@ Item fn_reverse(Item item) {
     if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        return array_num_reverse_result(item);
+    }
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
         return { .array = result };
     }
 
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_INT) {
-            // ELEM_INT (from literals): return content List for spreading
-            List* result = list();
-            for (int64_t i = len - 1; i >= 0; i--)
-                list_push(result, vector_get(item, i));
-            result->is_content = 1;
-            return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(len);
-            for (int64_t i = 0; i < len; i++)
-                result->float_items[i] = arr->float_items[len - 1 - i];
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(len);
-            for (int64_t i = 0; i < len; i++)
-                result->items[i] = arr->items[len - 1 - i];
-            return { .array_num = result };
-        }
-    }
     else {
         bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
         List* result = list();
@@ -2510,6 +2570,9 @@ Item fn_sort1(Item item) {
     if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        return array_num_sort_result(item, len, false);
+    }
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
@@ -2581,6 +2644,9 @@ Item fn_sort2(Item item, Item dir_item) {
     if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
+    if (type == LMD_TYPE_ARRAY_NUM && len == 0) {
+        return array_num_sort_result(item, len, false);
+    }
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
@@ -2705,9 +2771,16 @@ Item fn_sort2(Item item, Item dir_item) {
         mem_free(key_slots);
 
         result->is_spreadable = false;
+        if (type == LMD_TYPE_ARRAY_NUM) {
+            return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
+                rooted_result.get());
+        }
         return { .array = rooted_result.get() };
     }
 
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        return array_num_sort_result(item, len, descending);
+    }
     Array* result = vector_to_plain_array(item, len);
     stable_sort_items_by_total_order(result->items, len, descending);
     return { .array = result };
@@ -2769,64 +2842,38 @@ Item fn_unique(Item item) {
     // ARRAY_NUM: always spreadable for display (like old ARRAY_INT fallback)
 
     if (len == 0) {
+        if (type == LMD_TYPE_ARRAY_NUM) {
+            ArrayNumElemType elem_type = item.array_num->get_elem_type();
+            return array_num_from_items(elem_type, array());
+        }
         Array* result = array();
         result->is_spreadable = spreadable;
         return { .array = result };
     }
 
-    // fast path for homogeneous numeric arrays
+    // ArrayNum results keep their lane type; the generic staging array only
+    // supplies type-aware equality and a compact destination length.
     if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        Array* result = array();
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            for (int64_t i = 0; i < len; i++) {
-                double val = arr->float_items[i];
-                bool found = false;
-                for (int64_t j = 0; j < (int64_t)result->length; j++) {
-                    double res_val = result->items[j].get_double();
-                    if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    array_push(result, push_d(val));
+        RootFrame roots(3);
+        Rooted<Item> rooted_source(roots, item);
+        Rooted<Array*> rooted_result(roots, array());
+        Rooted<Item> rooted_elem(roots, ItemNull);
+        for (int64_t i = 0; i < len; i++) {
+            rooted_elem.set(vector_get(rooted_source.get(), i));
+            Array* result = rooted_result.get();
+            bool found = false;
+            for (int64_t j = 0; j < result->length; j++) {
+                if (unique_items_equal(rooted_elem.get(), result->items[j])) {
+                    found = true;
+                    break;
                 }
             }
-        } else if (arr->get_elem_type() == ELEM_INT) {
-            // v5: the int lane is i64; dedup still compares numerically (so a
-            // lane sentinel compares as its IEEE value) and re-boxes as int.
-            for (int64_t i = 0; i < len; i++) {
-                double val = lambda_int_lane_to_double(arr->items[i]);
-                bool found = false;
-                for (int64_t j = 0; j < (int64_t)result->length; j++) {
-                    double res_val = item_to_double(result->items[j]);
-                    if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    array_push(result, (Item){.item = lambda_int_box_double(val)});
-                }
-            }
-        } else {
-            for (int64_t i = 0; i < len; i++) {
-                int64_t val = arr->items[i];
-                bool found = false;
-                for (int64_t j = 0; j < (int64_t)result->length; j++) {
-                    if (result->items[j].get_int64() == val) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    array_push(result, box_int64_value(val));
-                }
+            if (!found) {
+                array_push(result, rooted_elem.get());
             }
         }
-        result->is_spreadable = spreadable;
-        return { .array = result };
+        return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
+            rooted_result.get());
     }
 
     // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
@@ -2877,22 +2924,7 @@ Item fn_take(Item vec, Item n_item) {
     if (n > len) n = len;
 
     if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = vec.array_num;
-        if (arr->get_elem_type() == ELEM_INT) {
-            // ELEM_INT (from literals): return content List for spreading
-            List* result = list();
-            for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
-            result->is_content = 1;
-            return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(n);
-            for (int64_t i = 0; i < n; i++) result->float_items[i] = arr->float_items[i];
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(n);
-            for (int64_t i = 0; i < n; i++) result->items[i] = arr->items[i];
-            return { .array_num = result };
-        }
+        return array_num_slice_result(vec, 0, n);
     }
     else {
         List* result = list();
@@ -2955,22 +2987,7 @@ Item fn_drop(Item vec, Item n_item) {
     int64_t new_len = len - n;
 
     if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = vec.array_num;
-        if (arr->get_elem_type() == ELEM_INT) {
-            // ELEM_INT (from literals): return content List for spreading
-            List* result = list();
-            for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
-            result->is_content = 1;
-            return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(new_len);
-            for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[n + i];
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(new_len);
-            for (int64_t i = 0; i < new_len; i++) result->items[i] = arr->items[n + i];
-            return { .array_num = result };
-        }
+        return array_num_slice_result(vec, n, new_len);
     }
     else {
         List* result = list();
@@ -2999,20 +3016,14 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
     int64_t start = 0;
     int64_t end = 0;
-    if (!lambda_item_to_int64_exact(start_item, &start) ||
-        !lambda_item_to_int64_exact(end_item, &end)) {
+    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
+    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
+    if (status == LAMBDA_SLICE_INVALID) {
         log_error("fn_slice: start and end must be integer-valued numbers");
         return ItemError;
     }
-
-    // Handle negative indices
-    if (start < 0) start = len + start;
-    if (end < 0) end = len + end;
-
-    // Clamp indices to valid range
-    if (start < 0) start = 0;
-    if (end > len) end = len;
-    if (start > end) start = end;
+    // negative offsets clamp, they do not wrap from the end
+    lambda_clamp_slice_range(len, &start, &end);
 
     int64_t new_len = end - start;
 
@@ -3024,22 +3035,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         return result ? (Item){.item = x2it(result)} : ItemError;
     }
     if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = vec.array_num;
-        if (arr->get_elem_type() == ELEM_INT) {
-            // ELEM_INT (from literals): return content List for spreading
-            Array* result = array();
-            for (int64_t i = start; i < end; i++) array_push(result, vector_get(vec, i));
-            result->is_content = 1;
-            return { .array = result };
-        } else if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(new_len);
-            for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[start + i];
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = array_int64_new(new_len);
-            for (int64_t i = 0; i < new_len; i++) result->items[i] = arr->items[start + i];
-            return { .array_num = result };
-        }
+        return array_num_slice_result(vec, start, new_len);
     }
     else {
         Array* result = array();
@@ -3090,17 +3086,15 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
         return ItemError;
     }
     int64_t start = 0, end = 0;
-    if (!lambda_item_to_int64_exact(start_item, &start) ||
-            !lambda_item_to_int64_exact(end_item, &end)) {
+    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
+    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
+    if (status == LAMBDA_SLICE_INVALID) {
         log_error("fn_view: start and end must be integer-valued numbers");
         return ItemError;
     }
     int64_t len = base->length;
-    if (start < 0) start = len + start;
-    if (end < 0) end = len + end;
-    if (start < 0) start = 0;
-    if (end > len) end = len;
-    if (start > end) start = end;
+    // negative offsets clamp, they do not wrap from the end
+    lambda_clamp_slice_range(len, &start, &end);
     int64_t view_len = end - start;
 
     ArrayNumElemType etype = base->get_elem_type();

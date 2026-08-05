@@ -41,6 +41,11 @@ void graph_append_diagnostics(InputContext& ctx, Element* graph, const char* def
         add_node_to_graph(ctx.input(), diagnostics, diagnostic.final().element);
     }
     add_node_to_graph(ctx.input(), graph, diagnostics);
+    // The graph parsers recover past malformed statements and carry their errors
+    // out as <diagnostics> data, so reaching here means a complete document was
+    // built. Release the raise flag the addError* calls set, or input() would
+    // discard the recovered graph and callers would see null instead.
+    ctx.clearParseError();
 }
 
 // Main graph parser function that dispatches to specific flavors

@@ -1,0 +1,12 @@
+'=== int ArrayNum carriers ==='
+[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+'=== int ArrayNum values ==='
+[[1, 2, 3], [3, 2, 1], [1, 2, 3], [3, 1, 2], [2, 1, 3], [3, 1], [1, 2], [1, 2]]
+'=== i8 lane preservation ==='
+[true, true, true, true, true, true]
+'=== i8 values ==='
+[[1, 2, 3], [3, 1], [2, 1, 3], [3, 1], [1, 2], [1, 2]]
+'=== f32 lane preservation ==='
+[true, true, true, true, true, true]
+'=== f32 values ==='
+[[1.5, 2.5, 3.5], [3.5, 1.5], [2.5, 1.5, 3.5], [3.5, 1.5], [1.5, 2.5], [1.5, 2.5]]

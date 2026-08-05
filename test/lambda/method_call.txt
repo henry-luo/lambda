@@ -25,13 +25,9 @@ true
 "s.starts_with("Hello") ="
 true
 "s.slice(0, 5) =HelloTest 7 - methods with args:data.take(3) ="
-10
-20
-30
+[10, 20, 30]
 "data.drop(2) ="
-30
-40
-50
+[30, 40, 50]
 "Test 8 - chained methods:[5,3,1,4,2].sort() ="
 [1, 2, 3, 4, 5]
 "[5,3,1,4,2].sort().reverse() ="

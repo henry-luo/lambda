@@ -28,10 +28,11 @@ int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind) {
 void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
     if (!mt || !mt->gen_env_reg) return;
     for (int sd = 1; sd <= mt->scope_depth; sd++) {
-        if (!mt->var_scopes[sd]) continue;
+        struct hashmap* scope = jm_var_scope_at(mt, sd);
+        if (!scope) continue;
         size_t iter = 0;
         void* item;
-        while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+        while (hashmap_iter(scope, &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
             if (!entry->var.from_env && entry->var.mir_type == MIR_T_I64) {
                 if (mt->gen_local_slot_count >= mt->gen_dynamic_slot_limit) {
@@ -56,10 +57,11 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
 void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
     if (!mt || !mt->gen_env_reg) return;
     for (int sd = 1; sd <= mt->scope_depth; sd++) {
-        if (!mt->var_scopes[sd]) continue;
+        struct hashmap* scope = jm_var_scope_at(mt, sd);
+        if (!scope) continue;
         size_t iter = 0;
         void* item;
-        while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+        while (hashmap_iter(scope, &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
             if (entry->var.env_slot < 0 || !entry->var.from_env) continue;
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -73,7 +75,7 @@ void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
 void jm_emit_try_state_reset(JsMirTranspiler* mt) {
     if (!mt) return;
     for (int td = 0; td < mt->try_ctx_depth; td++) {
-        JsTryContext* context = &mt->try_ctx_stack[td];
+        JsTryContext* context = jm_try_context_at(mt, td);
         if (context->has_return_reg) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, context->has_return_reg),
@@ -107,7 +109,7 @@ void jm_emit_async_resume_refresh(JsMirTranspiler* mt) {
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind) {
     if (!mt) return NULL;
     for (int depth = mt->try_ctx_depth - 1; depth >= 0; depth--) {
-        JsTryContext* context = &mt->try_ctx_stack[depth];
+        JsTryContext* context = jm_try_context_at(mt, depth);
         if (context->yield_state_only) continue;
         if (kind == JS_MIR_COMPLETION_GENERATOR_RETURN_SIGNAL && !context->has_finally) {
             continue;
@@ -389,7 +391,7 @@ void jm_emit_pending_exception_exit(JsMirTranspiler* mt) {
 
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt) {
     for (int t = mt->try_ctx_depth - 1; t >= 0; t--) {
-        JsTryContext* tc = &mt->try_ctx_stack[t];
+        JsTryContext* tc = jm_try_context_at(mt, t);
         if (tc->has_finally && tc->finally_body && !tc->inlining_finally &&
             tc->finally_body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             tc->inlining_finally = true;
@@ -412,8 +414,9 @@ void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt) {
 
 static void jm_emit_close_intervening_iterators(JsMirTranspiler* mt, int target_index) {
     for (int i = mt->loop_depth - 1; i > target_index; i--) {
-        if (mt->loop_stack[i].iterator_to_close) {
-            jm_emit_iterator_close(mt, mt->loop_stack[i].iterator_to_close);
+        JsLoopLabels* loop = jm_loop_label_at(mt, i);
+        if (loop && loop->iterator_to_close) {
+            jm_emit_iterator_close(mt, loop->iterator_to_close);
         }
     }
 }
@@ -422,18 +425,22 @@ void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk) {
     jm_emit_abrupt_jump_cleanup(mt);
     if (brk->label && brk->label_len > 0) {
         for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            if (mt->loop_stack[i].label_name &&
-                mt->loop_stack[i].label_name_len == brk->label_len &&
-                memcmp(mt->loop_stack[i].label_name, brk->label, brk->label_len) == 0) {
+            JsLoopLabels* loop = jm_loop_label_at(mt, i);
+            if (loop && loop->label_name &&
+                loop->label_name_len == brk->label_len &&
+                memcmp(loop->label_name, brk->label, brk->label_len) == 0) {
                 jm_emit_close_intervening_iterators(mt, i);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                    MIR_new_label_op(mt->ctx, mt->loop_stack[i].break_label)));
+                    MIR_new_label_op(mt->ctx, loop->break_label)));
                 break;
             }
         }
     } else if (mt->loop_depth > 0) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, mt->loop_stack[mt->loop_depth - 1].break_label)));
+        JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
+        if (loop) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, loop->break_label)));
+        }
     }
 }
 
@@ -441,22 +448,24 @@ void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont)
     jm_emit_abrupt_jump_cleanup(mt);
     if (cont->label && cont->label_len > 0) {
         for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            if (mt->loop_stack[i].label_name &&
-                mt->loop_stack[i].label_name_len == cont->label_len &&
-                memcmp(mt->loop_stack[i].label_name, cont->label, cont->label_len) == 0) {
-                if (mt->loop_stack[i].continue_label) {
+            JsLoopLabels* loop = jm_loop_label_at(mt, i);
+            if (loop && loop->label_name &&
+                loop->label_name_len == cont->label_len &&
+                memcmp(loop->label_name, cont->label, cont->label_len) == 0) {
+                if (loop->continue_label) {
                     jm_emit_close_intervening_iterators(mt, i);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, mt->loop_stack[i].continue_label)));
+                        MIR_new_label_op(mt->ctx, loop->continue_label)));
                 }
                 break;
             }
         }
     } else if (mt->loop_depth > 0) {
         for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            if (mt->loop_stack[i].continue_label) {
+            JsLoopLabels* loop = jm_loop_label_at(mt, i);
+            if (loop && loop->continue_label) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                    MIR_new_label_op(mt->ctx, mt->loop_stack[i].continue_label)));
+                    MIR_new_label_op(mt->ctx, loop->continue_label)));
                 break;
             }
         }

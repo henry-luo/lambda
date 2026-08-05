@@ -12,17 +12,13 @@ false
 true
 "Test index_of:7. expect 4:"
 4
-"8. expect -1 (not found):"
--1
-"9. expect 6:"
+"8. expect null (not found):9. expect 6:"
 6
 "Test last_index_of:10. expect 7 (second o):"
 7
 "11. expect 9 (last l):"
 9
-"12. expect -1:"
--1
-"Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
+"12. expect null:Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
 true
 "26. expect false:"
 false
@@ -44,11 +40,7 @@ true
 false
 "48. ends_with(x, null):"
 true
-"49. index_of(null, x):"
--1
-"50. last_index_of(null, x):"
--1
-"51. trim(null):52. upper(null):53. lower(null):54. replace(null, a, b):55. replace(s, null, b):hello56. slice(null, 0, 1):57. split(null, sep):"
+"49. index_of(null, x):50. last_index_of(null, x):51. trim(null):52. upper(null):53. lower(null):54. replace(null, a, b):55. replace(s, null, b):hello56. slice(null, 0, 1):57. split(null, sep):"
 0
 "58. join(null, sep):59. len(null):"
 0

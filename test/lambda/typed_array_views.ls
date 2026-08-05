@@ -24,13 +24,16 @@ v[1]
 v[2]
 
 // ============================================================
-// EDGE CASES — negative & out-of-range indices
+// EDGE CASES — negative & out-of-range offsets
+// A negative offset is out of range exactly like an over-length one, so it
+// clamps into [0, len] rather than wrapping from the end (§7.4).
 // ============================================================
-'=== negative indices ==='
+'=== negative offsets clamp ==='
 let b = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-subview(b, -3, -1)    // last 3 ... up to second-last → [8, 9]
-subview(b, 0, -1)     // all but last → [1..9]
-subview(b, -5, 10)    // last 5 → [6..10]
+subview(b, -3, -1)    // both offsets clamp to 0 → []
+subview(b, 0, -1)     // end clamps to 0 → []
+subview(b, -5, 10)    // start clamps to 0 → [1..10]
+subview(b, len(b) - 3, len(b))  // the way to view the last 3 → [8, 9, 10]
 
 '=== empty view ==='
 let e = subview(b, 4, 4)

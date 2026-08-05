@@ -69,7 +69,7 @@ enum JsModuleConstType {
 };
 
 struct JsModuleConstEntry {
-    char name[128];     // e.g. "_js_INITIAL_SIZE"
+    const char* name;   // NamePool-owned semantic binding name
     JsModuleConstType const_type;
     int64_t int_val;    // for MCONST_INT and MCONST_BOOL (0/1)
     double float_val;   // for MCONST_FLOAT
@@ -112,7 +112,7 @@ struct JsImportGraphNode {
 };
 
 struct JsNameSetEntry {
-    char name[128];
+    const char* name;   // NamePool-owned semantic binding name
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
     bool from_func_decl;  // true if this name came from a nested function declaration
     uint32_t binding_start; // source range of the resolved defining binding, if known
@@ -143,7 +143,7 @@ typedef struct JsMirTdzClosureCapture {
     int slot;
     int binding_scope_depth;
     bool is_transitive;
-    char name[128];
+    const char* name;   // NamePool-owned binding name
 } JsMirTdzClosureCapture;
 
 typedef enum JsExcTrack {
@@ -162,11 +162,18 @@ struct JsLoopLabels {
     int label_name_len;           // v11: length of label name
 };
 
+// A dynamically sized iterator-cleanup entry. Iterator registers are MIR
+// values rather than pointers, so they are stored in a stack-owned record when
+// held by the Lambda ArrayList.
+struct JsMirIteratorFrame {
+    MIR_reg_t iterator;
+};
+
 // Function entry for pre-pass collection
 struct JsFuncCollected {
     JsFunctionNode* node;
-    char name[128];
-    char body_name[144];
+    const char* name;       // NamePool-owned semantic/function identity
+    const char* body_name;  // NamePool-owned backend body symbol
     MIR_item_t func_item;        // public checked wrapper
     MIR_item_t body_func_item;   // internal boxed implementation body
     // Capture info
@@ -179,7 +186,7 @@ struct JsFuncCollected {
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
     int scope_env_normal_count;      // number of normal vars (excluding NFE extra slots and parent env link)
-    char (*scope_env_names)[64];     // dynamically allocated: scope_env_count entries of 64 chars each
+    const char** scope_env_names;    // NamePool-owned scope binding keys
     bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
     int reuse_env_slot_count;        // v16: slot count when reusing parent env
     bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
@@ -389,19 +396,22 @@ struct JsMirTranspiler {
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
 
-    // Variable scopes: array of hashmaps, name -> JsMirVarEntry
-    struct hashmap* var_scopes[64];
+    // Variable scopes: dynamic stack of hashmaps, name -> JsMirVarEntry.
+    // Each map carries pass-local MIR registers, type, TDZ, root, and
+    // environment state for one lexical scope.
+    ArrayList* var_scopes;
     int scope_depth;
     int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
 
-    // Loop label stack
-    JsLoopLabels loop_stack[32];
+    // Loop label stack. Entries are JsLoopLabels* owned by the ArrayList.
+    ArrayList* loop_stack;
     int loop_depth;
     int iteration_depth;
     int loop_scope_depth;
 
-    // Active for-of iterator stack for return cleanup
-    MIR_reg_t for_of_iterators[32];
+    // Active for-of iterator stack for return cleanup. Entries are
+    // JsMirIteratorFrame* owned by the ArrayList.
+    ArrayList* for_of_iterators;
     int for_of_depth;
 
     // v11: pending label for next loop push
@@ -424,8 +434,9 @@ struct JsMirTranspiler {
     // Current class being transpiled (for super resolution)
     JsClassEntry* current_class;
 
-    // Try/catch context stack (for return-in-try and exception flow)
-    JsTryContext try_ctx_stack[16];
+    // Try/catch context stack (for return-in-try and exception flow). Entries
+    // are JsTryContext* owned by the ArrayList.
+    ArrayList* try_ctx_stack;
     int try_ctx_depth;
 
     // Phase 4: Native function generation state
@@ -453,7 +464,7 @@ struct JsMirTranspiler {
     // Closure env read-back for mutable captures (forEach, reduce, etc.)
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
-    char last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    const char* last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
@@ -582,11 +593,41 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         hashmap_free(mt->module_consts);
         mt->module_consts = NULL;
     }
-    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
-        if (mt->var_scopes[i]) {
-            hashmap_free(mt->var_scopes[i]);
-            mt->var_scopes[i] = NULL;
+    if (mt->var_scopes) {
+        for (int i = 0; i < mt->var_scopes->length; i++) {
+            struct hashmap* scope =
+                (struct hashmap*)arraylist_get(mt->var_scopes, i);
+            if (scope) hashmap_free(scope);
         }
+        arraylist_free(mt->var_scopes);
+        mt->var_scopes = NULL;
+    }
+    if (mt->loop_stack) {
+        for (int i = 0; i < mt->loop_stack->length; i++) {
+            JsLoopLabels* labels =
+                (JsLoopLabels*)arraylist_get(mt->loop_stack, i);
+            if (labels) mem_free(labels);
+        }
+        arraylist_free(mt->loop_stack);
+        mt->loop_stack = NULL;
+    }
+    if (mt->for_of_iterators) {
+        for (int i = 0; i < mt->for_of_iterators->length; i++) {
+            JsMirIteratorFrame* frame =
+                (JsMirIteratorFrame*)arraylist_get(mt->for_of_iterators, i);
+            if (frame) mem_free(frame);
+        }
+        arraylist_free(mt->for_of_iterators);
+        mt->for_of_iterators = NULL;
+    }
+    if (mt->try_ctx_stack) {
+        for (int i = 0; i < mt->try_ctx_stack->length; i++) {
+            JsTryContext* try_context =
+                (JsTryContext*)arraylist_get(mt->try_ctx_stack, i);
+            if (try_context) mem_free(try_context);
+        }
+        arraylist_free(mt->try_ctx_stack);
+        mt->try_ctx_stack = NULL;
     }
     if (mt->class_entries) {
         for (int i = 0; i < mt->class_count; i++) {

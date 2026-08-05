@@ -1,4 +1,6 @@
-// Counts and indices return Lambda `int` (the unsized lane), not `int64`.
+// Counts return Lambda `int` (the unsized lane), not `int64`.
+// Search and ordinal functions return `int | null`; successful values still
+// occupy the same native int lane.
 // int64() is the one deliberate exception: the explicit widening constructor.
 // Before 2026-07-29 len/index_of/last_index_of were declared int64, which made
 // ordinary length arithmetic widen into the decimal-backed `integer` carrier.
@@ -27,3 +29,15 @@ len("abcd")
 index_of("hello", "l")
 last_index_of("hello", "l")
 index_of("hello", "zz")
+
+"=== nullable absence ==="
+type(index_of("hello", "zz"))
+type(last_index_of("hello", "zz"))
+type(ord(""))
+index_of("hello", "zz") or 99
+ord("") or 0
+
+"=== typed nullable native result ==="
+let empty_text: string = ""
+type(ord(empty_text))
+ord(empty_text) or 0

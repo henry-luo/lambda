@@ -6380,7 +6380,8 @@ static bool pm_add_capture_entry(PyMirTranspiler* mt, PyFuncCollected* fc,
         if (fc->analysis) {
             FnCapture* capture = (FnCapture*)arena_calloc(mt->tp->ast_arena,
                 sizeof(FnCapture));
-            snprintf(capture->name, sizeof(capture->name), "%s", varname);
+            String* capture_name = name_pool_create_name(mt->tp->name_pool, varname);
+            capture->name = capture_name ? capture_name->chars : varname;
             capture->next = fc->analysis->captures;
             fc->analysis->captures = capture;
             fc->analysis->capture_count++;
@@ -6547,7 +6548,8 @@ static void pm_analyze_lambda_captures(PyMirTranspiler* mt) {
                 if (lc->analysis) {
                     FnCapture* capture = (FnCapture*)arena_calloc(mt->tp->ast_arena,
                         sizeof(FnCapture));
-                    snprintf(capture->name, sizeof(capture->name), "%s", refs[ri]);
+                    String* capture_name = name_pool_create_name(mt->tp->name_pool, refs[ri]);
+                    capture->name = capture_name ? capture_name->chars : refs[ri];
                     capture->next = lc->analysis->captures;
                     lc->analysis->captures = capture;
                     lc->analysis->capture_count++;

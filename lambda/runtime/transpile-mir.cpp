@@ -5443,15 +5443,15 @@ static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node) {
 
 // The C-level return type of a sys func, which is NOT its Lambda return type:
 // `string()` returns String* while others return Item, and after G0 the funcs
-// whose Lambda type is `int` return int's native lane, a raw double. Both the
-// direct-call and the pipe-injection emitters need this, so it lives here
-// rather than being decided twice.
+// whose Lambda type is `int` return int's native lane. Both the direct-call and
+// the pipe-injection emitters need this, so it lives here rather than being
+// decided twice.
 static TypeId sysfunc_c_ret_type_id(SysFuncInfo* info) {
 TypeId c_ret_tid = LMD_TYPE_ANY;  // default: C function returns Item
     switch (info->fn) {
-    // G0: these return a Lambda `int`, so their C result is a double.
-    case SYSFUNC_LEN: case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF:
-    case SYSFUNC_ORD:
+    // len() stays a raw machine count. Search/ordinal calls return Item so
+    // their public null result cannot be mistaken for an integer sentinel.
+    case SYSFUNC_LEN:
         c_ret_tid = LMD_TYPE_INT; break;
     // These keep an int64_t C result. `int64()` because its Lambda type IS
     // int64; the bitwise/shift family because bit reinterpretation is a
@@ -5490,14 +5490,8 @@ TypeId c_ret_tid = LMD_TYPE_ANY;  // default: C function returns Item
 
 // Formal semantics 7.7: most value sys funcs declare their parameters as
 // `any - error`, so an error argument is rejected at the CALL BOUNDARY rather
-// than being absorbed into a plausible number. Declaring it here rather than
-// widening the return type to `int | error` is what keeps the contract from
-// going viral through untyped code: `fn f(s) => index_of(s, "x")` still infers
-// `int`. On failure the parameter never enters the function and the call's
-// result is that error, which then SKIPS to the end of the closest enclosing
-// safe boundary (TE-5) -- the same soft-error path every other typed parameter
-// boundary takes, which is why this reuses emit_return_if_item_error rather
-// than inventing a channel.
+// than being absorbed into a plausible value. Search and ordinal calls may
+// still return null for a successful operation with no answer.
 static bool sysfunc_params_reject_error(SysFuncInfo* info) {
     if (!info) return false;
     switch (info->fn) {
@@ -12667,7 +12661,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             TypeId a1_tid = get_effective_type(mt, arg);
             if (a1_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, transpile_expr(mt, arg), a1_tid);
-                return emit_call_1(mt, "fn_ord_str", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                MIR_reg_t boxed = emit_call_1(mt, "fn_ord_str_item", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+                emit_return_if_item_error(mt, boxed);
+                return emit_unbox(mt, boxed, LMD_TYPE_INT);
             }
         }
 
@@ -12898,6 +12895,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // STRING→String*, SYMBOL→Symbol*).
         TypeId call_expr_tid = get_effective_type(mt, (AstNode*)call_node);
         #define POST_PROCESS_UNBOX(result) \
+            if ((info->fn == SYSFUNC_INDEX_OF || info->fn == SYSFUNC_LAST_INDEX_OF || \
+                 info->fn == SYSFUNC_ORD) && c_ret_tid == LMD_TYPE_ANY) { \
+                emit_return_if_item_error(mt, result); \
+            } \
             if (!call_node->propagate && !mt->emitting_async_call && c_ret_tid == LMD_TYPE_ANY && \
                 (mir_is_native_scalar_value_type(call_expr_tid) || \
                  is_text_type_id(call_expr_tid))) { \
@@ -14315,7 +14316,18 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
                     }
-                    if (piped) return piped;
+                    if (piped) {
+                        // Nullable scalar sys funcs return a boxed Item from
+                        // their public ABI; the pipe expression still carries
+                        // the nullable int native lane to its consumer.
+                        if (info->fn == SYSFUNC_INDEX_OF ||
+                                info->fn == SYSFUNC_LAST_INDEX_OF ||
+                                info->fn == SYSFUNC_ORD) {
+                            emit_return_if_item_error(mt, piped);
+                            return emit_unbox(mt, piped, LMD_TYPE_INT);
+                        }
+                        return piped;
+                    }
                     // fall through for more args — use fn_pipe_call
                 }
             }

@@ -5,7 +5,7 @@
 
 import pdf: lambda.package.pdf.pdf
 
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn summarize(path: string) {
     let doc^err = input(path, 'pdf')

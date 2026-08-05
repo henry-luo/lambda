@@ -18,4 +18,12 @@ int
 4
 2
 3
--1
+"=== nullable absence ==="
+type.null
+type.null
+type.null
+99
+0
+"=== typed nullable native result ==="
+type.null
+0

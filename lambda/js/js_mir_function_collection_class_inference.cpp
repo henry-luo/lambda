@@ -139,15 +139,14 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj_id  = (JsIdentifierNode*)mem->object;
             JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+            const char* vname = jm_format_name("_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
             JsMirVarEntry* obj_var = jm_find_var(mt, vname);
             // P7: also check module_consts for top-level vars (is_modvar path has no local entry)
             JsClassEntry* p7_ce = obj_var ? obj_var->class_entry : NULL;
             if (!p7_ce && mt->module_consts) {
                 JsModuleConstEntry p7_mclookup;
                 memset(&p7_mclookup, 0, sizeof(p7_mclookup));
-                snprintf(p7_mclookup.name, sizeof(p7_mclookup.name), "%s", vname);
+                p7_mclookup.name = jm_persist_name(vname);
                 JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_mclookup);
                 if (p7_mc) p7_ce = p7_mc->class_entry;
             }
@@ -313,7 +312,7 @@ void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t fu
 // Function name generation
 // ============================================================================
 
-void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler* mt) {
+const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt) {
     StrBuf* sb = strbuf_new_cap(64);
     strbuf_append_str(sb, "_js_");
     if (fn->name) {
@@ -324,8 +323,9 @@ void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler
     }
     strbuf_append_char(sb, '_');
     strbuf_append_int(sb, ts_node_start_byte(fn->node));
-    snprintf(buf, bufsize, "%s", sb->str);
+    const char* name = jm_persist_name(sb->str);
     strbuf_free(sb);
+    return name;
 }
 
 int jm_count_params(JsFunctionNode* fn) {
@@ -388,13 +388,12 @@ JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node) {
 
 // Extract the semantic binding name for a function parameter.  MIR formals use
 // jm_get_backend_param_name; this spelling remains for JS scope semantics.
-void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size) {
+const char* jm_get_param_name(JsAstNode* param_node, int index) {
     JsIdentifierNode* pid = jm_get_param_identifier(param_node);
     if (pid && pid->name) {
-        snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
-        return;
+        return jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
     }
-    snprintf(out, out_size, "_js_p%d", index);
+    return jm_format_name("_js_p%d", index);
 }
 
 // ============================================================================
@@ -452,7 +451,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             JsFuncCollected* e = &mt->func_entries[my_index];
             memset(e, 0, sizeof(JsFuncCollected));
             e->node = fn;
-            jm_make_fn_name(e->name, sizeof(e->name), fn, mt);
+            e->name = jm_make_fn_name(fn, mt);
             e->func_item = NULL; // set during creation
             e->parent_index = -1; // top-level until set by parent
             e->is_strict = jm_function_inside_class_syntax(fn);
@@ -915,7 +914,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 if (md->kind == JsMethodDefinitionNode::JS_METHOD_GET) gs_prefix = "get_";
                                 else if (md->kind == JsMethodDefinitionNode::JS_METHOD_SET) gs_prefix = "set_";
                                 else if (md->static_method) gs_prefix = "s_";
-                                snprintf(fc->name, sizeof(fc->name), "%.*s_%s%.*s_%d",
+                                fc->name = jm_format_name("%.*s_%s%.*s_%d",
                                     (int)cls->name->len, cls->name->chars,
                                     gs_prefix,
                                     (int)method_name->len, method_name->chars,
@@ -926,12 +925,12 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 else if (md->kind == JsMethodDefinitionNode::JS_METHOD_SET) gs_prefix = "set_";
                                 else if (md->static_method) gs_prefix = "s_";
                                 // Anonymous class: use func_count to disambiguate
-                                snprintf(fc->name, sizeof(fc->name), "anon%d_%s%.*s",
+                                fc->name = jm_format_name("anon%d_%s%.*s",
                                     mt->func_count, gs_prefix,
                                     (int)method_name->len, method_name->chars);
                             } else {
                                 // Use func_count as a unique ID for unnamed computed methods.
-                                snprintf(fc->name, sizeof(fc->name), "class_method_%d_%d",
+                                fc->name = jm_format_name("class_method_%d_%d",
                                     mt->class_count, mt->func_count);
                             }
                             fc->func_item = NULL;
@@ -1912,8 +1911,7 @@ void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
         // Check if this is a recursive call — args passed to self propagate evidence
         if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-            char cname[128];
-            snprintf(cname, sizeof(cname), "_js_%.*s", (int)cid->name->len, cid->name->chars);
+            const char* cname = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
             if (strncmp(cname, self_name, strlen(self_name)) == 0) {
                 // Recursive call: pass-through params are type-consistent
                 // but only reinforce if there's already arithmetic evidence
@@ -2180,14 +2178,14 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // Build self-name for recursive call detection
-    char self_name[128] = {0};
+    const char* self_name = NULL;
     if (fn->name) {
-        snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
 
     // Accumulate evidence
     jm_infer_walk(fn->body, param_bindings, evidence, pc,
-                  self_name[0] ? self_name : NULL);
+                  self_name && self_name[0] ? self_name : NULL);
 
     // P6: Alias tracking — if `let x = param` appears in the function body,
     // re-walk with `x` added as an alias for that param so evidence on `x`
@@ -2236,7 +2234,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                 (size_t)alias_count, sizeof(*alias_evidence), MEM_CAT_JS_RUNTIME);
             if (alias_evidence) {
                 jm_infer_walk(fn->body, alias_bindings, alias_evidence, alias_count,
-                              self_name[0] ? self_name : NULL);
+                              self_name && self_name[0] ? self_name : NULL);
                 // merge alias evidence back to original params
                 for (int ai = 0; ai < alias_count; ai++) {
                     int pi = alias_map[ai];
@@ -2375,8 +2373,7 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             JsCallNode* call = (JsCallNode*)expr;
             if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-                char cn[128];
-                snprintf(cn, sizeof(cn), "_js_%.*s", (int)cid->name->len, cid->name->chars);
+                const char* cn = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
                 if (strncmp(cn, self_name, strlen(self_name)) == 0) {
                     t = LMD_TYPE_FLOAT; // recursive JS Number calls return binary64
                 }
@@ -2459,9 +2456,9 @@ void jm_infer_return_type(JsFuncCollected* fc) {
         return;
     }
 
-    char self_name[128] = {0};
+    const char* self_name = NULL;
     if (fn->name) {
-        snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
 
     // For expression-body arrow functions: infer from the expression directly
@@ -2482,7 +2479,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 
     TypeId collected[32];
     int count = 0;
-    jm_infer_return_type_walk(fn->body, self_name[0] ? self_name : NULL,
+    jm_infer_return_type_walk(fn->body, self_name && self_name[0] ? self_name : NULL,
                                collected, &count, 32);
 
     if (count == 0) {
@@ -2684,7 +2681,7 @@ bool jm_expression_has_float_hint(JsAstNode* node) {
 bool jm_prescan_is_float_array(struct hashmap* float_arrays, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = jm_persist_name(name);
     return hashmap_get(float_arrays, &key) != NULL;
 }
 
@@ -2696,8 +2693,8 @@ bool jm_prescan_has_float_array_access(JsAstNode* node, struct hashmap* float_ar
         JsMemberNode* mem = (JsMemberNode*)node;
         if (mem->computed && mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
-            char name[128];
-            snprintf(name, sizeof(name), "%.*s", (int)obj->name->len, obj->name->chars);
+            const char* name = jm_format_name("%.*s",
+                (int)obj->name->len, obj->name->chars);
             if (jm_prescan_is_float_array(float_arrays, name)) return true;
         }
     }
@@ -2754,8 +2751,8 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
                 asgn->right ? asgn->right->node_type : -1,
                 asgn->right ? jm_expression_has_float_hint(asgn->right) : 0, should_widen);
             if (should_widen) {
-                char name[128];
-                snprintf(name, sizeof(name), "%.*s", (int)dbg_id->name->len, dbg_id->name->chars);
+                const char* name = jm_format_name("%.*s",
+                    (int)dbg_id->name->len, dbg_id->name->chars);
                 jm_name_set_add(widen_vars, name);
                 log_debug("P9: prescan widen '%s' to FLOAT", name);
             }
@@ -2803,8 +2800,8 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
                         should_widen = true;
                     if (should_widen) {
                         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
-                        char name[128];
-                        snprintf(name, sizeof(name), "%.*s", (int)id->name->len, id->name->chars);
+                        const char* name = jm_format_name("%.*s",
+                            (int)id->name->len, id->name->chars);
                         jm_name_set_add(widen_vars, name);
                         log_debug("P9: prescan widen '%s' to FLOAT (var decl)", name);
                     }
@@ -2853,8 +2850,7 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
                             }
                             if (is_float_array) {
                                 JsIdentifierNode* vid = (JsIdentifierNode*)d->id;
-                                char name[128];
-                                snprintf(name, sizeof(name), "%.*s",
+                                const char* name = jm_format_name("%.*s",
                                     (int)vid->name->len, vid->name->chars);
                                 jm_name_set_add(float_arrays, name);
                                 log_debug("P9: prescan found float typed array '%s'", name);
@@ -2886,7 +2882,7 @@ bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname) {
     if (strncmp(vname, "_js_", 4) == 0) bare = vname + 4;
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", bare);
+    key.name = jm_persist_name(bare);
     return hashmap_get(mt->widen_to_float, &key) != NULL;
 }
 

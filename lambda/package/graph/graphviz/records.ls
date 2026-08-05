@@ -1,6 +1,6 @@
 // Graphviz record fields lowered to measured table content and canonical ports.
 
-fn leaf_at(text, close) => if (close > 1)
+fn leaf_at(text, close) => if (close != null and close > 1)
   {text: trim(slice(text, close + 1, len(text))), port: slice(text, 1, close), fields: null}
 else {text: text, port: null, fields: null}
 
@@ -8,7 +8,7 @@ fn leaf(raw) =>
   // An unreadable label contributes an empty record cell rather than aborting
   // the containing graph normalization.
   leaf_at(trim(raw),
-    if (starts_with(trim(raw), "<")) index_of(trim(raw), ">") else -1) or
+    if (starts_with(trim(raw), "<")) index_of(trim(raw), ">") else null) or
   {text: "", port: null, fields: null}
 
 fn scan_result(fields, next, valid) => map(["fields", fields, "next", next, "valid", valid])

@@ -99,6 +99,7 @@ static char* js_debug_display_name(JsFuncCollected* fc) {
         return name;
     }
     const char* raw = fc->name;
+    if (!raw) return js_debug_strdup("<anonymous>");
     if (strncmp(raw, "_js_", 4) == 0) raw += 4;
     int len = (int)strlen(raw);
     int end = len;
@@ -268,7 +269,7 @@ static void jm_note_module_block_lexical_name(struct hashmap* seen, struct hashm
     if (!name || !seen || !duplicate_consts) return;
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = jm_persist_name(name);
     JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(seen, &key);
     if (existing) {
         jm_name_set_add(duplicate_consts, name);
@@ -285,8 +286,8 @@ static bool jm_child_can_use_parent_scope_env(JsFuncCollected* parent, JsFuncCol
 static void jm_collect_function_private_self_name(JsFunctionNode* fn,
         struct hashmap* locals) {
     if (!fn || !locals || fn->node_type != JS_AST_NODE_FUNCTION_EXPRESSION || !fn->name) return;
-    char self_name[128];
-    snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+    const char* self_name = jm_format_name("_js_%.*s",
+        (int)fn->name->len, fn->name->chars);
     jm_name_set_add(locals, self_name);
 }
 
@@ -309,6 +310,7 @@ static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
 
 static bool jm_scope_env_key_binding_start(const FnCapture* cap, uint32_t* out_start) {
     if (!cap || !out_start) return false;
+    if (!cap->scope_env_key) return false;
     const char* at = strchr(cap->scope_env_key, '@');
     if (!at || !at[1] || at[1] < '0' || at[1] > '9') return false;
     uint32_t start = 0;
@@ -400,8 +402,8 @@ static void jm_count_lexical_pattern_name_for_slot(JsAstNode* pat, const char* n
     if (pat->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         if (!id->name) return;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s",
+            (int)id->name->len, id->name->chars);
         if (strcmp(vname, name) == 0) (*count)++;
         return;
     }
@@ -456,8 +458,7 @@ static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* 
     case JS_AST_NODE_FUNCTION_DECLARATION: {
         JsFunctionNode* fn = (JsFunctionNode*)node;
         if (!fn->name) return;
-        char fn_name[128];
-        snprintf(fn_name, sizeof(fn_name), "_js_%.*s",
+        const char* fn_name = jm_format_name("_js_%.*s",
             (int)fn->name->len, fn->name->chars);
         if (strcmp(fn_name, name) == 0) (*count)++;
         return;
@@ -515,7 +516,7 @@ static bool jm_parent_declares_function_var(JsFuncCollected* parent, const char*
     jm_collect_body_locals(parent->node->body, vars, /*var_only=*/true);
     JsNameSetEntry lookup;
     memset(&lookup, 0, sizeof(lookup));
-    snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+    lookup.name = jm_persist_name(name);
     JsNameSetEntry* entry = (JsNameSetEntry*)hashmap_get(vars, &lookup);
     bool is_var = entry && !entry->from_func_decl;
     hashmap_free(vars);
@@ -542,7 +543,8 @@ static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
 }
 
 static bool jm_capture_binding_starts_after_function(JsFuncCollected* parent, FnCapture* cap) {
-    if (!parent || !parent->node || !cap || !cap->scope_env_key[0]) return false;
+    if (!parent || !parent->node || !cap || !cap->scope_env_key ||
+            !cap->scope_env_key[0]) return false;
     const char* at = strchr(cap->scope_env_key, '@');
     if (!at || !at[1]) return false;
     uint32_t binding_start = 0;
@@ -558,7 +560,7 @@ static bool jm_capture_binding_starts_after_function(JsFuncCollected* parent, Fn
 }
 
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
-    const char* name, char* out_key);
+    const char* name, const char** out_key);
 
 static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFuncCollected* child,
         FnCapture* cap) {
@@ -570,19 +572,20 @@ static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFunc
     bool needs_binding_key = jm_parent_var_has_lexical_slot_collision(parent, cap->name) ||
         (cap->force_env_capture && child && child->is_class_method);
     if (needs_binding_key) {
-        if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
-            char derived_key[128];
-            memset(derived_key, 0, sizeof(derived_key));
+        if (!cap->scope_env_key || !cap->scope_env_key[0] ||
+                strcmp(cap->scope_env_key, cap->name) == 0) {
+            const char* derived_key = NULL;
             JsAstNode* root = parent && parent->node ? parent->node->body : NULL;
             JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
             if (root && target &&
-                jm_find_enclosing_lexical_key_for_target(root, target, cap->name, derived_key)) {
+                jm_find_enclosing_lexical_key_for_target(root, target, cap->name, &derived_key)) {
                 // A function-local lexical can shadow an IIFE-promoted module binding;
                 // its source identity must survive scope-env layout, not just its name.
-                snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+                cap->scope_env_key = derived_key;
             }
         }
-        if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
+        if (cap->scope_env_key && cap->scope_env_key[0] &&
+                strcmp(cap->scope_env_key, cap->name) != 0) {
             return cap->scope_env_key;
         }
     }
@@ -647,8 +650,8 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         if (!direct_program) {
             JsClassNode* cls = (JsClassNode*)node;
             if (cls->name) {
-                char name[128];
-                snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                const char* name = jm_format_name("_js_%.*s",
+                    (int)cls->name->len, cls->name->chars);
                 jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)JS_VAR_CONST);
             }
         }
@@ -658,8 +661,8 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         if (!direct_program) {
             JsFunctionNode* fn = (JsFunctionNode*)node;
             if (fn->name) {
-                char name[128];
-                snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                const char* name = jm_format_name("_js_%.*s",
+                    (int)fn->name->len, fn->name->chars);
                 jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)JS_VAR_LET);
             }
         }
@@ -764,8 +767,8 @@ static void jm_collect_for_init_lexical_pattern(JsAstNode* pat, struct hashmap* 
     if (pat->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         if (id->name) {
-            char fname[128];
-            snprintf(fname, sizeof(fname), "_js_%.*s", (int)id->name->len, id->name->chars);
+            const char* fname = jm_format_name("_js_%.*s",
+                (int)id->name->len, id->name->chars);
             jm_name_set_add(names, fname);
         }
         return;
@@ -1391,18 +1394,19 @@ static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
     return ns <= ts && te <= ne;
 }
 
-static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name, char out_key[128]) {
+static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name,
+        const char** out_key) {
     if (!pat || !name || !out_key) return false;
     switch (pat->node_type) {
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         if (!id->name) return false;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s",
+            (int)id->name->len, id->name->chars);
         if (strcmp(vname, name) != 0) return false;
         uint32_t start = ts_node_is_null(pat->node) ? 0 : ts_node_start_byte(pat->node);
         uint32_t end = ts_node_is_null(pat->node) ? 0 : ts_node_end_byte(pat->node);
-        snprintf(out_key, 128, "%s@%u:%u", name, start, end);
+        *out_key = jm_format_name("%s@%u:%u", name, start, end);
         return true;
     }
     case JS_AST_NODE_ARRAY_PATTERN:
@@ -1430,16 +1434,16 @@ static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name
     }
 }
 
-static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char out_key[128]) {
+static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name,
+        const char** out_key) {
     if (!stmt || !name || !out_key) return false;
     if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
         JsFunctionNode* fn = (JsFunctionNode*)stmt;
         if (!fn->name || ts_node_is_null(stmt->node)) return false;
-        char fn_name[128];
-        snprintf(fn_name, sizeof(fn_name), "_js_%.*s",
+        const char* fn_name = jm_format_name("_js_%.*s",
             (int)fn->name->len, fn->name->chars);
         if (strcmp(fn_name, name) != 0) return false;
-        snprintf(out_key, 128, "%s@%u:%u", name,
+        *out_key = jm_format_name("%s@%u:%u", name,
             ts_node_start_byte(stmt->node), ts_node_end_byte(stmt->node));
         return true;
     }
@@ -1455,7 +1459,7 @@ static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char
 }
 
 static bool jm_switch_lexical_decl_matches_name(JsSwitchNode* sw, const char* name,
-        char out_key[128]) {
+        const char** out_key) {
     if (!sw || !name || !out_key) return false;
     for (JsAstNode* c = sw->cases; c; c = c->next) {
         if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
@@ -1468,7 +1472,7 @@ static bool jm_switch_lexical_decl_matches_name(JsSwitchNode* sw, const char* na
 }
 
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
-        const char* name, char out_key[128]) {
+        const char* name, const char** out_key) {
     if (!node || !target || !name || !out_key) return false;
     if (node == target) return false;
     if (!jm_ast_node_contains_target(node, target)) {
@@ -2206,8 +2210,8 @@ static bool jm_p6_call_matches_name(JsCallNode* call, const char* name) {
     }
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
     if (!id->name) return false;
-    char cname[128];
-    snprintf(cname, sizeof(cname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    const char* cname = jm_format_name("_js_%.*s",
+        (int)id->name->len, id->name->chars);
     return strcmp(cname, name) == 0;
 }
 
@@ -2541,9 +2545,9 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
     p6.param_count = param_count;
     jm_p6_collect_locals(&p6);
 
-    char self_name[128] = {0};
+    const char* self_name = NULL;
     if (fn->name) {
-        snprintf(self_name, sizeof(self_name), "_js_%.*s",
+        self_name = jm_format_name("_js_%.*s",
             (int)fn->name->len, fn->name->chars);
     }
     p6.self_name = self_name;
@@ -2564,7 +2568,7 @@ void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
         return;
     }
 
-    if (inferred != LMD_TYPE_ANY && self_name[0]) {
+    if (inferred != LMD_TYPE_ANY && self_name && self_name[0]) {
         for (int pass = 0; pass < 4; pass++) {
             count = 0;
             p6.self_return_type = inferred;
@@ -2635,7 +2639,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
         // check module constants
         if (mt->module_consts) {
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "_js_%.*s",
+            lookup.name = jm_format_name("_js_%.*s",
                 (int)id->name->len, id->name->chars);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             if (mc) {
@@ -3554,11 +3558,11 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
         if (decl->init || !decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s",
+            (int)id->name->len, id->name->chars);
         JsModuleConstEntry lookup;
         memset(&lookup, 0, sizeof(lookup));
-        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        lookup.name = jm_persist_name(vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
         if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR ||
                 mc->is_implicit_global || (int)mc->int_val < 0) {
@@ -3735,15 +3739,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
                         if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
-                            char vname[128];
-                            snprintf(vname, sizeof(vname), "_js_%.*s",
+                            const char* vname = jm_format_name("_js_%.*s",
                                 (int)vid->name->len, vid->name->chars);
                             JsModuleConstEntry lookup;
-                            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                            lookup.name = jm_persist_name(vname);
                             if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                 JsModuleConstEntry mce;
                                 memset(&mce, 0, sizeof(mce));
-                                snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                                mce.name = jm_persist_name(vname);
                                 mce.const_type = MCONST_MODVAR;
                                 mce.int_val = mt->module_var_count++;
                                 mce.var_kind = (int)v->kind;  // v20 TDZ: track let/const/var
@@ -3774,11 +3777,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             while (hashmap_iter(pat_names, &piter, &pitem)) {
                                 JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
                                 JsModuleConstEntry lookup;
-                                snprintf(lookup.name, sizeof(lookup.name), "%s", ne->name);
+                                lookup.name = jm_persist_name(ne->name);
                                 if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                     JsModuleConstEntry mce;
                                     memset(&mce, 0, sizeof(mce));
-                                    snprintf(mce.name, sizeof(mce.name), "%s", ne->name);
+                                    mce.name = jm_persist_name(ne->name);
                                     mce.const_type = MCONST_MODVAR;
                                     mce.int_val = mt->module_var_count++;
                                     mce.var_kind = (int)v->kind;
@@ -3843,18 +3846,18 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (eval_lex_collisions && e->from_func_decl) {
                 JsNameSetEntry lex_lookup;
                 memset(&lex_lookup, 0, sizeof(lex_lookup));
-                snprintf(lex_lookup.name, sizeof(lex_lookup.name), "%s", e->name);
+                lex_lookup.name = jm_persist_name(e->name);
                 if (hashmap_get(eval_lex_collisions, &lex_lookup)) {
                     log_debug("js-mir: suppress AnnexB nested func hoist '%s' (let/const collision)", e->name);
                     continue;
                 }
             }
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+            lookup.name = jm_persist_name(e->name);
             if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 JsModuleConstEntry mce;
                 memset(&mce, 0, sizeof(mce));
-                snprintf(mce.name, sizeof(mce.name), "%s", e->name);
+                mce.name = jm_persist_name(e->name);
                 mce.const_type = MCONST_MODVAR;
                 mce.int_val = mt->module_var_count++;
                 mce.modvar_type = 0;
@@ -3878,8 +3881,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                 // Default import: import X from 'module'
                 if (imp->default_name) {
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                    const char* vname = jm_format_name("_js_%.*s",
                         (int)imp->default_name->len, imp->default_name->chars);
                     // Js57 P3 (Track B2): detect self-import so the module_consts
                     // entry can carry the live-binding marker. Closures and
@@ -3898,11 +3900,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     bool is_self_import = (mt->filename != NULL && resolved_pp[0] != '\0' &&
                         strcmp(resolved_pp, mt->filename) == 0);
                     JsModuleConstEntry lookup;
-                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    lookup.name = jm_persist_name(vname);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
-                        snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                        mce.name = jm_persist_name(vname);
                         mce.const_type = MCONST_MODVAR;
                         mce.int_val = mt->module_var_count++;
                         if (is_self_import) {
@@ -3918,15 +3920,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                 // Namespace import: import * as X from 'module'
                 if (imp->namespace_name) {
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                    const char* vname = jm_format_name("_js_%.*s",
                         (int)imp->namespace_name->len, imp->namespace_name->chars);
                     JsModuleConstEntry lookup;
-                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    lookup.name = jm_persist_name(vname);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
-                        snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                        mce.name = jm_persist_name(vname);
                         mce.const_type = MCONST_MODVAR;
                         mce.int_val = mt->module_var_count++;
                         hashmap_set(mt->module_consts, &mce);
@@ -3939,15 +3940,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 while (spec) {
                     if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
                         JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
-                        char vname[128];
-                        snprintf(vname, sizeof(vname), "_js_%.*s",
+                        const char* vname = jm_format_name("_js_%.*s",
                             (int)isp->local_name->len, isp->local_name->chars);
                         JsModuleConstEntry lookup;
-                        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                        lookup.name = jm_persist_name(vname);
                         if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                             JsModuleConstEntry mce;
                             memset(&mce, 0, sizeof(mce));
-                            snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                            mce.name = jm_persist_name(vname);
                             mce.const_type = MCONST_MODVAR;
                             mce.int_val = mt->module_var_count++;
                             hashmap_set(mt->module_consts, &mce);
@@ -4059,15 +4059,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             } else if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                 JsFunctionNode* fn = (JsFunctionNode*)s;
                 if (fn->name) {
-                    char name[128];
-                    snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    const char* name = jm_format_name("_js_%.*s",
+                        (int)fn->name->len, fn->name->chars);
                     jm_name_set_add(top_declarations, name);
                 }
             } else if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                 JsClassNode* cls = (JsClassNode*)s;
                 if (cls->name) {
-                    char name[128];
-                    snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                    const char* name = jm_format_name("_js_%.*s",
+                        (int)cls->name->len, cls->name->chars);
                     jm_name_set_add(top_declarations, name);
                 }
             } else {
@@ -4103,7 +4103,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsNameSetEntry* e = (JsNameSetEntry*)item;
                 if (jm_name_set_has(top_declarations, e->name)) continue;
                 JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                lookup.name = jm_persist_name(e->name);
                 if (hashmap_get(mt->module_consts, &lookup)) continue;
                 log_info("js-mir: implicit global '%s' (no modvar — uses global property)", e->name);
             }
@@ -4125,8 +4125,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn = mt->func_entries[fi].node;
             if (!fn || !fn->name || !fn->body) continue;
-            char name[128];
-            snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+            const char* name = jm_format_name("_js_%.*s",
+                (int)fn->name->len, fn->name->chars);
             struct hashmap* self_assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             jm_collect_func_assignments(fn->body, self_assigned);
@@ -4178,11 +4178,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (fc) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
-                        snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
+                        mce.name = jm_format_name("_js_%.*s",
                             (int)fn->name->len, fn->name->chars);
                         // Only add if not already in module_consts
                         JsModuleConstEntry lookup;
-                        snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
+                        lookup.name = jm_persist_name(mce.name);
                         if (!hashmap_get(mt->module_consts, &lookup)) {
                             // Store as MCONST_MODVAR so value persists in js_module_vars[].
                             // Direct call optimization still works independently via
@@ -4229,8 +4229,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (!iife_fn || !iife_fn->body || iife_fn->is_async || iife_fn->is_generator) return NULL;
             if (!iife_fn->name) return iife_fn;
 
-            char self_name[128];
-            snprintf(self_name, sizeof(self_name), "_js_%.*s",
+            const char* self_name = jm_format_name("_js_%.*s",
                 (int)iife_fn->name->len, iife_fn->name->chars);
             struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -4248,7 +4247,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         auto note_iife_binding = [&](const char* name) {
             JsNameSetEntry lookup;
             memset(&lookup, 0, sizeof(lookup));
-            snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+            lookup.name = jm_persist_name(name);
             JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(iife_binding_counts, &lookup);
             if (existing) {
                 existing->var_kind++;
@@ -4260,7 +4259,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         auto iife_binding_is_unique = [&](const char* name) -> bool {
             JsNameSetEntry lookup;
             memset(&lookup, 0, sizeof(lookup));
-            snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+            lookup.name = jm_persist_name(name);
             JsNameSetEntry* entry = (JsNameSetEntry*)hashmap_get(iife_binding_counts, &lookup);
             return entry && entry->var_kind == 1;
         };
@@ -4274,8 +4273,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                     JsFunctionNode* fn = (JsFunctionNode*)s;
                     if (fn->name) {
-                        char name[128];
-                        snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                        const char* name = jm_format_name("_js_%.*s",
+                            (int)fn->name->len, fn->name->chars);
                         jm_name_set_add(wrapper_bindings, name);
                     }
                 } else if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
@@ -4285,8 +4284,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
                         if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
                         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                        char name[128];
-                        snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        const char* name = jm_format_name("_js_%.*s",
+                            (int)id->name->len, id->name->chars);
                         jm_name_set_add(wrapper_bindings, name);
                     }
                 }
@@ -4321,22 +4320,22 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
                         if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
                         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                        char top_name[128];
-                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        const char* top_name = jm_format_name("_js_%.*s",
+                            (int)id->name->len, id->name->chars);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
                 } else if (top->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                     JsFunctionNode* fn = (JsFunctionNode*)top;
                     if (fn->name) {
-                        char top_name[128];
-                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                        const char* top_name = jm_format_name("_js_%.*s",
+                            (int)fn->name->len, fn->name->chars);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
                 } else if (top->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                     JsClassNode* cls = (JsClassNode*)top;
                     if (cls->name) {
-                        char top_name[128];
-                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                        const char* top_name = jm_format_name("_js_%.*s",
+                            (int)cls->name->len, cls->name->chars);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
                 }
@@ -4351,10 +4350,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (!fc) return;
             JsModuleConstEntry mce;
             memset(&mce, 0, sizeof(mce));
-            snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
+            mce.name = jm_format_name("_js_%.*s",
                 (int)fn->name->len, fn->name->chars);
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
+            lookup.name = jm_persist_name(mce.name);
             if (!iife_binding_is_unique(mce.name)) return;
             if (!hashmap_get(mt->module_consts, &lookup)) {
                 mce.const_type = MCONST_MODVAR;
@@ -4394,8 +4393,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
                                 if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
                                     JsIdentifierNode* vid = (JsIdentifierNode*)decl->id;
-                                    char vname[128];
-                                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                                    const char* vname = jm_format_name("_js_%.*s",
                                         (int)vid->name->len, vid->name->chars);
                                     if (top_level_declares_name(vname, stmt)) {
                                         d = d->next;
@@ -4406,11 +4404,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         continue;
                                     }
                                     JsModuleConstEntry lookup;
-                                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                                    lookup.name = jm_persist_name(vname);
                                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                         JsModuleConstEntry mce;
                                         memset(&mce, 0, sizeof(mce));
-                                        snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                                        mce.name = jm_persist_name(vname);
                                         mce.const_type = MCONST_MODVAR;
                                         mce.is_iife_var = true;
                                         mce.int_val = mt->module_var_count++;
@@ -4442,11 +4440,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
                     if (!iife_binding_is_unique(e->name)) continue;
                     JsModuleConstEntry lookup;
-                    snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                    lookup.name = jm_persist_name(e->name);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
-                        snprintf(mce.name, sizeof(mce.name), "%s", e->name);
+                        mce.name = jm_persist_name(e->name);
                         mce.const_type = MCONST_MODVAR;
                         mce.int_val = mt->module_var_count++;
                         mce.is_nested_func_hoist = true;
@@ -4480,7 +4478,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             JsModuleConstEntry mce;
             memset(&mce, 0, sizeof(mce));
-            snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
+            mce.name = jm_format_name("_js_%.*s",
                 (int)ce->name->len, ce->name->chars);
             if (ce->is_declaration) {
                 // Check if this class name already has a MCONST_MODVAR (iife_var) entry.
@@ -4568,7 +4566,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // Register as module const for ClassName.fieldName access pattern
                 JsModuleConstEntry mce;
                 memset(&mce, 0, sizeof(mce));
-                snprintf(mce.name, sizeof(mce.name), "_js_%.*s_%.*s",
+                mce.name = jm_format_name("_js_%.*s_%.*s",
                     (int)ce->name->len, ce->name->chars,
                     (int)sf->name->len, sf->name->chars);
                 mce.const_type = MCONST_MODVAR;
@@ -4669,8 +4667,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsClassEntry* ce = &mt->class_entries[ci];
             // Add class name itself
             if (ce->name) {
-                char cname[128];
-                snprintf(cname, sizeof(cname), "_js_%.*s", (int)ce->name->len, ce->name->chars);
+                const char* cname = jm_format_name("_js_%.*s",
+                    (int)ce->name->len, ce->name->chars);
                 jm_name_set_add(all_names, cname);
             }
             for (int mi = 0; mi < ce->method_count; mi++) {
@@ -4746,8 +4744,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // Add ancestor's function name (for recursive references)
                 if (afn->name) {
-                    char aname[128];
-                    snprintf(aname, sizeof(aname), "_js_%.*s", (int)afn->name->len, afn->name->chars);
+                    const char* aname = jm_format_name("_js_%.*s",
+                        (int)afn->name->len, afn->name->chars);
                     jm_name_set_add(ancestor_names, aname);
                     jm_name_set_add(ancestor_func_locals, aname);
                 }
@@ -4765,7 +4763,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         bool is_iife_promoted_module_var = false;
                         if (mt->module_consts) {
                             JsModuleConstEntry mclookup;
-                            snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
+                            mclookup.name = jm_persist_name(e->name);
                             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                             is_iife_promoted_module_var =
                                 jm_modvar_is_iife_scope_binding(mc) && anc->is_iife_body;
@@ -4800,8 +4798,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
                                         if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
                                             JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                                            char lname[128];
-                                            snprintf(lname, sizeof(lname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                                            const char* lname = jm_format_name("_js_%.*s",
+                                                (int)id->name->len, id->name->chars);
                                             jm_name_set_add_kind(let_const_names, lname, (int)v->kind);
                                         }
                                     }
@@ -4836,7 +4834,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     JsNameSetEntry lookup;
                     memset(&lookup, 0, sizeof(lookup));
-                    snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
+                    lookup.name = jm_persist_name(fc->captures[ci].name);
                     int nearest_var_kind = 0;
                     // Resolve the nearest function-scope lexical first. A
                     // minified outer const and inner let commonly share a name;
@@ -4918,7 +4916,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             bool skip_local_binding = false;
                             if (mt->module_consts) {
                                 JsModuleConstEntry mclookup;
-                                snprintf(mclookup.name, sizeof(mclookup.name), "%s", bl_entry->name);
+                                mclookup.name = jm_persist_name(bl_entry->name);
                                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                                 if (jm_modvar_is_iife_scope_binding(mc) && parent->is_iife_body) {
                                     skip_local_binding = true;
@@ -4959,8 +4957,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // is only visible inside its own body (JS spec), not in the parent scope.
                         // Don't propagate it upward — the function resolves it from its own closure env.
                         if (child->node && child->node->name) {
-                            char child_self_name[128];
-                            snprintf(child_self_name, sizeof(child_self_name), "_js_%.*s",
+                            const char* child_self_name = jm_format_name("_js_%.*s",
                                 (int)child->node->name->len, child->node->name->chars);
                             if (strcmp(cap_name, child_self_name) == 0) continue;
                         }
@@ -4972,7 +4969,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // is used rather than the stale module-level value.
                         if (mt->module_consts) {
                             JsModuleConstEntry lookup;
-                            snprintf(lookup.name, sizeof(lookup.name), "%s", cap_name);
+                            lookup.name = jm_persist_name(cap_name);
                             JsModuleConstEntry* mc_prop = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                             if (mc_prop) {
                                 // For ALL module_const types (CLASS, FUNC, MODVAR, etc.),
@@ -4987,8 +4984,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     if (!anc->node) break;
                                     // Check ancestor's function name (NFE self-reference)
                                     if (anc->node->name) {
-                                        char aname[128];
-                                        snprintf(aname, sizeof(aname), "_js_%.*s",
+                                        const char* aname = jm_format_name("_js_%.*s",
                                             (int)anc->node->name->len, anc->node->name->chars);
                                         if (strcmp(aname, cap_name) == 0) {
                                             shadowed_by_ancestor = true;
@@ -5055,17 +5051,19 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         bool cap_is_parent_nfe = false;
                         if (parent->node && parent->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
                             parent->node->name) {
-                            char parent_self_name[128];
-                            snprintf(parent_self_name, sizeof(parent_self_name), "_js_%.*s",
+                            const char* parent_self_name = jm_format_name("_js_%.*s",
                                 (int)parent->node->name->len, parent->node->name->chars);
                             cap_is_parent_nfe = (strcmp(cap_name, parent_self_name) == 0);
                         }
 
                         // Add as capture to parent
                         jm_ensure_captures_capacity(parent);
-                        snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
-                        snprintf(parent->captures[parent->capture_count].scope_env_key, 128, "%s",
-                            child->captures[ci].scope_env_key[0] ? child->captures[ci].scope_env_key : cap_name);
+                        parent->captures[parent->capture_count].name = jm_persist_name(cap_name);
+                        parent->captures[parent->capture_count].scope_env_key = jm_persist_name(
+                            child->captures[ci].scope_env_key &&
+                            child->captures[ci].scope_env_key &&
+                            child->captures[ci].scope_env_key[0]
+                                ? child->captures[ci].scope_env_key : cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
                         parent->captures[parent->capture_count].private_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
@@ -5150,11 +5148,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                 // Determine child's NFE self-name (if any)
-                char child_self_name[128] = {0};
-                if (child->node && child->node->name) {
-                    snprintf(child_self_name, sizeof(child_self_name), "_js_%.*s",
-                        (int)child->node->name->len, child->node->name->chars);
-                }
+                const char* child_self_name = child->node && child->node->name
+                    ? jm_format_name("_js_%.*s", (int)child->node->name->len,
+                        child->node->name->chars) : NULL;
 
                 bool is_child_nfe = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                 bool has_nfe_self_capture = false;
@@ -5164,7 +5160,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Skip true NFE self-captures (child is a function expression, not declaration).
                     // Name alone is not enough: minified bundles often have an
                     // outer binding and an NFE self binding with the same name.
-                    if (child_self_name[0] && strcmp(cname, child_self_name) == 0
+                    if (child_self_name && child_self_name[0] && strcmp(cname, child_self_name) == 0
                         && is_child_nfe && child->captures[k].is_nfe_binding) {
                         has_nfe_self_capture = true;
                         continue;
@@ -5179,7 +5175,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
             if (total_needed > 0) {
                 // Allocate scope_env_names (+2 for potential __parent_env__ and safety)
-                parent_fc->scope_env_names = (char(*)[64])mem_calloc(total_needed + 2, 64, MEM_CAT_JS_RUNTIME);
+                parent_fc->scope_env_names = (const char**)mem_calloc(
+                    total_needed + 2, sizeof(const char*), MEM_CAT_JS_RUNTIME);
 
                 // Re-iterate children in original order to fill names deterministically
                 int fill_idx = 0;
@@ -5191,24 +5188,22 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         if (child->capture_count == 0) continue;
                         if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
-                        char child_self_name2[128] = {0};
-                        if (child->node && child->node->name) {
-                            snprintf(child_self_name2, sizeof(child_self_name2), "_js_%.*s",
-                                (int)child->node->name->len, child->node->name->chars);
-                        }
+                        const char* child_self_name2 = child->node && child->node->name
+                            ? jm_format_name("_js_%.*s", (int)child->node->name->len,
+                                child->node->name->chars) : NULL;
 
                         bool is_child_nfe2 = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             const char* cname = child->captures[k].name;
                             const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                             // Same skip as first pass: true NFE self-captures only.
-                            if (child_self_name2[0] && strcmp(cname, child_self_name2) == 0
+                            if (child_self_name2 && child_self_name2[0] && strcmp(cname, child_self_name2) == 0
                                 && is_child_nfe2 && child->captures[k].is_nfe_binding) {
                                 continue;
                             }
                             if (!jm_name_set_has(scope_vars, slot_key)) {
                                 jm_name_set_add(scope_vars, slot_key);
-                                snprintf(parent_fc->scope_env_names[fill_idx], 64, "%s", slot_key);
+                                parent_fc->scope_env_names[fill_idx] = jm_persist_name(slot_key);
                                 fill_idx++;
                             }
                         }
@@ -5225,8 +5220,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (child->parent_index != fi) continue;
                     if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
                     if (!child->node || !child->node->name) continue;
-                    char csn[128];
-                    snprintf(csn, sizeof(csn), "_js_%.*s",
+                    const char* csn = jm_format_name("_js_%.*s",
                         (int)child->node->name->len, child->node->name->chars);
                     // Only true NFEs (not function declarations) get extra slots
                     if (child->node->node_type != JS_AST_NODE_FUNCTION_EXPRESSION) continue;
@@ -5239,7 +5233,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                     }
                     if (assigned_nfe_slot) {
-                        snprintf(parent_fc->scope_env_names[extra_slot], 64, "%s", csn);
+                        parent_fc->scope_env_names[extra_slot] = jm_persist_name(csn);
                         extra_slot++;
                     }
                 }
@@ -5263,16 +5257,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                         // Build child's NFE self-name to skip during remap
-                        char child_self_remap[128] = {0};
-                        if (child->node && child->node->name) {
-                            snprintf(child_self_remap, sizeof(child_self_remap), "_js_%.*s",
-                                (int)child->node->name->len, child->node->name->chars);
-                        }
+                        const char* child_self_remap = child->node && child->node->name
+                            ? jm_format_name("_js_%.*s", (int)child->node->name->len,
+                                child->node->name->chars) : NULL;
 
                         bool is_child_nfe_remap = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             // Skip true NFE self-captures — already assigned dedicated slots
-                            if (child_self_remap[0] &&
+                            if (child_self_remap && child_self_remap[0] &&
                                 strcmp(child->captures[k].name, child_self_remap) == 0 &&
                                 is_child_nfe_remap && child->captures[k].is_nfe_binding) {
                                 continue;
@@ -5348,15 +5340,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 FnCapture* cap) -> bool {
             if (!child || !cap) return false;
             if (!jm_name_set_has(duplicate_module_block_const_lexicals, cap->name)) return false;
-            char derived_key[128];
-            memset(derived_key, 0, sizeof(derived_key));
+            const char* derived_key = NULL;
             JsAstNode* target = child->node ? (JsAstNode*)child->node : NULL;
             bool found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
-                target, cap->name, derived_key);
+                target, cap->name, &derived_key);
             if (!found_key || strcmp(derived_key, cap->name) == 0) return false;
             // A block lexical that shadows a top-level module var must use the
             // scope-env cell, otherwise the function body resolves the module var.
-            snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+            cap->scope_env_key = derived_key;
             return true;
         };
 
@@ -5369,7 +5360,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (mt->module_consts) {
                 JsModuleConstEntry mclookup;
                 memset(&mclookup, 0, sizeof(mclookup));
-                snprintf(mclookup.name, sizeof(mclookup.name), "%s", name);
+                mclookup.name = jm_persist_name(name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                 if (mc && mc->const_type == MCONST_MODVAR && !module_shadow_lexical) return false;
             }
@@ -5381,32 +5372,32 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         auto capture_slot_key = [&](JsFuncCollected* child, FnCapture* cap) -> const char* {
             if (!cap) return "";
-            if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
+            if (cap->scope_env_key && cap->scope_env_key[0] &&
+                    strcmp(cap->scope_env_key, cap->name) != 0) {
                 JsModuleConstEntry mclookup;
                 memset(&mclookup, 0, sizeof(mclookup));
-                snprintf(mclookup.name, sizeof(mclookup.name), "%s", cap->name);
+                mclookup.name = jm_persist_name(cap->name);
                 JsModuleConstEntry* mc = mt->module_consts ?
                     (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup) : NULL;
                 if (mc && mc->const_type == MCONST_MODVAR) return cap->scope_env_key;
             }
             if (jm_name_set_has(duplicate_module_block_const_lexicals, cap->name) &&
-                cap->scope_env_key[0]) {
-                char derived_key[128];
-                memset(derived_key, 0, sizeof(derived_key));
+                cap->scope_env_key && cap->scope_env_key[0]) {
+                const char* derived_key = NULL;
                 JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
                 bool found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
-                    target, cap->name, derived_key);
+                    target, cap->name, &derived_key);
                 if (!found_key && target) {
                     for (int ci = 0; ci < mt->class_count; ci++) {
                         JsClassEntry* ce = &mt->class_entries[ci];
                         if (!ce->node || !jm_ast_node_contains_target((JsAstNode*)ce->node, target)) continue;
                         found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
-                            (JsAstNode*)ce->node, cap->name, derived_key);
+                            (JsAstNode*)ce->node, cap->name, &derived_key);
                         if (found_key) break;
                     }
                 }
                 if (found_key) {
-                    snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+                    cap->scope_env_key = derived_key;
                 }
                 return cap->scope_env_key;
             }
@@ -5486,8 +5477,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             mt->module_fc.scope_env_count = total;
             mt->module_fc.scope_env_normal_count = total;
             mt->module_fc.parent_index = -2;  // sentinel: module body
-            mt->module_fc.scope_env_names = (char(*)[64])mem_calloc(
-                scope_env_capacity, 64, MEM_CAT_JS_RUNTIME);
+            mt->module_fc.scope_env_names = (const char**)mem_calloc(
+                scope_env_capacity, sizeof(const char*), MEM_CAT_JS_RUNTIME);
 
             // Deterministic fill: iterate children in collection order
             hashmap_clear(scope_vars, false);
@@ -5501,8 +5492,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     const char* key = capture_slot_key(child, &child->captures[k]);
                     if (!jm_name_set_has(scope_vars, key)) {
                         jm_name_set_add(scope_vars, key);
-                        snprintf(mt->module_fc.scope_env_names[fill_idx], 64,
-                            "%s", key);
+                        mt->module_fc.scope_env_names[fill_idx] = jm_persist_name(key);
                         fill_idx++;
                     }
                 }
@@ -5546,9 +5536,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         mt->module_fc.has_parent_env_link = true;
                         mt->module_fc.scope_env_count =
                             child->closure_env_parent_link_slot + 1;
-                        snprintf(mt->module_fc.scope_env_names[
-                            child->closure_env_parent_link_slot], 64,
-                            "__parent_env__");
+                        mt->module_fc.scope_env_names[
+                            child->closure_env_parent_link_slot] = jm_persist_name("__parent_env__");
                     }
                     for (int k = 0; k < child->capture_count; k++) {
                         FnCapture* cap = &child->captures[k];
@@ -5690,11 +5679,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // Also add parameters as locals
             JsAstNode* pp = parent_fn->params;
             while (pp) {
-                char pname[128];
-                jm_get_param_name(pp, 0, pname, sizeof(pname));
-                if (pname[0]) {
+                const char* pname = jm_get_param_name(pp, 0);
+                if (pname && pname[0]) {
                     JsNameSetEntry pentry;
-                    snprintf(pentry.name, sizeof(pentry.name), "_js_%s", pname);
+                    pentry.name = jm_format_name("_js_%s", pname);
                     hashmap_set(parent_locals, &pentry);
                 }
                 pp = pp->next;
@@ -5713,7 +5701,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             bool is_capture = false;
             // Check if this scope env var is a local of the parent (including function declarations)
             JsNameSetEntry local_lookup;
-            snprintf(local_lookup.name, sizeof(local_lookup.name), "%s", parent_fc->scope_env_names[s]);
+            local_lookup.name = jm_persist_name(parent_fc->scope_env_names[s]);
             bool is_parent_local = (hashmap_get(parent_locals, &local_lookup) != NULL);
             if (!is_parent_local) {
                 for (int c = 0; c < parent_fc->capture_count; c++) {
@@ -5770,13 +5758,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             parent_fc->has_immediate_parent_env_link = true;
             immediate_parent_env_link_slot = parent_fc->scope_env_count;
             parent_fc->immediate_parent_env_link_slot = immediate_parent_env_link_slot;
-            snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64,
-                "__immediate_parent_env__");
+            parent_fc->scope_env_names[parent_fc->scope_env_count] =
+                jm_persist_name("__immediate_parent_env__");
             parent_fc->scope_env_count++;
         }
         int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
         // scope_env_names was allocated with +2 extra slots for this
-        snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64, "__parent_env__");
+        parent_fc->scope_env_names[parent_fc->scope_env_count] =
+            jm_persist_name("__parent_env__");
         parent_fc->scope_env_count++;
 
         // Re-collect locals for grandparent_slot assignment (reuse same logic)
@@ -5788,11 +5777,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_collect_body_locals(parent_fn->body, parent_locals2, false);
             JsAstNode* pp2 = parent_fn->params;
             while (pp2) {
-                char pname2[128];
-                jm_get_param_name(pp2, 0, pname2, sizeof(pname2));
+                const char* pname2 = jm_get_param_name(pp2, 0);
                 if (pname2[0]) {
                     JsNameSetEntry pe2;
-                    snprintf(pe2.name, sizeof(pe2.name), "_js_%s", pname2);
+                    pe2.name = jm_format_name("_js_%s", pname2);
                     hashmap_set(parent_locals2, &pe2);
                 }
                 pp2 = pp2->next;
@@ -5838,7 +5826,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // Check if this capture name is a LOCAL of the parent — if so, skip
                 JsNameSetEntry ll;
-                snprintf(ll.name, sizeof(ll.name), "%s", child->captures[k].name);
+                ll.name = jm_persist_name(child->captures[k].name);
                 if (hashmap_get(parent_locals2, &ll)) continue;
 
                 // Check if this capture is a transitive capture (also in parent_fc's captures)
@@ -5911,10 +5899,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // shared with sibling closures instead of copying stale values.
         fc->has_immediate_parent_env_link = true;
         fc->immediate_parent_env_link_slot = fc->scope_env_count;
-        snprintf(fc->scope_env_names[fc->scope_env_count], 64, "__immediate_parent_env__");
+        fc->scope_env_names[fc->scope_env_count] = jm_persist_name(
+            "__immediate_parent_env__");
         fc->scope_env_count++;
         int parent_env_link_slot = fc->scope_env_count;
-        snprintf(fc->scope_env_names[fc->scope_env_count], 64, "__parent_env__");
+        fc->scope_env_names[fc->scope_env_count] = jm_persist_name("__parent_env__");
         fc->scope_env_count++;
         for (int ci = 0; ci < mt->func_count; ci++) {
             JsFuncCollected* child = &mt->func_entries[ci];
@@ -6336,7 +6325,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             resume->result.normal = {LMD_TYPE_ANY, VALUE_REP_ITEM,
                 SCALAR_RETURN_NONE, false};
         }
-        snprintf(fc->body_name, sizeof(fc->body_name), "%s_body", fc->name);
+        fc->body_name = jm_format_name("%s_body", fc->name);
         if (!fc->func_item) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, fc->name);
             fc->func_item = fwd;
@@ -6612,7 +6601,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // Suppress if a let/const in the program shadows this name
             JsNameSetEntry lex_lookup;
             memset(&lex_lookup, 0, sizeof(lex_lookup));
-            snprintf(lex_lookup.name, sizeof(lex_lookup.name), "%s", mce->name);
+            lex_lookup.name = jm_persist_name(mce->name);
             if (hashmap_get(annexb_lex_collisions, &lex_lookup)) {
                 log_debug("js-mir: AnnexB suppress globalThis pre-init for %s (let/const collision)", mce->name);
                 mce->annexb_suppressed = true;
@@ -6733,8 +6722,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Non-capturing: hoist normally
                     int pc = jm_count_params(fn);
                     if (fc->has_rest_param) pc = -pc;  // negative signals rest params
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    const char* vname = jm_format_name("_js_%.*s",
+                        (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
                     MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -6754,7 +6743,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // js_main returns and is accessible by eval()/new Function()
                     {
                         JsModuleConstEntry pmlookup;
-                        snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
+                        pmlookup.name = jm_persist_name(vname);
                         JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);
                         if (pmc && pmc->const_type == MCONST_MODVAR) {
                             jm_call_void_2(mt, "js_set_module_var",
@@ -6836,8 +6825,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (!ce->is_declaration || !jm_is_direct_program_class_decl(program, ce->node)) {
                 continue;
             }
-            char vname[128];
-            snprintf(vname, sizeof(vname), "_js_%.*s", (int)ce->name->len, ce->name->chars);
+            const char* vname = jm_format_name("_js_%.*s",
+                (int)ce->name->len, ce->name->chars);
             // Create a variable holding null placeholder.
             // Actual class instantiation is handled by jm_transpile_new_expr.
             MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -6847,7 +6836,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_set_var(mt, vname, var_reg);
             // Also store null to module var so closures see the initial value
             JsModuleConstEntry mclookup;
-            snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+            mclookup.name = jm_persist_name(vname);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
             if (mc && mc->const_type == MCONST_CLASS) {
                 jm_call_void_2(mt, "js_set_module_var",
@@ -6932,8 +6921,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Capturing function declaration: bind as closure at this position
                     int pc = jm_count_params(fn);
                     if (fc->has_rest_param) pc = -pc;  // negative signals rest params
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    const char* vname = jm_format_name("_js_%.*s",
+                        (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
                     MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
@@ -6963,7 +6952,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             bool found_mc = false;
                             if (mt->module_consts) {
                                 JsModuleConstEntry mclookup;
-                                snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
+                                mclookup.name = jm_persist_name(fc->captures[ci].name);
                                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                                 if (mc) {
                                     found_mc = true;
@@ -7050,7 +7039,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // via MCONST_MODVAR see the correct function value
                     {
                         JsModuleConstEntry pmlookup;
-                        snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
+                        pmlookup.name = jm_persist_name(vname);
                         JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);
                         if (pmc && pmc->const_type == MCONST_MODVAR) {
                             jm_call_void_2(mt, "js_set_module_var",
@@ -7152,8 +7141,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     // Update local variable
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
+                    const char* vname = jm_format_name("_js_%.*s",
+                        (int)cls_node->name->len, cls_node->name->chars);
                     JsMirVarEntry* ve = jm_find_var(mt, vname);
                     if (ve) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -7162,7 +7151,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     // Store class object in module var
                     JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    mclookup.name = jm_persist_name(vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                     if (mc && mc->const_type == MCONST_CLASS) {
                         jm_call_void_2(mt, "js_set_module_var",
@@ -8155,13 +8144,18 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     mt->module = MIR_new_module(ctx, "js_module");
 
+    // parallel workers have no bound JS realm; route compiler-generated names
+    // to this worker's private pool instead of racing a shared runtime pool.
+    jm_set_name_pool_override(tp->name_pool);
     if (!transpile_js_mir_ast(mt, js_ast)) {
+        jm_set_name_pool_override(NULL);
         log_error("js-parallel: collection/allocation failed for '%s'", node->path);
         jm_destroy_mir_transpiler(mt);
         js_transpiler_destroy(tp);
         MIR_finish(ctx);
         return false;
     }
+    jm_set_name_pool_override(NULL);
     node->module_var_count = (uint32_t)mt->module_var_count;
 
     if (!jm_validate_mir_labels(ctx)) {

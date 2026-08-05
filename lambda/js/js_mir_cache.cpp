@@ -35,7 +35,7 @@ static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) 
                                      (uint64_t)preamble->module_var_count);
     for (int i = 0; i < preamble->entry_count; i++) {
         const JsModuleConstEntry* entry = &preamble->entries[i];
-        size_t name_len = strnlen(entry->name, sizeof(entry->name));
+        size_t name_len = entry->name ? strlen(entry->name) : 0;
         hash = js_mir_cache_mix(hash, hashmap_xxhash3(entry->name, name_len, 0, 0));
         hash = js_mir_cache_mix(hash, (uint64_t)entry->const_type);
         hash = js_mir_cache_mix(hash, (uint64_t)entry->int_val);

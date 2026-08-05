@@ -2,7 +2,7 @@
 
 import pdf: lambda.package.pdf.pdf
 
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 fn ref(n) { { type: "indirect_ref", object_num: n, gen_num: 0 } }
 fn stream_obj(n, dict, data) {

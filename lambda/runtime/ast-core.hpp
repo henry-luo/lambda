@@ -586,8 +586,8 @@ typedef struct AstMethodNode : AstFuncNode {
 } AstMethodNode;
 
 typedef struct FnCapture {
-    char name[128];
-    char scope_env_key[128];
+    const char* name;
+    const char* scope_env_key;
     String* lambda_name;
     NameEntry* entry;
     int scope_env_slot;

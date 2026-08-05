@@ -36,6 +36,9 @@ MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
 extern int g_eval_preamble_var_count;
+void js_eval_preamble_entries_free(void);
+extern __thread NamePool* g_js_mir_name_pool_override;
+void jm_set_name_pool_override(NamePool* pool);
 extern bool g_jm_preamble_mode;
 extern bool g_jm_preamble_compile_only;
 extern JsPreambleState* g_jm_preamble_out;
@@ -153,6 +156,8 @@ int js_local_func_cmp(const void *a, const void *b, void *udata);
 uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int js_module_const_cmp(const void *a, const void *b, void *udata);
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1);
+const char* jm_persist_name(const char* name);
+const char* jm_format_name(const char* format, ...);
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
@@ -213,6 +218,13 @@ void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_pending_exception_exit(JsMirTranspiler* mt);
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
+struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
+bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope);
+int jm_var_scope_length(JsMirTranspiler* mt);
+JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index);
+JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index);
+JsTryContext* jm_try_context_at(JsMirTranspiler* mt, int index);
+JsTryContext* jm_try_context_push(JsMirTranspiler* mt);
 void jm_push_scope(JsMirTranspiler* mt);
 int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
     JsMirVarEntry* resolved_var);
@@ -385,11 +397,11 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
 bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc);
 MIR_item_t jm_find_local_func(JsMirTranspiler* mt, const char* name);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
-void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler* mt);
+const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
 int jm_count_params(JsFunctionNode* fn);
 int jm_formal_length(JsFunctionNode* fn);
 JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node);
-void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size);
+const char* jm_get_param_name(JsAstNode* param_node, int index);
 // Backend-only formal names are compiler-owned and independent of source
 // spelling; semantic JS binding names continue to use jm_get_param_name.
 static inline void jm_get_backend_param_name(int index, char* out, int out_size) {

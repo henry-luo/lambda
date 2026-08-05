@@ -5,7 +5,7 @@ import interp: lambda.package.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn hex(s) { { kind: "hex", value: s } }
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn main() {
     let cmap = map(["1", chr(64257), "2", chr(64258), "258", chr(64259)])

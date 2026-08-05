@@ -15,6 +15,33 @@ This document provides comprehensive documentation for all built-in system funct
 9. [Concurrency Functions](#concurrency-functions)
 10. [Error Handling](#error-handling)
 11. [Quick Reference Table](#quick-reference-table)
+12. [Return-Value Conventions](#return-value-conventions)
+
+## Return-Value Conventions
+
+System-function results follow the cardinality and domain of the operation:
+
+- Zero-to-many results return `[]`, including a valid search with no matches
+  and an empty collection slice.
+- Zero-or-one results return `null` when the operation succeeds but has no
+  value, such as an absent index or `reduce([])`.
+- Non-admissive invalid input, invalid options, parsing failure, and I/O
+  failure return or raise `error`; they are not represented by `null` or `[]`.
+- Admissive system-function cases use the result-domain absence when that is
+  the documented meaning: `arr[-1]`, `argmin([])`, and `argmax([])` return
+  `null`, while `varg(non_integer)` returns `null`.
+- String-valued functions use `""` when the successful result has no string
+  content. For example, `chr(null)` and an empty string slice return `""`.
+  A `null` source still propagates as `null`.
+- Array-producing numeric operations accept numeric `[...]` values and return
+  numeric `[...]` values of the same element type, including a typed empty
+  result. The result remains an array at the Lambda surface; `ArrayNum` is an
+  internal storage representation.
+
+`index_of`, `last_index_of`, and `ord` return `int | null`, not `-1`, when
+there is no result. `null` is Lambda's uniform zero-or-one absence value and
+supports the `value or default` idiom; a private foreign-language adapter may
+still use `-1` before normalizing its result for Lambda.
 
 ---
 
@@ -43,9 +70,9 @@ integer type — not `int64`:
 | Function | Returns |
 |----------|---------|
 | `len(x)` | `int` |
-| `index_of(s, sub)` | `int` (`-1` when not found) |
-| `last_index_of(s, sub)` | `int` (`-1` when not found) |
-| `ord(ch)` | `int` |
+| `index_of(s, sub)` | `int \| null` (`null` when not found) |
+| `last_index_of(s, sub)` | `int \| null` (`null` when not found) |
+| `ord(ch)` | `int \| null` (`null` when no first character) |
 | `ndim(x)` | `int` |
 
 `int` covers the IEEE-754 float64 safe-integer band, ±(2^53 − 1) — 8 PiB expressed as a byte
@@ -146,6 +173,8 @@ max(3, 5)               // 5
 max([3, 1, 2])          // 3
 argmin([5, 2, 8, 1])    // 3 (index of 1)
 argmax([5, 2, 8, 1])    // 2 (index of 8)
+argmin([])              // null (no minimum)
+argmax([])              // null (no maximum)
 
 sum([1, 2, 3, 4])       // 10
 avg([1, 2, 3, 4])       // 2.5
@@ -342,12 +371,24 @@ string ws = \s+                  // one or more whitespace chars
 string word = \w+                // word characters
 ```
 
+String-valued system functions use `""` for a successful result with no
+string content. This keeps the result a string instead of changing its type to
+`null`; it applies to `chr` and to the string overload of `slice`. A `null`
+source remains `null` when the function propagates an absent input, while an
+empty result from an actual string is `""`. Collection overloads retain their
+own convention and return `[]` for an empty collection result.
+
 ### slice(str, start, end?)
 
 Extract a UTF-8 character slice from a string. `slice(str, start, end)` uses a
 zero-based start index inclusive and end index exclusive (`[start, end)`);
-`slice(str, start)` slices from `start` to the end. Negative indices count from
-the end, and out-of-range indices are clamped.
+`slice(str, start)` slices from `start` to the end. Out-of-range offsets are
+clamped in both directions: a negative offset carries no meaning and clamps to
+`0` rather than counting from the end, exactly as an over-length offset clamps
+to the length. Use `str[last - 2 to last]` or an explicit `len(str) - n` to
+reach from the end. A `null` offset makes the whole selection absent and
+returns `null`. For a string input, an empty source or a clamped empty range
+returns `""`.
 
 Range subscript syntax is also supported: `str[a to b]` returns characters
 `a` through `b`, inclusive. In other words, `str[a to b]` is equivalent to
@@ -363,6 +404,11 @@ Range subscript syntax is also supported: `str[a to b]` returns characters
 slice("hello", 0, 2)      // "he"
 slice("hello", 2)         // "llo"
 slice("café", 2, 4)       // "fé"  — UTF-8 character indices
+slice("hello", 2, 2)      // ""   — empty string result
+slice("hello", -2, 3)     // "hel" — negative clamps to 0; it does not wrap
+slice(null, 0, 1)          // null — absent source propagates
+slice("hello", null, 3)   // null — absent offset propagates
+slice("hello", index_of("hello", "z"), 3)  // null — a missed search stays absent
 "hello"[0 to 4]           // "hello"
 "hello"[1 to 3]           // "ell"
 ```
@@ -507,7 +553,7 @@ ends_with("abc", "abcd")            // false
 
 ### index_of(str, substring)
 
-Return the index (`int`) of the first occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+Return the index (`int`) of the first occurrence of a substring, or `null` if not found. Also works on collections (see [Collection Functions](#collection-functions)).
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -515,13 +561,22 @@ Return the index (`int`) of the first occurrence of a substring (-1 if not found
 
 ```lambda
 index_of("hello world", "world")   // 6
-index_of("hello world", "xyz")     // -1
+index_of("hello world", "xyz")     // null
 index_of("abcabc", "bc")           // 1
 ```
 
+When migrating code that tested the former `-1` sentinel, a non-negative check
+remains valid: `index_of(text, needle) >= 0` is true exactly when a valid index
+was found, because an ordered comparison against `null` evaluates to `null`,
+which is falsy. Every old *miss* check is now dead code, and each fails toward
+the found branch: `index_of(...) < 0` is likewise falsy `null`, while
+`index_of(...) == -1` is always false and `!= -1` always true. Use
+`index_of(...) is null` to test for absence. The same rule applies to
+`last_index_of` and `ord`.
+
 ### last_index_of(str, substring)
 
-Return the index (`int`) of the last occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+Return the index (`int`) of the last occurrence of a substring, or `null` if not found. Also works on collections (see [Collection Functions](#collection-functions)).
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -530,7 +585,7 @@ Return the index (`int`) of the last occurrence of a substring (-1 if not found)
 ```lambda
 last_index_of("abcabc", "abc")    // 3
 last_index_of("hello", "l")       // 3
-last_index_of("hello", "xyz")     // -1
+last_index_of("hello", "xyz")     // null
 ```
 
 ### trim(str) / trim_start(str) / trim_end(str)
@@ -589,8 +644,16 @@ ord("é")             // 233
 ord("😀")            // 128512
 ord('A')             // 65 (symbol input)
 ord("hello")         // 104 (first character 'h')
-ord("")              // -1 (empty string has no first character)
+ord("")              // null (empty string has no first character)
 ```
+
+`index_of`, `last_index_of`, and `ord` use `null` for absence rather than the
+older C-family `-1` sentinel. `null` gives all zero-or-one system functions one
+uniform absence value and supports `value or default`; Lambda's nullable native
+integer lane keeps `int | null` in the same native lane as `int`, so this does
+not require the former boxing penalty. A private C/JavaScript adapter may keep
+`-1` where the foreign API requires it, but it is normalized before returning
+to Lambda.
 
 ### chr(int)
 
@@ -600,8 +663,14 @@ Return a 1-character string from a Unicode code point.
 chr(65)              // "A"
 chr(233)             // "é"
 chr(128512)          // "😀"
-chr(-1)              // null (out of range)
+chr(null)            // "" (no code point)
+chr(-1)              // "" (out of range)
+chr(55296)           // "" (invalid Unicode surrogate)
 ```
+
+`chr` always returns a string. A missing, out-of-range, or otherwise
+non-encodable code point is represented by `""`; an error operand still
+propagates as `error`.
 
 **Round-trip:**
 ```lambda
@@ -621,8 +690,8 @@ Functions for working with arrays and other collections.
 |----------|-------------|---------|--------|
 | `len(x)` | Length of collection | `len([1, 2, 3])` | `3` |
 | `contains(vec, val)` | Check if element exists | `contains([1, 2, 3], 2)` | `true` |
-| `index_of(vec, val)` | Index of first match (-1 if none) | `index_of([1, 2, 3], 2)` | `1` |
-| `last_index_of(vec, val)` | Index of last match (-1 if none) | `last_index_of([1, 2, 1], 1)` | `2` |
+| `index_of(vec, val)` | Index of first match (`null` if none) | `index_of([1, 2, 3], 2)` | `1` |
+| `last_index_of(vec, val)` | Index of last match (`null` if none) | `last_index_of([1, 2, 1], 1)` | `2` |
 | `all(vec)` | All elements truthy? | `all([true, true, false])` | `false` |
 | `any(vec)` | Any element truthy? | `any([false, false, true])` | `true` |
 
@@ -636,7 +705,7 @@ contains(["a", "b", "c"], "d")      // false
 // Index search
 index_of([10, 20, 30, 20], 20)      // 1
 last_index_of([10, 20, 30, 20], 20) // 3
-index_of([1, 2, 3], 99)             // -1
+index_of([1, 2, 3], 99)             // null
 
 // Map key existence
 contains({name: "Alice", age: 30}, 'name')   // true
@@ -652,6 +721,10 @@ contains({x: 1, y: 2}, 'z')                  // false
 | `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
 | `drop(vec, n)` | Drop first n elements | `drop([1, 2, 3], 1)` | `[2, 3]` |
 
+For a numeric array input, `slice`, `take`, and `drop` preserve the numeric
+element type and return a numeric array, including when the selected range is
+empty. Generic arrays and lists retain their ordinary collection behavior.
+
 ### Transformation
 
 | Function             | Description                         | Example                                | Result             |
@@ -664,6 +737,22 @@ contains({x: 1, y: 2}, 'z')                  // false
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
+
+`reverse`, `sort`, `unique`, `take`, `drop`, and collection `slice` preserve
+the numeric-array carrier and element type when their input is numeric. This
+also applies to `sort` with a direction, key function, or options map. Thus a
+numeric empty result remains a typed numeric `[]`, rather than degrading to a
+generic list.
+
+```lambda
+let nums = [3, 1, 3, 2]
+sort(nums)             // numeric [1, 2, 3, 3]
+unique(nums)           // numeric [3, 1, 2]
+reverse(nums)          // numeric [2, 3, 1, 3]
+take(nums, 0)          // typed numeric []
+drop(nums, 4)          // typed numeric []
+slice(nums, 1, 1)      // typed numeric []
+```
 
 ### Construction
 
@@ -784,23 +873,26 @@ let absolute = /Users.name.project       // Absolute path
 let api = https.'api.example.com'.data   // HTTPS URL
 let file_url = /path.to.file             // File URL
 
-// All work uniformly with I/O functions
-let data = input(local)
-let remote = input(api)
+// input() raises on failure; propagate with ^
+let data = input(local)^
+let remote = input(api)^
 ```
 
-### Pure I/O Functions
+### Input and Parsing Functions
 
-These functions can be used anywhere (in both `fn` and `pn` functions).
+These functions can be used in both `fn` and `pn` functions, but `input` is an
+effectful `T^E` operation: invalid targets, failed loads, and parse failures
+raise an error. Propagate it with `^` or handle it with `^ { ... }`; a failed
+`input` never returns successful `null`.
 
 #### input(target) / input(target, format)
 
 Parse content from a file path or URL.
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `input(target)` | Parse target (auto-detect format) | `input(/.'data.json')` |
-| `input(target, format)` | Parse target with specified format | `input("data.json", 'json')` |
+| Function | Result | Description | Example |
+|----------|--------|-------------|---------|
+| `input(target)` | `data^E` | Parse target (auto-detect format) | `input(/.'data.json')^` |
+| `input(target, format)` | `data^E` | Parse target with specified format | `input("data.json", 'json')^` |
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
 
@@ -824,18 +916,18 @@ Parse content from a file path or URL.
 
 ```lambda
 // Basic input parsing with Path literals
-let data = input(/.'file.json', 'json')
-let config = input(/.'settings.yaml', 'yaml')
+let data = input(/.'file.json', 'json')^
+let config = input(/.'settings.yaml', 'yaml')^
 
 // Input from URLs
-let api_data = input(https.'api.example.com'.'users.json')
+let api_data = input(https.'api.example.com'.'users.json')^
 
 // Input with options map
-let math_expr = input(/.'formula.txt', {type: 'math', flavor: 'latex'})
-let csv_data = input(/.'data.csv', {type: 'csv', delimiter: ','})
+let math_expr = input(/.'formula.txt', {type: 'math', flavor: 'latex'})^
+let csv_data = input(/.'data.csv', {type: 'csv', delimiter: ','})^
 
 // Auto-detection (based on file extension)
-let auto_data = input(/.'document.md')  // Automatically detects Markdown
+let auto_data = input(/.'document.md')^  // Automatically detects Markdown
 ```
 
 #### parse(str) / parse(str, format)
@@ -867,6 +959,12 @@ let csv = parse("name,age\nAlice,30\nBob,25", 'csv') ^ { [] }
 
 > **Note**: `parse()` can raise errors. Propagate with `parse(...)^`, or handle
 > locally with `parse(...) ^ { … ~ … }` where `~` is the error.
+> Malformed input and unsupported formats return an error with a parser
+> diagnostic; a successfully parsed value such as JSON `null` remains `null`.
+
+`parse_html_fragment(str)` parses an HTML fragment into an element. A wrong
+argument type or parser/allocation failure returns an error rather than a
+successful `null`.
 
 #### exists(target)
 
@@ -877,7 +975,7 @@ let file_exists = exists(/.'config.json')
 let dir_exists = exists(/.data)
 
 if exists(/.'cache.json') {
-    let cached = input(/.'cache.json')
+    let cached = input(/.'cache.json')^
 }
 ```
 
@@ -1315,8 +1413,8 @@ if (result is error) {
 | `contains` | 2 | Check if string contains substring |
 | `starts_with` | 2 | Check if string starts with prefix |
 | `ends_with` | 2 | Check if string ends with suffix |
-| `index_of` | 2 | Index of first substring occurrence |
-| `last_index_of` | 2 | Index of last substring occurrence |
+| `index_of` | 2 | Index of first substring occurrence (`null` if absent) |
+| `last_index_of` | 2 | Index of last substring occurrence (`null` if absent) |
 | `trim` | 1 | Remove leading/trailing whitespace |
 | `trim_start` | 1 | Remove leading whitespace |
 | `trim_end` | 1 | Remove trailing whitespace |
@@ -1326,8 +1424,8 @@ if (result is error) {
 | `split` | 2-3 | Split string by pattern/substring |
 | `join` | 2 | Join list of strings with separator |
 | `find` | 2 | Find all pattern/substring matches |
-| `ord` | 1 | Unicode code point of first character |
-| `chr` | 1 | Character from Unicode code point |
+| `ord` | 1 | Unicode code point of first character (`null` if absent) |
+| `chr` | 1 | Character from Unicode code point (`""` if absent/invalid) |
 | `normalize` | 1 | Normalize string |
 | `url_resolve` | 2 | Resolve relative URL against base |
 
@@ -1335,8 +1433,8 @@ if (result is error) {
 | Function | Args | Description |
 |----------|------|-------------|
 | `contains` | 2 | Check element membership |
-| `index_of` | 2 | Index of first matching element |
-| `last_index_of` | 2 | Index of last matching element |
+| `index_of` | 2 | Index of first matching element (`null` if absent) |
+| `last_index_of` | 2 | Index of last matching element (`null` if absent) |
 | `slice` | 2 or 3 | Extract slice; 2-arg form slices to end |
 | `set` | 1+ | Remove duplicates |
 | `all` | 1 | All truthy |
@@ -1361,10 +1459,10 @@ if (result is error) {
 | `now` | 0 | Current time (proc) |
 | `justnow` | 0 | Time only |
 
-### I/O Functions (Pure)
+### I/O Functions (Input/Parsing)
 | Function | Args | Description |
 |----------|------|-------------|
-| `input` | 1-2 | Parse file/URL |
+| `input` | 1-2 | Parse file/URL; raises `T^E` on failure |
 | `parse` | 1-2 | Parse string content |
 | `exists` | 1 | Check if target exists |
 | `format` | 1-2 | Format data as string |

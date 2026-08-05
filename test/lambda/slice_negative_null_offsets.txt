@@ -1,0 +1,10 @@
+"=== array: negative offsets clamp, they do not wrap ==="
+[[1, 2, 3, 4], [1, 2], [], [2, 3, 4]]
+"=== string: negative offsets clamp, they do not wrap ==="
+["hello", "hel", "", "hél"]
+"=== null offset is absence, not position 0 ==="
+[null, null, null, null]
+"=== a missed search degrades to null instead of slicing from the start ==="
+[null, "ll"]
+"=== indexing: negative is out of range, like reading past the end ==="
+[null, null]

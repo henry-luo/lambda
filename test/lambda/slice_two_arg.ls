@@ -8,7 +8,7 @@
 
 "=== arrays ==="
 {r: slice([1, 2, 3, 4], 2)}
-{r: slice([1, 2, 3, 4], -2)}
+{r: slice([1, 2, 3, 4], -2)}  // negative clamps to 0; it does not wrap from the end
 {n: len(slice([1, 2, 3, 4], 99))}
 {r: [1, 2, 3, 4].slice(1)}
 {r: [1, 2, 3, 4] |> slice(3)}

@@ -553,10 +553,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_BOOL, C_ARG_ITEM, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
 
     {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0},
@@ -597,9 +597,8 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_find3", FPTR(fn_find3), NULL, NULL, false, 0},
 
-    // Unicode code points fit in compact Lambda int; keep the C ABI as int64_t.
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
 
     {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},
@@ -797,7 +796,8 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_RETITEM, C_ARG_ITEM, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
 
     {SYSFUNC_PARSE_HTML_FRAGMENT, "parse_html_fragment", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-        C_RET_ITEM, C_ARG_ITEM, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0},
+        C_RET_ITEM, C_ARG_ITEM, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0,
+        false, &TYPE_ANY, true},
 
     // ========================================================================
     // Variadic parameter access — not method-eligible
@@ -1668,6 +1668,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_starts_with_str", FPTR(fn_starts_with_str)},
     {"fn_ends_with_str", FPTR(fn_ends_with_str)},
     {"fn_ord_str", FPTR(fn_ord_str)},
+    {"fn_ord_str_item", FPTR(fn_ord_str_item)},
 
     // ========================================================================
     // MIR swap-safe store functions

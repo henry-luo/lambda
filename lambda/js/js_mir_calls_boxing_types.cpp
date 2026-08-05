@@ -1041,8 +1041,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
 
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->type_id;
         // P5: Check module-level variable type for arithmetic type inference.
@@ -1050,7 +1049,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
         if (mt->module_consts) {
             JsModuleConstEntry mv_lookup;
-            snprintf(mv_lookup.name, sizeof(mv_lookup.name), "%s", vname);
+            mv_lookup.name = jm_persist_name(vname);
             JsModuleConstEntry* mv_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mv_lookup);
             if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
                 (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
@@ -1265,8 +1264,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 }
                 // Check for named variable with class_entry
                 if (!ce) {
-                    char vname[128];
-                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+                    const char* vname = jm_format_name("_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
                     JsMirVarEntry* var = jm_find_var(mt, vname);
                     if (var && var->class_entry) ce = var->class_entry;
                 }
@@ -1297,8 +1295,7 @@ Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return NULL;
     if (node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->full_type;
     }
@@ -1312,12 +1309,13 @@ bool jm_is_native_type(TypeId tid) {
 
 static int jm_find_var_scope_depth_for_name(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return -1;
-    for (int depth = mt->scope_depth; depth >= 0 && depth < 64; depth--) {
-        if (!mt->var_scopes[depth]) continue;
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        struct hashmap* scope = jm_var_scope_at(mt, depth);
+        if (!scope) continue;
         JsVarScopeEntry key;
         memset(&key, 0, sizeof(key));
         key.name = name;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
+        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
         if (found) return depth;
     }
     return -1;
@@ -1325,12 +1323,13 @@ static int jm_find_var_scope_depth_for_name(JsMirTranspiler* mt, const char* nam
 
 static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* name, int inner_depth) {
     if (!mt || !name || inner_depth <= 0) return false;
-    for (int depth = inner_depth - 1; depth >= 0 && depth < 64; depth--) {
-        if (!mt->var_scopes[depth]) continue;
+    for (int depth = inner_depth - 1; depth >= 0; depth--) {
+        struct hashmap* scope = jm_var_scope_at(mt, depth);
+        if (!scope) continue;
         JsVarScopeEntry key;
         memset(&key, 0, sizeof(key));
         key.name = name;
-        if (hashmap_get(mt->var_scopes[depth], &key)) return true;
+        if (hashmap_get(scope, &key)) return true;
     }
     return false;
 }
@@ -1344,8 +1343,7 @@ static bool jm_scope_env_name_matches_binding(const char* scope_name, const char
     size_t base_len = (size_t)(at - scope_name);
     if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
     if (!binding_node || ts_node_is_null(binding_node->node)) return false;
-    char key[128];
-    snprintf(key, sizeof(key), "%s@%u:%u", name,
+    const char* key = jm_format_name("%s@%u:%u", name,
         ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
     return strcmp(scope_name, key) == 0;
 }
@@ -1570,8 +1568,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // Identifiers: use native register directly if variable is typed
     if (expr && expr->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var && jm_is_native_type(var->type_id)) {
             if (var->tdz_active) {
@@ -1594,7 +1591,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         } else if (mt->module_consts) {
             // check module-level variables (e.g. top-level let/var accessed from for-loop update)
             JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            lookup.name = jm_persist_name(vname);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             if (mc && mc->const_type == MCONST_MODVAR) {
                 boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
@@ -1686,8 +1683,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 // Only native if operand is a typed identifier
                 if (un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
-                    char uvname[128];
-                    snprintf(uvname, sizeof(uvname), "_js_%.*s", (int)uid->name->len, uid->name->chars);
+                    const char* uvname = jm_format_name("_js_%.*s", (int)uid->name->len, uid->name->chars);
                     JsMirVarEntry* uvar = jm_find_var(mt, uvname);
                     native_unary = uvar && (uvar->type_id == LMD_TYPE_INT || uvar->type_id == LMD_TYPE_FLOAT) && !uvar->from_env;
                 }
@@ -1718,8 +1714,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         TypeId assign_var_type = LMD_TYPE_ANY;
         if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* aid = (JsIdentifierNode*)asgn->left;
-            char avname[128];
-            snprintf(avname, sizeof(avname), "_js_%.*s", (int)aid->name->len, aid->name->chars);
+            const char* avname = jm_format_name("_js_%.*s", (int)aid->name->len, aid->name->chars);
             JsMirVarEntry* avar = jm_find_var(mt, avname);
             native_assign = avar && !avar->from_env &&
                             (avar->type_id == LMD_TYPE_INT || avar->type_id == LMD_TYPE_FLOAT);
@@ -1801,8 +1796,8 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             }
             // Check for named variable with class_entry
             if (!p1_ce) {
-                char p1_vname[132];
-                snprintf(p1_vname, sizeof(p1_vname), "_js_%.*s", (int)p1_obj->name->len, p1_obj->name->chars);
+                const char* p1_vname = jm_format_name("_js_%.*s",
+                    (int)p1_obj->name->len, p1_obj->name->chars);
                 JsMirVarEntry* p1_var = jm_find_var(mt, p1_vname);
                 if (p1_var && p1_var->class_entry) p1_ce = p1_var->class_entry;
             }
@@ -1817,7 +1812,8 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                     if (p1_prop->name->len == 1 && p1_prop->name->chars[0] == 'R') {
                         log_error("TRACE P1 slot read .R: field_type=%d slot=%d offset=%d class='%s'",
                             (int)field_type, p1_slot, (int)byte_offset,
-                            p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name[0] ?
+                            p1_ce->constructor && p1_ce->constructor->fc &&
+                                p1_ce->constructor->fc->name && p1_ce->constructor->fc->name[0] ?
                             p1_ce->constructor->fc->name : "anon");
                     }
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);

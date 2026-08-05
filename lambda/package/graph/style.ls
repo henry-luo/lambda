@@ -169,7 +169,7 @@ fn parse_declarations(parts, i, state) {
   else {
     let declaration = trim(parts[i]);
     let colon = index_of(declaration, ":");
-    let next = if (colon <= 0) state
+    let next = if (colon == null or colon <= 0) state
       else apply_declaration(state, slice(declaration, 0, colon),
         slice(declaration, colon + 1, len(declaration)));
     parse_declarations(parts, i + 1, next)

@@ -1155,8 +1155,10 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
             parse_graph(input, source, graph_flavor);
         }
         else {
-            log_debug("Unknown input type: %s\n", effective_type);
+            input->parse_failed = true;
+            log_error("input_from_source: unsupported input type '%s'", effective_type);
         }
+        if (get_type_id(input->root) == LMD_TYPE_ERROR) input->parse_failed = true;
         input_allocation_context = saved_allocation_context;
     }
     // Note: don't mem_free(source) here - it's the caller's responsibility
@@ -1456,6 +1458,8 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     input->root = (Item){.item = ITEM_NULL};
     input->doc_count = 0;
     input->ui_mode = false;
+    input->parse_failed = false;
+    input->parse_error_message = nullptr;
     input->xml_stylesheet_href = nullptr;
     return input;
 }

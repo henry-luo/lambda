@@ -29,7 +29,7 @@ extern "C" {
 typedef enum CRetType {
     C_RET_ITEM = 0,    // returns boxed Item (default, most sys funcs)
     C_RET_RETITEM,     // returns RetItem {Item value; LambdaError* err} (can_raise functions)
-    C_RET_INT64,       // returns raw int64_t (fn_len, fn_index_of, bitwise, etc.)
+    C_RET_INT64,       // returns raw int64_t (fn_len, bitwise, and machine operations)
     C_RET_DOUBLE,      // returns raw double (pn_clock)
     C_RET_BOOL,        // returns Bool/uint8_t (fn_contains, fn_starts_with, etc.)
     C_RET_STRING,      // returns String* (fn_string, fn_format1/2)
