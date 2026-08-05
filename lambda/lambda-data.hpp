@@ -427,6 +427,12 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
 
 static inline TypeId type_field_storage_type_id(const Type* type);
 
+// The full semantic contract, not just TypeId, decides whether a packed field
+// has a nullable native lane.  The implementation lives with the type-contract
+// rules so a ShapeEntry and an array boundary cannot disagree about `T?`.
+static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
+        LaneStorageDesc* out);
+
 static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
     return field ? type_field_storage_type_id(field->type) : LMD_TYPE_NULL;
 }
@@ -443,12 +449,12 @@ static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
 }
 
 Item map_field_to_item(void* field_ptr, TypeId type_id);
+// Read/write helpers must see ShapeEntry::type: TypeId alone cannot tell
+// `int` apart from `int?` once both use an eight-byte packed slot.
+Item map_shape_field_to_item(void* map_data, const ShapeEntry* field);
+bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
+    Item value);
 Item scalar_storage_read(Item item, bool immortal);
-
-static inline Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
-    return map_field_to_item(map_field_ptr(map_data, field),
-        shape_entry_storage_type_id(field));
-}
 
 static inline Map* map_shape_field_to_map(void* map_data, const ShapeEntry* field) {
     return map_data && field ? *(Map**)map_field_ptr(map_data, field) : nullptr;
@@ -943,11 +949,73 @@ static inline const char* type_contract_display_name(const Type* type) {
 // pointer lane corrupts unions such as string | error.
 static inline TypeId type_field_storage_type_id(const Type* type) {
     if (!type) return LMD_TYPE_NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
+        Type* base = ((TypeUnary*)type)->operand;
+        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
+                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
+            return base->type_id;
+        }
+        if (base && base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
+                lambda_num_sized_is_integer(type_num_sized_kind(base))) {
+            return LMD_TYPE_NUM_SIZED;
+        }
+        if (base && lambda_type_id_has_pointer_lane(base->type_id)) return base->type_id;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)type)->op == OPERATOR_UNION) {
+        TypeBinary* binary = (TypeBinary*)type;
+        Type* base = binary->left && binary->left->type_id == LMD_TYPE_NULL ? binary->right :
+            (binary->right && binary->right->type_id == LMD_TYPE_NULL ? binary->left : NULL);
+        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
+                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
+            return base->type_id;
+        }
+    }
     if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_NULL;
     if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
         return LMD_TYPE_NULL;
     }
     return type->type_id;
+}
+
+static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
+        LaneStorageDesc* out) {
+    if (!field || !field->type || !out) return false;
+    Type* semantic = field->type;
+    while (semantic->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(semantic) && semantic->kind == TYPE_KIND_SIMPLE) {
+        Type* inner = ((TypeType*)semantic)->type;
+        if (!inner) break;
+        semantic = inner;
+    }
+    Type* base = NULL;
+    if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)semantic)->op == OPERATOR_OPTIONAL) {
+        base = ((TypeUnary*)semantic)->operand;
+    } else if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)semantic)->op == OPERATOR_UNION) {
+        TypeBinary* binary = (TypeBinary*)semantic;
+        if (binary->left && binary->left->type_id == LMD_TYPE_NULL) base = binary->right;
+        else if (binary->right && binary->right->type_id == LMD_TYPE_NULL) base = binary->left;
+    }
+    if (!base) return false;
+    while (base->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(base) &&
+            base->kind == TYPE_KIND_SIMPLE) {
+        Type* inner = ((TypeType*)base)->type;
+        if (!inner) break;
+        base = inner;
+    }
+    *out = {};
+    out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
+    if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }
+    else if (base->type_id == LMD_TYPE_BOOL) { out->kind = LANE_STORAGE_BOOL; out->byte_size = 1; }
+    else if (base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
+    else if (base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
+            lambda_num_sized_is_integer(type_num_sized_kind(base))) { out->kind = LANE_STORAGE_SIZED_I64; out->byte_size = 8; }
+    else if (base->type_id == LMD_TYPE_INT64 || base->type_id == LMD_TYPE_UINT64) { out->kind = LANE_STORAGE_ITEM; out->byte_size = 8; }
+    else if (lambda_type_id_has_pointer_lane(base->type_id)) { out->kind = LANE_STORAGE_POINTER; out->byte_size = (uint8_t)sizeof(void*); }
+    else return false;
+    return true;
 }
 
 static inline bool shape_entry_uses_raw_item_storage(const ShapeEntry* field) {

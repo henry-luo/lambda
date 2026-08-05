@@ -1035,6 +1035,14 @@ module.exports = grammar({
       field('operator', $.occurrence),
     ))),
 
+    // Nullable elements bind before the array occurrence: `int?[]` is an
+    // array of nullable int values, not an optional int array. The existing
+    // occurrence builder receives the inner `int?` as its operand.
+    nullable_array_type: $ => prec.dynamic(2, prec.right(seq(
+      field('operand', $.occurrence_type),
+      field('operator', $.occurrence_count),
+    ))),
+
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
     negation_type: $ => prec.right(seq(
@@ -1056,6 +1064,7 @@ module.exports = grammar({
     // Unary type: primary type with optional occurrence modifier
     // Replaces the old unary_type → _quantified_type chain
     unary_type: $ => prec.right(choice(
+      $.nullable_array_type,
       $.occurrence_type,
       $.negation_type,          // !T - prefix negation
       $.primary_type,
@@ -1128,7 +1137,14 @@ module.exports = grammar({
       $.grouped_type        // alternation: T | U, T & U, T ! U
     ),
 
-    return_occurrence_type: $ => seq(choice($.base_type, $.identifier), optional($.occurrence)),
+    // Keep these field names aligned with occurrence_type: the AST builder
+    // reuses the occurrence constructor for return `T?` contracts. Without
+    // them it receives a null operator node and dereferences it while building
+    // a valid nullable return annotation.
+    return_occurrence_type: $ => seq(
+      field('operand', choice($.base_type, $.identifier)),
+      optional(field('operator', $.occurrence)),
+    ),
 
     // Simple type pattern for return types
     // This restriction avoids ambiguity with map_type in fn () T { ... }

@@ -1,0 +1,1 @@
+[7, null, null, null, 8, true, 2.5]

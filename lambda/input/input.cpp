@@ -100,11 +100,9 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT: {
-        // C16/G0: `int` has one native representation, the IEEE double, so a
-        // declared int field stores one. The int64_t carrier clamped every
-        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
-        // the map layout is unchanged.
-        *(double*)field_ptr = lambda_int_item_value(value);
+        // Input-built maps share runtime maps' int64 lane; mixing a double
+        // writer with the lane reader makes even finite fields decode as inf.
+        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
         break;
     }
     case LMD_TYPE_INT64:
@@ -112,6 +110,11 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         break;
     case LMD_TYPE_UINT64:
         *(uint64_t*)field_ptr = value.get_uint64();
+        break;
+    case LMD_TYPE_NUM_SIZED:
+        // A plain shaped field keeps the packed Item so the i8/u32 subtype
+        // survives later validation or nullable-lane conversion.
+        *(Item*)field_ptr = value;
         break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
@@ -623,13 +626,17 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(double*)field_ptr = lambda_int_item_value(value);
+        // Input-built shapes share the runtime int64 lane representation.
+        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
     case LMD_TYPE_UINT64:
         *(uint64_t*)field_ptr = value.get_uint64();
+        break;
+    case LMD_TYPE_NUM_SIZED:
+        *(Item*)field_ptr = value;
         break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();

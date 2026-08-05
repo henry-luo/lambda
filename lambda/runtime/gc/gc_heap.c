@@ -1376,11 +1376,21 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         void* items_ptr = *(void**)(p + 8);     // Item* items
         int64_t length = *(int64_t*)(p + 16);   // logical length
         uint8_t flags = *(uint8_t*)(p + 1);
+        uint8_t array_flags = *(uint8_t*)(p + 2);
+        uint8_t lane_kind = *(uint8_t*)(p + 3) & 0x07;
         int64_t extra = *(int64_t*)(p + 24);    // reserved tail item count
         int64_t capacity = *(int64_t*)(p + 32); // allocated dense capacity
         int64_t dense_limit = capacity >= extra ? capacity - extra : 0;
         int64_t dense_count = length < dense_limit ? length : dense_limit;
-        if (items_ptr && dense_count > 0) {
+        // Numeric/bool native lanes are raw words, not tagged Items. Pointer
+        // lanes are also raw, but their non-null words are exact GC edges.
+        bool native_lane = (array_flags & 0x10) != 0;
+        if (items_ptr && dense_count > 0 && native_lane && lane_kind == 6) {
+            uint64_t* items = (uint64_t*)items_ptr;
+            for (int64_t i = 0; i < dense_count; i++) {
+                gc_mark_object_ptr(gc, (void*)(uintptr_t)items[i]);
+            }
+        } else if (items_ptr && dense_count > 0 && (!native_lane || lane_kind == 1)) {
             uint64_t* items = (uint64_t*)items_ptr;
             for (int64_t i = 0; i < dense_count; i++) {
                 gc_mark_item(gc, items[i]);

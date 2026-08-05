@@ -1441,6 +1441,9 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
 
+    {"lambda_float_null_lane_c", FPTR(lambda_float_null_lane_c),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR}},
+
     {"lambda_double_to_int_lane_c", FPTR(lambda_double_to_int_lane_c),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -3269,7 +3272,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
-        "lambda_int_lane_to_double_c", "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
+        "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
+        "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "js_is_truthy", "js_is_nullish",
         // Only the flag read is an audited NO_GC helper. Debug assertions can

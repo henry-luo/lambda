@@ -42,6 +42,12 @@ bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id);
 bool lambda_type_accepts_error(Type* type);
 bool lambda_type_accepts_null(Type* type);
 bool lambda_type_has_proven_error(Type* type);
+// Resolves the physical lane from the full semantic contract. Returns false
+// for abstract/heterogeneous contracts that must remain boxed.
+bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out);
+// Canonicalize a semantic `T | null` result as `T?` when it has one concrete
+// payload type. Abstract/error-bearing cases deliberately remain boxed.
+Type* lambda_type_nullable_normalized(Pool* pool, Type* type);
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right);
 Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);
 

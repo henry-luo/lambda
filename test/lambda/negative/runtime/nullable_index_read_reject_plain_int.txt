@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'invalid' failed: expected int, got null

@@ -917,6 +917,13 @@ int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b) {
 // header-only in lambda.h because `core/` needs it and must not link `runtime/`.
 double lambda_int_lane_to_double_c(int64_t lane) { return lambda_int_lane_to_double(lane); }
 
+// MIR cannot materialize a raw IEEE payload with an integer move into a double
+// register on every backend. Keep the float? null marker behind this scalar ABI
+// boundary so the compiler never reinterprets it as an Item word.
+double lambda_float_null_lane_c(void) {
+    return lambda_float_lane_to_double(FLOAT_LANE_NULL_BITS);
+}
+
 // Cold arm of the emitted int unbox: every Item shape that is NOT a packed
 // int. A statically int-typed expression may still produce another numeric tag
 // (sys funcs declaring `int` while returning an int64 Item, ANY-typed
@@ -924,6 +931,10 @@ double lambda_int_lane_to_double_c(int64_t lane) { return lambda_int_lane_to_dou
 // and maps the shared poison to its lane sentinel, which `it2i` cannot.
 int64_t lambda_item_to_int_lane_c(uint64_t item_bits) {
     Item it = {.item = item_bits};
+    // A nullable IntLane shares ItemNull's word, but ItemNull is not an int
+    // Item tag. Preserve that fourth sentinel before the generic converter
+    // could silently turn an admitted `int?` argument into numeric zero.
+    if (item_bits == ITEM_NULL) return INT_LANE_NULL;
     TypeId t = get_type_id(it);
     if (t == LMD_TYPE_INT) return lambda_int_item_to_lane(item_bits);
     if (t == LMD_TYPE_FLOAT) return lambda_double_to_int_lane(it.get_double());

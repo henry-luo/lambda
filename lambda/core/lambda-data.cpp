@@ -259,7 +259,7 @@ void init_type_info() {
     type_info[LMD_TYPE_NULL] = {sizeof(void*), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};  // pointer-sized for NULL↔container transitions
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
-    type_info[LMD_TYPE_INT] = {sizeof(double), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // shaped int fields share float's double slot
+    type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // shaped int fields store one int64 lane word
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
@@ -532,6 +532,14 @@ List* list_arena(Arena* arena) {
 }
 
 void array_set(Array* arr, int64_t index, Item itm) {
+    if (array_has_native_lane(arr)) {
+        // Native lane arrays never accept a raw Item write that violates their
+        // full descriptor; callers must validate before reaching this storage.
+        if (!array_native_lane_store(arr, index, itm)) {
+            log_error("array_set: native lane rejected incompatible Item store");
+        }
+        return;
+    }
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
@@ -675,6 +683,11 @@ ConstItem List::get(int index) const {
         log_error("list_get_const: index out of bounds: %d", index);
         return null_result;
     }
+    if (array_has_native_lane((const Array*)this)) {
+        // Occurrence validation reads through List::get; expose a real Item
+        // instead of letting raw nullable-lane words enter the validator.
+        return array_native_lane_read((const Array*)this, index).to_const();
+    }
     return this->items[index].to_const();
 }
 
@@ -697,6 +710,15 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(Map**)field_ptr = nullptr;
             }
         } else {
+            LaneStorageDesc lane = {};
+            if (shape_entry_uses_native_lane(field, &lane)) {
+                if (!map_shape_field_store_native_lane(field_ptr, field, item)) {
+                    log_error("set_fields: value type %s does not fit nullable native map lane",
+                        get_type_name(get_type_id(item)));
+                }
+                field = field->next;
+                continue;
+            }
             TypeId storage_type_id = shape_entry_storage_type_id(field);
             switch (storage_type_id) {
             case LMD_TYPE_NULL: {
@@ -708,27 +730,28 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 }
                 break;
             }
+            case LMD_TYPE_UNDEFINED:
+                // Undefined fields carry no payload. Leaving their storage untouched
+                // preserves the distinct JS sentinel on every shaped-field read.
+                break;
             case LMD_TYPE_BOOL: {
                 *(bool*)field_ptr = item.bool_val;
                 break;
             }
             case LMD_TYPE_INT: {
-                // C16/G0: `int` has one native representation, the IEEE double,
-                // so a declared int field stores one -- and `val` must be that
-                // double all the way through. Holding it in an int64_t here
-                // truncated before the store, so a 2^70 field still read back
-                // as 2^63 even once the field itself was a double. Same width,
-                // so the map layout is unchanged.
+                // Map fields use the same int64 lane as variables and arrays;
+                // the former double carrier could not represent ItemNull as a
+                // nullable-int sentinel.
                 TypeId item_type = get_type_id(item);
-                double val;
+                int64_t val;
                 if (is_float_type_id(item_type)) {
-                    val = item.get_double();          // float -> int coercion
+                    val = lambda_double_to_int_lane(item.get_double());
                 } else if (item_type == LMD_TYPE_BOOL) {
-                    val = item.bool_val ? 1.0 : 0.0;  // bool -> int coercion
+                    val = item.bool_val ? 1 : 0;
                 } else {
-                    val = lambda_int_item_value(item);
+                    val = lambda_int_item_to_lane(item.item);
                 }
-                *(double*)field_ptr = val;
+                *(int64_t*)field_ptr = val;
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -737,6 +760,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_UINT64: {
                 *(uint64_t*)field_ptr = item.get_uint64();
+                break;
+            }
+            case LMD_TYPE_NUM_SIZED: {
+                // The compact Item preserves the sized subtype for a plain
+                // field; the nullable form widens separately in its lane.
+                *(Item*)field_ptr = item;
                 break;
             }
             case LMD_TYPE_FLOAT:
@@ -980,6 +1009,105 @@ Item typeditem_to_item(TypedItem *titem) {
     }
 }
 
+Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
+    if (!map_data || !field) return ItemNull;
+    void* field_ptr = map_field_ptr(map_data, field);
+    LaneStorageDesc lane = {};
+    if (shape_entry_uses_native_lane(field, &lane)) {
+        if (lane.kind == LANE_STORAGE_INT) {
+            return {.item = lambda_int_box_lane(*(int64_t*)field_ptr)};
+        }
+        if (lane.kind == LANE_STORAGE_FLOAT64) {
+            uint64_t bits;
+            memcpy(&bits, field_ptr, sizeof(bits));
+            if (lambda_float_lane_is_null(bits)) return ItemNull;
+            return lambda_float_ptr_to_item((const double*)field_ptr);
+        }
+        if (lane.kind == LANE_STORAGE_ITEM) return *(Item*)field_ptr;
+        if (lane.kind == LANE_STORAGE_SIZED_I64) {
+            int64_t stored = *(int64_t*)field_ptr;
+            if (stored == SIZED_LANE_NULL) return ItemNull;
+            NumSizedType num_type = type_num_sized_kind(lane.base_contract);
+            return lambda_num_sized_is_integer(num_type)
+                ? lambda_num_sized_lane_to_item(stored, num_type) : ItemError;
+        }
+        if (lane.kind == LANE_STORAGE_POINTER) {
+            return lambda_pointer_lane_to_item(*(uint64_t*)field_ptr,
+                lane.base_contract->type_id);
+        }
+        uint8_t stored = *(uint8_t*)field_ptr;
+        if (stored == 2) return ItemNull;
+        if (stored <= 1) return {.item = b2it(stored ? BOOL_TRUE : BOOL_FALSE)};
+        log_error("map native lane: invalid nullable bool payload %u", stored);
+        return ItemError;
+    }
+    return map_field_to_item(field_ptr, shape_entry_storage_type_id(field));
+}
+
+bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
+        Item value) {
+    if (!field_ptr || !field) return false;
+    LaneStorageDesc lane = {};
+    if (!shape_entry_uses_native_lane(field, &lane)) return false;
+
+    TypeId value_type = get_type_id(value);
+    if (lane.kind == LANE_STORAGE_INT) {
+        if (value_type == LMD_TYPE_NULL) {
+            // `ItemNull` is the fourth int-lane sentinel; never write the
+            // boxed Item word into a packed nullable-int field by accident.
+            *(int64_t*)field_ptr = INT_LANE_NULL;
+            return true;
+        }
+        if (value_type == LMD_TYPE_INT) {
+            *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
+            return true;
+        }
+        return false;
+    }
+    if (lane.kind == LANE_STORAGE_BOOL) {
+        if (value_type == LMD_TYPE_NULL) {
+            *(uint8_t*)field_ptr = 2;
+            return true;
+        }
+        if (value_type == LMD_TYPE_BOOL) {
+            *(uint8_t*)field_ptr = value.bool_val ? 1 : 0;
+            return true;
+        }
+    }
+    if (lane.kind == LANE_STORAGE_FLOAT64) {
+        if (value_type == LMD_TYPE_NULL) {
+            *(uint64_t*)field_ptr = FLOAT_LANE_NULL_BITS;
+            return true;
+        }
+        if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_FLOAT64) {
+            *(uint64_t*)field_ptr = lambda_float_lane_from_double(value.get_double());
+            return true;
+        }
+    }
+    if (lane.kind == LANE_STORAGE_ITEM &&
+            (value_type == LMD_TYPE_NULL || value_type == lane.base_contract->type_id)) {
+        *(Item*)field_ptr = value;
+        return true;
+    }
+    if (lane.kind == LANE_STORAGE_SIZED_I64) {
+        if (value_type == LMD_TYPE_NULL) {
+            *(int64_t*)field_ptr = SIZED_LANE_NULL;
+            return true;
+        }
+        NumSizedType num_type = type_num_sized_kind(lane.base_contract);
+        if (value_type == LMD_TYPE_NUM_SIZED && lambda_num_sized_is_integer(num_type) &&
+                value.get_num_type() == num_type) {
+            *(int64_t*)field_ptr = lambda_num_sized_item_to_lane(value.item);
+            return true;
+        }
+    }
+    if (lane.kind == LANE_STORAGE_POINTER) {
+        return lambda_pointer_lane_store(field_ptr, lane.base_contract->type_id,
+            lane.nullable != 0, value);
+    }
+    return false;
+}
+
 Item map_field_to_item(void* field_ptr, TypeId type_id) {
     Item result = (Item){._type_id = type_id};
     void* ptr_val = nullptr;
@@ -998,11 +1126,7 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result.bool_val = *(bool*)field_ptr;
         break;
     case LMD_TYPE_INT:
-        // C16/G0: `int` has one native representation, the IEEE double, so a
-        // declared int field stores one. The int64_t carrier clamped every
-        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
-        // the map layout is unchanged.
-        result = {.item = lambda_int_box_double(*(double*)field_ptr)};
+        result = {.item = lambda_int_box_lane(*(int64_t*)field_ptr)};
         break;
     case LMD_TYPE_INT64:
         // The map field is the persistent scalar owner; preserve its payload
@@ -1014,6 +1138,10 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         // address rather than copying wide values into a transient number home.
         result = {.item = u2it(field_ptr)};
         break;
+    case LMD_TYPE_NUM_SIZED:
+        // A shaped non-null sized field stores its compact Item so the
+        // subtype survives map reads and later nullable-lane admission.
+        return *(Item*)field_ptr;
     case LMD_TYPE_FLOAT:
         result = lambda_float_ptr_to_item((const double*)field_ptr);
         break;
@@ -1065,8 +1193,13 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         break;
     }
     case LMD_TYPE_ERROR:
-        // field was stored with error type — return null
-        return ItemNull;
+        // A shaped error field is a sentinel-only slot.  Returning ItemNull
+        // here erased an error propagated through an `any` map/tuple field.
+        return ItemError;
+    case LMD_TYPE_UNDEFINED:
+        // JS shapes may infer a sentinel-only field. Returning ItemError here
+        // made an own `undefined` property indistinguishable from a failed map read.
+        return {.item = ITEM_JS_UNDEFINED};
     default:
         log_error("unknown map item type %s", get_type_name(type_id));
         return ItemError;
@@ -1099,7 +1232,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
                 key, field->type->type_id, type_id, field->byte_offset, field_ptr,
                 *(uint64_t*)field_ptr, map_type, map_data);
-            Item result = map_field_to_item(field_ptr, type_id);
+            Item result = map_shape_field_to_item(map_data, field);
             return *(ConstItem*)&result;
         }
         field = field->next;

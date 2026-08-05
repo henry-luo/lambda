@@ -206,6 +206,9 @@ Item array_get(Array *array, int64_t index) {
     if (index < 0 || index >= array->length) {
         return ItemNull;  // return null instead of error
     }
+    if (array_has_native_lane(array)) {
+        return array_native_lane_read(array, index);
+    }
     return container_scalar_read((Container*)array, array->items[index]);
 }
 
@@ -2163,76 +2166,7 @@ Map* map_fill(Map* map, ...) {
 
 // extract field value from a named shape entry's storage
 Item _map_read_field(ShapeEntry* field, void* map_data) {
-    TypeId type_id = shape_entry_storage_type_id(field);
-    void* field_ptr = (char*)map_data + field->byte_offset;
-    void* ptr_val = nullptr;
-    switch (type_id) {
-    case LMD_TYPE_NULL: {
-        // unresolved map fields store a raw tagged Item; returning a literal
-        // null here discarded valid values written by set_fields().
-        return map_field_to_item(field_ptr, type_id);
-    }
-    case LMD_TYPE_BOOL:
-        return {.item = b2it(*(bool*)field_ptr)};
-    case LMD_TYPE_UNDEFINED:
-        return {.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    case LMD_TYPE_INT:
-        // C16/G0: `int` has one native representation, the IEEE double, so a
-        // declared int field stores one. The int64_t carrier clamped every
-        // value above 2^63 -- a 2^70 field read back as 2^63. Same width, so
-        // the map layout is unchanged.
-        return {.item = lambda_int_box_double(*(double*)field_ptr)};
-    case LMD_TYPE_INT64:
-        return box_int64_value(*(int64_t*)field_ptr);
-    case LMD_TYPE_UINT64:
-        return box_uint64_value(*(uint64_t*)field_ptr);
-    case LMD_TYPE_FLOAT:
-        return push_d(*(double*)field_ptr);
-    case LMD_TYPE_DTIME:
-        return {.item = k2it(*(DateTime**)field_ptr)};
-    case LMD_TYPE_DECIMAL:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        return {.item = c2it(ptr_val)};
-    case LMD_TYPE_STRING:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        return {.item = s2it(ptr_val)};
-    case LMD_TYPE_SYMBOL:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        return {.item = y2it(ptr_val)};
-    case LMD_TYPE_BINARY:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        return {.item = x2it(ptr_val)};
-    case LMD_TYPE_COMPLEX:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-    case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        if (((uintptr_t)ptr_val >> 56) != 0) return ItemNull;  // ITEM_TAG_SHIFT_OK: raw pointer high-byte validation, not Item tag dispatch.
-        Container* container = (Container*)ptr_val;
-        if (!container) return ItemNull;
-        if (container->type_id == LMD_TYPE_RAW_POINTER) {
-            container->type_id = type_id;
-        }
-        return {.container = container};
-    }
-    case LMD_TYPE_TYPE:
-        return {.type = *(Type**)field_ptr};
-    case LMD_TYPE_FUNC:
-        return {.function = *(Function**)field_ptr};
-    case LMD_TYPE_PATH:
-        return {.path = *(Path**)field_ptr};
-    case LMD_TYPE_ANY: {
-        return typeditem_to_item((TypedItem*)field_ptr);
-    }
-    case LMD_TYPE_ERROR:
-        // field was stored with error type (e.g., from failed arithmetic) — return null
-        return ItemNull;
-    default:
-        log_error("unknown map item type %s", get_type_name(type_id));
-        return ItemError;
-    }
+    return map_shape_field_to_item(map_data, field);
 }
 
 static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
