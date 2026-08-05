@@ -1696,12 +1696,8 @@ void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* 
     // Add new capture
     FnCapture* capture = (FnCapture*)pool_calloc(tp->pool, sizeof(FnCapture));
     capture->lambda_name = name;
-    if (name) {
-        int name_len = name->len < sizeof(capture->name) - 1 ? (int)name->len : (int)sizeof(capture->name) - 1;
-        memcpy(capture->name, name->chars, name_len);
-        capture->name[name_len] = '\0';
-        memcpy(capture->scope_env_key, capture->name, (size_t)name_len + 1);
-    }
+    capture->name = name ? name->chars : "";
+    capture->scope_env_key = capture->name;
     capture->entry = entry;
     capture->scope_env_slot = -1;
     capture->grandparent_slot = -1;

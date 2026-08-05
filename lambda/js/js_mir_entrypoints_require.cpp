@@ -436,6 +436,15 @@ static bool js_source_contains_ascii(const char* source, size_t source_len, cons
     return false;
 }
 
+static char* js_preamble_name_copy(const char* name) {
+    if (!name) return NULL;
+    size_t length = strlen(name);
+    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
+    if (!copy) return NULL;
+    memcpy(copy, name, length + 1);
+    return copy;
+}
+
 static bool js_is_line_terminator(char ch) {
     return ch == '\n' || ch == '\r';
 }
@@ -1015,14 +1024,26 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // eval()/new Function() called during js_main can resolve outer-scope
     // var declarations via the active context-owned module slab.
     if (mt->module_consts && !g_jm_preamble_mode) {
-        mem_free(g_eval_preamble_entries);
+        js_eval_preamble_entries_free();
         int ecount = (int)hashmap_count(mt->module_consts);
         g_eval_preamble_entries = (JsModuleConstEntry*)mem_alloc(ecount * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
         g_eval_preamble_entry_count = 0;
         size_t eiter = 0; void* eitem;
         while (hashmap_iter(mt->module_consts, &eiter, &eitem)) {
-            g_eval_preamble_entries[g_eval_preamble_entry_count++] =
-                *(JsModuleConstEntry*)eitem;
+            JsModuleConstEntry* source_entry = (JsModuleConstEntry*)eitem;
+            JsModuleConstEntry* target_entry =
+                &g_eval_preamble_entries[g_eval_preamble_entry_count];
+            *target_entry = *source_entry;
+            target_entry->name = js_preamble_name_copy(source_entry->name);
+            target_entry->live_binding_specifier =
+                js_preamble_name_copy(source_entry->live_binding_specifier);
+            if ((source_entry->name && !target_entry->name) ||
+                    (source_entry->live_binding_specifier &&
+                     !target_entry->live_binding_specifier)) {
+                js_eval_preamble_entries_free();
+                break;
+            }
+            g_eval_preamble_entry_count++;
         }
         g_eval_preamble_var_count = mt->module_var_count;
         log_debug("js-mir: saved eval preamble: %d entries, %d module vars",

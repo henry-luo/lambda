@@ -1,10 +1,61 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
 #include <limits.h>
+#include <stdarg.h>
+
+__thread NamePool* g_js_mir_name_pool_override = NULL;
+
+void jm_set_name_pool_override(NamePool* pool) {
+    g_js_mir_name_pool_override = pool;
+}
 
 static bool jm_lookup_import_metadata(const char* name,
         JitImportMetadata* metadata) {
     return jit_import_get_metadata(name, metadata);
+}
+
+static NamePool* jm_active_name_pool(void) {
+    if (g_js_mir_name_pool_override) return g_js_mir_name_pool_override;
+    JsMirTranspiler* mt = g_active_mir_transpiler;
+    // parallel module workers own distinct transpiler pools; using the shared
+    // runtime pool here races its hashmap during concurrent name interning.
+    if (mt && mt->tp && mt->tp->name_pool) return mt->tp->name_pool;
+    if (context && context->name_pool) return context->name_pool;
+    return NULL;
+}
+
+const char* jm_persist_name(const char* name) {
+    if (!name) return NULL;
+    NamePool* pool = jm_active_name_pool();
+    if (!pool) return name;
+    String* stable = name_pool_create_name(pool, name);
+    return stable ? stable->chars : name;
+}
+
+const char* jm_format_name(const char* format, ...) {
+    if (!format) return NULL;
+    NamePool* pool = jm_active_name_pool();
+    if (!pool) return NULL;
+    va_list ap;
+    va_start(ap, format);
+    va_list copy;
+    va_copy(copy, ap);
+    int length = vsnprintf(NULL, 0, format, copy);
+    va_end(copy);
+    if (length < 0) {
+        va_end(ap);
+        return NULL;
+    }
+    char* buffer = (char*)mem_alloc((size_t)length + 1, MEM_CAT_JS_RUNTIME);
+    if (!buffer) {
+        va_end(ap);
+        return NULL;
+    }
+    vsnprintf(buffer, (size_t)length + 1, format, ap);
+    va_end(ap);
+    String* stable = name_pool_create_len(pool, buffer, (size_t)length);
+    mem_free(buffer);
+    return stable ? stable->chars : NULL;
 }
 
 // ============================================================================
@@ -16,6 +67,83 @@ int js_var_scope_cmp(const void *a, const void *b, void *udata) {
 }
 uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return em_var_scope_hash(item, seed0, seed1);
+}
+
+static bool jm_stack_ensure_slot(ArrayList* stack, int index) {
+    if (!stack || index < 0) return false;
+    while (stack->length <= index) {
+        if (!arraylist_append(stack, NULL)) return false;
+    }
+    return true;
+}
+
+struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth) {
+    if (!mt || !mt->var_scopes || depth < 0 || depth >= mt->var_scopes->length) return NULL;
+    return (struct hashmap*)arraylist_get(mt->var_scopes, depth);
+}
+
+bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
+    if (!mt || !mt->var_scopes || !jm_stack_ensure_slot(mt->var_scopes, depth)) return false;
+    arraylist_set(mt->var_scopes, depth, scope);
+    return true;
+}
+
+int jm_var_scope_length(JsMirTranspiler* mt) {
+    return mt && mt->var_scopes ? mt->var_scopes->length : 0;
+}
+
+JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {
+    if (!mt || !mt->loop_stack || index < 0 || !jm_stack_ensure_slot(mt->loop_stack, index)) {
+        return NULL;
+    }
+    JsLoopLabels* labels = (JsLoopLabels*)arraylist_get(mt->loop_stack, index);
+    if (!labels) {
+        labels = (JsLoopLabels*)mem_calloc(1, sizeof(JsLoopLabels), MEM_CAT_JS_RUNTIME);
+        if (!labels) return NULL;
+        arraylist_set(mt->loop_stack, index, labels);
+    }
+    return labels;
+}
+
+JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index) {
+    if (!mt || !mt->for_of_iterators || index < 0 ||
+            !jm_stack_ensure_slot(mt->for_of_iterators, index)) {
+        return NULL;
+    }
+    JsMirIteratorFrame* frame =
+        (JsMirIteratorFrame*)arraylist_get(mt->for_of_iterators, index);
+    if (!frame) {
+        frame = (JsMirIteratorFrame*)mem_calloc(1, sizeof(JsMirIteratorFrame),
+            MEM_CAT_JS_RUNTIME);
+        if (!frame) return NULL;
+        arraylist_set(mt->for_of_iterators, index, frame);
+    }
+    return frame;
+}
+
+JsTryContext* jm_try_context_at(JsMirTranspiler* mt, int index) {
+    if (!mt || !mt->try_ctx_stack || index < 0 ||
+            !jm_stack_ensure_slot(mt->try_ctx_stack, index)) {
+        return NULL;
+    }
+    JsTryContext* context =
+        (JsTryContext*)arraylist_get(mt->try_ctx_stack, index);
+    if (!context) {
+        context = (JsTryContext*)mem_calloc(1, sizeof(JsTryContext),
+            MEM_CAT_JS_RUNTIME);
+        if (!context) return NULL;
+        arraylist_set(mt->try_ctx_stack, index, context);
+    }
+    return context;
+}
+
+JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
+    if (!mt) return NULL;
+    JsTryContext* context = jm_try_context_at(mt, mt->try_ctx_depth);
+    if (!context) return NULL;
+    memset(context, 0, sizeof(*context));
+    mt->try_ctx_depth++;
+    return context;
 }
 
 int js_local_func_cmp(const void *a, const void *b, void *udata) {
@@ -40,7 +168,7 @@ bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
     if (!mt || !capture || !mt->module_consts || capture->force_env_capture) return false;
     JsModuleConstEntry lookup;
     memset(&lookup, 0, sizeof(lookup));
-    snprintf(lookup.name, sizeof(lookup.name), "%s", capture->name);
+    lookup.name = jm_persist_name(capture->name);
     JsModuleConstEntry* entry =
         (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
     return entry && entry->const_type == MCONST_MODVAR;
@@ -97,7 +225,19 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.import_cache = em_import_cache_new(import_capacity);
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = em_var_scope_new(var_scope_capacity);
+    mt->var_scopes = arraylist_new(8);
+    mt->loop_stack = arraylist_new(8);
+    mt->for_of_iterators = arraylist_new(8);
+    mt->try_ctx_stack = arraylist_new(8);
+    if (!mt->var_scopes || !mt->loop_stack || !mt->for_of_iterators ||
+            !mt->try_ctx_stack) {
+        jm_destroy_mir_transpiler(mt);
+        return NULL;
+    }
+    if (!arraylist_append(mt->var_scopes, em_var_scope_new(var_scope_capacity))) {
+        jm_destroy_mir_transpiler(mt);
+        return NULL;
+    }
     mt->scope_depth = 0;
     mt->var_hoist_depth = -1;
     mt->loop_scope_depth = -1;
@@ -637,12 +777,13 @@ void jm_eval_cptn_reset(JsMirTranspiler* mt) {
 
 // v11: push loop labels, consuming any pending label from a labeled statement
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label) {
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = continue_label;
-        mt->loop_stack[mt->loop_depth].break_label = break_label;
-        mt->loop_stack[mt->loop_depth].iterator_to_close = 0;
-        mt->loop_stack[mt->loop_depth].label_name = mt->pending_label_name;
-        mt->loop_stack[mt->loop_depth].label_name_len = mt->pending_label_len;
+    JsLoopLabels* labels = jm_loop_label_at(mt, mt->loop_depth);
+    if (labels) {
+        labels->continue_label = continue_label;
+        labels->break_label = break_label;
+        labels->iterator_to_close = 0;
+        labels->label_name = mt->pending_label_name;
+        labels->label_name_len = mt->pending_label_len;
         mt->loop_depth++;
     }
     mt->pending_label_name = NULL;
@@ -662,9 +803,14 @@ MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r) {
 // ============================================================================
 
 void jm_push_scope(JsMirTranspiler* mt) {
-    if (mt->scope_depth >= 63) { log_error("js-mir: scope overflow"); return; }
+    if (!mt) return;
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = em_var_scope_new(16);
+    struct hashmap* scope = em_var_scope_new(16);
+    if (!scope || !jm_var_scope_set(mt, mt->scope_depth, scope)) {
+        if (scope) hashmap_free(scope);
+        mt->scope_depth--;
+        log_error("js-mir: failed to grow lexical scope stack");
+    }
 }
 
 static bool jm_arguments_param_matches_vname(JsAstNode* param, const char* vname) {
@@ -689,10 +835,11 @@ static JsMirVarEntry* jm_find_var_for_param_identifier(JsMirTranspiler* mt,
         JsIdentifierNode* identifier) {
     if (!mt || !identifier || !identifier->name) return NULL;
     int depth = mt->arguments_param_scope_depth;
-    if (depth < 0 || depth > mt->scope_depth || !mt->var_scopes[depth]) return NULL;
+    struct hashmap* scope = jm_var_scope_at(mt, depth);
+    if (depth < 0 || depth > mt->scope_depth || !scope) return NULL;
     size_t iter = 0;
     void* item = NULL;
-    while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
+    while (hashmap_iter(scope, &iter, &item)) {
         JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
         if (strncmp(entry->name, "_js_", 4) != 0) continue;
         const char* source_name = entry->name + 4;
@@ -768,8 +915,9 @@ void jm_pop_scope(JsMirTranspiler* mt) {
         kept_tdz_captures++;
     }
     mt->tdz_closure_capture_count = kept_tdz_captures;
-    hashmap_free(mt->var_scopes[mt->scope_depth]);
-    mt->var_scopes[mt->scope_depth] = NULL;
+    struct hashmap* scope = jm_var_scope_at(mt, mt->scope_depth);
+    if (scope) hashmap_free(scope);
+    jm_var_scope_set(mt, mt->scope_depth, NULL);
     mt->scope_depth--;
 }
 
@@ -777,7 +925,8 @@ JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 
 JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
         JsVarScopeEntry* entry) {
-    if (!mt || !entry || depth < 0 || depth >= 64 || !mt->var_scopes[depth]) {
+    struct hashmap* scope = jm_var_scope_at(mt, depth);
+    if (!mt || !entry || depth < 0 || depth > mt->scope_depth || !scope) {
         return NULL;
     }
     // Direct scope insertion used to leave root_slot at memset's zero, which
@@ -785,13 +934,13 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     entry->var.root_slot = -1;
     entry->var.gc_home_id = mt->em.frame.active
         ? em_gc_new_home(&mt->em) : 0;
-    hashmap_set(mt->var_scopes[depth], entry);
+    hashmap_set(scope, entry);
 
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
     key.name = entry->name;
     JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
-        mt->var_scopes[depth], &key);
+        scope, &key);
     if (!inserted) return NULL;
     jm_update_gc_root_slot(mt, &inserted->var);
     return &inserted->var;
@@ -819,11 +968,12 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     {
         JsMirVarEntry* existing = NULL;
         bool existing_in_target_scope = false;
-        if (target_depth >= 0 && mt->var_scopes[target_depth]) {
+        struct hashmap* target_scope = jm_var_scope_at(mt, target_depth);
+        if (target_depth >= 0 && target_scope) {
             JsVarScopeEntry key;
             memset(&key, 0, sizeof(key));
             key.name = name;
-            JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[target_depth], &key);
+            JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(target_scope, &key);
             if (found) {
                 existing = &found->var;
                 existing_in_target_scope = true;
@@ -874,12 +1024,14 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         entry.var.gc_home_id = em_gc_new_home(&mt->em);
     }
 
-    hashmap_set(mt->var_scopes[target_depth], &entry);
+    struct hashmap* target_scope = jm_var_scope_at(mt, target_depth);
+    if (!target_scope) return;
+    hashmap_set(target_scope, &entry);
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
     key.name = name;
     JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
-        mt->var_scopes[target_depth], &key);
+        target_scope, &key);
     if (inserted) {
         jm_update_gc_root_slot(mt, &inserted->var);
     }
@@ -890,8 +1042,9 @@ JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
     memset(&key, 0, sizeof(key));
     key.name = name;
     for (int i = mt->scope_depth; i >= 0; i--) {
-        if (!mt->var_scopes[i]) continue;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[i], &key);
+        struct hashmap* scope = jm_var_scope_at(mt, i);
+        if (!scope) continue;
+        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
         if (found) return &found->var;
     }
     return NULL;

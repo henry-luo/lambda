@@ -223,6 +223,49 @@ optimization, or interop boundaries.
   The tracker clamps or reports overflow; this is not a limit on JS formal
   parameters or on the runtime closure object itself.
 
+### Compiler lexical and control-flow stack storage
+
+The JavaScript AST builder already constructs the language-level lexical scope
+chain. `JsTranspiler.current_scope` is a parent-linked `NameScope` (aliased as
+`JsScope`), and function/block AST nodes retain the scope that was built for
+them. The MIR transpiler currently rebuilds a second lexical stack as
+`var_scopes[64]`, with `scope_depth` indexing hash maps of MIR-specific
+`VarEntry` state. These are two views of the same lexical nesting, not two
+independent language scopes.
+
+The design is to unify them through one dynamically sized MIR scope-frame
+stack, backed by the Lambda `ArrayList` utility:
+
+```text
+dynamic lexical frame stack
+    ├── AST NameScope*       // persistent source scope and parent identity
+    └── MIR variable map     // registers, types, TDZ, roots, env slots, etc.
+```
+
+The AST scope and `NameEntry*` remain the canonical source-binding identity.
+The MIR map remains pass-local and mutable because it contains registers,
+environment slots, root slots, and inference state that cannot be stored in
+the persistent AST. Synthetic bindings such as `this`, `arguments`, and
+generator state may use a null AST-scope pointer plus a NamePool-owned key.
+`scope_depth`, `var_hoist_depth`, `loop_scope_depth`, and
+`arguments_param_scope_depth` remain integer indices into the dynamic lexical
+stack. Inference/branch snapshots clone the dynamic MIR frame list; they do
+not mutate or clone the persistent AST scope graph.
+
+The same dynamic-array utility is also required for the other compiler stacks,
+but their entries must remain distinct frame types:
+
+| Current storage | Dynamic replacement | Why it is not the lexical frame type |
+|---|---|---|
+| `loop_stack[32]` | `JsMirLoopFrame` list | Break/continue labels, named-label matching, and iterator-close labels do not correspond one-to-one with lexical scopes. |
+| `for_of_iterators[32]` | iterator-resource list | This is an abrupt-cleanup/resource stack; one lexical scope can own multiple iterators and cleanup can outlive a source block during lowering. |
+| `try_ctx_stack[16]` | `JsMirTryFrame` list | Exception/finally labels and delayed-return registers describe control flow, not variable bindings. |
+
+Thus the implementation shares allocation/growth, bounds checking, and
+snapshot helpers, but does not merge unrelated records into one heterogeneous
+stack. Lexical scope push/pop, loop push/pop, iterator cleanup, and try/finally
+unwinding each retain independent invariants while becoming dynamically sized.
+
 ### Remaining source-name staging buffers
 
 There is no language-level maximum identifier length in the AST/name pool, but
